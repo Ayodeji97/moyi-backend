@@ -87,14 +87,17 @@ Solo project, so review is automated rather than delegated (doc 18 §11):
 - The PR template carries a ten-question hostile-reviewer checklist,
   filled in per PR rather than ticked through.
 - `.github/workflows/claude-code-review.yml` posts an automated review on
-  each non-draft PR when it is opened, updated, reopened, or marked ready.
-  It reviews the current diff against the Kotlin/Spring conventions,
-  architecture, testing strategy, and ADRs; obsolete in-progress reviews
-  are cancelled when a newer commit arrives.
+  each non-draft PR when it is opened, reopened, or marked ready. It
+  reviews the diff against the Kotlin/Spring conventions, architecture,
+  testing strategy, and ADRs. It deliberately does not run on every push:
+  the review plugin declines a PR it has already reviewed, so a per-push
+  trigger would add no-op runs rather than fresher reviews. Re-run the
+  workflow from the Actions tab to review again after pushing fixes.
 
 **One-time setup to activate the automated review.** Both steps are
-required — the token alone is not enough, and the failure mode if you do
-only step 2 is an unhelpful `401 Unauthorized`.
+required — the token alone is not enough. Do only step 2 and every PR
+fails with `401 Unauthorized - Claude Code is not installed on this
+repository`.
 
 **1. Install the Claude GitHub App** on this repository:
 <https://github.com/apps/claude>. This is what grants the workflow
