@@ -20,7 +20,7 @@ import javax.sql.DataSource
  */
 @SpringBootTest
 class FlywayMigrationTest(
-    @param:Autowired dataSource: DataSource,
+    @Autowired dataSource: DataSource,
 ) : PostgresIntegrationTest() {
     private val jdbcTemplate = JdbcTemplate(dataSource)
 
