@@ -12,3 +12,4 @@ class MoyiApplication
 fun main(args: Array<String>) {
     runApplication<MoyiApplication>(*args)
 }
+val x=1
