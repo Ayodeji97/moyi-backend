@@ -13,10 +13,9 @@ plugins {
     jacoco
 }
 
-// The generated `LibrariesForLibs` typed accessor is unreliable for a
-// precompiled script plugin inside an included build-logic build, so the
-// catalog is read through the plain (always-available) extension API instead.
-val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
+// `libraries` is defined in VersionCatalogExt.kt — see there for why the
+// generated typed accessor can't be used from a convention plugin.
+val libs = libraries
 
 kotlin {
     // Compiled and run WITH a JDK 25 toolchain, but the emitted bytecode
@@ -32,7 +31,15 @@ kotlin {
 tasks.withType<KotlinCompile>().configureEach {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_24)
-        freeCompilerArgs.add("-Xjsr305=strict")
+        freeCompilerArgs.addAll(
+            "-Xjsr305=strict",
+            // Opts in early to Kotlin's future default: an annotation on a
+            // constructor `val` applies to both the parameter and the
+            // property, instead of the parameter only. Without it, Kotlin
+            // warns on every such annotation and asks for an explicit
+            // `@param:`/`@property:` prefix. The course sets this too.
+            "-Xannotation-default-target=param-property",
+        )
         // Doc 18 §3: nullability must be meaningful — treat platform-type
         // leniency from Java interop as an error, not a warning.
         allWarningsAsErrors.set(false)

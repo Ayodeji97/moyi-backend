@@ -21,6 +21,12 @@ dependencyResolutionManagement {
     // catalog from gradle/libs.versions.toml at its default location.
 }
 
+// Lets modules depend on each other as `implementation(projects.common.core)`
+// instead of `project(":common:core")` — compile-checked and
+// autocompleted, so a typo'd or renamed module fails the build rather
+// than resolving to nothing. The course enables this too.
+enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+
 rootProject.name = "moyi-backend"
 
 include(
