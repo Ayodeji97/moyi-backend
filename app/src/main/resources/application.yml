@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: moyi-backend
+  threads:
+    virtual:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
