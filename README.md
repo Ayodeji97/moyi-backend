@@ -87,26 +87,52 @@ Solo project, so review is automated rather than delegated (doc 18 §11):
 - The PR template carries a ten-question hostile-reviewer checklist,
   filled in per PR rather than ticked through.
 - `.github/workflows/claude-code-review.yml` posts an automated review on
-  each PR when it's opened, reopened, or marked ready.
+  each non-draft PR when it is opened, reopened, or marked ready. It
+  reviews the diff against the Kotlin/Spring conventions, architecture,
+  testing strategy, and ADRs. It deliberately does not run on every push:
+  the review plugin declines a PR it has already reviewed, so a per-push
+  trigger would add no-op runs rather than fresher reviews. Re-run the
+  workflow from the Actions tab to review again after pushing fixes.
 
-**One-time setup to activate the automated review** (it skips with a
-notice until this is done, rather than failing):
+**One-time setup to activate the automated review.** Both steps are
+required — the token alone is not enough. Do only step 2 and every PR
+fails with `401 Unauthorized - Claude Code is not installed on this
+repository`.
+
+**1. Install the Claude GitHub App** on this repository:
+<https://github.com/apps/claude>. This is what grants the workflow
+permission to act on the repo; without it the action fails with *"Claude
+Code is not installed on this repository."*
+
+**2. Create the auth token and store it as a repository secret:**
 
 ```
 claude setup-token
-```
-
-Then add the printed token as a repository secret named
-`CLAUDE_CODE_OAUTH_TOKEN` (Settings → Secrets and variables → Actions →
-New repository secret), or:
-
-```
 gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo Ayodeji97/moyi-backend
 ```
 
-This bills against the Claude subscription rather than separate API
-credits. Note the review posts inline comments and a check run — GitHub
-has no way to show it as a *requested reviewer*.
+(Or paste it under Settings → Secrets and variables → Actions → New
+repository secret, named `CLAUDE_CODE_OAUTH_TOKEN`.)
+
+Using the OAuth token rather than an `ANTHROPIC_API_KEY` bills against
+the Claude subscription instead of separate API credits.
+
+Until the secret exists the job skips with a notice rather than failing.
+Once it exists but the app is not installed, the job **fails** — that is
+deliberate, because a review that cannot run should be visible rather
+than quietly green.
+
+**When the `review` check cannot be trusted.** There is one case that is
+neither of the above: `claude-code-action` refuses to run whenever
+`claude-code-review.yml` differs from the copy on `main`, and it reports
+that refusal as *success*. Any PR that edits the review workflow
+therefore gets a green `review` check having reviewed nothing. The job
+emits a warning in its summary when it detects this, but the check still
+passes — so a workflow change is reviewed by hand, and only proven by
+merging it and watching the PR after it.
+
+Note the review posts a single summary comment and a check run; GitHub
+has no mechanism to show it as a *requested reviewer*.
 
 ## How do I deploy it
 

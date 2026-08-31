@@ -4,22 +4,39 @@ name: Claude Code Review
 # teammate reading the diff (doc 18 §11 names heavy CI automation as
 # exactly that substitute).
 #
-# Deliberately NOT triggered on `synchronize` (every push to the branch):
-# reviews consume Claude subscription usage, and a review per push on a
-# branch that gets several fixup commits is mostly re-reading unchanged
-# code. Opening the PR, marking it ready, or reopening it triggers a
-# review; to re-run after pushing fixes, comment `@claude review` on the
-# PR or re-run this workflow from the Actions tab.
+# Deliberately NOT triggered on `synchronize` (every push to the branch).
+# Step 1 of the code-review plugin aborts when the PR "already has a code
+# review from you from earlier", so a per-push trigger yields one real
+# review of the first revision plus a no-op run per push after it —
+# subscription usage spent to do nothing. Opening the PR, marking it
+# ready, or reopening it triggers a review; to re-review after pushing
+# fixes, re-run this workflow from the Actions tab.
+#
+# KNOWN AND UNFIXABLE HERE: claude-code-action refuses to run when this
+# file differs from the copy on the default branch, and it signals that
+# by *succeeding* — so a PR that edits this workflow gets a green
+# `review` check that reviewed nothing. That is the one case the check
+# cannot be trusted, so the job below says so out loud in the run summary
+# rather than leaving it to be discovered. Changes here are therefore
+# only ever proven by merging them and watching the next PR.
 on:
   pull_request:
     types: [opened, reopened, ready_for_review]
 
+# One review at a time per PR. Not cancelled in flight: the plugin's last
+# step is a single summary comment posted with `gh pr comment`, so a
+# cancelled run has spent the whole review and posted nothing. With the
+# trigger list above, concurrent runs are rare enough that queueing the
+# second costs nothing worth optimising.
+concurrency:
+  group: automated-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
   review:
     runs-on: ubuntu-latest
-    # Skips cleanly until CLAUDE_CODE_OAUTH_TOKEN exists rather than
-    # failing every PR with a red X in the meantime. See README for the
-    # one-time `claude setup-token` step that activates this.
+    # Drafts are excluded here rather than inside the plugin's own
+    # eligibility check, so an unfinished PR costs nothing at all.
     if: ${{ github.event.pull_request.draft == false }}
     permissions:
       contents: read
@@ -27,9 +44,12 @@ jobs:
       issues: read
       id-token: write
     steps:
+      # Full history: reviewer agent #3 reads git blame and history, and
+      # any diff against the base needs the base ref present. A shallow
+      # merge-commit-only checkout fails both (cf. ci.yml's gitleaks job).
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Check review is configured
         id: configured
@@ -43,11 +63,69 @@ jobs:
             echo "enabled=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Makes the silent no-op above visible. Without this the only trace
+      # is a ##[warning] buried in the action's own step log, on a job
+      # that reports success — which is precisely the shape of green
+      # check this repo treats as worse than a red one.
+      - name: Warn if this PR edits the review workflow
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          workflow=.github/workflows/claude-code-review.yml
+          base="origin/$DEFAULT_BRANCH"
+          if ! git rev-parse --verify --quiet "$base" > /dev/null; then
+            git fetch --depth=1 origin "$DEFAULT_BRANCH" > /dev/null 2>&1 || true
+            base=FETCH_HEAD
+          fi
+          if ! git rev-parse --verify --quiet "$base" > /dev/null; then
+            echo "::notice::Could not resolve $DEFAULT_BRANCH, so the workflow-drift check was skipped."
+          elif ! git diff --quiet "$base" -- "$workflow"; then
+            echo "::warning::This PR changes $workflow, so claude-code-action will skip itself — it requires this file to be identical to the copy on $DEFAULT_BRANCH. The 'review' check will pass WITHOUT reviewing anything. Review this PR by hand, and prove the workflow change by watching the PR after it merges."
+          fi
+
       - if: steps.configured.outputs.enabled == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
-          prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
-          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
+          # The plugin's command takes a PR target and nothing else — it
+          # has no `--comment` flag (that belongs to the built-in
+          # /code-review skill, which is a different command). Passing one
+          # only muddies the argument string, so the target is passed
+          # alone, as a full URL so `gh pr view` can't misread it.
+          prompt: >-
+            /code-review:code-review
+            ${{ github.event.pull_request.html_url }}
+
+            Review only the current PR diff. Treat README.md, .github/PULL_REQUEST_TEMPLATE.md,
+            build-logic/src/main/kotlin, revision/, docs/, and adr/ as the project's source of truth.
+            Check Kotlin idioms and conventions, Spring boundaries, module boundaries, transaction
+            and concurrency safety, authorization and privacy, tests, documentation drift,
+            migrations, and compatibility with the documented architectural decisions.
+            Report only concrete, actionable findings caused by this PR. Include a file and line,
+            impact, and suggested correction for every finding; do not post generic praise or
+            restate the diff. Do not claim deterministic checks passed or failed—the CI workflow
+            owns ktlint, Detekt, compilation, tests, architecture tests, coverage, and secret scans.
+          # This list is the difference between a review and a green check
+          # that reviewed nothing, so it mirrors what the plugin's command
+          # actually does rather than trusting its frontmatter to carry
+          # over. `Task` is the load-bearing entry: every step is done
+          # through subagents ("use a Haiku agent...", "launch 5 parallel
+          # Sonnet agents..."), so without it step 1 is denied and the run
+          # ends having reviewed nothing — exactly what happened on PR #10
+          # (20s, 6 turns, one permission denial, zero findings). The `gh`
+          # entries are repeated from that frontmatter on purpose: the
+          # frontmatter grants them to the command, and it is not worth
+          # betting a silent no-op review on whether that grant reaches
+          # the subagents doing the work. `TodoWrite` because the command
+          # says "make a todo list first", and `gh pr comment` because
+          # step 8 is how the review is delivered — an allowlist without
+          # it buys a complete review that cannot post itself.
+          # Everything here is read-only apart from that one comment.
+          # Kept on one line on purpose: a YAML folded scalar turns each
+          # newline into a space, and a space inside the comma-separated
+          # tool list is not something worth finding out about in
+          # production.
+          claude_args: >-
+            --allowedTools "Task,Read,Grep,Glob,TodoWrite,mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(git blame:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
