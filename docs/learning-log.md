@@ -242,3 +242,63 @@ Wrong about: assuming `kotlin("plugin.jpa")` was the "open my entities"
          which stays invisible until the first `fetch = LAZY`
          association. Third time this session that "the config is
          present" turned out not to mean "the config is doing anything."
+
+## 2026-08-31 · Phase 0 · Two ways an architecture rule can be fake
+Expected: adding the layer rules (domain depends on nothing, entities
+         confined to infra, controllers confined to web) would be
+         mechanical — write the filters, watch six green tests.
+Reality: the six tests went green immediately, and two of them were
+         worthless. First, the `internal`-visibility rule written back in
+         PR #3 filtered on `it.packagee?.name?.contains(".modules.")`.
+         Our packages are `com.moyi.identity.…` — `modules/` is only the
+         Gradle *directory*, it never appears in a package name. That
+         filter could never match, so the rule had been passing for four
+         PRs by being structurally incapable of failing. Second, and
+         worse because it affected all six: Konsist reads source files
+         off disk, which Gradle cannot see as a task input, so after
+         dropping a deliberately violating file into `modules/identity`
+         the build reported `:app:test UP-TO-DATE` and passed. The rules
+         only failed when forced with `--rerun`. Locally, every
+         architecture rule was decorative. Fixed by declaring the repo's
+         Kotlin sources as an input to the test task, then re-checking
+         that a violation now triggers a rerun on its own.
+Wrong about: thinking "I verified the rule fails on a real violation"
+         was a complete check. It was necessary and not sufficient —
+         I had verified it *when the test ran*, having never asked
+         whether it would run. The check that actually matters is
+         narrower than it sounds: introduce the violation, then run the
+         build **the ordinary way**, with no flags. CI would have masked
+         this indefinitely, since a clean checkout has nothing to
+         consider up to date. That is the uncomfortable part — the gap
+         only existed on the machine where the code is actually written.
+
+## 2026-08-31 · Phase 0 · The same two holes, one layer down
+Expected: the fixes in the entry above closed the "fake rule" problem —
+         the `.modules.` filter was corrected and the Konsist sources
+         were declared as a task input, both verified by violation.
+Reality: code review on that same PR found each fix incomplete in the
+         same shape as the original. The task input tracked
+         `**/src/main/kotlin/**` only, but `scopeFromProject()` scans
+         test sources too (the field-injection rule exists to see
+         `HealthCheckTest`). Editing an existing file under another
+         module's `src/test/kotlin` into a violation left `:app:test`
+         **UP-TO-DATE and green** — the exact hole, still open, on the
+         half of the tree the fix did not name. And the visibility rule
+         used `.classes()`, so a public *interface* in `service` or
+         `infra` — the likeliest leak of all, since those are the layers
+         that implement contracts and expose repositories — passed
+         untouched. Both fixed and both proven by violation, this time
+         including the edit-an-existing-file case rather than only the
+         add-a-new-file one.
+Wrong about: two things. First, that "adding a violating file" is the
+         test. Adding one creates directories, and that alone can
+         invalidate a Gradle task for reasons unrelated to the input you
+         declared — the honest check edits a file that already exists.
+         Second, and more general: both misses were the fix being
+         narrower than the rule it repaired, and neither was visible in
+         a green build. A rule keyed on a convention is only as good as
+         the convention's own enforcement, which is why this PR now also
+         asserts that every file under `modules/` declares a
+         `com.moyi.<module>.<layer>` package. Without it, anything in an
+         unrecognised package is not rejected by the other rules — it is
+         invisible to all of them.

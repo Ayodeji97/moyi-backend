@@ -37,3 +37,27 @@ dependencies {
 springBoot {
     mainClass.set("com.moyi.app.MoyiApplicationKt")
 }
+
+// ArchitectureTest uses Konsist, which reads Kotlin source straight off
+// disk across the whole repo rather than through the compile classpath.
+// Gradle can't infer that, so without declaring it, adding a rule-violating
+// file in another module leaves `:app:test` UP-TO-DATE and the
+// architecture rules silently do not run — verified: a deliberate
+// violation in modules/identity was reported as UP-TO-DATE and passed,
+// and only failed once forced with --rerun. Declaring the sources as an
+// input makes the rules re-evaluate whenever any module's code changes.
+//
+// `src/*/kotlin`, not `src/main/kotlin`: Konsist's scopeFromProject()
+// scans test sources too — the field-injection rule depends on seeing
+// HealthCheckTest — so tracking main only would leave the same staleness
+// hole open for a violation introduced under another module's src/test.
+tasks.named<Test>("test") {
+    inputs
+        .files(
+            fileTree(rootDir) {
+                include("**/src/*/kotlin/**/*.kt")
+                exclude("**/build/**", "**/.gradle/**")
+            },
+        ).withPropertyName("konsistScannedSources")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}

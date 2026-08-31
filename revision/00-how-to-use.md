@@ -37,7 +37,7 @@ Two things separate someone who watched a course from someone who understands th
 |---|---|---|
 | 1 — Prerequisites | *(no notes needed — setup only)* | — |
 | **2 — System Design** | `m02-system-design.md` | ✅ Complete |
-| 3 — Multi-Module Setup | `m03-multi-module.md` | Pending |
+| **3 — Multi-Module Setup** | `m03-multi-module.md` | ✅ Complete — built as Phase 0. 7 deliberate divergences; **1 latent bug found in the course** (its `allOpen` never reaches its entities) |
 | … | | |
 
 ## The honest caveat
