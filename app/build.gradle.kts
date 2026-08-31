@@ -47,11 +47,16 @@ springBoot {
 // violation in modules/identity was reported as UP-TO-DATE and passed,
 // and only failed once forced with --rerun. Declaring the sources as an
 // input makes the rules re-evaluate whenever any module's code changes.
+//
+// `src/*/kotlin`, not `src/main/kotlin`: Konsist's scopeFromProject()
+// scans test sources too — the field-injection rule depends on seeing
+// HealthCheckTest — so tracking main only would leave the same staleness
+// hole open for a violation introduced under another module's src/test.
 tasks.named<Test>("test") {
     inputs
         .files(
             fileTree(rootDir) {
-                include("**/src/main/kotlin/**/*.kt")
+                include("**/src/*/kotlin/**/*.kt")
                 exclude("**/build/**", "**/.gradle/**")
             },
         ).withPropertyName("konsistScannedSources")

@@ -231,3 +231,34 @@ Wrong about: thinking "I verified the rule fails on a real violation"
          this indefinitely, since a clean checkout has nothing to
          consider up to date. That is the uncomfortable part — the gap
          only existed on the machine where the code is actually written.
+
+## 2026-08-31 · Phase 0 · The same two holes, one layer down
+Expected: the fixes in the entry above closed the "fake rule" problem —
+         the `.modules.` filter was corrected and the Konsist sources
+         were declared as a task input, both verified by violation.
+Reality: code review on that same PR found each fix incomplete in the
+         same shape as the original. The task input tracked
+         `**/src/main/kotlin/**` only, but `scopeFromProject()` scans
+         test sources too (the field-injection rule exists to see
+         `HealthCheckTest`). Editing an existing file under another
+         module's `src/test/kotlin` into a violation left `:app:test`
+         **UP-TO-DATE and green** — the exact hole, still open, on the
+         half of the tree the fix did not name. And the visibility rule
+         used `.classes()`, so a public *interface* in `service` or
+         `infra` — the likeliest leak of all, since those are the layers
+         that implement contracts and expose repositories — passed
+         untouched. Both fixed and both proven by violation, this time
+         including the edit-an-existing-file case rather than only the
+         add-a-new-file one.
+Wrong about: two things. First, that "adding a violating file" is the
+         test. Adding one creates directories, and that alone can
+         invalidate a Gradle task for reasons unrelated to the input you
+         declared — the honest check edits a file that already exists.
+         Second, and more general: both misses were the fix being
+         narrower than the rule it repaired, and neither was visible in
+         a green build. A rule keyed on a convention is only as good as
+         the convention's own enforcement, which is why this PR now also
+         asserts that every file under `modules/` declares a
+         `com.moyi.<module>.<layer>` package. Without it, anything in an
+         unrecognised package is not rejected by the other rules — it is
+         invisible to all of them.

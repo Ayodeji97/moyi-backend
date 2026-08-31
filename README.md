@@ -203,10 +203,16 @@ domain model that owes nothing to Hibernate.
 None of the above is guidance. It is enforced in CI by
 [`ArchitectureTest.kt`](app/src/test/kotlin/com/moyi/app/ArchitectureTest.kt),
 which fails the build on: a layer depending outwards, an `@Entity`
-outside `infra`, a controller outside `web`, a public class outside
-`api`, `java.util.Date`, or field injection. Each rule was verified by
-writing a real violation and watching it fail — a rule that has never
-failed is not yet known to work.
+outside `infra`, a controller outside `web`, a public declaration of any
+kind outside `api`, `java.util.Date`, or field injection. One further
+rule holds the rest up: every file under `modules/` must declare a
+`com.moyi.<module>.<layer>` package, because that convention is what all
+the others resolve against — a file that breaks it is not rejected by
+them, it is invisible to them.
+
+Each rule was verified by writing a real violation and watching it fail,
+running the build the ordinary way with no flags — a rule that has never
+failed is not yet known to work, and one that never runs cannot fail.
 
 ## How is it reviewed
 
