@@ -74,9 +74,39 @@ moyi-backend/
 └─ docs/            learning log and other in-repo documentation
 ```
 
-No module should reach into another module's internals — this will be
-enforced by Konsist rather than left to discipline alone, once that
-lands.
+No module reaches into another module's internals — enforced by Konsist
+architecture tests in CI (`app/src/test/kotlin/com/moyi/app/ArchitectureTest.kt`),
+not left to discipline alone.
+
+## How is it reviewed
+
+Solo project, so review is automated rather than delegated (doc 18 §11):
+
+- Every change goes through a PR — never a direct push to `main`, which
+  is branch-protected and requires the `quality` and `gitleaks` checks.
+- The PR template carries a ten-question hostile-reviewer checklist,
+  filled in per PR rather than ticked through.
+- `.github/workflows/claude-code-review.yml` posts an automated review on
+  each PR when it's opened, reopened, or marked ready.
+
+**One-time setup to activate the automated review** (it skips with a
+notice until this is done, rather than failing):
+
+```
+claude setup-token
+```
+
+Then add the printed token as a repository secret named
+`CLAUDE_CODE_OAUTH_TOKEN` (Settings → Secrets and variables → Actions →
+New repository secret), or:
+
+```
+gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo Ayodeji97/moyi-backend
+```
+
+This bills against the Claude subscription rather than separate API
+credits. Note the review posts inline comments and a check run — GitHub
+has no way to show it as a *requested reviewer*.
 
 ## How do I deploy it
 
