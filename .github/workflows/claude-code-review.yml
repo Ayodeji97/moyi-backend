@@ -4,15 +4,17 @@ name: Claude Code Review
 # teammate reading the diff (doc 18 §11 names heavy CI automation as
 # exactly that substitute).
 #
-# Deliberately NOT triggered on `synchronize` (every push to the branch):
-# reviews consume Claude subscription usage, and a review per push on a
-# branch that gets several fixup commits is mostly re-reading unchanged
-# code. Opening the PR, marking it ready, or reopening it triggers a
-# review; to re-run after pushing fixes, comment `@claude review` on the
-# PR or re-run this workflow from the Actions tab.
+# Run again whenever the PR branch changes. This makes the review describe
+# the revision that can actually be merged instead of becoming stale after
+# fixup commits. Workflow concurrency below cancels an obsolete run when
+# another commit is pushed while a review is still in progress.
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: automated-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   review:
@@ -49,5 +51,17 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
-          prompt: "/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          prompt: >-
+            /code-review:code-review --comment
+            ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+            Review only the current PR diff. Treat README.md, .github/PULL_REQUEST_TEMPLATE.md,
+            build-logic/src/main/kotlin, revision/, docs/, and adr/ as the project's source of truth.
+            Check Kotlin idioms and conventions, Spring boundaries, module boundaries, transaction
+            and concurrency safety, authorization and privacy, tests, documentation drift,
+            migrations, and compatibility with the documented architectural decisions.
+            Report only concrete, actionable findings caused by this PR. Include a file and line,
+            impact, and suggested correction for every finding; do not post generic praise or
+            restate the diff. Do not claim deterministic checks passed or failed—the CI workflow
+            owns ktlint, Detekt, compilation, tests, architecture tests, coverage, and secret scans.
           claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'

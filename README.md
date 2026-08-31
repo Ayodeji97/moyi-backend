@@ -87,7 +87,10 @@ Solo project, so review is automated rather than delegated (doc 18 §11):
 - The PR template carries a ten-question hostile-reviewer checklist,
   filled in per PR rather than ticked through.
 - `.github/workflows/claude-code-review.yml` posts an automated review on
-  each PR when it's opened, reopened, or marked ready.
+  each non-draft PR when it is opened, updated, reopened, or marked ready.
+  It reviews the current diff against the Kotlin/Spring conventions,
+  architecture, testing strategy, and ADRs; obsolete in-progress reviews
+  are cancelled when a newer commit arrives.
 
 **One-time setup to activate the automated review** (it skips with a
 notice until this is done, rather than failing):
