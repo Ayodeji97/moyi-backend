@@ -121,3 +121,36 @@ Wrong about: treating my own plan document as a literal build spec rather
          ("as their own job or a stage within test") — I just hadn't
          thought through the per-job cost until sizing the real workflow
          against the real (tiny) codebase.
+
+## 2026-08-31 · Phase 0 · detekt fails on JDK 25 — but only on GitHub Actions
+Expected: since `./gradlew clean build` was green locally (JDK 25
+         throughout), the same command in CI on the same JDK major
+         version would just work.
+Reality: it didn't — `:app:detekt` failed on GitHub Actions with
+         `GradleException: 25.0.4.1`, a bare, undocumented-looking
+         message, while the identical task passed locally. `--stacktrace`
+         traced it to detekt's own CLI invoker
+         (`DetektInvoker.kt:102`) — detekt 1.23.8 (last released Feb 2025,
+         before JDK 25 existed) apparently doesn't recognise the runtime
+         it's executing on and throws its raw version string as the
+         entire error. It happened on CI's Temurin 25.0.4+1 but not my
+         local Temurin 25.0.4+7 — same feature version, only the build
+         number differs, so this is about the *exact* runtime
+         version string detekt receives, not "JDK 25 unsupported" as a
+         blanket rule. Fixed by giving detekt its own JDK 21 via the
+         task's `jdkHome` property, resolved through Gradle's
+         `JavaToolchainService` (portable — works whether a JDK 21 is
+         already installed or needs auto-provisioning) rather than
+         hand-coding a path, with the `org.gradle.toolchains.foojay-
+         resolver-convention` plugin added so auto-provisioning has
+         somewhere to download from if needed.
+Wrong about: assuming "it's green locally" was sufficient evidence before
+         trusting a CI change — this is the second time this session a
+         CI-only failure surfaced something local runs didn't (Postgres
+         18's volume layout was the first, though that one was local-only
+         in the other direction). The actual lesson: a build tool's own
+         supported-JDK list can be stricter, and differently strict per
+         *build*, than the JDK the project itself targets — checking a
+         tool's release date against the JDK's release date up front
+         (detekt: Feb 2025; JDK 25: Sept 2025) would have flagged this as
+         a live risk before hitting it, not after.
