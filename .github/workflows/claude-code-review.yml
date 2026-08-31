@@ -64,4 +64,14 @@ jobs:
             impact, and suggested correction for every finding; do not post generic praise or
             restate the diff. Do not claim deterministic checks passed or failed—the CI workflow
             owns ktlint, Detekt, compilation, tests, architecture tests, coverage, and secret scans.
-          claude_args: '--allowedTools "mcp__github_inline_comment__create_inline_comment"'
+          # The review agent needs to *read* the PR before it can comment on
+          # it. `--allowedTools` is the whole allowlist, not an addition to a
+          # default set: with only the inline-comment tool listed, the first
+          # run after the GitHub App was installed finished in 20s over 6
+          # turns with one permission denial and zero findings, while a
+          # second reviewer on the same diff raised three real issues. The
+          # read-only tools below are what the code-review plugin uses to see
+          # the diff and the surrounding code; nothing here can write to the
+          # repo.
+          claude_args: >-
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Read,Grep,Glob,Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
