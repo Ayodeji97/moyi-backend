@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Enforces Conventional Commits (doc 18 §2): type(scope): subject
+# Enable with: git config core.hooksPath .githooks
+
+commit_msg_file="$1"
+first_line=$(head -1 "$commit_msg_file")
+
+pattern='^(feat|fix|chore|docs|refactor|test|build|ci|perf|revert)(\([a-z0-9-]+\))?!?: .{1,88}$'
+
+if [[ "$first_line" =~ ^Merge ]]; then
+  exit 0
+fi
+
+if ! [[ "$first_line" =~ $pattern ]]; then
+  echo "Commit message does not follow Conventional Commits." >&2
+  echo "  Got:      $first_line" >&2
+  echo "  Expected: type(scope): subject   e.g. feat(gratitude): add reveal engine" >&2
+  echo "  Allowed types: feat fix chore docs refactor test build ci perf revert" >&2
+  exit 1
+fi
