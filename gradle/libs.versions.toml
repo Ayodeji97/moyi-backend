@@ -7,8 +7,6 @@ konsist = "0.17.3"
 junit = "6.1.3"
 mockk = "1.14.11"
 kotest = "6.2.4"
-testcontainers = "1.21.4"
-flywayPostgres = "13.4.0"
 owaspDependencyCheck = "13.0.0"
 
 [libraries]
@@ -16,8 +14,12 @@ konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
-testcontainers-bom = { module = "org.testcontainers:testcontainers-bom", version.ref = "testcontainers" }
-flyway-database-postgresql = { module = "org.flywaydb:flyway-database-postgresql", version.ref = "flywayPostgres" }
+# flyway-core / flyway-database-postgresql, the postgresql JDBC driver, and
+# Testcontainers are NOT pinned here — their versions come from the Spring
+# Boot BOM (spring-boot-dependencies) that every Spring-facing module
+# already imports via spring-boot-service-convention, per doc 18 §8's
+# preference for the framework's own version management over a second
+# source of truth.
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

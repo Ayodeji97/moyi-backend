@@ -1,0 +1,39 @@
+# Local development infrastructure — Postgres + Redis (Valkey). The app
+# itself runs via `./gradlew bootRun` against these, not as a compose
+# service yet: a Dockerfile for the app arrives with CI (doc 25 §7 step 9,
+# where it's actually needed to publish an image), not before.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: moyi
+      POSTGRES_USER: moyi
+      POSTGRES_PASSWORD: moyi_dev_only
+    ports:
+      - "5432:5432"
+    volumes:
+      # Postgres 18's image switched to a pg_ctlcluster-style layout: mount
+      # the parent dir, not .../data, or the container refuses to start.
+      - moyi-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moyi -d moyi"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: valkey/valkey:8
+    command: ["valkey-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - moyi-redis-data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  moyi-postgres-data:
+  moyi-redis-data:

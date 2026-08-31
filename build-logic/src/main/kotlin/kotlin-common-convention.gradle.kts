@@ -42,6 +42,16 @@ tasks.withType<JavaCompile>().configureEach {
     options.release.set(24)
 }
 
+tasks.withType<Test>().configureEach {
+    // Testcontainers' Ryuk reaper bind-mounts the Docker socket into a
+    // container it spawns, using the path as seen INSIDE the Docker host —
+    // always /var/run/docker.sock, regardless of where the client (this
+    // JVM) reaches that socket from. Harmless default for Docker Desktop;
+    // required for Colima, where docker.host (set per-developer in
+    // ~/.testcontainers.properties — see README) is a different path.
+    environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
+}
+
 // No custom detekt.yml yet — running on detekt's built-in default ruleset
 // until real code surfaces false positives worth tuning (Phase 1+).
 detekt {

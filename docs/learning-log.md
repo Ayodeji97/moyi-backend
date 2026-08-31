@@ -32,3 +32,34 @@ Wrong about: assuming a JDK LTS release and a framework's stated baseline
          time rather than assumed from the "current LTS" framing. Stayed
          within the one-session escape hatch; no need to drop to
          Boot 3.5.x.
+
+## 2026-08-31 · Phase 0 · Compose, Flyway, and Testcontainers on Colima
+Expected: `docker compose up` with a Postgres image and a volume mount
+         would just work the way it always has; Testcontainers would find
+         Docker the same way the `docker` CLI does.
+Reality: Postgres 18's official image restructured its data directory to
+         a `pg_ctlcluster`-style layout — mounting a volume at
+         `.../data` (the old convention) now makes the container refuse
+         to start; it wants the *parent* directory mounted instead.
+         Testcontainers 2.x (pulled in transitively by
+         `spring-boot-testcontainers` on Boot 4.1) turned out to be a real
+         major-version jump: `org.testcontainers:postgresql` and
+         `:junit-jupiter` don't exist as artifact IDs any more (renamed
+         `testcontainers-postgresql` / `testcontainers-junit-jupiter`),
+         and `PostgreSQLContainer` moved to a new, no-longer-generic
+         `org.testcontainers.postgresql` package. Separately, Colima's
+         Docker socket lives outside Docker's own default-detection path,
+         so Testcontainers needed `docker.host` pointed at it explicitly
+         (personal `~/.testcontainers.properties`) — and even then, the
+         Ryuk reaper container failed until told the socket path *as seen
+         from inside the Docker host*, which is always `/var/run/docker.sock`
+         regardless of where Colima actually keeps the file on macOS.
+Wrong about: assuming "Testcontainers" as a name in a locked stack table
+         (doc 25 §2) meant one fixed, checkable API surface. A library
+         crossing a major version between when a course/doc was written
+         and when the code actually gets typed is a real, recurring risk
+         class — not a one-off. Also wrong to assume a Docker-socket
+         workaround is inherently machine-specific: the reaper's
+         *destination* path turned out to be universal, so it belongs in
+         `build-logic` (helps every future developer, Colima or not), while
+         only the *source* path genuinely stays per-developer config.

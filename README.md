@@ -26,12 +26,34 @@ building it.
 
 ## How do I run it
 
-*Local development environment setup is in progress. This section will
-cover:*
-- *Prerequisites (JDK 25, Docker/Colima, Gradle wrapper)*
-- *`docker compose up` for Postgres + Redis*
-- *`./gradlew bootRun` to start the app*
-- *`GET /health` to confirm it's alive*
+**Prerequisites**
+- JDK 25 (e.g. via [SDKMAN](https://sdkman.io): `sdk install java 25.0.4-tem`)
+- Docker. Colima (`brew install colima docker docker-compose`, then
+  `colima start`) works and is what this project is developed against;
+  Docker Desktop works too.
+  - **Colima only**: Testcontainers (used by the integration tests) needs
+    to know where Colima's Docker socket is. Add this to
+    `~/.testcontainers.properties` (create it if it doesn't exist),
+    replacing the path with your own username:
+    ```
+    docker.host=unix:///Users/<you>/.colima/default/docker.sock
+    ```
+    (The other half of this — telling Testcontainers' Ryuk reaper the
+    socket path *inside* the Docker host — is already handled in
+    `build-logic`'s test configuration and needs no per-developer setup.)
+
+**Running it**
+```
+docker compose up -d          # Postgres 18 + Redis (Valkey) for local dev
+./gradlew bootRun             # starts the app on :8080, profile: default
+curl localhost:8080/actuator/health
+```
+For the app to actually reach the Postgres/Redis started above, run it
+with the `local` profile instead: `SPRING_PROFILES_ACTIVE=local ./gradlew bootRun`.
+
+`./gradlew build` runs the full local verification loop: compile, ktlint,
+detekt, and tests — including integration tests that spin up a real
+Postgres via Testcontainers (needs Docker running).
 
 ## How is it structured
 
@@ -52,12 +74,12 @@ moyi-backend/
 └─ docs/            learning log and other in-repo documentation
 ```
 
-No module reaches into another module's internals — enforced by Konsist
-in CI, not by discipline alone.
+No module should reach into another module's internals — this will be
+enforced by Konsist rather than left to discipline alone, once that
+lands.
 
 ## How do I deploy it
 
-Not yet — deployment (Hetzner + Kamal + kamal-proxy) is a follow-up once
-the server infrastructure is provisioned. CI currently builds, tests, and
-publishes a container image to GHCR on every merge to `main`; there's no
-deploy stage wired up yet.
+Not yet. Neither deployment nor CI exist yet — both are follow-ups (CI is
+next; deployment to Hetzner + Kamal + kamal-proxy needs server
+infrastructure that hasn't been provisioned).
