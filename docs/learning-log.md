@@ -163,3 +163,42 @@ Wrong about: two things, layered. First, "it's green locally" was
          "does what I think" are different claims, and only actually
          reading the plugin's bytecode (not just its public API surface)
          settled which one was true.
+
+## 2026-08-31 · Phase 0 · Flyway was configured, on the classpath, and never ran
+Expected: adding `flyway-core` + `flyway-database-postgresql` plus
+         `spring.flyway.locations` in `application-local.yml`, then
+         having `HealthCheckTest` pass against a real Testcontainers
+         Postgres, was solid evidence Flyway actually worked — that's
+         literally why I wrote that test extending
+         `PostgresIntegrationTest` instead of a plain context test.
+Reality: it was configured and never ran. Running the app against the
+         *Compose* Postgres (not Testcontainers) with `bootRun` — a check
+         I did purely as final due diligence before calling Phase 0 done,
+         not because I suspected anything — showed no Flyway log line at
+         all, and `\dx` in psql confirmed citext/pgcrypto were never
+         created. `HealthCheckTest` passing proved nothing about Flyway:
+         with zero `@Entity` classes anywhere in the codebase, Hibernate's
+         `ddl-auto: validate` has no schema to check, so the app boots
+         identically whether migrations ran or not. Root cause: Spring
+         Boot 4 moved Flyway's autoconfiguration out of the plain
+         `flyway-core` library into a dedicated
+         `spring-boot-starter-flyway` module (the same restructuring
+         pattern as the MockMvc-test-support move from two entries ago) —
+         a library can sit correctly on the classpath, fully configured,
+         and simply never be wired up if the autoconfiguration module
+         that activates it is missing. Fixed by adding the starter, which
+         then surfaced a second, smaller gap: the starter alone doesn't
+         know about Postgres specifically ("Unsupported Database:
+         PostgreSQL 18.6") — `flyway-database-postgresql` is still needed
+         alongside it, not instead of it.
+Wrong about: trusting "the integration test passes" as proof of the
+         specific thing I'd added, rather than proof the app boots. Wrote
+         `FlywayMigrationTest` to actually query `flyway_schema_history`
+         and `pg_extension` — then, following the same discipline as the
+         Konsist rules, reverted the fix, watched the new test fail with
+         a real Postgres error, and restored it. This is the second time
+         this session a "passing test" turned out to be testing less than
+         its name claimed (`HealthCheckTest`'s `@Autowired` fix earlier
+         being the other) — worth treating as a pattern, not a
+         coincidence: a green integration test proves the code path it
+         exercises works, not the code path the test's *name* implies.

@@ -13,7 +13,13 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 
-    implementation("org.flywaydb:flyway-core")
+    // Spring Boot 4 split Flyway's autoconfiguration out of the plain
+    // flyway-core library into this dedicated starter (same pattern as
+    // spring-boot-starter-webmvc-test) — without it, Flyway is on the
+    // classpath but never actually runs. The starter alone doesn't know
+    // about Postgres specifically though ("Unsupported Database:
+    // PostgreSQL 18.6") — flyway-database-postgresql is still needed too.
+    implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.flywaydb:flyway-database-postgresql")
     runtimeOnly("org.postgresql:postgresql")
 
