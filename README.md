@@ -86,28 +86,31 @@ moyi-backend/
 
 ```mermaid
 flowchart TD
-    app["<b>app</b><br/>@SpringBootApplication<br/>wiring only, no domain logic"]
+    app["<b>app</b> — @SpringBootApplication, wiring only"]
 
-    subgraph domain_modules ["modules/ — the domain"]
-        identity["identity"]
-        space["space"]
-        gratitude["gratitude"]
-        media["media"]
-        notification["notification"]
-        scheduling["scheduling"]
-        admin["admin"]
-        analytics["analytics"]
-    end
+    identity["identity"]
+    space["space"]
+    gratitude["gratitude"]
+    media["media"]
+    notification["notification"]
+    scheduling["scheduling"]
+    admin["admin"]
+    analytics["analytics"]
 
-    common["<b>common</b><br/>core · web · security · testing"]
+    common["<b>common</b> — core · web · security · testing"]
 
-    app --> domain_modules
-    domain_modules --> common
+    app --> identity & space & gratitude & media
+    app --> notification & scheduling & admin & analytics
 
-    gratitude -. "via space's <b>api</b> package only" .-> space
+    identity & space & gratitude & media --> common
+    notification & scheduling & admin & analytics --> common
 
-    style app fill:#f9d5d3,stroke:#333
-    style common fill:#cfe2f3,stroke:#333
+    gratitude -. "only via space's api" .-> space
+
+    classDef wiring fill:#f4cccc,stroke:#a61c00,stroke-width:2px,color:#1a1a1a
+    classDef shared fill:#cfe2f3,stroke:#1155cc,stroke-width:2px,color:#1a1a1a
+    class app wiring
+    class common shared
 ```
 
 That dotted arrow is the one that matters. The reveal gate needs
@@ -150,8 +153,10 @@ flowchart TD
     sibling --> api
     infra --> db
 
-    style domain fill:#d9ead3,stroke:#333,stroke-width:2px
-    style api fill:#fff2cc,stroke:#333
+    classDef innermost fill:#d9ead3,stroke:#38761d,stroke-width:2px,color:#1a1a1a
+    classDef contract fill:#fff2cc,stroke:#bf9000,stroke-width:2px,color:#1a1a1a
+    class domain innermost
+    class api contract
 ```
 
 | Layer | Visibility | Holds | May depend on |
