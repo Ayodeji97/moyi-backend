@@ -63,3 +63,35 @@ Wrong about: assuming "Testcontainers" as a name in a locked stack table
          *destination* path turned out to be universal, so it belongs in
          `build-logic` (helps every future developer, Colima or not), while
          only the *source* path genuinely stays per-developer config.
+
+## 2026-08-31 · Phase 0 · Konsist architecture tests and a real coverage number
+Expected: the three Phase 0 Konsist rules (doc 25 §7 step 8) would be a
+         short, mechanical task — write a scope filter, assert it's empty.
+Reality: `modules/*` being empty shells meant a naive rule scoped to that
+         package would hit Konsist's own safety check (it refuses to
+         assert against an empty declaration list), so the "no
+         cross-module internal access" rule had to be written by hand
+         against a filtered list with a plain JUnit assertion instead of
+         Konsist's `assertTrue { }` sugar. Kotlin block comments turned
+         out to nest (unlike Java/C) — writing the literal text
+         "modules/*" inside a KDoc comment opened a second, unintended
+         comment level that only closed 30 lines later inside an unrelated
+         string, producing an "unclosed comment" error nowhere near the
+         real cause. The @Autowired rule caught something genuinely
+         useful on the first real run: `@param:Autowired` on
+         `HealthCheckTest`'s constructor still showed up as an annotated
+         *property* to Konsist (it doesn't distinguish Kotlin use-site
+         targets), which led to discovering `isConstructorDefined` — the
+         actual fix, and a better rule than what I'd first written. And
+         `runApplication`'s `main` function alone was enough to fail an
+         80% JaCoCo gate at 25% covered, days before there's any real
+         business logic — needed the standard `*ApplicationKt` exclusion,
+         which every real Spring Boot project has for exactly this reason.
+Wrong about: assuming a coverage gate only becomes relevant once there's
+         meaningful code to cover. It became relevant on line one, and
+         tuning the exclusion now — before any pressure to hit a number —
+         is a very different exercise than tuning it under pressure later.
+         Also confirmed the rule mechanism itself works, not just that it
+         compiles: added a real @Autowired field violation, watched the
+         test fail, then reverted it (doc 25 §9's own instinct — test the
+         test, not just the code).
