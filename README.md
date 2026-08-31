@@ -80,6 +80,9 @@ lands.
 
 ## How do I deploy it
 
-Not yet. Neither deployment nor CI exist yet — both are follow-ups (CI is
-next; deployment to Hetzner + Kamal + kamal-proxy needs server
-infrastructure that hasn't been provisioned).
+Not yet. CI (`.github/workflows/ci.yml`) builds, tests, and — on every
+merge to `main` — publishes a container image to GHCR via Spring Boot's
+Cloud Native Buildpacks support (`./gradlew bootBuildImage`, no
+hand-maintained Dockerfile). There's no deploy stage after that: nothing
+pulls the image anywhere yet. Deployment to Hetzner + Kamal + kamal-proxy
+is a follow-up plan, once that server infrastructure exists.

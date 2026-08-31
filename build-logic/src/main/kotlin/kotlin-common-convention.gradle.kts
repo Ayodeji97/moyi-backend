@@ -63,6 +63,17 @@ detekt {
 // accepts jvm-target up to 22 — independent of the project's own
 // Kotlin/Java target set above. Not a functional constraint: detekt only
 // parses source for static analysis, it doesn't emit bytecode.
+//
+// NOTE: detekt's Gradle plugin runs its CLI in-process (reflection into a
+// cached classloader — confirmed by decompiling DefaultCliInvoker, it
+// never shells out to `java`), so `jdkHome` on the Detekt task does NOT
+// select which JVM executes it, despite existing as a property — that
+// stays whatever JVM launched the Gradle daemon. The actual JDK-25-build-
+// specific failure this project hit is worked around at the CI level
+// instead (see .github/workflows/ci.yml): the daemon launches under
+// JDK 21 there, while jvmToolchain(25) above still resolves 25
+// separately for anything that supports out-of-process toolchain
+// selection (compile, test, run).
 tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
     jvmTarget = "21"
 }

@@ -6,6 +6,13 @@ pluginManagement {
     }
 }
 
+plugins {
+    // Lets Gradle auto-provision a JDK toolchain (e.g. the JDK 21 detekt
+    // needs — see kotlin-common-convention.gradle.kts) if one isn't
+    // already installed locally, instead of hard-failing.
+    id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+}
+
 dependencyResolutionManagement {
     repositories {
         mavenCentral()

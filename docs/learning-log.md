@@ -95,3 +95,71 @@ Wrong about: assuming a coverage gate only becomes relevant once there's
          compiles: added a real @Autowired field violation, watched the
          test fail, then reverted it (doc 25 §9's own instinct — test the
          test, not just the code).
+
+## 2026-08-31 · Phase 0 · CI, simplified from the original plan
+Expected: doc 25 §7 step 9's list — "lint → test → build → publish, plus
+         architecture tests and a coverage gate" — to map to one GitHub
+         Actions job per item, the way the plan I wrote described it.
+Reality: splitting lint/test/architecture-tests/coverage into separate
+         jobs would mean re-running Gradle setup (JDK, dependency
+         resolution, build cache) four-plus times for a codebase that is
+         currently a handful of files — the per-job overhead would
+         dominate actual work. Collapsed them into one `quality` job
+         running `./gradlew build`, which already chains all of it
+         correctly via Gradle's own task graph; a failure still names the
+         exact task in the log, which is what actually matters for
+         diagnosing it. Kept `gitleaks` and `publish` (GHCR, on push to
+         main only) as separate jobs since those genuinely don't share
+         setup with the Gradle build. Used Spring Boot's built-in Cloud
+         Native Buildpacks support (`bootBuildImage`) instead of writing a
+         Dockerfile — tested it locally first (a real container, JDK 25,
+         Spring Boot 4.1.1 all present and booting) before trusting it in
+         CI, and it failed only for the expected reason (no datasource
+         configured, same as running locally without the `local` profile).
+Wrong about: treating my own plan document as a literal build spec rather
+         than a statement of intent. The plan's actual words allowed this
+         ("as their own job or a stage within test") — I just hadn't
+         thought through the per-job cost until sizing the real workflow
+         against the real (tiny) codebase.
+
+## 2026-08-31 · Phase 0 · detekt fails on JDK 25 — but only on GitHub Actions
+Expected: since `./gradlew clean build` was green locally (JDK 25
+         throughout), the same command in CI on the same JDK major
+         version would just work.
+Reality: it didn't — `:app:detekt` failed on GitHub Actions with
+         `GradleException: 25.0.4.1`, a bare, undocumented-looking
+         message, while the identical task passed locally. `--stacktrace`
+         traced it to detekt's own CLI invoker
+         (`DetektInvoker.kt:102`) — detekt 1.23.8 (last released Feb 2025,
+         before JDK 25 existed) apparently doesn't recognise the runtime
+         it's executing on and throws its raw version string as the
+         entire error. It happened on CI's Temurin 25.0.4+1 but not my
+         local Temurin 25.0.4+7 — same feature version, only the build
+         number differs, so this is about the *exact* runtime
+         version string detekt receives, not "JDK 25 unsupported" as a
+         blanket rule. First fix attempt was wrong: the Detekt task type
+         does expose a `jdkHome` property, so I pointed it at a JDK 21
+         resolved via Gradle's `JavaToolchainService` — compiled, ran
+         locally, still failed identically on CI. Decompiling
+         `DefaultCliInvoker` (detekt-gradle-plugin's actual class, not
+         detekt-core) showed why: it loads `detekt.cli.Main` through a
+         cached `URLClassLoader` and invokes it **in-process** via
+         reflection — it never shells out to a `java` executable, so
+         `jdkHome` has nothing to hand off to. The JVM detekt's CLI
+         actually runs under is whatever JVM launched the Gradle daemon
+         itself, full stop. Real fix: install JDK 21 *last* in CI's
+         `actions/setup-java` step (making it the daemon's default
+         `JAVA_HOME`) while `jvmToolchain(25)` still resolves JDK 25
+         separately for compile/test/run, which — unlike detekt — do
+         support genuine out-of-process toolchain selection.
+Wrong about: two things, layered. First, "it's green locally" was
+         insufficient evidence before trusting a CI change — the second
+         time this session a CI-only failure surfaced something local
+         didn't (Postgres 18's volume layout was the first, in the
+         opposite direction). Second, and more specifically: assuming a
+         Gradle task property that *exists* (`jdkHome`) does what its
+         name implies. It compiled and ran without error on the first
+         attempt, which felt like confirmation — but "doesn't error" and
+         "does what I think" are different claims, and only actually
+         reading the plugin's bytecode (not just its public API surface)
+         settled which one was true.
