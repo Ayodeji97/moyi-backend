@@ -202,3 +202,43 @@ Wrong about: trusting "the integration test passes" as proof of the
          being the other) — worth treating as a pattern, not a
          coincidence: a green integration test proves the code path it
          exercises works, not the code path the test's *name* implies.
+
+## 2026-08-31 · Phase 0 · Reading the course's repo instead of guessing at it
+Expected: our Gradle setup diverged from the course in lots of small
+         ways, and reconciling them would be a long list of cosmetic
+         renames.
+Reality: the opposite. Comparing file-by-file against
+         `philipplackner/chirp-api`, we already match on everything
+         structural — `build-logic` as an included build, the same three
+         convention plugins in the same layering, version catalog,
+         `-Xjsr305=strict`. His `VersionCatalogExt.kt` uses the *identical*
+         `extensions.getByType<VersionCatalogsExtension>().named("libs")`
+         workaround I'd arrived at independently three PRs ago when the
+         generated typed accessor wouldn't resolve inside a precompiled
+         script plugin. Nice confirmation that it's the known answer and
+         not a hack. Adopted his extraction of it into a shared file
+         (we had the line duplicated across two conventions), plus
+         `TYPESAFE_PROJECT_ACCESSORS` and `-Xannotation-default-target=
+         param-property` — that last one retroactively explains the
+         `@param:Autowired` warnings from earlier: he'd already hit the
+         same thing and set the flag rather than prefixing each site.
+         The one genuine gap was JPA class opening, and chasing it
+         produced the actual lesson below.
+Wrong about: assuming `kotlin("plugin.jpa")` was the "open my entities"
+         plugin. It is not — it's the **noarg** plugin
+         (`org.jetbrains.kotlin.noarg.gradle.KotlinJpaSubplugin`, which
+         the applied-plugin probe spelled out), and it only synthesises
+         the no-arg constructor JPA requires. Making `@Entity` classes
+         non-final so Hibernate can build lazy proxies is **allopen's**
+         separate job, and `kotlin-spring` doesn't cover it because it
+         only knows Spring's own annotations. I only caught this because
+         I compiled a throwaway `@Entity` and ran `javap` on it instead
+         of trusting that adding the plugin had worked — the bytecode
+         still said `public final class`. Both plugins are now applied
+         and both halves verified in the bytecode (`public class` plus a
+         synthesised `TmpEntity()`). Worth noting the course has the same
+         latent gap: its `allOpen` block sits in the *app* convention,
+         while its entities live in feature modules that never apply it —
+         which stays invisible until the first `fetch = LAZY`
+         association. Third time this session that "the config is
+         present" turned out not to mean "the config is doing anything."

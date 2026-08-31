@@ -10,6 +10,8 @@ repositories {
 dependencies {
     implementation(libs.plugins.kotlin.jvm.toPluginDependency())
     implementation(libs.plugins.kotlin.spring.toPluginDependency())
+    implementation(libs.plugins.kotlin.jpa.toPluginDependency())
+    implementation(libs.plugins.kotlin.allopen.toPluginDependency())
     implementation(libs.plugins.spring.boot.toPluginDependency())
     implementation(libs.plugins.detekt.toPluginDependency())
     implementation(libs.plugins.ktlint.toPluginDependency())

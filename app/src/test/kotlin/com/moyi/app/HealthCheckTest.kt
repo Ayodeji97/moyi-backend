@@ -22,7 +22,7 @@ import org.springframework.test.web.servlet.get
 @SpringBootTest
 @AutoConfigureMockMvc
 class HealthCheckTest(
-    @param:Autowired private val mockMvc: MockMvc,
+    @Autowired private val mockMvc: MockMvc,
 ) : PostgresIntegrationTest() {
     @Test
     fun `health endpoint returns 200`() {
