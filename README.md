@@ -92,24 +92,35 @@ Solo project, so review is automated rather than delegated (doc 18 §11):
   architecture, testing strategy, and ADRs; obsolete in-progress reviews
   are cancelled when a newer commit arrives.
 
-**One-time setup to activate the automated review** (it skips with a
-notice until this is done, rather than failing):
+**One-time setup to activate the automated review.** Both steps are
+required — the token alone is not enough, and the failure mode if you do
+only step 2 is an unhelpful `401 Unauthorized`.
+
+**1. Install the Claude GitHub App** on this repository:
+<https://github.com/apps/claude>. This is what grants the workflow
+permission to act on the repo; without it the action fails with *"Claude
+Code is not installed on this repository."*
+
+**2. Create the auth token and store it as a repository secret:**
 
 ```
 claude setup-token
-```
-
-Then add the printed token as a repository secret named
-`CLAUDE_CODE_OAUTH_TOKEN` (Settings → Secrets and variables → Actions →
-New repository secret), or:
-
-```
 gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo Ayodeji97/moyi-backend
 ```
 
-This bills against the Claude subscription rather than separate API
-credits. Note the review posts inline comments and a check run — GitHub
-has no way to show it as a *requested reviewer*.
+(Or paste it under Settings → Secrets and variables → Actions → New
+repository secret, named `CLAUDE_CODE_OAUTH_TOKEN`.)
+
+Using the OAuth token rather than an `ANTHROPIC_API_KEY` bills against
+the Claude subscription instead of separate API credits.
+
+Until the secret exists the job skips with a notice rather than failing.
+Once it exists but the app is not installed, the job **fails** — that is
+deliberate, because a review that cannot run should be visible rather
+than quietly green.
+
+Note the review posts inline comments and a check run; GitHub has no
+mechanism to show it as a *requested reviewer*.
 
 ## How do I deploy it
 
