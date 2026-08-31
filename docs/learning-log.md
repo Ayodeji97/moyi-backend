@@ -95,3 +95,29 @@ Wrong about: assuming a coverage gate only becomes relevant once there's
          compiles: added a real @Autowired field violation, watched the
          test fail, then reverted it (doc 25 §9's own instinct — test the
          test, not just the code).
+
+## 2026-08-31 · Phase 0 · CI, simplified from the original plan
+Expected: doc 25 §7 step 9's list — "lint → test → build → publish, plus
+         architecture tests and a coverage gate" — to map to one GitHub
+         Actions job per item, the way the plan I wrote described it.
+Reality: splitting lint/test/architecture-tests/coverage into separate
+         jobs would mean re-running Gradle setup (JDK, dependency
+         resolution, build cache) four-plus times for a codebase that is
+         currently a handful of files — the per-job overhead would
+         dominate actual work. Collapsed them into one `quality` job
+         running `./gradlew build`, which already chains all of it
+         correctly via Gradle's own task graph; a failure still names the
+         exact task in the log, which is what actually matters for
+         diagnosing it. Kept `gitleaks` and `publish` (GHCR, on push to
+         main only) as separate jobs since those genuinely don't share
+         setup with the Gradle build. Used Spring Boot's built-in Cloud
+         Native Buildpacks support (`bootBuildImage`) instead of writing a
+         Dockerfile — tested it locally first (a real container, JDK 25,
+         Spring Boot 4.1.1 all present and booting) before trusting it in
+         CI, and it failed only for the expected reason (no datasource
+         configured, same as running locally without the `local` profile).
+Wrong about: treating my own plan document as a literal build spec rather
+         than a statement of intent. The plan's actual words allowed this
+         ("as their own job or a stage within test") — I just hadn't
+         thought through the per-job cost until sizing the real workflow
+         against the real (tiny) codebase.

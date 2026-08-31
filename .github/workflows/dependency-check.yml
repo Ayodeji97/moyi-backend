@@ -1,0 +1,33 @@
+name: Dependency Check
+
+# Nightly, not per-push: doc 12 sets a ~12-minute PR CI budget, and OWASP's
+# NVD-backed scan runs far longer than that.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dependency-check/Dependency-Check_Action@1.1.0
+        with:
+          project: moyi-backend
+          path: "."
+          format: "HTML"
+          args: >
+            --failOnCVSS 8
+            --enableRetired
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: reports
+          retention-days: 30
