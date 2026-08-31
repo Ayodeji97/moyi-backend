@@ -122,8 +122,17 @@ Once it exists but the app is not installed, the job **fails** — that is
 deliberate, because a review that cannot run should be visible rather
 than quietly green.
 
-Note the review posts inline comments and a check run; GitHub has no
-mechanism to show it as a *requested reviewer*.
+**When the `review` check cannot be trusted.** There is one case that is
+neither of the above: `claude-code-action` refuses to run whenever
+`claude-code-review.yml` differs from the copy on `main`, and it reports
+that refusal as *success*. Any PR that edits the review workflow
+therefore gets a green `review` check having reviewed nothing. The job
+emits a warning in its summary when it detects this, but the check still
+passes — so a workflow change is reviewed by hand, and only proven by
+merging it and watching the PR after it.
+
+Note the review posts a single summary comment and a check run; GitHub
+has no mechanism to show it as a *requested reviewer*.
 
 ## How do I deploy it
 
