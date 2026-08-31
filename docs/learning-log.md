@@ -137,20 +137,29 @@ Reality: it didn't — `:app:detekt` failed on GitHub Actions with
          local Temurin 25.0.4+7 — same feature version, only the build
          number differs, so this is about the *exact* runtime
          version string detekt receives, not "JDK 25 unsupported" as a
-         blanket rule. Fixed by giving detekt its own JDK 21 via the
-         task's `jdkHome` property, resolved through Gradle's
-         `JavaToolchainService` (portable — works whether a JDK 21 is
-         already installed or needs auto-provisioning) rather than
-         hand-coding a path, with the `org.gradle.toolchains.foojay-
-         resolver-convention` plugin added so auto-provisioning has
-         somewhere to download from if needed.
-Wrong about: assuming "it's green locally" was sufficient evidence before
-         trusting a CI change — this is the second time this session a
-         CI-only failure surfaced something local runs didn't (Postgres
-         18's volume layout was the first, though that one was local-only
-         in the other direction). The actual lesson: a build tool's own
-         supported-JDK list can be stricter, and differently strict per
-         *build*, than the JDK the project itself targets — checking a
-         tool's release date against the JDK's release date up front
-         (detekt: Feb 2025; JDK 25: Sept 2025) would have flagged this as
-         a live risk before hitting it, not after.
+         blanket rule. First fix attempt was wrong: the Detekt task type
+         does expose a `jdkHome` property, so I pointed it at a JDK 21
+         resolved via Gradle's `JavaToolchainService` — compiled, ran
+         locally, still failed identically on CI. Decompiling
+         `DefaultCliInvoker` (detekt-gradle-plugin's actual class, not
+         detekt-core) showed why: it loads `detekt.cli.Main` through a
+         cached `URLClassLoader` and invokes it **in-process** via
+         reflection — it never shells out to a `java` executable, so
+         `jdkHome` has nothing to hand off to. The JVM detekt's CLI
+         actually runs under is whatever JVM launched the Gradle daemon
+         itself, full stop. Real fix: install JDK 21 *last* in CI's
+         `actions/setup-java` step (making it the daemon's default
+         `JAVA_HOME`) while `jvmToolchain(25)` still resolves JDK 25
+         separately for compile/test/run, which — unlike detekt — do
+         support genuine out-of-process toolchain selection.
+Wrong about: two things, layered. First, "it's green locally" was
+         insufficient evidence before trusting a CI change — the second
+         time this session a CI-only failure surfaced something local
+         didn't (Postgres 18's volume layout was the first, in the
+         opposite direction). Second, and more specifically: assuming a
+         Gradle task property that *exists* (`jdkHome`) does what its
+         name implies. It compiled and ran without error on the first
+         attempt, which felt like confirmation — but "doesn't error" and
+         "does what I think" are different claims, and only actually
+         reading the plugin's bytecode (not just its public API surface)
+         settled which one was true.

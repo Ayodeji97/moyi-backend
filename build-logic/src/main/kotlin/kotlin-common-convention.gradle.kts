@@ -1,5 +1,3 @@
-import org.gradle.jvm.toolchain.JavaLanguageVersion
-import org.gradle.jvm.toolchain.JavaToolchainService
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -61,24 +59,23 @@ detekt {
     buildUponDefaultConfig = true
 }
 
-// detekt 1.23.8 (last released Feb 2025, predating JDK 25's Sept 2025 GA)
-// bundles its own (older) compiler frontend: `jvmTarget` above only
-// accepts values up to 22, and separately, detekt's own CLI refuses to
-// *run* on some JDK 25 builds at all (throws `GradleException("25.0.4.1")`
-// — a bare, unhelpful version string, observed on GitHub Actions' Temurin
-// 25.0.4+1 but not locally on Temurin 25.0.4+7, so it's version-string-
-// format-specific, not "JDK 25 outright unsupported"). Sidestepped by
-// running detekt's own process on a separate JDK 21 toolchain — a widely
-// supported LTS — while the rest of the build stays on JDK 25.
-val javaToolchains = project.extensions.getByType<JavaToolchainService>()
-val detektJdkHome =
-    javaToolchains
-        .launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
-        .map { it.metadata.installationPath }
-
+// detekt 1.23.8 bundles its own (older) compiler frontend, which only
+// accepts jvm-target up to 22 — independent of the project's own
+// Kotlin/Java target set above. Not a functional constraint: detekt only
+// parses source for static analysis, it doesn't emit bytecode.
+//
+// NOTE: detekt's Gradle plugin runs its CLI in-process (reflection into a
+// cached classloader — confirmed by decompiling DefaultCliInvoker, it
+// never shells out to `java`), so `jdkHome` on the Detekt task does NOT
+// select which JVM executes it, despite existing as a property — that
+// stays whatever JVM launched the Gradle daemon. The actual JDK-25-build-
+// specific failure this project hit is worked around at the CI level
+// instead (see .github/workflows/ci.yml): the daemon launches under
+// JDK 21 there, while jvmToolchain(25) above still resolves 25
+// separately for anything that supports out-of-process toolchain
+// selection (compile, test, run).
 tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
     jvmTarget = "21"
-    jdkHome.set(detektJdkHome)
 }
 
 ktlint {

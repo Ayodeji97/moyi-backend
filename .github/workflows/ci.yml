@@ -28,10 +28,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Both installed; 25 is what the project targets (compile/test/run,
+      # via jvmToolchain(25) in build-logic — Gradle provisions it
+      # out-of-process for tasks that support toolchain selection). 21 is
+      # listed last so it becomes the *default* JAVA_HOME, which is what
+      # launches the Gradle daemon itself — needed because detekt's CLI
+      # runs in-process in the daemon's own JVM (confirmed by decompiling
+      # its invoker) and GitHub Actions' specific Temurin 25 build throws
+      # a bare GradleException("25.0.4.1") from detekt's own version
+      # check that a locally-installed Temurin 25 build doesn't. See
+      # kotlin-common-convention.gradle.kts and docs/learning-log.md.
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: |
+            25
+            21
 
       - uses: gradle/actions/setup-gradle@v6
 
