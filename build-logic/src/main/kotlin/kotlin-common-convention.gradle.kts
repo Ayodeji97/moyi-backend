@@ -10,6 +10,7 @@ plugins {
     id("org.jetbrains.kotlin.jvm")
     id("io.gitlab.arturbosch.detekt")
     id("org.jlleitschuh.gradle.ktlint")
+    jacoco
 }
 
 // The generated `LibrariesForLibs` typed accessor is unreliable for a
@@ -81,4 +82,48 @@ testing {
             }
         }
     }
+}
+
+// Doc 12: 80% line coverage floor (90% on packages the project later
+// designates critical — none yet at Phase 0). `check` fails the build
+// below the floor rather than just reporting it.
+//
+// `*ApplicationKt` (the @SpringBootApplication file's compiled name) is
+// excluded: a `main` that only calls `runApplication` has nothing
+// meaningful to unit-test, and every real Spring Boot project excludes
+// it the same way — leaving it in would pressure someone into writing a
+// test that exists purely to move a coverage number, not to catch a bug.
+val jacocoExclusions = listOf("**/*ApplicationKt.class")
+
+tasks.named<Test>("test") {
+    finalizedBy(tasks.named("jacocoTestReport"))
+}
+
+tasks.named<JacocoReport>("jacocoTestReport") {
+    dependsOn(tasks.named("test"))
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+    }
+    classDirectories.setFrom(
+        classDirectories.files.map { fileTree(it) { exclude(jacocoExclusions) } },
+    )
+}
+
+tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+    dependsOn(tasks.named("jacocoTestReport"))
+    classDirectories.setFrom(
+        classDirectories.files.map { fileTree(it) { exclude(jacocoExclusions) } },
+    )
+    violationRules {
+        rule {
+            limit {
+                minimum = "0.80".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.named("check") {
+    dependsOn(tasks.named("jacocoTestCoverageVerification"))
 }

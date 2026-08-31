@@ -22,6 +22,11 @@ dependencies {
     // autoconfigure into a stack-specific module — needed explicitly now.
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation(project(":common:testing"))
+    // Architecture tests (doc 25 §7 step 8) live here: `app` is the one
+    // module with the whole project on its build path, and Konsist scans
+    // by project directory, not Gradle dependency graph, so placement
+    // doesn't need every module to depend on every other.
+    testImplementation(libs.konsist)
 }
 
 springBoot {
