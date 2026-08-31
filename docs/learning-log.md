@@ -202,3 +202,32 @@ Wrong about: trusting "the integration test passes" as proof of the
          being the other) — worth treating as a pattern, not a
          coincidence: a green integration test proves the code path it
          exercises works, not the code path the test's *name* implies.
+
+## 2026-08-31 · Phase 0 · Two ways an architecture rule can be fake
+Expected: adding the layer rules (domain depends on nothing, entities
+         confined to infra, controllers confined to web) would be
+         mechanical — write the filters, watch six green tests.
+Reality: the six tests went green immediately, and two of them were
+         worthless. First, the `internal`-visibility rule written back in
+         PR #3 filtered on `it.packagee?.name?.contains(".modules.")`.
+         Our packages are `com.moyi.identity.…` — `modules/` is only the
+         Gradle *directory*, it never appears in a package name. That
+         filter could never match, so the rule had been passing for four
+         PRs by being structurally incapable of failing. Second, and
+         worse because it affected all six: Konsist reads source files
+         off disk, which Gradle cannot see as a task input, so after
+         dropping a deliberately violating file into `modules/identity`
+         the build reported `:app:test UP-TO-DATE` and passed. The rules
+         only failed when forced with `--rerun`. Locally, every
+         architecture rule was decorative. Fixed by declaring the repo's
+         Kotlin sources as an input to the test task, then re-checking
+         that a violation now triggers a rerun on its own.
+Wrong about: thinking "I verified the rule fails on a real violation"
+         was a complete check. It was necessary and not sufficient —
+         I had verified it *when the test ran*, having never asked
+         whether it would run. The check that actually matters is
+         narrower than it sounds: introduce the violation, then run the
+         build **the ordinary way**, with no flags. CI would have masked
+         this indefinitely, since a clean checkout has nothing to
+         consider up to date. That is the uncomfortable part — the gap
+         only existed on the machine where the code is actually written.
