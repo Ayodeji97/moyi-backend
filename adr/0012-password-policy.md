@@ -25,7 +25,7 @@ Finally, the field had **no maximum at all**, anywhere in the document set. NIST
 ## Decision
 - **8–128 characters.** No composition rules. All printing Unicode and spaces accepted; NFKC-normalised before hashing.
 - Three independent limits, following FR-041's established pattern for bounded user input: 128 characters at request validation, an octet cap at the request layer, and no unbounded field reaching the encoder.
-- **Checked against an offline breached-password corpus of the top ~10M hashes**, held as a Bloom filter (~18 MB at a 0.1% false-positive rate) built in CI from a pinned HIBP dump and baked into the container image. This moves the full-corpus check from "a Phase 5 improvement" (`09` §3) into **Phase 1**, and is the price of the shorter minimum. The two halves are one decision and must not be unbundled.
+- **Checked against an offline breached-password corpus of the top ~10M hashes**, held as a Bloom filter (~17 MB at a 0.1% false-positive rate) built in CI from a pinned HIBP dump and baked into the container image. This moves the full-corpus check from "a Phase 5 improvement" (`09` §3) into **Phase 1**, and is the price of the shorter minimum. The two halves are one decision and must not be unbundled.
 - Argon2id parameters (NFR-046) and rate limits (FR-012) are unchanged.
 
 ## Consequences
@@ -33,7 +33,7 @@ Finally, the field had **no maximum at all**, anywhere in the document set. NIST
 
 **Negative:** a false positive rejects a safe password roughly once in a thousand registrations, which needs copy that explains rather than blames. Phase 1 grows by the corpus work — call it half a session. The pinned dump needs an owner and a refresh cadence, or it silently ages.
 
-**Neutral:** ~18 MB of heap against the 1.5 GB budget in `10` §2.1 — not worth a budget line. The 8-character floor will read as surprising to anyone who has absorbed the older ASVS 4.0.3 guidance, so the reasoning needs to stay attached to the number.
+**Neutral:** ~17 MB of heap against the 1.5 GB budget in `10` §2.1 — not worth a budget line. The 8-character floor will read as surprising to anyone who has absorbed the older ASVS 4.0.3 guidance, so the reasoning needs to stay attached to the number.
 
 ## Why offline rather than the k-anonymity API
 `09` §3 named the HIBP k-anonymity range API as the Phase 5 route. Rejected in favour of the offline filter:
