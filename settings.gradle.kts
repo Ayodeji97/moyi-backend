@@ -36,7 +36,7 @@ include(
     "common:security",
     "common:testing",
     "modules:identity",
-    "modules:space",
+    "modules:bond",
     "modules:gratitude",
     "modules:media",
     "modules:notification",

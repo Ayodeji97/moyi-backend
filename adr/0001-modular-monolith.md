@@ -3,7 +3,7 @@
 **Status:** Accepted · **Date:** 2026-08-30
 
 ## Context
-The system has clearly separable concerns (identity, spaces, entries, media, notifications). Microservices are the fashionable default and would look impressive on a CV. The developer is one person with ~12 h/week, a €25/month budget, and an expected peak load under 20 RPS. The primary goal is learning; the secondary goal is shipping.
+The system has clearly separable concerns (identity, bonds, entries, media, notifications). Microservices are the fashionable default and would look impressive on a CV. The developer is one person with ~12 h/week, a €25/month budget, and an expected peak load under 20 RPS. The primary goal is learning; the secondary goal is shipping.
 
 ## Decision
 A single deployable Spring Boot application, internally decomposed into Gradle modules with dependency rules enforced by automated architecture tests. Cross-module communication goes through narrow `api` packages; no foreign keys cross module boundaries.

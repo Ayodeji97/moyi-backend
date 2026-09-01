@@ -3,7 +3,7 @@
 **Status:** Accepted · **Date:** 2026-08-30
 
 ## Context
-The domain is strongly relational: users, spaces, members, days, entries. The choices were JPA/Hibernate, Spring Data JDBC, jOOQ, Exposed, or a document store. A relevant secondary factor: Kotlin/Spring job descriptions overwhelmingly ask for JPA, and one goal is employability.
+The domain is strongly relational: users, bonds, members, days, entries. The choices were JPA/Hibernate, Spring Data JDBC, jOOQ, Exposed, or a document store. A relevant secondary factor: Kotlin/Spring job descriptions overwhelmingly ask for JPA, and one goal is employability.
 
 ## Decision
 **PostgreSQL** (no major version pinned here) with Spring Data JPA and Flyway as the primary path. Spring's `JdbcClient` is used deliberately for read-heavy queries where JPA is the wrong tool (the archive feed, full-text search, admin reporting).
