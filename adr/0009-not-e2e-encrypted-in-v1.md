@@ -14,7 +14,7 @@ Not end-to-end encrypted in v1. Instead: full-disk encryption; client-side-encry
 **Neutral:** honesty in the Privacy Policy is itself a differentiator — most apps in this space are considerably vaguer.
 
 ## Alternatives considered
-- **Full E2EE with per-Space keys** — the right long-term answer. Rejected for v1: two-device key exchange, key backup, account recovery without a password reset destroying all data, and multi-device sync would collectively consume the entire project budget. Doing E2EE badly is worse than not claiming it.
+- **Full E2EE with per-Bond keys** — the right long-term answer. Rejected for v1: two-device key exchange, key backup, account recovery without a password reset destroying all data, and multi-device sync would collectively consume the entire project budget. Doing E2EE badly is worse than not claiming it.
 - **Plaintext with no additional encryption** — rejected: not defensible for this content.
 
 ## Revisit when

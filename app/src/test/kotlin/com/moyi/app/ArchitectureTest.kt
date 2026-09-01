@@ -42,7 +42,7 @@ class ArchitectureTest {
         private val MODULES =
             setOf(
                 "identity",
-                "space",
+                "bond",
                 "gratitude",
                 "media",
                 "notification",
@@ -130,7 +130,7 @@ class ArchitectureTest {
         // The rule that makes the other rules trustworthy. Everything else
         // here resolves a package into a module and a layer and skips what
         // it cannot resolve, so a file in `com.moyi.identity.util` or in
-        // `modules/space` declaring `com.moyi.identity.domain` would be
+        // `modules/bond` declaring `com.moyi.identity.domain` would be
         // waved through by every rule below rather than caught by them.
         val violations =
             project.files.mapNotNull { file ->
