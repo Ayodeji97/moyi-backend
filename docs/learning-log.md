@@ -540,3 +540,35 @@ Wrong about: what a test suite is evidence of. Those three 500s were
          responses were quietly outside the design. Nothing failed. The
          handler looked complete, and was, for the exceptions it had been
          written to think about.
+
+         **Addendum, same session — CI caught one I had argued myself into.**
+         The fix above went green locally and turned `quality` red on the PR:
+         the Argon2id saturation test reported zero refusals on GitHub's
+         two-core runner. The test used virtual threads, and **a virtual
+         thread unmounts from its carrier only when it blocks.** Argon2id
+         blocks on nothing — it is pure CPU and memory — so on a two-carrier
+         machine at most two hashes are ever in flight, the third and fourth
+         permits are never taken, and nothing is refused. Reproduced locally
+         by running the same test under `-XX:ActiveProcessorCount=2`: fails
+         with virtual threads, passes with platform threads, which are
+         scheduled preemptively and therefore all reach `tryAcquire` whatever
+         the core count.
+         The uncomfortable part is not the test. It is that the same mistake
+         was written into `Argon2Properties`' KDoc as the *justification* for
+         the semaphore — "virtual threads impose no limit of their own, so a
+         burst of ordinary sign-ups exhausts a 2 GB container". That argument
+         is wrong for exactly the reason the test was: the carrier pool
+         already caps concurrent CPU-bound work at the processor count, so on
+         the two-core box this project actually deploys to, peak is ~38 MiB
+         and the semaphore never binds. The control is still right — NFR-005a
+         requires it, it survives someone raising the scheduler's parallelism
+         or moving to a bigger instance, and it turns a kill into a 503 — but
+         the reason I gave for it was a story I had not checked.
+         Two things to keep. A confident paragraph explaining *why* a control
+         is needed deserves the same "prove it" treatment as the control
+         itself; I have now twice written a justification that was more wrong
+         than the code it justified. And a test that only ever runs on one
+         machine shape is a test whose result is partly about that machine —
+         which is the same lesson as "green is a claim about where you ran
+         it", arriving from the side where the *developer* machine is the
+         permissive one and CI is the honest one.

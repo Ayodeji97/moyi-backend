@@ -45,10 +45,19 @@ internal class Argon2idPasswordHasherTest {
 
     @Test
     fun `hashing beyond the permit count is refused rather than queued without bound`() {
-        // NFR-005a. Each concurrent hash holds ~19 MiB off-heap and virtual
-        // threads impose no limit of their own, so without the permits a burst
-        // of ordinary sign-ups exhausts a 2 GB container. The refusal is the
-        // feature: a fast 503 is survivable, an OOM is not.
+        // NFR-005a. Each concurrent hash holds ~19 MiB off-heap, so the
+        // permits are what bound peak memory rather than the request count.
+        // The refusal is the feature: a fast 503 is survivable, an OOM is not.
+        //
+        // **Platform threads, deliberately, and this cost a red CI run.** The
+        // first version used virtual threads, passed on a 10-core laptop and
+        // failed on a 2-core runner with zero refusals. A virtual thread only
+        // unmounts from its carrier when it *blocks*, and Argon2id blocks on
+        // nothing — it is pure CPU and memory. So on a two-carrier machine at
+        // most two hashes are ever in flight, the third and fourth permits are
+        // never taken, and nothing is refused. Platform threads are scheduled
+        // preemptively, so all forty reach `tryAcquire` whatever the core
+        // count, which is the condition this test needs to exist at all.
         val permits = 4
         val hasher = hasher(Argon2Properties(maxConcurrentHashes = permits, acquireTimeoutMillis = 0))
         val attempts = 40
@@ -58,7 +67,7 @@ internal class Argon2idPasswordHasherTest {
 
         val threads =
             List(attempts) {
-                Thread.ofVirtual().unstarted {
+                Thread.ofPlatform().unstarted {
                     start.await()
                     try {
                         hasher.hash(Password.of("correct horse battery"))
