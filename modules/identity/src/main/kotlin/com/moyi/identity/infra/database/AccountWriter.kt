@@ -30,11 +30,11 @@ internal class AccountWriter(
      */
     fun insert(
         user: User,
-        credentials: Credentials,
-        consents: List<ConsentRecord>,
+        newCredentials: Credentials,
+        newConsents: List<ConsentRecord>,
     ) {
         users.save(user.toEntity())
-        this.credentials.save(credentials.toEntity())
-        this.consents.saveAll(consents.map { it.toEntity() })
+        credentials.save(newCredentials.toEntity())
+        consents.saveAll(newConsents.map { it.toEntity() })
     }
 }

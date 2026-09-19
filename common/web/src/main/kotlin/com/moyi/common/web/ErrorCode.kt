@@ -31,6 +31,15 @@ enum class ErrorCode {
      */
     HASHING_CAPACITY_EXCEEDED,
 
+    /** No route, or a route that exists for other methods. */
+    NOT_FOUND,
+
+    /** The path exists; this verb does not. */
+    METHOD_NOT_ALLOWED,
+
+    /** A `Content-Type` this endpoint does not read, or an `Accept` it cannot satisfy. */
+    UNSUPPORTED_MEDIA_TYPE,
+
     /** Anything unanticipated. Never carries a message from the underlying failure. */
     INTERNAL_ERROR,
 }

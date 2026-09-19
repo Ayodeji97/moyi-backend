@@ -6,6 +6,7 @@ import org.springframework.core.annotation.Order
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.HttpStatusCode
+import org.springframework.http.ProblemDetail
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.MethodArgumentNotValidException
@@ -114,6 +115,64 @@ class GlobalExceptionHandler(
         )
     }
 
+    /**
+     * Stamps a [ErrorCode] onto the problem details Spring builds for itself.
+     *
+     * Every exception `ResponseEntityExceptionHandler` handles without our
+     * help — unsupported method, unreadable media type, no such route —
+     * already produced a correctly shaped `application/problem+json` body,
+     * and every one of them was missing `code`. Doc 06 §2 makes `code` the
+     * stable contract a client switches on, "enumerated and exhaustive,
+     * generated into the client as a sealed class". A third of the responses
+     * arriving without one does not break that design loudly; it breaks it by
+     * making the client's exhaustive `when` meet a value it cannot name.
+     *
+     * Found by asking for a 404, a 405 and a 415 against the running
+     * application rather than by reading the handler, which looked complete.
+     */
+    override fun handleExceptionInternal(
+        ex: Exception,
+        body: Any?,
+        headers: HttpHeaders,
+        statusCode: HttpStatusCode,
+        request: WebRequest,
+    ): ResponseEntity<Any>? {
+        val response = super.handleExceptionInternal(ex, body, headers, statusCode, request)
+        val problem = response?.body as? ProblemDetail ?: return response
+
+        // Only when absent: our own handlers set it deliberately, and a
+        // status-derived guess must never overwrite a specific code.
+        if (problem.properties?.containsKey("code") != true) {
+            problem.setProperty("code", codeFor(statusCode).name)
+        }
+        return response
+    }
+
+    private fun codeFor(status: HttpStatusCode): ErrorCode =
+        when (status.value()) {
+            HttpStatus.NOT_FOUND.value() -> {
+                ErrorCode.NOT_FOUND
+            }
+
+            HttpStatus.METHOD_NOT_ALLOWED.value() -> {
+                ErrorCode.METHOD_NOT_ALLOWED
+            }
+
+            HttpStatus.UNSUPPORTED_MEDIA_TYPE.value(), HttpStatus.NOT_ACCEPTABLE.value() -> {
+                ErrorCode.UNSUPPORTED_MEDIA_TYPE
+            }
+
+            // A 4xx Spring raised that we have not named is still the client
+            // sending something this application cannot read.
+            in CLIENT_ERROR_RANGE -> {
+                ErrorCode.MALFORMED_REQUEST
+            }
+
+            else -> {
+                ErrorCode.INTERNAL_ERROR
+            }
+        }
+
     private fun respond(
         status: HttpStatus,
         errorCode: ErrorCode,
@@ -136,4 +195,8 @@ class GlobalExceptionHandler(
     private fun WebRequest.instanceUri(): URI? = (this as? ServletWebRequest)?.request?.requestURI?.let(URI::create)
 
     private fun String.screamingSnakeCase(): String = replace(Regex("([a-z0-9])([A-Z])"), "$1_$2").uppercase()
+
+    private companion object {
+        val CLIENT_ERROR_RANGE = 400..499
+    }
 }

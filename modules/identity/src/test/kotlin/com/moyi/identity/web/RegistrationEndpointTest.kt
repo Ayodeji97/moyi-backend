@@ -146,6 +146,69 @@ internal class RegistrationEndpointTest(
     }
 
     @Test
+    fun `an address the annotation accepts but the domain rejects is 422, not 500`() {
+        // `@Email` deliberately does not require a dot, so `a@b` satisfied it
+        // and then failed `Email`'s own shape check inside the service — a 500
+        // on a request a user could plausibly send, after paying for an Argon2
+        // hash. Confirmed against the running application before the fix.
+        val response = register(email = "a@b")
+
+        response.status shouldBe 422
+        response.contentAsString shouldContain "\"field\":\"email\""
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `a password whose length changes under NFKC is 422 in both directions`() {
+        // The edge's `@Size` measured the raw string and the domain measured
+        // the normalised one, so the two disagreed wherever normalisation
+        // changed the length — and the domain won, with a 500.
+        //
+        // Shrinking: "e" plus a combining acute is two characters that compose
+        // into one, so twelve characters become eleven.
+        val composesShorter = "abcdefghij" + "e\u0301"
+        composesShorter.length shouldBe 12
+
+        // Growing: the "fi" ligature is one character that decomposes into
+        // two, so 128 characters become 256.
+        val composesLonger = "\uFB01".repeat(128)
+        composesLonger.length shouldBe 128
+
+        register(password = composesShorter).let { response ->
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"password\""
+        }
+        register(email = "b@example.com", password = composesLonger).status shouldBe 422
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `a surrounding space in an address is a typing accident, not a rejection`() {
+        // The trim existed before this fix but ran *after* validation, so
+        // `@Email` rejected the request before it could ever apply — the code
+        // comment described a behaviour the code did not have.
+        val response = register(email = "  ada@example.com  ")
+
+        response.status shouldBe 201
+        jdbc.queryForObject("SELECT email FROM users", String::class.java) shouldBe "ada@example.com"
+    }
+
+    @Test
+    fun `the byte limit is reported against the password field`() {
+        // It used to be reported against `passwordWithinByteLimit`, the name
+        // of the helper property that implemented it — an implementation
+        // detail leaking into the API contract, and not a field any client
+        // could map to an input.
+        val fourBytesEach = "\uD83D\uDE00".repeat(Password.MAX_OCTETS / 4 + 1)
+
+        val response = register(password = fourBytesEach)
+
+        response.status shouldBe 422
+        response.contentAsString shouldContain "\"field\":\"password\""
+        response.contentAsString shouldNotContain "passwordWithinByteLimit"
+    }
+
+    @Test
     fun `an unconfirmed 18+ box is a validation failure, not a silent skip`() {
         // FR-011 makes the confirmation a condition of the account existing.
         // Accepting the registration and omitting the AGE_18 row would leave

@@ -1,10 +1,10 @@
 package com.moyi.identity.web
 
+import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.User
 import com.moyi.identity.service.RegistrationCommand
 import jakarta.validation.constraints.AssertTrue
-import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
@@ -19,19 +19,18 @@ import jakarta.validation.constraints.Size
  * also what keeps Bean Validation annotations — an HTTP-layer concern — out
  * of the layers below.
  *
- * The bounds here repeat the domain's. That is not duplication for its own
- * sake: the domain's `require` throws, which becomes a 500, while these
- * produce the field-level 422 a form can actually render. The domain keeps
- * its checks because it must hold for every caller, including ones that never
- * came through HTTP.
+ * **The email and password constraints delegate to the domain** rather than
+ * restating its rules; see [ValidEmail] for the three confirmed 500s that
+ * restating them produced. `displayName`, `locale` and `acceptedTermsVersion`
+ * keep ordinary annotations because their domain rules are `isNotBlank` and
+ * nothing more — there is no second definition to drift from.
  */
 internal data class RegisterRequest(
     @field:NotBlank
-    @field:Email
-    @field:Size(max = EMAIL_MAX_LENGTH)
+    @field:ValidEmail
     val email: String,
     @field:NotBlank
-    @field:Size(min = Password.MIN_LENGTH, max = Password.MAX_LENGTH)
+    @field:ValidPassword
     val password: String,
     @field:NotBlank
     @field:Size(max = User.MAX_DISPLAY_NAME_LENGTH)
@@ -48,36 +47,51 @@ internal data class RegisterRequest(
     val over18: Boolean,
 ) {
     /**
-     * FR-001's third limit, which `@Size` cannot express: `@Size` counts
-     * characters and this counts bytes. 128 characters of four-byte code
-     * points is a 512-byte input, so without this the character bound is not
-     * the bound on work that it appears to be.
+     * Builds the command, constructing the domain's value types here at the
+     * edge rather than in the service.
      *
-     * Bean Validation reports this against the property name rather than
-     * `password`, which is a small cost for not writing a custom constraint
-     * annotation to say one line.
+     * Two things follow from that. The service receives types that cannot be
+     * invalid, so it has no failure mode left to handle; and the plaintext
+     * password stops existing as a bare `String` below this class, which is
+     * what [toString] below is about.
+     *
+     * The constructors cannot throw here: the same factories ran during
+     * validation, and a request that failed them never reached the handler.
      */
-    @get:AssertTrue(message = "password must be at most ${Password.MAX_OCTETS} bytes")
-    val isPasswordWithinByteLimit: Boolean
-        get() = password.toByteArray(Charsets.UTF_8).size <= Password.MAX_OCTETS
-
     fun toCommand() =
         RegistrationCommand(
-            // Trimmed here, at the edge, because a trailing space in an email
-            // is a typing accident rather than an address. The password is
-            // NOT trimmed: whitespace is a legitimate character in one
-            // (ADR-0012 accepts spaces) and silently removing it would make
-            // the password the user typed unenterable.
-            email = email.trim(),
-            password = password,
+            // A surrounding space in an address is a typing accident. The
+            // password is NOT trimmed — ADR-0012 accepts spaces in one, and
+            // removing them would make the password the user typed
+            // unenterable.
+            email = Email(email.trim()),
+            password = Password.of(password),
             displayName = displayName.trim(),
             locale = locale,
             acceptedTermsVersion = acceptedTermsVersion.trim(),
         )
 
+    /**
+     * **Redacted, because the generated one is not.**
+     *
+     * A Kotlin `data class` prints every property, and this is the object
+     * that holds the plaintext password. Spring prints it in two places
+     * without anyone asking: `AbstractMessageConverterMethodArgumentResolver`
+     * logs the deserialised body at `DEBUG` for `org.springframework.web`,
+     * and `MethodArgumentNotValidException.getMessage()` embeds each
+     * `FieldError`, whose `toString()` contains `rejected value [...]` — the
+     * password itself when it fails validation, logged untruncated by
+     * `AbstractHandlerExceptionResolver`. Neither needs an attacker; both
+     * need one operator turning on `--debug`, at which point every
+     * registration writes a password next to its email, in a log that gets
+     * shipped somewhere and kept.
+     *
+     * `PasswordHash`'s KDoc already names this exact mechanism. The two types
+     * carrying the *plaintext* were the ones that missed it.
+     */
+    override fun toString(): String = "RegisterRequest(email=$email, displayName=$displayName, locale=$locale)"
+
     private companion object {
-        /** RFC 5321 §4.5.3.1.3, the same bound the `users.email` column carries. */
-        const val EMAIL_MAX_LENGTH = 254
         const val CONSENT_VERSION_MAX_LENGTH = 40
 
         /** Deliberately loose: two or three letters, optionally a region. Not the full BCP 47 grammar. */
