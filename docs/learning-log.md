@@ -302,3 +302,42 @@ Wrong about: two things. First, that "adding a violating file" is the
          `com.moyi.<module>.<layer>` package. Without it, anything in an
          unrecognised package is not rejected by the other rules — it is
          invisible to all of them.
+
+## 2026-09-19 · Phase 1 · The build was red on the only machine that matters
+Expected: to open Phase 1 by writing code. First step was the habit this
+         repo has earned twice already — run `./gradlew build` and look at
+         it, rather than assume a repo that passed CI six times passes
+         locally.
+Reality: `BUILD FAILED`. `:app:detekt` died with a bare `25.0.4` — detekt
+         1.23.8 bundles an older Kotlin frontend that will not run on a
+         JDK 25 daemon, and detekt's Gradle plugin invokes its CLI
+         **in-process**, so `jdkHome` on the task is a decoy: the only JVM
+         that matters is whichever one launched the daemon. CI had been
+         green the whole time because `setup-java` was given `25` then
+         `21`, and the *last* entry wins JAVA_HOME — so CI's daemon was on
+         21 by a side effect of list order. Locally JAVA_HOME is sdkman's
+         25, so every local `build` had been failing. Fixed properly with
+         Gradle 9's daemon JVM criteria — `./gradlew updateDaemonJvm
+         --jvm-version=21` writes `gradle/gradle-daemon-jvm.properties`,
+         which states the daemon's JVM outright, is committed, and applies
+         identically on both machines. Verified the fix did not quietly
+         downgrade compilation: the emitted bytecode is still major
+         version 68 (Java 24), which a JDK 21 compiler cannot produce, so
+         `jvmToolchain(25)` is still doing the real work out-of-process.
+Wrong about: two things, one of them written down by me earlier in this
+         repo. The comment in `kotlin-common-convention.gradle.kts` stated
+         that GitHub's Temurin 25 build throws this "that a
+         locally-installed Temurin 25 build doesn't." That is false — the
+         local build throws too, with `25.0.4` instead of `25.0.4.1`. A
+         confident parenthetical in a comment became the reason nobody
+         looked, which is worse than having no comment, because a comment
+         that asserts a negative is read as evidence.
+         The general shape is now the **third** instance of the same class
+         in this project: the `.modules.` filter that could never match,
+         the Konsist rule that never re-ran, and now a quality gate that
+         only ever executed where its failure was invisible. Each time the
+         mechanism differed and the lesson was identical — *green* is a
+         claim about where you ran it, not about the code. The rule I
+         should have been applying: a gate is not verified until it has
+         been run on the developer machine, with no flags, by the ordinary
+         command.

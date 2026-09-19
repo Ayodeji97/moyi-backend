@@ -75,12 +75,19 @@ detekt {
 // cached classloader — confirmed by decompiling DefaultCliInvoker, it
 // never shells out to `java`), so `jdkHome` on the Detekt task does NOT
 // select which JVM executes it, despite existing as a property — that
-// stays whatever JVM launched the Gradle daemon. The actual JDK-25-build-
-// specific failure this project hit is worked around at the CI level
-// instead (see .github/workflows/ci.yml): the daemon launches under
-// JDK 21 there, while jvmToolchain(25) above still resolves 25
-// separately for anything that supports out-of-process toolchain
-// selection (compile, test, run).
+// stays whatever JVM launched the Gradle daemon. So the daemon's own JVM
+// is the only lever, and it is now pulled in `gradle/gradle-daemon-jvm.properties`
+// (Gradle 9 daemon JVM criteria, `./gradlew updateDaemonJvm --jvm-version=21`):
+// the daemon runs on 21 everywhere, while jvmToolchain(25) above still
+// resolves 25 separately for anything that supports out-of-process
+// toolchain selection (compile, test, run) — verified by the emitted
+// bytecode being major version 68 (Java 24), which a 21 compiler cannot
+// produce.
+//
+// This was CI-only until 2026-09-19, and that asymmetry meant `./gradlew
+// build` FAILED on the machine the code is written on while CI was green
+// — the third instance in this repo of a gate that only worked where
+// nobody was looking (see docs/learning-log.md).
 tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
     jvmTarget = "21"
 }

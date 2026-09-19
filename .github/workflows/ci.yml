@@ -28,15 +28,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Both installed; 25 is what the project targets (compile/test/run,
-      # via jvmToolchain(25) in build-logic — Gradle provisions it
-      # out-of-process for tasks that support toolchain selection). 21 is
-      # listed last so it becomes the *default* JAVA_HOME, which is what
-      # launches the Gradle daemon itself — needed because detekt's CLI
-      # runs in-process in the daemon's own JVM (confirmed by decompiling
-      # its invoker) and GitHub Actions' specific Temurin 25 build throws
-      # a bare GradleException("25.0.4.1") from detekt's own version
-      # check that a locally-installed Temurin 25 build doesn't. See
+      # Both installed so neither has to be downloaded at build time. 25 is
+      # what the project targets (compile/test/run, via jvmToolchain(25) in
+      # build-logic — Gradle provisions it out-of-process for tasks that
+      # support toolchain selection); the Gradle *daemon* runs on 21,
+      # because detekt's CLI runs in-process in the daemon's own JVM
+      # (confirmed by decompiling its invoker) and detekt 1.23.8 throws a
+      # bare GradleException from its own version check under a Temurin 25
+      # daemon.
+      #
+      # Which JDK launches the daemon is no longer decided by the ORDER of
+      # this list. It is declared outright in
+      # gradle/gradle-daemon-jvm.properties (Gradle 9 daemon JVM criteria),
+      # added 2026-09-19 so that local builds stop diverging from CI. The
+      # ordering trick worked but was invisible, and an earlier version of
+      # this comment claimed a locally-installed Temurin 25 did NOT hit the
+      # failure — it does. That claim is what let `./gradlew build` sit
+      # broken locally while CI stayed green. See
       # kotlin-common-convention.gradle.kts and docs/learning-log.md.
       - uses: actions/setup-java@v6
         with:
