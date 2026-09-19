@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.test.context.ActiveProfiles
 import javax.sql.DataSource
 
 /**
@@ -19,19 +20,26 @@ import javax.sql.DataSource
  * database it actually ran migrations against is.
  */
 @SpringBootTest
+@ActiveProfiles("test")
 class FlywayMigrationTest(
     @Autowired dataSource: DataSource,
 ) : PostgresIntegrationTest() {
     private val jdbcTemplate = JdbcTemplate(dataSource)
 
     @Test
-    fun `V1__extensions migration actually ran`() {
+    fun `every module's migrations run, in one sequence, against one schema`() {
+        // V1 lives in `app` (database-wide extensions); V2 lives in
+        // `modules/identity` (its own tables). Flyway merges every
+        // `classpath:db/migration` it finds, which is what lets a module own
+        // its schema without `app` restating it — and this assertion is what
+        // notices when a module's migrations are not on the classpath at all,
+        // a failure that otherwise shows up as a missing table much later.
         val appliedVersions =
             jdbcTemplate.queryForList(
-                "SELECT version FROM flyway_schema_history WHERE success = true",
+                "SELECT version FROM flyway_schema_history WHERE success = true ORDER BY installed_rank",
                 String::class.java,
             )
-        assertEquals(listOf("1"), appliedVersions)
+        assertEquals(listOf("1", "2"), appliedVersions)
 
         val extensions =
             jdbcTemplate.queryForList(
@@ -41,6 +49,16 @@ class FlywayMigrationTest(
         assertTrue(
             extensions.containsAll(listOf("citext", "pgcrypto")),
             "Expected citext and pgcrypto extensions, found: $extensions",
+        )
+
+        val identityTables =
+            jdbcTemplate.queryForList(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename IN ('users', 'credentials')",
+                String::class.java,
+            )
+        assertTrue(
+            identityTables.containsAll(listOf("users", "credentials")),
+            "Expected the identity module's tables, found: $identityTables",
         )
     }
 }

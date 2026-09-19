@@ -72,6 +72,7 @@ moyi-backend/
 ├─ modules/         identity, bond, gratitude, media, notification,
 │                   scheduling, admin, analytics — the actual domain
 ├─ contracts/       OpenAPI generation for the client
+├─ config/          detekt configuration (only the tuned rules)
 ├─ adr/             architecture decision records
 ├─ revision/        course-concept notes (what the course taught vs.
 │                   what this project does, and why)
@@ -197,6 +198,23 @@ domain model that owes nothing to Hibernate.
 > §2.1), so his `api/` is our `web/`. His modules also share one package
 > root across all of them; ours are namespaced `com.moyi.<module>`, which
 > avoids split packages and is what makes the rules below expressible.
+
+### Where the schema lives
+
+A module owns the migrations for the tables it owns
+(**ADR-0014**): they sit in `modules/<name>/src/main/resources/db/migration`,
+and Flyway merges every `classpath:db/migration` it finds, so `app` picks
+them up through the dependency it already has. `app` keeps only what
+belongs to no module — currently the `CREATE EXTENSION` statements.
+
+This is not tidiness. A module's entities and repositories are
+`internal`, so `app` physically cannot name them, so the tests that prove
+the mapping matches the schema have to run *inside* the module — and a
+test inside the module needs the migration on its own classpath.
+
+Version numbers are **one global sequence** across all modules, because
+there is one schema. Take the next free number. Two branches that claim
+the same one collide loudly: Flyway refuses to start.
 
 ### The rules are executable
 
