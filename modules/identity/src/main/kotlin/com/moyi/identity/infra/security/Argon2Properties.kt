@@ -47,13 +47,27 @@ internal data class Argon2Properties(
     /**
      * NFR-005a: 4–8 permits.
      *
-     * The number exists because of an interaction between two things that are
-     * each fine alone. `spring.threads.virtual.enabled` is on, so the server
-     * will happily run thousands of concurrent requests; and every Argon2id
-     * hash holds ~19 MiB off-heap for its duration. Multiply those and a
-     * handful of concurrent sign-ups is a memory-exhaustion DoS inside a 2 GB
-     * container — from *well-formed* requests, with no attacker sophistication
-     * at all. The permit count, not the thread count, is what bounds it.
+     * The number exists because every Argon2id hash holds ~19 MiB off-heap
+     * for its duration, so peak memory is (concurrent hashes × 19 MiB) and
+     * something has to bound the multiplier. The permit count is that bound,
+     * and it is the one we control.
+     *
+     * **A correction to the obvious version of this argument.** It is tempting
+     * to say that `spring.threads.virtual.enabled` removes every other limit,
+     * so thousands of concurrent requests become thousands of concurrent
+     * hashes. That is not true, and the test for this file found out the hard
+     * way: a virtual thread unmounts from its carrier only when it *blocks*,
+     * and Argon2id blocks on nothing — it is pure CPU and memory. Concurrent
+     * hashes are therefore already capped by the carrier pool, which defaults
+     * to the processor count. On a two-core container that is two hashes and
+     * ~38 MiB, and this semaphore never binds at all.
+     *
+     * It stays, for three reasons that are smaller than the original claim but
+     * real. NFR-005a requires it. It is the only bound that survives someone
+     * raising `jdk.virtualThreadScheduler.parallelism`, moving to a larger
+     * instance, or giving the hasher work that *does* block. And it converts
+     * the failure from "the container is killed" to "a 503 with a
+     * `Retry-After`", which is a choice worth having made in advance.
      */
     @field:Min(MIN_PERMITS)
     @field:Max(MAX_PERMITS)
