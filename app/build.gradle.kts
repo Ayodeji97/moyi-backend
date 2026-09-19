@@ -9,11 +9,15 @@ dependencies {
     // `app` is the composition root: it depends on every module so that
     // their beans, entities and migrations are on the runtime classpath.
     implementation(projects.modules.identity)
+    implementation(projects.common.web)
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
-    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    // Jackson 3 (`tools.jackson`), which is what Spring Boot 4 wires into
+    // its message converters — not Jackson 2's `com.fasterxml.jackson`
+    // module, which was here since Phase 0 and was never consulted.
+    implementation("tools.jackson.module:jackson-module-kotlin")
 
     // Spring Boot 4 split Flyway's autoconfiguration out of the plain
     // flyway-core library into this dedicated starter (same pattern as

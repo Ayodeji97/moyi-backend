@@ -38,3 +38,16 @@ internal interface CredentialsRepository : Repository<CredentialsEntity, UUID> {
 
     fun save(credentials: CredentialsEntity): CredentialsEntity
 }
+
+/**
+ * Consent records. One method, because writing is the only thing this slice
+ * does with them — the export path (FR-009) adds its own read when it exists.
+ *
+ * On the bare [Repository] marker for the same reason as
+ * [CredentialsRepository]: what a repository *cannot* do is part of its
+ * design, and `findAll()` over a table of personal-data attestations is not
+ * a query anything should be able to reach for by accident.
+ */
+internal interface ConsentRecordRepository : Repository<ConsentRecordEntity, UUID> {
+    fun saveAll(records: Iterable<ConsentRecordEntity>): List<ConsentRecordEntity>
+}
