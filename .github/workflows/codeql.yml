@@ -101,7 +101,17 @@ jobs:
       # that handoff hangs. Compiling inside the Gradle daemon removes the
       # second process, and therefore the handoff.
       #
-      # The flags either side of it are about a different failure: CodeQL
+      # `-Xmx4g` is the direct consequence of that, and the second failure
+      # this step produced: `OutOfMemoryError: GC overhead limit exceeded` in
+      # `:build-logic:compileKotlin`. Compiling in-process puts the Kotlin
+      # compiler *and* CodeQL's extractor plugin inside the Gradle daemon,
+      # whose default heap is sized for orchestrating a build rather than for
+      # running a compiler with an instrumentation plugin attached. Only this
+      # job is affected, which is why the size is set on the invocation rather
+      # than in `gradle.properties` — an ordinary build has no reason to pay
+      # for it. The runner has 16 GB.
+      #
+      # The flags either side of those are about a different failure: CodeQL
       # extracts only what it observes being compiled, and `setup-gradle`
       # restores the Gradle build cache, so a cache hit would satisfy
       # `classes` without invoking the compiler at all — an empty database and
@@ -113,6 +123,7 @@ jobs:
           --no-build-cache
           --rerun-tasks
           -Dkotlin.compiler.execution.strategy=in-process
+          -Dorg.gradle.jvmargs=-Xmx4g
 
       - uses: github/codeql-action/analyze@v4
         with:
