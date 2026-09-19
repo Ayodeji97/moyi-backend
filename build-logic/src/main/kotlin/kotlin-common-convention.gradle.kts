@@ -60,10 +60,13 @@ tasks.withType<Test>().configureEach {
     environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
 }
 
-// No custom detekt.yml yet — running on detekt's built-in default ruleset
-// until real code surfaces false positives worth tuning (Phase 1+).
+// `buildUponDefaultConfig` merges config/detekt/detekt.yml onto detekt's own
+// defaults, so that file holds only the rules this project has deliberately
+// changed — with the reason next to each — instead of a copy of the whole
+// ruleset that nobody can diff.
 detekt {
     buildUponDefaultConfig = true
+    config.setFrom(rootDir.resolve("config/detekt/detekt.yml"))
 }
 
 // detekt 1.23.8 bundles its own (older) compiler frontend, which only

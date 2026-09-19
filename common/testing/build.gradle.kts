@@ -7,6 +7,10 @@ plugins {
 // (`testImplementation(project(":common:testing"))`), so its own Testcontainers
 // dependencies must be visible transitively to consumers.
 dependencies {
+    // DeterministicIdGenerator implements common:core's IdGenerator port, so
+    // that type is part of this module's own surface — `api`, not `implementation`.
+    api(projects.common.core)
+
     api("org.springframework.boot:spring-boot-testcontainers")
     // Testcontainers 2.x renamed these artifacts with a "testcontainers-"
     // prefix (junit-jupiter / postgresql -> testcontainers-junit-jupiter /

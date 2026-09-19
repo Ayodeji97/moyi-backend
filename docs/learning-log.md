@@ -356,3 +356,71 @@ Wrong about: two things, one of them written down by me earlier in this
          caught it was reading the diff and asking "which jobs does this
          touch that did not run" — a question a green check cannot answer,
          and the reason the reviewer being down mattered.
+
+## 2026-09-19 · Phase 1 · A wrong answer that raised no error
+Expected: the interesting failure in the first identity slice to be the one
+         I had written down in advance — `JpaRepository.save()` issuing a
+         `SELECT` before every `INSERT`, because an application-assigned id
+         is never null and `isNew()` has nothing else to look at. That part
+         went exactly as predicted: with `Persistable` the statement counter
+         says 1, and with `isNew()` forced to `false` it says 2. Predicting a
+         bug and then measuring it is a good feeling and taught me nothing I
+         did not already know.
+Reality: the expensive one was `citext`. Doc 07 specifies `email citext`
+         so that uniqueness and lookup are case-insensitive in the database
+         rather than in application code. Hibernate maps a Kotlin `String` to
+         `varchar`, so the driver tells PostgreSQL that the parameter in
+         `WHERE email = ?` *is* a varchar — and PostgreSQL, having no
+         `citext = varchar` operator, resolves the comparison through the
+         implicit `citext -> text` cast and compares two ordinary strings.
+         Case-sensitively. **Nothing failed.** The column was still `citext`,
+         the unique index was still case-insensitive (so the "two accounts
+         cannot share a mailbox" test passed the whole time), `ddl-auto:
+         validate` was satisfied, inserts worked. Only the lookup was wrong,
+         and it was wrong by returning *no row* — which is indistinguishable
+         from "no such user" at every layer above it. In a login path that is
+         a support ticket reading "my password stopped working when I typed
+         my email with a capital letter", and the query it comes from looks
+         correct in the diff, in review, and in the logs.
+         Fixed with a `UserType` that binds the parameter untyped
+         (`setObject(…, Types.OTHER)`), so PostgreSQL infers `citext` from
+         the column it is being compared to. `@Column(columnDefinition)` is a
+         separate half of the same problem and only satisfies the schema
+         validator; the two are easy to confuse because either one alone
+         leaves a build that is green.
+Wrong about: three things, and the middle one is the one worth keeping.
+         First, that Kotlin can satisfy a Java interface's getter with a
+         property. `@Id override val id: UUID` does not compile against
+         `Persistable<UUID>` — `'id' overrides nothing` — and a *public*
+         `val id` additionally clashes with the `getId()` you then have to
+         write. A `private val id` generates no accessor at all, which leaves
+         the name free. Small, and I would have guessed wrong indefinitely
+         without compiling it.
+         Second, and this is the real lesson: I expected the `citext` problem
+         to announce itself. I had even predicted the mechanism — "the
+         parameter will be a varchar and there is no such operator" — and
+         assumed the consequence would be `operator does not exist`, a loud,
+         immediate, obviously-my-fault error. The consequence was `null`.
+         I had reasoned correctly about the cause and then quietly assumed
+         the failure mode I was most comfortable with. **Predicting a bug is
+         not the same as predicting how it presents, and the presentation is
+         what decides whether you ever find it.**
+         Third, my first fix was `@JdbcTypeCode(SqlTypes.OTHER)`, which looks
+         like the targeted, column-local version of the right idea. It made
+         Hibernate route the String through its `Object` type and Java-
+         *serialize* it into a `bytea` — so the round-trip test then failed
+         inside the domain with "email is not a valid address", a message
+         pointing at validation rather than at binding. A wrong fix that
+         moves the error somewhere else costs more than no fix, and the only
+         reason it cost minutes rather than an afternoon is that the tests
+         that broke were ones I had written for other reasons.
+         Worth recording separately: the architecture decided where this code
+         could be tested, and I did not see it coming. The plan said the
+         integration tests would live in `app`. They cannot — `UserEntity`
+         and `UserRepository` are `internal`, so `app` cannot name them.
+         The choice was to widen the visibility (deleting the boundary to
+         suit the test) or to give the module its own migrations and its own
+         small Spring context (ADR-0014). The rule pushed back on the plan,
+         which is what an executable rule is for, but it pushed back at
+         implementation time rather than at design time — I should have read
+         the Konsist rules *as constraints on the plan* before writing it.

@@ -1,0 +1,15 @@
+spring:
+  jpa:
+    hibernate:
+      # The guard that makes the entities and the migration one thing rather
+      # than two: Hibernate checks every mapped column against the schema
+      # Flyway just built, and refuses to start on a mismatch. Without it, a
+      # renamed column is discovered by the first query that needs it.
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        # Enables the counters UserPersistenceTest asserts on. Statement counts
+        # are the only way to see the difference between one INSERT and a
+        # SELECT-then-INSERT, since both produce the same row.
+        generate_statistics: true

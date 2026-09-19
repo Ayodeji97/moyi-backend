@@ -6,6 +6,9 @@ plugins {
 
 dependencies {
     implementation(projects.common.core)
+    // `app` is the composition root: it depends on every module so that
+    // their beans, entities and migrations are on the runtime classpath.
+    implementation(projects.modules.identity)
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")

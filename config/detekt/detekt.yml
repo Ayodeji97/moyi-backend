@@ -1,0 +1,33 @@
+# Partial detekt configuration, merged onto detekt's defaults
+# (`buildUponDefaultConfig = true` in kotlin-common-convention). Only the rules
+# that real code has shown to be wrong for this project appear here — the rest
+# stay at their defaults, so this file records decisions rather than restating
+# a ruleset.
+#
+# Every entry needs a reason. A silenced rule with no justification is
+# indistinguishable from a rule nobody understood.
+
+complexity:
+  LongParameterList:
+    # A JPA entity's constructor has one parameter per column, and `users` has
+    # ten. The rule is right about ordinary code — a ten-argument function is
+    # usually a missing type — but an entity's arity is the table's arity, and
+    # the alternative (mutable properties assigned after construction) is
+    # strictly worse: it gives up `val` on the id and makes a half-built entity
+    # representable.
+    ignoreAnnotated: ['Entity']
+
+style:
+  MaxLineLength:
+    # Matches ktlint's own limit (140, the ktlint_official default). The two
+    # tools disagreeing by twenty characters means code that satisfies the
+    # formatter fails the linter, and there is no reason for this project to
+    # hold two opinions about one number.
+    maxLineLength: 140
+  UnusedPrivateMember:
+    # JPA lifecycle callbacks are invoked reflectively by the persistence
+    # provider, so static analysis correctly observes that nothing calls them
+    # and incorrectly concludes they are dead. Listing the annotations rather
+    # than the method names keeps this narrow: only a method that JPA itself
+    # will call is exempt.
+    ignoreAnnotated: ['PostPersist', 'PostLoad', 'PostUpdate', 'PrePersist', 'PreUpdate', 'PreRemove']

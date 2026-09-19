@@ -1,0 +1,12 @@
+# Applied by `@ActiveProfiles("test")` on the integration tests, rather than a
+# test-classpath `application.yml`, which would shadow the real one and quietly
+# drop everything it configures.
+spring:
+  jpa:
+    hibernate:
+      # Proves two things at once about the composition root: that
+      # `@EntityScan("com.moyi")` really does reach the modules' entities, and
+      # that those entities agree with the schema Flyway built from every
+      # module's migrations together. Neither is visible from inside a module.
+      ddl-auto: validate
+    open-in-view: false
