@@ -91,10 +91,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # 21 as well as 25, even though this job never runs detekt: the
+      # daemon JVM is now declared repo-wide in
+      # gradle/gradle-daemon-jvm.properties, so EVERY Gradle invocation
+      # needs a 21 available — including this one. Without it Gradle falls
+      # back to downloading 21 from the foojay URLs in that file, which
+      # adds a download to every publish and fails outright if those
+      # pinned URLs ever rot.
+      #
+      # This job only runs on push-to-main, so a PR can never prove this
+      # line is right. It was found by reading, not by a green check.
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: |
+            25
+            21
 
       - uses: gradle/actions/setup-gradle@v6
 

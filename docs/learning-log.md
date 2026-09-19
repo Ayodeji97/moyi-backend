@@ -341,3 +341,18 @@ Wrong about: two things, one of them written down by me earlier in this
          should have been applying: a gate is not verified until it has
          been run on the developer machine, with no flags, by the ordinary
          command.
+
+         Addendum, same session: reviewing my own fix by hand — the
+         automated PR reviewer was down, its OAuth token having expired —
+         found that the fix **reintroduced the same class of bug it was
+         fixing.** Declaring the daemon JVM in
+         `gradle/gradle-daemon-jvm.properties` applies to *every* Gradle
+         invocation in the repo, and the `publish` job installed only
+         JDK 25. So publish would have started downloading a JDK on every
+         merge, or failed outright. It runs only on push-to-main, was
+         SKIPPED on the PR, and therefore no green check could ever have
+         contradicted it. Fourth instance, and the first one I authored
+         while writing the entry about the previous three. The thing that
+         caught it was reading the diff and asking "which jobs does this
+         touch that did not run" — a question a green check cannot answer,
+         and the reason the reviewer being down mattered.

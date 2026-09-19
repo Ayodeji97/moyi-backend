@@ -88,6 +88,25 @@ detekt {
 // build` FAILED on the machine the code is written on while CI was green
 // — the third instance in this repo of a gate that only worked where
 // nobody was looking (see docs/learning-log.md).
+//
+// DELETE `gradle/gradle-daemon-jvm.properties` (and this note, and the
+// `jvmTarget` override below) the moment detekt can run on the project's
+// own JDK. detekt is the ONLY reason the daemon is held back; nothing this
+// project ships is built on 21. As of 2026-09-19 there is no newer detekt
+// — 1.23.8 is the latest release and no 2.x exists on Maven Central under
+// either coordinate — so this is a workaround with no better option, not a
+// preference.
+//
+// Known latent risk in that file: `updateDaemonJvm` writes `toolchainUrl.*`
+// entries pinning JDK 21 by opaque foojay build ID. They make provisioning
+// reproducible, but they are only ever exercised on a machine with no local
+// JDK 21 — which is neither the dev machine nor CI (both install it
+// directly). If foojay retires those IDs, the failure appears first for a
+// fresh clone. The file is left exactly as generated rather than
+// hand-trimmed; if that path ever breaks, delete the `toolchainUrl.*`
+// lines and keep `toolchainVersion=21`, which requires a locally
+// installed 21 and fails with a clear message instead of a broken
+// redirect.
 tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
     jvmTarget = "21"
 }
