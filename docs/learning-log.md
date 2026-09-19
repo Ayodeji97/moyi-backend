@@ -424,3 +424,68 @@ Wrong about: three things, and the middle one is the one worth keeping.
          which is what an executable rule is for, but it pushed back at
          implementation time rather than at design time — I should have read
          the Konsist rules *as constraints on the plan* before writing it.
+
+## 2026-09-19 · Phase 1 · Three guards that were not guarding, one of them mine
+Expected: registration to be mostly plumbing on top of slice A — a
+         controller, a service, Argon2id, done. The interesting decision was
+         supposed to be the one I had already reasoned about: attempt the
+         insert and absorb the unique-constraint violation rather than
+         check-then-insert, because the check is a race and the conflict
+         response is an enumeration oracle.
+Reality: that part went as planned, and the mutation test for it is the most
+         satisfying thing in the PR — rewriting the service to the course's
+         `findByEmail` → throw → save shape fails *the timing test
+         specifically*, because that version skips the ~150 ms hash on the
+         duplicate path. The identical response body is only half a control;
+         the other half is that both paths cost the same, and it took an
+         assertion on hash *call count* to pin it, because any assertion on
+         elapsed time that is not flaky is an assertion that is not measuring
+         anything.
+         What actually cost the session was three separate guards that were
+         not guarding. **Jackson**: `app` has carried
+         `com.fasterxml.jackson.module:jackson-module-kotlin` since Phase 0,
+         and Spring Boot 4 uses **Jackson 3** — a different artifact tree
+         under `tools.jackson`. Both were on the classpath, only Jackson 3
+         was wired into the message converters, and the Kotlin module was
+         registering with a mapper nobody used. Invisible for four PRs
+         because no endpoint had ever taken a request body. The first one
+         failed with "Type definition error", which is Jackson 3 saying it
+         cannot construct a Kotlin data class, and is not a sentence that
+         mentions Kotlin.
+         **The controller architecture rule** filtered on the substring
+         `".web."`. Controllers live in `com.moyi.identity.web`, which has no
+         dot after `web`, so the filter excluded nothing and the rule reported
+         every controller as a violation. It had never run against a
+         controller because until this slice there were none — the third
+         filter in this file to have been structurally unable to do its job,
+         after the `.modules.` one and the Konsist staleness hole.
+Wrong about: the `@Order` I added to stop `common:web`'s catch-all advice
+         beating a module's own handler. I wrote it, wrote a paragraph
+         explaining the race it prevented, then deleted it as a mutation
+         test — and **every test stayed green**. An advice with no `@Order`
+         already sorts at `Ordered.LOWEST_PRECEDENCE`, so annotating the
+         catch-all with `LOWEST_PRECEDENCE` gives it exactly the order it
+         already had. There was no race to lose and no precedence gained; the
+         module advice was winning by bean-discovery luck the whole time. The
+         fix is the opposite annotation on the opposite class — the module's
+         advice has to declare a *higher* precedence — and it now has a test
+         that reads the annotation rather than a response, because a
+         behavioural test genuinely cannot tell the two apart.
+         The general shape is one I keep meeting from a new angle: **a guard
+         whose removal changes nothing observable is not yet a guard.** The
+         previous four instances were all rules that could not fail. This one
+         was a rule that could not fail *and that I had just written, with a
+         confident comment attached* — the same failure mode as the
+         `kotlin-common-convention` comment that asserted a negative and
+         stopped anyone looking. The only reason I found it is that I have
+         started deleting my own guards to watch them break, and that habit
+         is now the most valuable thing in this repo's process.
+         Separately, and worth its own line: Argon2id at NFR-046's parameters
+         hashes in **17.7 ms** on this M5, against the ~150 ms `09` §3
+         intends. The parameters are documented as a *minimum*, and the
+         minimum turns out to be about an eighth of the intended cost on
+         modern ARM — which is an eighth of the work an attacker does per
+         guess. I did not change it: the number that matters is measured on
+         the deployment target, that box does not exist yet, and tuning
+         against a laptop would bake in the wrong answer while looking like
+         diligence. It is written into the properties file and owed before M1.
