@@ -64,8 +64,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
-      - id: init
-        uses: github/codeql-action/init@v4
+      - uses: github/codeql-action/init@v4
         with:
           # One language identifier covering both; Kotlin is extracted by the
           # Java extractor and cannot be requested separately.
@@ -125,7 +124,8 @@ jobs:
           -Dkotlin.compiler.execution.strategy=in-process
           -Dorg.gradle.jvmargs=-Xmx4g
 
-      - uses: github/codeql-action/analyze@v4
+      - id: analyze
+        uses: github/codeql-action/analyze@v4
         with:
           category: /language:java-kotlin
 
@@ -142,14 +142,31 @@ jobs:
       # the `.kt` files it saw are in it. Compared against the working tree so
       # that a *partially* extracted build — one module compiled, seven
       # skipped — is caught as well as a completely empty one.
+      #
+      # The path comes from `analyze`'s documented `db-locations` output, a
+      # JSON map of language to absolute path. The first version of this step
+      # read `db-location` from `init`, which **does not exist** — `init`
+      # outputs only `codeql-path` and `codeql-version` — so the path was
+      # empty and the step looked for `/src.zip`. It failed, which is the only
+      # reason that was a ten-minute problem rather than a permanent one: a
+      # check written to warn instead of fail would have printed nothing
+      # anyone would read, on a job whose other steps were all green.
       - name: Prove Kotlin was actually extracted
+        env:
+          DB_LOCATIONS: ${{ steps.analyze.outputs.db-locations }}
         run: |
-          database="${{ steps.init.outputs.db-location }}"
+          database=$(printf '%s' "$DB_LOCATIONS" | jq -r 'to_entries[0].value // empty')
+          if [ -z "$database" ]; then
+            echo "::error::analyze reported no database location. Output was: $DB_LOCATIONS"
+            exit 1
+          fi
+
           archive="$database/src.zip"
           if [ ! -f "$archive" ]; then
             echo "::error::No CodeQL source archive at $archive — the database was never built."
             exit 1
           fi
+
           extracted=$(unzip -Z1 "$archive" | grep -c '\.kt$' || true)
           present=$(git ls-files '*.kt' | wc -l | tr -d ' ')
           echo "Kotlin files: $extracted extracted, $present in the working tree."
