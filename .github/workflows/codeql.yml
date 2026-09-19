@@ -40,6 +40,12 @@ jobs:
   analyze:
     name: Analyze Kotlin
     runs-on: ubuntu-latest
+    # A hang here is invisible without this. The first run of this workflow sat
+    # on the build step for 83 minutes and was still going when it was
+    # cancelled by hand; left alone it would have burned the six-hour job limit,
+    # and on the weekly schedule it would have done that with nobody watching.
+    # Twenty minutes is roughly four times the honest duration.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -86,8 +92,27 @@ jobs:
       # `--rerun-tasks` closes the same hole from the up-to-date side. This
       # repository has been bitten four times by a check that could not fail;
       # this is the shape that failure would take here.
+      # **`in-process` is not a tuning knob; without it this deadlocks.** The
+      # first run of this workflow stopped at `:build-logic:compileKotlin` —
+      # the first Kotlin compilation in the build — and produced no further
+      # output for 83 minutes. CodeQL traces a build by `LD_PRELOAD`ing a
+      # library into it and following the processes it spawns, and Gradle
+      # compiles Kotlin in a **separate long-lived Kotlin daemon**. Tracing
+      # that handoff hangs. Compiling inside the Gradle daemon removes the
+      # second process, and therefore the handoff.
+      #
+      # The flags either side of it are about a different failure: CodeQL
+      # extracts only what it observes being compiled, and `setup-gradle`
+      # restores the Gradle build cache, so a cache hit would satisfy
+      # `classes` without invoking the compiler at all — an empty database and
+      # a green check. `--rerun-tasks` closes the same hole from the
+      # up-to-date side.
       - name: Compile for extraction
-        run: ./gradlew classes --no-build-cache --rerun-tasks
+        run: >-
+          ./gradlew classes
+          --no-build-cache
+          --rerun-tasks
+          -Dkotlin.compiler.execution.strategy=in-process
 
       - uses: github/codeql-action/analyze@v4
         with:
