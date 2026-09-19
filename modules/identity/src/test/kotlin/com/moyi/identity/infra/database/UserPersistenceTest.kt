@@ -10,6 +10,7 @@ import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.domain.UserStatus
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import jakarta.persistence.EntityManagerFactory
@@ -49,7 +50,7 @@ internal class UserPersistenceTest(
 
     @AfterEach
     fun clearTables() {
-        jdbc.execute("TRUNCATE TABLE credentials, users CASCADE")
+        jdbc.execute("TRUNCATE TABLE consent_records, credentials, users CASCADE")
     }
 
     @Test
@@ -107,6 +108,30 @@ internal class UserPersistenceTest(
         found.shouldNotBeNull().getId() shouldBe stored.id.value
         // And the address is stored as the user typed it, not folded.
         found.email shouldBe "Ada.Lovelace@Example.com"
+    }
+
+    @Test
+    fun `the constraint names the code reacts to are the ones the database has`() {
+        // `RegisterUser` decides whether a failure was "already registered" by
+        // comparing the violated constraint's name against a constant. That
+        // constant is a string, and a string that disagrees with the schema
+        // fails in the worst possible direction: a duplicate registration
+        // stops being absorbed and becomes a 500, on the sign-up path, in
+        // production, with every test still green.
+        val declared =
+            jdbc.queryForList(
+                """
+                SELECT conname FROM pg_constraint
+                WHERE conrelid IN ('users'::regclass, 'consent_records'::regclass)
+                """.trimIndent(),
+                String::class.java,
+            )
+
+        declared shouldContainAll
+            listOf(
+                IdentityConstraints.USERS_EMAIL_UNIQUE,
+                IdentityConstraints.CONSENT_RECORD_UNIQUE,
+            )
     }
 
     @Test

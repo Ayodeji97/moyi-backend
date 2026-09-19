@@ -25,8 +25,19 @@ import java.util.concurrent.atomic.AtomicReference
  * 48..51   version      0b0111
  * 52..63   rand_a       12 bits — used here as a monotonic counter
  * 64..65   variant      0b10
- * 66..127  rand_b       62 random bits  (≈74 bits of entropy with rand_a)
+ * 66..127  rand_b       62 random bits
  * ```
+ *
+ * **How much of this is unpredictable: 62 bits, not 74.** Doc 06 §1 reaches
+ * 74 by counting `rand_a` as random. Here it is not — see below, it is a
+ * counter, so an id minted after another in the same millisecond carries a
+ * `rand_a` exactly one higher. `rand_b`'s 62 bits are the whole of the
+ * unguessability, which is ample. The figure is written down because 74 was
+ * wrong and because nothing currently depends on either number: `timeOrdered`
+ * ids are used for `users.id` and `consent_records.id`, neither of which is
+ * returned to any client. **Before an id from here is ever exposed to a
+ * stranger — an invite code, a share link — this is the paragraph to
+ * re-read.**
  *
  * **Why `rand_a` is a counter.** RFC 9562 §6.2 method 2 allows replacing
  * the leading random bits with an increasing counter so that ids created

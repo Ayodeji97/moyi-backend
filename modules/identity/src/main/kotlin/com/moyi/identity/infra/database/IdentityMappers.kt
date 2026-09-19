@@ -1,5 +1,6 @@
 package com.moyi.identity.infra.database
 
+import com.moyi.identity.domain.ConsentRecord
 import com.moyi.identity.domain.Credentials
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.PasswordHash
@@ -101,3 +102,26 @@ internal fun Credentials.applyTo(entity: CredentialsEntity) {
     entity.failedAttempts = failedAttempts
     entity.lockedUntil = lockedUntil
 }
+
+internal fun ConsentRecordEntity.toDomain(): ConsentRecord =
+    ConsentRecord(
+        id = getId(),
+        userId = UserId(userId),
+        document = document,
+        version = version,
+        acceptedAt = acceptedAt,
+        ipHash = ipHash,
+        userAgentHash = userAgentHash,
+    )
+
+/** Insert-only. Consent records are never updated — a change of mind is a new row. */
+internal fun ConsentRecord.toEntity(): ConsentRecordEntity =
+    ConsentRecordEntity(
+        id = id,
+        userId = userId.value,
+        document = document,
+        version = version,
+        acceptedAt = acceptedAt,
+        ipHash = ipHash,
+        userAgentHash = userAgentHash,
+    )

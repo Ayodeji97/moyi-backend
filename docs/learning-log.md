@@ -424,3 +424,151 @@ Wrong about: three things, and the middle one is the one worth keeping.
          which is what an executable rule is for, but it pushed back at
          implementation time rather than at design time — I should have read
          the Konsist rules *as constraints on the plan* before writing it.
+
+## 2026-09-19 · Phase 1 · Three guards that were not guarding, one of them mine
+Expected: registration to be mostly plumbing on top of slice A — a
+         controller, a service, Argon2id, done. The interesting decision was
+         supposed to be the one I had already reasoned about: attempt the
+         insert and absorb the unique-constraint violation rather than
+         check-then-insert, because the check is a race and the conflict
+         response is an enumeration oracle.
+Reality: that part went as planned, and the mutation test for it is the most
+         satisfying thing in the PR — rewriting the service to the course's
+         `findByEmail` → throw → save shape fails *the timing test
+         specifically*, because that version skips the ~150 ms hash on the
+         duplicate path. The identical response body is only half a control;
+         the other half is that both paths cost the same, and it took an
+         assertion on hash *call count* to pin it, because any assertion on
+         elapsed time that is not flaky is an assertion that is not measuring
+         anything.
+         What actually cost the session was three separate guards that were
+         not guarding. **Jackson**: `app` has carried
+         `com.fasterxml.jackson.module:jackson-module-kotlin` since Phase 0,
+         and Spring Boot 4 uses **Jackson 3** — a different artifact tree
+         under `tools.jackson`. Both were on the classpath, only Jackson 3
+         was wired into the message converters, and the Kotlin module was
+         registering with a mapper nobody used. Invisible for four PRs
+         because no endpoint had ever taken a request body. The first one
+         failed with "Type definition error", which is Jackson 3 saying it
+         cannot construct a Kotlin data class, and is not a sentence that
+         mentions Kotlin.
+         **The controller architecture rule** filtered on the substring
+         `".web."`. Controllers live in `com.moyi.identity.web`, which has no
+         dot after `web`, so the filter excluded nothing and the rule reported
+         every controller as a violation. It had never run against a
+         controller because until this slice there were none — the third
+         filter in this file to have been structurally unable to do its job,
+         after the `.modules.` one and the Konsist staleness hole.
+Wrong about: the `@Order` I added to stop `common:web`'s catch-all advice
+         beating a module's own handler. I wrote it, wrote a paragraph
+         explaining the race it prevented, then deleted it as a mutation
+         test — and **every test stayed green**. An advice with no `@Order`
+         already sorts at `Ordered.LOWEST_PRECEDENCE`, so annotating the
+         catch-all with `LOWEST_PRECEDENCE` gives it exactly the order it
+         already had. There was no race to lose and no precedence gained; the
+         module advice was winning by bean-discovery luck the whole time. The
+         fix is the opposite annotation on the opposite class — the module's
+         advice has to declare a *higher* precedence — and it now has a test
+         that reads the annotation rather than a response, because a
+         behavioural test genuinely cannot tell the two apart.
+         The general shape is one I keep meeting from a new angle: **a guard
+         whose removal changes nothing observable is not yet a guard.** The
+         previous four instances were all rules that could not fail. This one
+         was a rule that could not fail *and that I had just written, with a
+         confident comment attached* — the same failure mode as the
+         `kotlin-common-convention` comment that asserted a negative and
+         stopped anyone looking. The only reason I found it is that I have
+         started deleting my own guards to watch them break, and that habit
+         is now the most valuable thing in this repo's process.
+         Separately, and worth its own line: Argon2id at NFR-046's parameters
+         hashes in **17.7 ms** on this M5, against the ~150 ms `09` §3
+         intends. The parameters are documented as a *minimum*, and the
+         minimum turns out to be about an eighth of the intended cost on
+         modern ARM — which is an eighth of the work an attacker does per
+         guess. I did not change it: the number that matters is measured on
+         the deployment target, that box does not exist yet, and tuning
+         against a laptop would bake in the wrong answer while looking like
+         diligence. It is written into the properties file and owed before M1.
+
+## 2026-09-19 · Phase 1 · Validating twice is validating differently
+Expected: the pre-merge review of the two identity PRs to be a formality. The
+         code had 87 passing tests, a green build, a self-review against
+         doc 18 §6, and six mutation checks behind it. I had also just run a
+         security pass over the same diff, which found nothing that survived
+         verification.
+Reality: four defects, three of them the same bug wearing different clothes,
+         and all four found by **asking the running application** rather than
+         by reading the code again. `RegisterRequest` carried `@Email`,
+         `@Size(min = 12, max = 128)` and a hand-rolled byte check, and its
+         own KDoc defended that duplication: the domain's `require` produces a
+         500, the annotation produces a renderable 422, so state the rule in
+         both places. The argument was right about the consequence and wrong
+         about the fix. **Every point where the two statements disagreed was a
+         500 on a well-formed request**, and three were reachable:
+         `a@b` satisfies `@Email`, which deliberately does not require a dot,
+         and fails `Email`'s own shape check. A twelve-character password
+         containing a combining accent composes to eleven under NFKC — and
+         `@Size` measured the string *before* normalisation, which the domain
+         does after. 128 `ﬁ` ligatures expand to 256 characters, breaking the
+         maximum from the other side. The fourth was quieter: `toCommand()`
+         trimmed the email with a comment explaining that a surrounding space
+         is a typing accident, but the trim ran *after* validation, so
+         `@Email` had already rejected the request. A comment describing a
+         behaviour the code did not have — the same failure as the
+         `kotlin-common-convention` note that asserted a negative and stopped
+         anyone looking.
+         The fix was to delete the second statement rather than to correct it:
+         `@ValidEmail` and `@ValidPassword` call the domain factories and
+         report the domain's own message as the field error. Three bugs gone,
+         one definition left, and a rule added to the domain later becomes a
+         422 without anyone remembering to mirror it.
+Wrong about: what a test suite is evidence of. Those three 500s were
+         reachable from the first request of a real client, and 87 tests, a
+         security review and my own hostile-reviewer pass all missed them —
+         because every one of those was reading the code, and the code reads
+         correctly. Each statement of the rule is defensible in isolation;
+         only running it shows they disagree. **Two statements of one rule do
+         not need a bug to diverge, only time, and no amount of reading either
+         one finds the gap between them.** The thing that found all four was
+         twenty minutes of curl against the packaged jar.
+         A fifth came from the same twenty minutes and is worth its own note:
+         404, 405 and 415 came back correctly shaped and with **no `code`
+         field**, because they are produced by `ResponseEntityExceptionHandler`
+         and never pass through our own `respond()`. Doc 06 §2 calls `code`
+         the stable contract a client switches on, "enumerated and exhaustive,
+         generated into the client as a sealed class" — so a third of the
+         responses were quietly outside the design. Nothing failed. The
+         handler looked complete, and was, for the exceptions it had been
+         written to think about.
+
+         **Addendum, same session — CI caught one I had argued myself into.**
+         The fix above went green locally and turned `quality` red on the PR:
+         the Argon2id saturation test reported zero refusals on GitHub's
+         two-core runner. The test used virtual threads, and **a virtual
+         thread unmounts from its carrier only when it blocks.** Argon2id
+         blocks on nothing — it is pure CPU and memory — so on a two-carrier
+         machine at most two hashes are ever in flight, the third and fourth
+         permits are never taken, and nothing is refused. Reproduced locally
+         by running the same test under `-XX:ActiveProcessorCount=2`: fails
+         with virtual threads, passes with platform threads, which are
+         scheduled preemptively and therefore all reach `tryAcquire` whatever
+         the core count.
+         The uncomfortable part is not the test. It is that the same mistake
+         was written into `Argon2Properties`' KDoc as the *justification* for
+         the semaphore — "virtual threads impose no limit of their own, so a
+         burst of ordinary sign-ups exhausts a 2 GB container". That argument
+         is wrong for exactly the reason the test was: the carrier pool
+         already caps concurrent CPU-bound work at the processor count, so on
+         the two-core box this project actually deploys to, peak is ~38 MiB
+         and the semaphore never binds. The control is still right — NFR-005a
+         requires it, it survives someone raising the scheduler's parallelism
+         or moving to a bigger instance, and it turns a kill into a 503 — but
+         the reason I gave for it was a story I had not checked.
+         Two things to keep. A confident paragraph explaining *why* a control
+         is needed deserves the same "prove it" treatment as the control
+         itself; I have now twice written a justification that was more wrong
+         than the code it justified. And a test that only ever runs on one
+         machine shape is a test whose result is partly about that machine —
+         which is the same lesson as "green is a claim about where you ran
+         it", arriving from the side where the *developer* machine is the
+         permissive one and CI is the honest one.

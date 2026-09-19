@@ -110,6 +110,26 @@ class ArchitectureTest {
             get() = projectPath.replace('\\', '/')
 
         /**
+         * Names of declarations matching [predicate] that live inside a domain
+         * module but outside [layer].
+         *
+         * Anything `locationOf` cannot resolve — `app`, `common`, a test's own
+         * throwaway class — is skipped rather than reported, which is the same
+         * contract every other rule here follows: these rules constrain the
+         * domain modules, and a file outside them is not in scope rather than
+         * in violation.
+         */
+        private fun <T> Collection<T>.inModuleButNotIn(
+            layer: String,
+            predicate: (T) -> Boolean,
+        ): List<String> where T : KoNameProvider, T : KoPackageProvider =
+            filter(predicate)
+                .filter { declaration ->
+                    val location = locationOf(declaration.packagee?.name)
+                    location != null && location.layer != layer
+                }.map { it.name }
+
+        /**
          * Declarations outside an `api` package that anything beyond their
          * own module could still see. `hasPublicOrDefaultModifier` is the
          * load-bearing part: Kotlin's default is public, so a declaration
@@ -171,8 +191,20 @@ class ArchitectureTest {
         // that, and matching raw file text would fire on KDoc and comments.
         // The gap is narrow — Kotlin tooling writes imports, and ktlint
         // keeps them tidy — but it is a gap, not a guarantee.
+        //
+        // **Main sources only, and this rule alone.** Every other rule here
+        // scans test sources too, deliberately. This one cannot: a test's job
+        // is to observe from outside the thing it tests, and for an HTTP
+        // endpoint that means posting a request (web) and then asserting on
+        // the rows it wrote (infra) — a web -> infra edge that is wrong in
+        // production and is the entire point of the test. Applying the
+        // production dependency graph to test code does not make the
+        // architecture stronger; it makes the tests assert less. The
+        // package-convention rule below still covers every file, so test code
+        // cannot escape the other rules by living in an unrecognised package.
         val violations =
             project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
                 .flatMap { file ->
                     val from = locationOf(file.packagee?.name) ?: return@flatMap emptyList()
                     val allowed = ALLOWED_LAYER_IMPORTS.getValue(from.layer)
@@ -198,12 +230,7 @@ class ArchitectureTest {
 
     @Test
     fun `JPA entities live only in a module's infra layer`() {
-        val violations =
-            project
-                .classes()
-                .filter { it.hasAnnotationWithName("Entity", "jakarta.persistence.Entity") }
-                .filterNot { it.packagee?.name?.contains(".infra.") == true }
-                .map { it.name }
+        val violations = project.classes().inModuleButNotIn("infra") { it.hasAnnotationWithName("Entity", "jakarta.persistence.Entity") }
 
         assertTrue(
             violations.isEmpty(),
@@ -214,13 +241,17 @@ class ArchitectureTest {
 
     @Test
     fun `controllers live only in a module's web layer`() {
-        val violations =
-            project
-                .classes()
-                .filter { it.hasAnnotationWithName("RestController", "Controller") }
-                .filterNot { it.packagee?.name?.contains(".web.") == true }
-                .filterNot { it.packagee?.name?.startsWith("com.moyi.app") == true }
-                .map { it.name }
+        // Both this rule and the entity rule above used to filter on the
+        // substring `".web."` / `".infra."`. A controller in the layer's root
+        // package — `com.moyi.identity.web`, which is where controllers
+        // actually go — has no dot after `web`, so the filter excluded
+        // nothing and the rule reported every controller as a violation. It
+        // had never run against a controller, because until this slice there
+        // were none. That is the third filter in this file to have been
+        // structurally unable to do its job (see docs/learning-log.md); all
+        // three are now resolved through `locationOf`, which is the only
+        // thing that actually understands the package convention.
+        val violations = project.classes().inModuleButNotIn("web") { it.hasAnnotationWithName("RestController", "Controller") }
 
         assertTrue(
             violations.isEmpty(),

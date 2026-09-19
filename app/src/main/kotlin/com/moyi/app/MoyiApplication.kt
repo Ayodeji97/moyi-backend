@@ -1,6 +1,7 @@
 package com.moyi.app
 
 import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.boot.persistence.autoconfigure.EntityScan
 import org.springframework.boot.runApplication
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories
@@ -15,8 +16,14 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
  * default every `@Service`, `@Entity` and repository under `com.moyi.identity`
  * — that is, all of them — would be invisible. A modular monolith needs this
  * said once, explicitly, here.
+ *
+ * `@ConfigurationPropertiesScan` is the same story for `@ConfigurationProperties`
+ * classes, which are found by scanning rather than by being `@Component`s —
+ * and whose absence shows up as a missing-bean failure at startup, which is
+ * at least loud.
  */
 @SpringBootApplication(scanBasePackages = ["com.moyi"])
+@ConfigurationPropertiesScan("com.moyi")
 @EntityScan("com.moyi")
 @EnableJpaRepositories("com.moyi")
 class MoyiApplication
