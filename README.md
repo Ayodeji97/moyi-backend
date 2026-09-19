@@ -60,7 +60,7 @@ Postgres via Testcontainers (needs Docker running).
 A **modular monolith** (ADR-0001): one deployable Spring Boot service,
 internally decomposed into Gradle modules with boundaries that are
 enforced by tests rather than by good intentions. Microservices would buy
-scaling headroom a two-people-per-Space product will not need for years,
+scaling headroom a two-people-per-Bond product will not need for years,
 at the cost of distributed transactions and multiplied ops. A ball-of-mud
 monolith would teach nothing. This is the middle.
 
@@ -69,7 +69,7 @@ moyi-backend/
 ├─ build-logic/     convention plugins shared across modules
 ├─ app/             @SpringBootApplication, wiring — depends on everything
 ├─ common/          core, web, security, testing — shared, no domain logic
-├─ modules/         identity, space, gratitude, media, notification,
+├─ modules/         identity, bond, gratitude, media, notification,
 │                   scheduling, admin, analytics — the actual domain
 ├─ contracts/       OpenAPI generation for the client
 ├─ adr/             architecture decision records
@@ -89,7 +89,7 @@ flowchart TD
     app["<b>app</b> — @SpringBootApplication, wiring only"]
 
     identity["identity"]
-    space["space"]
+    bond["bond"]
     gratitude["gratitude"]
     media["media"]
     notification["notification"]
@@ -99,13 +99,13 @@ flowchart TD
 
     common["<b>common</b> — core · web · security · testing"]
 
-    app --> identity & space & gratitude & media
+    app --> identity & bond & gratitude & media
     app --> notification & scheduling & admin & analytics
 
-    identity & space & gratitude & media --> common
+    identity & bond & gratitude & media --> common
     notification & scheduling & admin & analytics --> common
 
-    gratitude -. "only via space's api" .-> space
+    gratitude -. "only via bond's api" .-> bond
 
     classDef wiring fill:#f4cccc,stroke:#a61c00,stroke-width:2px,color:#1a1a1a
     classDef shared fill:#cfe2f3,stroke:#1155cc,stroke-width:2px,color:#1a1a1a
@@ -114,7 +114,7 @@ flowchart TD
 ```
 
 That dotted arrow is the one that matters. The reveal gate needs
-`gratitude` to ask `space` "is this person really a member here?"
+`gratitude` to ask `bond` "is this person really a member here?"
 synchronously, mid-request — so unlike the course (whose modules never
 call each other and communicate over RabbitMQ), we do have direct
 cross-module calls. They are confined to `api` packages, and everything

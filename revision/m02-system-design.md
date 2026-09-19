@@ -75,7 +75,7 @@
 **2026 check** ⚠️ **Two claims in the lesson are dated.** "NoSQL lacks guaranteed consistency" — MongoDB has had multi-document ACID transactions since 2018. "SQL only scales vertically" — read replicas, Citus, CockroachDB and Vitess all exist. The honest 2026 framing is: *pick by data shape and query pattern, not by scaling folklore.*
 
 > **"Why Postgres and not Mongo?"**
-> The domain is relational — users, spaces, members, days, entries — and the correctness rules are uniqueness constraints the database can enforce for me. In Mongo I'd be enforcing "one entry per member per day" in application code, which is where race conditions live.
+> The domain is relational — users, bonds, members, days, entries — and the correctness rules are uniqueness constraints the database can enforce for me. In Mongo I'd be enforcing "one entry per member per day" in application code, which is where race conditions live.
 
 > **"When would you actually reach for NoSQL?"**
 > When the access pattern is a known key and the shape varies — event logs, session data, product catalogues with heterogeneous attributes. Not because "it scales", which is the reason people usually give and rarely the real one.
@@ -94,7 +94,7 @@
 > It should be performance only — but I found two places in my own design where it wasn't. The token denylist would have un-revoked every revoked token on a flush, and idempotency would have failed *open*, letting duplicate submissions through into a unique constraint. Both moved to Postgres with Redis as the fast path. That's the question to ask about any cache: does losing it degrade, or does it break a guarantee?
 
 > **"Cache invalidation strategy?"**
-> Short TTLs and cache only what's expensive and stable. And be careful what you key on — I caught a bug where a per-member payload was keyed by space id, which would have served one partner's private entry to the other.
+> Short TTLs and cache only what's expensive and stable. And be careful what you key on — I caught a bug where a per-member payload was keyed by bond id, which would have served one partner's private entry to the other.
 
 ---
 
@@ -137,7 +137,7 @@
 **What** — Transactional email (verification, reset) and push (FCM → Android and, via APNs, iOS).
 **Why it exists** — Sending mail from your own SMTP box lands in spam. Push is the only way to reach a backgrounded app.
 **In Spring Boot** — `spring-boot-starter-mail` + `JavaMailSender`; `firebase-admin` SDK for FCM.
-**Moyi** — Same shape. **Resend** instead of Mailgun (better free tier, cleaner API — either is fine). FCM as taught. We add: dispatch through the outbox with retry, a per-Space daily budget with a reserved slot for reveals, quiet hours, and **no entry text in any payload** (lock screens).
+**Moyi** — Same shape. **Resend** instead of Mailgun (better free tier, cleaner API — either is fine). FCM as taught. We add: dispatch through the outbox with retry, a per-Bond daily budget with a reserved slot for reveals, quiet hours, and **no entry text in any payload** (lock screens).
 **2026 check** ⚠️ **FCM legacy HTTP API was shut off in June 2024** — you must use HTTP v1 with OAuth2 service-account credentials. Old tutorials still show the legacy server key. ✅ Firebase Admin SDK covering both platforms is still correct.
 
 > **"How do you guarantee a notification is sent exactly once?"**
