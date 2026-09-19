@@ -139,9 +139,15 @@ jobs:
       # this repository keeps rediscovering (see docs/learning-log.md).
       #
       # The database's source archive is the evidence: if the extractor ran,
-      # the `.kt` files it saw are in it. Compared against the working tree so
-      # that a *partially* extracted build — one module compiled, seven
-      # skipped — is caught as well as a completely empty one.
+      # the `.kt` files it saw are in it. Counted twice — everything, which
+      # answers "did the extractor run at all", and only this repository's own
+      # main sources, which answers "did it read *our* code". The second count
+      # is the one the comparison uses, because the first is dominated by
+      # Kotlin the extractor pulled from dependencies: the run that first
+      # passed this step reported 657 extracted against 50 files in the tree.
+      # Comparing that 657 to 50 would have made the partial-extraction
+      # warning unable to fire — one module missing out of eight would still
+      # have looked like a surplus.
       #
       # The path comes from `analyze`'s documented `db-locations` output, a
       # JSON map of language to absolute path. The first version of this step
@@ -167,13 +173,16 @@ jobs:
             exit 1
           fi
 
-          extracted=$(unzip -Z1 "$archive" | grep -c '\.kt$' || true)
-          present=$(git ls-files '*.kt' | wc -l | tr -d ' ')
-          echo "Kotlin files: $extracted extracted, $present in the working tree."
-          if [ "$extracted" -eq 0 ]; then
+          listing=$(unzip -Z1 "$archive")
+          total=$(printf '%s\n' "$listing" | grep -c '\.kt$' || true)
+          ours=$(printf '%s\n' "$listing" | grep -c '/src/main/kotlin/.*\.kt$' || true)
+          present=$(git ls-files '*/src/main/kotlin/*.kt' | wc -l | tr -d ' ')
+          echo "Kotlin extracted: $total total, $ours from this repository's main sources ($present present)."
+          if [ "$total" -eq 0 ]; then
             echo "::error::CodeQL extracted no Kotlin. The analysis above found zero alerts because it read zero code — most likely this project's Kotlin version is outside the extractor's supported range. Do not treat this check as passing."
             exit 1
           fi
-          if [ "$extracted" -lt "$present" ]; then
-            echo "::warning::Only $extracted of $present Kotlin files were extracted. Test sources are not compiled by 'classes', so some gap is expected; a large one means a module is not being built."
+          if [ "$ours" -lt "$present" ]; then
+            echo "::error::Only $ours of this repository's $present main-source Kotlin files reached the database. A module is not being compiled, so the analysis has a hole in it."
+            exit 1
           fi
