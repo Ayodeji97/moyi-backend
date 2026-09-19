@@ -1,0 +1,57 @@
+# Dependency updates.
+#
+# **This replaces the Renovate plan in doc 18 §8**, which named a tool that
+# was never installed — so the practice the document described was not
+# happening at all. Dependabot needs no service to be configured, and the one
+# thing Renovate was chosen for (grouped, scheduled upgrades with majors held
+# back) it now does too, below. The doc is updated in the same change.
+#
+# Separately from this file, **Dependabot alerts and security updates are
+# enabled on the repository**. Those are the ones that matter: they are driven
+# by the GitHub Advisory Database rather than by a schedule, so a
+# vulnerability disclosed on a Tuesday does not wait for Monday. This file
+# only handles routine upgrades.
+#
+# Note the division of labour with `dependency-check.yml`: OWASP
+# Dependency-Check tells you a dependency you *have* is vulnerable. Dependabot
+# opens the PR that fixes it. Neither replaces the other.
+version: 2
+updates:
+  # The larger supply-chain surface of the two, and the one nobody thinks
+  # about. Every workflow here pins a floating major tag (`@v7`, `@v6`), so a
+  # compromised release of any of them runs with this repository's
+  # `GITHUB_TOKEN` and, in the publish job, its GHCR write access. Pinning to
+  # commit SHAs would be stronger still; grouped weekly PRs are the version of
+  # this that actually gets merged rather than ignored.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore"
+      include: scope
+
+  # Everything else. Versions live in `gradle/libs.versions.toml` (doc 18 §8),
+  # which Dependabot reads directly, and `build-logic` takes its plugin
+  # versions from the same catalog — so this one entry covers the whole build
+  # despite `build-logic` being a separate included build.
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Doc 18 §8: "patch and minor merged after CI, major upgrades scheduled
+      # between phases." One PR for the safe ones, so reviewing them is a
+      # single look at a single green build; majors arrive individually
+      # because each needs its own decision about when.
+      patch-and-minor:
+        update-types: [patch, minor]
+    commit-message:
+      prefix: "chore"
+      include: scope
