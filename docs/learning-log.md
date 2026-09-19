@@ -489,3 +489,54 @@ Wrong about: the `@Order` I added to stop `common:web`'s catch-all advice
          the deployment target, that box does not exist yet, and tuning
          against a laptop would bake in the wrong answer while looking like
          diligence. It is written into the properties file and owed before M1.
+
+## 2026-09-19 · Phase 1 · Validating twice is validating differently
+Expected: the pre-merge review of the two identity PRs to be a formality. The
+         code had 87 passing tests, a green build, a self-review against
+         doc 18 §6, and six mutation checks behind it. I had also just run a
+         security pass over the same diff, which found nothing that survived
+         verification.
+Reality: four defects, three of them the same bug wearing different clothes,
+         and all four found by **asking the running application** rather than
+         by reading the code again. `RegisterRequest` carried `@Email`,
+         `@Size(min = 12, max = 128)` and a hand-rolled byte check, and its
+         own KDoc defended that duplication: the domain's `require` produces a
+         500, the annotation produces a renderable 422, so state the rule in
+         both places. The argument was right about the consequence and wrong
+         about the fix. **Every point where the two statements disagreed was a
+         500 on a well-formed request**, and three were reachable:
+         `a@b` satisfies `@Email`, which deliberately does not require a dot,
+         and fails `Email`'s own shape check. A twelve-character password
+         containing a combining accent composes to eleven under NFKC — and
+         `@Size` measured the string *before* normalisation, which the domain
+         does after. 128 `ﬁ` ligatures expand to 256 characters, breaking the
+         maximum from the other side. The fourth was quieter: `toCommand()`
+         trimmed the email with a comment explaining that a surrounding space
+         is a typing accident, but the trim ran *after* validation, so
+         `@Email` had already rejected the request. A comment describing a
+         behaviour the code did not have — the same failure as the
+         `kotlin-common-convention` note that asserted a negative and stopped
+         anyone looking.
+         The fix was to delete the second statement rather than to correct it:
+         `@ValidEmail` and `@ValidPassword` call the domain factories and
+         report the domain's own message as the field error. Three bugs gone,
+         one definition left, and a rule added to the domain later becomes a
+         422 without anyone remembering to mirror it.
+Wrong about: what a test suite is evidence of. Those three 500s were
+         reachable from the first request of a real client, and 87 tests, a
+         security review and my own hostile-reviewer pass all missed them —
+         because every one of those was reading the code, and the code reads
+         correctly. Each statement of the rule is defensible in isolation;
+         only running it shows they disagree. **Two statements of one rule do
+         not need a bug to diverge, only time, and no amount of reading either
+         one finds the gap between them.** The thing that found all four was
+         twenty minutes of curl against the packaged jar.
+         A fifth came from the same twenty minutes and is worth its own note:
+         404, 405 and 415 came back correctly shaped and with **no `code`
+         field**, because they are produced by `ResponseEntityExceptionHandler`
+         and never pass through our own `respond()`. Doc 06 §2 calls `code`
+         the stable contract a client switches on, "enumerated and exhaustive,
+         generated into the client as a sealed class" — so a third of the
+         responses were quietly outside the design. Nothing failed. The
+         handler looked complete, and was, for the exceptions it had been
+         written to think about.

@@ -49,14 +49,13 @@ internal class RegisterUser(
     private val log = LoggerFactory.getLogger(javaClass)
 
     fun register(command: RegistrationCommand) {
-        val password = Password.of(command.password)
-        val passwordHash = hasher.hash(password)
+        val passwordHash = hasher.hash(command.password)
         val now = clock.instant()
 
         val user =
             User(
                 id = UserId(ids.timeOrdered()),
-                email = Email(command.email),
+                email = command.email,
                 emailVerifiedAt = null,
                 displayName = command.displayName,
                 avatarMediaId = null,
@@ -82,7 +81,7 @@ internal class RegisterUser(
             transactions.executeWithoutResult {
                 accounts.insert(
                     user = user,
-                    credentials =
+                    newCredentials =
                         Credentials(
                             userId = user.id,
                             passwordHash = passwordHash,
@@ -91,7 +90,7 @@ internal class RegisterUser(
                             failedAttempts = 0,
                             lockedUntil = null,
                         ),
-                    consents = consentRecordsFor(user, command, now),
+                    newConsents = consentRecordsFor(user, command, now),
                 )
             }
         } catch (violation: DataIntegrityViolationException) {
@@ -139,8 +138,16 @@ internal class RegisterUser(
  * belong to).
  */
 internal data class RegistrationCommand(
-    val email: String,
-    val password: String,
+    val email: Email,
+    /**
+     * The domain type, not a `String`. Two reasons, and the second is the one
+     * that matters: a value that has already been normalised and checked
+     * cannot arrive here invalid, and `Password.toString()` redacts — so the
+     * plaintext cannot be printed by this class's own generated `toString`,
+     * by a log statement that interpolates it, or by an exception message
+     * that embeds it.
+     */
+    val password: Password,
     val displayName: String,
     val locale: String,
     val acceptedTermsVersion: String,

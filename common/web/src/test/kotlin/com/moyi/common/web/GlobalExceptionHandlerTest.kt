@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import org.springframework.validation.beanvalidation.LocalValidatorFactoryBean
@@ -142,6 +143,42 @@ class GlobalExceptionHandlerTest {
 
         response.status shouldBe 418
         response.contentAsString shouldContain "Short and stout."
+    }
+
+    @Test
+    fun `an error Spring raised on its own still carries a code`() {
+        // The framework's own problem details arrive correctly shaped and,
+        // before this, without `code` — the one field doc 06 §2 says a client
+        // switches on, and which it generates into an exhaustive sealed
+        // class. Found by asking a running application for a 405, not by
+        // reading the handler.
+        val response =
+            mockMvc
+                .get("/things")
+                .andReturn()
+                .response
+
+        response.status shouldBe 405
+        response.contentAsString shouldContain "\"code\":\"METHOD_NOT_ALLOWED\""
+    }
+
+    @Test
+    fun `our own handlers keep their code, which the new stamping must not reach`() {
+        // Honest about what this covers: our handlers build their response
+        // directly and never pass through `handleExceptionInternal`, so the
+        // stamping cannot touch them today. The `containsKey` guard there is
+        // defensive and currently unreachable — this test is the regression
+        // that notices if a future change routes our handlers through it,
+        // because 418 falls in the 4xx fallback range and would be relabelled
+        // MALFORMED_REQUEST.
+        val response =
+            mockMvc
+                .post("/teapot") { contentType = MediaType.APPLICATION_JSON }
+                .andReturn()
+                .response
+
+        response.contentAsString shouldContain "\"code\":\"INTERNAL_ERROR\""
+        response.contentAsString shouldNotContain "MALFORMED_REQUEST"
     }
 
     @Test
