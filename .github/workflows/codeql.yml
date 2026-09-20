@@ -44,7 +44,9 @@ jobs:
     # on the build step for 83 minutes and was still going when it was
     # cancelled by hand; left alone it would have burned the six-hour job limit,
     # and on the weekly schedule it would have done that with nobody watching.
-    # Twenty minutes is roughly four times the honest duration.
+    # A healthy run takes 4m23s end to end, measured, so twenty minutes is
+    # about four and a half times the real thing — enough slack for a cold
+    # cache and not enough to hide a hang.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -82,40 +84,31 @@ jobs:
           # a real one.
           queries: security-extended
 
-      # **The flags are the whole point of this step.** CodeQL extracts what
-      # it observes the compiler doing, so a build that compiles nothing
-      # produces a database containing nothing — and then reports no alerts,
-      # in green, forever. `setup-gradle` above restores the Gradle build
-      # cache, so without `--no-build-cache` a cache hit would satisfy
-      # `classes` without invoking the Kotlin compiler at all.
-      # `--rerun-tasks` closes the same hole from the up-to-date side. This
-      # repository has been bitten four times by a check that could not fail;
-      # this is the shape that failure would take here.
-      # **`in-process` is not a tuning knob; without it this deadlocks.** The
-      # first run of this workflow stopped at `:build-logic:compileKotlin` —
-      # the first Kotlin compilation in the build — and produced no further
-      # output for 83 minutes. CodeQL traces a build by `LD_PRELOAD`ing a
-      # library into it and following the processes it spawns, and Gradle
-      # compiles Kotlin in a **separate long-lived Kotlin daemon**. Tracing
-      # that handoff hangs. Compiling inside the Gradle daemon removes the
-      # second process, and therefore the handoff.
+      # Three flags, two different failures, and neither is a tuning knob.
       #
-      # `-Xmx4g` is the direct consequence of that, and the second failure
-      # this step produced: `OutOfMemoryError: GC overhead limit exceeded` in
-      # `:build-logic:compileKotlin`. Compiling in-process puts the Kotlin
-      # compiler *and* CodeQL's extractor plugin inside the Gradle daemon,
-      # whose default heap is sized for orchestrating a build rather than for
-      # running a compiler with an instrumentation plugin attached. Only this
-      # job is affected, which is why the size is set on the invocation rather
-      # than in `gradle.properties` — an ordinary build has no reason to pay
-      # for it. The runner has 16 GB.
+      # **`in-process`, or this deadlocks.** The first run of this workflow
+      # stopped at `:build-logic:compileKotlin` — the first Kotlin compilation
+      # in the build — and produced no further output for 83 minutes. CodeQL
+      # traces a build by `LD_PRELOAD`ing a library into it and following the
+      # processes it spawns, and Gradle compiles Kotlin in a **separate
+      # long-lived Kotlin daemon**. Tracing that handoff hangs. Compiling
+      # inside the Gradle daemon removes the second process, and with it the
+      # handoff.
       #
-      # The flags either side of those are about a different failure: CodeQL
+      # **`-Xmx4g`, or it runs out of memory** — the second failure this step
+      # produced, `OutOfMemoryError: GC overhead limit exceeded`, in the same
+      # task. Compiling in-process puts the Kotlin compiler *and* CodeQL's
+      # extractor plugin inside the Gradle daemon, whose default heap is sized
+      # for orchestrating a build rather than for running a compiler with an
+      # instrumentation plugin attached. Set on the invocation rather than in
+      # `gradle.properties`, so only this job pays for it. The runner has 16 GB.
+      #
+      # **`--no-build-cache --rerun-tasks`, or it compiles nothing.** CodeQL
       # extracts only what it observes being compiled, and `setup-gradle`
-      # restores the Gradle build cache, so a cache hit would satisfy
-      # `classes` without invoking the compiler at all — an empty database and
-      # a green check. `--rerun-tasks` closes the same hole from the
-      # up-to-date side.
+      # restores the Gradle build cache — so a cache hit would satisfy
+      # `classes` without ever invoking the compiler, producing an empty
+      # database and a green check. `--rerun-tasks` closes the same hole from
+      # the up-to-date side.
       - name: Compile for extraction
         run: >-
           ./gradlew classes
@@ -174,15 +167,29 @@ jobs:
           fi
 
           listing=$(unzip -Z1 "$archive")
+
           total=$(printf '%s\n' "$listing" | grep -c '\.kt$' || true)
-          ours=$(printf '%s\n' "$listing" | grep -c '/src/main/kotlin/.*\.kt$' || true)
-          present=$(git ls-files '*/src/main/kotlin/*.kt' | wc -l | tr -d ' ')
-          echo "Kotlin extracted: $total total, $ours from this repository's main sources ($present present)."
           if [ "$total" -eq 0 ]; then
-            echo "::error::CodeQL extracted no Kotlin. The analysis above found zero alerts because it read zero code — most likely this project's Kotlin version is outside the extractor's supported range. Do not treat this check as passing."
+            echo "::error::CodeQL extracted no Kotlin at all. The analysis above found zero alerts because it read zero code — most likely this project's Kotlin version is outside the extractor's supported range. Do not treat this check as passing."
             exit 1
           fi
-          if [ "$ours" -lt "$present" ]; then
-            echo "::error::Only $ours of this repository's $present main-source Kotlin files reached the database. A module is not being compiled, so the analysis has a hole in it."
+
+          # Each of our files by name, rather than a count. A count can be
+          # satisfied by the wrong files: most of `total` is Kotlin the
+          # extractor pulled from dependencies (the first passing run saw 657
+          # against our 32), so any threshold comparison is inflated by code
+          # we did not write and would wave through a module that silently
+          # stopped compiling. Checking for the paths themselves cannot be,
+          # and it names what is missing instead of reporting a number.
+          missing=$(git ls-files '*/src/main/kotlin/*.kt' | while IFS= read -r file; do
+            printf '%s\n' "$listing" | grep -qF -- "$file" || printf '%s\n' "$file"
+          done)
+          present=$(git ls-files '*/src/main/kotlin/*.kt' | wc -l | tr -d ' ')
+
+          if [ -n "$missing" ]; then
+            echo "::error::These main-source files never reached the CodeQL database, so the analysis has a hole in it:"
+            printf '%s\n' "$missing"
             exit 1
           fi
+
+          echo "All $present main-source Kotlin files reached the database ($total Kotlin files in total, the rest from dependencies)."
