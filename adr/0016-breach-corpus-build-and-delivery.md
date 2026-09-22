@@ -35,7 +35,7 @@ Ten million falls between 600 and 650 and the tie goes **upward**: a larger corp
 
 **5. A missing or unreadable corpus stops the application from starting.** Not a warning, not a disabled check. ADR-0012's whole argument for the offline filter is that it *removes* the fail-open/fail-closed question; a service that boots without its corpus reintroduces fail-open through the back door, and does it invisibly — every registration succeeds, the control simply is not there.
 
-**6. It rebuilds quarterly and on demand**, never per push. ADR-0012's "revisit when" triggers at a year stale; quarterly is comfortably inside that. Per-push would pull ~70 GB from a free service for an output that does not change between commits.
+**6. It rebuilds twice a year and on demand**, never per push. Per-push would pull ~70 GB from a free service for an output that does not change between commits. Twice rather than four times is a judgement about what is reasonable to take from that service: ~140 GB a year against ~280 GB, for a list whose ten million most prevalent entries barely move over three months. ADR-0012 revisits the corpus at "more than a year stale", so six months leaves a whole missed run of slack before the staleness warning fires — and the warning is what would tell us the job has stopped.
 
 ## Consequences
 
@@ -45,7 +45,7 @@ Ten million falls between 600 and 650 and the tie goes **upward**: a larger corp
 
 **Negative, and worth stating plainly:** ADR-0012's "call it half a session" was wrong by roughly a factor of four. The filter, the format, the builder, the retry policy, the workflow, the pin-and-verify step and the runtime loader are each small; there are just more of them than "download a list" suggests. The estimate is not corrected here to make it look better in hindsight — it is recorded because the same shape of underestimate is likely wherever a document describes an artefact without describing where it comes from.
 
-**Neutral:** ~70 GB pulled from Have I Been Pwned four times a year. This is the access pattern HIBP's own downloader tool uses and Cloudflare fronts it, but the job identifies itself by `User-Agent` and disables response padding, which removes about a third of the transfer we would otherwise cost them for a secret we do not have.
+**Neutral:** ~70 GB pulled from Have I Been Pwned twice a year. This is the access pattern HIBP's own downloader tool uses and Cloudflare fronts it, but the job identifies itself by `User-Agent` and disables response padding, which removes about a third of the transfer we would otherwise cost them for a secret we do not have.
 
 ## Alternatives considered
 

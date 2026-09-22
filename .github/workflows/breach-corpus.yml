@@ -4,9 +4,14 @@
 #
 # Deliberately NOT part of CI. It pulls roughly 70 GB from Have I Been Pwned
 # over about an hour, and nothing about it changes between commits — running it
-# per push would be both useless and rude. It runs quarterly, which is well
-# inside ADR-0012's "revisit when the pinned corpus is more than a year stale",
-# and on demand when someone wants it sooner.
+# per push would be both useless and rude. It runs **twice a year**, and on
+# demand when someone wants it sooner.
+#
+# Twice, not four times: the corpus is a free service's bandwidth, and 140 GB a
+# year is a more honest thing to take from it than 280 GB for a list whose top
+# ten million barely move between quarters. ADR-0012 revisits the corpus when
+# it is "more than a year stale", so a six-month cadence still leaves a whole
+# missed run of slack before the staleness warning fires.
 #
 # The output is a single file plus its SHA-256. Pinning the digest in
 # `gradle/breach-corpus.properties` is what makes the corpus a build input like
@@ -35,8 +40,8 @@ on:
         required: false
         default: true
   schedule:
-    # 04:00 UTC on the 1st of Jan/Apr/Jul/Oct.
-    - cron: "0 4 1 1,4,7,10 *"
+    # 04:00 UTC on 1 January and 1 July.
+    - cron: "0 4 1 1,7 *"
 
 permissions:
   contents: write
