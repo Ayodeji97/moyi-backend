@@ -72,92 +72,109 @@ internal annotation class ValidPassword(
     val payload: Array<KClass<out Payload>> = [],
 )
 
-/**
- * Shape *and* corpus membership — the two halves of ADR-0012, asked together.
- *
- * The breach check lives here rather than in [Password] or in `RegisterUser`,
- * and the reason is what it *is* rather than where it is convenient. It is
- * input validation in the strict sense: a property of the submitted value
- * alone, needing no database, no user and no context. That makes it exactly
- * what Bean Validation is for, and it means the rejection arrives in doc 06's
- * `errors` array next to the field it is about, which is what a client's form
- * needs in order to render it.
- *
- * Putting it on [Password] was the alternative, and it is tempting — the type
- * would then mean "acceptable password" in full, and no caller could construct
- * one that skips the check. It was rejected because it makes a domain value
- * type unconstructible without a 17 MB piece of infrastructure, which would
- * put a file load into every test that needs a password.
- *
- * **The limit of that choice, stated rather than left to be discovered:**
- * `Password` guarantees shape, not absence from the corpus, so a
- * `RegistrationCommand` built by some future caller that does not come through
- * this annotation would skip the check. Today [RegisterRequest.toCommand] is
- * the only thing that builds one. The moment a second caller appears, this
- * moves to the service.
- *
- * Because the annotation carries the rule, `POST /auth/reset-password`
- * inherits it by using `@ValidPassword` — which is the reuse that matters, and
- * the reason this is one annotation asking two questions rather than two
- * annotations.
- */
-internal class PasswordConstraintValidator(
-    private val corpus: BreachedPasswordCorpus,
-) : ConstraintValidator<ValidPassword, String> {
+internal class PasswordConstraintValidator : ConstraintValidator<ValidPassword, String> {
     override fun isValid(
         value: String?,
         context: ConstraintValidatorContext,
     ): Boolean {
-        // Null and blank are `@NotBlank`'s job. A constraint that also
-        // reports them produces two errors for one mistake.
         if (value.isNullOrBlank()) return true
+        // Not trimmed: ADR-0012 accepts spaces in a password, and silently
+        // removing them would make the password the user typed unenterable.
+        return validate(context) { Password.of(value) }
+    }
+}
 
-        return when (val verdict = verdictFor(value)) {
-            Verdict.Acceptable -> true
-            is Verdict.Rejected -> reject(context, verdict.message)
-        }
+/**
+ * ADR-0012's other half: the password is not in the breached-password corpus.
+ *
+ * **A second annotation rather than another question inside [ValidPassword],
+ * and the reason is the wire format.** A `FieldViolation` carries the
+ * constraint's own name as its `code`, so one annotation asking both questions
+ * would report "too short" and "already breached" as the same
+ * `VALID_PASSWORD` — leaving a client able to tell them apart only by matching
+ * on the English `message`. That is precisely what [com.moyi.common.web.ErrorCode]'s
+ * contract exists to prevent, and it is not academic here: `states.md` §1c
+ * gives the breach case its own designed copy on the sign-up screen, so the
+ * client has to be able to recognise it. Two annotations, two codes —
+ * `VALID_PASSWORD` and `NOT_BREACHED`.
+ *
+ * The check lives at the edge rather than inside [Password] or in
+ * `RegisterUser` because of what it *is*: a property of the submitted value
+ * alone, needing no database, no user and no context — the definition of input
+ * validation. Putting it on [Password] was the alternative, and it is
+ * tempting, since the type would then mean "acceptable password" in full and
+ * no caller could construct one that skips the check. It was rejected because
+ * it makes a domain value type unconstructible without a 17 MB piece of
+ * infrastructure, which would put a file load into every test that needs a
+ * password.
+ *
+ * **The limit of that choice, stated rather than left to be discovered:**
+ * [Password] guarantees shape, not absence from the corpus, so a
+ * `RegistrationCommand` built by some future caller that does not come through
+ * this annotation would skip the check. Today `RegisterRequest.toCommand` is
+ * the only thing that builds one. The moment a second caller appears, this
+ * moves to the service.
+ *
+ * `POST /auth/reset-password` inherits the rule by carrying the same
+ * annotation, which is the reuse that matters.
+ */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [NotBreachedValidator::class])
+internal annotation class NotBreached(
+    val message: String = BREACHED_MESSAGE,
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+/**
+ * **"matches a list", not "has appeared in a breach".**
+ *
+ * A Bloom filter is one-sided: roughly once in a thousand registrations it
+ * matches a password that was never breached at all. Telling that person their
+ * password "has appeared in a data breach" is a false statement about
+ * something they care about, and ADR-0012 asks for copy that "explains rather
+ * than blames". This sentence is true in both cases — the value did match the
+ * list — and it names the problem as exposure rather than weakness.
+ *
+ * The client is expected to replace it with `copy.md`'s warmer wording, which
+ * is what the `NOT_BREACHED` code is for; this is the fallback for anything
+ * reading the API directly.
+ */
+internal const val BREACHED_MESSAGE =
+    "matches a list of passwords exposed in data breaches, so it is not safe to use — please choose another"
+
+internal class NotBreachedValidator(
+    private val corpus: BreachedPasswordCorpus,
+) : ConstraintValidator<NotBreached, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean {
+        val password = value?.takeIf(String::isNotBlank)?.let(::shapedOrNull)
+        return if (password != null && corpus.contains(password)) reject(context, BREACHED_MESSAGE) else true
     }
 
     /**
-     * Deciding *what* is wrong, separately from *how* it is reported.
+     * Null for a password [ValidPassword] will already reject.
      *
-     * Not trimmed: ADR-0012 accepts spaces in a password, and silently
-     * removing them would make the password the user typed unenterable.
+     * Shape is that constraint's job, and reporting it here too would produce
+     * two violations for one mistake. `IllegalArgumentException` only — the
+     * exception `require` throws; catching `Exception` would swallow a genuine
+     * bug inside a domain factory and quietly wave the password through.
      *
-     * `IllegalArgumentException` only — the exception `require` throws.
-     * Catching `Exception` here would turn a genuine bug inside a domain
-     * factory into a polite 422 about the user's input.
+     * The exception is swallowed on purpose, which is the one case detekt's
+     * rule cannot see: it is not lost, it is *another constraint's* to report,
+     * and re-raising or logging it here is exactly what produces the second
+     * error.
      */
-    private fun verdictFor(value: String): Verdict =
+    @Suppress("SwallowedException")
+    private fun shapedOrNull(value: String): Password? =
         try {
-            val password = Password.of(value)
-            if (corpus.contains(password)) Verdict.Rejected(BREACHED) else Verdict.Acceptable
-        } catch (rejected: IllegalArgumentException) {
-            Verdict.Rejected(rejected.message ?: "is not valid")
+            Password.of(value)
+        } catch (invalidShape: IllegalArgumentException) {
+            null
         }
-
-    private sealed interface Verdict {
-        data object Acceptable : Verdict
-
-        data class Rejected(
-            val message: String,
-        ) : Verdict
-    }
-
-    private companion object {
-        /**
-         * **"matches a list", not "has appeared in a breach".**
-         *
-         * A Bloom filter is one-sided: roughly once in a thousand
-         * registrations it matches a password that was never breached at all.
-         * Telling that user their password "has appeared in a data breach" is
-         * a false statement about something they care about, and ADR-0012 asks
-         * for copy that "explains rather than blames". This sentence is true
-         * in both cases — the value did match the list — and it says what the
-         * problem is (exposure, not weakness) and what to do about it.
-         */
-        const val BREACHED = "matches a list of passwords exposed in data breaches, so it is not safe to use — please choose another"
-    }
 }
 
 /**

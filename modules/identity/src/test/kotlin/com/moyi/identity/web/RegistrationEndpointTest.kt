@@ -144,6 +144,11 @@ internal class RegistrationEndpointTest(
         response.status shouldBe 422
         response.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
         response.contentAsString shouldContain "\"field\":\"password\""
+        response.contentAsString shouldContain "\"code\":\"VALID_PASSWORD\""
+        // One violation, not two: the breach constraint declines to report a
+        // password the shape constraint is already rejecting, so a single
+        // mistake produces a single error.
+        response.contentAsString shouldNotContain "NOT_BREACHED"
         response.contentAsString shouldNotContain "short"
         jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
     }
@@ -204,12 +209,15 @@ internal class RegistrationEndpointTest(
         response.status shouldBe 422
         response.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
         response.contentAsString shouldContain "\"field\":\"password\""
-        response.contentAsString shouldContain "exposed in data breaches"
+        // Its own code, not the shape constraint's. A client cannot be asked to
+        // tell "too short" from "already breached" by matching English, and
+        // `states.md` §1c gives the breach case its own copy on this screen —
+        // so it has to be recognisable without reading the sentence.
+        response.contentAsString shouldContain "\"code\":\"NOT_BREACHED\""
         // "matches a list", not "has appeared in a breach": a Bloom filter is
         // one-sided, so roughly one rejection in a thousand is of a password
         // that was never breached, and the sentence has to be true then too.
         response.contentAsString shouldContain "matches a list"
-        response.contentAsString shouldNotContain "password\",\"rejected"
         jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
     }
 

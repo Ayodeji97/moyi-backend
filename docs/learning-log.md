@@ -695,6 +695,23 @@ Wrong about: which numbers in a test are data and which are structure. I have
          packaged file and Gradle simply put it back on the next build. A
          guard is not verified by removing something the build regenerates.
 
+**Same session, found by the Figma alignment check rather than by the code.**
+`states.md` §1c already gives the breached-password case its own designed copy
+on the sign-up screen — "FR-001's breach message is the password case". That is
+a client requirement, and it sent me back to look at what the API actually
+hands the client. A `FieldViolation` carries the *constraint's* name as its
+`code`, so with the breach question folded into `@ValidPassword`, "too short"
+and "already breached" both arrived as `VALID_PASSWORD`, distinguishable only
+by the English sentence. `ErrorCode`'s own KDoc says exactly why that is wrong
+— "a client that pattern-matches on English is a client that breaks when
+someone improves a sentence" — and I had written a paragraph of KDoc arguing
+that one annotation asking two questions was the *better* design. The argument
+was coherent and it never looked at the wire. Two annotations now, two codes.
+Worth keeping: **the standing rule to check every change against the Figma file
+is not a formality about screens.** It is the only step in the loop that makes
+me read the API from the client's side, and it caught a contract defect that no
+backend test would have — every assertion I had written passed.
+
 ## 2026-09-22 · Phase 1 · The verification step that could not fail
 Expected: #21 to be reviewed by the automated reviewer and, failing that, by
          my own pass, which had already caught a shell-injection hole and a

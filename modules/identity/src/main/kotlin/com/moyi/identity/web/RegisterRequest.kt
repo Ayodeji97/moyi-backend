@@ -20,7 +20,8 @@ import jakarta.validation.constraints.Size
  * of the layers below.
  *
  * **The email and password constraints delegate to the domain** rather than
- * restating its rules; see [ValidEmail] for the three confirmed 500s that
+ * restating its rules, and `password` carries a second one — [NotBreached],
+ * which is ADR-0012's breached-password corpus; see [ValidEmail] for the three confirmed 500s that
  * restating them produced. `displayName`, `locale` and `acceptedTermsVersion`
  * keep ordinary annotations because their domain rules are `isNotBlank` and
  * nothing more — there is no second definition to drift from.
@@ -31,6 +32,10 @@ internal data class RegisterRequest(
     val email: String,
     @field:NotBlank
     @field:ValidPassword
+    // ADR-0012's two halves, as two constraints, so they reach the client as
+    // two distinct codes — see [NotBreached] for why that separation is the
+    // wire format's requirement rather than a stylistic choice.
+    @field:NotBreached
     val password: String,
     @field:NotBlank
     @field:Size(max = User.MAX_DISPLAY_NAME_LENGTH)
