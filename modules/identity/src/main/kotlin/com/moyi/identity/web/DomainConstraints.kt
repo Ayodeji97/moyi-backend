@@ -137,12 +137,18 @@ internal annotation class NotBreached(
  * than blames". This sentence is true in both cases — the value did match the
  * list — and it names the problem as exposure rather than weakness.
  *
- * The client is expected to replace it with `copy.md`'s warmer wording, which
- * is what the `NOT_BREACHED` code is for; this is the fallback for anything
- * reading the API directly.
+ * No dash, deliberately: `copy.md` bans the em and en dash in any user-facing
+ * string, on the grounds that a dash invites a subordinate clause where the
+ * product's copy is at its best in short sentences that each stand alone. This
+ * is an API string rather than a screen string, and there is no reason for it
+ * to be the one place the house rule does not apply.
+ *
+ * The client replaces it with `copy.md`'s warmer wording, which is what the
+ * `NOT_BREACHED` code exists for; this is the fallback for anything reading
+ * the API directly.
  */
 internal const val BREACHED_MESSAGE =
-    "matches a list of passwords exposed in data breaches, so it is not safe to use — please choose another"
+    "matches a list of passwords exposed in data breaches, so it is not safe to use. Please choose another."
 
 internal class NotBreachedValidator(
     private val corpus: BreachedPasswordCorpus,
