@@ -6,9 +6,12 @@ import io.kotest.matchers.string.shouldContain
 import io.mockk.every
 import io.mockk.mockk
 import org.junit.jupiter.api.Test
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.http.HttpClient
+import java.net.http.HttpHeaders
 import java.net.http.HttpResponse
+import java.util.zip.GZIPOutputStream
 
 /**
  * The retry policy, which is security-relevant rather than merely robust.
@@ -44,7 +47,30 @@ internal class HibpRangeClientTest {
 
     @Test
     fun `an IO failure is transient too`() {
-        every { http.send<String>(any(), any()) } throws IOException("connection reset") andThen ok(BODY)
+        every {
+            http.send(any(), any<HttpResponse.BodyHandler<ByteArray>>())
+        } throws IOException("connection reset") andThen ok(BODY)
+
+        client.fetch(PREFIX) shouldBe BODY
+    }
+
+    @Test
+    fun `a gzipped body is decompressed`() {
+        // HIBP serves gzip and Java's HttpClient neither asks for it nor
+        // decodes it, so this is ours to do. Getting it wrong does not throw:
+        // the compressed bytes read as text, every line looks malformed, and
+        // the corpus comes out empty while the job reports success.
+        respondWith(gzipped(BODY))
+
+        client.fetch(PREFIX) shouldBe BODY
+    }
+
+    @Test
+    fun `a body served as plain text is read as text, even though gzip was offered`() {
+        // Keyed on the response header rather than on having asked. A proxy
+        // that ignores Accept-Encoding would otherwise produce a ZipException
+        // per range, retried four times, a million times over.
+        respondWith(ok(BODY))
 
         client.fetch(PREFIX) shouldBe BODY
     }
@@ -74,22 +100,31 @@ internal class HibpRangeClientTest {
         slept shouldBe emptyList()
     }
 
-    private fun respondWith(vararg responses: HttpResponse<String>) {
+    private fun respondWith(vararg responses: HttpResponse<ByteArray>) {
         val remaining = responses.toMutableList()
-        every { http.send<String>(any(), any()) } answers { remaining.removeFirst() }
+        every { http.send(any(), any<HttpResponse.BodyHandler<ByteArray>>()) } answers { remaining.removeFirst() }
     }
 
-    private fun ok(body: String) = response(OK, body)
+    private fun ok(body: String) = response(OK, body.toByteArray(), gzip = false)
 
-    private fun status(code: Int) = response(code, "")
+    private fun gzipped(body: String): HttpResponse<ByteArray> {
+        val compressed = ByteArrayOutputStream()
+        GZIPOutputStream(compressed).use { it.write(body.toByteArray()) }
+        return response(OK, compressed.toByteArray(), gzip = true)
+    }
+
+    private fun status(code: Int) = response(code, ByteArray(0), gzip = false)
 
     private fun response(
         code: Int,
-        body: String,
-    ): HttpResponse<String> =
-        mockk<HttpResponse<String>>(relaxed = true).also {
+        body: ByteArray,
+        gzip: Boolean,
+    ): HttpResponse<ByteArray> =
+        mockk<HttpResponse<ByteArray>>(relaxed = true).also {
             every { it.statusCode() } returns code
             every { it.body() } returns body
+            every { it.headers() } returns
+                HttpHeaders.of(if (gzip) mapOf("content-encoding" to listOf("gzip")) else emptyMap()) { _, _ -> true }
         }
 
     private companion object {

@@ -6,6 +6,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.util.zip.GZIPInputStream
 
 /**
  * Where a range of breached hashes comes from.
@@ -87,10 +88,10 @@ internal class HibpRangeClient(
      */
     private fun attemptOnce(prefix: String): Outcome =
         try {
-            val response = http.send(request(prefix), HttpResponse.BodyHandlers.ofString())
+            val response = http.send(request(prefix), HttpResponse.BodyHandlers.ofByteArray())
             val status = response.statusCode()
             when {
-                status == HTTP_OK -> Outcome.Body(response.body())
+                status == HTTP_OK -> Outcome.Body(decode(response))
                 status in RETRYABLE_STATUSES -> Outcome.Retryable(IOException("HTTP $status"))
                 else -> Outcome.Fatal(IOException("HTTP $status is not retryable"))
             }
@@ -115,6 +116,24 @@ internal class HibpRangeClient(
         ) : Outcome
     }
 
+    /**
+     * The body as text, ungzipping it when the server says it is gzipped.
+     *
+     * Keyed on the response header rather than on having asked: a proxy, or a
+     * change at their end, can serve plain text to a request that offered to
+     * take gzip. Decompressing that throws a `ZipException`, which the retry
+     * loop would treat as transient and retry four more times — for every one
+     * of a million ranges.
+     */
+    private fun decode(response: HttpResponse<ByteArray>): String {
+        val encoding = response.headers().firstValue("content-encoding").orElse("")
+        return if (encoding.equals("gzip", ignoreCase = true)) {
+            GZIPInputStream(response.body().inputStream()).use { it.readBytes().toString(Charsets.UTF_8) }
+        } else {
+            response.body().toString(Charsets.UTF_8)
+        }
+    }
+
     private fun request(prefix: String): HttpRequest =
         HttpRequest
             .newBuilder(URI.create("$BASE_URL/$prefix"))
@@ -126,6 +145,13 @@ internal class HibpRangeClient(
             // off removes roughly a third of ~100 GB of transfer from a job
             // that has no secret to keep.
             .header("Add-Padding", "false")
+            // Java's HttpClient neither asks for compression nor decompresses
+            // it, so without this line the whole corpus arrives as plain text.
+            // Measured on 2026-09-22: one range is 98,561 bytes uncompressed
+            // and 55,362 gzipped — 44% off, which over 1,048,576 ranges is the
+            // difference between ~103 GB and ~58 GB taken from a service that
+            // charges nobody for it.
+            .header("Accept-Encoding", "gzip")
             // HIBP asks bulk consumers to identify themselves. A job that pulls
             // the whole corpus should be attributable to something a human can
             // contact, not anonymous traffic.

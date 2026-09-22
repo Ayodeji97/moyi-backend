@@ -705,3 +705,28 @@ Wrong about: two things, and they are the same thing twice.
          appear 210 million and 52 million times — and I verified those counts
          against the live endpoint rather than assuming them, because a
          sentinel that is not really in the corpus is the same bug one level up.
+
+**Same session, third correction, and the one I would have shipped.** The
+review pass ended with a number I had repeated four times — "~70 GB over about
+an hour" — in the ADR, the workflow, and two PR descriptions. Both halves were
+invented. The duration came from extrapolating a 300-range sample at ~290
+ranges/s; a real 130,000-range run sustained **~98/s**, which makes the full
+job about **three hours**, not one. A small sample of a CDN comes back warm and
+overstates the rate, and I had no business treating it as a rate at all. The
+byte figure was worse: I had reasoned that disabling response padding removed
+"about a third" of the transfer — but the 98,561-byte measurement I started
+from was *already* unpadded, so I subtracted a saving twice. The real figure
+was ~103 GB.
+Chasing that down found something genuinely worth having. HIBP serves gzip,
+and Java's `HttpClient` neither requests it nor decodes it: 98,561 bytes per
+range becomes **55,362**. Two lines and a `GZIPInputStream` take a full run
+from ~103 GB to ~58 GB — a bigger saving than halving the cadence, which is the
+change Daniel had actually asked for. Verified by re-running the same 300
+ranges and getting the same 3,005 digests.
+The lesson is not "measure before you write a number", which I already knew and
+had already written in this file. It is narrower and more useful: **a number
+you have repeated is not thereby confirmed.** I said "~70 GB" once from a bad
+inference and then quoted myself three times, and each repetition made it
+feel more settled. The check is to go back to where a figure entered the
+documents and ask what measurement it came from — and if the answer is "an
+earlier sentence of mine", it has never been checked.

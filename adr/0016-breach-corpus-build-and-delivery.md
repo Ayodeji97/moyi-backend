@@ -35,17 +35,19 @@ Ten million falls between 600 and 650 and the tie goes **upward**: a larger corp
 
 **5. A missing or unreadable corpus stops the application from starting.** Not a warning, not a disabled check. ADR-0012's whole argument for the offline filter is that it *removes* the fail-open/fail-closed question; a service that boots without its corpus reintroduces fail-open through the back door, and does it invisibly — every registration succeeds, the control simply is not there.
 
-**6. It rebuilds twice a year and on demand**, never per push. Per-push would pull ~70 GB from a free service for an output that does not change between commits. Twice rather than four times is a judgement about what is reasonable to take from that service: ~140 GB a year against ~280 GB, for a list whose ten million most prevalent entries barely move over three months. ADR-0012 revisits the corpus at "more than a year stale", so six months leaves a whole missed run of slack before the staleness warning fires — and the warning is what would tell us the job has stopped.
+**6. It rebuilds twice a year and on demand**, never per push. Per-push would pull ~58 GB from a free service for an output that does not change between commits. Twice rather than four times is a judgement about what is reasonable to take from that service: ~116 GB a year against ~232 GB, for a list whose ten million most prevalent entries barely move over three months. ADR-0012 revisits the corpus at "more than a year stale", so six months leaves a whole missed run of slack before the staleness warning fires — and the warning is what would tell us the job has stopped.
 
 ## Consequences
 
-**Positive:** the corpus is a dependency like any other — versioned, pinned, digest-verified, cached by Gradle after the first fetch. The build is reproducible: the same properties file produces the same image. And the tooling is out of the deployable, so the HTTP client that pulls 70 GB cannot reach the production classpath.
+**Positive:** the corpus is a dependency like any other — versioned, pinned, digest-verified, cached by Gradle after the first fetch. The build is reproducible: the same properties file produces the same image. And the tooling is out of the deployable, so the HTTP client that pulls ~58 GB cannot reach the production classpath.
 
 **Negative:** the build now has a network dependency on GitHub releases for a first fetch on a clean machine. That is a build-time outage path, not a runtime one, and it is the same class of dependency as Maven Central — which the build already cannot proceed without.
 
 **Negative, and worth stating plainly:** ADR-0012's "call it half a session" was wrong by roughly a factor of four. The filter, the format, the builder, the retry policy, the workflow, the pin-and-verify step and the runtime loader are each small; there are just more of them than "download a list" suggests. The estimate is not corrected here to make it look better in hindsight — it is recorded because the same shape of underestimate is likely wherever a document describes an artefact without describing where it comes from.
 
-**Neutral:** ~70 GB pulled from Have I Been Pwned twice a year. This is the access pattern HIBP's own downloader tool uses and Cloudflare fronts it, but the job identifies itself by `User-Agent` and disables response padding, which removes about a third of the transfer we would otherwise cost them for a secret we do not have.
+**Neutral:** ~58 GB pulled from Have I Been Pwned twice a year, over about three hours. This is the access pattern HIBP's own downloader tool uses and Cloudflare fronts it, and three things hold the cost down, each measured rather than assumed on 2026-09-22: response padding is disabled (it exists to hide *which* range a caller wants, and we want all of them), gzip is requested and decoded (98,561 bytes per range becomes 55,362 — Java's `HttpClient` does neither by default), and the cadence is six-monthly. Without the first two it would be ~103 GB.
+
+An earlier draft of this ADR said "~70 GB over about an hour". Both halves were wrong: the byte figure assumed padding removal saved a third of an already-unpadded measurement, and the duration extrapolated from a 300-range sample that came back warm at ~290 ranges/s, where a real 130,000-range run sustained ~98/s. Corrected here rather than silently, because the numbers are the reason the cadence is what it is.
 
 ## Alternatives considered
 

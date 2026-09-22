@@ -2,16 +2,16 @@
 # the 8-character minimum, and publishes it as a release asset the service
 # build pins by digest.
 #
-# Deliberately NOT part of CI. It pulls roughly 70 GB from Have I Been Pwned
-# over about an hour, and nothing about it changes between commits — running it
-# per push would be both useless and rude. It runs **twice a year**, and on
-# demand when someone wants it sooner.
+# Deliberately NOT part of CI. It pulls roughly 58 GB from Have I Been Pwned
+# over about three hours, and nothing about it changes between commits —
+# running it per push would be both useless and rude. It runs **twice a year**,
+# and on demand when someone wants it sooner.
 #
-# Twice, not four times: the corpus is a free service's bandwidth, and 140 GB a
-# year is a more honest thing to take from it than 280 GB for a list whose top
-# ten million barely move between quarters. ADR-0012 revisits the corpus when
-# it is "more than a year stale", so a six-month cadence still leaves a whole
-# missed run of slack before the staleness warning fires.
+# Twice, not four times: the corpus is a free service's bandwidth, and ~116 GB
+# a year is a more honest thing to take from it than ~232 GB for a list whose
+# top ten million barely move between quarters. ADR-0012 revisits the corpus
+# when it is "more than a year stale", so a six-month cadence still leaves a
+# whole missed run of slack before the staleness warning fires.
 #
 # The output is a single file plus its SHA-256. Pinning the digest in
 # `gradle/breach-corpus.properties` is what makes the corpus a build input like
@@ -54,9 +54,16 @@ jobs:
   build:
     runs-on: ubuntu-latest
     # The download is bound by round trips, not bandwidth or CPU: ~1.05M
-    # requests at concurrency 64. A 300-range sample ran at ~290 ranges/s,
-    # which puts the full job near an hour — this is headroom, not an estimate.
-    timeout-minutes: 240
+    # requests at concurrency 64.
+    #
+    # **Six hours because three is the measurement.** A 300-range sample
+    # extrapolated to about an hour, and that was wrong: a real 130,000-range
+    # run took 22 minutes, or ~98 ranges/s, which puts the full job near three
+    # hours. A small sample overstates the rate, because the first few hundred
+    # ranges come back warm. This is the maximum GitHub allows for a job, and
+    # against a three-hour measurement taken on a home connection it is margin
+    # rather than an estimate — a runner's bandwidth is not this machine's.
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
 
@@ -128,8 +135,8 @@ jobs:
             # which invalidates a SHA-256 somebody has already pinned, and
             # directly contradicts this release's own "never replace an asset
             # in place". Runs are serialised by the concurrency group above and
-            # take about an hour, so minutes are more than enough to separate
-            # them.
+            # take about three hours, so minutes are more than enough to
+            # separate them.
             echo "tag=corpus-$(date -u +%Y-%m-%d-%H%M)"
           } >> "$GITHUB_OUTPUT"
 
