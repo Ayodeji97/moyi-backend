@@ -72,6 +72,22 @@ internal class BloomFilterBreachedPasswordCorpusTest {
     }
 
     @Test
+    fun `a smoke-test filter is refused, however well-formed it is`() {
+        // The builder can produce a range-limited filter for smoke tests. It is
+        // a perfectly valid Bloom filter — right magic, right format, readable
+        // — covering a fraction of the 1,048,576 prefix ranges, so it would
+        // wave through nearly every breached password while looking exactly
+        // like a working control. The workflow refuses to publish one; this is
+        // the layer that holds when something upstream goes wrong anyway.
+        val smokeSized = TestBreachCorpus.writeTo(directory)
+
+        val failure = shouldThrow<IllegalStateException> { load(smokeSized, minimumDigests = 1_000_000) }
+
+        failure.message shouldContain "holds only 9 digests"
+        failure.message shouldContain "range-limited smoke build"
+    }
+
+    @Test
     fun `a stale corpus warns, naming the age`() {
         // ADR-0012's "revisit when the pinned corpus is more than a year
         // stale". Nothing about an old filter looks wrong, so the age has to
@@ -99,12 +115,14 @@ internal class BloomFilterBreachedPasswordCorpusTest {
         appender.list.none { it.level == Level.WARN } shouldBe true
     }
 
-    private fun load(file: Path) =
-        BloomFilterBreachedPasswordCorpus(
-            properties = BreachCorpusProperties(resource = file.toUri().toString()),
-            resourceLoader = DefaultResourceLoader(),
-            clock = Clock.fixed(NOW, ZoneOffset.UTC),
-        )
+    private fun load(
+        file: Path,
+        minimumDigests: Long = 1,
+    ) = BloomFilterBreachedPasswordCorpus(
+        properties = BreachCorpusProperties(resource = file.toUri().toString(), minimumDigests = minimumDigests),
+        resourceLoader = DefaultResourceLoader(),
+        clock = Clock.fixed(NOW, ZoneOffset.UTC),
+    )
 
     private fun captureLogs(): ListAppender<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(BloomFilterBreachedPasswordCorpus::class.java) as Logger

@@ -36,7 +36,7 @@ internal class BloomFilterBreachedPasswordCorpus(
     clock: Clock,
 ) : BreachedPasswordCorpus {
     private val log = LoggerFactory.getLogger(javaClass)
-    private val filter = load(properties, resourceLoader)
+    private val filter = load(properties, resourceLoader).also { verifyIsACorpus(it, properties) }
 
     init {
         val age = Duration.between(filter.metadata.builtAt, clock.instant())
@@ -60,6 +60,27 @@ internal class BloomFilterBreachedPasswordCorpus(
     }
 
     override fun contains(password: Password): Boolean = filter.mightContain(sha1(password.value))
+
+    /**
+     * Refuses a file that is a valid filter but not a corpus.
+     *
+     * The builder can produce a range-limited smoke filter, and that file is
+     * indistinguishable from the real thing by every property except how much
+     * of the space it covers. The workflow will not publish one — but a check
+     * that only lives in CI is a check that protects CI, and the thing worth
+     * protecting is the running service.
+     */
+    private fun verifyIsACorpus(
+        filter: BloomFilter,
+        properties: BreachCorpusProperties,
+    ) {
+        check(filter.insertedCount >= properties.minimumDigests) {
+            "The breached-password corpus at '${properties.resource}' holds only ${filter.insertedCount} digests, " +
+                "below the ${properties.minimumDigests} a real corpus must have (ADR-0016 builds ~10.5M). This is " +
+                "almost certainly a range-limited smoke build, which is a working-looking filter that covers a " +
+                "fraction of the space. Refusing to start rather than run a control that is not there."
+        }
+    }
 
     /**
      * SHA-1 — because that is what the corpus is made of, not because it is a

@@ -43,9 +43,37 @@ internal data class BreachCorpusProperties(
      */
     @field:Min(1)
     val warnAfterDays: Long = DEFAULT_WARN_AFTER_DAYS,
+    /**
+     * The fewest members a file may hold and still be treated as a corpus.
+     *
+     * **This is the layer that survives a mistake upstream.** The corpus
+     * builder supports a range limit for smoke tests, and a range-limited run
+     * produces a file that is valid in every observable respect — right magic,
+     * right format, plausible digest — while covering a fraction of the
+     * 1,048,576 prefix ranges and therefore waving through nearly every
+     * breached password. The workflow refuses to publish one, but a guard that
+     * only lives in the workflow is bypassed by editing the workflow. This one
+     * lives next to the thing being protected.
+     *
+     * A million separates the two cases by three orders of magnitude in both
+     * directions: a real corpus holds ~10.5M (ADR-0016), and a few hundred
+     * ranges hold a few thousand. It also catches a *full* run that went wrong
+     * — a parser change that silently dropped most entries would land here
+     * too, which no check on the build inputs could see.
+     */
+    @field:Min(1)
+    val minimumDigests: Long = DEFAULT_MINIMUM_DIGESTS,
 ) {
     private companion object {
         const val DEFAULT_RESOURCE = "classpath:security/pwned-passwords.bloom"
         const val DEFAULT_WARN_AFTER_DAYS = 365L
+
+        /**
+         * An order of magnitude below the ~10.5M a real corpus holds, and three
+         * above what a smoke build produces. Deliberately not tuned close to
+         * the real figure: this is a sanity bound, and one that tracked the
+         * corpus size would need re-tuning every time the threshold moved.
+         */
+        const val DEFAULT_MINIMUM_DIGESTS = 1_000_000L
     }
 }

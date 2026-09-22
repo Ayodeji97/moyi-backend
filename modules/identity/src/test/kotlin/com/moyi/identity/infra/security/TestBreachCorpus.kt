@@ -74,6 +74,12 @@ internal object TestBreachCorpus {
     ) {
         val file = writeTo(Files.createTempDirectory("moyi-test-corpus"), builtAt)
         registry.add("moyi.security.breach-corpus.resource") { file.toUri().toString() }
+        // A fixture of nine entries is exactly the kind of file
+        // `minimumDigests` exists to refuse, so the bound has to come down for
+        // it. Lowered here rather than defaulted low: production's default is
+        // the safe one, and the only thing that overrides it is a test saying
+        // so in writing.
+        registry.add("moyi.security.breach-corpus.minimum-digests") { "1" }
     }
 
     /**
