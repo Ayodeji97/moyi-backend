@@ -44,4 +44,8 @@ include(
     "modules:admin",
     "modules:analytics",
     "contracts",
+    // Build-time tooling, not part of the deployable. `app` does not depend
+    // on it, which is what keeps the corpus builder's HTTP client off the
+    // runtime classpath — see tools/breach-corpus/build.gradle.kts.
+    "tools:breach-corpus",
 )

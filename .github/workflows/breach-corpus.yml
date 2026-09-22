@@ -1,0 +1,135 @@
+# Builds the breached-password Bloom filter that ADR-0012 makes the price of
+# the 8-character minimum, and publishes it as a release asset the service
+# build pins by digest.
+#
+# Deliberately NOT part of CI. It pulls roughly 70 GB from Have I Been Pwned
+# over about an hour, and nothing about it changes between commits — running it
+# per push would be both useless and rude. It runs quarterly, which is well
+# inside ADR-0012's "revisit when the pinned corpus is more than a year stale",
+# and on demand when someone wants it sooner.
+#
+# The output is a single file plus its SHA-256. Pinning the digest in
+# `gradle/breach-corpus.properties` is what makes the corpus a build input like
+# any other dependency: a file swapped at the distribution point fails the
+# build rather than quietly becoming the filter the service ships.
+name: Breach corpus
+
+on:
+  workflow_dispatch:
+    inputs:
+      min-count:
+        description: >-
+          Keep hashes appearing at least this many times. 600 was calibrated
+          against 300 live ranges and lands near 10.5M — see BreachCorpusBuilder.
+        required: false
+        default: "600"
+      ranges:
+        description: >-
+          How many of the 1048576 prefix ranges to pull. Leave empty for all;
+          set a few hundred for a smoke run that finishes in seconds.
+        required: false
+        default: ""
+      publish:
+        description: Upload the result as a release asset.
+        type: boolean
+        required: false
+        default: true
+  schedule:
+    # 04:00 UTC on the 1st of Jan/Apr/Jul/Oct.
+    - cron: "0 4 1 1,4,7,10 *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: breach-corpus
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # The download is bound by round trips, not bandwidth or CPU: ~1.05M
+    # requests at concurrency 64. A 300-range sample ran at ~290 ranges/s,
+    # which puts the full job near an hour — this is headroom, not an estimate.
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+
+      # 21 as well as 25 for the same reason every other workflow here installs
+      # both: gradle/gradle-daemon-jvm.properties pins the daemon to 21, so a
+      # missing 21 makes Gradle download one from the foojay URLs in that file.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - id: build
+        run: |
+          set -euo pipefail
+          ARGS="--output build/pwned-passwords.bloom --min-count ${{ inputs.min-count || '600' }}"
+          if [ -n "${{ inputs.ranges }}" ]; then ARGS="$ARGS --ranges ${{ inputs.ranges }}"; fi
+          ./gradlew :tools:breach-corpus:run --args="$ARGS" --console=plain | tee build.log
+
+          # Parsed from the tool's own output rather than recomputed here, so
+          # the digest published is the digest of the file it reported on.
+          {
+            echo "sha256=$(awk '/^  sha256/ {print $2}' build.log)"
+            echo "digests=$(awk '/^  digests/ {print $2}' build.log)"
+            echo "size=$(stat -c%s build/pwned-passwords.bloom)"
+            echo "tag=corpus/$(date -u +%Y-%m-%d)"
+          } >> "$GITHUB_OUTPUT"
+
+      # An independent check that the file the service will download is one the
+      # service can read. The builder just wrote it, so this is not testing the
+      # writer — it is testing that nothing between the writer and the artefact
+      # store mangles it, which is the failure a digest alone would catch only
+      # after someone noticed.
+      - name: Verify the published file reads back
+        run: |
+          set -euo pipefail
+          echo "${{ steps.build.outputs.sha256 }}  build/pwned-passwords.bloom" > corpus.sha256
+          sha256sum -c corpus.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pwned-passwords-bloom
+          path: build/pwned-passwords.bloom
+          retention-days: 7
+
+      # `make_latest: false` — this is a data artefact, not a release of the
+      # service, and it must not take over the repository's "Latest" badge.
+      # `inputs` is empty on a scheduled run, so the schedule is named explicitly
+      # rather than relying on the declared default being applied to it.
+      - if: ${{ github.event_name == 'schedule' || inputs.publish }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build.outputs.tag }}
+          name: Breached-password corpus ${{ steps.build.outputs.tag }}
+          make_latest: false
+          files: build/pwned-passwords.bloom
+          body: |
+            Breached-password Bloom filter for `moyi-backend` (ADR-0012, ADR-0016).
+
+            Built from the live [Have I Been Pwned](https://haveibeenpwned.com/Passwords)
+            Pwned Passwords corpus, keeping every SHA-1 that appears at least
+            **${{ inputs.min-count || '600' }}** times.
+
+            | | |
+            |---|---|
+            | digests | `${{ steps.build.outputs.digests }}` |
+            | size | `${{ steps.build.outputs.size }}` bytes |
+            | sha256 | `${{ steps.build.outputs.sha256 }}` |
+
+            Pin it by putting the tag and digest in `gradle/breach-corpus.properties`.
+            The service build downloads this file and refuses it if the digest
+            does not match, so this asset must never be replaced in place —
+            publish a new tag instead.
+
+      - name: The lines to pin
+        run: |
+          echo "version=${{ steps.build.outputs.tag }}"
+          echo "sha256=${{ steps.build.outputs.sha256 }}"

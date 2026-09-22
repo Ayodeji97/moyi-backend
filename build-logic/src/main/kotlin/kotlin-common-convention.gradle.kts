@@ -140,7 +140,12 @@ testing {
 // meaningful to unit-test, and every real Spring Boot project excludes
 // it the same way — leaving it in would pressure someone into writing a
 // test that exists purely to move a coverage number, not to catch a bug.
-val jacocoExclusions = listOf("**/*ApplicationKt.class")
+//
+// `tools/**/MainKt` is excluded on the same grounds: it is argument parsing
+// and a `println` around a class that is itself tested. The path is spelled
+// out rather than matching `**/MainKt.class` so the exclusion cannot silently
+// widen to a `main` somewhere it would matter.
+val jacocoExclusions = listOf("**/*ApplicationKt.class", "**/com/moyi/tools/**/MainKt.class")
 
 tasks.named<Test>("test") {
     finalizedBy(tasks.named("jacocoTestReport"))
