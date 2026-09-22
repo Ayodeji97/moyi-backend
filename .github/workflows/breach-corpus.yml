@@ -2,9 +2,9 @@
 # the 8-character minimum, and publishes it as a release asset the service
 # build pins by digest.
 #
-# Deliberately NOT part of CI. It pulls roughly 58 GB from Have I Been Pwned
-# over about three hours, and nothing about it changes between commits —
-# running it per push would be both useless and rude. It runs **twice a year**,
+# Deliberately NOT part of CI. It pulls roughly 58 GB from Have I Been Pwned —
+# about 20 minutes on a GitHub runner — and nothing about it changes between
+# commits, so running it per push would be both useless and rude. It runs **twice a year**,
 # and on demand when someone wants it sooner.
 #
 # Twice, not four times: the corpus is a free service's bandwidth, and ~116 GB
@@ -50,19 +50,31 @@ concurrency:
   group: breach-corpus
   cancel-in-progress: false
 
+# One definition. The same literal appeared in four places — the build, the
+# artifact upload, the release, and the fetch-back — and the first real run
+# found all four pointing somewhere the file was not.
+env:
+  CORPUS: build/pwned-passwords.bloom
+
 jobs:
   build:
     runs-on: ubuntu-latest
     # The download is bound by round trips, not bandwidth or CPU: ~1.05M
     # requests at concurrency 64.
     #
-    # **Six hours because three is the measurement.** A 300-range sample
-    # extrapolated to about an hour, and that was wrong: a real 130,000-range
-    # run took 22 minutes, or ~98 ranges/s, which puts the full job near three
-    # hours. A small sample overstates the rate, because the first few hundred
-    # ranges come back warm. This is the maximum GitHub allows for a job, and
-    # against a three-hour measurement taken on a home connection it is margin
-    # rather than an estimate — a runner's bandwidth is not this machine's.
+    # The download is bound by round trips: ~1.05M requests at concurrency 64.
+    #
+    # **Measured, finally, on the thing that runs it.** The full corpus took
+    # **19m34s** here — ~893 ranges/s. Two earlier numbers were guesses dressed
+    # as estimates: a 300-range sample suggested an hour, and a 130,000-range
+    # run on a home connection suggested three. Both were extrapolations from
+    # the wrong machine; a runner's network is roughly nine times that
+    # connection.
+    #
+    # Six hours is left as the cap rather than tightened to the measurement. A
+    # timeout is there for the run that goes wrong — a Cloudflare slowdown, a
+    # retry storm — and sizing it to the happy path converts a slow day into a
+    # failed build.
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
@@ -110,16 +122,30 @@ jobs:
           RANGES: ${{ inputs.ranges }}
         run: |
           set -euo pipefail
-          ARGS="--output build/pwned-passwords.bloom --min-count $MIN_COUNT"
+          ARGS="--output $CORPUS --min-count $MIN_COUNT"
           if [ -n "$RANGES" ]; then ARGS="$ARGS --ranges $RANGES"; fi
           ./gradlew :tools:breach-corpus:run --args="$ARGS" --console=plain | tee build.log
+
+          # **The builder reporting success is not the same as the file being
+          # where we asked for it**, and nothing downstream says so. On the
+          # first real run the corpus was written to a different directory;
+          # `stat` failed inside a command substitution, which `set -e` does
+          # not abort on, so `size` was published empty; upload-artifact logged
+          # "No files were found" as a *warning*; and action-gh-release
+          # published a release with no asset. All three steps went green.
+          #
+          # One line, placed where the assumption is made.
+          test -f "$CORPUS" || {
+            echo "::error::The builder reported success but $CORPUS does not exist."
+            exit 1
+          }
 
           # Parsed from the tool's own output rather than recomputed here, so
           # the digest published is the digest of the file it reported on.
           {
             echo "sha256=$(awk '/^  sha256/ {print $2}' build.log)"
             echo "digests=$(awk '/^  digests/ {print $2}' build.log)"
-            echo "size=$(stat -c%s build/pwned-passwords.bloom)"
+            echo "size=$(stat -c%s "$CORPUS")"
             # Stated in the release body so a partial build could never be
             # mistaken for a corpus even if one reached the artefact store.
             echo "ranges=${RANGES:-1048576}"
@@ -135,15 +161,15 @@ jobs:
             # which invalidates a SHA-256 somebody has already pinned, and
             # directly contradicts this release's own "never replace an asset
             # in place". Runs are serialised by the concurrency group above and
-            # take about three hours, so minutes are more than enough to
-            # separate them.
+            # take about twenty minutes, so minutes are enough to separate
+            # them.
             echo "tag=corpus-$(date -u +%Y-%m-%d-%H%M)"
           } >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
           name: pwned-passwords-bloom
-          path: build/pwned-passwords.bloom
+          path: ${{ env.CORPUS }}
           retention-days: 7
 
       # `make_latest: false` — this is a data artefact, not a release of the
@@ -156,7 +182,7 @@ jobs:
           tag_name: ${{ steps.build.outputs.tag }}
           name: Breached-password corpus ${{ steps.build.outputs.tag }}
           make_latest: false
-          files: build/pwned-passwords.bloom
+          files: ${{ env.CORPUS }}
           body: |
             Breached-password Bloom filter for `moyi-backend` (ADR-0012, ADR-0016).
 

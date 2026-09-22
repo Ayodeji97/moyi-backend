@@ -730,3 +730,43 @@ inference and then quoted myself three times, and each repetition made it
 feel more settled. The check is to go back to where a figure entered the
 documents and ask what measurement it came from — and if the answer is "an
 earlier sentence of mine", it has never been checked.
+
+## 2026-09-22 · Phase 1 · Three green steps that did nothing
+Expected: the first real corpus run to either work or fail. It did both. The
+         corpus built perfectly — 10,546,783 digests from 2,068,408,781 entries
+         scanned, zero malformed lines, sentinels present, in **19m34s** — and
+         the release it published contained no file at all.
+Reality: `JavaExec`'s working directory defaults to the **subproject**
+         directory, not where Gradle was invoked. So `--output
+         build/pwned-passwords.bloom` landed in
+         `tools/breach-corpus/build/`, and every later step looked for it at
+         the repository root. Invisible locally because I had always passed
+         absolute paths — the one habit that guaranteed I would never meet this.
+         What happened next is the part worth keeping. **Three consecutive
+         steps reported success while doing nothing.** `stat` failed inside a
+         command substitution, and `set -e` does not abort on that, so the
+         published size was empty and the step went green (verified afterwards
+         in a shell, not assumed). `upload-artifact` logged "No files were
+         found" as a **warning**. `action-gh-release` logged "does not include
+         a valid file" and published an empty release, also green. A pipeline
+         with `set -euo pipefail` at the top of it produced a public release
+         object containing nothing, and reported four successes on the way.
+Wrong about: where to put a check. I had been placing verification at the
+         *end* — a step that fetches the published asset and proves it is what
+         we pinned. That is a good check and it is the one that caught this.
+         But it caught it three steps late, after a public release had already
+         been created and had to be deleted. The missing check was one line,
+         `test -f "$CORPUS"`, at the exact point where the assumption is first
+         made: the builder said it succeeded, therefore the file is here.
+         The general form: **an assumption should be checked where it is made,
+         not where it eventually hurts.** End-to-end verification tells you
+         something is broken; a check at the assumption tells you *what*, and
+         stops the damage before it is public.
+         Second, smaller, and mine again: I have now been wrong about this
+         job's duration three times — an hour, then three hours, then 19
+         minutes. Every wrong figure came from extrapolating a measurement
+         taken on a machine that was not the one running the job. The one
+         estimate that held was the corpus size, and it held because it came
+         from running the real builder: predicted 10.49M, actual 10,546,783,
+         inside 0.5%. **Extrapolation is only as good as the thing you
+         extrapolated from being the thing you are describing.**

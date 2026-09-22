@@ -4,7 +4,7 @@
 
 ## Context
 
-ADR-0012 lowered the password minimum from 12 to 8 and priced the change: the shorter floor is paid for by widening the breached-password check from a top-10k list to "an offline breached-password corpus of the top ~10M hashes, held as a Bloom filter (~17 MB at a 0.1% false-positive rate) **built in CI from a pinned HIBP dump and baked into the container image**". It ended: "the two halves are one decision and must not be unbundled", and estimated the corpus work at "half a session".
+ADR-0012 lowered the password minimum from 12 to 8 and priced the change: the shorter floor is paid for by widening the breached-password check from a top-10k list to "an offline breached-password corpus of the top ~10M hashes, held as a Bloom filter (~18 MB at a 0.1% false-positive rate) **built in CI from a pinned HIBP dump and baked into the container image**". It ended: "the two halves are one decision and must not be unbundled", and estimated the corpus work at "half a session".
 
 Three phrases in that sentence do not survive contact with the source, and ADR-0012 does not decide any of the questions they raise. None of this changes ADR-0012's position — it supplies the mechanism that position assumed existed.
 
@@ -45,9 +45,11 @@ Ten million falls between 600 and 650 and the tie goes **upward**: a larger corp
 
 **Negative, and worth stating plainly:** ADR-0012's "call it half a session" was wrong by roughly a factor of four. The filter, the format, the builder, the retry policy, the workflow, the pin-and-verify step and the runtime loader are each small; there are just more of them than "download a list" suggests. The estimate is not corrected here to make it look better in hindsight — it is recorded because the same shape of underestimate is likely wherever a document describes an artefact without describing where it comes from.
 
-**Neutral:** ~58 GB pulled from Have I Been Pwned twice a year, over about three hours. This is the access pattern HIBP's own downloader tool uses and Cloudflare fronts it, and three things hold the cost down, each measured rather than assumed on 2026-09-22: response padding is disabled (it exists to hide *which* range a caller wants, and we want all of them), gzip is requested and decoded (98,561 bytes per range becomes 55,362 — Java's `HttpClient` does neither by default), and the cadence is six-monthly. Without the first two it would be ~103 GB.
+**Neutral:** ~58 GB pulled from Have I Been Pwned twice a year, over about twenty minutes on a GitHub runner. This is the access pattern HIBP's own downloader tool uses and Cloudflare fronts it, and three things hold the cost down, each measured rather than assumed on 2026-09-22: response padding is disabled (it exists to hide *which* range a caller wants, and we want all of them), gzip is requested and decoded (98,561 bytes per range becomes 55,362 — Java's `HttpClient` does neither by default), and the cadence is six-monthly. Without the first two it would be ~103 GB.
 
-An earlier draft of this ADR said "~70 GB over about an hour". Both halves were wrong: the byte figure assumed padding removal saved a third of an already-unpadded measurement, and the duration extrapolated from a 300-range sample that came back warm at ~290 ranges/s, where a real 130,000-range run sustained ~98/s. Corrected here rather than silently, because the numbers are the reason the cadence is what it is.
+The duration figure in this ADR has now been wrong twice, and both corrections are left visible because the numbers are the reason the cadence is what it is. It first said "about an hour", extrapolated from a 300-range sample that came back warm at ~290 ranges/s. It then said "about three hours", from a real 130,000-range run that sustained ~98/s — but on a home connection, not on the machine that runs the job. The first full run on a GitHub runner took **19m34s**, or ~893 ranges/s. The byte figure was wrong once too: it assumed padding removal saved a third of a measurement that was already unpadded.
+
+The pattern worth naming: every one of those numbers was produced by extrapolating from something that was not the thing being described. The corpus itself was calibrated by running the real builder, and that estimate (10.49M) landed within 0.5% of the real 10,546,783.
 
 ## Alternatives considered
 
