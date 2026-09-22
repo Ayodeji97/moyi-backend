@@ -1,0 +1,195 @@
+name: CodeQL
+
+# Static analysis that is not a language model.
+#
+# This repository's review automation is Claude reading a diff, and its own
+# author is Claude writing one. That shares a failure mode: both are the same
+# kind of reader, with the same blind spots. CodeQL is dataflow analysis over
+# an extracted database — it fails at completely different things, which is
+# the only property that makes a second opinion worth having. ADR-0002 also
+# requires an ASVS-aligned posture for the self-built authentication this
+# repository is currently writing, and CodeQL is the part of that a machine
+# can do continuously.
+#
+# It does NOT satisfy ADR-0002's hard gate, which requires an independent
+# review of the auth code by a second competent engineer before public
+# launch. Nothing automated does.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Weekly, because the analysis is only as good as its query pack: a query
+  # written next month finds bugs in code written last month, and nothing
+  # would re-run it if the analysis only fired on a diff.
+  schedule:
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Writing the results to the Security tab, and to the PR as annotations.
+  security-events: write
+  # The analyze step reads workflow run metadata to attribute results.
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze Kotlin
+    runs-on: ubuntu-latest
+    # A hang here is invisible without this. The first run of this workflow sat
+    # on the build step for 83 minutes and was still going when it was
+    # cancelled by hand; left alone it would have burned the six-hour job limit,
+    # and on the weekly schedule it would have done that with nobody watching.
+    # A healthy run takes 4m23s end to end, measured, so twenty minutes is
+    # about four and a half times the real thing — enough slack for a cold
+    # cache and not enough to hide a hang.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      # The same pair ci.yml installs, and for the same reason: the Gradle
+      # daemon's JVM is declared repo-wide in
+      # gradle/gradle-daemon-jvm.properties, so 21 must be present for any
+      # Gradle invocation, while jvmToolchain(25) resolves 25 for compilation.
+      # Omitting 21 does not fail loudly — Gradle falls back to downloading it
+      # from the foojay URLs pinned in that file.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - uses: github/codeql-action/init@v4
+        with:
+          # One language identifier covering both; Kotlin is extracted by the
+          # Java extractor and cannot be requested separately.
+          languages: java-kotlin
+          # `manual`, not `autobuild`: autobuild guesses at the build, and
+          # this one has a declared daemon JVM and a convention-plugin
+          # included build that a guess is likely to get wrong. `none` is not
+          # an option — it works for Java, but Kotlin extraction requires an
+          # observed compilation.
+          build-mode: manual
+          # Beyond the default suite. More queries means more noise, which is
+          # usually the argument against it; here the code being written is
+          # authentication, the codebase is a few thousand lines, and the
+          # cost of reading a false positive is far below the cost of missing
+          # a real one.
+          queries: security-extended
+
+      # Three flags, two different failures, and neither is a tuning knob.
+      #
+      # **`in-process`, or this deadlocks.** The first run of this workflow
+      # stopped at `:build-logic:compileKotlin` — the first Kotlin compilation
+      # in the build — and produced no further output for 83 minutes. CodeQL
+      # traces a build by `LD_PRELOAD`ing a library into it and following the
+      # processes it spawns, and Gradle compiles Kotlin in a **separate
+      # long-lived Kotlin daemon**. Tracing that handoff hangs. Compiling
+      # inside the Gradle daemon removes the second process, and with it the
+      # handoff.
+      #
+      # **`-Xmx4g`, or it runs out of memory** — the second failure this step
+      # produced, `OutOfMemoryError: GC overhead limit exceeded`, in the same
+      # task. Compiling in-process puts the Kotlin compiler *and* CodeQL's
+      # extractor plugin inside the Gradle daemon, whose default heap is sized
+      # for orchestrating a build rather than for running a compiler with an
+      # instrumentation plugin attached. Set on the invocation rather than in
+      # `gradle.properties`, so only this job pays for it. The runner has 16 GB.
+      #
+      # **`--no-build-cache --rerun-tasks`, or it compiles nothing.** CodeQL
+      # extracts only what it observes being compiled, and `setup-gradle`
+      # restores the Gradle build cache — so a cache hit would satisfy
+      # `classes` without ever invoking the compiler, producing an empty
+      # database and a green check. `--rerun-tasks` closes the same hole from
+      # the up-to-date side.
+      - name: Compile for extraction
+        run: >-
+          ./gradlew classes
+          --no-build-cache
+          --rerun-tasks
+          -Dkotlin.compiler.execution.strategy=in-process
+          -Dorg.gradle.jvmargs=-Xmx4g
+
+      - id: analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:java-kotlin
+
+      # The check that makes the rest of this file trustworthy.
+      #
+      # CodeQL's Kotlin extractor supports a moving range of Kotlin versions,
+      # and when a project is outside it the extractor does not fail — it
+      # warns, extracts nothing, and the analysis reports zero alerts in
+      # green. That is indistinguishable from "no problems found", which is
+      # the single most dangerous state a security check can be in and the one
+      # this repository keeps rediscovering (see docs/learning-log.md).
+      #
+      # The database's source archive is the evidence: if the extractor ran,
+      # the `.kt` files it saw are in it. Counted twice — everything, which
+      # answers "did the extractor run at all", and only this repository's own
+      # main sources, which answers "did it read *our* code". The second count
+      # is the one the comparison uses, because the first is dominated by
+      # Kotlin the extractor pulled from dependencies: the run that first
+      # passed this step reported 657 extracted against 50 files in the tree.
+      # Comparing that 657 to 50 would have made the partial-extraction
+      # warning unable to fire — one module missing out of eight would still
+      # have looked like a surplus.
+      #
+      # The path comes from `analyze`'s documented `db-locations` output, a
+      # JSON map of language to absolute path. The first version of this step
+      # read `db-location` from `init`, which **does not exist** — `init`
+      # outputs only `codeql-path` and `codeql-version` — so the path was
+      # empty and the step looked for `/src.zip`. It failed, which is the only
+      # reason that was a ten-minute problem rather than a permanent one: a
+      # check written to warn instead of fail would have printed nothing
+      # anyone would read, on a job whose other steps were all green.
+      - name: Prove Kotlin was actually extracted
+        env:
+          DB_LOCATIONS: ${{ steps.analyze.outputs.db-locations }}
+        run: |
+          database=$(printf '%s' "$DB_LOCATIONS" | jq -r 'to_entries[0].value // empty')
+          if [ -z "$database" ]; then
+            echo "::error::analyze reported no database location. Output was: $DB_LOCATIONS"
+            exit 1
+          fi
+
+          archive="$database/src.zip"
+          if [ ! -f "$archive" ]; then
+            echo "::error::No CodeQL source archive at $archive — the database was never built."
+            exit 1
+          fi
+
+          listing=$(unzip -Z1 "$archive")
+
+          total=$(printf '%s\n' "$listing" | grep -c '\.kt$' || true)
+          if [ "$total" -eq 0 ]; then
+            echo "::error::CodeQL extracted no Kotlin at all. The analysis above found zero alerts because it read zero code — most likely this project's Kotlin version is outside the extractor's supported range. Do not treat this check as passing."
+            exit 1
+          fi
+
+          # Each of our files by name, rather than a count. A count can be
+          # satisfied by the wrong files: most of `total` is Kotlin the
+          # extractor pulled from dependencies (the first passing run saw 657
+          # against our 32), so any threshold comparison is inflated by code
+          # we did not write and would wave through a module that silently
+          # stopped compiling. Checking for the paths themselves cannot be,
+          # and it names what is missing instead of reporting a number.
+          missing=$(git ls-files '*/src/main/kotlin/*.kt' | while IFS= read -r file; do
+            printf '%s\n' "$listing" | grep -qF -- "$file" || printf '%s\n' "$file"
+          done)
+          present=$(git ls-files '*/src/main/kotlin/*.kt' | wc -l | tr -d ' ')
+
+          if [ -n "$missing" ]; then
+            echo "::error::These main-source files never reached the CodeQL database, so the analysis has a hole in it:"
+            printf '%s\n' "$missing"
+            exit 1
+          fi
+
+          echo "All $present main-source Kotlin files reached the database ($total Kotlin files in total, the rest from dependencies)."

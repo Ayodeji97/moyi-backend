@@ -572,3 +572,52 @@ Wrong about: what a test suite is evidence of. Those three 500s were
          which is the same lesson as "green is a claim about where you ran
          it", arriving from the side where the *developer* machine is the
          permissive one and CI is the honest one.
+
+## 2026-09-20 · Phase 1 · Five runs, five different failures
+Expected: adding CodeQL to be configuration. A workflow file, a language
+         identifier, a build command; the interesting question was whether
+         the extractor supports Kotlin 2.2.21, and the whole point of the
+         verification step was to answer that rather than assume it.
+Reality: it took five runs, and each one failed differently and further
+         along than the last. The build **hung** for 83 minutes at
+         `:build-logic:compileKotlin` — CodeQL traces a build by
+         `LD_PRELOAD`ing a library and following the processes it spawns,
+         and Gradle compiles Kotlin in a separate long-lived daemon; tracing
+         that handoff deadlocks. Compiling in-process fixed that and then
+         ran **out of memory**, because in-process puts the compiler and
+         CodeQL's extractor plugin inside a Gradle daemon whose heap is sized
+         for orchestrating a build. With the heap raised, the build and the
+         analysis both succeeded — and my own verification step failed,
+         because it read `db-location` from the `init` action, an output that
+         **does not exist** (`init` publishes `codeql-path` and
+         `codeql-version`; `db-locations` belongs to `analyze`). Fixed, it
+         finally reported the number this whole exercise existed to get:
+         657 Kotlin files extracted, and the extractor reads 2.2.21 fine.
+         Then that number showed the check's second half was useless. 657
+         against 32 files of ours: the surplus is Kotlin pulled from
+         dependencies, so the "did it read enough" comparison could never
+         fire — a build silently dropping one module out of eight would still
+         have shown a comfortable surplus. It now checks for each of our
+         files **by name**, which cannot be inflated and says which one is
+         missing instead of reporting a number.
+Wrong about: what "verify the guard" means. I wrote the verification step
+         precisely because a CodeQL run that extracts nothing reports zero
+         alerts in green, and I was pleased with it. But I shipped it reading
+         an output that does not exist, and I shipped its second half
+         comparing two numbers that are not comparable. **A guard is code,
+         and I had held it to a lower standard than the code it guards** —
+         no test, no run, no check of the API it depended on, because it felt
+         like configuration rather than logic.
+         The thing that saved it was writing it to *fail* rather than warn.
+         With an empty path it looked for `/src.zip`, found nothing, and went
+         red on a job whose every other step was green. A version that logged
+         a warning would have printed a line nobody reads, and the job would
+         have reported success for an analysis nobody had confirmed read any
+         code — the exact outcome the step exists to prevent, arriving
+         through the step itself. That is the rule worth keeping: **a check
+         that cannot fail loudly is not a check, and that applies most to the
+         checks you are proudest of.**
+         Smaller, and also mine: the timeout. The first run would have burned
+         the six-hour job limit, and on the weekly schedule it would have
+         done so with nobody watching. A scheduled job with no timeout is the
+         same class of invisible as a green check that checked nothing.
