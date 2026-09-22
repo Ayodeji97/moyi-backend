@@ -621,3 +621,43 @@ Wrong about: what "verify the guard" means. I wrote the verification step
          the six-hour job limit, and on the weekly schedule it would have
          done so with nobody watching. A scheduled job with no timeout is the
          same class of invisible as a green check that checked nothing.
+
+## 2026-09-22 · Phase 1 · The document said "download the top 10 million"
+Expected: slice C to be plumbing. ADR-0012 had already decided everything —
+         a ~10M-hash Bloom filter, built in CI from a pinned HIBP dump, baked
+         into the image, half a session — so the work looked like reading a
+         file, filling a data structure and wiring one check into validation.
+Reality: the first sentence of the plan was not executable. There is no "top
+         ~10M hashes" to download: HIBP serves 1,048,576 prefix ranges sorted
+         only *within* themselves, so a global top-N means pulling and sorting
+         all ~2.1 billion entries. And there is no "pinned dump" either — the
+         downloadable corpus was retired, and the official downloader now just
+         walks every prefix. Two of the three load-bearing phrases in the
+         decision described something that does not exist.
+         What replaced the top-N was a prevalence threshold, and the number
+         came from running the thing rather than reasoning about it. Five
+         ranges sampled with `curl` put ~10M near "appears at least 700
+         times"; the finished builder over 300 ranges said 700 gives 9.0M and
+         **600** gives 10.5M. The quick estimate was off by a sixth, which is
+         the size of error you get for free by measuring with the real tool
+         instead of a shell pipeline.
+Wrong about: what a decided decision decides. I have been treating the corpus
+         as authoritative in the strong sense — doc 25 says decisions are not
+         renegotiated without an ADR, and that is right — and I read that as
+         "the plan is executable". ADR-0012 is an excellent document about
+         *why* the floor moves to 8 and it is completely right about that. It
+         is not a document about where an 18 MB file lives between the job
+         that builds it and the build that packages it, because nobody had
+         looked yet. The reading to keep: **an authoritative document settles
+         the argument, not the mechanism**, and the gap between them is not a
+         licence to relitigate — ADR-0016 changes nothing ADR-0012 decided —
+         but it is work, and pretending it is not is how "half a session"
+         becomes four.
+         Two smaller ones, both mine. I nearly wrote the false-positive rate
+         as an assertion from the formula; it is now measured over 200k
+         non-members, because a formula restated in a test only proves I can
+         restate it. And the first version of the CI job interpolated
+         `${{ inputs.ranges }}` straight into a shell script — the same shape
+         as string-concatenating SQL, in the repository that has CodeQL
+         running specifically to find that class of thing. Caught by reading
+         it back, not by any gate I had put in place.

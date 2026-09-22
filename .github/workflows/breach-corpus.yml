@@ -67,11 +67,19 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      # Inputs reach the script through `env`, never through `${{ }}`
+      # interpolation into the shell text. A dispatch input is attacker-
+      # controlled the moment anyone but the owner has write access, and
+      # interpolation splices it into the command before bash ever sees a
+      # quote — the same class of hole as string-concatenating SQL.
       - id: build
+        env:
+          MIN_COUNT: ${{ inputs.min-count || '600' }}
+          RANGES: ${{ inputs.ranges }}
         run: |
           set -euo pipefail
-          ARGS="--output build/pwned-passwords.bloom --min-count ${{ inputs.min-count || '600' }}"
-          if [ -n "${{ inputs.ranges }}" ]; then ARGS="$ARGS --ranges ${{ inputs.ranges }}"; fi
+          ARGS="--output build/pwned-passwords.bloom --min-count $MIN_COUNT"
+          if [ -n "$RANGES" ]; then ARGS="$ARGS --ranges $RANGES"; fi
           ./gradlew :tools:breach-corpus:run --args="$ARGS" --console=plain | tee build.log
 
           # Parsed from the tool's own output rather than recomputed here, so
@@ -89,9 +97,11 @@ jobs:
       # store mangles it, which is the failure a digest alone would catch only
       # after someone noticed.
       - name: Verify the published file reads back
+        env:
+          SHA256: ${{ steps.build.outputs.sha256 }}
         run: |
           set -euo pipefail
-          echo "${{ steps.build.outputs.sha256 }}  build/pwned-passwords.bloom" > corpus.sha256
+          echo "$SHA256  build/pwned-passwords.bloom" > corpus.sha256
           sha256sum -c corpus.sha256
 
       - uses: actions/upload-artifact@v4
@@ -130,6 +140,9 @@ jobs:
             publish a new tag instead.
 
       - name: The lines to pin
+        env:
+          TAG: ${{ steps.build.outputs.tag }}
+          SHA256: ${{ steps.build.outputs.sha256 }}
         run: |
-          echo "version=${{ steps.build.outputs.tag }}"
-          echo "sha256=${{ steps.build.outputs.sha256 }}"
+          echo "version=$TAG"
+          echo "sha256=$SHA256"

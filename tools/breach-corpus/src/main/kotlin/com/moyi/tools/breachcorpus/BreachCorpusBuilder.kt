@@ -164,9 +164,13 @@ internal class BreachCorpusBuilder(
         check(onDisk == download.digestCount) {
             "wrote ${workFile.fileSize()} bytes ($onDisk digests) but counted ${download.digestCount}"
         }
-        check(onDisk in 1..Int.MAX_VALUE) {
+        check(onDisk > 0) {
             "no digests met the count >= ${options.minCount} threshold — check the parser before the threshold"
         }
+        // The second pass indexes with an Int. Ten million is nowhere near it,
+        // but a threshold typo of 6 instead of 600 would put ~2.1 billion
+        // digests here, and a silently truncated read is worse than a stop.
+        check(onDisk <= Int.MAX_VALUE) { "$onDisk digests is more than one pass can index — raise the threshold" }
 
         log("Sizing the filter for $onDisk digests at a ${options.falsePositiveRate} false-positive rate")
         val filter =
