@@ -14,14 +14,17 @@ internal class PasswordTest {
     }
 
     @Test
-    fun `the floor is 12 until the breach corpus lands, not the 8 in ADR-0012`() {
-        // ADR-0012 lowers the minimum to 8 and states that the shorter floor
-        // is paid for by widening the breached-password corpus, and that "the
-        // two halves are one decision and MUST NOT be unbundled". This test
-        // is what stops the cheap half shipping alone. It fails — correctly —
-        // in the PR that adds the corpus, which is the PR that should be
-        // changing this number.
-        Password.MIN_LENGTH shouldBe 12
+    fun `the floor is 8, which ADR-0012 only permits alongside the corpus`() {
+        // This test used to pin 12 and say why: ADR-0012 lowers the minimum to
+        // 8 and states that the shorter floor is paid for by widening the
+        // breached-password corpus, "the two halves are one decision and MUST
+        // NOT be unbundled". Pinning the old number is what stopped the cheap
+        // half shipping alone for four PRs. It changes here because the corpus
+        // arrived here — see BreachedPasswordCorpus, ADR-0016, and
+        // `a password already known to attackers is rejected` in
+        // RegistrationEndpointTest, which is the half this number is paid for
+        // with.
+        Password.MIN_LENGTH shouldBe 8
     }
 
     @Test
@@ -75,6 +78,11 @@ internal class PasswordTest {
 
         Normalizer.normalize(ligatures, Normalizer.Form.NFKC).length shouldBe (Password.MIN_LENGTH - 1) * 2
         Password.of(ligatures).value.length shouldBe (Password.MIN_LENGTH - 1) * 2
+        // And the other direction, which only became reachable once the floor
+        // dropped to 8: four ligatures are four characters and fail, but
+        // compose to eight and pass. Checking length before normalising would
+        // reject a password that is exactly at the minimum.
+        Password.of("ﬁ".repeat(Password.MIN_LENGTH / 2)).value.length shouldBe Password.MIN_LENGTH
     }
 
     @Test

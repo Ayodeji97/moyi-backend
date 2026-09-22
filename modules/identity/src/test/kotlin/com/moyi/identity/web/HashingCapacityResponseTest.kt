@@ -7,6 +7,7 @@ import com.moyi.identity.domain.PasswordHash
 import com.moyi.identity.domain.PasswordHashAlgorithm
 import com.moyi.identity.domain.PasswordHasher
 import com.moyi.identity.infra.IdentityTestApplication
+import com.moyi.identity.infra.security.TestBreachCorpus
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.Test
@@ -19,6 +20,8 @@ import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
 
@@ -81,5 +84,24 @@ internal class HashingCapacityResponseTest(
 
                 override fun hash(password: Password): PasswordHash = throw HashingCapacityExceededException()
             }
+    }
+
+    private companion object {
+        /**
+         * The real corpus is a 17 MB release asset the build downloads and
+         * pins by digest; a test that waited for it would be testing the
+         * network. This points the context at a dozen-entry fixture built from
+         * a readable list, using the same `BloomFilter` the service loads — so
+         * the format is exercised rather than stood in for.
+         *
+         * Every context-booting test needs this, because there is deliberately
+         * no flag that switches the corpus off:
+         * `BloomFilterBreachedPasswordCorpus` refuses to start without one
+         * (ADR-0016), and a test context that could boot without it would not
+         * be the context we deploy.
+         */
+        @JvmStatic
+        @DynamicPropertySource
+        fun breachCorpus(registry: DynamicPropertyRegistry) = TestBreachCorpus.register(registry)
     }
 }

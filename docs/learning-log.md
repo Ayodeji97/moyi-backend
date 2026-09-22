@@ -662,6 +662,39 @@ Wrong about: what a decided decision decides. I have been treating the corpus
          running specifically to find that class of thing. Caught by reading
          it back, not by any gate I had put in place.
 
+## 2026-09-22 · Phase 1 · A test that would have passed by stopping testing
+Expected: the second half of slice C to be wiring. The corpus exists, the
+         filter reads, so: a port, an adapter, one line in the validator, and
+         `MIN_LENGTH` from 12 to 8.
+Reality: most of it was that. The thing worth writing down is what moving the
+         floor did to a test I was not looking at.
+         `RegistrationEndpointTest` has a case called *a password whose length
+         changes under NFKC is 422 in both directions*, built around a
+         twelve-character password that composes to eleven — twelve passes the
+         raw check, eleven fails the normalised one, and the 422 is the proof
+         that normalisation happens first. With the floor at 8, eleven is
+         **fine**. The test would have gone green by *accepting* the password:
+         same name, same assertion shape, asserting nothing. It is now six
+         characters composing to seven, which straddles the new floor.
+         Nothing would have caught that. The name still described the
+         behaviour, the file still contained the case, and the suite was
+         greener than before.
+Wrong about: which numbers in a test are data and which are structure. I have
+         been treating literals in tests as fixtures — details of the example,
+         free to be anything valid. But a boundary test's literals *are* the
+         test: they exist to sit either side of a line, and the moment the line
+         moves they are just numbers. The rule to keep: **when a constant
+         changes, grep for the tests that were interesting because of its old
+         value, not only for the ones that fail.** A failing test tells you it
+         noticed. This one would not have.
+         The other thing done right, and only because the habit is written
+         down: I verified fail-closed by actually taking the corpus away —
+         pointing the real application at a resource that does not exist and
+         watching the context refuse to start with a `BeanCreationException`.
+         The first attempt at that proved nothing, because I deleted the
+         packaged file and Gradle simply put it back on the next build. A
+         guard is not verified by removing something the build regenerates.
+
 ## 2026-09-22 · Phase 1 · The verification step that could not fail
 Expected: #21 to be reviewed by the automated reviewer and, failing that, by
          my own pass, which had already caught a shell-injection hole and a

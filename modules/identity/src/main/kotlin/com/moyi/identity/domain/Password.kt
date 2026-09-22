@@ -22,19 +22,29 @@ internal value class Password private constructor(
 
     companion object {
         /**
-         * **Twelve, not the eight in ADR-0012 — deliberately, and temporarily.**
+         * **Eight, as ADR-0012 decided — and only now, because the other half
+         * of that decision is finally here.**
          *
          * ADR-0012 lowers the floor to 8 and says in terms that the shorter
          * minimum is *paid for* by widening the breached-password corpus from
          * the top 10k to the top ~10M, and that "the two halves are one
-         * decision and MUST NOT be unbundled". The corpus is a slice of its
-         * own — a pinned dump processed in CI into a Bloom filter baked into
-         * the image. Until it lands, shipping 8 would be taking the friction
-         * benefit and leaving the security half behind, which is precisely
-         * what the ADR forbids. So the pre-ADR floor stands until the same PR
-         * that adds the corpus lowers it.
+         * decision and MUST NOT be unbundled". This number sat at the pre-ADR
+         * 12 for four PRs, with `PasswordTest` pinning it there, so that
+         * shipping the friction benefit without the security half would be a
+         * failing test rather than a judgement call. The corpus landed in
+         * ADR-0016; [BreachedPasswordCorpus] is the check; this is the number
+         * moving on the same day, which is what the ADR asked for.
+         *
+         * Eight is not a claim that eight characters is a good password. It is
+         * the observation that length is the *weakest* of the four controls
+         * here — human-chosen passwords carry ~2–3 bits of entropy per
+         * character, so 8 and 12 are both trivially brute-forceable offline,
+         * and what actually separates them is Argon2id, which we already have.
+         * Against credential stuffing, which ADR-0012 calls the dominant real
+         * attack, length does almost nothing and the corpus does almost
+         * everything.
          */
-        const val MIN_LENGTH = 12
+        const val MIN_LENGTH = 8
 
         /** NIST SP 800-63B requires accepting at least 64; ADR-0012 sets 128. */
         const val MAX_LENGTH = 128
@@ -61,9 +71,11 @@ internal value class Password private constructor(
             val password = Password(normalised)
 
             // No composition rules — ADR-0012, and they reduce entropy in
-            // practice by pushing people towards `Password1!`. Length, byte
-            // count, and (from the corpus slice) whether it is already known
-            // to attackers are the only questions asked.
+            // practice by pushing people towards `Password1!`. Length and byte
+            // count are the questions this type asks; whether the password is
+            // already known to attackers is [BreachedPasswordCorpus]'s, asked
+            // at the same edge by the same annotation. See
+            // `PasswordConstraintValidator` for why that one is not here.
             require(normalised.length >= MIN_LENGTH) { "password must be at least $MIN_LENGTH characters" }
             require(normalised.length <= MAX_LENGTH) { "password must be at most $MAX_LENGTH characters" }
             require(password.octetLength <= MAX_OCTETS) { "password must be at most $MAX_OCTETS bytes" }
