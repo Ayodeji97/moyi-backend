@@ -88,7 +88,12 @@ jobs:
             echo "sha256=$(awk '/^  sha256/ {print $2}' build.log)"
             echo "digests=$(awk '/^  digests/ {print $2}' build.log)"
             echo "size=$(stat -c%s build/pwned-passwords.bloom)"
-            echo "tag=corpus/$(date -u +%Y-%m-%d)"
+            # A hyphen, not a slash. A release asset is served from
+            # /releases/download/:tag/:filename, so a tag containing a slash
+            # makes the boundary between the two ambiguous — GitHub happens to
+            # resolve it, and the build that has to reconstruct this URL should
+            # not be relying on that.
+            echo "tag=corpus-$(date -u +%Y-%m-%d)"
           } >> "$GITHUB_OUTPUT"
 
       # An independent check that the file the service will download is one the
