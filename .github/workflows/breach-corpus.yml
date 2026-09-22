@@ -1,0 +1,217 @@
+# Builds the breached-password Bloom filter that ADR-0012 makes the price of
+# the 8-character minimum, and publishes it as a release asset the service
+# build pins by digest.
+#
+# Deliberately NOT part of CI. It pulls roughly 58 GB from Have I Been Pwned
+# over about three hours, and nothing about it changes between commits —
+# running it per push would be both useless and rude. It runs **twice a year**,
+# and on demand when someone wants it sooner.
+#
+# Twice, not four times: the corpus is a free service's bandwidth, and ~116 GB
+# a year is a more honest thing to take from it than ~232 GB for a list whose
+# top ten million barely move between quarters. ADR-0012 revisits the corpus
+# when it is "more than a year stale", so a six-month cadence still leaves a
+# whole missed run of slack before the staleness warning fires.
+#
+# The output is a single file plus its SHA-256. Pinning the digest in
+# `gradle/breach-corpus.properties` is what makes the corpus a build input like
+# any other dependency: a file swapped at the distribution point fails the
+# build rather than quietly becoming the filter the service ships.
+name: Breach corpus
+
+on:
+  workflow_dispatch:
+    inputs:
+      min-count:
+        description: >-
+          Keep hashes appearing at least this many times. 600 was calibrated
+          against 300 live ranges and lands near 10.5M — see BreachCorpusBuilder.
+        required: false
+        default: "600"
+      ranges:
+        description: >-
+          How many of the 1048576 prefix ranges to pull. Leave empty for all;
+          set a few hundred for a smoke run that finishes in seconds.
+        required: false
+        default: ""
+      publish:
+        description: Upload the result as a release asset.
+        type: boolean
+        required: false
+        default: true
+  schedule:
+    # 04:00 UTC on 1 January and 1 July.
+    - cron: "0 4 1 1,7 *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: breach-corpus
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # The download is bound by round trips, not bandwidth or CPU: ~1.05M
+    # requests at concurrency 64.
+    #
+    # **Six hours because three is the measurement.** A 300-range sample
+    # extrapolated to about an hour, and that was wrong: a real 130,000-range
+    # run took 22 minutes, or ~98 ranges/s, which puts the full job near three
+    # hours. A small sample overstates the rate, because the first few hundred
+    # ranges come back warm. This is the maximum GitHub allows for a job, and
+    # against a three-hour measurement taken on a home connection it is margin
+    # rather than an estimate — a runner's bandwidth is not this machine's.
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+
+      # 21 as well as 25 for the same reason every other workflow here installs
+      # both: gradle/gradle-daemon-jvm.properties pins the daemon to 21, so a
+      # missing 21 makes Gradle download one from the foojay URLs in that file.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # Inputs reach the script through `env`, never through `${{ }}`
+      # interpolation into the shell text. A dispatch input is attacker-
+      # controlled the moment anyone but the owner has write access, and
+      # interpolation splices it into the command before bash ever sees a
+      # quote — the same class of hole as string-concatenating SQL.
+      # A range-limited build is a smoke test, not a corpus: 300 of 1,048,576
+      # ranges is 0.03% of the space, so the filter it produces would wave
+      # through essentially every breached password while being, in every
+      # observable respect, a working control. `publish` defaults to true, so
+      # without this the documented smoke-run path publishes one — and the
+      # release body says nothing about the limit, so it could be pinned.
+      #
+      # Refused here rather than warned about, and refused *before* the hour of
+      # downloading rather than after it.
+      - if: ${{ inputs.ranges != '' && (github.event_name == 'schedule' || inputs.publish) }}
+        name: Refuse to publish a partial corpus
+        env:
+          RANGES: ${{ inputs.ranges }}
+        run: |
+          echo "::error::Refusing to publish a $RANGES-range build. A partial corpus is indistinguishable" \
+               "from a complete one once it is a file, and this one would cover a fraction of the" \
+               "1048576 prefix ranges. Re-run with publish unchecked for a smoke test, or clear ranges" \
+               "to build the real corpus."
+          exit 1
+
+      - id: build
+        env:
+          MIN_COUNT: ${{ inputs.min-count || '600' }}
+          RANGES: ${{ inputs.ranges }}
+        run: |
+          set -euo pipefail
+          ARGS="--output build/pwned-passwords.bloom --min-count $MIN_COUNT"
+          if [ -n "$RANGES" ]; then ARGS="$ARGS --ranges $RANGES"; fi
+          ./gradlew :tools:breach-corpus:run --args="$ARGS" --console=plain | tee build.log
+
+          # Parsed from the tool's own output rather than recomputed here, so
+          # the digest published is the digest of the file it reported on.
+          {
+            echo "sha256=$(awk '/^  sha256/ {print $2}' build.log)"
+            echo "digests=$(awk '/^  digests/ {print $2}' build.log)"
+            echo "size=$(stat -c%s build/pwned-passwords.bloom)"
+            # Stated in the release body so a partial build could never be
+            # mistaken for a corpus even if one reached the artefact store.
+            echo "ranges=${RANGES:-1048576}"
+            # A hyphen, not a slash. A release asset is served from
+            # /releases/download/:tag/:filename, so a tag containing a slash
+            # makes the boundary between the two ambiguous — GitHub happens to
+            # resolve it, and the build that has to reconstruct this URL should
+            # not be relying on that.
+            #
+            # The time is in the tag, not just the date. A date-only tag
+            # collides when a run is retried on the same UTC day, and
+            # action-gh-release resolves a collision by *replacing* the asset —
+            # which invalidates a SHA-256 somebody has already pinned, and
+            # directly contradicts this release's own "never replace an asset
+            # in place". Runs are serialised by the concurrency group above and
+            # take about three hours, so minutes are more than enough to
+            # separate them.
+            echo "tag=corpus-$(date -u +%Y-%m-%d-%H%M)"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pwned-passwords-bloom
+          path: build/pwned-passwords.bloom
+          retention-days: 7
+
+      # `make_latest: false` — this is a data artefact, not a release of the
+      # service, and it must not take over the repository's "Latest" badge.
+      # `inputs` is empty on a scheduled run, so the schedule is named explicitly
+      # rather than relying on the declared default being applied to it.
+      - if: ${{ github.event_name == 'schedule' || inputs.publish }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.build.outputs.tag }}
+          name: Breached-password corpus ${{ steps.build.outputs.tag }}
+          make_latest: false
+          files: build/pwned-passwords.bloom
+          body: |
+            Breached-password Bloom filter for `moyi-backend` (ADR-0012, ADR-0016).
+
+            Built from the live [Have I Been Pwned](https://haveibeenpwned.com/Passwords)
+            Pwned Passwords corpus, keeping every SHA-1 that appears at least
+            **${{ inputs.min-count || '600' }}** times.
+
+            | | |
+            |---|---|
+            | digests | `${{ steps.build.outputs.digests }}` |
+            | ranges | `${{ steps.build.outputs.ranges }}` of 1048576 |
+            | size | `${{ steps.build.outputs.size }}` bytes |
+            | sha256 | `${{ steps.build.outputs.sha256 }}` |
+
+            Pin it by putting the tag and digest in `gradle/breach-corpus.properties`.
+            The service build downloads this file and refuses it if the digest
+            does not match, so this asset must never be replaced in place —
+            publish a new tag instead.
+
+      # The check that used to sit before the upload compared the file's
+      # SHA-256 against the digest this same job had printed for it seconds
+      # earlier — a file compared with itself, which cannot fail. It was called
+      # "verify the published file reads back" and verified nothing of the
+      # sort. Reading the filter back through its own format is now the
+      # builder's job, where it can look for passwords that must be in any real
+      # corpus.
+      #
+      # What is left for the workflow is the half only the workflow can do:
+      # fetch the published asset from the public URL the Gradle build will
+      # reconstruct, and check it is the file we pinned. That exercises the tag,
+      # the asset name, the URL shape and the artefact store in one go — every
+      # part of the chain that a digest computed locally says nothing about,
+      # and the part that would otherwise be discovered by somebody's build
+      # failing a week later.
+      - if: ${{ github.event_name == 'schedule' || inputs.publish }}
+        name: Fetch the published asset and verify it
+        env:
+          TAG: ${{ steps.build.outputs.tag }}
+          SHA256: ${{ steps.build.outputs.sha256 }}
+          URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.build.outputs.tag }}/pwned-passwords.bloom
+        run: |
+          set -euo pipefail
+          # A release is not always servable the instant the API returns.
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL --retry 2 -o published.bloom "$URL"; then break; fi
+            echo "Asset not available yet (attempt $attempt); waiting"
+            sleep 10
+          done
+          echo "$SHA256  published.bloom" | sha256sum -c -
+          echo "Published asset at $URL matches the digest to pin."
+
+      - name: The lines to pin
+        env:
+          TAG: ${{ steps.build.outputs.tag }}
+          SHA256: ${{ steps.build.outputs.sha256 }}
+        run: |
+          echo "version=$TAG"
+          echo "sha256=$SHA256"

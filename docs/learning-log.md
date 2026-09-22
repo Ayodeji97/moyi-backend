@@ -621,3 +621,112 @@ Wrong about: what "verify the guard" means. I wrote the verification step
          the six-hour job limit, and on the weekly schedule it would have
          done so with nobody watching. A scheduled job with no timeout is the
          same class of invisible as a green check that checked nothing.
+
+## 2026-09-22 · Phase 1 · The document said "download the top 10 million"
+Expected: slice C to be plumbing. ADR-0012 had already decided everything —
+         a ~10M-hash Bloom filter, built in CI from a pinned HIBP dump, baked
+         into the image, half a session — so the work looked like reading a
+         file, filling a data structure and wiring one check into validation.
+Reality: the first sentence of the plan was not executable. There is no "top
+         ~10M hashes" to download: HIBP serves 1,048,576 prefix ranges sorted
+         only *within* themselves, so a global top-N means pulling and sorting
+         all ~2.1 billion entries. And there is no "pinned dump" either — the
+         downloadable corpus was retired, and the official downloader now just
+         walks every prefix. Two of the three load-bearing phrases in the
+         decision described something that does not exist.
+         What replaced the top-N was a prevalence threshold, and the number
+         came from running the thing rather than reasoning about it. Five
+         ranges sampled with `curl` put ~10M near "appears at least 700
+         times"; the finished builder over 300 ranges said 700 gives 9.0M and
+         **600** gives 10.5M. The quick estimate was off by a sixth, which is
+         the size of error you get for free by measuring with the real tool
+         instead of a shell pipeline.
+Wrong about: what a decided decision decides. I have been treating the corpus
+         as authoritative in the strong sense — doc 25 says decisions are not
+         renegotiated without an ADR, and that is right — and I read that as
+         "the plan is executable". ADR-0012 is an excellent document about
+         *why* the floor moves to 8 and it is completely right about that. It
+         is not a document about where an 18 MB file lives between the job
+         that builds it and the build that packages it, because nobody had
+         looked yet. The reading to keep: **an authoritative document settles
+         the argument, not the mechanism**, and the gap between them is not a
+         licence to relitigate — ADR-0016 changes nothing ADR-0012 decided —
+         but it is work, and pretending it is not is how "half a session"
+         becomes four.
+         Two smaller ones, both mine. I nearly wrote the false-positive rate
+         as an assertion from the formula; it is now measured over 200k
+         non-members, because a formula restated in a test only proves I can
+         restate it. And the first version of the CI job interpolated
+         `${{ inputs.ranges }}` straight into a shell script — the same shape
+         as string-concatenating SQL, in the repository that has CodeQL
+         running specifically to find that class of thing. Caught by reading
+         it back, not by any gate I had put in place.
+
+## 2026-09-22 · Phase 1 · The verification step that could not fail
+Expected: #21 to be reviewed by the automated reviewer and, failing that, by
+         my own pass, which had already caught a shell-injection hole and a
+         slash in a release tag. I said the PR was green and ready.
+Reality: Daniel asked whether it was actually *reviewed*. It was not. The
+         Claude reviewer failed in 32 seconds — the expired
+         `CLAUDE_CODE_OAUTH_TOKEN`, the same failure since PR #13, and I had
+         reported "CI green" without checking that the *review* job was part of
+         what went green. A Codex reviewer had run and left two inline comments
+         I had not looked at. Both were real:
+         **P1** — a smoke run (`ranges=300`) still had `publish` defaulting to
+         true, so the documented smoke-test path publishes a 300-of-1,048,576
+         filter as the corpus, with the release body saying nothing about the
+         limit. 0.03% of the space, pinnable, and indistinguishable from a
+         working control. **P2** — a date-only release tag collides on a
+         same-day retry, and the release action resolves that by *replacing*
+         the asset, which invalidates a SHA-256 somebody has pinned and
+         contradicts the release body's own "never replace an asset in place".
+         Going back through it properly then found two of my own, and the first
+         is the bad one: the step named **"Verify the published file reads
+         back" compared the file's SHA-256 against the digest the tool had
+         printed for that same file seconds earlier.** A file compared with
+         itself. It could not fail. Its comment claimed it proved "nothing
+         between the writer and the artefact store mangles it" — and it ran
+         *before* the upload.
+Wrong about: two things, and they are the same thing twice.
+         **"CI is green" is not "this was reviewed".** I read a list of passing
+         checks and reported a conclusion the list did not support, without
+         noticing that the job whose entire purpose is review was absent from
+         it because it had failed on an earlier commit. The check I should have
+         run is the one Daniel ran: *did a review actually happen*.
+         **And I wrote another guard that cannot fail.** On 2026-09-20 I wrote,
+         in this file, that "a check that cannot fail loudly is not a check, and
+         that applies most to the checks you are proudest of". Two days later I
+         shipped a verification step whose comparison is a tautology, and I was
+         pleased enough with it to name it in the PR description as evidence.
+         Knowing the rule is not the same as applying it. The thing that would
+         have caught it is mechanical and I did not do it: **for every check,
+         ask what input makes it fail, and if there isn't one, it is
+         decoration.** The replacement asks the corpus for two passwords that
+         appear 210 million and 52 million times — and I verified those counts
+         against the live endpoint rather than assuming them, because a
+         sentinel that is not really in the corpus is the same bug one level up.
+
+**Same session, third correction, and the one I would have shipped.** The
+review pass ended with a number I had repeated four times — "~70 GB over about
+an hour" — in the ADR, the workflow, and two PR descriptions. Both halves were
+invented. The duration came from extrapolating a 300-range sample at ~290
+ranges/s; a real 130,000-range run sustained **~98/s**, which makes the full
+job about **three hours**, not one. A small sample of a CDN comes back warm and
+overstates the rate, and I had no business treating it as a rate at all. The
+byte figure was worse: I had reasoned that disabling response padding removed
+"about a third" of the transfer — but the 98,561-byte measurement I started
+from was *already* unpadded, so I subtracted a saving twice. The real figure
+was ~103 GB.
+Chasing that down found something genuinely worth having. HIBP serves gzip,
+and Java's `HttpClient` neither requests it nor decodes it: 98,561 bytes per
+range becomes **55,362**. Two lines and a `GZIPInputStream` take a full run
+from ~103 GB to ~58 GB — a bigger saving than halving the cadence, which is the
+change Daniel had actually asked for. Verified by re-running the same 300
+ranges and getting the same 3,005 digests.
+The lesson is not "measure before you write a number", which I already knew and
+had already written in this file. It is narrower and more useful: **a number
+you have repeated is not thereby confirmed.** I said "~70 GB" once from a bad
+inference and then quoted myself three times, and each repetition made it
+feel more settled. The check is to go back to where a figure entered the
+documents and ask what measurement it came from — and if the answer is "an
+earlier sentence of mine", it has never been checked.
