@@ -1,5 +1,6 @@
 package com.moyi.tools.breachcorpus
 
+import com.moyi.common.security.BloomFilter
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
@@ -118,4 +119,54 @@ internal class PwnedRangeTest {
             |
             """.trimMargin()
     }
+}
+
+/**
+ * The check that separates a corpus from a well-formed, worthless filter.
+ *
+ * It runs only on a full 1,048,576-range build, which no test can do, so the
+ * rule is tested here directly rather than through the builder. A guard that
+ * can only be exercised by an hour-long job is a guard nobody exercises.
+ */
+internal class CorpusSentinelsTest {
+    @Test
+    fun `a filter holding the sentinels reports none missing`() {
+        val filter = emptyFilter()
+        CorpusSentinels.PASSWORDS.forEach { filter.add(CorpusSentinels.digestOf(it)) }
+
+        CorpusSentinels.missingFrom(filter) shouldBe emptyList()
+    }
+
+    @Test
+    fun `an empty filter reports every sentinel missing`() {
+        CorpusSentinels.missingFrom(emptyFilter()) shouldBe CorpusSentinels.PASSWORDS
+    }
+
+    @Test
+    fun `the sentinel digest agrees with one assembled from a prefix and a suffix`() {
+        // The failure this exists to catch is a corpus built without
+        // re-attaching the 5-character prefix HIBP omits: every digest would be
+        // twenty valid-looking bytes matching no password alive. If the
+        // sentinel check derived its digests differently from the builder, it
+        // would pass on exactly that corpus — testing its own arithmetic.
+        //
+        // SHA-1("password"), which is public knowledge and what HIBP's own
+        // range endpoint returns under prefix 5BAA6.
+        val known = "5BAA61E4C9B93F3F0682250B6CF8331B7EE68FD8"
+        val assembled =
+            PwnedRange
+                .qualifyingDigests(known.take(PwnedRange.PREFIX_LENGTH), "${known.drop(PwnedRange.PREFIX_LENGTH)}:9999999", 1)
+                .digests
+                .single()
+
+        assembled.toList() shouldBe CorpusSentinels.digestOf("password").toList()
+    }
+
+    private fun emptyFilter() =
+        BloomFilter.create(
+            expectedInsertions = 100,
+            falsePositiveRate = 1e-9,
+            source = "test",
+            builtAt = java.time.Instant.EPOCH,
+        )
 }

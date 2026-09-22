@@ -661,3 +661,47 @@ Wrong about: what a decided decision decides. I have been treating the corpus
          as string-concatenating SQL, in the repository that has CodeQL
          running specifically to find that class of thing. Caught by reading
          it back, not by any gate I had put in place.
+
+## 2026-09-22 · Phase 1 · The verification step that could not fail
+Expected: #21 to be reviewed by the automated reviewer and, failing that, by
+         my own pass, which had already caught a shell-injection hole and a
+         slash in a release tag. I said the PR was green and ready.
+Reality: Daniel asked whether it was actually *reviewed*. It was not. The
+         Claude reviewer failed in 32 seconds — the expired
+         `CLAUDE_CODE_OAUTH_TOKEN`, the same failure since PR #13, and I had
+         reported "CI green" without checking that the *review* job was part of
+         what went green. A Codex reviewer had run and left two inline comments
+         I had not looked at. Both were real:
+         **P1** — a smoke run (`ranges=300`) still had `publish` defaulting to
+         true, so the documented smoke-test path publishes a 300-of-1,048,576
+         filter as the corpus, with the release body saying nothing about the
+         limit. 0.03% of the space, pinnable, and indistinguishable from a
+         working control. **P2** — a date-only release tag collides on a
+         same-day retry, and the release action resolves that by *replacing*
+         the asset, which invalidates a SHA-256 somebody has pinned and
+         contradicts the release body's own "never replace an asset in place".
+         Going back through it properly then found two of my own, and the first
+         is the bad one: the step named **"Verify the published file reads
+         back" compared the file's SHA-256 against the digest the tool had
+         printed for that same file seconds earlier.** A file compared with
+         itself. It could not fail. Its comment claimed it proved "nothing
+         between the writer and the artefact store mangles it" — and it ran
+         *before* the upload.
+Wrong about: two things, and they are the same thing twice.
+         **"CI is green" is not "this was reviewed".** I read a list of passing
+         checks and reported a conclusion the list did not support, without
+         noticing that the job whose entire purpose is review was absent from
+         it because it had failed on an earlier commit. The check I should have
+         run is the one Daniel ran: *did a review actually happen*.
+         **And I wrote another guard that cannot fail.** On 2026-09-20 I wrote,
+         in this file, that "a check that cannot fail loudly is not a check, and
+         that applies most to the checks you are proudest of". Two days later I
+         shipped a verification step whose comparison is a tautology, and I was
+         pleased enough with it to name it in the PR description as evidence.
+         Knowing the rule is not the same as applying it. The thing that would
+         have caught it is mechanical and I did not do it: **for every check,
+         ask what input makes it fail, and if there isn't one, it is
+         decoration.** The replacement asks the corpus for two passwords that
+         appear 210 million and 52 million times — and I verified those counts
+         against the live endpoint rather than assuming them, because a
+         sentinel that is not really in the corpus is the same bug one level up.

@@ -5,6 +5,7 @@ import java.io.DataInputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
@@ -76,6 +77,7 @@ internal class BreachCorpusBuilder(
             val filter = fillFilter(workFile, download, startedAt)
             options.output.parent?.let(Files::createDirectories)
             options.output.outputStream().use(filter::writeTo)
+            verifyReadBack(filter)
 
             return BuildReport(
                 insertedCount = download.digestCount,
@@ -191,6 +193,51 @@ internal class BreachCorpusBuilder(
         return filter
     }
 
+    /**
+     * Reads the file back and asks it questions only a correct corpus can
+     * answer.
+     *
+     * The first version of this check lived in the workflow and compared the
+     * file's SHA-256 against the digest this tool had printed for it seconds
+     * earlier — a comparison of a file with itself, which cannot fail. It was
+     * called "verify the published file reads back" and verified nothing of
+     * the sort.
+     *
+     * This one goes through the format: it reopens the written bytes with
+     * [BloomFilter.readFrom] and looks for passwords that must be in any real
+     * corpus. That is what catches the failure worth catching here — a
+     * **plausible but useless** filter. The likeliest cause is the prefix: HIBP
+     * returns only the 35-character suffix, so forgetting to re-attach the
+     * 5-character prefix produces twenty valid-looking bytes per entry that
+     * match no password in existence. Every count in the report would still be
+     * right, the file would still be well-formed, and the control would be off.
+     */
+    private fun verifyReadBack(built: BloomFilter) {
+        val written = Files.newInputStream(options.output).use(BloomFilter::readFrom)
+
+        check(written.insertedCount == built.insertedCount && written.bitCount == built.bitCount) {
+            "the corpus did not survive being written: ${written.insertedCount}/${written.bitCount} read back " +
+                "from ${built.insertedCount}/${built.bitCount}"
+        }
+
+        // Only on a full run: a range-limited smoke build legitimately covers
+        // a fraction of the space, and these two live at prefixes 7C4A8 and
+        // 5BAA6 — indices 509,096 and 375,974 of 1,048,576, which a build
+        // limited to the first few hundred ranges never reaches.
+        if (options.prefixLimit < PwnedRange.TOTAL_PREFIXES) {
+            log("Skipping the known-password check: this is a ${options.prefixLimit}-range build, not a corpus")
+            return
+        }
+
+        val missing = CorpusSentinels.missingFrom(written)
+        check(missing.isEmpty()) {
+            "the corpus does not contain ${missing.joinToString()}, which appear tens of millions of times in " +
+                "any real breach corpus. The filter is well-formed and worthless. Suspect the prefix being " +
+                "dropped before the digest is assembled."
+        }
+        log("Read back and verified: ${written.insertedCount} digests, sentinels present")
+    }
+
     private fun reportProgress(
         completed: Int,
         total: Int,
@@ -249,4 +296,33 @@ private class Progress {
     val failure =
         java.util.concurrent.atomic
             .AtomicReference<IOException?>(null)
+}
+
+/**
+ * Passwords that must be in any real breach corpus, and the check that says so.
+ *
+ * Its own object because it is a rule rather than a step: it is what separates
+ * a corpus from a **plausible but useless** filter, and a rule that can only be
+ * exercised by a 1,048,576-range build is a rule nobody tests. Extracted so it
+ * can be handed a filter directly.
+ */
+internal object CorpusSentinels {
+    /**
+     * The two most-used passwords on earth by a wide margin. Checked against
+     * the live endpoint on 2026-09-22: `123456` appears **210,461,208** times
+     * and `password` **52,372,427**, against a threshold of 600. Any threshold
+     * a sane person would set keeps them, so their absence means the corpus is
+     * wrong rather than that the threshold was strict.
+     */
+    val PASSWORDS = listOf("123456", "password")
+
+    /** Which of [PASSWORDS] the filter does not have. Empty is the only acceptable answer. */
+    fun missingFrom(filter: BloomFilter): List<String> = PASSWORDS.filterNot { filter.mightContain(digestOf(it)) }
+
+    /**
+     * SHA-1 of the UTF-8 bytes, which is how HIBP keys its corpus — so this has
+     * to agree with the digest [PwnedRange] assembles from a prefix and a
+     * suffix, or the check tests its own arithmetic instead of the corpus.
+     */
+    fun digestOf(password: String): ByteArray = MessageDigest.getInstance("SHA-1").digest(password.toByteArray(Charsets.UTF_8))
 }

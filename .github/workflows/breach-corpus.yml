@@ -77,6 +77,26 @@ jobs:
       # controlled the moment anyone but the owner has write access, and
       # interpolation splices it into the command before bash ever sees a
       # quote — the same class of hole as string-concatenating SQL.
+      # A range-limited build is a smoke test, not a corpus: 300 of 1,048,576
+      # ranges is 0.03% of the space, so the filter it produces would wave
+      # through essentially every breached password while being, in every
+      # observable respect, a working control. `publish` defaults to true, so
+      # without this the documented smoke-run path publishes one — and the
+      # release body says nothing about the limit, so it could be pinned.
+      #
+      # Refused here rather than warned about, and refused *before* the hour of
+      # downloading rather than after it.
+      - if: ${{ inputs.ranges != '' && (github.event_name == 'schedule' || inputs.publish) }}
+        name: Refuse to publish a partial corpus
+        env:
+          RANGES: ${{ inputs.ranges }}
+        run: |
+          echo "::error::Refusing to publish a $RANGES-range build. A partial corpus is indistinguishable" \
+               "from a complete one once it is a file, and this one would cover a fraction of the" \
+               "1048576 prefix ranges. Re-run with publish unchecked for a smoke test, or clear ranges" \
+               "to build the real corpus."
+          exit 1
+
       - id: build
         env:
           MIN_COUNT: ${{ inputs.min-count || '600' }}
@@ -93,26 +113,25 @@ jobs:
             echo "sha256=$(awk '/^  sha256/ {print $2}' build.log)"
             echo "digests=$(awk '/^  digests/ {print $2}' build.log)"
             echo "size=$(stat -c%s build/pwned-passwords.bloom)"
+            # Stated in the release body so a partial build could never be
+            # mistaken for a corpus even if one reached the artefact store.
+            echo "ranges=${RANGES:-1048576}"
             # A hyphen, not a slash. A release asset is served from
             # /releases/download/:tag/:filename, so a tag containing a slash
             # makes the boundary between the two ambiguous — GitHub happens to
             # resolve it, and the build that has to reconstruct this URL should
             # not be relying on that.
-            echo "tag=corpus-$(date -u +%Y-%m-%d)"
+            #
+            # The time is in the tag, not just the date. A date-only tag
+            # collides when a run is retried on the same UTC day, and
+            # action-gh-release resolves a collision by *replacing* the asset —
+            # which invalidates a SHA-256 somebody has already pinned, and
+            # directly contradicts this release's own "never replace an asset
+            # in place". Runs are serialised by the concurrency group above and
+            # take about an hour, so minutes are more than enough to separate
+            # them.
+            echo "tag=corpus-$(date -u +%Y-%m-%d-%H%M)"
           } >> "$GITHUB_OUTPUT"
-
-      # An independent check that the file the service will download is one the
-      # service can read. The builder just wrote it, so this is not testing the
-      # writer — it is testing that nothing between the writer and the artefact
-      # store mangles it, which is the failure a digest alone would catch only
-      # after someone noticed.
-      - name: Verify the published file reads back
-        env:
-          SHA256: ${{ steps.build.outputs.sha256 }}
-        run: |
-          set -euo pipefail
-          echo "$SHA256  build/pwned-passwords.bloom" > corpus.sha256
-          sha256sum -c corpus.sha256
 
       - uses: actions/upload-artifact@v4
         with:
@@ -141,6 +160,7 @@ jobs:
             | | |
             |---|---|
             | digests | `${{ steps.build.outputs.digests }}` |
+            | ranges | `${{ steps.build.outputs.ranges }}` of 1048576 |
             | size | `${{ steps.build.outputs.size }}` bytes |
             | sha256 | `${{ steps.build.outputs.sha256 }}` |
 
@@ -148,6 +168,38 @@ jobs:
             The service build downloads this file and refuses it if the digest
             does not match, so this asset must never be replaced in place —
             publish a new tag instead.
+
+      # The check that used to sit before the upload compared the file's
+      # SHA-256 against the digest this same job had printed for it seconds
+      # earlier — a file compared with itself, which cannot fail. It was called
+      # "verify the published file reads back" and verified nothing of the
+      # sort. Reading the filter back through its own format is now the
+      # builder's job, where it can look for passwords that must be in any real
+      # corpus.
+      #
+      # What is left for the workflow is the half only the workflow can do:
+      # fetch the published asset from the public URL the Gradle build will
+      # reconstruct, and check it is the file we pinned. That exercises the tag,
+      # the asset name, the URL shape and the artefact store in one go — every
+      # part of the chain that a digest computed locally says nothing about,
+      # and the part that would otherwise be discovered by somebody's build
+      # failing a week later.
+      - if: ${{ github.event_name == 'schedule' || inputs.publish }}
+        name: Fetch the published asset and verify it
+        env:
+          TAG: ${{ steps.build.outputs.tag }}
+          SHA256: ${{ steps.build.outputs.sha256 }}
+          URL: https://github.com/${{ github.repository }}/releases/download/${{ steps.build.outputs.tag }}/pwned-passwords.bloom
+        run: |
+          set -euo pipefail
+          # A release is not always servable the instant the API returns.
+          for attempt in 1 2 3 4 5; do
+            if curl -fsSL --retry 2 -o published.bloom "$URL"; then break; fi
+            echo "Asset not available yet (attempt $attempt); waiting"
+            sleep 10
+          done
+          echo "$SHA256  published.bloom" | sha256sum -c -
+          echo "Published asset at $URL matches the digest to pin."
 
       - name: The lines to pin
         env:

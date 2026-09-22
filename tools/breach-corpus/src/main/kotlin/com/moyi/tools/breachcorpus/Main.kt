@@ -65,28 +65,3 @@ private fun sha256(path: Path): String =
         .getInstance("SHA-256")
         .digest(path.readBytes())
         .joinToString("") { "%02x".format(it) }
-
-/** Just enough argument parsing for a four-flag tool; a CLI library would be more code than this. */
-private class Arguments(
-    args: Array<String>,
-) {
-    private val values =
-        args
-            .toList()
-            .chunked(2)
-            .mapNotNull { pair ->
-                pair.takeIf { it.size == 2 }?.let { it[0] to it[1] }
-            }.toMap()
-
-    fun require(flag: String): String = values[flag] ?: error("missing required argument $flag")
-
-    fun int(
-        flag: String,
-        default: Int,
-    ): Int = values[flag]?.toInt() ?: default
-
-    fun double(
-        flag: String,
-        default: Double,
-    ): Double = values[flag]?.toDouble() ?: default
-}
