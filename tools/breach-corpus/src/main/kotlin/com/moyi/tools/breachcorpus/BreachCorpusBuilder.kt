@@ -1,11 +1,11 @@
 package com.moyi.tools.breachcorpus
 
 import com.moyi.common.security.BloomFilter
+import com.moyi.common.security.PwnedPasswordDigest
 import java.io.DataInputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
-import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicInteger
@@ -320,9 +320,10 @@ internal object CorpusSentinels {
     fun missingFrom(filter: BloomFilter): List<String> = PASSWORDS.filterNot { filter.mightContain(digestOf(it)) }
 
     /**
-     * SHA-1 of the UTF-8 bytes, which is how HIBP keys its corpus — so this has
-     * to agree with the digest [PwnedRange] assembles from a prefix and a
-     * suffix, or the check tests its own arithmetic instead of the corpus.
+     * Delegates to [PwnedPasswordDigest], rather than computing SHA-1 here, so
+     * that this check and the service's own lookup cannot disagree about what
+     * the key is. If they did, this would pass on exactly the corpus it exists
+     * to reject.
      */
-    fun digestOf(password: String): ByteArray = MessageDigest.getInstance("SHA-1").digest(password.toByteArray(Charsets.UTF_8))
+    fun digestOf(password: String): ByteArray = PwnedPasswordDigest.of(password)
 }
