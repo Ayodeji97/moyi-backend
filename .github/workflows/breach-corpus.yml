@@ -45,6 +45,8 @@ on:
 
 permissions:
   contents: write
+  # For the pin PR below. Without it the corpus refreshes and nothing uses it.
+  pull-requests: write
 
 concurrency:
   group: breach-corpus
@@ -234,10 +236,51 @@ jobs:
           echo "$SHA256  published.bloom" | sha256sum -c -
           echo "Published asset at $URL matches the digest to pin."
 
-      - name: The lines to pin
+      # ADR-0012 lists, under its negative consequences, that "the pinned dump
+      # needs an owner and a refresh cadence, or it silently ages". The cron
+      # above is the cadence. This is the owner: a rebuilt corpus that nobody
+      # pins is a rebuilt corpus nobody ships, and the failure mode is exactly
+      # the silent ageing the ADR warns about — the job goes green every
+      # quarter while the service keeps loading a filter from years ago.
+      #
+      # A PR rather than a push to main: the pin is a security-relevant change
+      # and doc 18's PR discipline applies to it like anything else. Note that
+      # GITHUB_TOKEN-authored PRs do not trigger workflows, by design — closing
+      # and reopening the PR runs CI on it.
+      - if: ${{ github.event_name == 'schedule' || inputs.publish }}
+        name: Re-pin the corpus
         env:
           TAG: ${{ steps.build.outputs.tag }}
           SHA256: ${{ steps.build.outputs.sha256 }}
         run: |
-          echo "version=$TAG"
-          echo "sha256=$SHA256"
+          set -euo pipefail
+          sed -i "s|^version=.*|version=$TAG|" gradle/breach-corpus.properties
+          sed -i "s|^sha256=.*|sha256=$SHA256|" gradle/breach-corpus.properties
+          git diff --stat gradle/breach-corpus.properties
+
+      - if: ${{ github.event_name == 'schedule' || inputs.publish }}
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/pin-${{ steps.build.outputs.tag }}
+          add-paths: gradle/breach-corpus.properties
+          title: "chore: pin the ${{ steps.build.outputs.tag }} breached-password corpus"
+          commit-message: |
+            chore: pin the ${{ steps.build.outputs.tag }} breached-password corpus
+
+            Published by the Breach corpus workflow: ${{ steps.build.outputs.digests }}
+            digests, SHA-256 ${{ steps.build.outputs.sha256 }}.
+          body: |
+            Opened by the `Breach corpus` workflow. It rebuilt the corpus and
+            published it as [`${{ steps.build.outputs.tag }}`](https://github.com/${{ github.repository }}/releases/tag/${{ steps.build.outputs.tag }});
+            this pins it so the service actually packages it.
+
+            | | |
+            |---|---|
+            | digests | `${{ steps.build.outputs.digests }}` |
+            | size | `${{ steps.build.outputs.size }}` bytes |
+            | sha256 | `${{ steps.build.outputs.sha256 }}` |
+
+            The build downloads the asset and verifies this digest, so merging
+            is what makes the new corpus live. **CI will not have run on this
+            PR** — `GITHUB_TOKEN`-authored PRs do not trigger workflows; close
+            and reopen it to run the checks.
