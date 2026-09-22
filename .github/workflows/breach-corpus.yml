@@ -240,8 +240,8 @@ jobs:
       # needs an owner and a refresh cadence, or it silently ages". The cron
       # above is the cadence. This is the owner: a rebuilt corpus that nobody
       # pins is a rebuilt corpus nobody ships, and the failure mode is exactly
-      # the silent ageing the ADR warns about — the job goes green every
-      # quarter while the service keeps loading a filter from years ago.
+      # the silent ageing the ADR warns about — the job goes green twice a year
+      # while the service keeps loading a filter from years ago.
       #
       # A PR rather than a push to main: the pin is a security-relevant change
       # and doc 18's PR discipline applies to it like anything else. Note that

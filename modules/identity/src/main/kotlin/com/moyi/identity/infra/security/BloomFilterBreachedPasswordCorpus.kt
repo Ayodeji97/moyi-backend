@@ -52,7 +52,7 @@ internal class BloomFilterBreachedPasswordCorpus(
             // quietly, because nothing about a stale filter looks wrong.
             log.warn(
                 "The breached-password corpus is {} days old (ADR-0012 revisits past {}). " +
-                    "The quarterly rebuild has probably been failing.",
+                    "The twice-yearly rebuild has probably been failing.",
                 age.toDays(),
                 properties.warnAfterDays,
             )

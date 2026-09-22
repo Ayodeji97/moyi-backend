@@ -29,9 +29,17 @@ internal data class BreachCorpusProperties(
     /**
      * ADR-0012 revisits the corpus when it is "more than a year stale". A
      * corpus older than this is logged at WARN on every startup rather than
-     * refused: the quarterly rebuild is what keeps it fresh, so staleness here
-     * means that job has been failing, and taking production down for a
+     * refused: the twice-yearly rebuild is what keeps it fresh, so staleness
+     * here means that job has been failing, and taking production down for a
      * *documentation* trigger would be a worse outcome than the staleness.
+     *
+     * **A year, not six months, deliberately.** It is tempting to tie this to
+     * the rebuild cadence so the warning fires the moment one run is missed.
+     * It stays at ADR-0012's number instead, because a threshold pinned to the
+     * schedule has to be edited every time the schedule moves — and a warning
+     * that has been re-tuned twice is a warning nobody reads. One whole missed
+     * run of slack is the cost, and it buys a number that means something on
+     * its own.
      */
     @field:Min(1)
     val warnAfterDays: Long = DEFAULT_WARN_AFTER_DAYS,

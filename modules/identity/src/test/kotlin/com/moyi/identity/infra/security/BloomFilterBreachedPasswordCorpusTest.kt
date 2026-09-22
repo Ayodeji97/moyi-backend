@@ -76,8 +76,11 @@ internal class BloomFilterBreachedPasswordCorpusTest {
         // ADR-0012's "revisit when the pinned corpus is more than a year
         // stale". Nothing about an old filter looks wrong, so the age has to
         // be said out loud. It is a warning rather than a refusal because the
-        // quarterly rebuild is the real mechanism — staleness means that job
-        // has been failing, and taking production down for it would be worse.
+        // twice-yearly rebuild is the real mechanism — staleness means that
+        // job has been failing, and taking production down for it would be
+        // worse. 400 days is past the threshold with a whole missed run of
+        // slack already spent, which is the point of keeping the threshold at
+        // ADR-0012's year rather than at the cadence.
         val appender = captureLogs()
 
         load(TestBreachCorpus.writeTo(directory, builtAt = NOW.minus(Duration.ofDays(400))))
