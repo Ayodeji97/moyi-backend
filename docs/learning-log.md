@@ -820,3 +820,39 @@ Wrong about: where to put a check. I had been placing verification at the
          from running the real builder: predicted 10.49M, actual 10,546,783,
          inside 0.5%. **Extrapolation is only as good as the thing you
          extrapolated from being the thing you are describing.**
+
+## 2026-09-23 · Phase 1 · Two wrong diagnoses before the evidence
+Expected: the automated reviewer's failure to be the expired
+         `CLAUDE_CODE_OAUTH_TOKEN` my notes already named.
+Reality: it was. I talked myself out of it twice on the way there, and both
+         detours are worth keeping because the reasoning looked sound each time.
+         **First wrong turn.** Two runs that morning showed `success`, so I
+         concluded the token worked and the problem was elsewhere. They were
+         Dependabot PRs, and their `claude-code-action` step was **skipped** —
+         Dependabot runs cannot read repository secrets, so the guard saw an
+         empty token and no-opped into a green job. I had read a *job*
+         conclusion and drawn a conclusion about a *step*.
+         **Second wrong turn.** With the token apparently exonerated I bisected
+         to the action version and found 20 releases of
+         `anthropics/claude-code-action@v1` between the last success and the
+         first failure — a floating tag, a real supply-chain weakness, and a
+         tidy story. It was not the cause: `v1` has resolved to the same commit
+         since 2026-09-19T03:12Z, which spans both the failures and the run
+         that fixed them. The correlation was real and the causation was not.
+         What settled it was one command, `gh secret list`, showing the secret
+         last updated 2026-08-31 and never rotated. Last success 2026-09-01.
+Wrong about: what counts as evidence. Both detours came from reasoning over
+         *summaries* — a job's conclusion, a release timeline — when the
+         primary fact was one API call away and I had not made it. **A green
+         job is not a green step, and a correlation across a window is not a
+         cause.** The habit to keep: when a diagnosis rests on "X was working
+         at time T", go and check X at time T directly, not something that
+         would usually imply it.
+         And the sting in the tail: with the token fixed, the review ran
+         properly — 24 turns, three models, four and a half minutes, about a
+         dollar of subscription usage — and **posted nothing at all**. Five
+         permission denials, contents hidden. The check went green. So the
+         thing I was fixing was never the only thing broken, and the second
+         fault was invisible behind the first precisely because the first one
+         failed loudly enough to explain the symptom. Fixing the loud failure
+         is how you find out what the quiet one was.
