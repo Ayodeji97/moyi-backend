@@ -68,6 +68,7 @@ jobs:
       # that reports success — which is precisely the shape of green
       # check this repo treats as worse than a red one.
       - name: Warn if this PR edits the review workflow
+        id: drift
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
@@ -78,15 +79,85 @@ jobs:
             base=FETCH_HEAD
           fi
           if ! git rev-parse --verify --quiet "$base" > /dev/null; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Could not resolve $DEFAULT_BRANCH, so the workflow-drift check was skipped."
           elif ! git diff --quiet "$base" -- "$workflow"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "::warning::This PR changes $workflow, so claude-code-action will skip itself — it requires this file to be identical to the copy on $DEFAULT_BRANCH. The 'review' check will pass WITHOUT reviewing anything. Review this PR by hand, and prove the workflow change by watching the PR after it merges."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # What the PR looked like before the review ran, so that "the review
+      # posted nothing" can be distinguished from "the review posted nothing
+      # new". Counted across all three surfaces the plugin can deliver on: a
+      # summary comment (`gh pr comment` -> issue comments), inline comments
+      # (the MCP tool -> pull request review comments), and a formal review.
       - if: steps.configured.outputs.enabled == 'true'
-        uses: anthropics/claude-code-action@v1
+        id: before
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Summed across pages, not `--jq length` on the first one. A PR with
+          # more than a page of comments would otherwise report a count pinned
+          # at the page size, and the guard below would compare 30 against 30
+          # and conclude nothing was posted — a check silently capped at 30 is
+          # the same kind of bug it exists to catch. `--slurp` cannot be
+          # combined with `--jq`, hence awk.
+          # Only what the review itself posts. It delivers through GITHUB_TOKEN,
+          # so its comments are authored by github-actions[bot] — and counting
+          # *everything* would let an unrelated bot rescue a silent no-op.
+          # That is not hypothetical: CodeQL posts a review and an inline
+          # comment when it finds an alert, which on a real PR would have
+          # pushed the total up while the review posted nothing at all.
+          #
+          # If the review ever posts under a different identity this filter
+          # goes stale and the guard fails on a good review. That is the
+          # failure direction worth having, and the error message says where
+          # to look.
+          count() { gh api --paginate "$1?per_page=100" --jq '[.[] | select(.user.login == "github-actions[bot]")] | length' | awk '{s+=$1} END {print s+0}'; }
+          issue=$(count "repos/$REPO/issues/$PR/comments")
+          inline=$(count "repos/$REPO/pulls/$PR/comments")
+          reviews=$(count "repos/$REPO/pulls/$PR/reviews")
+          echo "count=$(( issue + inline + reviews ))" >> "$GITHUB_OUTPUT"
+
+      # **Pinned, and the pin is preventive rather than corrective.** `@v1` is
+      # a floating tag: it moved 20 times between this repo's last working
+      # review (2026-09-01) and its first broken one (2026-09-19), so for three
+      # weeks this job could have changed behaviour without a commit. It did
+      # not, as it happens — `v1` has resolved to the same commit (`cfc3eb22`,
+      # identical to `v1.0.231`) since 2026-09-19T03:12Z, which covers both the
+      # failures and the run that fixed them, so the breakage was entirely the
+      # expired OAuth token. The pin is here so that the next time this job
+      # changes behaviour, a commit says so.
+      #
+      # Two moving parts remain unpinned and are recorded rather than quietly
+      # accepted: `plugin_marketplaces` clones that repository at HEAD on every
+      # run, and the action installs whatever Claude Code version is current
+      # (2.1.278 today). Neither exposes a version input here.
+      - if: steps.configured.outputs.enabled == 'true'
+        uses: anthropics/claude-code-action@v1.0.231
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The action hides the SDK transcript by default, which is why the
+          # token failure above took a bisect across six runs, two wrong
+          # diagnoses and a secret-metadata lookup to identify: every failing
+          # run said only `is_error: true`.
+          #
+          # The usual objection is secrets in logs, and it does not apply the
+          # way it first looks: Actions masks every registered secret in log
+          # output, so the OAuth token appears as `***`. Everything else in the
+          # transcript is this public repository and its public diff.
+          #
+          # Permanent rather than switched on when needed, because switching it
+          # on requires editing this file — and an edit to this file makes the
+          # action skip itself (see the header). Diagnostics that can only be
+          # enabled by a change that cannot be tested are diagnostics that
+          # arrive a merge too late.
+          show_full_output: true
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
           # The plugin's command takes a PR target and nothing else — it
@@ -129,3 +200,60 @@ jobs:
           # production.
           claude_args: >-
             --allowedTools "Task,Read,Grep,Glob,TodoWrite,mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(git blame:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+
+      # **The check that would have caught today.** With a working token the
+      # review ran properly — 24 turns, three models, four and a half minutes,
+      # about a dollar of subscription usage — and posted nothing at all on the
+      # pull request. Five permission denials, contents unknown because the
+      # transcript was hidden. The job reported success.
+      #
+      # That is the shape this repository keeps being bitten by and has twice
+      # written down as a rule: a check that cannot fail is not a check. A
+      # review nobody can read is indistinguishable from no review, and worse
+      # than none, because the green tick says otherwise.
+      #
+      # The assumption, stated so it can be argued with: the plugin's last step
+      # posts a summary comment whether or not it found anything, so zero new
+      # comments means broken rather than clean. If a genuinely clean PR is
+      # ever seen to post nothing, this guard is wrong and should become a
+      # warning — but a false red is cheap and today's false green was not.
+      # Not when this PR edits this workflow. In that case claude-code-action
+      # deliberately skips itself and signals it by *succeeding*, so nothing is
+      # posted for a reason that has nothing to do with the review being
+      # broken — and a guard that fires anyway is a red check on every future
+      # change to this file, which is how guards get deleted.
+      #
+      # Found by this step failing on the very PR that introduced it, which is
+      # the only run that could have found it. The drift step is now
+      # load-bearing rather than informational.
+      - if: steps.configured.outputs.enabled == 'true' && steps.drift.outputs.changed != 'true'
+        name: The review must have said something
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          BEFORE: ${{ steps.before.outputs.count }}
+        run: |
+          set -euo pipefail
+          # Only what the review itself posts. It delivers through GITHUB_TOKEN,
+          # so its comments are authored by github-actions[bot] — and counting
+          # *everything* would let an unrelated bot rescue a silent no-op.
+          # That is not hypothetical: CodeQL posts a review and an inline
+          # comment when it finds an alert, which on a real PR would have
+          # pushed the total up while the review posted nothing at all.
+          #
+          # If the review ever posts under a different identity this filter
+          # goes stale and the guard fails on a good review. That is the
+          # failure direction worth having, and the error message says where
+          # to look.
+          count() { gh api --paginate "$1?per_page=100" --jq '[.[] | select(.user.login == "github-actions[bot]")] | length' | awk '{s+=$1} END {print s+0}'; }
+          issue=$(count "repos/$REPO/issues/$PR/comments")
+          inline=$(count "repos/$REPO/pulls/$PR/comments")
+          reviews=$(count "repos/$REPO/pulls/$PR/reviews")
+          after=$(( issue + inline + reviews ))
+
+          if [ "$after" -le "$BEFORE" ]; then
+            echo "::error::The review ran but posted nothing as github-actions[bot] ($BEFORE before, $after after). It has spent the whole review and delivered none of it, and without this step the check would be green. Two things to check, in order. First the run log — show_full_output is on — for permission denials: the allowlist in claude_args is the usual cause, and it must cover the tools the review's SUBAGENTS use, not only the top-level session's. Second, whether the review now posts under a different identity, in which case the filter in this job is what is stale, not the review."
+            exit 1
+          fi
+          echo "The review posted $(( after - BEFORE )) item(s)." >> "$GITHUB_STEP_SUMMARY"
