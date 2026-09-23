@@ -1048,3 +1048,14 @@ Wrong about: what a green PR from a capable author tells you. It tells you the
          so it cannot be used to test tokens; the malformed-address path
          running the dummy verify instead of returning a 422. Good decisions
          are worth writing down when they are somebody else's.
+## 2026-09-23 · Phase 1 · The smoke test is now a script, and its first run found a bug in itself
+Expected: to hand Daniel a list of curl commands.
+Reality: a list is read once; a script is run every time. `scripts/smoke.sh`
+         boots the jar, probes 22 things, checks the rows, exits with the
+         failure count. Its first run reported one failure — "wrong content
+         type is 415" came back 400 — and the API was right: the helper added
+         its own `Content-Type: application/json` to every request, so the
+         probe sent two headers and the server honoured the first. The test
+         harness was the bug. Same lesson as the mock server that went to the
+         network: a test's plumbing is code, and the first run of a new test
+         is the moment to distrust a failure *and* a pass.

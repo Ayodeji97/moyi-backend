@@ -67,6 +67,31 @@ generated with the two `openssl` lines in ADR-0019. Everything under
 detekt, and tests — including integration tests that spin up a real
 Postgres via Testcontainers (needs Docker running).
 
+## How do I test it
+
+Three layers, cheapest first.
+
+1. **`./gradlew build`** — every unit, integration and architecture test,
+   against a Testcontainers Postgres. Green here is a claim about *this*
+   machine (see `docs/learning-log.md`, 2026-09-19 onward).
+2. **`scripts/smoke.sh`** — boots the packaged jar with the `local` profile
+   against the compose Postgres and drives every endpoint that exists with
+   `curl`, on the happy path and on the edges that have bitten before:
+   malformed JSON, wrong method, a reused token, an unknown address, a
+   duplicate registration. It reads the verification link out of the log,
+   because the `local` profile writes email there instead of sending it, and
+   it checks the rows afterwards. `--no-build` reuses the jar; `PORT=18080`
+   boots elsewhere; `--attach` probes a server you started yourself (set
+   `MOYI_LOG` to its log file). Exit status is the number of failures.
+3. **By hand.** Start the app (`SPRING_PROFILES_ACTIVE=local ./gradlew
+   bootRun`), then `curl` the endpoints in `06` — the script is the worked
+   example of every request body and every expected status. Rows are one
+   `docker compose exec postgres psql -U moyi -d moyi` away.
+
+What the smoke script deliberately does not do: replace the tests. It runs
+after them, on the artifact that ships, because three of Phase 1's real
+defects were found only that way.
+
 ## How is it structured
 
 A **modular monolith** (ADR-0001): one deployable Spring Boot service,
