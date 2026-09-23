@@ -72,6 +72,13 @@ internal data class User(
             )
         }
 
+    /** Invalidates every access token issued before [now]. */
+    fun revokeAllSessions(now: Instant): User =
+        copy(
+            tokensInvalidBefore = now,
+            updatedAt = now,
+        )
+
     companion object {
         /**
          * Chosen here rather than found in a document — doc 03 FR-006 requires a display

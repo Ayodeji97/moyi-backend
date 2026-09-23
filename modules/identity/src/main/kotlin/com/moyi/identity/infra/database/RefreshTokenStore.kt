@@ -2,6 +2,7 @@ package com.moyi.identity.infra.database
 
 import com.moyi.identity.domain.RefreshToken
 import com.moyi.identity.domain.TokenHash
+import com.moyi.identity.domain.UserId
 import org.springframework.stereotype.Component
 import java.time.Instant
 import java.util.UUID
@@ -27,5 +28,12 @@ internal class RefreshTokenStore(
         now: Instant,
     ) {
         tokens.revokeFamily(familyId, now)
+    }
+
+    fun revokeAllForUser(
+        userId: UserId,
+        now: Instant,
+    ) {
+        tokens.revokeAllForUser(userId.value, now)
     }
 }

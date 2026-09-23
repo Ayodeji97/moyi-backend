@@ -6,6 +6,7 @@ import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import org.springframework.stereotype.Component
+import java.time.Instant
 
 /**
  * Accounts, spoken in domain terms.
@@ -68,5 +69,13 @@ internal class AccountStore(
             }
         user.applyTo(entity)
         users.save(entity)
+    }
+
+    fun revokeAllSessions(
+        userId: UserId,
+        now: Instant,
+    ) {
+        val user = findById(userId) ?: return
+        update(user.revokeAllSessions(now))
     }
 }

@@ -102,6 +102,34 @@ internal class LoginEndpointTest(
         refresh(secondRefresh).status shouldBe 401
     }
 
+    @Test
+    fun `logout revokes the refresh-token family and is idempotent`() {
+        registerAndActivate()
+        val refreshToken = refreshToken(login().contentAsString)
+
+        logout(refreshToken).status shouldBe 204
+        refresh(refreshToken).status shouldBe 401
+        logout(refreshToken).status shouldBe 204
+    }
+
+    @Test
+    fun `logout all revokes every refresh token for the authenticated user`() {
+        registerAndActivate()
+        val loginResponse = login()
+        val firstRefresh = refreshToken(loginResponse.contentAsString)
+        val secondRefresh = refreshToken(refresh(firstRefresh).contentAsString)
+        val accessToken = Regex("\"accessToken\":\"([^\"]+)\"").find(loginResponse.contentAsString)!!.groupValues[1]
+
+        mockMvc
+            .post("/api/v1/auth/logout-all") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer $accessToken")
+            }.andReturn()
+            .response.status shouldBe 204
+
+        refresh(firstRefresh).status shouldBe 401
+        refresh(secondRefresh).status shouldBe 401
+    }
+
     private fun registerAndActivate(activate: Boolean = true) {
         mockMvc
             .post("/api/v1/auth/register") {
@@ -137,6 +165,14 @@ internal class LoginEndpointTest(
     private fun refresh(token: String) =
         mockMvc
             .post("/api/v1/auth/refresh") {
+                contentType = MediaType.APPLICATION_JSON
+                content = "{\"refreshToken\":\"$token\"}"
+            }.andReturn()
+            .response
+
+    private fun logout(token: String) =
+        mockMvc
+            .post("/api/v1/auth/logout") {
                 contentType = MediaType.APPLICATION_JSON
                 content = "{\"refreshToken\":\"$token\"}"
             }.andReturn()

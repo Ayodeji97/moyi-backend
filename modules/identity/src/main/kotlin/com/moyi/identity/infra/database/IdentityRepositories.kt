@@ -89,6 +89,20 @@ internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID>
         familyId: UUID,
         now: Instant,
     ): Int
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.revokedAt = :now
+         WHERE t.userId = :userId
+           AND t.revokedAt IS NULL
+        """,
+    )
+    fun revokeAllForUser(
+        userId: UUID,
+        now: Instant,
+    ): Int
 }
 
 /**
