@@ -13,3 +13,15 @@ spring:
         # are the only way to see the difference between one INSERT and a
         # SELECT-then-INSERT, since both produce the same row.
         generate_statistics: true
+
+moyi:
+  notification:
+    email:
+      # Tests that care about the email replace the EmailSender bean with a
+      # recorder; every other test still boots the configuration, and the
+      # default provider refuses to start without a key (ADR-0017).
+      provider: log
+      from: "Moyi <test@moyi.test>"
+  identity:
+    verification:
+      link-base-url: https://moyi.test/verify

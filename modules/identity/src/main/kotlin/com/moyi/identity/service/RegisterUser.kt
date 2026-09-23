@@ -10,7 +10,8 @@ import com.moyi.identity.domain.PasswordHasher
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.domain.UserStatus
-import com.moyi.identity.infra.database.AccountWriter
+import com.moyi.identity.domain.VerificationPurpose
+import com.moyi.identity.infra.database.AccountStore
 import com.moyi.identity.infra.database.IdentityConstraints
 import com.moyi.identity.infra.database.violates
 import org.slf4j.LoggerFactory
@@ -37,14 +38,25 @@ import java.time.Clock
  * trivially serve. Always, because skipping it on the duplicate path would
  * make that path ~150 ms faster and hand back through timing exactly what the
  * identical response withholds (T-18).
+ *
+ * **The verification email is a consequence of the commit, not a step of the
+ * method.** [RequestVerification] inserts the token row and publishes its
+ * event *inside* the transaction; the listener that turns it into an email is
+ * bound to `AFTER_COMMIT`, so a rollback publishes nothing and a commit
+ * publishes exactly once. Calling the email sender from here instead would
+ * send for an account that may be about to roll back — and, on the duplicate
+ * path, would *not* send, making the two paths differ by one HTTP round-trip
+ * to the provider, which is the timing oracle the always-hash rule exists to
+ * close. See `SendVerificationEmail`.
  */
 @Service
 internal class RegisterUser(
-    private val accounts: AccountWriter,
+    private val accounts: AccountStore,
     private val hasher: PasswordHasher,
     private val ids: IdGenerator,
     private val clock: Clock,
     private val transactions: TransactionTemplate,
+    private val verification: RequestVerification,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -61,8 +73,7 @@ internal class RegisterUser(
                 avatarMediaId = null,
                 locale = command.locale,
                 // FR-002: the account exists but can do almost nothing until
-                // the address is confirmed. The email that would move it out
-                // of this state arrives with the verification slice.
+                // the address is confirmed. `VerifyEmail` is what moves it on.
                 status = UserStatus.PENDING_VERIFICATION,
                 createdAt = now,
                 updatedAt = null,
@@ -92,6 +103,12 @@ internal class RegisterUser(
                         ),
                     newConsents = consentRecordsFor(user, command, now),
                 )
+                // Inside the boundary on purpose: the token row commits with the
+                // account, and the AFTER_COMMIT listener binds to the transaction
+                // that is open when the event is published. Published after the
+                // boundary, there is no transaction to bind to and Spring drops
+                // the event — see RequestVerification.
+                verification.request(user, VerificationPurpose.EMAIL_VERIFICATION)
             }
         } catch (violation: DataIntegrityViolationException) {
             // Only this one constraint is an expected outcome. Treating every

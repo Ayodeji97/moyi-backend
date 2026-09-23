@@ -31,6 +31,20 @@ enum class ErrorCode {
      */
     HASHING_CAPACITY_EXCEEDED,
 
+    /**
+     * `POST /auth/verify-email` with a token that matches nothing (FR-002).
+     * A mistyped or truncated link, or a guess. 422: the body is well-formed,
+     * the value in it is not one this system issued.
+     */
+    VERIFICATION_TOKEN_INVALID,
+
+    /**
+     * The token was real but is spent — past its 24 hours, or presented
+     * before. One code for both because the person's recovery is the same
+     * and `states.md` §1 draws one state for it: ask for a new link. 410.
+     */
+    VERIFICATION_TOKEN_EXPIRED,
+
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,
 
