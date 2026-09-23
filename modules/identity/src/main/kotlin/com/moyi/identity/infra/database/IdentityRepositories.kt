@@ -51,6 +51,47 @@ internal interface CredentialsRepository : Repository<CredentialsEntity, UUID> {
     fun findById(id: UUID): CredentialsEntity?
 
     fun save(credentials: CredentialsEntity): CredentialsEntity
+
+    /** Records one failed attempt without allowing concurrent requests to lose an increment. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE CredentialsEntity c
+           SET c.failedAttempts = CASE
+                   WHEN c.lockedUntil IS NOT NULL AND c.lockedUntil <= :now THEN 1
+                   ELSE c.failedAttempts + 1
+               END,
+               c.lockedUntil = CASE
+                   WHEN c.lockedUntil IS NOT NULL AND c.lockedUntil <= :now THEN NULL
+                   WHEN c.failedAttempts + 1 >= :threshold THEN :lockedUntil
+                   ELSE c.lockedUntil
+               END
+         WHERE c.id = :id
+           AND (c.lockedUntil IS NULL OR c.lockedUntil <= :now)
+        """,
+    )
+    fun recordFailedAttempt(
+        id: UUID,
+        now: Instant,
+        threshold: Int,
+        lockedUntil: Instant,
+    ): Int
+
+    /** Clears the counter only when the account was not locked by another request. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE CredentialsEntity c
+           SET c.failedAttempts = 0,
+               c.lockedUntil = NULL
+         WHERE c.id = :id
+           AND (c.lockedUntil IS NULL OR c.lockedUntil <= :now)
+        """,
+    )
+    fun clearFailedAttempts(
+        id: UUID,
+        now: Instant,
+    ): Int
 }
 
 internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID> {

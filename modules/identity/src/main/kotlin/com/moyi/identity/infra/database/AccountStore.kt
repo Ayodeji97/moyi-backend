@@ -6,6 +6,7 @@ import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import org.springframework.stereotype.Component
+import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
 /**
@@ -85,5 +86,21 @@ internal class AccountStore(
                 ?: error("cannot update credentials that do not exist")
         credentials.applyTo(entity)
         this.credentials.save(entity)
+    }
+
+    @Transactional
+    fun recordFailedLogin(
+        userId: UserId,
+        now: Instant,
+        threshold: Int,
+        lockedUntil: Instant,
+    ): Boolean = credentials.recordFailedAttempt(userId.value, now, threshold, lockedUntil) == 1
+
+    @Transactional
+    fun clearFailedLogins(
+        userId: UserId,
+        now: Instant,
+    ) {
+        credentials.clearFailedAttempts(userId.value, now)
     }
 }

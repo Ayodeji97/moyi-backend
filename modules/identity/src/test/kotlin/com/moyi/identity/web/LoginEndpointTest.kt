@@ -89,6 +89,25 @@ internal class LoginEndpointTest(
     }
 
     @Test
+    fun `five wrong passwords lock the account while responses stay generic`() {
+        registerAndActivate()
+
+        repeat(5) { login(password = "wrong password $it").status shouldBe 401 }
+
+        val locked = login(password = PASSWORD)
+        locked.status shouldBe 401
+        locked.contentAsString shouldContain "\"code\":\"UNAUTHENTICATED\""
+        jdbc.queryForObject(
+            "SELECT failed_attempts FROM credentials c JOIN users u ON u.id = c.user_id WHERE u.email = 'ada@example.com'",
+            Int::class.java,
+        ) shouldBe 5
+        jdbc.queryForObject(
+            "SELECT locked_until IS NOT NULL FROM credentials c JOIN users u ON u.id = c.user_id WHERE u.email = 'ada@example.com'",
+            Boolean::class.java,
+        ) shouldBe true
+    }
+
+    @Test
     fun `refresh rotates the token and reuse revokes the family`() {
         registerAndActivate()
         val firstLogin = login()

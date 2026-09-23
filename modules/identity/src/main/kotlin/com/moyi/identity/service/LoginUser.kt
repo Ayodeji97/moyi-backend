@@ -9,6 +9,9 @@ import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserStatus
 import com.moyi.identity.infra.database.AccountStore
 import org.springframework.stereotype.Service
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
 
 /**
  * Authenticates a user and issues the access-token half of the login response.
@@ -23,8 +26,10 @@ internal class LoginUser(
     private val passwords: PasswordHasher,
     private val accessTokens: AccessTokenIssuer,
     private val refreshTokens: RefreshTokens,
+    private val clock: Clock,
 ) {
     fun login(command: LoginCommand): LoginResult {
+        val now = Instant.now(clock)
         val email = runCatching { Email(command.email.trim()) }.getOrNull()
         val user = email?.let(accounts::findByEmail)
         val credentials = user?.let { accounts.findCredentials(it.id) }
@@ -35,10 +40,20 @@ internal class LoginUser(
                 passwords.matches(command.password, credentials.passwordHash)
             }
 
-        val authenticatedUser = authenticatedUser(user, credentials, passwordMatches)
+        val authenticatedUser = authenticatedUser(user, credentials, passwordMatches, now)
         if (authenticatedUser == null) {
+            failedAttemptUser(user, credentials, passwordMatches, now)?.let { failedUser ->
+                accounts.recordFailedLogin(
+                    userId = failedUser.id,
+                    now = now,
+                    threshold = MAX_FAILED_ATTEMPTS,
+                    lockedUntil = now.plus(LOCK_DURATION),
+                )
+            }
             throw InvalidCredentialsException()
         }
+
+        accounts.clearFailedLogins(authenticatedUser.id, now)
 
         return LoginResult(
             user = authenticatedUser,
@@ -51,7 +66,29 @@ internal class LoginUser(
         user: User?,
         credentials: Credentials?,
         passwordMatches: Boolean,
-    ): User? = user?.takeIf { passwordMatches && credentials != null && it.status == UserStatus.ACTIVE }
+        now: Instant,
+    ): User? =
+        user?.takeIf {
+            passwordMatches && credentials != null && it.status == UserStatus.ACTIVE && !credentials.isLockedAt(now)
+        }
+
+    private fun failedAttemptUser(
+        user: User?,
+        credentials: Credentials?,
+        passwordMatches: Boolean,
+        now: Instant,
+    ): User? =
+        user?.takeIf {
+            it.status == UserStatus.ACTIVE &&
+                credentials != null &&
+                !credentials.isLockedAt(now) &&
+                !passwordMatches
+        }
+
+    private companion object {
+        const val MAX_FAILED_ATTEMPTS = 5
+        val LOCK_DURATION: Duration = Duration.ofMinutes(15)
+    }
 }
 
 internal data class LoginCommand(

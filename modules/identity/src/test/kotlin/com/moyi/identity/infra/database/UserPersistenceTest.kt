@@ -264,6 +264,61 @@ internal class UserPersistenceTest(
         statistics.prepareStatementCount shouldBe 1
     }
 
+    @Test
+    fun `failed login updates increment atomically and lock on the fifth attempt`() {
+        val user = newUser().copy(status = UserStatus.ACTIVE)
+        transactions.executeWithoutResult {
+            users.save(user.toEntity())
+            credentials.save(newCredentials(user.id).toEntity())
+        }
+
+        repeat(4) {
+            transactions.execute {
+                credentials.recordFailedAttempt(user.id.value, NOW, 5, NOW.plusSeconds(900))
+            } shouldBe 1
+        }
+        transactions.execute {
+            credentials
+                .findById(user.id.value)
+                .shouldNotBeNull()
+                .toDomain()
+                .failedAttempts
+        } shouldBe 4
+
+        transactions.execute {
+            credentials.recordFailedAttempt(user.id.value, NOW, 5, NOW.plusSeconds(900))
+        } shouldBe 1
+        val locked = transactions.execute { credentials.findById(user.id.value).shouldNotBeNull().toDomain() }
+        locked.failedAttempts shouldBe 5
+        locked.lockedUntil shouldBe NOW.plusSeconds(900)
+
+        transactions.execute {
+            credentials.recordFailedAttempt(user.id.value, NOW.plusSeconds(1), 5, NOW.plusSeconds(901))
+        } shouldBe 0
+
+        transactions.execute {
+            credentials.recordFailedAttempt(user.id.value, NOW.plusSeconds(901), 5, NOW.plusSeconds(1801))
+        } shouldBe 1
+        val restarted = transactions.execute { credentials.findById(user.id.value).shouldNotBeNull().toDomain() }
+        restarted.failedAttempts shouldBe 1
+        restarted.lockedUntil shouldBe null
+    }
+
+    @Test
+    fun `successful login reset clears an expired lock and failed attempts`() {
+        val user = newUser().copy(status = UserStatus.ACTIVE)
+        transactions.executeWithoutResult {
+            users.save(user.toEntity())
+            credentials.save(newCredentials(user.id).copy(failedAttempts = 4, lockedUntil = NOW.minusSeconds(1)).toEntity())
+        }
+
+        transactions.execute { credentials.clearFailedAttempts(user.id.value, NOW) } shouldBe 1
+
+        val cleared = transactions.execute { credentials.findById(user.id.value).shouldNotBeNull().toDomain() }
+        cleared.failedAttempts shouldBe 0
+        cleared.lockedUntil shouldBe null
+    }
+
     private fun newUser(email: String = "ada@example.com") =
         User(
             id = UserId(ids.timeOrdered()),
