@@ -134,6 +134,27 @@ internal class ResendEmailSenderTest {
     }
 
     @Test
+    fun `a 2xx that is not JSON is transient and does not escape as an exception`() {
+        // A proxy, a captive portal or a maintenance page answering 200 with
+        // HTML for the API. The first version let the client's decode failure
+        // escape `send`, which broke the one promise the port makes.
+        server
+            .expect(requestTo("https://api.resend.test/emails"))
+            .andRespond(withSuccess("<html><body>Service temporarily unavailable</body></html>", MediaType.TEXT_HTML))
+
+        sender.send(message()).shouldBeInstanceOf<EmailDelivery.Unavailable>().reason shouldContain "unexpectedly"
+    }
+
+    @Test
+    fun `a 2xx whose JSON does not decode is transient too`() {
+        server
+            .expect(requestTo("https://api.resend.test/emails"))
+            .andRespond(withSuccess("""{"id": ["not", "a", "string"]}""", MediaType.APPLICATION_JSON))
+
+        sender.send(message()).shouldBeInstanceOf<EmailDelivery.Unavailable>()
+    }
+
+    @Test
     fun `refuses to build without an API key, and says which property`() {
         val failure = shouldThrow<IllegalStateException> { ResendEmailSender.create(properties(apiKey = null, from = "x <y@z>"), builder) }
 

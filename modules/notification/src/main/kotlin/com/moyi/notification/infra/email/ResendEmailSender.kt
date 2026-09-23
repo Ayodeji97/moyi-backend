@@ -11,6 +11,7 @@ import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
 import org.springframework.web.client.RestClient
+import org.springframework.web.client.RestClientException
 
 /**
  * [EmailSender] over Resend's HTTP API — the one class in this codebase that
@@ -75,6 +76,13 @@ internal class ResendEmailSender(
             // Connection refused, DNS, timeout. The cause's class says which;
             // its message can name hosts and is left out.
             unavailable("Resend unreachable (${unreachable.cause?.javaClass?.simpleName ?: "I/O failure"})")
+        } catch (unexpected: RestClientException) {
+            // Everything the client can raise that is not one of the above: a
+            // 2xx whose body is not JSON (a proxy or captive portal answering
+            // for the API), a body that does not decode, a 3xx. Found in
+            // review — without this branch the port's "never throws" promise
+            // held for every status Resend documents and for none it does not.
+            unavailable("Resend responded unexpectedly (${unexpected.javaClass.simpleName})")
         }
 
     private fun rejected(reason: String): EmailDelivery.Rejected {
