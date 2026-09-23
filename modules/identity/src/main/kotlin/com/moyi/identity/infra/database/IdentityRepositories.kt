@@ -22,6 +22,16 @@ internal interface UserRepository : JpaRepository<UserEntity, UUID> {
     fun findByEmail(email: String): UserEntity?
 
     fun existsByEmail(email: String): Boolean
+
+    /** See [UserRevocationRow]. `null` when there is no such user. */
+    @Query(
+        """
+        SELECT new com.moyi.identity.infra.database.UserRevocationRow(u.id, u.tokensInvalidBefore)
+          FROM UserEntity u
+         WHERE u.id = :id
+        """,
+    )
+    fun findRevocation(id: UUID): UserRevocationRow?
 }
 
 /**
@@ -122,3 +132,14 @@ internal interface VerificationTokenRepository : Repository<VerificationTokenEnt
         purpose: VerificationPurpose,
     ): Int
 }
+
+/**
+ * The two columns the access-token verifier needs, and nothing else. A
+ * projection rather than `findById`, because this query runs once per
+ * authenticated request and the row carries an email address and a display
+ * name that request has no use for.
+ */
+internal data class UserRevocationRow(
+    val id: UUID,
+    val tokensInvalidBefore: Instant?,
+)

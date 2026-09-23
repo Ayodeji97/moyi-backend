@@ -130,6 +130,7 @@ internal class UserTest {
             createdAt = NOW,
             updatedAt = null,
             deletedAt = deletedAt,
+            tokensInvalidBefore = null,
         )
     }
 }

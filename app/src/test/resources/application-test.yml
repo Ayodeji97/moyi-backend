@@ -18,3 +18,6 @@ moyi:
       # email, and Resend would refuse to start without a key.
       provider: log
       from: "Moyi <test@moyi.test>"
+  security:
+    jwt:
+      key-source: ephemeral

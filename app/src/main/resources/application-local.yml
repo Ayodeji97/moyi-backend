@@ -18,3 +18,8 @@ moyi:
       # `log` — the default is Resend, which refuses to start without a key.
       provider: log
       from: "Moyi <hello@moyi.local>"
+  security:
+    jwt:
+      # Generated at startup: every token dies with the process, which is fine
+      # on a laptop and is logged at WARN so it is never fine anywhere else.
+      key-source: ephemeral

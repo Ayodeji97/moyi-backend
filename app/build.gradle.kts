@@ -14,6 +14,10 @@ dependencies {
     // `api` package only.
     implementation(projects.modules.notification)
     implementation(projects.common.web)
+    // The filter chain, the JWT encoder/decoder and the current-user resolver.
+    // Reachable transitively through identity already; declared so the
+    // composition root names everything it composes.
+    implementation(projects.common.security)
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")

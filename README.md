@@ -55,6 +55,13 @@ sending it, so a verification link is read from the console. Every other
 profile defaults to Resend and refuses to start without
 `MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY` and `MOYI_NOTIFICATION_EMAIL_FROM`
 — by design, so a mute production is a failed deploy rather than a quiet one.
+The same posture applies to the access-token signing key: `local` generates
+an ephemeral RSA pair at startup (tokens die with the process, and the log
+says so at WARN); every other profile needs
+`MOYI_SECURITY_JWT_PRIVATE_KEY_PEM` and `MOYI_SECURITY_JWT_PUBLIC_KEY_PEM`,
+generated with the two `openssl` lines in ADR-0019. Everything under
+`/api/v1` except the auth endpoints needs `Authorization: Bearer <token>`;
+`GET /api/v1/me` is the endpoint to try it on.
 
 `./gradlew build` runs the full local verification loop: compile, ktlint,
 detekt, and tests — including integration tests that spin up a real

@@ -6,6 +6,7 @@ import com.moyi.common.web.ProblemDetails
 import com.moyi.identity.domain.HashingCapacityExceededException
 import com.moyi.identity.domain.VerificationTokenExpiredException
 import com.moyi.identity.domain.VerificationTokenInvalidException
+import com.moyi.identity.service.AuthenticatedUserMissingException
 import org.slf4j.LoggerFactory
 import org.springframework.core.annotation.Order
 import org.springframework.http.HttpHeaders
@@ -64,6 +65,20 @@ internal class IdentityExceptionHandler(
             status = HttpStatus.GONE,
             errorCode = ErrorCode.VERIFICATION_TOKEN_EXPIRED,
             detail = "That link has expired. Links last 24 hours and work once. We can send you a new one.",
+            request = request,
+        )
+
+    /**
+     * A valid token whose user vanished between the filter and the handler.
+     * 401 `UNAUTHENTICATED`, the same code the filter chain gives a token for
+     * a user that never existed: from the client's side those are one case.
+     */
+    @ExceptionHandler(AuthenticatedUserMissingException::class)
+    fun handleAuthenticatedUserMissing(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.UNAUTHORIZED,
+            errorCode = ErrorCode.UNAUTHENTICATED,
+            detail = "Your session is not valid. Sign in again.",
             request = request,
         )
 
