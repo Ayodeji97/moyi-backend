@@ -1,5 +1,6 @@
 package com.moyi.identity.web
 
+import com.moyi.identity.domain.BreachedPasswordCorpus
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
 import jakarta.validation.Constraint
@@ -84,6 +85,105 @@ internal class PasswordConstraintValidator : ConstraintValidator<ValidPassword, 
 }
 
 /**
+ * ADR-0012's other half: the password is not in the breached-password corpus.
+ *
+ * **A second annotation rather than another question inside [ValidPassword],
+ * and the reason is the wire format.** A `FieldViolation` carries the
+ * constraint's own name as its `code`, so one annotation asking both questions
+ * would report "too short" and "already breached" as the same
+ * `VALID_PASSWORD` — leaving a client able to tell them apart only by matching
+ * on the English `message`. That is precisely what [com.moyi.common.web.ErrorCode]'s
+ * contract exists to prevent, and it is not academic here: `states.md` §1c
+ * gives the breach case its own designed copy on the sign-up screen, so the
+ * client has to be able to recognise it. Two annotations, two codes —
+ * `VALID_PASSWORD` and `NOT_BREACHED`.
+ *
+ * The check lives at the edge rather than inside [Password] or in
+ * `RegisterUser` because of what it *is*: a property of the submitted value
+ * alone, needing no database, no user and no context — the definition of input
+ * validation. Putting it on [Password] was the alternative, and it is
+ * tempting, since the type would then mean "acceptable password" in full and
+ * no caller could construct one that skips the check. It was rejected because
+ * it makes a domain value type unconstructible without a 17 MB piece of
+ * infrastructure, which would put a file load into every test that needs a
+ * password.
+ *
+ * **The limit of that choice, stated rather than left to be discovered:**
+ * [Password] guarantees shape, not absence from the corpus, so a
+ * `RegistrationCommand` built by some future caller that does not come through
+ * this annotation would skip the check. Today `RegisterRequest.toCommand` is
+ * the only thing that builds one. The moment a second caller appears, this
+ * moves to the service.
+ *
+ * `POST /auth/reset-password` inherits the rule by carrying the same
+ * annotation, which is the reuse that matters.
+ */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [NotBreachedValidator::class])
+internal annotation class NotBreached(
+    val message: String = BREACHED_MESSAGE,
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+/**
+ * **"matches a list", not "has appeared in a breach".**
+ *
+ * A Bloom filter is one-sided: roughly once in a thousand registrations it
+ * matches a password that was never breached at all. Telling that person their
+ * password "has appeared in a data breach" is a false statement about
+ * something they care about, and ADR-0012 asks for copy that "explains rather
+ * than blames". This sentence is true in both cases — the value did match the
+ * list — and it names the problem as exposure rather than weakness.
+ *
+ * No dash, deliberately: `copy.md` bans the em and en dash in any user-facing
+ * string, on the grounds that a dash invites a subordinate clause where the
+ * product's copy is at its best in short sentences that each stand alone. This
+ * is an API string rather than a screen string, and there is no reason for it
+ * to be the one place the house rule does not apply.
+ *
+ * The client replaces it with `copy.md`'s warmer wording, which is what the
+ * `NOT_BREACHED` code exists for; this is the fallback for anything reading
+ * the API directly.
+ */
+internal const val BREACHED_MESSAGE =
+    "matches a list of passwords exposed in data breaches, so it is not safe to use. Please choose another."
+
+internal class NotBreachedValidator(
+    private val corpus: BreachedPasswordCorpus,
+) : ConstraintValidator<NotBreached, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean {
+        val password = value?.takeIf(String::isNotBlank)?.let(::shapedOrNull)
+        return if (password != null && corpus.contains(password)) reject(context, BREACHED_MESSAGE) else true
+    }
+
+    /**
+     * Null for a password [ValidPassword] will already reject.
+     *
+     * Shape is that constraint's job, and reporting it here too would produce
+     * two violations for one mistake. `IllegalArgumentException` only — the
+     * exception `require` throws; catching `Exception` would swallow a genuine
+     * bug inside a domain factory and quietly wave the password through.
+     *
+     * The exception is swallowed on purpose, which is the one case detekt's
+     * rule cannot see: it is not lost, it is *another constraint's* to report,
+     * and re-raising or logging it here is exactly what produces the second
+     * error.
+     */
+    @Suppress("SwallowedException")
+    private fun shapedOrNull(value: String): Password? =
+        try {
+            Password.of(value)
+        } catch (invalidShape: IllegalArgumentException) {
+            null
+        }
+}
+
+/**
  * Runs a domain constructor and reports its complaint as the violation.
  *
  * `IllegalArgumentException` only — the exception `require` throws. Catching
@@ -99,15 +199,25 @@ private inline fun validate(
         construct()
         true
     } catch (rejected: IllegalArgumentException) {
-        context.disableDefaultConstraintViolation()
-        context
-            // `addExpressionVariable` is not used and the message is added as
-            // a literal: Hibernate Validator interpolates `{}` and `${}` in a
-            // template, and a domain message that ever contained either would
-            // otherwise become an expression. None do today; this is the line
-            // that keeps that from mattering.
-            .buildConstraintViolationWithTemplate(
-                rejected.message?.replace("{", "\\{")?.replace("$", "\\$") ?: "is not valid",
-            ).addConstraintViolation()
-        false
+        reject(context, rejected.message ?: "is not valid")
     }
+
+/**
+ * Replaces the default violation with [message], and always returns `false`.
+ *
+ * `addExpressionVariable` is not used and the message is added as a literal:
+ * Hibernate Validator interpolates `{}` and `${}` in a template, and a message
+ * that ever contained either would otherwise become an expression. None do
+ * today; this is the line that keeps that from mattering — and it is shared by
+ * both validators so that a rule added to one cannot arrive unescaped.
+ */
+private fun reject(
+    context: ConstraintValidatorContext,
+    message: String,
+): Boolean {
+    context.disableDefaultConstraintViolation()
+    context
+        .buildConstraintViolationWithTemplate(message.replace("{", "\\{").replace("$", "\\$"))
+        .addConstraintViolation()
+    return false
+}

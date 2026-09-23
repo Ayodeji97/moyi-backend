@@ -9,6 +9,7 @@ import com.moyi.identity.domain.PasswordHashAlgorithm
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.domain.UserStatus
+import com.moyi.identity.infra.security.TestBreachCorpus
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -21,6 +22,8 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
 import javax.sql.DataSource
@@ -286,6 +289,23 @@ internal class UserPersistenceTest(
         )
 
     private companion object {
+        /**
+         * The real corpus is a 17 MB release asset the build downloads and
+         * pins by digest; a test that waited for it would be testing the
+         * network. This points the context at a dozen-entry fixture built from
+         * a readable list, using the same `BloomFilter` the service loads — so
+         * the format is exercised rather than stood in for.
+         *
+         * Every context-booting test needs this, because there is deliberately
+         * no flag that switches the corpus off:
+         * `BloomFilterBreachedPasswordCorpus` refuses to start without one
+         * (ADR-0016), and a test context that could boot without it would not
+         * be the context we deploy.
+         */
+        @JvmStatic
+        @DynamicPropertySource
+        fun breachCorpus(registry: DynamicPropertyRegistry) = TestBreachCorpus.register(registry)
+
         val NOW: Instant = Instant.parse("2026-09-19T10:15:30Z")
     }
 }

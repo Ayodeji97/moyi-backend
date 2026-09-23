@@ -662,6 +662,56 @@ Wrong about: what a decided decision decides. I have been treating the corpus
          running specifically to find that class of thing. Caught by reading
          it back, not by any gate I had put in place.
 
+## 2026-09-22 · Phase 1 · A test that would have passed by stopping testing
+Expected: the second half of slice C to be wiring. The corpus exists, the
+         filter reads, so: a port, an adapter, one line in the validator, and
+         `MIN_LENGTH` from 12 to 8.
+Reality: most of it was that. The thing worth writing down is what moving the
+         floor did to a test I was not looking at.
+         `RegistrationEndpointTest` has a case called *a password whose length
+         changes under NFKC is 422 in both directions*, built around a
+         twelve-character password that composes to eleven — twelve passes the
+         raw check, eleven fails the normalised one, and the 422 is the proof
+         that normalisation happens first. With the floor at 8, eleven is
+         **fine**. The test would have gone green by *accepting* the password:
+         same name, same assertion shape, asserting nothing. It is now six
+         characters composing to seven, which straddles the new floor.
+         Nothing would have caught that. The name still described the
+         behaviour, the file still contained the case, and the suite was
+         greener than before.
+Wrong about: which numbers in a test are data and which are structure. I have
+         been treating literals in tests as fixtures — details of the example,
+         free to be anything valid. But a boundary test's literals *are* the
+         test: they exist to sit either side of a line, and the moment the line
+         moves they are just numbers. The rule to keep: **when a constant
+         changes, grep for the tests that were interesting because of its old
+         value, not only for the ones that fail.** A failing test tells you it
+         noticed. This one would not have.
+         The other thing done right, and only because the habit is written
+         down: I verified fail-closed by actually taking the corpus away —
+         pointing the real application at a resource that does not exist and
+         watching the context refuse to start with a `BeanCreationException`.
+         The first attempt at that proved nothing, because I deleted the
+         packaged file and Gradle simply put it back on the next build. A
+         guard is not verified by removing something the build regenerates.
+
+**Same session, found by the Figma alignment check rather than by the code.**
+`states.md` §1c already gives the breached-password case its own designed copy
+on the sign-up screen — "FR-001's breach message is the password case". That is
+a client requirement, and it sent me back to look at what the API actually
+hands the client. A `FieldViolation` carries the *constraint's* name as its
+`code`, so with the breach question folded into `@ValidPassword`, "too short"
+and "already breached" both arrived as `VALID_PASSWORD`, distinguishable only
+by the English sentence. `ErrorCode`'s own KDoc says exactly why that is wrong
+— "a client that pattern-matches on English is a client that breaks when
+someone improves a sentence" — and I had written a paragraph of KDoc arguing
+that one annotation asking two questions was the *better* design. The argument
+was coherent and it never looked at the wire. Two annotations now, two codes.
+Worth keeping: **the standing rule to check every change against the Figma file
+is not a formality about screens.** It is the only step in the loop that makes
+me read the API from the client's side, and it caught a contract defect that no
+backend test would have — every assertion I had written passed.
+
 ## 2026-09-22 · Phase 1 · The verification step that could not fail
 Expected: #21 to be reviewed by the automated reviewer and, failing that, by
          my own pass, which had already caught a shell-injection hole and a

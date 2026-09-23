@@ -8,6 +8,7 @@ import com.moyi.identity.domain.PasswordHasher
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.Argon2Properties
 import com.moyi.identity.infra.security.Argon2idPasswordHasher
+import com.moyi.identity.infra.security.TestBreachCorpus
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -23,6 +24,8 @@ import org.springframework.context.annotation.Primary
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
 import java.util.concurrent.atomic.AtomicInteger
@@ -141,6 +144,11 @@ internal class RegistrationEndpointTest(
         response.status shouldBe 422
         response.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
         response.contentAsString shouldContain "\"field\":\"password\""
+        response.contentAsString shouldContain "\"code\":\"VALID_PASSWORD\""
+        // One violation, not two: the breach constraint declines to report a
+        // password the shape constraint is already rejecting, so a single
+        // mistake produces a single error.
+        response.contentAsString shouldNotContain "NOT_BREACHED"
         response.contentAsString shouldNotContain "short"
         jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
     }
@@ -165,9 +173,15 @@ internal class RegistrationEndpointTest(
         // changed the length — and the domain won, with a 500.
         //
         // Shrinking: "e" plus a combining acute is two characters that compose
-        // into one, so twelve characters become eleven.
-        val composesShorter = "abcdefghij" + "e\u0301"
-        composesShorter.length shouldBe 12
+        // into one, so eight characters become seven.
+        //
+        // These were twelve and eleven until ADR-0012's floor moved to 8. The
+        // numbers are not decoration — the case only tests anything while it
+        // straddles the minimum, and leaving them at twelve would have left a
+        // test that passes by accepting the password, which is the opposite of
+        // what it asserts.
+        val composesShorter = "abcdef" + "e\u0301"
+        composesShorter.length shouldBe 8
 
         // Growing: the "fi" ligature is one character that decomposes into
         // two, so 128 characters become 256.
@@ -180,6 +194,46 @@ internal class RegistrationEndpointTest(
         }
         register(email = "b@example.com", password = composesLonger).status shouldBe 422
         jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `a password already known to attackers is rejected, per field`() {
+        // The half ADR-0012 makes the 8-character floor conditional on. It is
+        // asserted here, through the real context and a real Postgres, rather
+        // than only against the adapter — because the thing that can silently
+        // break is the wiring, not the filter: a corpus bean nobody injects,
+        // or a validator that catches its own exception, both leave every
+        // other test in this file green.
+        val response = register(password = "password")
+
+        response.status shouldBe 422
+        response.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+        response.contentAsString shouldContain "\"field\":\"password\""
+        // Its own code, not the shape constraint's. A client cannot be asked to
+        // tell "too short" from "already breached" by matching English, and
+        // `states.md` §1c gives the breach case its own copy on this screen —
+        // so it has to be recognisable without reading the sentence.
+        response.contentAsString shouldContain "\"code\":\"NOT_BREACHED\""
+        // "matches a list", not "has appeared in a breach": a Bloom filter is
+        // one-sided, so roughly one rejection in a thousand is of a password
+        // that was never breached, and the sentence has to be true then too.
+        response.contentAsString shouldContain "matches a list"
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `the corpus check does not reject an ordinary password`() {
+        // The other side of the one-sided error. A control that rejects
+        // everything also passes every test that only checks rejections.
+        register(password = TestBreachCorpus.SAFE).status shouldBe 201
+    }
+
+    @Test
+    fun `eight characters is now accepted, which is the point of the corpus`() {
+        // ADR-0012's two halves in one assertion: this password is exactly at
+        // the new floor and would have been a 422 before the corpus landed.
+        register(password = "tr0mbone").status shouldBe 201
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 1
     }
 
     @Test
@@ -298,6 +352,23 @@ internal class RegistrationEndpointTest(
     }
 
     private companion object {
+        /**
+         * The real corpus is a 17 MB release asset the build downloads and
+         * pins by digest; a test that waited for it would be testing the
+         * network. This points the context at a dozen-entry fixture built from
+         * a readable list, using the same `BloomFilter` the service loads — so
+         * the format is exercised rather than stood in for.
+         *
+         * Every context-booting test needs this, because there is deliberately
+         * no flag that switches the corpus off:
+         * `BloomFilterBreachedPasswordCorpus` refuses to start without one
+         * (ADR-0016), and a test context that could boot without it would not
+         * be the context we deploy.
+         */
+        @JvmStatic
+        @DynamicPropertySource
+        fun breachCorpus(registry: DynamicPropertyRegistry) = TestBreachCorpus.register(registry)
+
         const val PATH = "/api/v1/auth/register"
         const val PASSWORD = "correct horse battery"
     }
