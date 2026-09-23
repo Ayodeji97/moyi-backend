@@ -253,6 +253,13 @@ internal interface VerificationTokenRepository : Repository<VerificationTokenEnt
      * them has done its job. Deleted rather than consumed: doc 07 §7 keeps
      * tokens only until "consumption or expiry", and these were neither —
      * they are simply moot.
+     *
+     * **Live means live.** The first version deleted every unconsumed row,
+     * expired ones included, so a stale expired link presented afterwards
+     * answered 422 "not recognised" instead of the contracted 410 "expired",
+     * and its row was gone before the reaper's turn. The `expiresAt` predicate
+     * is what makes the name true; expired rows are the reaper's (doc 07 §7).
+     * Raised by the Codex review on PR #29, 2026-09-23.
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
@@ -261,11 +268,13 @@ internal interface VerificationTokenRepository : Repository<VerificationTokenEnt
          WHERE t.userId = :userId
            AND t.purpose = :purpose
            AND t.consumedAt IS NULL
+           AND t.expiresAt > :now
         """,
     )
     fun deleteLive(
         userId: UUID,
         purpose: VerificationPurpose,
+        now: Instant,
     ): Int
 }
 

@@ -59,10 +59,12 @@ internal class VerifyEmail(
         val user = accounts.findById(token.userId) ?: throw VerificationTokenInvalidException()
         accounts.update(user.verifyEmail(now))
 
-        // Any other link still in this person's inbox is now moot. Deleted
-        // rather than left to expire, so a stale one presented later is "not
-        // recognised" rather than a second, pointless verification.
-        val retired = tokens.deleteLive(user.id, VerificationPurpose.EMAIL_VERIFICATION)
+        // Any other *live* link still in this person's inbox is now moot.
+        // Deleted rather than left to expire, so a stale one presented later
+        // is "not recognised" rather than a second, pointless verification.
+        // Already-expired rows are left for the reaper: they must keep
+        // answering 410, not 422, until it takes them (doc 07 §7).
+        val retired = tokens.deleteLive(user.id, VerificationPurpose.EMAIL_VERIFICATION, now)
 
         // A user id, not an address (doc 11 NFR-044). The id is what a trace
         // needs and is meaningless outside this database.

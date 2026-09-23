@@ -41,9 +41,10 @@ internal class VerificationTokenStore(
         now: Instant,
     ): Boolean = tokens.consume(hash.value, now) == 1
 
-    /** Removes the person's other outstanding tokens for [purpose]. Returns how many there were. */
+    /** Removes the person's other tokens for [purpose] that are still live at [now]. Returns how many there were. */
     fun deleteLive(
         userId: UserId,
         purpose: VerificationPurpose,
-    ): Int = tokens.deleteLive(userId.value, purpose)
+        now: Instant,
+    ): Int = tokens.deleteLive(userId.value, purpose, now)
 }
