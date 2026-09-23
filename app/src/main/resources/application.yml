@@ -13,3 +13,9 @@ management:
   endpoint:
     health:
       show-details: never
+
+# Email (doc 25 D7). No provider or key is set here on purpose: the provider
+# defaults to Resend, and Resend refuses to start without
+# `moyi.notification.email.resend.api-key` and `moyi.notification.email.from`,
+# both supplied by the environment. A missing key is a failed boot, not a
+# silently mute service — see modules/notification EmailProperties.

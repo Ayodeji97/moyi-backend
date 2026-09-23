@@ -10,3 +10,11 @@ spring:
       # module's migrations together. Neither is visible from inside a module.
       ddl-auto: validate
     open-in-view: false
+
+moyi:
+  notification:
+    email:
+      # The composition root boots in these tests; nothing in them sends
+      # email, and Resend would refuse to start without a key.
+      provider: log
+      from: "Moyi <test@moyi.test>"

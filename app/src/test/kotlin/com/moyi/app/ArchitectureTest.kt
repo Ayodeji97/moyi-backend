@@ -61,9 +61,17 @@ class ArchitectureTest {
          *   nothing, which is what keeps it testable without Spring,
          *   a database, or HTTP.
          * - `infra` — JPA entities, repositories, vendor SDKs. Maps to and
-         *   from domain; never reaches back up to service or web.
-         * - `service` — orchestration. Implements the `api` contract and
-         *   coordinates domain and infra in the right order.
+         *   from domain; never reaches back up to service or web. May
+         *   implement the module's own `api` contract directly when that
+         *   contract is pure transport with nothing to orchestrate — the
+         *   `notification` module's `EmailSender` is a port, its Resend
+         *   client is the adapter, and a service in between would exist
+         *   only to satisfy this table. Added 2026-09-23 with that module;
+         *   an `api` package holds interfaces and DTOs that depend on
+         *   nothing, so importing one is never a dependency on behaviour.
+         * - `service` — orchestration. Implements the `api` contract when
+         *   there are domain rules to apply, and coordinates domain and
+         *   infra in the right order.
          * - `web` — controllers, request/response DTOs, mappers. The HTTP
          *   edge. Goes through service, never straight to infra.
          *
@@ -76,7 +84,7 @@ class ArchitectureTest {
             mapOf(
                 "api" to emptySet<String>(),
                 "domain" to emptySet(),
-                "infra" to setOf("domain"),
+                "infra" to setOf("domain", "api"),
                 "service" to setOf("domain", "infra", "api"),
                 "web" to setOf("domain", "service"),
             )
@@ -223,7 +231,7 @@ class ArchitectureTest {
         assertTrue(
             violations.isEmpty(),
             "Illegal cross-layer dependency. Allowed: web -> service/domain, " +
-                "service -> domain/infra/api, infra -> domain; domain and api depend on nothing. " +
+                "service -> domain/infra/api, infra -> domain/api; domain and api depend on nothing. " +
                 "Found: $violations",
         )
     }

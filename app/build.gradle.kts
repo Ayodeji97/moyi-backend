@@ -9,6 +9,10 @@ dependencies {
     // `app` is the composition root: it depends on every module so that
     // their beans, entities and migrations are on the runtime classpath.
     implementation(projects.modules.identity)
+    // The email port and its Resend adapter. Wired here so the composition
+    // root sees the EmailSender bean; identity depends on the module for the
+    // `api` package only.
+    implementation(projects.modules.notification)
     implementation(projects.common.web)
 
     implementation("org.springframework.boot:spring-boot-starter-web")

@@ -880,3 +880,36 @@ so CodeQL posting an alert would have made a silent no-op review look like a
 successful one. Caught by reading real numbers off a real PR rather than by
 imagining the happy path — `all=3, github-actions[bot]=0` on a PR where the
 review had genuinely posted nothing.
+
+## 2026-09-23 · Phase 1 · Four red tests and two green ones, all for the same wrong reason
+Expected: `MockRestServiceServer.bindTo(builder)` to intercept every request
+         the `ResendEmailSender` made through the `RestClient` built from
+         that builder — the documented, standard way to test a client.
+Reality: four tests failed with `ConnectException`, because the client had
+         gone to the real network looking for `api.resend.test`. The sender's
+         factory method installed its own request factory on the builder —
+         a JDK client with the configured timeouts — *after* the test had
+         bound the mock server, and `requestFactory(...)` is last-writer-wins.
+         The mock was replaced, silently, by a real transport. The fix moved
+         the timeout configuration to the composition root, which is where it
+         belonged anyway: the transport is wiring, the sender is behaviour.
+Wrong about: what a passing test proved. The "5xx is transient" and
+         "unreachable is transient" tests were **green on that same run**,
+         because a real `ConnectException` is also classified as
+         `Unavailable`. Two tests passed for a reason that had nothing to do
+         with the code they were written to exercise. Had the four others not
+         failed, nothing would have said so. The habit: a test on a failure
+         path asserts *which* failure — the `503` in the reason, not just the
+         type — because the failure branch is exactly where two different
+         causes converge on one answer. This is the third entry in this log
+         about a green test that was not testing anything, and the pattern is
+         always the same: the assertion was true, and it was true for a
+         reason the test did not control.
+**Also today:** the first `api` package, the first cross-module port, and one
+architecture rule loosened by one edge (`infra → api`) — proven still to bite
+by planting an `infra → service` import and watching `layers only depend
+inwards` fail before removing it. And the first provider posture decision
+written down (ADR-0017): the default is the real provider, and the real
+provider refuses to boot without its key. Confirmed by running the packaged
+jar both ways — `local` boots and logs the provider, the default exits 1 with
+a message that names the missing property.

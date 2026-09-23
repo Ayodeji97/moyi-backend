@@ -50,6 +50,11 @@ curl localhost:8080/actuator/health
 ```
 For the app to actually reach the Postgres/Redis started above, run it
 with the `local` profile instead: `SPRING_PROFILES_ACTIVE=local ./gradlew bootRun`.
+The `local` profile also writes outgoing email to the log instead of
+sending it, so a verification link is read from the console. Every other
+profile defaults to Resend and refuses to start without
+`MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY` and `MOYI_NOTIFICATION_EMAIL_FROM`
+— by design, so a mute production is a failed deploy rather than a quiet one.
 
 `./gradlew build` runs the full local verification loop: compile, ktlint,
 detekt, and tests — including integration tests that spin up a real
@@ -165,7 +170,7 @@ flowchart TD
 | `api` | **public** | Interfaces and DTOs other modules call | nothing |
 | `web` | `internal` | Controllers, HTTP DTOs, mappers | `service`, `domain` |
 | `service` | `internal` | Orchestration, transactions | `domain`, `infra`, `api` |
-| `infra` | `internal` | JPA entities, repositories, SDKs | `domain` |
+| `infra` | `internal` | JPA entities, repositories, SDKs | `domain`, and `api` when it is the adapter behind a port that has nothing to orchestrate (the Resend client behind `EmailSender`) |
 | `domain` | `internal` | Models, business rules | nothing |
 
 ```

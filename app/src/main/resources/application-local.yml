@@ -9,3 +9,12 @@ spring:
     open-in-view: false
   flyway:
     locations: classpath:db/migration
+
+moyi:
+  notification:
+    email:
+      # Local development has no mailbox: the message is written to the log and
+      # the verification link is read from there. Only this profile may say
+      # `log` — the default is Resend, which refuses to start without a key.
+      provider: log
+      from: "Moyi <hello@moyi.local>"
