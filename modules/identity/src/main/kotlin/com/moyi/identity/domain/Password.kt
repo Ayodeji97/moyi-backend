@@ -100,6 +100,15 @@ internal interface PasswordHasher {
      * @throws HashingCapacityExceededException when too many hashes are already in flight (NFR-005a).
      */
     fun hash(password: Password): PasswordHash
+
+    /** Verifies an untrusted login input against a stored digest. */
+    fun matches(
+        raw: String,
+        hash: PasswordHash,
+    ): Boolean
+
+    /** Performs the same Argon2 work when no account exists, closing T-18's timing oracle. */
+    fun matchesDummy(raw: String): Boolean
 }
 
 /**

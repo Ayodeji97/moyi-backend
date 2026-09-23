@@ -51,6 +51,9 @@ internal class AccountStore(
 
     fun findByEmail(email: Email): User? = users.findByEmail(email.value)?.toDomain()
 
+    /** Password hashes are reachable only through the authentication path. */
+    fun findCredentials(userId: UserId): Credentials? = credentials.findById(userId.value)?.toDomain()
+
     fun findById(id: UserId): User? = users.findById(id.value).orElse(null)?.toDomain()
 
     /**

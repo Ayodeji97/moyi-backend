@@ -42,6 +42,10 @@ internal class Argon2idPasswordHasher(
 
     private val permits = Semaphore(properties.maxConcurrentHashes, true)
 
+    // Build this once at startup so the first unknown-email login does not pay
+    // an extra hash and become a timing outlier.
+    private val dummyHash: PasswordHash = hash(Password.of("moyi-dummy-password-never-accepted"))
+
     override fun hash(password: Password): PasswordHash {
         // Blocking here is cheap and correct: a virtual thread waiting on a
         // semaphore unmounts from its carrier, so the wait costs a
@@ -57,6 +61,24 @@ internal class Argon2idPasswordHasher(
             // encoder ever returns nothing, that is genuinely exceptional and
             // the message should say which encoder, not just where the NPE was.
             PasswordHash(checkNotNull(encoder.encode(password.value)) { "Argon2id encoder returned no hash" })
+        } finally {
+            permits.release()
+        }
+    }
+
+    override fun matches(
+        raw: String,
+        hash: PasswordHash,
+    ): Boolean = withPermit { encoder.matches(raw, hash.value) }
+
+    override fun matchesDummy(raw: String): Boolean = matches(raw, dummyHash)
+
+    private fun <T> withPermit(block: () -> T): T {
+        if (!permits.tryAcquire(properties.acquireTimeoutMillis, TimeUnit.MILLISECONDS)) {
+            throw HashingCapacityExceededException()
+        }
+        return try {
+            block()
         } finally {
             permits.release()
         }

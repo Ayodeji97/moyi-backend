@@ -385,4 +385,11 @@ internal class RecordingPasswordHasher(
         calls.incrementAndGet()
         return delegate.hash(password)
     }
+
+    override fun matches(
+        raw: String,
+        hash: PasswordHash,
+    ): Boolean = delegate.matches(raw, hash)
+
+    override fun matchesDummy(raw: String): Boolean = delegate.matchesDummy(raw)
 }

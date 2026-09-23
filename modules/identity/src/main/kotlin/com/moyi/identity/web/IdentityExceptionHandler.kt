@@ -7,6 +7,7 @@ import com.moyi.identity.domain.HashingCapacityExceededException
 import com.moyi.identity.domain.VerificationTokenExpiredException
 import com.moyi.identity.domain.VerificationTokenInvalidException
 import com.moyi.identity.service.AuthenticatedUserMissingException
+import com.moyi.identity.service.InvalidCredentialsException
 import org.slf4j.LoggerFactory
 import org.springframework.core.annotation.Order
 import org.springframework.http.HttpHeaders
@@ -79,6 +80,15 @@ internal class IdentityExceptionHandler(
             status = HttpStatus.UNAUTHORIZED,
             errorCode = ErrorCode.UNAUTHENTICATED,
             detail = "Your session is not valid. Sign in again.",
+            request = request,
+        )
+
+    @ExceptionHandler(InvalidCredentialsException::class)
+    fun handleInvalidCredentials(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.UNAUTHORIZED,
+            errorCode = ErrorCode.UNAUTHENTICATED,
+            detail = "The email or password is not correct.",
             request = request,
         )
 
