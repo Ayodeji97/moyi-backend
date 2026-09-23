@@ -97,7 +97,15 @@ expect "breached password is 422 NOT_BREACHED" 422 '"code":"NOT_BREACHED"' -- -X
 expect "over18=false is 422 on field over18" 422 '"field":"over18"' -- -X POST "$API/auth/register" -d '{"email":"x@example.com","password":"correct horse battery","displayName":"S","acceptedTermsVersion":"1","over18":false}'
 expect "malformed JSON is 400 MALFORMED_REQUEST" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/auth/register" -d '{"email": '
 expect "wrong content type is 415" 415 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- -X POST "$API/auth/register" -H 'Content-Type: text/plain' -d 'x'
-expect "unknown route is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- "$API/auth/nope"
+# Since E1 (ADR-0019) the resource server answers before routing does: anything
+# under /api/v1 that is not a permitted public POST needs a bearer token, so an
+# unknown route is 401, not 404 — and the 401 still carries a code.
+expect "unknown route under /api/v1 is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- "$API/auth/nope"
+
+echo; echo "resource server (ADR-0019)"
+expect "GET /me without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- "$API/me"
+if curl -s -o /dev/null -D - "$API/me" | grep -qi "^www-authenticate: bearer"; then pass "…with a WWW-Authenticate: Bearer challenge"; else fail "WWW-Authenticate" "header missing on the 401"; fi
+expect "GET /me with a garbage token is 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/me" -H 'Authorization: Bearer not-a-jwt'
 
 echo; echo "email verification (FR-002, ADR-0018)"
 # The email is sent after the commit, on another thread. Poll for a NEW log
@@ -113,7 +121,9 @@ if [ "${#SECRET}" = 43 ]; then pass "link carries a 43-character secret"; else f
 if grep -q "$EMAIL" "$MOYI_LOG"; then fail "address never logged" "the address appears in the log"; else pass "address never appears in the log (masked to the domain)"; fi
 expect "garbage token is 422 VERIFICATION_TOKEN_INVALID" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -d '{"token":"not-a-token"}'
 expect "blank token is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/verify-email" -d '{"token":" "}'
-expect "GET on verify-email is 405 (a scanner cannot spend a token)" 405 '"code":"METHOD_NOT_ALLOWED"' -- "$API/auth/verify-email?token=$SECRET"
+# A scanner's GET cannot spend a token: only POST is public here, so the filter
+# chain refuses it before the controller is ever reached.
+expect "GET on verify-email cannot spend a token (401)" 401 '"code":"UNAUTHENTICATED"' -- "$API/auth/verify-email?token=$SECRET"
 expect "real token verifies: 200, empty body" 200 "" -- -X POST "$API/auth/verify-email" -d "{\"token\":\"$SECRET\"}"
 expect "same token again is 410 VERIFICATION_TOKEN_EXPIRED" 410 '"code":"VERIFICATION_TOKEN_EXPIRED"' -- -X POST "$API/auth/verify-email" -d "{\"token\":\"$SECRET\"}"
 expect "resend for a verified address is 202, empty" 202 "" -- -X POST "$API/auth/resend-verification" -d "{\"email\":\"$EMAIL\"}"

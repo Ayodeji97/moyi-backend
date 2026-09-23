@@ -2,6 +2,12 @@
 # itself runs via `./gradlew bootRun` against these, not as a compose
 # service yet: a Dockerfile for the app arrives with CI (doc 25 §7 step 9,
 # where it's actually needed to publish an image), not before.
+# Pinned, so every checkout of this repository — the main one, a git worktree,
+# an agent's clone — shares ONE local Postgres instead of each trying to bind
+# 5432 for a project named after its directory. Found when scripts/smoke.sh,
+# run from a worktree, tried to start a second Postgres on the same port.
+name: moyi-backend
+
 services:
   postgres:
     image: postgres:18
