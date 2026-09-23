@@ -168,7 +168,7 @@ jobs:
             echo "tag=corpus-$(date -u +%Y-%m-%d-%H%M)"
           } >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pwned-passwords-bloom
           path: ${{ env.CORPUS }}
@@ -179,7 +179,7 @@ jobs:
       # `inputs` is empty on a scheduled run, so the schedule is named explicitly
       # rather than relying on the declared default being applied to it.
       - if: ${{ github.event_name == 'schedule' || inputs.publish }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.build.outputs.tag }}
           name: Breached-password corpus ${{ steps.build.outputs.tag }}
@@ -259,7 +259,7 @@ jobs:
           git diff --stat gradle/breach-corpus.properties
 
       - if: ${{ github.event_name == 'schedule' || inputs.publish }}
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: chore/pin-${{ steps.build.outputs.tag }}
           add-paths: gradle/breach-corpus.properties
