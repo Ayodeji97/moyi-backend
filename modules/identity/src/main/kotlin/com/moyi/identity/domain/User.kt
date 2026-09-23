@@ -42,6 +42,29 @@ internal data class User(
     /** Email verification is a timestamp, not a flag — *when* is auditable and answers "how long has this been true". */
     val isEmailVerified: Boolean get() = emailVerifiedAt != null
 
+    /**
+     * The account has proved it controls its address (FR-002).
+     *
+     * Only `PENDING_VERIFICATION` becomes `ACTIVE`. A suspended or
+     * deletion-pending account records the verification — the fact is true
+     * and worth keeping — but a verification email must not be a way out of
+     * suspension, so its status is left where an administrator or the person
+     * themselves put it.
+     *
+     * Idempotent: an already-verified user is returned unchanged, so the
+     * first verification time survives a second token being presented.
+     */
+    fun verifyEmail(now: Instant): User =
+        if (isEmailVerified) {
+            this
+        } else {
+            copy(
+                emailVerifiedAt = now,
+                status = if (status == UserStatus.PENDING_VERIFICATION) UserStatus.ACTIVE else status,
+                updatedAt = now,
+            )
+        }
+
     companion object {
         /**
          * Chosen here rather than found in a document — doc 03 FR-006 requires a display

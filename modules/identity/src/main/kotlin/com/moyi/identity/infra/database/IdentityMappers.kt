@@ -4,8 +4,10 @@ import com.moyi.identity.domain.ConsentRecord
 import com.moyi.identity.domain.Credentials
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.PasswordHash
+import com.moyi.identity.domain.TokenHash
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
+import com.moyi.identity.domain.VerificationToken
 
 /**
  * The translation between the domain model and the persistence model.
@@ -124,4 +126,29 @@ internal fun ConsentRecord.toEntity(): ConsentRecordEntity =
         acceptedAt = acceptedAt,
         ipHash = ipHash,
         userAgentHash = userAgentHash,
+    )
+
+internal fun VerificationTokenEntity.toDomain(): VerificationToken =
+    VerificationToken(
+        id = getId(),
+        userId = UserId(userId),
+        purpose = purpose,
+        tokenHash = TokenHash(tokenHash),
+        expiresAt = expiresAt,
+        consumedAt = consumedAt,
+    )
+
+/**
+ * Insert-only. A token's one state change — being consumed — is a conditional
+ * `UPDATE` on the repository, never an `applyTo`, because it has to be atomic
+ * with the check that it is still live.
+ */
+internal fun VerificationToken.toEntity(): VerificationTokenEntity =
+    VerificationTokenEntity(
+        id = id,
+        userId = userId.value,
+        purpose = purpose,
+        tokenHash = tokenHash.value,
+        expiresAt = expiresAt,
+        consumedAt = consumedAt,
     )

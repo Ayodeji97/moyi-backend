@@ -1,7 +1,11 @@
 package com.moyi.identity.infra.database
 
+import com.moyi.identity.domain.VerificationPurpose
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Modifying
+import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -50,4 +54,67 @@ internal interface CredentialsRepository : Repository<CredentialsEntity, UUID> {
  */
 internal interface ConsentRecordRepository : Repository<ConsentRecordEntity, UUID> {
     fun saveAll(records: Iterable<ConsentRecordEntity>): List<ConsentRecordEntity>
+}
+
+/**
+ * Verification tokens. On the bare [Repository] marker, and every method is
+ * one the verification path actually makes — there is no `findAll()` over a
+ * table of credential digests.
+ *
+ * The two `@Modifying` queries are the interesting part. [consume] is a
+ * compare-and-set written in SQL: it flips `consumed_at` **only if** the row
+ * is still live, and reports through its return value whether it was this
+ * caller who spent it. Two requests presenting the same token at the same
+ * moment both read it as live; only one of them gets `1` back here, because
+ * the database serialises the two `UPDATE`s and the second finds the
+ * `consumed_at IS NULL` predicate no longer true. A read-then-write in Kotlin
+ * — load, check `isLive`, save — has no such guarantee, and would let both
+ * through.
+ *
+ * `clearAutomatically` on both: a bulk JPQL update bypasses the persistence
+ * context, so an entity loaded earlier in the same transaction would still
+ * say `consumedAt == null` after the row was flipped. Clearing the context
+ * makes the next read go to the database, which is the only place the truth
+ * now is.
+ */
+internal interface VerificationTokenRepository : Repository<VerificationTokenEntity, UUID> {
+    fun save(token: VerificationTokenEntity): VerificationTokenEntity
+
+    fun findByTokenHash(tokenHash: String): VerificationTokenEntity?
+
+    /** @return `1` if this call consumed the token; `0` if it was already consumed, expired, or absent. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE VerificationTokenEntity t
+           SET t.consumedAt = :now
+         WHERE t.tokenHash = :tokenHash
+           AND t.consumedAt IS NULL
+           AND t.expiresAt > :now
+        """,
+    )
+    fun consume(
+        tokenHash: String,
+        now: Instant,
+    ): Int
+
+    /**
+     * Retires a person's other outstanding tokens for a purpose once one of
+     * them has done its job. Deleted rather than consumed: doc 07 §7 keeps
+     * tokens only until "consumption or expiry", and these were neither —
+     * they are simply moot.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        DELETE FROM VerificationTokenEntity t
+         WHERE t.userId = :userId
+           AND t.purpose = :purpose
+           AND t.consumedAt IS NULL
+        """,
+    )
+    fun deleteLive(
+        userId: UUID,
+        purpose: VerificationPurpose,
+    ): Int
 }

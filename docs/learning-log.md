@@ -933,3 +933,38 @@ Wrong about: what a complete allowlist is. I had audited it against what the
          was one grep away). The fix is one word. Whether it is the *whole*
          fix cannot be known from this PR, because editing the workflow makes
          the action skip itself — the next ordinary PR is the test.
+
+## 2026-09-23 · Phase 1 · A comment that asserted a negative, and the mutation that made it true
+Expected: to write "published after the boundary, there is no transaction to
+         bind to and the listener silently drops the event" as a code comment
+         in `RegisterUser`, and move on.
+Reality: this log already says a comment asserting a negative is the claim to
+         distrust most, because nothing tests prose. So the claim was tested:
+         the `publishEvent` call was moved three lines down, outside
+         `transactions.executeWithoutResult { }`, and the identity suite
+         re-run. Seven tests failed — every one that expected an email — and
+         the eighth, the duplicate-registration test, failed *too*, because
+         the moved publish now fired on the duplicate path where it had been
+         skipped by the exception before. The comment was true. It is now a
+         comment I have watched be true, which is a different thing.
+         The second mutation deleted `AND t.consumedAt IS NULL` from the
+         conditional `UPDATE`. Two tests died: the persistence test that calls
+         `consume` twice, and the endpoint test that presents one token from
+         two threads behind a latch. Both `UPDATE`s succeeded, both requests
+         got 200, and the "single-use" in FR-002 was a word in a document.
+Wrong about: nothing this time, and that is the point of recording it. The
+         first run of the new suite was green — 28 tasks, 111 tests — and a
+         green first run on ninety lines of new tests is the moment to be most
+         suspicious, not least. Ten minutes of breaking the code on purpose is
+         what turns "the tests pass" into "the tests would notice". The habit
+         from slice C's log holds: *green is a claim about where you ran it*,
+         and it is also a claim about what you broke to check.
+**Also today.** The email now leaves the system through an `AFTER_COMMIT`
+`@Async` listener rather than the outbox, and ADR-0018 spends a paragraph on
+why that is allowed here and would not be for a reveal notification: the
+difference is whether the person has a button that recovers the loss. Worth
+being able to say out loud, because "why not just use the outbox for
+everything" is the obvious question and "because this event has a designed
+recovery path and that one does not" is the whole answer. And one thing the
+course does that we now deliberately do not: Chirp's verification link is a
+`GET` on the API. Mail scanners fetch links. A `GET` must never spend a token.

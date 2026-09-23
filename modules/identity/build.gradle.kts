@@ -21,6 +21,12 @@ dependencies {
     // module should learn about common:core by depending on identity.
     implementation(projects.common.core)
 
+    // The email port (ADR-0017). Only `com.moyi.notification.api` is reachable
+    // from here — everything else in that module is `internal` — which is the
+    // module boundary doing its job: identity knows an email can be sent and
+    // nothing about how.
+    implementation(projects.modules.notification)
+
     // JPA annotations and Spring Data repositories.
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 

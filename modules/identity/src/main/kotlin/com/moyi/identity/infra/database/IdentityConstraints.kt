@@ -24,6 +24,9 @@ internal object IdentityConstraints {
 
     /** `consent_records_user_document_version_key` — the same version accepted twice. */
     const val CONSENT_RECORD_UNIQUE = "consent_records_user_document_version_key"
+
+    /** `verification_tokens_token_hash_key` — two tokens with one digest, which only a broken generator can produce. */
+    const val VERIFICATION_TOKEN_HASH_UNIQUE = "verification_tokens_token_hash_key"
 }
 
 /**

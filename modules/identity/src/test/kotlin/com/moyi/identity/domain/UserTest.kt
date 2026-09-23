@@ -81,6 +81,36 @@ internal class UserTest {
         Email("Ada.Lovelace@Example.COM").value shouldBe "Ada.Lovelace@Example.COM"
     }
 
+    @Test
+    fun `verifying moves a pending account to active and records when`() {
+        val later = NOW.plusSeconds(60)
+
+        val verified = user(status = UserStatus.PENDING_VERIFICATION, emailVerifiedAt = null).verifyEmail(later)
+
+        verified.status shouldBe UserStatus.ACTIVE
+        verified.emailVerifiedAt shouldBe later
+        verified.updatedAt shouldBe later
+    }
+
+    @Test
+    fun `verifying is not a way out of suspension`() {
+        // The fact is recorded — the address is genuinely confirmed — but the
+        // status stays where an administrator put it.
+        val verified = user(status = UserStatus.SUSPENDED, emailVerifiedAt = null).verifyEmail(NOW)
+
+        verified.status shouldBe UserStatus.SUSPENDED
+        verified.emailVerifiedAt shouldBe NOW
+    }
+
+    @Test
+    fun `verifying twice keeps the first time`() {
+        val first = user(status = UserStatus.PENDING_VERIFICATION, emailVerifiedAt = null).verifyEmail(NOW)
+
+        val again = first.verifyEmail(NOW.plusSeconds(3600))
+
+        again shouldBe first
+    }
+
     private companion object {
         val NOW: Instant = Instant.parse("2026-09-19T10:15:30Z")
 

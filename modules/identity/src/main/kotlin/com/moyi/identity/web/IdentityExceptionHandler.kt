@@ -4,6 +4,9 @@ import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.ExceptionHandlerAdviceOrder
 import com.moyi.common.web.ProblemDetails
 import com.moyi.identity.domain.HashingCapacityExceededException
+import com.moyi.identity.domain.VerificationTokenExpiredException
+import com.moyi.identity.domain.VerificationTokenInvalidException
+import org.slf4j.LoggerFactory
 import org.springframework.core.annotation.Order
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
@@ -33,6 +36,37 @@ import java.net.URI
 internal class IdentityExceptionHandler(
     private val problems: ProblemDetails,
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
+    /**
+     * FR-002. 422 and not 404: the *route* exists and the body parsed; what is
+     * wrong is the value, which is doc 06 §2's definition of 422. The detail
+     * does not echo the token — it is a credential, even a wrong one.
+     */
+    @ExceptionHandler(VerificationTokenInvalidException::class)
+    fun handleVerificationTokenInvalid(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.UNPROCESSABLE_ENTITY,
+            errorCode = ErrorCode.VERIFICATION_TOKEN_INVALID,
+            detail = "That verification link is not recognised.",
+            request = request,
+        )
+
+    /**
+     * 410 Gone, which doc 06 §2 already uses for a spent invite: the resource
+     * existed and will not again. The sentence is `states.md` §1's copy for
+     * the "Link expired" state, so the client can show it as-is or switch on
+     * the code.
+     */
+    @ExceptionHandler(VerificationTokenExpiredException::class)
+    fun handleVerificationTokenExpired(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.GONE,
+            errorCode = ErrorCode.VERIFICATION_TOKEN_EXPIRED,
+            detail = "That link has expired. Links last 24 hours and work once. We can send you a new one.",
+            request = request,
+        )
+
     /**
      * NFR-005a: saturation is a 503 with a `Retry-After`, not a 500.
      *
@@ -59,6 +93,27 @@ internal class IdentityExceptionHandler(
                     instance = (request as? ServletWebRequest)?.request?.requestURI?.let(URI::create),
                 ),
             )
+
+    private fun problem(
+        status: HttpStatus,
+        errorCode: ErrorCode,
+        detail: String,
+        request: WebRequest,
+    ): ResponseEntity<Any> {
+        // WARN, as the catch-all does for contract outcomes: a rate of these is
+        // worth a graph, a single one is not worth a page.
+        log.warn("{} -> {}", errorCode, status.value())
+        return ResponseEntity
+            .status(status)
+            .body(
+                problems.of(
+                    status = status,
+                    errorCode = errorCode,
+                    detail = detail,
+                    instance = (request as? ServletWebRequest)?.request?.requestURI?.let(URI::create),
+                ),
+            )
+    }
 
     private companion object {
         /** A hash takes ~150 ms, so a second is long enough for the queue to drain and short enough to feel instant. */
