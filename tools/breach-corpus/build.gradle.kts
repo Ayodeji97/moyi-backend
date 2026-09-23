@@ -23,4 +23,21 @@ application {
 // its heap around that by trial and error.
 tasks.named<JavaExec>("run") {
     jvmArgs("-Xmx1g")
+
+    // **JavaExec's working directory defaults to the *subproject* directory**,
+    // not the directory Gradle was invoked from. So `--output build/x.bloom`
+    // written by someone standing at the repo root lands in
+    // `tools/breach-corpus/build/x.bloom`, and every later step that looks for
+    // it at the root finds nothing.
+    //
+    // That is not hypothetical: it is what happened on the first real corpus
+    // run. The 10.5M-digest corpus built correctly in 19 minutes and was
+    // written somewhere nobody was looking, after which upload-artifact logged
+    // a warning, action-gh-release published an empty release, and both
+    // reported success.
+    //
+    // Anchoring to the root makes a relative path mean what a person typing it
+    // at the root would expect. It was invisible in local testing because
+    // absolute paths were used there — which is its own lesson.
+    workingDir = rootDir
 }
