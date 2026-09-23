@@ -856,3 +856,27 @@ Wrong about: what counts as evidence. Both detours came from reasoning over
          fault was invisible behind the first precisely because the first one
          failed loudly enough to explain the symptom. Fixing the loud failure
          is how you find out what the quiet one was.
+
+**Same day, and the most useful thing I learned all week.** After pushing a fix
+to the review workflow's PR, no checks ran. Not the review, not CI, not CodeQL
+— zero workflow runs for the commit. I pushed again, closed and reopened the
+PR, toggled it draft and back, and finally pushed an empty commit for a fresh
+SHA. Still zero. Meanwhile a `workflow_dispatch` run on the same repository
+started normally, all six workflows showed `active`, and Actions was enabled.
+The cause was one field: `mergeable: CONFLICTING`. **A `pull_request` workflow
+runs against the PR's *merge* commit, and when the branch conflicts with the
+base GitHub cannot compute one — so it schedules nothing at all.** No error, no
+queued run, no annotation. The branch had conflicted the moment a PR merged
+ahead of it, because both had appended to this file. Rebasing made every check
+fire within seconds.
+What made this cost forty minutes was looking in the wrong register. I
+reasoned about Actions health, workflow states, billing, the action version,
+concurrency limits — all repository-level explanations for what turned out to
+be a property of one pull request, visible in a field I had already queried
+twice that morning for another purpose. **When something does not run, ask what
+it would have run *on* before asking whether the runner is healthy.**
+The honourable mention: the guard I had just written counted every new comment,
+so CodeQL posting an alert would have made a silent no-op review look like a
+successful one. Caught by reading real numbers off a real PR rather than by
+imagining the happy path — `all=3, github-actions[bot]=0` on a PR where the
+review had genuinely posted nothing.

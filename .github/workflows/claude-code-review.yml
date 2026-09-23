@@ -107,7 +107,18 @@ jobs:
           # and conclude nothing was posted — a check silently capped at 30 is
           # the same kind of bug it exists to catch. `--slurp` cannot be
           # combined with `--jq`, hence awk.
-          count() { gh api --paginate "$1?per_page=100" --jq 'length' | awk '{s+=$1} END {print s+0}'; }
+          # Only what the review itself posts. It delivers through GITHUB_TOKEN,
+          # so its comments are authored by github-actions[bot] — and counting
+          # *everything* would let an unrelated bot rescue a silent no-op.
+          # That is not hypothetical: CodeQL posts a review and an inline
+          # comment when it finds an alert, which on a real PR would have
+          # pushed the total up while the review posted nothing at all.
+          #
+          # If the review ever posts under a different identity this filter
+          # goes stale and the guard fails on a good review. That is the
+          # failure direction worth having, and the error message says where
+          # to look.
+          count() { gh api --paginate "$1?per_page=100" --jq '[.[] | select(.user.login == "github-actions[bot]")] | length' | awk '{s+=$1} END {print s+0}'; }
           issue=$(count "repos/$REPO/issues/$PR/comments")
           inline=$(count "repos/$REPO/pulls/$PR/comments")
           reviews=$(count "repos/$REPO/pulls/$PR/reviews")
@@ -224,14 +235,25 @@ jobs:
           BEFORE: ${{ steps.before.outputs.count }}
         run: |
           set -euo pipefail
-          count() { gh api --paginate "$1?per_page=100" --jq 'length' | awk '{s+=$1} END {print s+0}'; }
+          # Only what the review itself posts. It delivers through GITHUB_TOKEN,
+          # so its comments are authored by github-actions[bot] — and counting
+          # *everything* would let an unrelated bot rescue a silent no-op.
+          # That is not hypothetical: CodeQL posts a review and an inline
+          # comment when it finds an alert, which on a real PR would have
+          # pushed the total up while the review posted nothing at all.
+          #
+          # If the review ever posts under a different identity this filter
+          # goes stale and the guard fails on a good review. That is the
+          # failure direction worth having, and the error message says where
+          # to look.
+          count() { gh api --paginate "$1?per_page=100" --jq '[.[] | select(.user.login == "github-actions[bot]")] | length' | awk '{s+=$1} END {print s+0}'; }
           issue=$(count "repos/$REPO/issues/$PR/comments")
           inline=$(count "repos/$REPO/pulls/$PR/comments")
           reviews=$(count "repos/$REPO/pulls/$PR/reviews")
           after=$(( issue + inline + reviews ))
 
           if [ "$after" -le "$BEFORE" ]; then
-            echo "::error::The review ran but posted nothing ($BEFORE before, $after after). It has spent the whole review and delivered none of it, and without this step the check would be green. Open the run log — show_full_output is on — and look for permission denials: the allowlist in claude_args is the usual cause, and it must cover the tools the review's SUBAGENTS use, not only the ones the top-level session uses."
+            echo "::error::The review ran but posted nothing as github-actions[bot] ($BEFORE before, $after after). It has spent the whole review and delivered none of it, and without this step the check would be green. Two things to check, in order. First the run log — show_full_output is on — for permission denials: the allowlist in claude_args is the usual cause, and it must cover the tools the review's SUBAGENTS use, not only the top-level session's. Second, whether the review now posts under a different identity, in which case the filter in this job is what is stale, not the review."
             exit 1
           fi
           echo "The review posted $(( after - BEFORE )) item(s)." >> "$GITHUB_STEP_SUMMARY"
