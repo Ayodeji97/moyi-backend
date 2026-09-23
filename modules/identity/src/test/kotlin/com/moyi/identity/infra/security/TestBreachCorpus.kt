@@ -1,11 +1,10 @@
 package com.moyi.identity.infra.security
 
 import com.moyi.common.security.BloomFilter
+import com.moyi.common.security.PwnedPasswordDigest
 import org.springframework.test.context.DynamicPropertyRegistry
 import java.nio.file.Files
 import java.nio.file.Path
-import java.security.MessageDigest
-import java.text.Normalizer
 import java.time.Instant
 import kotlin.io.path.outputStream
 
@@ -83,15 +82,14 @@ internal object TestBreachCorpus {
     }
 
     /**
-     * NFKC first, then SHA-1 — the same order [BloomFilterBreachedPasswordCorpus]
-     * uses. A fixture that normalised differently from the code under test
-     * would make every lookup miss, and the tests would read as a broken
-     * filter rather than as a broken fixture.
+     * The same [PwnedPasswordDigest] the service uses, deliberately.
+     *
+     * A fixture that derived its digests independently would still pass every
+     * test while agreeing with nothing — it would be testing that the fixture
+     * agrees with itself. Sharing the definition is what makes these tests say
+     * something about the code under test.
      */
-    private fun sha1(value: String): ByteArray =
-        MessageDigest
-            .getInstance("SHA-1")
-            .digest(Normalizer.normalize(value, Normalizer.Form.NFKC).toByteArray(Charsets.UTF_8))
+    private fun sha1(value: String): ByteArray = PwnedPasswordDigest.of(value)
 
     /**
      * Far tighter than production's 0.001, because eight members in a filter

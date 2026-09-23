@@ -1,13 +1,13 @@
 package com.moyi.identity.infra.security
 
 import com.moyi.common.security.BloomFilter
+import com.moyi.common.security.PwnedPasswordDigest
 import com.moyi.identity.domain.BreachedPasswordCorpus
 import com.moyi.identity.domain.Password
 import org.slf4j.LoggerFactory
 import org.springframework.core.io.ResourceLoader
 import org.springframework.stereotype.Component
 import java.io.IOException
-import java.security.MessageDigest
 import java.time.Clock
 import java.time.Duration
 
@@ -59,7 +59,7 @@ internal class BloomFilterBreachedPasswordCorpus(
         }
     }
 
-    override fun contains(password: Password): Boolean = filter.mightContain(sha1(password.value))
+    override fun contains(password: Password): Boolean = filter.mightContain(digestOf(password))
 
     /**
      * Refuses a file that is a valid filter but not a corpus.
@@ -83,30 +83,21 @@ internal class BloomFilterBreachedPasswordCorpus(
     }
 
     /**
-     * SHA-1 — because that is what the corpus is made of, not because it is a
-     * reasonable way to handle a password.
+     * The corpus's lookup key, from the one place that defines it.
      *
-     * HIBP publishes SHA-1 digests, so the lookup key is fixed by the data.
-     * Nothing derived here is stored, transmitted or used to authenticate
-     * anyone; the digest exists for the microsecond it takes to index into a
-     * bit array, and the password's real hash is Argon2id
-     * ([Argon2idPasswordHasher]). A scanner flagging this line is right about
-     * the algorithm and wrong about the use.
+     * This held its own `MessageDigest.getInstance("SHA-1")` until CodeQL
+     * flagged it — the second copy of a line that [PwnedPasswordDigest] was
+     * created to be the only instance of, left behind when that type was
+     * introduced. Precisely the drift centralising it was supposed to prevent,
+     * and the reason the failure mode is worth restating: two digests computed
+     * different ways do not throw, they simply never match, and the
+     * breached-password check is off while reporting that it is on.
      *
-     * A fresh [MessageDigest] per call because they are not thread-safe, and
-     * because a few microseconds is nothing next to the ~150 ms of Argon2id
-     * that follows on the same request.
-     *
-     * One honest limitation: [Password.value] is NFKC-normalised and the
-     * corpus is not, so a breached password whose only representation in the
-     * wild is decomposed would not match. Every realistic entry in the corpus
-     * is ASCII, where NFKC is the identity function, so this is a theoretical
-     * gap rather than a practical one — but it is a gap, and normalising is
-     * still the right call, because the alternative locks users out of their
-     * own accounts across devices.
+     * [PwnedPasswordDigest] normalises before hashing and [Password.value] is
+     * already normalised; NFKC is idempotent, so applying it twice is a
+     * no-op rather than a correctness question.
      */
-    @Suppress("InsecureHash")
-    private fun sha1(value: String): ByteArray = MessageDigest.getInstance("SHA-1").digest(value.toByteArray(Charsets.UTF_8))
+    private fun digestOf(password: Password): ByteArray = PwnedPasswordDigest.of(password.value)
 
     private fun load(
         properties: BreachCorpusProperties,
