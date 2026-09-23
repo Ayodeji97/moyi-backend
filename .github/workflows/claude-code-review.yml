@@ -194,12 +194,22 @@ jobs:
           # step 8 is how the review is delivered — an allowlist without
           # it buys a complete review that cannot post itself.
           # Everything here is read-only apart from that one comment.
+          #
+          # `Skill` is first because the prompt IS a skill invocation:
+          # `/code-review:code-review` is executed through the Skill tool, and
+          # without it on this list the very first thing the review does is
+          # denied — "user-rejected", in the transcript — after which the model
+          # improvises a review with `Task` agents, ends its turn waiting for
+          # them, and the session closes having posted nothing. Found on
+          # PR #26, 2026-09-23, by the step below; the allowlist had been
+          # written for the tools the review *uses* and forgot the one that
+          # *starts* it.
           # Kept on one line on purpose: a YAML folded scalar turns each
           # newline into a space, and a space inside the comma-separated
           # tool list is not something worth finding out about in
           # production.
           claude_args: >-
-            --allowedTools "Task,Read,Grep,Glob,TodoWrite,mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(git blame:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --allowedTools "Skill,Task,Read,Grep,Glob,TodoWrite,mcp__github_inline_comment__create_inline_comment,Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr list:*),Bash(gh pr comment:*),Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh search:*),Bash(git blame:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
 
       # **The check that would have caught today.** With a working token the
       # review ran properly — 24 turns, three models, four and a half minutes,

@@ -913,3 +913,23 @@ written down (ADR-0017): the default is the real provider, and the real
 provider refuses to boot without its key. Confirmed by running the packaged
 jar both ways — `local` boots and logs the provider, the default exits 1 with
 a message that names the missing property.
+
+## 2026-09-23 · Phase 1 · The guard fired, and it was right
+Expected: the review job on PR #26 to run the `/code-review` plugin and post.
+Reality: it ran for twenty seconds, six turns, posted nothing, and the
+         "review must have said something" step from #24 turned the job red.
+         The transcript — visible only because `show_full_output` is on — had
+         one `permission_denied`: tool `Skill`, "Execute skill:
+         code-review:code-review". The prompt *is* a skill invocation, and the
+         allowlist named every tool the review uses and not the one that
+         starts it. Denied that, the model spawned three `Task` agents itself,
+         said "I'll continue once results arrive", and the headless session
+         ended — `terminal_reason: completed`, `is_error: false`.
+Wrong about: what a complete allowlist is. I had audited it against what the
+         plugin's *commands* do, not against what the *prompt* does first.
+         The two lessons that were already in this log both applied at once:
+         a check that cannot fail is not a check (the guard is what surfaced
+         this), and read the primary transcript before theorising (the denial
+         was one grep away). The fix is one word. Whether it is the *whole*
+         fix cannot be known from this PR, because editing the workflow makes
+         the action skip itself — the next ordinary PR is the test.
