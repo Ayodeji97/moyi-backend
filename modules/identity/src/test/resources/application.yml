@@ -25,3 +25,8 @@ moyi:
   identity:
     verification:
       link-base-url: https://moyi.test/verify
+  security:
+    jwt:
+      # A fresh RSA pair per test context; the default source refuses to
+      # start without configured PEMs (ADR-0019).
+      key-source: ephemeral

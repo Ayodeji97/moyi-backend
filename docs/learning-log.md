@@ -968,3 +968,35 @@ everything" is the obvious question and "because this event has a designed
 recovery path and that one does not" is the whole answer. And one thing the
 course does that we now deliberately do not: Chirp's verification link is a
 `GET` on the API. Mail scanners fetch links. A `GET` must never spend a token.
+
+## 2026-09-23 · Phase 1 · Three things the compiler and the framework disagreed about
+Expected: slice E1 to be mostly configuration — Spring Security's resource
+         server, a decoder, a chain — with the risk in the security semantics.
+Reality: the semantics held on the first run (every 401 case, the 403, the
+         revocation window). The first three failures were all *language
+         meets framework*, and each is worth one sentence because each will
+         recur.
+         **A `value class` cannot be a controller parameter.** `CurrentUser`
+         was a `@JvmInline value class` over a UUID; Kotlin compiles that
+         parameter to a bare `UUID` with a mangled method name, so Spring MVC
+         asked the argument resolvers for a `UUID`, none matched, and the
+         request was a 500 — "Parameter specified as non-null is null". A
+         `data class` with one field costs an allocation and works. The
+         wrapping still buys what it was for.
+         **Kotlin block comments nest.** A KDoc line that quoted a URL pattern
+         ending in `/**` opened a second comment inside the first, and the
+         file failed to parse with "Unclosed comment" forty lines later. The
+         fix was a word; the lesson is that a code comment is code.
+         **The architecture rule caught the test, not the code.** The chain
+         test built forged tokens with Nimbus, whose claims builder takes a
+         `java.util.Date` — and `no file imports java-util-Date` scans test
+         sources on purpose. Rewriting the forgeries through Spring's own
+         `JwtClaimsSet` and `NimbusJwtEncoder` over a stranger's key was
+         shorter and reads better. A rule that only inconveniences is a rule
+         doing its job.
+Wrong about: where the risk was. I had budgeted attention for the token
+         design and spent it well; the failures came from the seams between
+         Kotlin, Spring and our own rules, none of which any document
+         describes, all of which the first `./gradlew build` found in under a
+         minute. Run the build early, before the code is finished, because
+         the build is cheaper than the theory.

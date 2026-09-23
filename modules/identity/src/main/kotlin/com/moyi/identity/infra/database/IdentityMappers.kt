@@ -35,6 +35,7 @@ internal fun UserEntity.toDomain(): User =
         createdAt = createdAt,
         updatedAt = updatedAt,
         deletedAt = deletedAt,
+        tokensInvalidBefore = tokensInvalidBefore,
     )
 
 /** Builds a new row. See the note above on why this is not the update path. */
@@ -50,6 +51,7 @@ internal fun User.toEntity(): UserEntity =
         createdAt = createdAt,
         updatedAt = updatedAt,
         deletedAt = deletedAt,
+        tokensInvalidBefore = tokensInvalidBefore,
     )
 
 /**
@@ -73,6 +75,7 @@ internal fun User.applyTo(entity: UserEntity) {
     entity.status = status
     entity.updatedAt = updatedAt
     entity.deletedAt = deletedAt
+    entity.tokensInvalidBefore = tokensInvalidBefore
 }
 
 internal fun CredentialsEntity.toDomain(): Credentials =

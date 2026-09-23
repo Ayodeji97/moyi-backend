@@ -1,0 +1,15 @@
+-- users.tokens_invalid_before — the revocation mechanism for access tokens
+-- (doc 09 §3, doc 06 §3.1). Absent from doc 07 §2's `users` definition, which
+-- both of those documents nonetheless rely on; corrected here and in the
+-- document.
+--
+-- Any access token whose `iat` is before this instant is rejected on verify.
+-- `logout-all`, password reset and admin suspension set it to now(). One
+-- timestamp per user replaces a denylist of every issued token id, and it
+-- lives in Postgres rather than only in a cache so that a cache flush cannot
+-- un-revoke anything (doc 25 D6). NULL means nothing has ever been revoked.
+--
+-- Nullable rather than defaulting to the row's creation time: a token cannot
+-- predate its user, so NULL and created_at would mean the same thing, and
+-- NULL says plainly that no revocation has happened.
+ALTER TABLE users ADD COLUMN tokens_invalid_before timestamptz;

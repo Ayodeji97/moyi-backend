@@ -276,6 +276,7 @@ internal class UserPersistenceTest(
             createdAt = NOW,
             updatedAt = null,
             deletedAt = null,
+            tokensInvalidBefore = null,
         )
 
     private fun newCredentials(userId: UserId) =

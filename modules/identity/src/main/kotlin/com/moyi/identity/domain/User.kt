@@ -24,6 +24,13 @@ internal data class User(
     val createdAt: Instant,
     val updatedAt: Instant?,
     val deletedAt: Instant?,
+    /**
+     * Every access token issued before this instant is dead (doc 09 §3).
+     * `null` until the first `logout-all`, password reset or suspension.
+     * Compared at one-second resolution by the verifier, because that is
+     * the resolution a JWT's `iat` has — see `RevocationValidator`.
+     */
+    val tokensInvalidBefore: Instant?,
 ) {
     init {
         // Mirrors the CHECK constraints in V2. Both exist on purpose: the

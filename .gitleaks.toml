@@ -1,0 +1,23 @@
+# Secret-scanning configuration (NFR-042). Extends the scanner's default rules;
+# nothing is switched off.
+#
+# One allowance, deliberately narrow. `common:security` parses PEM-armoured
+# keys and therefore quotes the armour markers — in the parser's own error
+# messages and in the KDoc that tells an operator what to supply. The default
+# `private-key` rule matches from `-----BEGIN PRIVATE KEY-----` to the next
+# `KEY-----`, and in prose that span can run across two quoted markers, which
+# is how PR #29 was reported as leaking a key it does not contain.
+#
+# The allowance matches the marker ONLY when it is immediately followed by a
+# closing quote, backtick or bracket — the shape of a marker mentioned in
+# text. A real key has a newline and base64 after the marker and is still
+# caught. ADR-0019: no key ever lives in this repository.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "PEM armour markers quoted as text in the code that parses them"
+regexTarget = "match"
+regexes = [
+  '''-----BEGIN (RSA )?PRIVATE KEY-----[`"')\.]''',
+]

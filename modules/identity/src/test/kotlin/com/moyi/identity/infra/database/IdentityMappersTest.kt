@@ -33,6 +33,7 @@ internal class IdentityMappersTest {
                 avatarMediaId = UUID.fromString("00000000-0000-4000-8000-0000000000aa"),
                 updatedAt = NOW.plusSeconds(1),
                 deletedAt = NOW.plusSeconds(2),
+                tokensInvalidBefore = null,
                 status = UserStatus.DELETED,
             )
 
@@ -158,6 +159,7 @@ internal class IdentityMappersTest {
                 createdAt = NOW,
                 updatedAt = null,
                 deletedAt = null,
+                tokensInvalidBefore = null,
             )
 
         fun credentials() =

@@ -69,6 +69,7 @@ internal class UserEntity(
     var createdAt: Instant,
     var updatedAt: Instant?,
     var deletedAt: Instant?,
+    var tokensInvalidBefore: Instant?,
 ) : Persistable<UUID> {
     /**
      * Not a column — `@Transient` keeps it out of the schema. It starts true

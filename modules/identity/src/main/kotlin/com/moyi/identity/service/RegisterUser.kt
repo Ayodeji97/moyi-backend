@@ -78,6 +78,7 @@ internal class RegisterUser(
                 createdAt = now,
                 updatedAt = null,
                 deletedAt = null,
+                tokensInvalidBefore = null,
             )
 
         try {

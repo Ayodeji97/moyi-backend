@@ -45,6 +45,18 @@ enum class ErrorCode {
      */
     VERIFICATION_TOKEN_EXPIRED,
 
+    /**
+     * No usable bearer token: missing, malformed, expired, signed by the
+     * wrong key, for the wrong audience, or issued before the user's sessions
+     * were revoked. One code, deliberately — which of those it was is in the
+     * server log, and a client's only correct response to any of them is the
+     * same: refresh, or sign in again.
+     */
+    UNAUTHENTICATED,
+
+    /** A valid token that lacks the authority this action needs. */
+    FORBIDDEN,
+
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,
 

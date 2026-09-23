@@ -125,6 +125,7 @@ internal class VerificationTokenPersistenceTest(
                 createdAt = NOW,
                 updatedAt = null,
                 deletedAt = null,
+                tokensInvalidBefore = null,
             )
         inTransaction { users.save(user.toEntity()) }
         return user
