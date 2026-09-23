@@ -439,6 +439,21 @@ internal class LoginEndpointTest(
         reset(secret, NEW_PASSWORD).status shouldBe 200
     }
 
+    @Test
+    fun `oversized inputs are validation failures, not work`() {
+        // Nothing valid is this long, and the bound is what stops a megabyte
+        // being hashed on request. Found on the second review pass: every
+        // other request body in the repo already had one.
+        login(password = "x".repeat(MAX_PASSWORD_LENGTH + 1)).let {
+            it.status shouldBe 422
+            it.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+        }
+        refresh("x".repeat(MAX_TOKEN_LENGTH + 1)).status shouldBe 422
+        logout("x".repeat(MAX_TOKEN_LENGTH + 1)).status shouldBe 422
+        hasher.matchesCalls.get() shouldBe 0
+        hasher.dummyCalls.get() shouldBe 0
+    }
+
     // ---- helpers -----------------------------------------------------------
 
     private fun registerAndActivate(activate: Boolean = true) {

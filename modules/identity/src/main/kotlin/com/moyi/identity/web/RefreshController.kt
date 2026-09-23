@@ -3,6 +3,7 @@ package com.moyi.identity.web
 import com.moyi.identity.service.RotateRefreshToken
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Size
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
@@ -33,7 +34,9 @@ internal class RefreshController(
 }
 
 internal data class RefreshRequest(
-    @field:NotBlank val refreshToken: String,
+    @field:NotBlank
+    @field:Size(max = MAX_TOKEN_LENGTH)
+    val refreshToken: String,
 ) {
     override fun toString(): String = "RefreshRequest(refreshToken=redacted)"
 }

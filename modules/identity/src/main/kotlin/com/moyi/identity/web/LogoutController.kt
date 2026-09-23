@@ -4,6 +4,7 @@ import com.moyi.common.security.CurrentUser
 import com.moyi.identity.service.LogoutUser
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Size
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -31,7 +32,9 @@ internal class LogoutController(
 }
 
 internal data class LogoutRequest(
-    @field:NotBlank val refreshToken: String,
+    @field:NotBlank
+    @field:Size(max = MAX_TOKEN_LENGTH)
+    val refreshToken: String,
 ) {
     override fun toString(): String = "LogoutRequest(refreshToken=redacted)"
 }
