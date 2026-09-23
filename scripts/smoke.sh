@@ -88,6 +88,7 @@ echo; echo "health"
 expect "GET /actuator/health is UP" 200 '"status":"UP"' -- "$BASE/actuator/health"
 
 echo; echo "registration (FR-001, FR-011, ADR-0015)"
+EMAILS_BEFORE="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
 expect "valid registration is 201 with an empty body" 201 "" -- -X POST "$API/auth/register" -d "$(register_body "$EMAIL")"
 [ -z "$LAST_BODY" ] && pass "…and the body really is empty" || fail "empty body" "got: ${LAST_BODY:0:100}"
 expect "same address again (different case) is still 201" 201 "" -- -X POST "$API/auth/register" -d "$(register_body "$(echo "$EMAIL" | tr a-z A-Z)")"
@@ -99,8 +100,14 @@ expect "wrong content type is 415" 415 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- -X P
 expect "unknown route is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- "$API/auth/nope"
 
 echo; echo "email verification (FR-002, ADR-0018)"
-sleep 1.5  # the email is sent after the commit, on another thread
-if grep -q "Email NOT sent" "$MOYI_LOG"; then pass "verification email was written to the log (provider=log)"; else fail "email in log" "no 'Email NOT sent' line in $MOYI_LOG"; fi
+# The email is sent after the commit, on another thread. Poll for a NEW log
+# line rather than sleeping a fixed time: a loaded machine can take longer
+# than any constant, and an old line from an earlier run must not count.
+for _ in $(seq 1 40); do
+  [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$EMAILS_BEFORE" ] && break
+  sleep 0.25
+done
+if [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$EMAILS_BEFORE" ]; then pass "verification email was written to the log (provider=log)"; else fail "email in log" "no new 'Email NOT sent' line in $MOYI_LOG within 10 s"; fi
 SECRET="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
 if [ "${#SECRET}" = 43 ]; then pass "link carries a 43-character secret"; else fail "secret in link" "got '${SECRET}'"; fi
 if grep -q "$EMAIL" "$MOYI_LOG"; then fail "address never logged" "the address appears in the log"; else pass "address never appears in the log (masked to the domain)"; fi
@@ -118,4 +125,6 @@ ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.statu
 if [ "$ROW" = "ACTIVE|t|1|1" ]; then pass "user ACTIVE, verified, one token, consumed"; elif [ "$ROW" = "psql-unavailable" ]; then echo "  skip database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|1|1, got '$ROW'"; fi
 
 echo; printf '%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" = 0 ]
+# The exit status is the failure count, as the README says (capped at what a
+# shell can carry), so a caller can tell one failure from several.
+exit $(( FAIL > 255 ? 255 : FAIL ))
