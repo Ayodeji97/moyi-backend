@@ -22,7 +22,11 @@ internal class VerificationTokenStore(
         tokens.save(token.toEntity())
     }
 
-    fun findByHash(hash: TokenHash): VerificationToken? = tokens.findByTokenHash(hash.value)?.toDomain()
+    /** The token with this digest, if it was issued for [purpose]. A digest issued for another purpose is not found. */
+    fun findByHash(
+        hash: TokenHash,
+        purpose: VerificationPurpose,
+    ): VerificationToken? = tokens.findByTokenHashAndPurpose(hash.value, purpose)?.toDomain()
 
     /**
      * Spends the token if — and only if — it is still live at [now].

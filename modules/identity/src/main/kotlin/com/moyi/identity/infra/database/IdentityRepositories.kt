@@ -80,7 +80,11 @@ internal interface ConsentRecordRepository : Repository<ConsentRecordEntity, UUI
 internal interface VerificationTokenRepository : Repository<VerificationTokenEntity, UUID> {
     fun save(token: VerificationTokenEntity): VerificationTokenEntity
 
-    fun findByTokenHash(tokenHash: String): VerificationTokenEntity?
+    /** Purpose-scoped on purpose: the table is shared, and a reset token must never satisfy a verification lookup. */
+    fun findByTokenHashAndPurpose(
+        tokenHash: String,
+        purpose: VerificationPurpose,
+    ): VerificationTokenEntity?
 
     /** @return `1` if this call consumed the token; `0` if it was already consumed, expired, or absent. */
     @Modifying(clearAutomatically = true, flushAutomatically = true)

@@ -74,7 +74,13 @@ internal class VerifyEmail(
         hash: TokenHash,
         now: Instant,
     ): VerificationToken {
-        val token = tokens.findByHash(hash) ?: throw VerificationTokenInvalidException()
+        // Scoped to this purpose in the query, not checked afterwards: the
+        // table is shared with FR-004/FR-005's tokens, and a password-reset
+        // secret presented here must be "not recognised", never a way to mark
+        // an address verified. With one purpose in the CHECK today the branch
+        // cannot be reached by a test; FR-004 brings the second purpose and
+        // the test with it. Raised by the automated review on this PR.
+        val token = tokens.findByHash(hash, VerificationPurpose.EMAIL_VERIFICATION) ?: throw VerificationTokenInvalidException()
         if (!token.isLive(now)) throw VerificationTokenExpiredException()
         return token
     }

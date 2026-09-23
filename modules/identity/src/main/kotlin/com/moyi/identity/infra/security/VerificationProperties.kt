@@ -25,7 +25,20 @@ import java.net.URI
 @Validated
 @ConfigurationProperties(prefix = "moyi.identity.verification")
 internal data class VerificationProperties(
-    /** Absolute. The token is appended as `?token=`. */
+    /** Absolute, `http` or `https`. The token is appended as `?token=`. */
     @field:NotNull
     val linkBaseUrl: URI,
-)
+) {
+    init {
+        // Checked at binding, so a relative path or a `mailto:` in a deployment's
+        // environment is a failed start rather than a link nobody can open.
+        // Raised by the automated review on the PR that added this class.
+        require(linkBaseUrl.isAbsolute && linkBaseUrl.scheme in WEB_SCHEMES) {
+            "moyi.identity.verification.link-base-url must be an absolute http(s) URL, e.g. https://example.com/verify"
+        }
+    }
+
+    private companion object {
+        val WEB_SCHEMES = setOf("http", "https")
+    }
+}
