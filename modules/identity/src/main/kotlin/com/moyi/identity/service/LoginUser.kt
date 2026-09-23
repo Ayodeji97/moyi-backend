@@ -22,6 +22,7 @@ internal class LoginUser(
     private val accounts: AccountStore,
     private val passwords: PasswordHasher,
     private val accessTokens: AccessTokenIssuer,
+    private val refreshTokens: RefreshTokens,
 ) {
     fun login(command: LoginCommand): LoginResult {
         val email = runCatching { Email(command.email.trim()) }.getOrNull()
@@ -42,6 +43,7 @@ internal class LoginUser(
         return LoginResult(
             user = authenticatedUser,
             accessToken = accessTokens.issue(authenticatedUser.id.value),
+            refreshToken = refreshTokens.issue(authenticatedUser.id, command.deviceInfo),
         )
     }
 
@@ -55,11 +57,13 @@ internal class LoginUser(
 internal data class LoginCommand(
     val email: String,
     val password: String,
+    val deviceInfo: String?,
 )
 
 internal data class LoginResult(
     val user: User,
     val accessToken: IssuedAccessToken,
+    val refreshToken: IssuedRefreshToken,
 )
 
 internal class InvalidCredentialsException : RuntimeException("The credentials were not accepted")

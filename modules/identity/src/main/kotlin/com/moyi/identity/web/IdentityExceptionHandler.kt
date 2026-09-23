@@ -4,6 +4,7 @@ import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.ExceptionHandlerAdviceOrder
 import com.moyi.common.web.ProblemDetails
 import com.moyi.identity.domain.HashingCapacityExceededException
+import com.moyi.identity.domain.RefreshTokenInvalidException
 import com.moyi.identity.domain.VerificationTokenExpiredException
 import com.moyi.identity.domain.VerificationTokenInvalidException
 import com.moyi.identity.service.AuthenticatedUserMissingException
@@ -89,6 +90,15 @@ internal class IdentityExceptionHandler(
             status = HttpStatus.UNAUTHORIZED,
             errorCode = ErrorCode.UNAUTHENTICATED,
             detail = "The email or password is not correct.",
+            request = request,
+        )
+
+    @ExceptionHandler(RefreshTokenInvalidException::class)
+    fun handleInvalidRefreshToken(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.UNAUTHORIZED,
+            errorCode = ErrorCode.UNAUTHENTICATED,
+            detail = "The refresh token is not valid.",
             request = request,
         )
 

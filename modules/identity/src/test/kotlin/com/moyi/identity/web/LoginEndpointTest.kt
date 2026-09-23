@@ -4,6 +4,7 @@ import com.moyi.common.testing.PostgresIntegrationTest
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.TestBreachCorpus
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
@@ -44,6 +45,7 @@ internal class LoginEndpointTest(
         response.contentType!! shouldStartWith MediaType.APPLICATION_JSON_VALUE
         response.contentAsString shouldContain "\"accessToken\":"
         response.contentAsString shouldContain "\"expiresIn\":900"
+        response.contentAsString shouldContain "\"refreshToken\":"
         response.contentAsString shouldContain "\"email\":\"ada@example.com\""
         response.contentAsString shouldContain "\"status\":\"ACTIVE\""
         response.contentAsString shouldNotContain PASSWORD
@@ -82,6 +84,24 @@ internal class LoginEndpointTest(
         response.contentAsString shouldContain "\"code\":\"UNAUTHENTICATED\""
     }
 
+    @Test
+    fun `refresh rotates the token and reuse revokes the family`() {
+        registerAndActivate()
+        val firstLogin = login()
+        val firstRefresh = refreshToken(firstLogin.contentAsString)
+
+        val rotated = refresh(firstRefresh)
+        rotated.status shouldBe 200
+        val secondRefresh = refreshToken(rotated.contentAsString)
+        secondRefresh shouldNotBe firstRefresh
+
+        val reuse = refresh(firstRefresh)
+        reuse.status shouldBe 401
+        reuse.contentAsString shouldContain "\"code\":\"UNAUTHENTICATED\""
+
+        refresh(secondRefresh).status shouldBe 401
+    }
+
     private fun registerAndActivate(activate: Boolean = true) {
         mockMvc
             .post("/api/v1/auth/register") {
@@ -113,6 +133,16 @@ internal class LoginEndpointTest(
             content = "{\"email\":\"$email\",\"password\":\"$password\"}"
         }.andReturn()
         .response
+
+    private fun refresh(token: String) =
+        mockMvc
+            .post("/api/v1/auth/refresh") {
+                contentType = MediaType.APPLICATION_JSON
+                content = "{\"refreshToken\":\"$token\"}"
+            }.andReturn()
+            .response
+
+    private fun refreshToken(body: String): String = Regex("\\\"refreshToken\\\":\\\"([^\\\"]+)\\\"").find(body)!!.groupValues[1]
 
     private companion object {
         const val PASSWORD = "correct horse battery"

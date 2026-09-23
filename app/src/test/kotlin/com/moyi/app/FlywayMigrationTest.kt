@@ -28,7 +28,7 @@ class FlywayMigrationTest(
 
     @Test
     fun `every module's migrations run, in one sequence, against one schema`() {
-        // V1 lives in `app` (database-wide extensions); V2 to V5 live in
+        // V1 lives in `app` (database-wide extensions); V2 to V6 live in
         // `modules/identity` (its own tables). Flyway merges every
         // `classpath:db/migration` it finds, which is what lets a module own
         // its schema without `app` restating it — and this assertion is what
@@ -39,7 +39,7 @@ class FlywayMigrationTest(
                 "SELECT version FROM flyway_schema_history WHERE success = true ORDER BY installed_rank",
                 String::class.java,
             )
-        assertEquals(listOf("1", "2", "3", "4", "5"), appliedVersions)
+        assertEquals(listOf("1", "2", "3", "4", "5", "6"), appliedVersions)
 
         val extensions =
             jdbcTemplate.queryForList(
@@ -54,11 +54,11 @@ class FlywayMigrationTest(
         val identityTables =
             jdbcTemplate.queryForList(
                 "SELECT tablename FROM pg_tables WHERE schemaname = 'public' " +
-                    "AND tablename IN ('users', 'credentials', 'consent_records', 'verification_tokens')",
+                    "AND tablename IN ('users', 'credentials', 'consent_records', 'verification_tokens', 'refresh_tokens')",
                 String::class.java,
             )
         assertTrue(
-            identityTables.containsAll(listOf("users", "credentials", "consent_records", "verification_tokens")),
+            identityTables.containsAll(listOf("users", "credentials", "consent_records", "verification_tokens", "refresh_tokens")),
             "Expected the identity module's tables, found: $identityTables",
         )
     }

@@ -18,10 +18,11 @@ internal class LoginController(
     fun login(
         @Valid @RequestBody request: LoginRequest,
     ): LoginResponse {
-        val result = loginUser.login(LoginCommand(request.email, request.password))
+        val result = loginUser.login(LoginCommand(request.email, request.password, request.deviceInfo))
         return LoginResponse(
             accessToken = result.accessToken.token,
             expiresIn = result.accessToken.expiresIn,
+            refreshToken = result.refreshToken.secret,
             user = UserResponse.from(result.user),
         )
     }
@@ -30,8 +31,7 @@ internal class LoginController(
 internal data class LoginRequest(
     @field:NotBlank val email: String,
     @field:NotBlank val password: String,
-    /** Accepted now so clients can send device metadata without changing the wire shape. */
-    val deviceInfo: String? = null,
+    @field:jakarta.validation.constraints.Size(max = 200) val deviceInfo: String? = null,
 ) {
     override fun toString(): String = "LoginRequest(email=$email, deviceInfo=$deviceInfo)"
 }
@@ -39,5 +39,8 @@ internal data class LoginRequest(
 internal data class LoginResponse(
     val accessToken: String,
     val expiresIn: Long,
+    val refreshToken: String,
     val user: UserResponse,
-)
+) {
+    override fun toString(): String = "LoginResponse(accessToken=redacted, refreshToken=redacted, user=$user)"
+}

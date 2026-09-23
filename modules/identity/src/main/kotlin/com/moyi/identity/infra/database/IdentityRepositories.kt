@@ -53,6 +53,44 @@ internal interface CredentialsRepository : Repository<CredentialsEntity, UUID> {
     fun save(credentials: CredentialsEntity): CredentialsEntity
 }
 
+internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID> {
+    fun save(token: RefreshTokenEntity): RefreshTokenEntity
+
+    fun findByTokenHash(tokenHash: String): RefreshTokenEntity?
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.rotatedAt = :now,
+               t.replacedBy = :replacementId
+         WHERE t.id = :id
+           AND t.rotatedAt IS NULL
+           AND t.revokedAt IS NULL
+           AND t.expiresAt > :now
+        """,
+    )
+    fun rotate(
+        id: UUID,
+        replacementId: UUID,
+        now: Instant,
+    ): Int
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.revokedAt = :now
+         WHERE t.familyId = :familyId
+           AND t.revokedAt IS NULL
+        """,
+    )
+    fun revokeFamily(
+        familyId: UUID,
+        now: Instant,
+    ): Int
+}
+
 /**
  * Consent records. One method, because writing is the only thing this slice
  * does with them — the export path (FR-009) adds its own read when it exists.
