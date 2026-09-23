@@ -68,6 +68,7 @@ jobs:
       # that reports success — which is precisely the shape of green
       # check this repo treats as worse than a red one.
       - name: Warn if this PR edits the review workflow
+        id: drift
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
@@ -78,9 +79,13 @@ jobs:
             base=FETCH_HEAD
           fi
           if ! git rev-parse --verify --quiet "$base" > /dev/null; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Could not resolve $DEFAULT_BRANCH, so the workflow-drift check was skipped."
           elif ! git diff --quiet "$base" -- "$workflow"; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "::warning::This PR changes $workflow, so claude-code-action will skip itself — it requires this file to be identical to the copy on $DEFAULT_BRANCH. The 'review' check will pass WITHOUT reviewing anything. Review this PR by hand, and prove the workflow change by watching the PR after it merges."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
 
       # What the PR looked like before the review ran, so that "the review
@@ -201,7 +206,16 @@ jobs:
       # comments means broken rather than clean. If a genuinely clean PR is
       # ever seen to post nothing, this guard is wrong and should become a
       # warning — but a false red is cheap and today's false green was not.
-      - if: steps.configured.outputs.enabled == 'true'
+      # Not when this PR edits this workflow. In that case claude-code-action
+      # deliberately skips itself and signals it by *succeeding*, so nothing is
+      # posted for a reason that has nothing to do with the review being
+      # broken — and a guard that fires anyway is a red check on every future
+      # change to this file, which is how guards get deleted.
+      #
+      # Found by this step failing on the very PR that introduced it, which is
+      # the only run that could have found it. The drift step is now
+      # load-bearing rather than informational.
+      - if: steps.configured.outputs.enabled == 'true' && steps.drift.outputs.changed != 'true'
         name: The review must have said something
         env:
           GH_TOKEN: ${{ github.token }}
