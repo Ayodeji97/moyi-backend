@@ -45,6 +45,12 @@ enum class ErrorCode {
      */
     VERIFICATION_TOKEN_EXPIRED,
 
+    /** A password-reset secret that matches no reset token. */
+    PASSWORD_RESET_TOKEN_INVALID,
+
+    /** A password-reset secret that was spent or passed its one-hour TTL. */
+    PASSWORD_RESET_TOKEN_EXPIRED,
+
     /**
      * No usable bearer token: missing, malformed, expired, signed by the
      * wrong key, for the wrong audience, or issued before the user's sessions

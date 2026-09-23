@@ -78,4 +78,12 @@ internal class AccountStore(
         val user = findById(userId) ?: return
         update(user.revokeAllSessions(now))
     }
+
+    fun updateCredentials(credentials: Credentials) {
+        val entity =
+            this.credentials.findById(credentials.userId.value)
+                ?: error("cannot update credentials that do not exist")
+        credentials.applyTo(entity)
+        this.credentials.save(entity)
+    }
 }

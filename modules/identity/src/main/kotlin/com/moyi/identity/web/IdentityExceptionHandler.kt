@@ -4,6 +4,8 @@ import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.ExceptionHandlerAdviceOrder
 import com.moyi.common.web.ProblemDetails
 import com.moyi.identity.domain.HashingCapacityExceededException
+import com.moyi.identity.domain.PasswordResetTokenExpiredException
+import com.moyi.identity.domain.PasswordResetTokenInvalidException
 import com.moyi.identity.domain.RefreshTokenInvalidException
 import com.moyi.identity.domain.VerificationTokenExpiredException
 import com.moyi.identity.domain.VerificationTokenInvalidException
@@ -67,6 +69,24 @@ internal class IdentityExceptionHandler(
             status = HttpStatus.GONE,
             errorCode = ErrorCode.VERIFICATION_TOKEN_EXPIRED,
             detail = "That link has expired. Links last 24 hours and work once. We can send you a new one.",
+            request = request,
+        )
+
+    @ExceptionHandler(PasswordResetTokenInvalidException::class)
+    fun handlePasswordResetTokenInvalid(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.UNPROCESSABLE_ENTITY,
+            errorCode = ErrorCode.PASSWORD_RESET_TOKEN_INVALID,
+            detail = "That password reset link is not recognised.",
+            request = request,
+        )
+
+    @ExceptionHandler(PasswordResetTokenExpiredException::class)
+    fun handlePasswordResetTokenExpired(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.GONE,
+            errorCode = ErrorCode.PASSWORD_RESET_TOKEN_EXPIRED,
+            detail = "That password reset link has expired or was already used.",
             request = request,
         )
 

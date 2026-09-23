@@ -2,6 +2,7 @@ package com.moyi.identity.service
 
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.UserId
+import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationRequested
 import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.infra.security.VerificationProperties
@@ -65,6 +66,7 @@ internal class VerificationEmailComposerTest {
         email = Email("ada@example.com"),
         displayName = displayName,
         locale = "en",
+        purpose = VerificationPurpose.EMAIL_VERIFICATION,
         tokenId = tokenId,
         secret = VerificationSecret(secret),
         expiresAt = Instant.parse("2026-09-24T12:00:00Z"),

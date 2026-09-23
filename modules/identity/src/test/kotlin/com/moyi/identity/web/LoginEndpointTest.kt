@@ -1,6 +1,7 @@
 package com.moyi.identity.web
 
 import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.TestBreachCorpus
 import io.kotest.matchers.shouldBe
@@ -19,7 +20,10 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import java.util.UUID
+import java.util.concurrent.Executors
 import javax.sql.DataSource
 
 @SpringBootTest(classes = [IdentityTestApplication::class])
@@ -128,6 +132,83 @@ internal class LoginEndpointTest(
 
         refresh(firstRefresh).status shouldBe 401
         refresh(secondRefresh).status shouldBe 401
+    }
+
+    @Test
+    fun `concurrent refresh requests allow one winner and revoke the family on reuse`() {
+        registerAndActivate()
+        val firstRefresh = refreshToken(login().contentAsString)
+        val executor = Executors.newFixedThreadPool(2)
+        val responses =
+            try {
+                List(2) { executor.submit<Int> { refresh(firstRefresh).status } }.map { it.get() }
+            } finally {
+                executor.shutdownNow()
+            }
+
+        responses.count { it == 200 } shouldBe 1
+        responses.count { it == 401 } shouldBe 1
+        refresh(firstRefresh).status shouldBe 401
+    }
+
+    @Test
+    fun `logout all invalidates access tokens after the timestamp boundary`() {
+        registerAndActivate()
+        val loginResponse = login()
+        val accessToken = Regex("\"accessToken\":\"([^\"]+)\"").find(loginResponse.contentAsString)!!.groupValues[1]
+
+        mockMvc
+            .post("/api/v1/auth/logout-all") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer $accessToken")
+            }.andReturn()
+            .response.status shouldBe 204
+        jdbc.update("UPDATE users SET tokens_invalid_before = tokens_invalid_before + interval '2 seconds'")
+
+        mockMvc
+            .get("/api/v1/me") { header(HttpHeaders.AUTHORIZATION, "Bearer $accessToken") }
+            .andReturn()
+            .response.status shouldBe 401
+    }
+
+    @Test
+    fun `forgot and reset password invalidate the old password and sessions`() {
+        registerAndActivate()
+        val oldRefresh = refreshToken(login().contentAsString)
+        val userId = jdbc.queryForObject("SELECT id FROM users WHERE email = 'ada@example.com'", UUID::class.java)!!
+        val secret = "password-reset-secret"
+        jdbc.update(
+            """
+            INSERT INTO verification_tokens (id, user_id, purpose, token_hash, expires_at)
+            VALUES (?, ?, 'PASSWORD_RESET', ?, now() + interval '1 hour')
+            """.trimIndent(),
+            UUID.randomUUID(),
+            userId,
+            VerificationSecret(secret).hash().value,
+        )
+
+        mockMvc
+            .post("/api/v1/auth/forgot-password") {
+                contentType = MediaType.APPLICATION_JSON
+                content = "{\"email\":\"ada@example.com\"}"
+            }.andReturn()
+            .response.status shouldBe 202
+
+        mockMvc
+            .post("/api/v1/auth/reset-password") {
+                contentType = MediaType.APPLICATION_JSON
+                content = "{\"token\":\"$secret\",\"password\":\"new secure password 2026\"}"
+            }.andReturn()
+            .response.status shouldBe 200
+
+        login(password = PASSWORD).status shouldBe 401
+        login(password = "new secure password 2026").status shouldBe 200
+        refresh(oldRefresh).status shouldBe 401
+        mockMvc
+            .post("/api/v1/auth/reset-password") {
+                contentType = MediaType.APPLICATION_JSON
+                content = "{\"token\":\"$secret\",\"password\":\"another secure password 2026\"}"
+            }.andReturn()
+            .response.status shouldBe 410
     }
 
     private fun registerAndActivate(activate: Boolean = true) {
