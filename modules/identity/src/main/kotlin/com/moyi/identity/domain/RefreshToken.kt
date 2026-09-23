@@ -46,4 +46,13 @@ internal data class RefreshToken(
     }
 }
 
+/** Unknown, expired, or in a family already revoked. The client signs in again. */
 internal class RefreshTokenInvalidException : RuntimeException("The refresh token was not accepted")
+
+/**
+ * An already-rotated token was presented (doc 09 §3). Either the thief or the
+ * victim is holding a stale copy, and the system cannot tell which — so the
+ * whole family is revoked, the person is emailed, and the client is told to
+ * wipe what it holds (`TOKEN_REUSE_DETECTED`, doc 13).
+ */
+internal class RefreshTokenReusedException : RuntimeException("The refresh token was already rotated; its family has been revoked")

@@ -7,6 +7,11 @@ import org.springframework.stereotype.Component
 import java.time.Instant
 import java.util.UUID
 
+/**
+ * The refresh-token table in domain terms, like [VerificationTokenStore]. The
+ * conditional statements — [rotate] especially — are where the concurrency
+ * guarantees live; see `RefreshTokenRepository`.
+ */
 @Component
 internal class RefreshTokenStore(
     private val tokens: RefreshTokenRepository,
@@ -23,12 +28,11 @@ internal class RefreshTokenStore(
         now: Instant,
     ): Boolean = tokens.rotate(id, replacementId, now) == 1
 
+    /** Revokes every token in the family that is not already revoked. @return how many that was. */
     fun revokeFamily(
         familyId: UUID,
         now: Instant,
-    ) {
-        tokens.revokeFamily(familyId, now)
-    }
+    ): Int = tokens.revokeFamily(familyId, now)
 
     fun revokeAllForUser(
         userId: UserId,

@@ -52,29 +52,43 @@ internal interface CredentialsRepository : Repository<CredentialsEntity, UUID> {
 
     fun save(credentials: CredentialsEntity): CredentialsEntity
 
-    /** Records one failed attempt without allowing concurrent requests to lose an increment. */
+    /**
+     * Records one failed attempt and applies `LockoutPolicy` in the same
+     * statement, so two concurrent wrong passwords both count and neither can
+     * lose the other's increment or the lock it earned.
+     *
+     * Native SQL, because the policy is arithmetic JPQL cannot express:
+     * `1 min × 2^(failures − 5)`, capped at 60. The `WHERE` refuses to count
+     * an attempt made while a lock is in force, so a lock cannot be extended by
+     * hammering it; the counter is **not** reset when a lock expires — that is
+     * what makes the next lock longer (T-03's "exponential backoff"). Only a
+     * successful sign-in resets it, in [clearFailedAttempts].
+     *
+     * `LockoutPolicyTest` pins the Kotlin statement of the rule and
+     * `UserPersistenceTest` pins this SQL to the same numbers, because a rule
+     * written twice drifts twice.
+     *
+     * @return `1` if the attempt was counted; `0` if the account is currently locked (or does not exist).
+     */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
-        """
-        UPDATE CredentialsEntity c
-           SET c.failedAttempts = CASE
-                   WHEN c.lockedUntil IS NOT NULL AND c.lockedUntil <= :now THEN 1
-                   ELSE c.failedAttempts + 1
-               END,
-               c.lockedUntil = CASE
-                   WHEN c.lockedUntil IS NOT NULL AND c.lockedUntil <= :now THEN NULL
-                   WHEN c.failedAttempts + 1 >= :threshold THEN :lockedUntil
-                   ELSE c.lockedUntil
+        nativeQuery = true,
+        value = """
+        UPDATE credentials
+           SET failed_attempts = failed_attempts + 1,
+               locked_until = CASE
+                   WHEN failed_attempts + 1 >= 5
+                       THEN CAST(:now AS timestamptz)
+                            + make_interval(mins => LEAST(60, CAST(power(2, failed_attempts + 1 - 5) AS int)))
+                   ELSE locked_until
                END
-         WHERE c.id = :id
-           AND (c.lockedUntil IS NULL OR c.lockedUntil <= :now)
+         WHERE user_id = :id
+           AND (locked_until IS NULL OR locked_until <= CAST(:now AS timestamptz))
         """,
     )
     fun recordFailedAttempt(
         id: UUID,
         now: Instant,
-        threshold: Int,
-        lockedUntil: Instant,
     ): Int
 
     /** Clears the counter only when the account was not locked by another request. */

@@ -6,7 +6,6 @@ import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import org.springframework.stereotype.Component
-import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 
 /**
@@ -88,15 +87,17 @@ internal class AccountStore(
         this.credentials.save(entity)
     }
 
-    @Transactional
+    /**
+     * Counts a failed sign-in and locks the account if `LockoutPolicy` says so.
+     * Not transactional here — the boundary is the caller's, as everywhere in
+     * this class. @return `false` if the account was locked at [now], in which
+     * case the attempt was deliberately not counted.
+     */
     fun recordFailedLogin(
         userId: UserId,
         now: Instant,
-        threshold: Int,
-        lockedUntil: Instant,
-    ): Boolean = credentials.recordFailedAttempt(userId.value, now, threshold, lockedUntil) == 1
+    ): Boolean = credentials.recordFailedAttempt(userId.value, now) == 1
 
-    @Transactional
     fun clearFailedLogins(
         userId: UserId,
         now: Instant,

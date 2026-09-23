@@ -20,9 +20,9 @@ internal class LoginController(
     ): LoginResponse {
         val result = loginUser.login(LoginCommand(request.email, request.password, request.deviceInfo))
         return LoginResponse(
-            accessToken = result.accessToken.token,
-            expiresIn = result.accessToken.expiresIn,
-            refreshToken = result.refreshToken.secret,
+            accessToken = result.tokens.accessToken.token,
+            expiresIn = result.tokens.accessToken.expiresIn,
+            refreshToken = result.tokens.refreshToken.secret,
             user = UserResponse.from(result.user),
         )
     }
@@ -33,7 +33,8 @@ internal data class LoginRequest(
     @field:NotBlank val password: String,
     @field:jakarta.validation.constraints.Size(max = 200) val deviceInfo: String? = null,
 ) {
-    override fun toString(): String = "LoginRequest(email=$email, deviceInfo=$deviceInfo)"
+    /** The address is personal data (doc 11 NFR-044) and the password is a secret; neither prints. */
+    override fun toString(): String = "LoginRequest(email=<redacted>, password=<redacted>, deviceInfo=$deviceInfo)"
 }
 
 internal data class LoginResponse(

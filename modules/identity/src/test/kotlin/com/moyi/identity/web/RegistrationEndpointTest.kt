@@ -379,6 +379,10 @@ internal class RecordingPasswordHasher(
 ) : PasswordHasher {
     val calls = AtomicInteger()
 
+    /** Verifications against a real stored hash, and against the dummy. The login tests assert on both. */
+    val matchesCalls = AtomicInteger()
+    val dummyCalls = AtomicInteger()
+
     override val algorithm: PasswordHashAlgorithm get() = delegate.algorithm
 
     override fun hash(password: Password): PasswordHash {
@@ -389,7 +393,13 @@ internal class RecordingPasswordHasher(
     override fun matches(
         raw: String,
         hash: PasswordHash,
-    ): Boolean = delegate.matches(raw, hash)
+    ): Boolean {
+        matchesCalls.incrementAndGet()
+        return delegate.matches(raw, hash)
+    }
 
-    override fun matchesDummy(raw: String): Boolean = delegate.matchesDummy(raw)
+    override fun matchesDummy(raw: String): Boolean {
+        dummyCalls.incrementAndGet()
+        return delegate.matchesDummy(raw)
+    }
 }

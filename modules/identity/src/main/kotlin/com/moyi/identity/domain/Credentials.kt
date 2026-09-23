@@ -1,5 +1,6 @@
 package com.moyi.identity.domain
 
+import java.time.Duration
 import java.time.Instant
 
 /**
@@ -66,3 +67,42 @@ internal enum class PasswordHashAlgorithm {
     /** ADR-0012 / NFR-046: Argon2id, m=19456 KiB, t=2, p=1. */
     ARGON2ID,
 }
+
+/**
+ * T-03: "account lockout with exponential backoff". The rule, stated once,
+ * with the SQL that applies it atomically in `CredentialsRepository`
+ * asserting the same numbers.
+ *
+ * Five consecutive failures lock the account for one minute; every further
+ * failure after a lock expires doubles the next lock, to a one-hour cap. The
+ * counter resets only on a successful sign-in, so a slow attacker who waits
+ * out each lock meets a longer one every time — which is the whole difference
+ * between a backoff and a fixed lockout. Attempts made *during* a lock are
+ * refused without being counted, so a lock cannot be extended by hammering it.
+ *
+ * **The lockout is silent.** A locked account answers the same 401, in the
+ * same time, as a wrong password: the Argon2id verify still runs, and the
+ * result is discarded. A visible "account locked" response can only be
+ * produced for a real account, which makes it an enumeration oracle — T-18
+ * says this in as many words about per-account rate limits, and FR-012's
+ * `429 Retry-After` is the per-IP control that will say "wait", in the
+ * rate-limiting slice.
+ */
+internal object LockoutPolicy {
+    const val MAX_FAILED_ATTEMPTS = 5
+    val FIRST_LOCK: Duration = Duration.ofMinutes(1)
+    val LOCK_CAP: Duration = Duration.ofHours(1)
+
+    /** The lock a failure brings the count to [failedAttempts] earns, or null below the threshold. */
+    fun lockDurationFor(failedAttempts: Int): Duration? {
+        if (failedAttempts < MAX_FAILED_ATTEMPTS) return null
+        val doublings = (failedAttempts - MAX_FAILED_ATTEMPTS).coerceAtMost(DOUBLINGS_TO_CAP)
+        val minutes = FIRST_LOCK.toMinutes() shl doublings
+        return Duration.ofMinutes(minutes).coerceAtMost(LOCK_CAP)
+    }
+
+    /** 2^6 minutes is 64, past the 60-minute cap, so six doublings is where the shift stops mattering. */
+    private const val DOUBLINGS_TO_CAP = 6
+}
+
+private fun Duration.coerceAtMost(cap: Duration): Duration = if (this > cap) cap else this

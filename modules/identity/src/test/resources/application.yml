@@ -25,6 +25,7 @@ moyi:
   identity:
     verification:
       link-base-url: https://moyi.test/verify
+      reset-link-base-url: https://moyi.test/reset-password
   security:
     jwt:
       # A fresh RSA pair per test context; the default source refuses to
