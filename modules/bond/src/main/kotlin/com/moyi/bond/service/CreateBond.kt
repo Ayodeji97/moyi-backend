@@ -3,6 +3,7 @@ package com.moyi.bond.service
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.BondDraft
 import com.moyi.bond.infra.database.BondStore
+import com.moyi.bond.infra.database.InviteStore
 import com.moyi.identity.api.UserDirectory
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -22,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional
 internal class CreateBond(
     private val users: UserDirectory,
     private val bonds: BondStore,
+    private val invites: InviteStore,
     private val factory: BondFactory,
     private val views: BondViews,
 ) {
@@ -40,7 +42,11 @@ internal class CreateBond(
         if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()
 
         val (bond, invite) = factory.create(draft)
-        bonds.insert(bond, invite)
+        // One transaction, two stores: the bond and the invite that will bring
+        // its second member are created together (doc 04 §2's aggregate), and
+        // it is this boundary that makes that atomic rather than a shared class.
+        bonds.insert(bond)
+        invites.insert(invite)
         // Ids only. The name is the couple's words and the code is a
         // credential until it is spent (doc 18 §9).
         log.info("Bond {} created by user {}", bond.id.value, draft.creator.value)

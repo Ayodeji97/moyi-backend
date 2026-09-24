@@ -3,18 +3,22 @@ package com.moyi.bond.infra.database
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.BondStatus
-import com.moyi.bond.domain.Invite
+import com.moyi.bond.domain.Member
 import com.moyi.bond.domain.UserId
 import org.springframework.stereotype.Component
 import java.time.Instant
 
 /**
- * The Bond aggregate, spoken in domain terms — the `AccountStore` precedent.
+ * The Bond and its members, spoken in domain terms — the `AccountStore`
+ * precedent. It keeps the mappers where they belong: a service deals in
+ * domain objects and never imports a `toEntity`.
  *
- * It exists because "create a bond" is one thing and three tables, and a
- * service holding three repositories to express one operation is holding the
- * wrong collaborators. It also keeps the mappers where they belong: the
- * service deals in domain objects and never imports a `toEntity`.
+ * **Invites live in [InviteStore], not here**, which is what the Phase 2
+ * design said and what detekt insisted on when this class reached fourteen
+ * methods in slice B2. The split is not arbitrary: an invite has a lifecycle
+ * of its own — issued, revoked, replaced, spent — that no invariant of the
+ * bond depends on, and the two are written together only at creation, in one
+ * transaction the service owns.
  *
  * **Every read is scoped to a user** (doc 05 §5.5 layer 3): there is
  * deliberately no `find(bondId)` on this class. A caller who cannot say who
@@ -30,16 +34,11 @@ import java.time.Instant
 internal class BondStore(
     private val bonds: BondRepository,
     private val members: BondMemberRepository,
-    private val invites: BondInviteRepository,
 ) {
-    /** The bond, its member rows and its first invite: one aggregate, three tables, three inserts. */
-    fun insert(
-        bond: Bond,
-        invite: Invite,
-    ) {
+    /** A new bond and its member rows. Its first invite is [InviteStore]'s, written in the same transaction. */
+    fun insert(bond: Bond) {
         bonds.save(bond.toEntity())
         members.saveAll(bond.members.map { it.toEntity() })
-        invites.save(invite.toEntity())
     }
 
     /**
@@ -88,17 +87,37 @@ internal class BondStore(
     /** FR-025's number: bonds this user is still in and can still be written to. */
     fun countOpenBondsOf(userId: UserId): Int = members.countByUserIdAndBondStatusIn(userId.value, OPEN_STATUSES).toInt()
 
-    /** The live invite of each of [bondIds], keyed by bond; absent where there is none. */
-    fun findLiveInvites(
-        bondIds: Collection<BondId>,
-        now: Instant,
-    ): Map<BondId, Invite> {
-        if (bondIds.isEmpty()) return emptyMap()
-        return invites
-            .findAllLiveByBondIdIn(bondIds.map { it.value }, now)
-            .map { it.toDomain() }
-            .associateBy { it.bondId }
+    /**
+     * Holds the bond's row until this transaction ends. Taken before reading
+     * the state an accept decides on, so that two accepts of one code cannot
+     * both see a free seat (slice B2).
+     */
+    fun lockBond(bondId: BondId) {
+        bonds.lockRow(bondId.value)
     }
+
+    /**
+     * The second member joins: the member row and the bond's new status,
+     * written together. [bond] is the aggregate *after* `accept`, so the two
+     * cannot disagree about what was decided.
+     */
+    fun addMember(
+        bond: Bond,
+        member: Member,
+    ) {
+        members.saveAll(listOf(member.toEntity()))
+        val entity = bonds.findById(bond.id.value) ?: error("cannot add a member to a bond that does not exist")
+        bond.applyTo(entity)
+        bonds.save(entity)
+    }
+
+    /**
+     * Everyone who has ever held a membership row in this bond, those who
+     * left included — which is who FR-029's block check has to consider: a
+     * bond somebody walked away from is exactly where a block would have been
+     * made.
+     */
+    fun memberUserIdsEverOf(bondId: BondId): List<UserId> = members.findAllByBondId(bondId.value).map { UserId(it.userId) }
 
     private companion object {
         /** FR-025 counts a bond waiting for its partner exactly as much as one that has them. */

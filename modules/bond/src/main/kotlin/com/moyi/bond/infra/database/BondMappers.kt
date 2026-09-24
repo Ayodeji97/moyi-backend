@@ -1,5 +1,6 @@
 package com.moyi.bond.infra.database
 
+import com.moyi.bond.domain.Block
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.Invite
@@ -66,6 +67,34 @@ internal fun Bond.toEntity(): BondEntity =
         version = version,
     )
 
+/**
+ * Carries a changed [Bond] onto the managed entity it came from — the update
+ * path, added in slice B2 for the status change a join makes.
+ *
+ * `id`, `createdBy` and `createdAt` are not copied: they are not the caller's
+ * to change, and the columns are `updatable = false` so the database would
+ * refuse anyway. Neither is `version`, which is Hibernate's to increment —
+ * assigning it here would fight the optimistic lock rather than use it.
+ *
+ * The alternative, `save(bond.toEntity())`, is wrong in a way that does not
+ * fail: it hands Hibernate a *detached* object claiming to be new, and the
+ * `isNew` flag means it is persisted rather than merged. `IdentityMappers`
+ * carries the same warning for the same reason.
+ */
+internal fun Bond.applyTo(entity: BondEntity) {
+    require(entity.getId() == id.value) { "cannot apply a bond onto a different bond's row" }
+    entity.type = type
+    entity.name = name
+    entity.anchorTimezone = anchorTimezone.id
+    entity.timezoneChangedAt = timezoneChangedAt
+    entity.revealTimeLocal = revealTimeLocal
+    entity.strictMode = strictMode
+    entity.status = status
+    entity.maxMembers = maxMembers.toShort()
+    entity.archivedAt = archivedAt
+    entity.deletionRequestedAt = deletionRequestedAt
+}
+
 internal fun BondMemberEntity.toDomain(): Member =
     Member(
         id = MemberId(getId()),
@@ -124,4 +153,22 @@ internal fun Invite.toEntity(): BondInviteEntity =
         usedAt = usedAt,
         usedByUserId = usedByUserId?.value,
         revokedAt = revokedAt,
+    )
+
+internal fun BlockEntity.toDomain(): Block =
+    Block(
+        blockerUserId = UserId(blockerUserId),
+        blockedUserId = UserId(blockedUserId),
+        bondId = BondId(bondId),
+        createdAt = createdAt,
+    )
+
+/** Insert-only. A block is never edited; if it is ever lifted, that is a delete. */
+internal fun Block.toEntity(id: java.util.UUID): BlockEntity =
+    BlockEntity(
+        id = id,
+        blockerUserId = blockerUserId.value,
+        blockedUserId = blockedUserId.value,
+        bondId = bondId.value,
+        createdAt = createdAt,
     )
