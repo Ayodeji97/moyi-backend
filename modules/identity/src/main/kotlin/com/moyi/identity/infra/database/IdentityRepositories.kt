@@ -192,7 +192,12 @@ internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID>
      * FR-007: a family scoped to its owner. The `userId` predicate is the
      * authorisation — a family id that is not the caller's matches no row,
      * and no row is the 404 doc 06 §2 requires, never a 403 that confirms
-     * the id exists. `0` also for a family already revoked: not a live session.
+     * the id exists. `0` also for a family that is not a *live* session: one
+     * already revoked, or one whose last token has expired. Without the
+     * `EXISTS`, a family that had merely expired still had unrevoked rows to
+     * match, and a stale id from a client's cache got a 204 for a session the
+     * list had stopped showing (Codex's P2 on #35). Every row of a live family
+     * is revoked, rotated ones included, so the chain reads as ended.
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
@@ -202,6 +207,13 @@ internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID>
          WHERE t.familyId = :familyId
            AND t.userId = :userId
            AND t.revokedAt IS NULL
+           AND EXISTS (
+               SELECT 1 FROM RefreshTokenEntity live
+                WHERE live.familyId = t.familyId
+                  AND live.rotatedAt IS NULL
+                  AND live.revokedAt IS NULL
+                  AND live.expiresAt > :now
+           )
         """,
     )
     fun revokeFamilyOf(

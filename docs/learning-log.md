@@ -1165,3 +1165,16 @@ Wrong about: where the risk was. I expected the claim and the authorisation
          to be the delicate parts; both were one line. The delicate parts
          were three assertions I had written with a picture of the API that
          the API had just outgrown.
+         **Added after CI and the Codex review of #35.** Two more corrections,
+         one to code. The revoke `UPDATE` matched every unrevoked row of a
+         family, expired ones included, so a stale id from a client's cache
+         earned a 204 for a session the list had stopped showing; an `EXISTS`
+         on a live token in the family is the fix, and a test that advances
+         the clock thirty-one days is the proof. And two timestamp assertions
+         that were green on this Mac were red on CI: a Linux clock carries
+         nanoseconds, Postgres keeps microseconds, and the round trip through
+         `timestamptz` drops the difference — the tests now compare at the
+         database's resolution. Also worth knowing: oasdiff does *not* call a
+         removed optional request property breaking (a client still sending
+         it is ignored), so the `breaking-api-change` label on #35 was a
+         reviewer's judgement, not the gate's; ADR-0025 §6 says so.

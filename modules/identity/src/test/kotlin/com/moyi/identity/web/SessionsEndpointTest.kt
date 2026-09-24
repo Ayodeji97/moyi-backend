@@ -30,6 +30,7 @@ import org.springframework.test.web.servlet.post
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 import java.time.Duration
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -67,8 +68,11 @@ internal class SessionsEndpointTest(
         session["device"]["platform"].asText() shouldBe "ANDROID"
         session["device"]["appVersion"].asText() shouldBe "1.0.3"
         session["device"]["osVersion"].asText() shouldBe "16"
-        session["createdAt"].asText() shouldBe clock.instant().toString()
-        session["lastSeenAt"].asText() shouldBe clock.instant().toString()
+        // Compared at Postgres's microsecond resolution: a Linux clock carries
+        // nanoseconds, and the round trip through `timestamptz` drops them —
+        // green on a Mac, red on CI, until this truncation.
+        session["createdAt"].asText() shouldBe now().toString()
+        session["lastSeenAt"].asText() shouldBe now().toString()
         UUID.fromString(session["id"].asText()) shouldNotBe null
 
         jdbc.queryForObject("SELECT platform || '|' || app_version || '|' || os_version FROM devices", String::class.java) shouldBe
@@ -107,8 +111,8 @@ internal class SessionsEndpointTest(
         val sessions = sessionsOf(accessTokenIn(rotated.contentAsString))
         sessions.size() shouldBe 1
         sessions[0]["current"].asBoolean() shouldBe true
-        sessions[0]["lastSeenAt"].asText() shouldBe clock.instant().toString()
-        sessions[0]["createdAt"].asText() shouldBe clock.instant().minus(Duration.ofHours(2)).toString()
+        sessions[0]["lastSeenAt"].asText() shouldBe now().toString()
+        sessions[0]["createdAt"].asText() shouldBe now().minus(Duration.ofHours(2)).toString()
     }
 
     @Test
@@ -163,6 +167,22 @@ internal class SessionsEndpointTest(
         revoke(ada.accessToken, mine).status shouldBe 404
         // Grace's session was never touched.
         sessionsOf(grace.accessToken).size() shouldBe 1
+    }
+
+    @Test
+    fun `a session whose refresh token has expired is not in the list, and ending it is 404, not a quiet 204`() {
+        // Codex's P2 on #35: the revoke UPDATE matched every unrevoked row of
+        // the family, expired ones included, so a stale id from a client's
+        // cache got a 204 for a session the list had already stopped showing.
+        register("ada@example.com")
+        val old = login("ada@example.com", device = PIXEL)
+        val oldSession = sessionsOf(old.accessToken)[0]["id"].asText()
+        clock.advance(Duration.ofDays(31)) // past the thirty-day refresh TTL
+        val fresh = login("ada@example.com", device = WATCH)
+
+        sessionsOf(fresh.accessToken).size() shouldBe 1
+
+        revoke(fresh.accessToken, oldSession).status shouldBe 404
     }
 
     @Test
@@ -259,6 +279,9 @@ internal class SessionsEndpointTest(
             .response
 
     private fun accessTokenIn(body: String): String = json.readTree(body)["accessToken"].asText()
+
+    /** The clock at the resolution the database keeps (see the first test). */
+    private fun now() = clock.instant().truncatedTo(ChronoUnit.MICROS)
 
     @TestConfiguration
     class TimeConfiguration {
