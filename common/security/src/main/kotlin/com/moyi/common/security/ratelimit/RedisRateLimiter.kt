@@ -17,6 +17,7 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -39,7 +40,10 @@ import java.util.concurrent.atomic.AtomicReference
  * second and not one line a request; and the counter
  * `moyi.rate_limit.backend_unavailable`, which is what an alert watches.
  * For [RateLimitProperties.retryInterval] after a failure, Redis is not tried
- * at all, so a dead Redis costs one timeout per interval, not one per login.
+ * at all; when the interval is up, **one** caller probes it while every other
+ * stays failed open, so a dead Redis costs one timeout per interval and not
+ * one per in-flight login (Codex's P2 on #33: without that gate, every
+ * request that saw the expired hold probed together).
  *
  * **Connected lazily.** The application must boot with Redis down; the first
  * consume connects, and a failed connect is retried on the next attempt
@@ -55,8 +59,11 @@ class RedisRateLimiter(
     private val log = LoggerFactory.getLogger(javaClass)
     private val unavailable: Counter = meters.counter(BACKEND_UNAVAILABLE_METRIC)
 
-    /** Until when Redis is not worth asking. `null` when the last call succeeded. */
+    /** Until when Redis is not worth asking. `null` while Redis is believed healthy. */
     private val backOffUntil = AtomicReference<Instant?>(null)
+
+    /** Set by the one caller allowed to probe once the hold has expired. */
+    private val probing = AtomicBoolean(false)
 
     // `lazy` does not cache a failed initialiser, which is exactly the retry
     // this needs: a connect that failed at the first request is attempted
@@ -68,10 +75,29 @@ class RedisRateLimiter(
         key: String,
     ): RateLimitDecision {
         val now = clock.instant()
-        return if (isHeld(now)) heldUnavailable() else consume(bucket, key, now)
-    }
+        val hold = backOffUntil.get()
+        return when {
+            hold == null -> {
+                consume(bucket, key, now)
+            }
 
-    private fun isHeld(now: Instant): Boolean = backOffUntil.get()?.let(now::isBefore) == true
+            now.isBefore(hold) -> {
+                heldUnavailable()
+            }
+
+            probing.compareAndSet(false, true) -> {
+                try {
+                    consume(bucket, key, now)
+                } finally {
+                    probing.set(false)
+                }
+            }
+
+            else -> {
+                heldUnavailable()
+            }
+        }
+    }
 
     /** Every request that passes without a limit is counted, held or not. */
     private fun heldUnavailable(): RateLimitDecision {
@@ -126,10 +152,14 @@ class RedisRateLimiter(
         failure: RuntimeException,
     ): RateLimitDecision {
         unavailable.increment()
-        // The first failure after a success sets the hold; a failure inside
-        // the hold cannot happen (the guard above returns first), so this
-        // logs exactly once per interval.
-        backOffUntil.set(now.plus(properties.retryInterval))
+        // Whoever moves the hold forward logs. Twenty in-flight requests that
+        // fail together when Redis dies race on this compare-and-set, and
+        // exactly one of them wins the WARN.
+        val previous = backOffUntil.get()
+        val expired = previous == null || !now.isBefore(previous)
+        if (!expired || !backOffUntil.compareAndSet(previous, now.plus(properties.retryInterval))) {
+            return RateLimitDecision.Unavailable
+        }
         log.warn(
             "Rate limiting is unavailable: Redis did not answer ({}: {}). Requests are being allowed through " +
                 "without limits for the next {}; see the moyi.rate_limit.backend_unavailable counter.",
