@@ -30,6 +30,12 @@ import java.util.UUID
  * that one is about bonds, this is about the codes that let someone into one.
  * `/invites/{code}` is different again and lives in `InvitesController`, keyed
  * on the code rather than on a bond the caller cannot yet name.
+ *
+ * The method names are API names: springdoc builds each `operationId` from the
+ * method name alone, so `revoke` here would collide with the sessions
+ * controller's and one of them would be silently renamed `revoke_1` — which
+ * renames a generated client's method for an endpoint that did not change.
+ * `OpenApiContractTest` holds it.
  */
 @RestController
 @RequestMapping("/api/v1/bonds/{bondId}/invites")
@@ -43,7 +49,7 @@ internal class BondInvitesController(
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @RateLimited(RateLimitBucket.INVITE_CREATE_USER)
-    fun create(
+    fun createBondInvite(
         caller: CurrentUser,
         @PathVariable bondId: String,
     ): InviteDetailResponse {
@@ -55,7 +61,7 @@ internal class BondInvitesController(
     /** FR-023. `204`, and the same 404 for an invite that is already dead, another bond's, or invented. */
     @DeleteMapping("/{inviteId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    fun revoke(
+    fun revokeBondInvite(
         caller: CurrentUser,
         @PathVariable bondId: String,
         @PathVariable inviteId: String,

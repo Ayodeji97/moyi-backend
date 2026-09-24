@@ -572,7 +572,7 @@
     },
     "/api/v1/auth/sessions/{id}" : {
       "delete" : {
-        "operationId" : "revoke_1",
+        "operationId" : "revoke",
         "parameters" : [ {
           "in" : "path",
           "name" : "id",
@@ -949,7 +949,7 @@
     },
     "/api/v1/bonds/{bondId}/invites" : {
       "post" : {
-        "operationId" : "create_1",
+        "operationId" : "createBondInvite",
         "parameters" : [ {
           "in" : "path",
           "name" : "bondId",
@@ -1025,7 +1025,7 @@
     },
     "/api/v1/bonds/{bondId}/invites/{inviteId}" : {
       "delete" : {
-        "operationId" : "revoke",
+        "operationId" : "revokeBondInvite",
         "parameters" : [ {
           "in" : "path",
           "name" : "bondId",

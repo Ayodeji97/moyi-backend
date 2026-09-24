@@ -70,7 +70,14 @@ internal class InvitesController(
     fun accept(
         caller: CurrentUser,
         @PathVariable code: String,
-    ): BondResponse = BondResponse.from(acceptInvite.accept(UserId(caller.id), parse(code)))
+    ): ResponseEntity<BondResponse> {
+        val view = acceptInvite.accept(UserId(caller.id), parse(code))
+        // With its `ETag`, like every other response carrying a bond: the
+        // contract documents one for any body that is a `BondResponse`, and a
+        // client told to keep a version it never received would have to GET
+        // the bond again before it could ever PATCH it.
+        return ResponseEntity.ok().eTag(BondResponse.etagOf(view)).body(BondResponse.from(view))
+    }
 
     /**
      * A code from the path, normalised.

@@ -175,6 +175,29 @@ internal class InviteEndpointTest(
     }
 
     @Test
+    fun `accepting returns the ETag of the bond as it now is, not as it was`() {
+        // The contract documents an ETag on every response carrying a bond, and
+        // this one did not send it — the document promised a header the
+        // endpoint never wrote. Worse than missing: the in-memory aggregate
+        // still holds the version it was loaded with, while Hibernate has
+        // incremented the row, so the obvious fix would have sent a version
+        // `If-Match` rejects. Raised by the review of PR #38.
+        val ada = users.verified("Ada")
+        val bob = users.verified("Bob")
+        val bond = createBond(ada)
+
+        val joined = accept(bob, codeOf(bond))
+
+        joined.status shouldBe 200
+        val etag = joined.getHeader(HttpHeaders.ETAG)
+        val version = jdbc.queryForObject("SELECT version FROM bonds WHERE id = ?::uuid", Int::class.java, bondIdOf(bond))
+        etag shouldBe "\"$version\""
+        // And it moved, so a client holding the create-time ETag is correctly
+        // refused by a later If-Match.
+        etag shouldNotBe "\"0\""
+    }
+
+    @Test
     fun `an unverified account may not accept`() {
         // FR-002, and the same answer as create: their own state, so it is safe to name.
         val bond = createBond(users.verified("Ada"))

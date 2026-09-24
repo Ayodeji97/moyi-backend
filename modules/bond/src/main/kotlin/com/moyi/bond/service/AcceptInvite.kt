@@ -90,10 +90,15 @@ internal class AcceptInvite(
         if (!invites.consume(invite.id, caller, now)) throw InviteNotUsableException()
 
         val member = Member.member(MemberId(support.ids.timeOrdered()), bond.id, caller, bond.anchorTimezone, now)
-        val joined = bond.accept(member)
-        bonds.addMember(joined, member)
+        bonds.addMember(bond.accept(member), member)
         log.info("User {} joined bond {}", caller.value, bond.id.value)
-        return views.of(joined, caller)
+        // Re-read rather thanreturning the in-memory aggregate: `accept` leaves the
+        // version it was loaded with, while Hibernate's @Version has since
+        // incremented the row. Returning the stale one would put a version in
+        // the `ETag` that `If-Match` immediately rejects — a client told to
+        // keep a value that was never true. Raised by the review of PR #38.
+        val persisted = bonds.findByMember(bond.id, caller) ?: error("the bond this caller just joined is gone")
+        return views.of(persisted, caller)
     }
 }
 
