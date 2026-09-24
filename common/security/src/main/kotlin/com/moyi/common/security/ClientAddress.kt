@@ -87,8 +87,12 @@ class ClientAddress private constructor(
         @Suppress("SwallowedException")
         private fun ipv6(text: String): ClientAddress? =
             try {
-                // A string containing ':' cannot be a hostname, so this is a parse, not a lookup.
-                ClientAddress(InetAddress.getByName(text))
+                // Bracketed on purpose. The JDK treats an unbracketed string
+                // that fails its IPv6 literal parse as a *hostname* and hands
+                // it to the name service; "1:2:3:4:5:6:7:8:9" is all hex and
+                // colons and is exactly that case. With brackets the contract
+                // is literal-or-throw, and nothing here ever resolves a name.
+                ClientAddress(InetAddress.getByName("[$text]"))
             } catch (notAnAddress: UnknownHostException) {
                 null
             }

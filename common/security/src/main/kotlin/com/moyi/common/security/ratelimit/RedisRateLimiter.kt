@@ -59,8 +59,15 @@ class RedisRateLimiter(
     private val log = LoggerFactory.getLogger(javaClass)
     private val unavailable: Counter = meters.counter(BACKEND_UNAVAILABLE_METRIC)
 
-    /** Until when Redis is not worth asking. `null` while Redis is believed healthy. */
-    private val backOffUntil = AtomicReference<Instant?>(null)
+    /**
+     * Until when Redis is not worth asking; `null` while Redis is believed
+     * healthy. Starts in the past rather than `null`, so that first contact
+     * goes through the probe gate too: the lazy connection is a synchronised
+     * initialiser, and twenty concurrent first callers against a Redis that
+     * does not answer would otherwise queue on it and each pay the connect
+     * timeout in turn (found in review of #33).
+     */
+    private val backOffUntil = AtomicReference<Instant?>(Instant.EPOCH)
 
     /** Set by the one caller allowed to probe once the hold has expired. */
     private val probing = AtomicBoolean(false)

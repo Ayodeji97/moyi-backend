@@ -1,6 +1,7 @@
 package com.moyi.common.security
 
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockHttpServletRequest
 
@@ -52,6 +53,18 @@ internal class ClientAddressResolverTest {
 
         resolver.resolve(request(remote = "10.0.0.2", forwardedFor = "evil.example, 10.0.0.3")).hostAddress shouldBe "10.0.0.3"
         resolver.resolve(request(remote = "10.0.0.2", forwardedFor = "evil.example")).hostAddress shouldBe "10.0.0.2"
+    }
+
+    @Test
+    fun `hex and colons that are not an IPv6 literal are not an address, and are never looked up`() {
+        // The character check alone lets "1:2:3:4:5:6:7:8:9" through, and an
+        // unbracketed string that fails the literal parse is one the JDK hands
+        // to the name service. Found in review of #33.
+        ClientAddress.parse("1:2:3:4:5:6:7:8:9") shouldBe null
+        ClientAddress.parse("1:2:3:4:5:6:7:8:9").let { it } shouldBe null
+        ClientAddress.parse("12345::1") shouldBe null
+        ClientAddress.parse(":::") shouldBe null
+        ClientAddress.parse("2001:db8::42") shouldNotBe null
     }
 
     @Test
