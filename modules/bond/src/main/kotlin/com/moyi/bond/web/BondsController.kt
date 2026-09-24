@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
@@ -44,7 +45,17 @@ internal class BondsController(
     private val getBond: GetBond,
     private val listBonds: ListBonds,
 ) {
+    /**
+     * `@ResponseStatus` **and** a `ResponseEntity`, which looks redundant and
+     * is not. The entity carries the real status and the `ETag`; the
+     * annotation is what springdoc reads, and without it the generated
+     * contract says this returns 200 — a lie a generated client would be
+     * built on (ADR-0024). The two cannot drift unnoticed:
+     * `BondsEndpointTest` asserts the runtime status is 201, and
+     * `OpenApiContractTest` asserts the document says so.
+     */
     @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
     fun create(
         caller: CurrentUser,
         @Valid @RequestBody request: CreateBondRequest,

@@ -73,7 +73,15 @@ class OpenApiContractTest(
     @Test
     fun `it is OpenAPI 3 and knows every route that exists`() {
         api.openapi shouldStartWith "3."
-        api.paths.keys shouldContainAll listOf("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/me")
+        api.paths.keys shouldContainAll
+            listOf(
+                "/api/v1/auth/register",
+                "/api/v1/auth/login",
+                "/api/v1/auth/refresh",
+                "/api/v1/me",
+                "/api/v1/bonds",
+                "/api/v1/bonds/{bondId}",
+            )
     }
 
     @Test
@@ -134,6 +142,19 @@ class OpenApiContractTest(
     @Test
     fun `ending a session documents its 404`() {
         api.paths["/api/v1/auth/sessions/{id}"]!!.delete.responses shouldContainKey "404"
+    }
+
+    @Test
+    fun `reading a bond documents its 404, and creating one its 201`() {
+        // Doc 06 §2 and ADR-0024's amendment: an operation that names a
+        // resource by a path parameter can answer "not found or not permitted
+        // to know it exists", and a generated client has to be able to model
+        // that. For bonds it is the *usual* answer to a stranger (T-02), not
+        // an edge case.
+        val bond = api.paths["/api/v1/bonds/{bondId}"]!!.get
+        bond.responses shouldContainKey "404"
+        bond.responses["200"]!!.content.keys shouldContainExactly listOf(MediaType.APPLICATION_JSON_VALUE)
+        api.paths["/api/v1/bonds"]!!.post.responses shouldContainKey "201"
     }
 
     @Test

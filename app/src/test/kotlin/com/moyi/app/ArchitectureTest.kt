@@ -341,6 +341,7 @@ class ArchitectureTest {
                 violations.joinToString { it.name },
         )
     }
+
     @Test
     fun `a Membership is only ever constructed by BondAccessGuard`() {
         // The spec's §4 and doc 05 §5.5 layer 2: the type is a *proof* that
