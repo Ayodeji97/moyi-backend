@@ -53,10 +53,11 @@ class InMemoryTokenRevocations : TokenRevocations {
 }
 
 /**
- * Four endpoints: one any signed-in user may call, one that needs a scope no
- * token carries, and two on the *public* auth paths the chain permits —
+ * Six endpoints: one any signed-in user may call, one that needs a scope no
+ * token carries, two on the *public* auth paths the chain permits —
  * `identity`'s controllers are not on this classpath, so the paths are free
- * — one rate-limited per address, one that reports who is calling.
+ * — one rate-limited per address, one that reports who is calling, and two
+ * that exercise the per-user and multi-bucket forms of [RateLimited].
  */
 @RestController
 class ProbeController {
@@ -71,6 +72,21 @@ class ProbeController {
     @PostMapping("/api/v1/auth/login")
     fun client(client: ClientContext): Map<String, String?> =
         mapOf("addressHash" to client.addressHash, "userAgentHash" to client.userAgentHash, "address" to null)
+
+    /** A bucket keyed on the caller rather than the address (slice B2). */
+    @GetMapping("/api/v1/probe/per-user")
+    @RateLimited(RateLimitBucket.INVITE_CREATE_USER)
+    fun perUser(): Map<String, String> = mapOf("ok" to "true")
+
+    /** Two buckets on one handler, as `GET /invites/{code}` needs (slice B2). */
+    @GetMapping("/api/v1/probe/two-buckets")
+    @RateLimited(RateLimitBucket.INVITE_LOOKUP_USER, RateLimitBucket.INVITE_CODE_IP)
+    fun twoBuckets(): Map<String, String> = mapOf("ok" to "true")
+
+    /** Names a bucket whose subject is in the request body, which the interceptor cannot read. */
+    @GetMapping("/api/v1/probe/wrong-subject")
+    @RateLimited(RateLimitBucket.AUTH_LOGIN_EMAIL)
+    fun wrongSubject(): Map<String, String> = mapOf("ok" to "true")
 
     @GetMapping("/api/v1/probe/admin")
     @PreAuthorize("hasAuthority('SCOPE_admin')")
