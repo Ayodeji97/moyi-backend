@@ -2,8 +2,9 @@
 # Smoke test for the moyi-backend API against a locally running instance.
 #
 # What it proves: the packaged application boots against the compose Postgres,
-# and every identity endpoint that exists so far answers with the status and
-# the error code the API contract (doc 06) promises — on the happy path AND on
+# and every identity endpoint that exists so far — registration, verification,
+# sign-in, refresh rotation, logout, password reset — answers with the status
+# and the error code the API contract (doc 06) promises — on the happy path AND on
 # the edges that have bitten before: malformed JSON, wrong method, reused
 # token, unknown address, duplicate registration.
 #
@@ -130,9 +131,69 @@ expect "resend for a verified address is 202, empty" 202 "" -- -X POST "$API/aut
 expect "resend for an unknown address is 202, identical" 202 "" -- -X POST "$API/auth/resend-verification" -d '{"email":"nobody-here@example.com"}'
 expect "resend for a malformed address is 422" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/resend-verification" -d '{"email":"not-an-address"}'
 
+echo; echo "sign-in and sessions (FR-003, FR-004, ADR-0020–0022)"
+# The account is verified by now, so this is the ordinary sign-in; the
+# unverified sign-in FR-002 allows is covered by the endpoint tests.
+jget() { python3 -c "import json,sys; print(json.load(sys.stdin)['$1'])"; }
+login_body() { printf '{"email":"%s","password":"%s","deviceInfo":"smoke"}' "$1" "$2"; }
+expect "login is 200 with a token pair and the profile" 200 '"expiresIn":900' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
+ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"; REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+[[ "$LAST_BODY" == *'"emailVerified":true'* ]] && pass "…and the profile says the address is verified" || fail "profile" "emailVerified not true: ${LAST_BODY:0:120}"
+expect "GET /me with the access token is 200" 200 "\"email\":\"$EMAIL\"" -- "$API/me" -H "Authorization: Bearer $ACCESS"
+expect "wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "not the password")"
+WRONG="$LAST_BODY"
+expect "unknown address is 401 too" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "nobody-$RANDOM@example.com" "not the password")"
+[ "$WRONG" = "$LAST_BODY" ] && pass "…with a byte-identical body (no account oracle)" || fail "identical 401s" "bodies differ"
+expect "an oversized password is 422, not work" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$(printf 'x%.0s' $(seq 1 600))")"
+# Lockout: four more wrong attempts make five; the right password is then
+# refused with the same 401, silently, for a minute.
+for i in 2 3 4 5; do curl -s -o /dev/null -H 'Content-Type: application/json' -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "wrong $i")"; done
+expect "after five failures the RIGHT password is refused, identically" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
+LOCK="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT failed_attempts || '|' || CAST(EXTRACT(EPOCH FROM (locked_until - now())) AS int) FROM credentials c JOIN users u ON u.id=c.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
+case "$LOCK" in 5\|5[5-9]|5\|60) pass "locked for a minute after five failures ($LOCK)";; psql-unavailable) echo "  skip lock check (psql unavailable)";; *) fail "lockout row" "expected 5|55..60, got '$LOCK'";; esac
+docker compose exec -T postgres psql -U moyi -d moyi -Atc "UPDATE credentials SET locked_until = now() - interval '1 second' FROM users u WHERE u.id = credentials.user_id AND u.email='$EMAIL'" >/dev/null 2>&1 || true
+expect "once the lock expires the right password signs in again" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
+REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "refresh rotates: 200 with a new pair" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
+REFRESH2="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+[ "$REFRESH2" != "$REFRESH" ] && pass "…and the new refresh token differs from the old" || fail "rotation" "same refresh token returned"
+expect "presenting the rotated token again is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
+expect "…and the successor died with the family: REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH2\"}"
+expect "a never-issued refresh token is 401 REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d '{"refreshToken":"never-issued"}'
+expect "login again (fresh family)" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
+REFRESH3="$(printf '%s' "$LAST_BODY" | jget refreshToken)"; ACCESS3="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+expect "logout is 204" 204 "" -- -X POST "$API/auth/logout" -d "{\"refreshToken\":\"$REFRESH3\"}"
+expect "…and idempotent" 204 "" -- -X POST "$API/auth/logout" -d "{\"refreshToken\":\"$REFRESH3\"}"
+expect "the logged-out token cannot refresh" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH3\"}"
+expect "logout-all without a bearer token is 401" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/auth/logout-all"
+expect "logout-all with one is 204" 204 "" -- -X POST "$API/auth/logout-all" -H "Authorization: Bearer $ACCESS3"
+
+echo; echo "password reset (FR-004, T-17, ADR-0022)"
+EMAILS_BEFORE="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "forgot-password for the account is 202, empty" 202 "" -- -X POST "$API/auth/forgot-password" -d "{\"email\":\"$EMAIL\"}"
+expect "forgot-password for a stranger is 202, identical" 202 "" -- -X POST "$API/auth/forgot-password" -d '{"email":"nobody-here@example.com"}'
+for _ in $(seq 1 40); do [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$EMAILS_BEFORE" ] && break; sleep 0.25; done
+RESET="$(grep -oE 'reset-password\?token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+if [ "${#RESET}" = 43 ]; then pass "reset link lands on the reset page with a 43-character secret"; else fail "reset link" "got '${RESET}'"; fi
+expect "a breached new password is refused per field, token not spent" 422 '"code":"NOT_BREACHED"' -- -X POST "$API/auth/reset-password" -d "{\"token\":\"$RESET\",\"password\":\"password\"}"
+NEW_PASSWORD="a different good password"
+expect "reset with a good password is 200" 200 "" -- -X POST "$API/auth/reset-password" -d "{\"token\":\"$RESET\",\"password\":\"$NEW_PASSWORD\"}"
+expect "the same link again is 410 PASSWORD_RESET_TOKEN_EXPIRED" 410 '"code":"PASSWORD_RESET_TOKEN_EXPIRED"' -- -X POST "$API/auth/reset-password" -d "{\"token\":\"$RESET\",\"password\":\"$NEW_PASSWORD\"}"
+expect "the old password no longer signs in" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
+expect "the new one does" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$NEW_PASSWORD")"
+sleep 1
+for needle in "$PASSWORD" "$NEW_PASSWORD" "$REFRESH" "$REFRESH2" "$ACCESS"; do if grep -qF -- "$needle" "$MOYI_LOG"; then fail "secret in log" "a password or token appears in the log"; SECRET_LEAK=1; fi; done
+[ "${SECRET_LEAK:-0}" = 0 ] && pass "no password, refresh token or access token appears in the log"
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
-if [ "$ROW" = "ACTIVE|t|1|1" ]; then pass "user ACTIVE, verified, one token, consumed"; elif [ "$ROW" = "psql-unavailable" ]; then echo "  skip database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|1|1, got '$ROW'"; fi
+# Two tokens by now — the verification link and the reset link — both consumed.
+if [ "$ROW" = "ACTIVE|t|2|2" ]; then pass "user ACTIVE, verified, two tokens (verification + reset), both consumed"; elif [ "$ROW" = "psql-unavailable" ]; then echo "  skip database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|2|2, got '$ROW'"; fi
+SESSIONS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) || '|' || count(*) FILTER (WHERE revoked_at IS NULL) FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
+# Five families were started and every one ended: two by reuse detection and
+# logout, the rest by logout-all and the reset. The final login after the
+# reset is the one live token.
+case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|1") pass "refresh tokens stored as hashes; exactly one live session remains ($SESSIONS)";; *) fail "sessions" "expected exactly one live refresh token, got '$SESSIONS'";; esac
 
 echo; printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 # The exit status is the failure count, as the README says (capped at what a
