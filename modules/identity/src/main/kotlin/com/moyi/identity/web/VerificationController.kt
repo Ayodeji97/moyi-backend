@@ -1,5 +1,7 @@
 package com.moyi.identity.web
 
+import com.moyi.common.security.ratelimit.RateLimitBucket
+import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.service.ResendVerification
@@ -44,9 +46,15 @@ internal class VerificationController(
         verifyEmail.verify(VerificationSecret(request.token.trim()))
     }
 
-    /** 202, not 200: the request is accepted, and whether anything follows is deliberately not disclosed. */
+    /**
+     * 202, not 200: the request is accepted, and whether anything follows is
+     * deliberately not disclosed. Twenty an hour per address (ADR-0023): this
+     * endpoint sends email to whoever asks, and the per-email cooldown in
+     * the service bounds nothing an attacker cannot vary.
+     */
     @PostMapping("/resend-verification")
     @ResponseStatus(HttpStatus.ACCEPTED)
+    @RateLimited(RateLimitBucket.AUTH_RESEND_IP)
     fun resend(
         @Valid @RequestBody request: ResendVerificationRequest,
     ) {

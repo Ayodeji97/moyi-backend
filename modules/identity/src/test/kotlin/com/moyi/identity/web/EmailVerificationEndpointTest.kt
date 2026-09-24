@@ -1,6 +1,6 @@
 package com.moyi.identity.web
 
-import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.TestBreachCorpus
 import com.moyi.notification.api.EmailDelivery
@@ -53,7 +53,7 @@ internal class EmailVerificationEndpointTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val emails: RecordingEmailSender,
     @Autowired dataSource: DataSource,
-) : PostgresIntegrationTest() {
+) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
 
     @AfterEach

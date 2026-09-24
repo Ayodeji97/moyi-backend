@@ -1,8 +1,6 @@
 package com.moyi.common.testing
 
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.postgresql.PostgreSQLContainer
 
 /**
@@ -12,19 +10,27 @@ import org.testcontainers.postgresql.PostgreSQLContainer
  * same test run; Testcontainers' Ryuk reaper tears it down afterwards, so
  * there's no manual `stop()` to forget.
  *
+ * **Started once, in the initialiser, and never stopped — deliberately not
+ * `@Testcontainers` / `@Container`.** The JUnit extension stops a static
+ * container after each test *class* and starts a new one (new port) for the
+ * next, while Spring caches the application context across classes with
+ * the first container's port inside it. Two classes sharing one context
+ * therefore worked only as long as no two classes shared one; the day
+ * `AddressNeverLoggedTest` joined `HealthCheckTest`'s context, the health
+ * check waited thirty seconds on a container that no longer existed. The
+ * singleton pattern is Testcontainers' own answer to this.
+ *
  * `UtilityClassWithPublicConstructor` is suppressed below: detekt's rule
  * doesn't distinguish "utility class" from "abstract base meant only for
  * subclassing" (the standard Testcontainers+Spring pattern) — an abstract
  * class can't be instantiated directly regardless.
  */
 @Suppress("UtilityClassWithPublicConstructor")
-@Testcontainers
 abstract class PostgresIntegrationTest {
     companion object {
         @Suppress("unused")
-        @Container
         @ServiceConnection
         @JvmStatic
-        val postgres: PostgreSQLContainer = PostgreSQLContainer("postgres:18")
+        val postgres: PostgreSQLContainer = PostgreSQLContainer("postgres:18").also { it.start() }
     }
 }

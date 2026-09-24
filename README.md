@@ -63,6 +63,23 @@ generated with the two `openssl` lines in ADR-0019. Everything under
 `/api/v1` except the auth endpoints needs `Authorization: Bearer <token>`;
 `GET /api/v1/me` is the endpoint to try it on.
 
+Since slice F (ADR-0023) the compose Redis (Valkey) matters too: it holds
+the rate-limit buckets of doc 06 §4. The app boots without it — a Redis
+that does not answer makes the limiter fail *open*, with a WARN in the
+log and the `moyi.rate_limit.backend_unavailable` counter going up, never
+a refused login. Two more environment values are needed outside `local`:
+`MOYI_SECURITY_HASHING_SECRET` (at least 32 characters; `openssl rand
+-base64 48` makes one), the HMAC key behind `consent_records.ip_hash` and
+the Redis keys, which `local` again generates per process; and
+`MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES` (comma-separated CIDRs, or
+`…_PROXIES_0`, `…_PROXIES_1` one per entry), the proxies whose
+`X-Forwarded-For` is believed. Left empty, no header is believed and the
+socket address is the client — which behind kamal-proxy means every
+request shares one per-IP bucket, over-strict and visible rather than
+forgeable and silent. `local` trusts loopback so `curl -H
+'X-Forwarded-For: …'` can pick an address, which is how the smoke script
+drives the per-IP limits.
+
 `./gradlew build` runs the full local verification loop: compile, ktlint,
 detekt, and tests — including integration tests that spin up a real
 Postgres via Testcontainers (needs Docker running).
@@ -80,7 +97,10 @@ Three layers, cheapest first.
    malformed JSON, wrong method, a reused token, an unknown address, a
    duplicate registration. It reads the verification link out of the log,
    because the `local` profile writes email there instead of sending it, and
-   it checks the rows afterwards. `--no-build` reuses the jar; `PORT=18080`
+   it checks the rows afterwards. It also drives every rate limit in doc
+   06 §4 to its 429 — headers, `Retry-After` and copy — and flushes the
+   compose Valkey between sections so the buckets do not decide what the
+   next probe sees. `--no-build` reuses the jar; `PORT=18080`
    boots elsewhere; `--attach` probes a server you started yourself (set
    `MOYI_LOG` to its log file). Exit status is the number of failures.
 3. **By hand.** Start the app (`SPRING_PROFILES_ACTIVE=local ./gradlew

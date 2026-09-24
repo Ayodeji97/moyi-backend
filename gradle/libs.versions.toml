@@ -13,11 +13,17 @@ owaspDependencyCheck = "13.0.0"
 # BouncyCastle is a runtime requirement, not an alternative to it. Not managed
 # by the Spring Boot BOM, unlike spring-security itself, so it is pinned here.
 bouncycastle = "1.86"
+# Token buckets over Redis (doc 25 D6, ADR-0023). The Lettuce adapter is built
+# against Lettuce 6 and declares it `provided`; Spring Boot 4 supplies Lettuce
+# 7, and the three calls the adapter makes (EVAL, GET, DEL) exist in both —
+# verified by the limiter's integration tests against a real Valkey 8.
+bucket4j = "8.20.0"
 
 [libraries]
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 bouncycastle-provider = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
+bucket4j-lettuce = { module = "com.bucket4j:bucket4j_jdk17-lettuce", version.ref = "bucket4j" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 # flyway-core / flyway-database-postgresql, the postgresql JDBC driver, and

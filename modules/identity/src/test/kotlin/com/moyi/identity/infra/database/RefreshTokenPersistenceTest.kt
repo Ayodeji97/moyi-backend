@@ -1,7 +1,7 @@
 package com.moyi.identity.infra.database
 
 import com.moyi.common.testing.DeterministicIdGenerator
-import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.RefreshToken
 import com.moyi.identity.domain.User
@@ -36,7 +36,7 @@ internal class RefreshTokenPersistenceTest(
     @Autowired private val users: UserRepository,
     @Autowired private val transactions: TransactionTemplate,
     @Autowired dataSource: DataSource,
-) : PostgresIntegrationTest() {
+) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
     private val ids = DeterministicIdGenerator()
 

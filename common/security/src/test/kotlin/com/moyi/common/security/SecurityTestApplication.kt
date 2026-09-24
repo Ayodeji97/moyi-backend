@@ -1,11 +1,14 @@
 package com.moyi.common.security
 
+import com.moyi.common.security.ratelimit.RateLimitBucket
+import com.moyi.common.security.ratelimit.RateLimited
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.context.annotation.Bean
 import org.springframework.security.access.prepost.PreAuthorize
 import org.springframework.stereotype.Component
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RestController
 import java.time.Instant
 import java.util.UUID
@@ -49,11 +52,25 @@ class InMemoryTokenRevocations : TokenRevocations {
     }
 }
 
-/** Two endpoints: one any signed-in user may call, one that needs a scope no token carries. */
+/**
+ * Four endpoints: one any signed-in user may call, one that needs a scope no
+ * token carries, and two on the *public* auth paths the chain permits —
+ * `identity`'s controllers are not on this classpath, so the paths are free
+ * — one rate-limited per address, one that reports who is calling.
+ */
 @RestController
 class ProbeController {
     @GetMapping("/api/v1/probe/whoami")
     fun whoami(caller: CurrentUser): Map<String, String> = mapOf("userId" to caller.id.toString())
+
+    @PostMapping("/api/v1/auth/register")
+    @RateLimited(RateLimitBucket.AUTH_REGISTER_IP)
+    fun limited(): Map<String, String> = mapOf("ok" to "true")
+
+    /** Serialises the whole context, so the test can assert the address itself is *not* in it. */
+    @PostMapping("/api/v1/auth/login")
+    fun client(client: ClientContext): Map<String, String?> =
+        mapOf("addressHash" to client.addressHash, "userAgentHash" to client.userAgentHash, "address" to null)
 
     @GetMapping("/api/v1/probe/admin")
     @PreAuthorize("hasAuthority('SCOPE_admin')")

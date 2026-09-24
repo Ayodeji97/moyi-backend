@@ -1,6 +1,7 @@
 package com.moyi.identity.web
 
-import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.security.PersonalDataHasher
+import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.PasswordHash
 import com.moyi.identity.domain.PasswordHashAlgorithm
@@ -14,13 +15,17 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
@@ -44,12 +49,14 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [IdentityTestApplication::class])
 @AutoConfigureMockMvc
+@ExtendWith(OutputCaptureExtension::class)
 @Import(RegistrationEndpointTest.RecordingHasherConfiguration::class)
 internal class RegistrationEndpointTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val hasher: RecordingPasswordHasher,
+    @Autowired private val personalData: PersonalDataHasher,
     @Autowired dataSource: DataSource,
-) : PostgresIntegrationTest() {
+) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
 
     @AfterEach
@@ -314,6 +321,66 @@ internal class RegistrationEndpointTest(
         // arrives as null in a non-null property.
         jdbc.queryForObject("SELECT locale FROM users", String::class.java) shouldBe "en"
     }
+
+    @Test
+    fun `the duplicate path leaves the address out of the log, including Hibernate's constraint line`(output: CapturedOutput) {
+        // Doc 18 §9. Postgres reports a unique violation as
+        // "Key (email)=(ada@example.com) already exists", and Hibernate's
+        // `org.hibernate.orm.jdbc.error` logger logs that detail at ERROR before the exception
+        // ever reaches RegisterUser, which absorbs it (ADR-0015). Found by the
+        // smoke script on 2026-09-24, once its grep stopped being blind to case.
+        register().status shouldBe 201
+        register().status shouldBe 201
+
+        output.all shouldNotContain "ada@example.com"
+        output.all shouldNotContain "ADA@EXAMPLE.COM"
+    }
+
+    @Test
+    fun `the consent rows record the caller's address and user agent as keyed hashes, never the values`() {
+        // Doc 07 §2: corroborating evidence for FR-011, populated now that
+        // the trusted-proxy resolver exists (ADR-0023). Hashed with the
+        // configured secret, so the column cannot be turned back into an
+        // address by hashing all four billion of them.
+        mockMvc
+            .post(PATH) {
+                contentType = MediaType.APPLICATION_JSON
+                content = body("ada@example.com", PASSWORD, over18 = true)
+                with { request -> request.apply { remoteAddr = "203.0.113.7" } }
+                header(HttpHeaders.USER_AGENT, "Moyi/1.0 (Pixel 9)")
+            }.andReturn()
+            .response.status shouldBe 201
+
+        jdbc.queryForList("SELECT DISTINCT ip_hash FROM consent_records", String::class.java) shouldBe
+            listOf(personalData.hash("203.0.113.7"))
+        jdbc.queryForList("SELECT DISTINCT user_agent_hash FROM consent_records", String::class.java) shouldBe
+            listOf(personalData.hash("Moyi/1.0 (Pixel 9)"))
+        jdbc.queryForObject("SELECT count(*) FROM consent_records WHERE ip_hash LIKE '%203.0.113%'", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `no User-Agent leaves the column null rather than a hash of nothing`() {
+        register().status shouldBe 201
+
+        jdbc.queryForObject("SELECT count(*) FROM consent_records WHERE user_agent_hash IS NULL", Int::class.java) shouldBe 3
+        jdbc.queryForObject("SELECT count(*) FROM consent_records WHERE ip_hash IS NULL", Int::class.java) shouldBe 0
+    }
+
+    private fun body(
+        email: String,
+        password: String,
+        over18: Boolean,
+    ): String =
+        """
+        {
+          "email": "$email",
+          "password": "$password",
+          "displayName": "Ada",
+          "locale": "en",
+          "acceptedTermsVersion": "2026-09-01",
+          "over18": $over18
+        }
+        """.trimIndent()
 
     private fun register(
         email: String = "ada@example.com",

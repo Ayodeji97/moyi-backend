@@ -1,5 +1,7 @@
 package com.moyi.common.security
 
+import com.moyi.common.security.ratelimit.RateLimitExceededException
+import com.moyi.common.security.ratelimit.writeRateLimit
 import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.ExceptionHandlerAdviceOrder
 import com.moyi.common.web.ProblemDetails
@@ -106,11 +108,42 @@ class ProblemAccessDeniedHandler(
 class SecurityExceptionHandler(
     private val problems: ProblemDetails,
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     @ExceptionHandler(AccessDeniedException::class)
     fun handleAccessDenied(request: WebRequest): ResponseEntity<Any> =
         ResponseEntity
             .status(HttpStatus.FORBIDDEN)
             .body(forbidden(problems, (request as? ServletWebRequest)?.request?.requestURI?.let(URI::create)))
+
+    /**
+     * Doc 06 §2: 429, "always with `Retry-After`", plus the `X-RateLimit-*`
+     * triple with zero remaining. Handled here rather than by `common:web`'s
+     * catch-all for [ApiException][com.moyi.common.web.ApiException] because
+     * the headers come from the decision, and the decision is this module's
+     * type. Logged at WARN with the wait, never the key: which address or
+     * email was limited is not in the log, but the *rate* of 429s is what an
+     * operator graphs (doc 11 §4).
+     */
+    @ExceptionHandler(RateLimitExceededException::class)
+    fun handleRateLimited(
+        exceeded: RateLimitExceededException,
+        request: WebRequest,
+    ): ResponseEntity<Any> {
+        log.warn("RATE_LIMITED -> 429, retry after {}s", exceeded.retryAfterSeconds)
+        val headers = HttpHeaders().apply { writeRateLimit(exceeded) }
+        return ResponseEntity
+            .status(HttpStatus.TOO_MANY_REQUESTS)
+            .headers(headers)
+            .body(
+                problems.of(
+                    status = HttpStatus.TOO_MANY_REQUESTS,
+                    errorCode = ErrorCode.RATE_LIMITED,
+                    detail = exceeded.detail,
+                    instance = (request as? ServletWebRequest)?.request?.requestURI?.let(URI::create),
+                ),
+            )
+    }
 }
 
 private fun forbidden(

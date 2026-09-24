@@ -1,0 +1,18 @@
+# The posture every test context in this module needs and none of them is
+# about: a fresh RSA pair and a fresh hashing secret per context, because both
+# default to CONFIGURED and refuse to start without one from the environment
+# (ADR-0019, ADR-0023). A test that is about the posture itself uses
+# ApplicationContextRunner and sets nothing.
+moyi:
+  security:
+    jwt:
+      key-source: ephemeral
+    hashing:
+      secret-source: ephemeral
+
+spring:
+  data:
+    redis:
+      # There are no @RedisHash entities and scanning for them costs a startup.
+      repositories:
+        enabled: false

@@ -1,6 +1,7 @@
 package com.moyi.identity.service
 
 import com.moyi.common.core.IdGenerator
+import com.moyi.common.security.ClientContext
 import com.moyi.identity.domain.ConsentDocument
 import com.moyi.identity.domain.ConsentRecord
 import com.moyi.identity.domain.Credentials
@@ -142,8 +143,10 @@ internal class RegisterUser(
                 document = document,
                 version = command.acceptedTermsVersion,
                 acceptedAt = now,
-                ipHash = null,
-                userAgentHash = null,
+                // Doc 07 §2's corroborating evidence, hashed before it reached
+                // this class; the address itself never did (ADR-0023).
+                ipHash = command.client.addressHash,
+                userAgentHash = command.client.userAgentHash,
             )
         }
 }
@@ -169,4 +172,6 @@ internal data class RegistrationCommand(
     val displayName: String,
     val locale: String,
     val acceptedTermsVersion: String,
+    /** Where the request came from, as the hashes the consent rows store. */
+    val client: ClientContext,
 )

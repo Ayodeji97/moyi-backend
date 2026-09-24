@@ -1059,3 +1059,44 @@ Reality: a list is read once; a script is run every time. `scripts/smoke.sh`
          harness was the bug. Same lesson as the mock server that went to the
          network: a test's plumbing is code, and the first run of a new test
          is the moment to distrust a failure *and* a pass.
+
+## 2026-09-24 · Phase 1 · Rate limiting, and the number the test told me I had wrong
+Expected: to wire Bucket4j to Redis, annotate four controllers, and write the
+         429. The design had been written the day before and re-read this
+         morning; the interesting part was expected to be the trusted-proxy
+         resolver.
+Reality: the resolver was the easy part — eight unit tests, one loop. Four
+         things were learned by running, none by reading:
+         **`X-RateLimit-Reset` is not "now plus the period".** I wrote the
+         test expecting the reset an hour after one registration; Bucket4j
+         answered twenty minutes. Reset is when the bucket is *full again*,
+         and with greedy refill one missing token is one refill interval
+         away. The test was wrong, the library was right, and the header now
+         says something true that I would have documented falsely.
+         **FR-012 and T-03 share a threshold.** Five sign-in attempts per
+         fifteen minutes per email, and a lock after five failures. Counting
+         the smoke script's logins showed the sixth attempt is always a 429,
+         so the lockout can never be observed over HTTP inside the window.
+         Not a conflict — the bucket is the cheap front door, the lockout is
+         what remains when Redis is gone — but nobody had written down which
+         fires first, and the test contexts had to be arranged around it:
+         limiter off for the shared context, on for one dedicated class.
+         **A duplicate top-level key in a test `application.yml`** fails the
+         context with "while constructing a mapping", buried under twenty-
+         seven `ParameterResolutionException`s. The YAML was valid to the eye.
+         **The identity module has no Redis client**, which is correct — it
+         consumes a port — and the test that needed to empty the buckets
+         between cases found that out at compile time. It flushes through the
+         container (`valkey-cli FLUSHALL`) instead, which is a module boundary
+         doing its job in a test.
+         Also confirmed by running rather than assuming: Bucket4j's Lettuce
+         adapter, built against Lettuce 6, works over the Lettuce 7 that Boot
+         4.1 ships — three calls, `EVAL`/`GET`/`DEL`, none of them changed —
+         and the clock binding refills a fifteen-minute bucket in a test that
+         takes milliseconds. My notes from yesterday pinned Bucket4j 8.14;
+         Maven Central said 8.20, which is a reminder that a version in a
+         design note is a guess until the day it is added to the catalog.
+Wrong about: where the difficulty would be. The design named the resolver;
+         the day was spent on semantics — what "reset" means, which control
+         fires first, what a 422 costs — each of which is a sentence in the
+         ADR now and none of which was in the design.

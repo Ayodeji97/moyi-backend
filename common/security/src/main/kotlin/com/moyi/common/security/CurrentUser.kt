@@ -1,5 +1,6 @@
 package com.moyi.common.security
 
+import com.moyi.common.security.ratelimit.RateLimitInterceptor
 import org.springframework.core.MethodParameter
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException
 import org.springframework.security.core.context.SecurityContextHolder
@@ -9,6 +10,7 @@ import org.springframework.web.bind.support.WebDataBinderFactory
 import org.springframework.web.context.request.NativeWebRequest
 import org.springframework.web.method.support.HandlerMethodArgumentResolver
 import org.springframework.web.method.support.ModelAndViewContainer
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 import java.util.UUID
 
@@ -58,11 +60,19 @@ class CurrentUserArgumentResolver : HandlerMethodArgumentResolver {
     }
 }
 
+/** Plugs this module's two argument resolvers and its interceptor into MVC. */
 @Component
-class CurrentUserWebMvcConfigurer(
-    private val resolver: CurrentUserArgumentResolver,
+class SecurityWebMvcConfigurer(
+    private val currentUser: CurrentUserArgumentResolver,
+    private val clientContext: ClientContextArgumentResolver,
+    private val rateLimits: RateLimitInterceptor,
 ) : WebMvcConfigurer {
     override fun addArgumentResolvers(resolvers: MutableList<HandlerMethodArgumentResolver>) {
-        resolvers.add(resolver)
+        resolvers.add(currentUser)
+        resolvers.add(clientContext)
+    }
+
+    override fun addInterceptors(registry: InterceptorRegistry) {
+        registry.addInterceptor(rateLimits)
     }
 }

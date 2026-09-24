@@ -1,5 +1,7 @@
 package com.moyi.identity.web
 
+import com.moyi.common.security.ratelimit.RateLimitBucket
+import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.identity.service.LoginCommand
 import com.moyi.identity.service.LoginUser
 import jakarta.validation.Valid
@@ -15,7 +17,9 @@ import org.springframework.web.bind.annotation.RestController
 internal class LoginController(
     private val loginUser: LoginUser,
 ) {
+    /** FR-012's per-IP half, "regardless of whether the address exists" (T-18); the per-email half is in the service. */
     @PostMapping("/login")
+    @RateLimited(RateLimitBucket.AUTH_LOGIN_IP)
     fun login(
         @Valid @RequestBody request: LoginRequest,
     ): LoginResponse {

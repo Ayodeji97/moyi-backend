@@ -6,7 +6,9 @@
 # sign-in, refresh rotation, logout, password reset — answers with the status
 # and the error code the API contract (doc 06) promises — on the happy path AND on
 # the edges that have bitten before: malformed JSON, wrong method, reused
-# token, unknown address, duplicate registration.
+# token, unknown address, duplicate registration. Since slice F it also drives
+# every rate limit in doc 06 §4 to its 429 (FR-012, ADR-0023) and checks the
+# X-RateLimit-* headers and Retry-After on the way, against the compose Valkey.
 #
 # What it does not prove: anything the unit and integration tests already
 # prove. This is the "run it, do not read it" check (docs/learning-log.md,
@@ -38,16 +40,26 @@ PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
 fail() { FAIL=$((FAIL+1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
 
+# Empties every rate-limit bucket in the compose Valkey. The buckets are the
+# point of slice F, and they are also what makes a second run of this script —
+# or the lockout flow below, which signs in more than five times — collide with
+# the first. Flushing between sections keeps each probe about one thing.
+flush_buckets() { docker compose exec -T redis valkey-cli FLUSHALL >/dev/null 2>&1 || true; }
+
 # expect <label> <expected-status> [expected-substring-in-body] -- <curl args>
+# Leaves the body in LAST_BODY and the response headers in LAST_HEADERS, so a
+# follow-up `header_is` can check a header of the SAME response rather than
+# re-issuing the request — which would spend another rate-limit token.
 expect() {
   local label="$1" want="$2" needle="${3:-}"; shift 3; [ "${1:-}" = "--" ] && shift
-  local body status
-  body="$(mktemp)"
+  local body hdrs status
+  body="$(mktemp)"; hdrs="$(mktemp)"
   # JSON by default; a probe that names its own Content-Type gets only that one.
   local -a headers=(-H 'Content-Type: application/json')
   case "$*" in *Content-Type:*) headers=() ;; esac
-  status="$(curl -s -o "$body" -w '%{http_code}' "${headers[@]}" "$@")"
+  status="$(curl -s -o "$body" -D "$hdrs" -w '%{http_code}' "${headers[@]}" "$@")"
   local text; text="$(cat "$body")"; rm -f "$body"
+  LAST_HEADERS="$(tr -d '\r' < "$hdrs")"; rm -f "$hdrs"
   if [ "$status" != "$want" ]; then
     fail "$label" "expected HTTP $want, got $status: ${text:0:200}"
   elif [ -n "$needle" ] && [[ "$text" != *"$needle"* ]]; then
@@ -56,6 +68,13 @@ expect() {
     pass "$label ($status)"
   fi
   LAST_BODY="$text"
+}
+
+# header_is <label> <header-name> <expected-value> — checked against LAST_HEADERS.
+header_is() {
+  local label="$1" name="$2" want="$3" got
+  got="$(printf '%s\n' "$LAST_HEADERS" | grep -i "^$name:" | head -1 | cut -d' ' -f2-)"
+  if [ "$got" = "$want" ]; then pass "$label ($name: $got)"; else fail "$label" "expected $name: $want, got '${got:-<absent>}'"; fi
 }
 
 if [ "$ATTACH" = 0 ]; then
@@ -85,19 +104,27 @@ EMAIL="smoke-$(date +%s)-$RANDOM@example.com"
 PASSWORD="correct horse battery"
 register_body() { printf '{"email":"%s","password":"%s","displayName":"Smoke","locale":"en","acceptedTermsVersion":"2026-09-01","over18":true}' "$1" "$PASSWORD"; }
 
+# A previous run's buckets must not count against this one.
+flush_buckets
+
 echo; echo "health"
 expect "GET /actuator/health is UP" 200 '"status":"UP"' -- "$BASE/actuator/health"
 
 echo; echo "registration (FR-001, FR-011, ADR-0015)"
+# Each probe arrives from its own address. Registration is three an hour per
+# IP (FR-012), spent BEFORE validation, so seven probes from one address would
+# meet the limit on the fourth; the local profile trusts loopback as a proxy,
+# so X-Forwarded-For chooses the client. The rate-limit section below is where
+# that limit is the subject.
 EMAILS_BEFORE="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
-expect "valid registration is 201 with an empty body" 201 "" -- -X POST "$API/auth/register" -d "$(register_body "$EMAIL")"
+expect "valid registration is 201 with an empty body" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.1' -d "$(register_body "$EMAIL")"
 [ -z "$LAST_BODY" ] && pass "…and the body really is empty" || fail "empty body" "got: ${LAST_BODY:0:100}"
-expect "same address again (different case) is still 201" 201 "" -- -X POST "$API/auth/register" -d "$(register_body "$(echo "$EMAIL" | tr a-z A-Z)")"
-expect "7-character password is 422 VALID_PASSWORD" 422 '"code":"VALID_PASSWORD"' -- -X POST "$API/auth/register" -d '{"email":"x@example.com","password":"short12","displayName":"S","acceptedTermsVersion":"1","over18":true}'
-expect "breached password is 422 NOT_BREACHED" 422 '"code":"NOT_BREACHED"' -- -X POST "$API/auth/register" -d '{"email":"x@example.com","password":"password","displayName":"S","acceptedTermsVersion":"1","over18":true}'
-expect "over18=false is 422 on field over18" 422 '"field":"over18"' -- -X POST "$API/auth/register" -d '{"email":"x@example.com","password":"correct horse battery","displayName":"S","acceptedTermsVersion":"1","over18":false}'
-expect "malformed JSON is 400 MALFORMED_REQUEST" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/auth/register" -d '{"email": '
-expect "wrong content type is 415" 415 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- -X POST "$API/auth/register" -H 'Content-Type: text/plain' -d 'x'
+expect "same address again (different case) is still 201" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.2' -d "$(register_body "$(echo "$EMAIL" | tr a-z A-Z)")"
+expect "7-character password is 422 VALID_PASSWORD" 422 '"code":"VALID_PASSWORD"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.3' -d '{"email":"x@example.com","password":"short12","displayName":"S","acceptedTermsVersion":"1","over18":true}'
+expect "breached password is 422 NOT_BREACHED" 422 '"code":"NOT_BREACHED"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.4' -d '{"email":"x@example.com","password":"password","displayName":"S","acceptedTermsVersion":"1","over18":true}'
+expect "over18=false is 422 on field over18" 422 '"field":"over18"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.5' -d '{"email":"x@example.com","password":"correct horse battery","displayName":"S","acceptedTermsVersion":"1","over18":false}'
+expect "malformed JSON is 400 MALFORMED_REQUEST" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.6' -d '{"email": '
+expect "wrong content type is 415" 415 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.7' -H 'Content-Type: text/plain' -d 'x'
 # Since E1 (ADR-0019) the resource server answers before routing does: anything
 # under /api/v1 that is not a permitted public POST needs a bearer token, so an
 # unknown route is 401, not 404 — and the 401 still carries a code.
@@ -119,7 +146,7 @@ done
 if [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$EMAILS_BEFORE" ]; then pass "verification email was written to the log (provider=log)"; else fail "email in log" "no new 'Email NOT sent' line in $MOYI_LOG within 10 s"; fi
 SECRET="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
 if [ "${#SECRET}" = 43 ]; then pass "link carries a 43-character secret"; else fail "secret in link" "got '${SECRET}'"; fi
-if grep -q "$EMAIL" "$MOYI_LOG"; then fail "address never logged" "the address appears in the log"; else pass "address never appears in the log (masked to the domain)"; fi
+if grep -qi "$EMAIL" "$MOYI_LOG"; then fail "address never logged" "the address appears in the log"; else pass "address never appears in the log (masked to the domain)"; fi
 expect "garbage token is 422 VERIFICATION_TOKEN_INVALID" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -d '{"token":"not-a-token"}'
 expect "blank token is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/verify-email" -d '{"token":" "}'
 # A scanner's GET cannot spend a token: only POST is public here, so the filter
@@ -131,6 +158,59 @@ expect "resend for a verified address is 202, empty" 202 "" -- -X POST "$API/aut
 expect "resend for an unknown address is 202, identical" 202 "" -- -X POST "$API/auth/resend-verification" -d '{"email":"nobody-here@example.com"}'
 expect "resend for a malformed address is 422" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/resend-verification" -d '{"email":"not-an-address"}'
 
+echo; echo "rate limiting (FR-012, ADR-0023)"
+# Every bucket in doc 06 §4 that the identity module owes, driven to its 429
+# against the real jar and the compose Valkey. Each flow uses an address no
+# other section uses, so nothing here leaks into the probes that follow — and
+# a 429 writes nothing, so the database checks at the end are unaffected. It
+# runs after verification because the fresh accounts it registers send
+# verification emails of their own, and that section reads the LAST link in
+# the log.
+#
+# Registration: a fresh account (201) shows the headers on a success; two 422s
+# spend tokens too, because the interceptor runs before validation; the fourth
+# request is the 429. Fresh addresses rather than the duplicate path, because
+# the duplicate path makes Postgres name the address in a constraint message
+# that Hibernate logs — see the "address never logged" probe below.
+RL_STAMP="$(date +%s)-$RANDOM"
+expect "a limited response carries X-RateLimit-* on success (201)" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.20' -d "$(register_body "rl-a-$RL_STAMP@example.com")"
+header_is "…limit is three an hour per address" X-RateLimit-Limit 3
+header_is "…with two left" X-RateLimit-Remaining 2
+if printf '%s\n' "$LAST_HEADERS" | grep -qiE '^X-RateLimit-Reset: [0-9]{10}'; then pass "…and a reset time in Unix seconds"; else fail "X-RateLimit-Reset" "missing or not epoch seconds"; fi
+expect "a 422 spends a token too (validation runs after the limiter)" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.20' -d '{"email":"x@example.com","password":"short12","displayName":"S","acceptedTermsVersion":"1","over18":true}'
+header_is "…one left" X-RateLimit-Remaining 1
+expect "third attempt from the address is still answered" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.20' -d '{"email":"x@example.com","password":"short12","displayName":"S","acceptedTermsVersion":"1","over18":true}'
+header_is "…none left" X-RateLimit-Remaining 0
+expect "the fourth registration from one address is 429 RATE_LIMITED" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.20' -d "$(register_body "$EMAIL")"
+[[ "$LAST_BODY" == *"Please wait 20 minutes before trying again."* ]] && pass "…announcing the wait, not the failure (states.md §1b)" || fail "429 copy" "got: ${LAST_BODY:0:200}"
+header_is "…with Retry-After: three an hour, greedy, is one token every twenty minutes" Retry-After 1200
+header_is "…and X-RateLimit-Remaining: 0" X-RateLimit-Remaining 0
+if printf '%s\n' "$LAST_HEADERS" | grep -qi '^Content-Type: application/problem+json'; then pass "…in the problem shape"; else fail "429 content type" "not application/problem+json"; fi
+expect "another address is unaffected" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.24' -d "$(register_body "rl-b-$RL_STAMP@example.com")"
+# Sign-in: five attempts per fifteen minutes per address — counted for an
+# address that has no account, so the 429 is not an oracle (T-18). No Argon2
+# is paid for the sixth: the bucket is consumed before the verify.
+LIMITED_EMAIL="limit-$(date +%s)-$RANDOM@example.com"
+for i in 1 2 3 4 5; do
+  curl -s -o /dev/null -H 'Content-Type: application/json' -H 'X-Forwarded-For: 203.0.113.21' -X POST "$API/auth/login" -d "$(printf '{"email":"%s","password":"wrong %s","deviceInfo":"smoke"}' "$LIMITED_EMAIL" "$i")"
+done
+expect "the sixth sign-in for one (unknown) address in fifteen minutes is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/login" -H 'X-Forwarded-For: 203.0.113.21' -d "$(printf '{"email":"%s","password":"wrong 6","deviceInfo":"smoke"}' "$LIMITED_EMAIL")"
+header_is "…Retry-After: one token back every three minutes" Retry-After 180
+header_is "…X-RateLimit-Limit is the per-email five, the bucket that decided" X-RateLimit-Limit 5
+[[ "$LAST_BODY" == *"Please wait 3 minutes before trying again."* ]] && pass "…copy names the three minutes" || fail "429 copy" "got: ${LAST_BODY:0:200}"
+# Resend: once a minute per address, the cooldown states.md §1 promised.
+expect "first resend for an unknown address is 202" 202 "" -- -X POST "$API/auth/resend-verification" -H 'X-Forwarded-For: 203.0.113.22' -d "{\"email\":\"$LIMITED_EMAIL\"}"
+expect "a second inside a minute is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/resend-verification" -H 'X-Forwarded-For: 203.0.113.22' -d "{\"email\":\"$LIMITED_EMAIL\"}"
+header_is "…Retry-After: 60" Retry-After 60
+[[ "$LAST_BODY" == *"Please wait a minute before trying again."* ]] && pass "…copy says a minute" || fail "429 copy" "got: ${LAST_BODY:0:200}"
+# Password reset: three an hour per address, identical for an address nobody has.
+for i in 1 2 3; do
+  expect "forgot-password $i of 3 for an unknown address is 202" 202 "" -- -X POST "$API/auth/forgot-password" -H 'X-Forwarded-For: 203.0.113.23' -d "{\"email\":\"$LIMITED_EMAIL\"}"
+done
+expect "the fourth is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/forgot-password" -H 'X-Forwarded-For: 203.0.113.23' -d "{\"email\":\"$LIMITED_EMAIL\"}"
+header_is "…Retry-After: 1200" Retry-After 1200
+flush_buckets
+
 echo; echo "sign-in and sessions (FR-003, FR-004, ADR-0020–0022)"
 # The account is verified by now, so this is the ordinary sign-in; the
 # unverified sign-in FR-002 allows is covered by the endpoint tests.
@@ -140,18 +220,24 @@ expect "login is 200 with a token pair and the profile" 200 '"expiresIn":900' --
 ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"; REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
 [[ "$LAST_BODY" == *'"emailVerified":true'* ]] && pass "…and the profile says the address is verified" || fail "profile" "emailVerified not true: ${LAST_BODY:0:120}"
 expect "GET /me with the access token is 200" 200 "\"email\":\"$EMAIL\"" -- "$API/me" -H "Authorization: Bearer $ACCESS"
+header_is "…and every authenticated request is counted against the per-user bucket (doc 06 §4)" X-RateLimit-Limit 120
 expect "wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "not the password")"
 WRONG="$LAST_BODY"
 expect "unknown address is 401 too" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "nobody-$RANDOM@example.com" "not the password")"
 [ "$WRONG" = "$LAST_BODY" ] && pass "…with a byte-identical body (no account oracle)" || fail "identical 401s" "bodies differ"
 expect "an oversized password is 422, not work" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$(printf 'x%.0s' $(seq 1 600))")"
 # Lockout: four more wrong attempts make five; the right password is then
-# refused with the same 401, silently, for a minute.
+# refused with the same 401, silently, for a minute. The per-email bucket
+# (five per fifteen minutes) fires BEFORE the lockout on an unflushed run —
+# that layering is deliberate (ADR-0023) — so the buckets are emptied here to
+# let the lockout, the durable control, be observed on its own.
+flush_buckets
 for i in 2 3 4 5; do curl -s -o /dev/null -H 'Content-Type: application/json' -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "wrong $i")"; done
 expect "after five failures the RIGHT password is refused, identically" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
 LOCK="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT failed_attempts || '|' || CAST(EXTRACT(EPOCH FROM (locked_until - now())) AS int) FROM credentials c JOIN users u ON u.id=c.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
 case "$LOCK" in 5\|5[5-9]|5\|60) pass "locked for a minute after five failures ($LOCK)";; psql-unavailable) echo "  skip lock check (psql unavailable)";; *) fail "lockout row" "expected 5|55..60, got '$LOCK'";; esac
 docker compose exec -T postgres psql -U moyi -d moyi -Atc "UPDATE credentials SET locked_until = now() - interval '1 second' FROM users u WHERE u.id = credentials.user_id AND u.email='$EMAIL'" >/dev/null 2>&1 || true
+flush_buckets
 expect "once the lock expires the right password signs in again" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
 REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
 expect "refresh rotates: 200 with a new pair" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"

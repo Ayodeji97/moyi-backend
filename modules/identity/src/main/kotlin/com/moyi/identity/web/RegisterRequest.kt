@@ -1,5 +1,6 @@
 package com.moyi.identity.web
 
+import com.moyi.common.security.ClientContext
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.User
@@ -63,7 +64,7 @@ internal data class RegisterRequest(
      * The constructors cannot throw here: the same factories ran during
      * validation, and a request that failed them never reached the handler.
      */
-    fun toCommand() =
+    fun toCommand(client: ClientContext) =
         RegistrationCommand(
             // A surrounding space in an address is a typing accident. The
             // password is NOT trimmed — ADR-0012 accepts spaces in one, and
@@ -74,6 +75,7 @@ internal data class RegisterRequest(
             displayName = displayName.trim(),
             locale = locale,
             acceptedTermsVersion = acceptedTermsVersion.trim(),
+            client = client,
         )
 
     /**
