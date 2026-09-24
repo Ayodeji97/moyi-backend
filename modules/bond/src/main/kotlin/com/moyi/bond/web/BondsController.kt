@@ -36,6 +36,14 @@ import java.util.UUID
  *
  * Every response carrying a bond carries its `ETag`, so a client that later
  * `PATCH`es (slice B4) already holds the `If-Match` it will need.
+ *
+ * **The method names are API names, not Kotlin ones.** springdoc derives each
+ * operation's `operationId` from the method name alone — the class is not part
+ * of it — so a `list()` here and a `list()` on the sessions controller collide,
+ * and springdoc silently renames one of them to `list_1` depending on scan
+ * order. That renames a *generated client's method* for an endpoint that did
+ * not change, and `oasdiff` does not catch it because no path or schema moved.
+ * Found by the review of PR #37. `OpenApiContractTest` now holds it.
  */
 @RestController
 @RequestMapping("/api/v1/bonds")
@@ -43,7 +51,7 @@ internal class BondsController(
     private val guard: BondAccessGuard,
     private val createBond: CreateBond,
     private val getBond: GetBond,
-    private val listBonds: ListBonds,
+    private val bondList: ListBonds,
 ) {
     /**
      * `@ResponseStatus` **and** a `ResponseEntity`, which looks redundant and
@@ -56,7 +64,7 @@ internal class BondsController(
      */
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    fun create(
+    fun createBond(
         caller: CurrentUser,
         @Valid @RequestBody request: CreateBondRequest,
     ): ResponseEntity<BondResponse> {
@@ -65,10 +73,10 @@ internal class BondsController(
     }
 
     @GetMapping
-    fun list(caller: CurrentUser): BondsResponse = BondsResponse(listBonds.forUser(UserId(caller.id)).map(BondResponse::from))
+    fun listBonds(caller: CurrentUser): BondsResponse = BondsResponse(bondList.forUser(UserId(caller.id)).map(BondResponse::from))
 
     @GetMapping("/{bondId}")
-    fun get(
+    fun getBond(
         caller: CurrentUser,
         @PathVariable bondId: String,
     ): ResponseEntity<BondResponse> {

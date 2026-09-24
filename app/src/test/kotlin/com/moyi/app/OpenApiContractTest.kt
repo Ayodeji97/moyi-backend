@@ -11,6 +11,7 @@ import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.maps.shouldContainKey
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
 import io.swagger.v3.oas.models.OpenAPI
@@ -196,6 +197,29 @@ class OpenApiContractTest(
         api.paths["/api/v1/auth/login"]!!
             .post.responses["200"]!!
             .content.keys shouldContainExactly listOf(MediaType.APPLICATION_JSON_VALUE)
+    }
+
+    @Test
+    fun `every operation has a distinct id, and none was renamed by a collision`() {
+        // springdoc derives `operationId` from the *method name alone* — the
+        // controller class is not part of it — and silently appends `_1` when
+        // two collide, picking the loser by scan order. A generated client
+        // names its methods after these, so a collision renames a method for an
+        // endpoint that did not change, and `oasdiff` does not notice because
+        // no path or schema moved. Slice B1 renamed the sessions list that way
+        // and it took a reviewer to see it.
+        val ids = operations().map { (route, op) -> route to op.operationId }
+
+        ids.forEach { (route, id) ->
+            withClue(route) {
+                id.shouldNotBeNull()
+                // The suffix springdoc adds on a collision. Its presence means
+                // two controller methods share a name: rename one after what
+                // the *API* calls it, not after what reads well in Kotlin.
+                id.endsWith("_1") shouldBe false
+            }
+        }
+        ids.map { it.second }.toSet().size shouldBe ids.size
     }
 
     @Test

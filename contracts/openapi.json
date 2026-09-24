@@ -514,7 +514,7 @@
     },
     "/api/v1/auth/sessions" : {
       "get" : {
-        "operationId" : "list_1",
+        "operationId" : "list",
         "responses" : {
           "200" : {
             "content" : {
@@ -703,7 +703,7 @@
     },
     "/api/v1/bonds" : {
       "get" : {
-        "operationId" : "list",
+        "operationId" : "listBonds",
         "responses" : {
           "200" : {
             "content" : {
@@ -759,7 +759,7 @@
         "tags" : [ "bonds-controller" ]
       },
       "post" : {
-        "operationId" : "create",
+        "operationId" : "createBond",
         "requestBody" : {
           "content" : {
             "application/json" : {
@@ -855,7 +855,7 @@
     },
     "/api/v1/bonds/{bondId}" : {
       "get" : {
-        "operationId" : "get",
+        "operationId" : "getBond",
         "parameters" : [ {
           "in" : "path",
           "name" : "bondId",
