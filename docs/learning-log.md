@@ -1178,3 +1178,48 @@ Wrong about: where the risk was. I expected the claim and the authorisation
          removed optional request property breaking (a client still sending
          it is ignored), so the `breaking-api-change` label on #35 was a
          reviewer's judgement, not the gate's; ADR-0025 §6 says so.
+
+## 2026-09-24 · Phase 2 · The bond module, and the authorisation check that cannot be forgotten
+Expected: a second module much like the first — a migration, an aggregate, a
+         store, three endpoints — with the interesting part being the guard,
+         which I expected to be a service the controllers remember to call.
+Reality: the guard turned out to be a *type*. Doc 12 §3.6 asks for a Konsist
+         rule that "every controller method taking a bondId passes through
+         BondAccessGuard", and that rule cannot be written: whether the guard
+         ran is a fact about the call graph, which Konsist does not see. What
+         is checkable is the signature one layer down. So `Membership` became
+         a value only the guard can construct, every bond-scoped service takes
+         one, and two rules hold the halves the compiler cannot — nothing else
+         constructs it, and no service function names a bond without it. The
+         authorisation check stopped being a step someone can forget and
+         became an argument they must be holding.
+         **Three things the verification found that reading would not.**
+         (1) Breaking `BondStore.findByMember`'s membership predicate did
+         *not* fail the cross-tenant suite, because the guard re-checks
+         membership on the loaded aggregate. That is defence in depth working,
+         and it means the two layers need two tests: the store's is
+         BondPersistenceTest, which did fail. Breaking the guard itself failed
+         the suite with "a stranger: expected 404, got 200".
+         (2) My first deliberate violation of the BondId rule slipped through,
+         because I wrote the parameter type fully qualified and the rule
+         matches the simple name. The gap is now in the rule's comment. A rule
+         that has never failed is not known to work, and a rule verified once
+         is not known to work *generally*.
+         (3) Adding one test class to identity broke the whole build with
+         "FATAL: sorry, too many clients already". Spring caches a context per
+         distinct configuration, every one holds a ten-connection Hikari pool
+         for the entire run, and the count finally crossed Postgres's default.
+         Nothing was wrong with the code under test. The pools are capped at
+         four now.
+         Two smaller ones: detekt's six-parameter limit split `Member.join`
+         into `owner()` and `member()`, and it was right — the role was the
+         only difference between the two call sites, and a name reads better
+         than an enum argument. And springdoc documented `POST /bonds` as 200,
+         because the status lived in the ResponseEntity; the annotation is
+         what it reads, so the method now carries both and two tests hold them
+         together.
+Wrong about: where the design work was. I thought it was in the aggregate —
+         ADR-0003 had already decided the shape, so modelling it took an hour.
+         The design work was in making the authorisation unforgettable, and
+         the answer came from a constraint I first read as an obstacle: that
+         Konsist cannot see a call graph.
