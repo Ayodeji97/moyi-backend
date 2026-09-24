@@ -605,6 +605,16 @@
             },
             "description" : "Forbidden"
           },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
           "429" : {
             "content" : {
               "application/problem+json" : {

@@ -40,7 +40,10 @@ import org.springframework.http.HttpStatus
  *   `code` is `ErrorCode` enumerated — the client generates a sealed class
  *   from it, and an unhandled code is a compile error there. 429 and 500 can
  *   happen to anything; 400 and 422 to anything with a body; 401 and 403 to
- *   anything behind the bearer.
+ *   anything behind the bearer; 404 to anything that names a resource by a
+ *   path parameter — doc 06 §2's "not found or not permitted to know it
+ *   exists", which the first document omitted for `DELETE /sessions/{id}`
+ *   until the review of #35 noticed a generated client could not model it.
  * - **The two argument-resolver types.** `CurrentUser` comes from the token
  *   and `ClientContext` from the socket; documented as query parameters they
  *   would generate a client that sends them.
@@ -91,6 +94,7 @@ class OpenApiConfiguration {
         buildList {
             if (operation.requestBody != null) addAll(listOf(HttpStatus.BAD_REQUEST, HttpStatus.UNPROCESSABLE_ENTITY))
             if (!public) addAll(listOf(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN))
+            if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
             add(HttpStatus.TOO_MANY_REQUESTS)
             add(HttpStatus.INTERNAL_SERVER_ERROR)
         }
@@ -128,5 +132,6 @@ class OpenApiConfiguration {
         private const val PROBLEM_DETAIL_REF = "#/components/schemas/$PROBLEM_DETAIL"
         private const val FIELD_VIOLATION_REF = "#/components/schemas/$FIELD_VIOLATION"
         private const val PROBLEM_JSON = "application/problem+json"
+        private const val PATH_PARAMETER = "path"
     }
 }

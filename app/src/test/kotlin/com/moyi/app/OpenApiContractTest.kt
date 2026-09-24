@@ -103,6 +103,10 @@ class OpenApiContractTest(
             responses shouldContainAll listOf("429", "500")
             if (op.requestBody != null) responses shouldContainAll listOf("400", "422")
             if (!isPublic(name)) op.responses shouldContainKey "401"
+            // An operation that names a resource by id can answer "not found
+            // or not permitted to know it exists" (doc 06 §2), and a
+            // generated client has to be able to model that (Codex on #35).
+            if (op.parameters.orEmpty().any { it.`in` == "path" }) op.responses shouldContainKey "404"
             responses.filter { it.startsWith("4") || it.startsWith("5") }.forEach { status ->
                 op.responses[status]!!
                     .content[MediaType.APPLICATION_PROBLEM_JSON_VALUE]!!
@@ -125,6 +129,11 @@ class OpenApiContractTest(
             val required = op.security?.let { it.isNotEmpty() } ?: (api.security?.isNotEmpty() == true)
             required shouldBe !isPublic(name)
         }
+    }
+
+    @Test
+    fun `ending a session documents its 404`() {
+        api.paths["/api/v1/auth/sessions/{id}"]!!.delete.responses shouldContainKey "404"
     }
 
     @Test
