@@ -2,6 +2,7 @@ package com.moyi.identity.service
 
 import com.moyi.identity.domain.Credentials
 import com.moyi.identity.domain.Email
+import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.PasswordHasher
 import com.moyi.identity.domain.User
 import com.moyi.identity.infra.database.AccountStore
@@ -57,11 +58,15 @@ internal class LoginUser(
         val user = email?.let(accounts::findByEmail)
         val credentials = user?.let { accounts.findCredentials(it.id) }
 
+        // Registration and reset hash the NFKC-normalised password (ADR-0012);
+        // the same text typed on a keyboard that composes differently must
+        // verify, so login normalises the same way before either path.
+        val presented = Password.normalised(command.password)
         val passwordMatches =
             if (credentials == null) {
-                passwords.matchesDummy(command.password)
+                passwords.matchesDummy(presented)
             } else {
-                passwords.matches(command.password, credentials.passwordHash)
+                passwords.matches(presented, credentials.passwordHash)
             }
 
         val authenticated = user?.takeIf { credentials != null && it.admits(credentials, passwordMatches, now) }
@@ -80,6 +85,9 @@ internal class LoginUser(
 
         val refreshToken =
             transactions.execute {
+                // Serialised with logout-all and reset, so a sign-in that
+                // started before a "sign everything out" cannot survive it.
+                sessions.lockSessionsOf(authenticated.id)
                 accounts.clearFailedLogins(authenticated.id, now)
                 sessions.newFamily(authenticated.id, command.deviceInfo, now)
             }!!

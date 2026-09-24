@@ -141,7 +141,7 @@ internal class IdentityExceptionHandler(
         problem(
             status = HttpStatus.UNAUTHORIZED,
             errorCode = ErrorCode.TOKEN_REUSE_DETECTED,
-            detail = "This sign-in was used from two places at once, so every device has been signed out. Sign in again to continue.",
+            detail = "This sign-in was used from two places at once, so it has been ended. Sign in again to continue.",
             request = request,
         )
 

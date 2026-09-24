@@ -22,6 +22,18 @@ internal class RefreshTokenStore(
 
     fun findByHash(hash: TokenHash): RefreshToken? = tokens.findByTokenHash(hash.value)?.toDomain()
 
+    fun findById(id: UUID): RefreshToken? = tokens.findById(id)?.toDomain()
+
+    /**
+     * Takes the per-user sessions lock for the rest of the current transaction.
+     * **Call this before reading the state you are about to act on**: a token
+     * read before the lock may have been rotated or revoked by the transaction
+     * that held it. See `RefreshTokenRepository.lockSessions`.
+     */
+    fun lockSessionsOf(userId: UserId) {
+        tokens.lockSessions(userId.value)
+    }
+
     fun rotate(
         id: UUID,
         replacementId: UUID,

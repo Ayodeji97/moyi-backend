@@ -85,10 +85,11 @@ internal class ApplyPasswordReset(
                 lockedUntil = null,
             ),
         )
+        refreshTokens.lockSessionsOf(user.id)
         refreshTokens.revokeAllForUser(user.id, now)
         accounts.revokeAllSessions(user.id, now)
         // T-17: the old address is told, after the commit, that the password
         // changed and every device was signed out.
-        events.publishEvent(SecurityNotice.PasswordChanged(user.id, user.email, user.displayName))
+        events.publishEvent(SecurityNotice.PasswordChanged(user.id, user.email, user.displayName, changedAt = now))
     }
 }

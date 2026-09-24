@@ -56,6 +56,9 @@ internal class IssueSessionTokens(
 
     fun accessTokenFor(userId: UserId): IssuedAccessToken = accessTokens.issue(userId.value)
 
+    /** The per-user sessions lock; see `RefreshTokenStore.lockSessionsOf`. Inside the caller's transaction. */
+    fun lockSessionsOf(userId: UserId) = tokens.lockSessionsOf(userId)
+
     /** The next link in an existing family, for a rotation. */
     fun successor(
         previous: RefreshToken,

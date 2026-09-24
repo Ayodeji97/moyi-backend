@@ -22,6 +22,7 @@ internal class LogoutUser(
         transactions.executeWithoutResult {
             val hash = runCatching { VerificationSecret(rawRefreshToken.trim()).hash() }.getOrNull() ?: return@executeWithoutResult
             val token = refreshTokens.findByHash(hash) ?: return@executeWithoutResult
+            refreshTokens.lockSessionsOf(token.userId)
             refreshTokens.revokeFamily(token.familyId, now)
         }
     }
@@ -29,6 +30,7 @@ internal class LogoutUser(
     fun logoutAll(currentUser: CurrentUser) {
         val now = clock.instant()
         transactions.executeWithoutResult {
+            refreshTokens.lockSessionsOf(UserId(currentUser.id))
             refreshTokens.revokeAllForUser(UserId(currentUser.id), now)
             accounts.revokeAllSessions(UserId(currentUser.id), now)
         }

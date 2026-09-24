@@ -113,6 +113,17 @@ internal class LoginEndpointTest(
     }
 
     @Test
+    fun `a password typed on a keyboard that composes differently still signs in`() {
+        // Registration stores the NFKC form (ADR-0012). "e" + combining acute
+        // is the same password as "é"; a login that compared the raw text
+        // would have refused it, and the person would have had no way to
+        // enter the password they set.
+        registerAndActivate(password = "caf\u00e9 au lait plus")
+
+        login(password = "cafe\u0301 au lait plus").status shouldBe 200
+    }
+
+    @Test
     fun `a suspended account is refused with the same body as a wrong password`() {
         registerAndActivate()
         val wrongPassword = login(password = "wrong password").contentAsString
@@ -254,7 +265,9 @@ internal class LoginEndpointTest(
         await().atMost(WAIT).untilAsserted { emails.sent shouldHaveSize 2 }
         val notice = emails.sent.last()
         notice.to shouldBe "ada@example.com"
-        notice.subject shouldContain "signed out"
+        // Honest about scope: that sign-in ended; other devices did not.
+        notice.subject shouldContain "was ended"
+        notice.text shouldContain "other devices are not affected"
         notice.text shouldContain "I forgot my password"
 
         refresh(first).status shouldBe 401
@@ -395,6 +408,23 @@ internal class LoginEndpointTest(
     }
 
     @Test
+    fun `two password changes are two notices, not one and a retry`() {
+        // A provider that remembers idempotency keys would have swallowed the
+        // second notice under a key made of the user id alone.
+        registerAndActivate()
+        forgot("ada@example.com").status shouldBe 202
+        reset(secretIn(awaitEmail(2)), NEW_PASSWORD).status shouldBe 200
+        awaitEmail(3)
+        forgot("ada@example.com").status shouldBe 202
+        reset(secretIn(awaitEmail(4)), "yet another good password").status shouldBe 200
+        awaitEmail(5)
+
+        val notices = emails.sent.filter { it.subject.contains("password was changed") }
+        notices shouldHaveSize 2
+        notices[0].idempotencyKey shouldNotBe notices[1].idempotencyKey
+    }
+
+    @Test
     fun `forgot for an unknown, verified-elsewhere or unverified address is 202 and sends only when it should`() {
         registerAndActivate(activate = false)
 
@@ -456,7 +486,10 @@ internal class LoginEndpointTest(
 
     // ---- helpers -----------------------------------------------------------
 
-    private fun registerAndActivate(activate: Boolean = true) {
+    private fun registerAndActivate(
+        activate: Boolean = true,
+        password: String = PASSWORD,
+    ) {
         mockMvc
             .post("/api/v1/auth/register") {
                 contentType = MediaType.APPLICATION_JSON
@@ -464,7 +497,7 @@ internal class LoginEndpointTest(
                     """
                     {
                       "email": "ada@example.com",
-                      "password": "$PASSWORD",
+                      "password": "$password",
                       "displayName": "Ada",
                       "locale": "en",
                       "acceptedTermsVersion": "2026-09-01",

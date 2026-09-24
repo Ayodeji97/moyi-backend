@@ -1,5 +1,6 @@
 package com.moyi.identity.domain
 
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -22,7 +23,9 @@ internal sealed interface SecurityNotice {
      * Doc 09 §3: "presenting an already-rotated token means it was stolen …
      * The entire token family is revoked immediately, and the user is emailed."
      * The person may be the thief's victim, or may be the one holding the
-     * stale copy; the email has to make sense to both.
+     * stale copy; the email has to make sense to both — and has to be honest
+     * about scope: *that* sign-in ended, other devices and outstanding access
+     * tokens did not. Changing the password is what signs everything out.
      */
     data class SessionReuseDetected(
         override val userId: UserId,
@@ -40,5 +43,7 @@ internal sealed interface SecurityNotice {
         override val userId: UserId,
         override val email: Email,
         override val displayName: String,
+        /** Distinguishes one change from the next, so a provider that remembers idempotency keys delivers both. */
+        val changedAt: Instant,
     ) : SecurityNotice
 }

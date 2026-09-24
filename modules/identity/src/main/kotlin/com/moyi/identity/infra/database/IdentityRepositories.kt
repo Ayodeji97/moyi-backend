@@ -113,6 +113,35 @@ internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID>
 
     fun findByTokenHash(tokenHash: String): RefreshTokenEntity?
 
+    fun findById(id: UUID): RefreshTokenEntity?
+
+    /**
+     * Serialises every mutation of one user's sessions for the rest of the
+     * current transaction, and is the reason [revokeFamily] and
+     * [revokeAllForUser] can be trusted.
+     *
+     * Without it there is a race the tests could not see and the Codex review
+     * of PR #32 could: a family revocation is one `UPDATE` over the rows that
+     * exist when its snapshot is taken (READ COMMITTED), while a concurrent
+     * rotation of the current successor inserts a *new* row in its own
+     * transaction. If that insert commits after the revocation's snapshot,
+     * the family is "revoked" and one live token survives it — in the hands
+     * of whoever was refreshing, which after a reuse may be the thief.
+     *
+     * A transaction-scoped advisory lock keyed on the user id closes it:
+     * rotation, logout, logout-all and reset all take the same lock first, so
+     * the insert either commits before the revocation's snapshot or waits
+     * until after the revocation commits and finds its own token already
+     * rotated. Per user rather than per family so there is one lock and no
+     * ordering to get wrong; a user has a handful of concurrent sessions, so
+     * the contention is nil. Released automatically at commit or rollback.
+     *
+     * Namespaced with `1` in the two-key form so a future advisory lock for
+     * something else cannot collide with it by accident.
+     */
+    @Query(nativeQuery = true, value = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(1, hashtext(CAST(:userId AS text)))) AS held")
+    fun lockSessions(userId: UUID): Int
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(
         """

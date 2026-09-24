@@ -58,6 +58,14 @@ internal value class Password private constructor(
         const val MAX_OCTETS = 512
 
         /**
+         * The normalisation alone, for the login path: what a person types
+         * must be compared the way it was stored, but a wrong or over-long
+         * login attempt is a 401, never the `IllegalArgumentException` that
+         * [of]'s shape rules would raise.
+         */
+        fun normalised(raw: String): String = Normalizer.normalize(raw, Normalizer.Form.NFKC)
+
+        /**
          * **NFKC, before anything else.** The same password typed on two
          * keyboards can be two different byte sequences — a precomposed "é"
          * versus "e" plus a combining accent — which hash differently and
@@ -67,7 +75,7 @@ internal value class Password private constructor(
          * check, because normalisation changes length.
          */
         fun of(raw: String): Password {
-            val normalised = Normalizer.normalize(raw, Normalizer.Form.NFKC)
+            val normalised = normalised(raw)
             val password = Password(normalised)
 
             // No composition rules — ADR-0012, and they reduce entropy in

@@ -40,7 +40,14 @@ internal data class RotatedTokens(
  *    set shape as verification consumption — and the successor is inserted in
  *    the same transaction. Two concurrent presentations of one live token:
  *    one wins the `UPDATE`, the other finds the row already rotated and is
- *    treated as a reuse, exactly as doc 09 specifies. **Strict, no grace
+ *    treated as a reuse, exactly as doc 09 specifies.
+ *
+ * Every path first takes the per-user sessions lock
+ * (`RefreshTokenStore.lockSessionsOf`) and re-reads the token. The compare-
+ * and-set alone is not enough: a family revocation is a single `UPDATE` over
+ * the rows in its snapshot, and a rotation committing concurrently can insert
+ * a successor that snapshot never saw — a "revoked" family with one live
+ * token in it. Found by the Codex review of the first version. **Strict, no grace
  *    window**: two legitimate concurrent refreshes will trip this, which is why
  *    doc 13 gives the client a mutex so it never sends two. ADR-0021 records
  *    the grace-window alternative and why it was not taken.
@@ -69,7 +76,12 @@ internal class RotateRefreshToken(
 
         val outcome =
             transactions.execute {
-                val previous = hash?.let(tokens::findByHash) ?: return@execute Outcome.Invalid
+                val found = hash?.let(tokens::findByHash) ?: return@execute Outcome.Invalid
+                // Serialise against every other mutation of this user's
+                // sessions, then re-read: the row may have been rotated or
+                // revoked by whoever held the lock while we waited for it.
+                tokens.lockSessionsOf(found.userId)
+                val previous = tokens.findById(found.id) ?: return@execute Outcome.Invalid
                 when {
                     previous.revokedAt != null -> Outcome.Invalid
                     previous.rotatedAt != null -> reuse(previous, now)

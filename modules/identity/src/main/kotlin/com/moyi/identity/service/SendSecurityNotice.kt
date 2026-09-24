@@ -65,10 +65,11 @@ internal class SendSecurityNotice(
         val (subject, body) =
             when (notice) {
                 is SecurityNotice.SessionReuseDetected -> {
-                    "Your Moyi sessions were signed out" to
-                        "A sign-in for your account was used from two places at once, which can mean a device other than yours " +
-                        "has a copy. To be safe, every device has been signed out. Sign in again to continue. If that was not you, " +
-                        "change your password from the sign-in screen with \"I forgot my password\"."
+                    "A sign-in on your Moyi account was ended" to
+                        "A sign-in for your account was used from two places at once, which can mean another device has a " +
+                        "copy of it. That sign-in has been ended and cannot be used again. Your other devices are not affected. " +
+                        "If this was not you, change your password from the sign-in screen with \"I forgot my password\"; " +
+                        "that signs every device out."
                 }
 
                 is SecurityNotice.PasswordChanged -> {
@@ -82,11 +83,14 @@ internal class SendSecurityNotice(
             subject = subject,
             text = "Hi $name,\n\n$body",
             html = "<p>Hi ${HtmlUtils.htmlEscape(name)},</p><p>${HtmlUtils.htmlEscape(body)}</p>",
-            // One notice per family or per change; a retry cannot double up.
+            // One notice per family, one per change; a retry cannot double up,
+            // and a second change is a second notice — a key on the user id
+            // alone would have made every later one look like a retry of the
+            // first (Codex review of PR #32).
             idempotencyKey =
                 when (notice) {
                     is SecurityNotice.SessionReuseDetected -> "reuse-${notice.familyId}"
-                    is SecurityNotice.PasswordChanged -> "password-changed-${notice.userId.value}"
+                    is SecurityNotice.PasswordChanged -> "password-changed-${notice.userId.value}-${notice.changedAt.toEpochMilli()}"
                 },
         )
     }
