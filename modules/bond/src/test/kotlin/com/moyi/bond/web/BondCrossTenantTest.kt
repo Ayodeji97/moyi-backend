@@ -62,6 +62,12 @@ internal class BondCrossTenantTest(
     private val fixtures: Map<String, Fixture> =
         mapOf(
             "GET /api/v1/bonds/{bondId}" to Fixture(),
+            // Slice B2. Neither takes a body; the invite id in the DELETE is
+            // filled with a random UUID by `call`, because the bond id is what
+            // this suite is about — a non-member must be refused before the
+            // invite id is even looked at.
+            "POST /api/v1/bonds/{bondId}/invites" to Fixture(),
+            "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}" to Fixture(),
         )
 
     private data class Fixture(

@@ -88,6 +88,24 @@ internal class BondStore(
     fun countOpenBondsOf(userId: UserId): Int = members.countByUserIdAndBondStatusIn(userId.value, OPEN_STATUSES).toInt()
 
     /**
+     * The bond an invite points at, **not** scoped to a member — the one read
+     * in this class that is not, and the exception needs its reason written
+     * down.
+     *
+     * `POST /invites/{code}/accept` is answered by someone who is *not yet* a
+     * member, so a membership predicate would refuse every legitimate join.
+     * What authorises the read instead is the code: the caller presented a
+     * live, unexpired, unspent invite, which is a capability this system
+     * issued. The name says `ForInvite` so that a future caller reaching for
+     * it without one has to explain themselves, and `BondAccessGuard` is
+     * unaffected — it still goes through [findByMember].
+     */
+    fun findAnyForInvite(bondId: BondId): Bond? {
+        val rows = members.findAllByBondId(bondId.value)
+        return bonds.findById(bondId.value)?.toDomain(rows)
+    }
+
+    /**
      * Holds the bond's row until this transaction ends. Taken before reading
      * the state an accept decides on, so that two accepts of one code cannot
      * both see a free seat (slice B2).
