@@ -1,6 +1,6 @@
 package com.moyi.app
 
-import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.testing.IntegrationTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -23,7 +23,7 @@ import javax.sql.DataSource
 @ActiveProfiles("test")
 class FlywayMigrationTest(
     @Autowired dataSource: DataSource,
-) : PostgresIntegrationTest() {
+) : IntegrationTest() {
     private val jdbcTemplate = JdbcTemplate(dataSource)
 
     @Test

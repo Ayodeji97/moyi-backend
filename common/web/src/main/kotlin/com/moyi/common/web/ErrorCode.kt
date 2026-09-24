@@ -87,6 +87,13 @@ enum class ErrorCode {
     /** A valid token that lacks the authority this action needs. */
     FORBIDDEN,
 
+    /**
+     * A bucket in doc 06 §4 is empty (FR-012). 429, always with `Retry-After`
+     * and the `X-RateLimit-*` triple; `states.md` §1b: the client announces
+     * the wait, never the failure.
+     */
+    RATE_LIMITED,
+
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,
 

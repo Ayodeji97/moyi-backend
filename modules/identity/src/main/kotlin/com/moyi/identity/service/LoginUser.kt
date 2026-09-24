@@ -1,5 +1,9 @@
 package com.moyi.identity.service
 
+import com.moyi.common.security.ratelimit.RateLimitBucket
+import com.moyi.common.security.ratelimit.RateLimitDecision
+import com.moyi.common.security.ratelimit.RateLimitExceededException
+import com.moyi.common.security.ratelimit.RateLimiter
 import com.moyi.identity.domain.Credentials
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
@@ -35,6 +39,14 @@ import java.time.Instant
  * The two writes — count a failure, or clear the count and issue a family —
  * are each a small explicit boundary of their own.
  *
+ * **The per-address bucket is consumed first, before any of that.** FR-012's
+ * five attempts per fifteen minutes per account is checked against the
+ * lowercased address as typed, whether or not it belongs to anyone — T-18:
+ * a limit that only real accounts can hit is an oracle for which accounts
+ * are real. It sits before the verify so that a refused attempt costs the
+ * server nothing, and it sits *here*, not in the interceptor, because the
+ * address is in the body. The per-IP bucket is on the controller.
+ *
  * FR-002: an unverified account signs in. What it may not do is create or join
  * a Bond, and that is the Bond module's rule, not this class's.
  */
@@ -45,11 +57,14 @@ internal class LoginUser(
     private val sessions: IssueSessionTokens,
     private val clock: Clock,
     private val transactions: TransactionTemplate,
+    private val rateLimiter: RateLimiter,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     fun login(command: LoginCommand): LoginResult {
         val now = clock.instant()
+        val decision = rateLimiter.tryConsume(RateLimitBucket.AUTH_LOGIN_EMAIL, command.email.trim().lowercase())
+        if (decision is RateLimitDecision.Rejected) throw RateLimitExceededException(decision)
 
         // A malformed address cannot belong to anyone; it takes the unknown
         // path rather than a 422, so the request's shape reveals nothing the

@@ -1,5 +1,6 @@
 package com.moyi.common.security
 
+import com.moyi.common.testing.RedisIntegrationTest
 import com.nimbusds.jose.PlainHeader
 import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.RSAKey
@@ -9,6 +10,7 @@ import com.nimbusds.jose.proc.SecurityContext
 import com.nimbusds.jwt.JWTClaimsSet
 import com.nimbusds.jwt.PlainJWT
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
@@ -53,7 +55,7 @@ class SecurityFilterChainTest(
     @Autowired private val keys: SigningKeys,
     @Autowired private val properties: JwtProperties,
     @Autowired private val revocations: InMemoryTokenRevocations,
-) {
+) : RedisIntegrationTest() {
     private val userId: UUID = UUID.randomUUID()
 
     @AfterEach
@@ -176,14 +178,15 @@ class SecurityFilterChainTest(
 
     @Test
     fun `the named auth endpoints are public, and only for POST`() {
-        // No controller serves them in this context, so "public" shows up as
-        // 404 rather than 401 — and anything the chain protects is 401
+        // "Public" shows up as *reaching routing*: 404 where no controller
+        // serves the path in this context, 200 for the two the probe
+        // controller takes — never 401. Anything the chain protects is 401
         // regardless of whether a route exists, which is the second assertion.
         SecurityConfiguration.PUBLIC_AUTH_ENDPOINTS.forEach { path ->
             mockMvc
                 .post(path)
                 .andReturn()
-                .response.status shouldBe 404
+                .response.status shouldNotBe 401
             mockMvc
                 .get(path)
                 .andReturn()

@@ -1,7 +1,7 @@
 package com.moyi.identity.web
 
 import com.moyi.common.security.AccessTokenIssuer
-import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.TestBreachCorpus
 import io.kotest.matchers.shouldBe
@@ -36,7 +36,7 @@ internal class MeEndpointTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired dataSource: DataSource,
-) : PostgresIntegrationTest() {
+) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
 
     @AfterEach

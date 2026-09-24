@@ -1,7 +1,7 @@
 package com.moyi.identity.infra.database
 
 import com.moyi.common.testing.DeterministicIdGenerator
-import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.domain.Credentials
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.PasswordHash
@@ -47,7 +47,7 @@ internal class UserPersistenceTest(
     @Autowired private val transactions: TransactionTemplate,
     @Autowired entityManagerFactory: EntityManagerFactory,
     @Autowired dataSource: DataSource,
-) : PostgresIntegrationTest() {
+) : IntegrationTest() {
     private val statistics = entityManagerFactory.unwrap(SessionFactory::class.java).statistics
     private val jdbc = JdbcTemplate(dataSource)
     private val ids = DeterministicIdGenerator()

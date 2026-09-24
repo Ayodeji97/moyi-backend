@@ -1,6 +1,6 @@
 package com.moyi.identity.web
 
-import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.Argon2Properties
 import com.moyi.identity.infra.security.Argon2idPasswordHasher
@@ -52,7 +52,7 @@ internal class LoginEndpointTest(
     @Autowired private val hasher: RecordingPasswordHasher,
     @Autowired private val emails: RecordingEmailSender,
     @Autowired dataSource: DataSource,
-) : PostgresIntegrationTest() {
+) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
 
     @AfterEach

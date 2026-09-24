@@ -1,5 +1,6 @@
 package com.moyi.identity.web
 
+import com.moyi.common.security.ClientContext
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -24,7 +25,7 @@ internal class RegisterRequestTest {
         // The second half: below the web layer the password is a `Password`,
         // whose own toString redacts, so nothing downstream can print it
         // however it is interpolated.
-        val printed = request().toCommand().toString()
+        val printed = request().toCommand(ClientContext(addressHash = "address-hash", userAgentHash = null)).toString()
 
         printed shouldNotContain PASSWORD
         printed shouldContain "Password(redacted)"
@@ -32,7 +33,7 @@ internal class RegisterRequestTest {
 
     @Test
     fun `the command carries domain types, so the service cannot be handed something invalid`() {
-        val command = request(email = "  Ada@Example.com  ").toCommand()
+        val command = request(email = "  Ada@Example.com  ").toCommand(ClientContext(addressHash = "address-hash", userAgentHash = null))
 
         command.email.value shouldBe "Ada@Example.com"
         command.password.value shouldBe PASSWORD

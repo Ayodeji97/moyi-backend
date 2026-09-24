@@ -21,3 +21,5 @@ moyi:
   security:
     jwt:
       key-source: ephemeral
+    hashing:
+      secret-source: ephemeral

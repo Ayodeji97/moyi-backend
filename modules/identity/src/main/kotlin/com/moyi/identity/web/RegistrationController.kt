@@ -1,5 +1,8 @@
 package com.moyi.identity.web
 
+import com.moyi.common.security.ClientContext
+import com.moyi.common.security.ratelimit.RateLimitBucket
+import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.identity.service.RegisterUser
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -21,18 +24,23 @@ import org.springframework.web.bind.annotation.RestController
  *
  * Nothing here does any work (doc 18 §4): it maps HTTP to the service and
  * back. The mapping itself lives on [RegisterRequest], so that this class has
- * no logic to test separately from the endpoint.
+ * no logic to test separately from the endpoint. The [ClientContext] is the
+ * caller's address and user agent, already hashed, for the consent rows
+ * (FR-011, doc 07 §2); the controller never sees the address itself.
  */
 @RestController
 @RequestMapping("/api/v1/auth")
 internal class RegistrationController(
     private val registerUser: RegisterUser,
 ) {
+    /** FR-012: three an hour per address. */
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
+    @RateLimited(RateLimitBucket.AUTH_REGISTER_IP)
     fun register(
         @Valid @RequestBody request: RegisterRequest,
+        client: ClientContext,
     ) {
-        registerUser.register(request.toCommand())
+        registerUser.register(request.toCommand(client))
     }
 }

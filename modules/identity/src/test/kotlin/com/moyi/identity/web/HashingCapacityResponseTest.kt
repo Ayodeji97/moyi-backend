@@ -1,6 +1,6 @@
 package com.moyi.identity.web
 
-import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.domain.HashingCapacityExceededException
 import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.PasswordHash
@@ -43,7 +43,7 @@ import org.springframework.test.web.servlet.post
 @Import(HashingCapacityResponseTest.SaturatedHasherConfiguration::class)
 internal class HashingCapacityResponseTest(
     @Autowired private val mockMvc: MockMvc,
-) : PostgresIntegrationTest() {
+) : IntegrationTest() {
     @Test
     fun `saturation is 503 with a Retry-After, not 500`() {
         val response =

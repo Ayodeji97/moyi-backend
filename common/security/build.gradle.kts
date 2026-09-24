@@ -21,6 +21,17 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("tools.jackson.module:jackson-module-kotlin")
 
+    // Rate limiting (FR-012, doc 25 D6, ADR-0023): token buckets held in
+    // Redis, so that a login brute-force writes to the cache and never to the
+    // primary database. The Boot starter owns the connection (`spring.data.redis.*`,
+    // `@ServiceConnection` in tests); Bucket4j owns the bucket arithmetic, and
+    // no bucket maths is written here. Micrometer is for the two counters an
+    // operator needs: rejections per bucket, and how often Redis was
+    // unreachable and the limiter let a request through.
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
+    implementation(libs.bucket4j.lettuce)
+    implementation("io.micrometer:micrometer-core")
+
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation(projects.common.testing)
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")

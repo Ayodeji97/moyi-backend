@@ -23,3 +23,15 @@ moyi:
       # Generated at startup: every token dies with the process, which is fine
       # on a laptop and is logged at WARN so it is never fine anywhere else.
       key-source: ephemeral
+    hashing:
+      # Likewise: a random secret per process. Address hashes from one run
+      # cannot be matched by the next, which does not matter on a laptop.
+      secret-source: ephemeral
+    client-address:
+      # Loopback is trusted so that a request from this machine may say who
+      # it is on behalf of: `curl -H 'X-Forwarded-For: 203.0.113.7'` is how
+      # scripts/smoke.sh gives each probe its own address and drives the
+      # per-IP buckets to their limits. Only this profile.
+      trusted-proxies:
+        - 127.0.0.0/8
+        - ::1/128

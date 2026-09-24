@@ -1,5 +1,7 @@
 package com.moyi.identity.web
 
+import com.moyi.common.security.ratelimit.RateLimitBucket
+import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.VerificationSecret
@@ -21,8 +23,10 @@ internal class PasswordResetController(
     private val requestPasswordReset: RequestPasswordReset,
     private val resetPassword: ResetPassword,
 ) {
+    /** Twenty an hour per address (ADR-0023), beside the three-an-hour-per-email bucket in the service. */
     @PostMapping("/forgot-password")
     @ResponseStatus(HttpStatus.ACCEPTED)
+    @RateLimited(RateLimitBucket.AUTH_RESET_IP)
     fun forgot(
         @Valid @RequestBody request: ForgotPasswordRequest,
     ) {

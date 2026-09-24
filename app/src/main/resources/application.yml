@@ -4,6 +4,35 @@ spring:
   threads:
     virtual:
       enabled: true
+  data:
+    redis:
+      # Rate limiting only (doc 25 D6, ADR-0023). Host and port from the
+      # environment in production (SPRING_DATA_REDIS_HOST / _PORT); the
+      # `local` profile reaches the compose Valkey on the defaults.
+      #
+      # The timeouts are the fail-open policy made concrete: a Redis that
+      # does not answer within this must degrade to "no limit" (the limiter
+      # logs and counts it), never to a slow login. Lettuce's own default is
+      # sixty seconds, which would turn a Redis outage into a login outage.
+      connect-timeout: 500ms
+      timeout: 250ms
+      # No @RedisHash entities; scanning for them costs a startup.
+      repositories:
+        enabled: false
+
+logging:
+  level:
+    # Doc 18 §9: no personal data in a log. Postgres reports a unique
+    # violation as "Key (email)=(ada@example.com) already exists", and
+    # Hibernate's `org.hibernate.orm.jdbc.error` logger writes that detail at WARN before the
+    # exception reaches RegisterUser, which absorbs it (ADR-0015) — so the
+    # one expected constraint violation in the system wrote the address to
+    # the log on every duplicate registration. Found by scripts/smoke.sh on
+    # 2026-09-24. A genuine failure still surfaces: it propagates to the
+    # exception handler, which logs the stack trace. AddressNeverLoggedTest
+    # holds this line in place; modules/identity's test config carries the
+    # same one for its own context.
+    org.hibernate.orm.jdbc.error: "OFF"
 
 management:
   endpoints:
@@ -13,6 +42,15 @@ management:
   endpoint:
     health:
       show-details: never
+  health:
+    redis:
+      # Deliberately NOT part of the health verdict. Doc 07 §5: "losing Redis
+      # entirely degrades performance and nothing else" — the limiter fails
+      # open — and kamal-proxy routes on this endpoint, so a Redis outage
+      # reported as DOWN would take the whole application out of rotation to
+      # protect a cache. Redis availability is visible instead through the
+      # `moyi.rate_limit.backend_unavailable` counter (ADR-0023).
+      enabled: false
 
 # Email (doc 25 D7). No provider or key is set here on purpose: the provider
 # defaults to Resend, and Resend refuses to start without
@@ -34,3 +72,13 @@ moyi:
 # source defaults to CONFIGURED, which refuses to start unless
 # `moyi.security.jwt.private-key-pem` and `moyi.security.jwt.public-key-pem`
 # arrive from the environment. Only the `local` profile says `ephemeral`.
+#
+# The same posture for `moyi.security.hashing.secret` (ADR-0023): the HMAC
+# key behind `consent_records.ip_hash` and the rate-limit keys, required from
+# the environment, ephemeral only in `local`.
+#
+# `moyi.security.client-address.trusted-proxies` is EMPTY here on purpose:
+# with no ranges configured no `X-Forwarded-For` is believed and the socket
+# address is the client, which behind a proxy means every request shares one
+# address — over-strict and visible, rather than spoofable. Production sets
+# it to kamal-proxy's Docker range and Cloudflare's published ranges.

@@ -1,6 +1,6 @@
 package com.moyi.app
 
-import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.testing.IntegrationTest
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -25,7 +25,7 @@ import org.springframework.test.web.servlet.get
 @ActiveProfiles("test")
 class HealthCheckTest(
     @Autowired private val mockMvc: MockMvc,
-) : PostgresIntegrationTest() {
+) : IntegrationTest() {
     @Test
     fun `health endpoint returns 200`() {
         mockMvc.get("/actuator/health").andExpect { status { isOk() } }

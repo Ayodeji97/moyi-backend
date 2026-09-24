@@ -52,7 +52,7 @@ import java.time.Duration
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
-@EnableConfigurationProperties(JwtProperties::class)
+@EnableConfigurationProperties(JwtProperties::class, HashingProperties::class, ClientAddressProperties::class)
 class SecurityConfiguration {
     @Bean
     fun securityFilterChain(
@@ -90,6 +90,9 @@ class SecurityConfiguration {
 
     @Bean
     fun signingKeys(properties: JwtProperties): SigningKeys = SigningKeys.from(properties)
+
+    @Bean
+    fun personalDataHasher(properties: HashingProperties): PersonalDataHasher = PersonalDataHasher.from(properties)
 
     @Bean
     fun jwtEncoder(keys: SigningKeys): JwtEncoder = NimbusJwtEncoder(ImmutableJWKSet<SecurityContext>(JWKSet(keys.rsaKey)))
