@@ -193,6 +193,69 @@ internal class BondsEndpointTest(
         response.getHeader(HttpHeaders.WWW_AUTHENTICATE) shouldBe "Bearer"
     }
 
+    @Test
+    fun `GET a bond is 200 for a member, with an ETag, and 404 for everyone else`() {
+        val ada = users.verified("Ada")
+        val eve = users.verified("Eve")
+        val bondId = bondIdOf(create(ada, body()))
+
+        val mine = get(ada, bondId)
+        mine.status shouldBe 200
+        mine.getHeader(HttpHeaders.ETAG) shouldBe "\"0\""
+        mine.contentAsString shouldContain "\"id\":\"$bondId\""
+        mine.contentAsString shouldContain "\"me\":{\"memberId\":\""
+
+        // T-02: a stranger is told the bond does not exist, not that they are
+        // not allowed to see it — a 403 would confirm the id is real.
+        val theirs = get(eve, bondId)
+        theirs.status shouldBe 404
+        theirs.contentAsString shouldContain "\"code\":\"NOT_FOUND\""
+        theirs.contentAsString shouldContain "\"detail\":\"That bond was not found.\""
+        theirs.contentAsString shouldNotContain "Us"
+
+        get(ada, UUID.randomUUID().toString()).status shouldBe 404
+        // Not a UUID at all: still 404, because a value that cannot name a
+        // bond is not a different kind of ignorance (the sessions precedent).
+        get(ada, "not-a-bond").status shouldBe 404
+    }
+
+    @Test
+    fun `a member who left still reads the bond, and it says they left`() {
+        val ada = users.verified("Ada")
+        val bondId = bondIdOf(create(ada, body()))
+        jdbc.update("UPDATE bond_members SET left_at = now() WHERE bond_id = ?::uuid", bondId)
+        jdbc.update("UPDATE bonds SET status = 'ARCHIVED', archived_at = now() WHERE id = ?::uuid", bondId)
+
+        val response = get(ada, bondId)
+
+        response.status shouldBe 200
+        response.contentAsString shouldContain "\"status\":\"ARCHIVED\""
+        response.contentAsString shouldContain "\"leftAt\":\"20"
+    }
+
+    @Test
+    fun `GET bonds lists mine newest first, with names, and nothing of anyone else's`() {
+        val ada = users.verified("Ada")
+        val eve = users.verified("Eve")
+        create(ada, body(name = "First")).status shouldBe 201
+        create(ada, body(name = "Second")).status shouldBe 201
+        create(eve, body(name = "Eves")).status shouldBe 201
+
+        val json = list(ada).contentAsString
+
+        json shouldContain "\"displayName\":\"Ada\""
+        (json.indexOf("\"name\":\"Second\"") < json.indexOf("\"name\":\"First\"")) shouldBe true
+        json shouldNotContain "Eve"
+    }
+
+    @Test
+    fun `GET bonds is an empty list for a user with none`() {
+        val response = list(users.verified("Ada"))
+
+        response.status shouldBe 200
+        response.contentAsString shouldBe "{\"bonds\":[]}"
+    }
+
     // ---- helpers ------------------------------------------------------------
 
     private fun create(
@@ -218,4 +281,22 @@ internal class BondsEndpointTest(
             """"revealTimeLocal":$revealTimeLocal,"reminderTimezone":$reminderTimezone}"""
 
     private fun codeOf(json: String): String = Regex(""""code":"([^"]+)"""").find(json)!!.groupValues[1]
+
+    private fun bondIdOf(response: MockHttpServletResponse): String =
+        Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
+
+    private fun get(
+        userId: UUID,
+        bondId: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .get("/api/v1/bonds/$bondId") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(userId).token}") }
+            .andReturn()
+            .response
+
+    private fun list(userId: UUID): MockHttpServletResponse =
+        mockMvc
+            .get("/api/v1/bonds") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(userId).token}") }
+            .andReturn()
+            .response
 }
