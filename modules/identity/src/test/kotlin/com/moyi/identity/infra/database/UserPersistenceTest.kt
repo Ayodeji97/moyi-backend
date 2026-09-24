@@ -25,6 +25,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Duration
 import java.time.Instant
 import javax.sql.DataSource
 
@@ -263,6 +264,106 @@ internal class UserPersistenceTest(
 
         statistics.prepareStatementCount shouldBe 1
     }
+
+    @Test
+    fun `failures count atomically and the fifth locks for a minute`() {
+        // The SQL statement of LockoutPolicy. LockoutPolicyTest pins the Kotlin
+        // one; this pins the database to the same numbers.
+        val user = insertActiveUserWithCredentials()
+
+        repeat(4) { transactions.execute { credentials.recordFailedAttempt(user.id.value, NOW) } shouldBe 1 }
+        loaded(user).failedAttempts shouldBe 4
+        loaded(user).lockedUntil shouldBe null
+
+        transactions.execute { credentials.recordFailedAttempt(user.id.value, NOW) } shouldBe 1
+        loaded(user).failedAttempts shouldBe 5
+        loaded(user).lockedUntil shouldBe NOW.plus(Duration.ofMinutes(1))
+    }
+
+    @Test
+    fun `an attempt during a lock is refused and not counted`() {
+        // A lock that could be extended by hammering it would be a lock an
+        // attacker controls.
+        val user = insertActiveUserWithCredentials()
+        repeat(5) { transactions.execute { credentials.recordFailedAttempt(user.id.value, NOW) } }
+
+        transactions.execute { credentials.recordFailedAttempt(user.id.value, NOW.plusSeconds(30)) } shouldBe 0
+
+        loaded(user).failedAttempts shouldBe 5
+        loaded(user).lockedUntil shouldBe NOW.plus(Duration.ofMinutes(1))
+    }
+
+    @Test
+    fun `the counter survives a lock expiring, so each lock is longer than the last`() {
+        // T-03: exponential backoff. The first version reset the counter to 1
+        // when a lock expired, which made every lock 15 minutes and none of
+        // them a backoff.
+        val user = insertActiveUserWithCredentials()
+        repeat(5) { transactions.execute { credentials.recordFailedAttempt(user.id.value, NOW) } }
+
+        val afterFirstLock = NOW.plus(Duration.ofMinutes(1))
+        transactions.execute { credentials.recordFailedAttempt(user.id.value, afterFirstLock) } shouldBe 1
+        loaded(user).failedAttempts shouldBe 6
+        loaded(user).lockedUntil shouldBe afterFirstLock.plus(Duration.ofMinutes(2))
+
+        val afterSecondLock = afterFirstLock.plus(Duration.ofMinutes(2))
+        transactions.execute { credentials.recordFailedAttempt(user.id.value, afterSecondLock) } shouldBe 1
+        loaded(user).failedAttempts shouldBe 7
+        loaded(user).lockedUntil shouldBe afterSecondLock.plus(Duration.ofMinutes(4))
+    }
+
+    @Test
+    fun `the lock caps at an hour`() {
+        val user = insertActiveUserWithCredentials()
+        // 11 failures: five to the first lock, then six more, each after the
+        // previous lock expired. 2^6 minutes would be 64.
+        var at = NOW
+        repeat(5) { transactions.execute { credentials.recordFailedAttempt(user.id.value, at) } }
+        repeat(6) {
+            at = loaded(user).lockedUntil!!
+            transactions.execute { credentials.recordFailedAttempt(user.id.value, at) } shouldBe 1
+        }
+
+        loaded(user).failedAttempts shouldBe 11
+        loaded(user).lockedUntil shouldBe at.plus(Duration.ofHours(1))
+    }
+
+    @Test
+    fun `a successful sign-in clears the counter and any expired lock`() {
+        val user = insertActiveUserWithCredentials(failedAttempts = 7, lockedUntil = NOW.minusSeconds(1))
+
+        transactions.execute { credentials.clearFailedAttempts(user.id.value, NOW) } shouldBe 1
+
+        loaded(user).failedAttempts shouldBe 0
+        loaded(user).lockedUntil shouldBe null
+    }
+
+    @Test
+    fun `a successful sign-in cannot clear a lock that is still in force`() {
+        // Belt and braces: the service never calls this for a locked account,
+        // because the password result is discarded while locked. If it ever
+        // did, the statement itself refuses.
+        val user = insertActiveUserWithCredentials(failedAttempts = 5, lockedUntil = NOW.plusSeconds(30))
+
+        transactions.execute { credentials.clearFailedAttempts(user.id.value, NOW) } shouldBe 0
+
+        loaded(user).failedAttempts shouldBe 5
+    }
+
+    private fun insertActiveUserWithCredentials(
+        failedAttempts: Int = 0,
+        lockedUntil: Instant? = null,
+    ): User {
+        val user = newUser().copy(status = UserStatus.ACTIVE)
+        transactions.executeWithoutResult {
+            users.save(user.toEntity())
+            credentials.save(newCredentials(user.id).copy(failedAttempts = failedAttempts, lockedUntil = lockedUntil).toEntity())
+        }
+        return user
+    }
+
+    private fun loaded(user: User): Credentials =
+        transactions.execute { credentials.findById(user.id.value).shouldNotBeNull().toDomain() }!!
 
     private fun newUser(email: String = "ada@example.com") =
         User(

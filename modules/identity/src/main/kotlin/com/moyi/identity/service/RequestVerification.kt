@@ -58,6 +58,7 @@ internal class RequestVerification(
                 email = user.email,
                 displayName = user.displayName,
                 locale = user.locale,
+                purpose = purpose,
                 tokenId = token.id,
                 secret = secret,
                 expiresAt = token.expiresAt,

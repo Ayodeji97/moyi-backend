@@ -18,10 +18,14 @@ internal enum class VerificationPurpose(
 ) {
     /** FR-002: "Token TTL 24h". */
     EMAIL_VERIFICATION(Duration.ofHours(EMAIL_VERIFICATION_TTL_HOURS)),
+
+    /** FR-004: a password-reset link is valid for one hour. */
+    PASSWORD_RESET(Duration.ofHours(PASSWORD_RESET_TTL_HOURS)),
 }
 
 /** File-level rather than in a companion: an enum entry cannot read its own companion while it is being constructed. */
 private const val EMAIL_VERIFICATION_TTL_HOURS = 24L
+private const val PASSWORD_RESET_TTL_HOURS = 1L
 
 /**
  * The secret half of a verification token: what goes in the email, and the
@@ -137,6 +141,7 @@ internal data class VerificationRequested(
     val email: Email,
     val displayName: String,
     val locale: String,
+    val purpose: VerificationPurpose,
     val tokenId: UUID,
     val secret: VerificationSecret,
     val expiresAt: Instant,
@@ -151,3 +156,7 @@ internal class VerificationTokenInvalidException : RuntimeException("The verific
  * the same — ask for a new one — and `states.md` §1 draws one state for it.
  */
 internal class VerificationTokenExpiredException : RuntimeException("The verification token has expired or was already used")
+
+internal class PasswordResetTokenInvalidException : RuntimeException("The password reset token is not recognised")
+
+internal class PasswordResetTokenExpiredException : RuntimeException("The password reset token has expired or was already used")

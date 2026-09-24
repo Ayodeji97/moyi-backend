@@ -28,6 +28,7 @@ moyi:
       # on this API — mail scanners fetch links, and a scanner must not be able
       # to spend a single-use token. See VerificationProperties.
       link-base-url: https://moyi.com/verify
+      reset-link-base-url: https://moyi.com/reset-password
 
 # Access-token signing (doc 09 §3, ADR-0019). No key here on purpose: the key
 # source defaults to CONFIGURED, which refuses to start unless

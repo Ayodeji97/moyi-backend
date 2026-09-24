@@ -4,9 +4,14 @@ import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.ExceptionHandlerAdviceOrder
 import com.moyi.common.web.ProblemDetails
 import com.moyi.identity.domain.HashingCapacityExceededException
+import com.moyi.identity.domain.PasswordResetTokenExpiredException
+import com.moyi.identity.domain.PasswordResetTokenInvalidException
+import com.moyi.identity.domain.RefreshTokenInvalidException
+import com.moyi.identity.domain.RefreshTokenReusedException
 import com.moyi.identity.domain.VerificationTokenExpiredException
 import com.moyi.identity.domain.VerificationTokenInvalidException
 import com.moyi.identity.service.AuthenticatedUserMissingException
+import com.moyi.identity.service.InvalidCredentialsException
 import org.slf4j.LoggerFactory
 import org.springframework.core.annotation.Order
 import org.springframework.http.HttpHeaders
@@ -68,6 +73,24 @@ internal class IdentityExceptionHandler(
             request = request,
         )
 
+    @ExceptionHandler(PasswordResetTokenInvalidException::class)
+    fun handlePasswordResetTokenInvalid(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.UNPROCESSABLE_ENTITY,
+            errorCode = ErrorCode.PASSWORD_RESET_TOKEN_INVALID,
+            detail = "That password reset link is not recognised.",
+            request = request,
+        )
+
+    @ExceptionHandler(PasswordResetTokenExpiredException::class)
+    fun handlePasswordResetTokenExpired(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.GONE,
+            errorCode = ErrorCode.PASSWORD_RESET_TOKEN_EXPIRED,
+            detail = "That password reset link has expired or was already used.",
+            request = request,
+        )
+
     /**
      * A valid token whose user vanished between the filter and the handler.
      * 401 `UNAUTHENTICATED`, the same code the filter chain gives a token for
@@ -79,6 +102,46 @@ internal class IdentityExceptionHandler(
             status = HttpStatus.UNAUTHORIZED,
             errorCode = ErrorCode.UNAUTHENTICATED,
             detail = "Your session is not valid. Sign in again.",
+            request = request,
+        )
+
+    /**
+     * FR-003 / doc 06 §2's security rule: one 401 for every refusal, and no
+     * `WWW-Authenticate`, because no bearer credential was presented — this is
+     * a login form, not a resource request. The sentence is the app's fallback
+     * copy for the sign-in error; `copy.md` has no line for it yet, so this
+     * one follows its rules: two short sentences, no dash, no blame.
+     */
+    @ExceptionHandler(InvalidCredentialsException::class)
+    fun handleInvalidCredentials(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.UNAUTHORIZED,
+            errorCode = ErrorCode.INVALID_CREDENTIALS,
+            detail = "That email and password do not match. Check both and try again.",
+            request = request,
+        )
+
+    /** The client's only correct move is to sign in again. */
+    @ExceptionHandler(RefreshTokenInvalidException::class)
+    fun handleInvalidRefreshToken(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.UNAUTHORIZED,
+            errorCode = ErrorCode.REFRESH_TOKEN_INVALID,
+            detail = "This session has ended. Sign in again to continue.",
+            request = request,
+        )
+
+    /**
+     * Doc 06 §3.1 names this code; doc 13 has the client wipe its stored
+     * credentials and explain why on seeing it. The family is already revoked
+     * by the time this is written.
+     */
+    @ExceptionHandler(RefreshTokenReusedException::class)
+    fun handleRefreshTokenReused(request: WebRequest): ResponseEntity<Any> =
+        problem(
+            status = HttpStatus.UNAUTHORIZED,
+            errorCode = ErrorCode.TOKEN_REUSE_DETECTED,
+            detail = "This sign-in was used from two places at once, so it has been ended. Sign in again to continue.",
             request = request,
         )
 

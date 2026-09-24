@@ -72,6 +72,24 @@ internal data class User(
             )
         }
 
+    /**
+     * FR-002: "Unverified accounts may sign in but MUST NOT create or join a
+     * Bond." So a pending account authenticates, and the Bond module is where
+     * the restriction lives. Suspended, deletion-pending and deleted accounts
+     * do not — and are refused with the same 401 as a wrong password, because
+     * no screen exists yet for "your account is suspended" (ADR-0020 records
+     * the gap). Used by login, refresh and password reset alike.
+     */
+    val canAuthenticate: Boolean
+        get() = status == UserStatus.ACTIVE || status == UserStatus.PENDING_VERIFICATION
+
+    /** Invalidates every access token issued before [now]. */
+    fun revokeAllSessions(now: Instant): User =
+        copy(
+            tokensInvalidBefore = now,
+            updatedAt = now,
+        )
+
     companion object {
         /**
          * Chosen here rather than found in a document — doc 03 FR-006 requires a display

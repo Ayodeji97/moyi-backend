@@ -6,6 +6,7 @@ import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import org.springframework.stereotype.Component
+import java.time.Instant
 
 /**
  * Accounts, spoken in domain terms.
@@ -51,6 +52,9 @@ internal class AccountStore(
 
     fun findByEmail(email: Email): User? = users.findByEmail(email.value)?.toDomain()
 
+    /** Password hashes are reachable only through the authentication path. */
+    fun findCredentials(userId: UserId): Credentials? = credentials.findById(userId.value)?.toDomain()
+
     fun findById(id: UserId): User? = users.findById(id.value).orElse(null)?.toDomain()
 
     /**
@@ -65,5 +69,39 @@ internal class AccountStore(
             }
         user.applyTo(entity)
         users.save(entity)
+    }
+
+    fun revokeAllSessions(
+        userId: UserId,
+        now: Instant,
+    ) {
+        val user = findById(userId) ?: return
+        update(user.revokeAllSessions(now))
+    }
+
+    fun updateCredentials(credentials: Credentials) {
+        val entity =
+            this.credentials.findById(credentials.userId.value)
+                ?: error("cannot update credentials that do not exist")
+        credentials.applyTo(entity)
+        this.credentials.save(entity)
+    }
+
+    /**
+     * Counts a failed sign-in and locks the account if `LockoutPolicy` says so.
+     * Not transactional here — the boundary is the caller's, as everywhere in
+     * this class. @return `false` if the account was locked at [now], in which
+     * case the attempt was deliberately not counted.
+     */
+    fun recordFailedLogin(
+        userId: UserId,
+        now: Instant,
+    ): Boolean = credentials.recordFailedAttempt(userId.value, now) == 1
+
+    fun clearFailedLogins(
+        userId: UserId,
+        now: Instant,
+    ) {
+        credentials.clearFailedAttempts(userId.value, now)
     }
 }

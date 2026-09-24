@@ -2,6 +2,7 @@ package com.moyi.identity.service
 
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.UserId
+import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationRequested
 import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.infra.security.VerificationProperties
@@ -14,7 +15,10 @@ import java.time.Instant
 import java.util.UUID
 
 internal class VerificationEmailComposerTest {
-    private val composer = VerificationEmailComposer(VerificationProperties(URI("https://moyi.test/verify")))
+    private val composer =
+        VerificationEmailComposer(
+            VerificationProperties(URI("https://moyi.test/verify"), URI("https://moyi.test/reset-password")),
+        )
 
     @Test
     fun `the link carries the secret to the configured landing page`() {
@@ -29,6 +33,19 @@ internal class VerificationEmailComposerTest {
         // States.md's copy rule: say what the link does and how long it lasts.
         message.text shouldContain "works once"
         message.text shouldContain "24 hours"
+    }
+
+    @Test
+    fun `a password-reset event links to the reset page, not the verify page`() {
+        // The first version sent both to the verify page. A reset token POSTed
+        // to /verify-email is "not recognised" (its purpose is wrong), so every
+        // reset link would have been dead on arrival.
+        val message = composer.compose(event(purpose = VerificationPurpose.PASSWORD_RESET, secret = "example-reset-for-tests"))
+
+        message.subject shouldContain "password"
+        message.text shouldContain "https://moyi.test/reset-password?token=example-reset-for-tests"
+        message.text shouldNotContain "/verify?"
+        message.text shouldContain "1 hour"
     }
 
     @Test
@@ -57,6 +74,7 @@ internal class VerificationEmailComposerTest {
     }
 
     private fun event(
+        purpose: VerificationPurpose = VerificationPurpose.EMAIL_VERIFICATION,
         secret: String = "s",
         displayName: String = "Ada",
         tokenId: UUID = UUID.randomUUID(),
@@ -65,6 +83,7 @@ internal class VerificationEmailComposerTest {
         email = Email("ada@example.com"),
         displayName = displayName,
         locale = "en",
+        purpose = purpose,
         tokenId = tokenId,
         secret = VerificationSecret(secret),
         expiresAt = Instant.parse("2026-09-24T12:00:00Z"),

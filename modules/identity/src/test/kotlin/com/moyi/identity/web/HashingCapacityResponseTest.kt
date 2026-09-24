@@ -83,6 +83,13 @@ internal class HashingCapacityResponseTest(
                 override val algorithm = PasswordHashAlgorithm.ARGON2ID
 
                 override fun hash(password: Password): PasswordHash = throw HashingCapacityExceededException()
+
+                override fun matches(
+                    raw: String,
+                    hash: PasswordHash,
+                ): Boolean = throw HashingCapacityExceededException()
+
+                override fun matchesDummy(raw: String): Boolean = throw HashingCapacityExceededException()
             }
     }
 

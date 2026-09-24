@@ -1000,3 +1000,51 @@ Wrong about: where the risk was. I had budgeted attention for the token
          describes, all of which the first `./gradlew build` found in under a
          minute. Run the build early, before the code is finished, because
          the build is cheaper than the theory.
+
+## 2026-09-23 · Phase 1 · Reviewing a slice I did not write, and the four things green tests could not see
+Expected: to review PR #32 — login, refresh rotation, logout and password
+         reset, written by Codex while my session was rate-limited — as a
+         finished slice with all checks green, and to add the ADRs it lacked.
+Reality: all checks *were* green, and four requirements were not met. None of
+         the four was a bug in the sense of a wrong line; each was a decision
+         the corpus had already made and the code had made differently, with a
+         test enshrining the difference:
+         **FR-002.** "Unverified accounts may sign in." Login required
+         `ACTIVE`, refresh revoked any non-`ACTIVE` family, and a test named
+         "an unverified account cannot log in" passed. Screen 3's "Check
+         again" — sign in, read `/me` — would have been impossible.
+         **T-03.** "Account lockout with exponential backoff." A fixed
+         fifteen minutes, with the counter reset to 1 when a lock expired, so
+         every lock was the same length. A lockout, not a backoff.
+         **Doc 06 / doc 13.** `TOKEN_REUSE_DETECTED` is named in the API spec
+         and is the code the client wipes its credentials on. Every refresh
+         failure was `UNAUTHENTICATED`, so a stolen session and an expired one
+         were the same event to the app.
+         **Doc 09 §3 / T-17.** "The user is emailed" on reuse; "notification
+         email to the old address" on reset. Neither existed. And the reset
+         link pointed at the *verify* landing page — a reset token `POST`ed to
+         `/verify-email` is "not recognised" — which nothing caught because the
+         reset test inserted its token by SQL instead of reading the email.
+Wrong about: what a green PR from a capable author tells you. It tells you the
+         code does what its tests say. It does not tell you the tests say what
+         the *documents* say, and every one of the four gaps was in that
+         second distance. The review that found them was not a reading of the
+         diff; it was a reading of the diff *against* FR-002, T-03, doc 06
+         §3.1, doc 09 §3 and doc 13, one requirement at a time, asking "where
+         is this". That is a checklist, and it is slower than reading, and it
+         is the only thing that worked.
+         The fixes themselves were the usual shape: a `canAuthenticate` on the
+         domain model used by login, refresh and reset alike; the lockout rule
+         stated once in Kotlin and once in one native `UPDATE`, with two tests
+         pinning them to the same numbers; three 401 codes where there was
+         one; a `SecurityNotice` event and an `AFTER_COMMIT` listener for the
+         two emails; a second, required, landing URL. Four mutations, all
+         killed by the tests written for them — including the one that
+         restores the fixed-15-minute behaviour, which fails three tests now
+         and would have failed none before.
+         Also kept from the review: what Codex did *better* than my design.
+         The compare-and-set on `rotated_at` with `replaced_by` making the
+         family readable as a chain; `logout` idempotent and unauthenticated
+         so it cannot be used to test tokens; the malformed-address path
+         running the dummy verify instead of returning a 422. Good decisions
+         are worth writing down when they are somebody else's.

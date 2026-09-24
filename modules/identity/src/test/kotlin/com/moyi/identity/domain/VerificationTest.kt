@@ -36,6 +36,7 @@ internal class VerificationTest {
             email = Email("ada@example.com"),
             displayName = "Ada",
             locale = "en",
+            purpose = VerificationPurpose.EMAIL_VERIFICATION,
             tokenId = UUID.randomUUID(),
             secret = VerificationSecret("s3cret-value"),
             expiresAt = NOW,

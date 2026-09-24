@@ -46,6 +46,36 @@ enum class ErrorCode {
     VERIFICATION_TOKEN_EXPIRED,
 
     /**
+     * `POST /auth/login` refused. One code for a wrong password, an unknown
+     * address, a locked account and an account in a state that cannot sign in,
+     * because telling them apart is exactly the oracle T-18 and ADR-0015 close.
+     * 401, without `WWW-Authenticate`: no bearer credential was presented.
+     */
+    INVALID_CREDENTIALS,
+
+    /**
+     * `POST /auth/refresh` with a token that is unknown, expired or revoked. The
+     * client's only correct response is to sign in again. Distinct from
+     * [TOKEN_REUSE_DETECTED] because that one asks the client to do more.
+     */
+    REFRESH_TOKEN_INVALID,
+
+    /**
+     * `POST /auth/refresh` with a token that was already rotated (doc 06 §3.1,
+     * doc 09 §3): somebody presented a stolen copy, or the victim did after the
+     * thief. The whole family is revoked before this is returned, and doc 13
+     * has the client wipe its credentials and explain why — which is why this
+     * needs its own code.
+     */
+    TOKEN_REUSE_DETECTED,
+
+    /** A password-reset secret that matches no reset token. */
+    PASSWORD_RESET_TOKEN_INVALID,
+
+    /** A password-reset secret that was spent or passed its one-hour TTL. */
+    PASSWORD_RESET_TOKEN_EXPIRED,
+
+    /**
      * No usable bearer token: missing, malformed, expired, signed by the
      * wrong key, for the wrong audience, or issued before the user's sessions
      * were revoked. One code, deliberately — which of those it was is in the

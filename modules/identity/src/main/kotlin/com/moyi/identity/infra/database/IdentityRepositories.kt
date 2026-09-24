@@ -51,6 +51,142 @@ internal interface CredentialsRepository : Repository<CredentialsEntity, UUID> {
     fun findById(id: UUID): CredentialsEntity?
 
     fun save(credentials: CredentialsEntity): CredentialsEntity
+
+    /**
+     * Records one failed attempt and applies `LockoutPolicy` in the same
+     * statement, so two concurrent wrong passwords both count and neither can
+     * lose the other's increment or the lock it earned.
+     *
+     * Native SQL, because the policy is arithmetic JPQL cannot express:
+     * `1 min × 2^(failures − 5)`, capped at 60. The `WHERE` refuses to count
+     * an attempt made while a lock is in force, so a lock cannot be extended by
+     * hammering it; the counter is **not** reset when a lock expires — that is
+     * what makes the next lock longer (T-03's "exponential backoff"). Only a
+     * successful sign-in resets it, in [clearFailedAttempts].
+     *
+     * `LockoutPolicyTest` pins the Kotlin statement of the rule and
+     * `UserPersistenceTest` pins this SQL to the same numbers, because a rule
+     * written twice drifts twice.
+     *
+     * @return `1` if the attempt was counted; `0` if the account is currently locked (or does not exist).
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        nativeQuery = true,
+        value = """
+        UPDATE credentials
+           SET failed_attempts = failed_attempts + 1,
+               locked_until = CASE
+                   WHEN failed_attempts + 1 >= 5
+                       THEN CAST(:now AS timestamptz)
+                            + make_interval(mins => LEAST(60, CAST(power(2, failed_attempts + 1 - 5) AS int)))
+                   ELSE locked_until
+               END
+         WHERE user_id = :id
+           AND (locked_until IS NULL OR locked_until <= CAST(:now AS timestamptz))
+        """,
+    )
+    fun recordFailedAttempt(
+        id: UUID,
+        now: Instant,
+    ): Int
+
+    /** Clears the counter only when the account was not locked by another request. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE CredentialsEntity c
+           SET c.failedAttempts = 0,
+               c.lockedUntil = NULL
+         WHERE c.id = :id
+           AND (c.lockedUntil IS NULL OR c.lockedUntil <= :now)
+        """,
+    )
+    fun clearFailedAttempts(
+        id: UUID,
+        now: Instant,
+    ): Int
+}
+
+internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID> {
+    fun save(token: RefreshTokenEntity): RefreshTokenEntity
+
+    fun findByTokenHash(tokenHash: String): RefreshTokenEntity?
+
+    fun findById(id: UUID): RefreshTokenEntity?
+
+    /**
+     * Serialises every mutation of one user's sessions for the rest of the
+     * current transaction, and is the reason [revokeFamily] and
+     * [revokeAllForUser] can be trusted.
+     *
+     * Without it there is a race the tests could not see and the Codex review
+     * of PR #32 could: a family revocation is one `UPDATE` over the rows that
+     * exist when its snapshot is taken (READ COMMITTED), while a concurrent
+     * rotation of the current successor inserts a *new* row in its own
+     * transaction. If that insert commits after the revocation's snapshot,
+     * the family is "revoked" and one live token survives it — in the hands
+     * of whoever was refreshing, which after a reuse may be the thief.
+     *
+     * A transaction-scoped advisory lock keyed on the user id closes it:
+     * rotation, logout, logout-all and reset all take the same lock first, so
+     * the insert either commits before the revocation's snapshot or waits
+     * until after the revocation commits and finds its own token already
+     * rotated. Per user rather than per family so there is one lock and no
+     * ordering to get wrong; a user has a handful of concurrent sessions, so
+     * the contention is nil. Released automatically at commit or rollback.
+     *
+     * Namespaced with `1` in the two-key form so a future advisory lock for
+     * something else cannot collide with it by accident.
+     */
+    @Query(nativeQuery = true, value = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(1, hashtext(CAST(:userId AS text)))) AS held")
+    fun lockSessions(userId: UUID): Int
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.rotatedAt = :now,
+               t.replacedBy = :replacementId
+         WHERE t.id = :id
+           AND t.rotatedAt IS NULL
+           AND t.revokedAt IS NULL
+           AND t.expiresAt > :now
+        """,
+    )
+    fun rotate(
+        id: UUID,
+        replacementId: UUID,
+        now: Instant,
+    ): Int
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.revokedAt = :now
+         WHERE t.familyId = :familyId
+           AND t.revokedAt IS NULL
+        """,
+    )
+    fun revokeFamily(
+        familyId: UUID,
+        now: Instant,
+    ): Int
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.revokedAt = :now
+         WHERE t.userId = :userId
+           AND t.revokedAt IS NULL
+        """,
+    )
+    fun revokeAllForUser(
+        userId: UUID,
+        now: Instant,
+    ): Int
 }
 
 /**

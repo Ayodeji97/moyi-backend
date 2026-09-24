@@ -1,5 +1,6 @@
 package com.moyi.identity.service
 
+import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationRequested
 import com.moyi.identity.infra.security.VerificationProperties
 import com.moyi.notification.api.EmailMessage
@@ -31,26 +32,27 @@ internal class VerificationEmailComposer(
     fun compose(event: VerificationRequested): EmailMessage {
         val link = linkFor(event)
         val name = event.displayName.trim()
+        val reset = event.purpose == VerificationPurpose.PASSWORD_RESET
 
         return EmailMessage(
             to = event.email.value,
-            subject = SUBJECT,
+            subject = if (reset) RESET_SUBJECT else VERIFY_SUBJECT,
             text =
                 """
                 |Hi $name,
                 |
-                |Confirm this is your address by opening the link below. It works once and expires in 24 hours.
+                |${if (reset) "Reset your Moyi password by opening the link below. It works once and expires in 1 hour." else "Confirm this is your address by opening the link below. It works once and expires in 24 hours."}
                 |
                 |$link
                 |
-                |If you did not create a Moyi account, you can ignore this email — nothing happens without the link.
+                |${if (reset) "If you did not request a password reset, you can ignore this email. Your password will not change without the link." else "If you did not create a Moyi account, you can ignore this email. Nothing happens without the link."}
                 """.trimMargin(),
             html =
                 """
                 |<p>Hi ${HtmlUtils.htmlEscape(name)},</p>
-                |<p>Confirm this is your address by opening the link below. It works once and expires in 24 hours.</p>
-                |<p><a href="${HtmlUtils.htmlEscape(link)}">Confirm my email</a></p>
-                |<p>If you did not create a Moyi account, you can ignore this email — nothing happens without the link.</p>
+                |<p>${if (reset) "Reset your Moyi password by opening the link below. It works once and expires in 1 hour." else "Confirm this is your address by opening the link below. It works once and expires in 24 hours."}</p>
+                |<p><a href="${HtmlUtils.htmlEscape(link)}">${if (reset) "Reset my password" else "Confirm my email"}</a></p>
+                |<p>${if (reset) "If you did not request a password reset, you can ignore this email. Your password will not change without the link." else "If you did not create a Moyi account, you can ignore this email. Nothing happens without the link."}</p>
                 """.trimMargin(),
             idempotencyKey = event.tokenId.toString(),
         )
@@ -63,13 +65,18 @@ internal class VerificationEmailComposer(
      */
     private fun linkFor(event: VerificationRequested): String =
         UriComponentsBuilder
-            .fromUri(properties.linkBaseUrl)
-            .queryParam("token", event.secret.value)
+            .fromUri(
+                when (event.purpose) {
+                    VerificationPurpose.EMAIL_VERIFICATION -> properties.linkBaseUrl
+                    VerificationPurpose.PASSWORD_RESET -> properties.resetLinkBaseUrl
+                },
+            ).queryParam("token", event.secret.value)
             .encode()
             .build()
             .toUriString()
 
     private companion object {
-        const val SUBJECT = "Confirm your email address"
+        const val VERIFY_SUBJECT = "Confirm your email address"
+        const val RESET_SUBJECT = "Reset your Moyi password"
     }
 }
