@@ -38,12 +38,9 @@ import java.net.URI
  * code, which is why the per-IP bucket both methods share is the control that
  * matters here.
  *
- * [resolve] takes no `CurrentUser`, and that is not an oversight: it does not
- * need who is asking, only that somebody is. Two things already guarantee
- * that — the filter chain, which permits nothing outside its public list, and
- * the per-user bucket on this very method, which refuses to be consumed
- * without a verified token. A parameter nothing reads would be a claim that
- * something does.
+ * Both methods need to know *who* is asking, not merely that somebody is:
+ * a block is between two accounts, and a preview that ignored it would show a
+ * blocked person the bond's name before refusing them (see [ResolveInvite]).
  */
 @RestController
 @RequestMapping("/api/v1/invites")
@@ -59,8 +56,9 @@ internal class InvitesController(
     @GetMapping("/{code}")
     @RateLimited(RateLimitBucket.INVITE_LOOKUP_USER, RateLimitBucket.INVITE_CODE_IP)
     fun resolve(
+        caller: CurrentUser,
         @PathVariable code: String,
-    ): InvitePreviewResponse = InvitePreviewResponse.from(resolveInvite.resolve(parse(code)))
+    ): InvitePreviewResponse = InvitePreviewResponse.from(resolveInvite.resolve(UserId(caller.id), parse(code)))
 
     /**
      * FR-022, and milestone M2. The per-IP bucket is doc 06 §4's "combined"

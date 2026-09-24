@@ -274,8 +274,15 @@ internal class InviteEndpointTest(
             bondIdOf(bond),
         )
 
+        // Both, and for the same reason: a preview that succeeded and an
+        // accept that failed would tell the blocked party the code is real and
+        // that something is wrong with them in particular — a block oracle
+        // aimed at exactly the person doc 26 §2.1 says must learn nothing.
         accept(bob, codeOf(bond)).status shouldBe 404
-        resolve(bob, codeOf(bond)).status shouldBe 200
+        resolve(bob, codeOf(bond)).status shouldBe 404
+
+        // And a stranger to the block is unaffected.
+        resolve(users.verified("Carol"), codeOf(bond)).status shouldBe 200
     }
 
     // ---- helpers ------------------------------------------------------------

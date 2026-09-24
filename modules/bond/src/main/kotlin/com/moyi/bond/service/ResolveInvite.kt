@@ -2,6 +2,8 @@ package com.moyi.bond.service
 
 import com.moyi.bond.domain.BondType
 import com.moyi.bond.domain.InviteCode
+import com.moyi.bond.domain.UserId
+import com.moyi.bond.infra.database.BlockStore
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.InviteStore
 import com.moyi.identity.api.UserDirectory
@@ -25,29 +27,43 @@ import java.time.Clock
  * guessing codes got a real person's name on a hit (T-06); here they must
  * also have an account, and the per-IP bucket bounds the guessing.
  *
- * It applies only the checks that are about the code and the bond — not the
- * caller's own state. Verification and the three-bond limit are refusals for
- * `accept` to make, because telling somebody they cannot join before they
- * have decided to is worse copy and no safer.
+ * **It checks blocks, and that was a correction.** The first version applied
+ * only the checks about the code and the bond, on the reasoning that a
+ * preview should preview and `accept` should refuse. `InviteOneAnswerTest`
+ * caught what that costs: a blocked person would see the bond's name and the
+ * inviter's, and *then* be refused — which tells them the code is real and
+ * that something is wrong with them specifically. That is a block oracle
+ * pointed at the one person doc 26 §2.1 says must learn nothing, and it is
+ * worse than the leak it replaced.
+ *
+ * Verification and the three-bond limit stay with `accept`: they are facts
+ * about the caller's own account, they disclose nothing about the bond, and
+ * refusing somebody before they have decided to join is worse copy for no
+ * safety.
  */
 @Service
 internal class ResolveInvite(
     private val invites: InviteStore,
     private val bonds: BondStore,
+    private val blocks: BlockStore,
     private val users: UserDirectory,
     private val clock: Clock,
 ) {
     /** @throws InviteNotUsableException for every way the code might not work (FR-024) */
     @Transactional(readOnly = true)
-    // Three guard clauses, all throwing the *same* exception on purpose:
+    // Four guard clauses, all throwing the *same* exception on purpose:
     // that is FR-024's one answer, and the rule counts statements rather than
     // outcomes.
     @Suppress("ThrowsCount")
-    fun resolve(code: InviteCode): InvitePreview {
+    fun resolve(
+        caller: UserId,
+        code: InviteCode,
+    ): InvitePreview {
         val now = clock.instant()
         val invite = invites.findLiveByCode(code, now) ?: throw InviteNotUsableException()
         val bond = bonds.findAnyForInvite(invite.bondId) ?: throw InviteNotUsableException()
         if (!bond.hasRoom) throw InviteNotUsableException()
+        if (blocks.existsBetween(caller, bonds.memberUserIdsEverOf(bond.id))) throw InviteNotUsableException()
 
         val inviter = bond.members.firstOrNull { it.id == invite.createdByMemberId }
         return InvitePreview(

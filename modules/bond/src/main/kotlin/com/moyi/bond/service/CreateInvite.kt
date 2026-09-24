@@ -45,6 +45,15 @@ internal class CreateInvite(
     @Suppress("ThrowsCount")
     fun forBond(membership: Membership): Invite {
         val now = clock.instant()
+        // Under the bond's row lock, and this is not belt-and-braces: without
+        // it, two concurrent creates each revoke the invites *their own
+        // snapshot* can see and then each insert a new one, leaving a bond
+        // with two live codes — which `states.md` §2 promises a member cannot
+        // happen, and which the CAS on accept does not prevent because both
+        // codes are genuinely live. Found by `InviteRaceTest`, and it is the
+        // same shape as the refresh-token family race on PR #32: a revoke over
+        // a READ COMMITTED snapshot cannot see a concurrent insert.
+        bonds.lockBond(membership.bondId)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         if (!bond.isOpen) throw BondArchivedException()
         if (!bond.hasRoom) throw BondFullException()
