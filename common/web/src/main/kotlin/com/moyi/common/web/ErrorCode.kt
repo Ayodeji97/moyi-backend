@@ -110,6 +110,40 @@ enum class ErrorCode {
      */
     RATE_LIMITED,
 
+    /**
+     * FR-022: the bond already has everyone it can hold, so there is nothing
+     * to invite anyone to. Safe to name, because the caller is a member and
+     * already knows who is in it.
+     */
+    BOND_FULL,
+
+    /**
+     * BR-9: every write on an `ARCHIVED` or `PENDING_DELETION` bond. Safe to
+     * name for the same reason — and deliberately the *same* code whether the
+     * bond ended by a leave or by a block, because doc 26 §2.1 requires that
+     * the two be indistinguishable from the other side.
+     */
+    BOND_ARCHIVED,
+
+    /**
+     * `POST /invites/{code}/accept` by someone already in that bond — the
+     * creator scanning their own code, most often. A fact about the caller's
+     * own memberships, which they can already list, so naming it discloses
+     * nothing.
+     */
+    ALREADY_MEMBER,
+
+    /**
+     * **One code for six causes, on purpose** (FR-024, ADR-0027): the invite
+     * expired, was revoked, was already used, the bond is full, the code never
+     * existed, or the two accounts have blocked each other. `states.md` §2
+     * draws one screen and one string for all of them, because any visible
+     * difference between them tells a stranger that a bond exists, or that a
+     * code was once real. 404, never 410 — doc 06 §3.3's `410` for a spent
+     * invite is superseded, since "gone" confirms it was once here.
+     */
+    INVITE_NOT_USABLE,
+
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,
 

@@ -136,6 +136,44 @@ internal class BondTest {
     }
 
     @Test
+    fun `accepting a member makes the bond active`() {
+        val bond = create()
+        val joiner = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)
+
+        val active = bond.accept(joiner)
+
+        active.status shouldBe BondStatus.ACTIVE
+        active.activeMembers shouldHaveSize 2
+        active.memberOf(joiner.userId)?.role shouldBe MemberRole.MEMBER
+    }
+
+    @Test
+    fun `only a bond still waiting for someone has room`() {
+        val bond = create()
+        bond.hasRoom shouldBe true
+        bond.isOpen shouldBe true
+
+        val full = bond.accept(Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now))
+        full.hasRoom shouldBe false
+        // Active, so it still takes writes — it just has no seat.
+        full.isOpen shouldBe true
+        shouldThrow<IllegalStateException> {
+            full.accept(Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now))
+        }
+    }
+
+    @Test
+    fun `an archived bond has no room and takes no writes`() {
+        val archived = create().copy(status = BondStatus.ARCHIVED, archivedAt = now)
+
+        archived.hasRoom shouldBe false
+        archived.isOpen shouldBe false
+        shouldThrow<IllegalStateException> {
+            archived.accept(Member.member(MemberId(UUID.randomUUID()), archived.id, UserId(UUID.randomUUID()), lagos, now))
+        }
+    }
+
+    @Test
     fun `an invite lives seven days and is dead once used, revoked or expired`() {
         val bond = create()
         val invite = Invite.issue(InviteId(UUID.randomUUID()), bond.id, InviteCode("7KQ4MZ"), bond.members.single().id, now)
