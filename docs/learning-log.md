@@ -1223,3 +1223,15 @@ Wrong about: where the design work was. I thought it was in the aggregate —
          The design work was in making the authorisation unforgettable, and
          the answer came from a constraint I first read as an obstacle: that
          Konsist cannot see a call graph.
+         **Added after CI.** I wrote "additive, oasdiff should report no
+         breaking change" in the ADR and the PR body, and oasdiff reported 76
+         errors. Adding a value to `ErrorCode` is `response-property-enum-value-
+         added`, which oasdiff calls breaking — and it is right by doc 06 §2's
+         own design, which wants the generated client's sealed class to be
+         exhaustive so an unhandled code is a compile error there. So an error
+         code is source-breaking for the client while being entirely
+         wire-compatible. Labelled rather than suppressed, and ADR-0024 amended
+         to say so once rather than every slice re-deciding it. The lesson is
+         narrower than "check before claiming": I reasoned about the wire and
+         the document's shape, and forgot that the contract's consumer is a
+         *generated sealed class* whose exhaustiveness is the feature.
