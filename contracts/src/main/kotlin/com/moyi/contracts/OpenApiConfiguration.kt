@@ -8,6 +8,7 @@ import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.Operation
 import io.swagger.v3.oas.models.PathItem
+import io.swagger.v3.oas.models.headers.Header
 import io.swagger.v3.oas.models.info.Info
 import io.swagger.v3.oas.models.media.ArraySchema
 import io.swagger.v3.oas.models.media.Content
@@ -47,6 +48,14 @@ import org.springframework.http.HttpStatus
  * - **The two argument-resolver types.** `CurrentUser` comes from the token
  *   and `ClientContext` from the socket; documented as query parameters they
  *   would generate a client that sends them.
+ * - **The `ETag` on a versioned resource.** A success response whose body is
+ *   one of [VERSIONED_RESOURCE_SCHEMAS] carries the row version as an `ETag`,
+ *   which is what `If-Match` compares against (doc 06 §1). The header is set
+ *   on the `ResponseEntity`, so springdoc cannot see it, and a client
+ *   generated without it has no typed way to keep the value it must send
+ *   back — raised by the review of PR #37. Keyed on the response schema
+ *   rather than a list of paths, so the `PATCH` that arrives with slice B4
+ *   is documented by having a body, not by somebody remembering.
  *
  * Which codes a *particular* operation returns is doc 06 §3's table, not this
  * document: the contract a generated client is built from is the shape.
@@ -83,6 +92,7 @@ class OpenApiConfiguration {
                     statusesFor(operation, public).forEach { status ->
                         operation.responses.addApiResponse(status.value().toString(), problemResponse(status))
                     }
+                    documentETags(operation)
                 }
             }
         }
@@ -98,6 +108,29 @@ class OpenApiConfiguration {
             add(HttpStatus.TOO_MANY_REQUESTS)
             add(HttpStatus.INTERNAL_SERVER_ERROR)
         }
+
+    /**
+     * Declares the `ETag` on every success response that returns a versioned
+     * resource. Idempotent, and silent when there is none to declare.
+     */
+    private fun documentETags(operation: Operation) {
+        operation.responses
+            .filterKeys { it.startsWith("2") }
+            .values
+            .filter { response ->
+                response.content
+                    ?.values
+                    ?.any { it.schema?.`$ref` in VERSIONED_RESOURCE_REFS } == true
+            }.forEach { response ->
+                response.addHeaderObject(
+                    ETAG,
+                    Header()
+                        .description(
+                            "The resource's version, quoted (RFC 9110 §8.8.3). Send it back as `If-Match` to update it (doc 06 §1).",
+                        ).schema(StringSchema()),
+                )
+            }
+    }
 
     private fun problemResponse(status: HttpStatus): ApiResponse =
         ApiResponse()
@@ -133,5 +166,14 @@ class OpenApiConfiguration {
         private const val FIELD_VIOLATION_REF = "#/components/schemas/$FIELD_VIOLATION"
         private const val PROBLEM_JSON = "application/problem+json"
         private const val PATH_PARAMETER = "path"
+        private const val ETAG = "ETag"
+
+        /**
+         * Response schemas whose resource carries a row version, and therefore
+         * an `ETag`. One entry per versioned aggregate, not one per endpoint —
+         * an operation is covered by what it returns.
+         */
+        val VERSIONED_RESOURCE_SCHEMAS = setOf("BondResponse")
+        private val VERSIONED_RESOURCE_REFS = VERSIONED_RESOURCE_SCHEMAS.map { "#/components/schemas/$it" }.toSet()
     }
 }

@@ -4,9 +4,12 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.security.SecurityConfiguration
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.ErrorCode
+import com.moyi.contracts.OpenApiConfiguration
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.maps.shouldContainKey
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
@@ -155,6 +158,35 @@ class OpenApiContractTest(
         bond.responses shouldContainKey "404"
         bond.responses["200"]!!.content.keys shouldContainExactly listOf(MediaType.APPLICATION_JSON_VALUE)
         api.paths["/api/v1/bonds"]!!.post.responses shouldContainKey "201"
+    }
+
+    @Test
+    fun `a response carrying a versioned resource declares its ETag`() {
+        // The header is set on the ResponseEntity, so springdoc cannot see it
+        // and an OpenApiCustomizer adds it by rule. Without it a generated
+        // client has no typed way to keep the value that `If-Match` must send
+        // back, which is the whole reason these endpoints return one (doc 06
+        // §1). Raised by the review of PR #37.
+        val versioned =
+            operations().filter { (_, op) ->
+                op.responses.any { (status, response) ->
+                    status.startsWith("2") &&
+                        response.content?.values?.any {
+                            it.schema
+                                ?.`$ref`
+                                ?.substringAfterLast('/') in OpenApiConfiguration.VERSIONED_RESOURCE_SCHEMAS
+                        } == true
+                }
+            }
+
+        versioned.shouldNotBeEmpty()
+        versioned.forEach { (name, op) ->
+            op.responses
+                .filterKeys { it.startsWith("2") }
+                .forEach { (status, response) ->
+                    withClue("$name -> $status") { response.headers.orEmpty() shouldContainKey "ETag" }
+                }
+        }
     }
 
     @Test
