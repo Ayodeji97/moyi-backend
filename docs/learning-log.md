@@ -1235,3 +1235,17 @@ Wrong about: where the design work was. I thought it was in the aggregate —
          narrower than "check before claiming": I reasoned about the wire and
          the document's shape, and forgot that the contract's consumer is a
          *generated sealed class* whose exhaustiveness is the feature.
+         **Added after CI, second time.** `SessionsEndpointTest` went red on
+         the Linux runner with two timestamp assertions — the *same* symptom
+         slice H met and "fixed" by truncating the assertion side to
+         microseconds. That fix was half right. **Postgres rounds fractional
+         seconds to microseconds; it does not truncate** — confirmed at a psql
+         prompt: `.123456789` comes back `.123457`. So a nanosecond-precision
+         Linux clock and a truncating assertion disagree whenever the
+         remainder rounds up, which is about half the time. Green on a Mac,
+         green on some CI runs, red on others. `MutableClock` now truncates at
+         the source, so there is nothing left for the database to round, and a
+         test in `common:testing` pins that invariant. The lesson: when a
+         value survives a round trip unchanged on one machine and not another,
+         find out what the *store* does to it rather than adjusting what the
+         test expects.
