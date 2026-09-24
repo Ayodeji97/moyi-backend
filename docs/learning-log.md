@@ -1178,3 +1178,56 @@ Wrong about: where the risk was. I expected the claim and the authorisation
          removed optional request property breaking (a client still sending
          it is ignored), so the `breaking-api-change` label on #35 was a
          reviewer's judgement, not the gate's; ADR-0025 §6 says so.
+
+## 2026-09-24 · Phase 1 · The smoke test of everything, and the two things the script could not see
+Expected: a green run of the 98-probe script over `main @ 2e8f7e7`, then a
+         list of things to fix. Daniel asked for the whole of Phase 1 wired
+         together and exercised end to end, not for a slice.
+Reality: the script could not boot the jar, and the code was not the reason.
+         The jar is compiled for JDK 25; `java` on a non-interactive PATH is
+         21, because SDKMAN's `current` is only on PATH in a login shell. The
+         JVM died at once with `UnsupportedClassVersionError` and the script
+         waited its full ninety seconds to say "timed out", because it only
+         watched for Spring's "APPLICATION FAILED" banner and never asked
+         whether the process was still alive. It now finds a JDK 25 for
+         itself (`MOYI_JAVA`, `JAVA_HOME`, SDKMAN, `java_home`, then PATH),
+         refuses with a sentence when there is none, and notices a dead
+         process on every tick. On JDK 25: 98 of 98.
+         Then some eighty probes by hand for what the script does not cover.
+         Confirmed as designed: the unverified sign-in (FR-002); NFKC on the
+         password (a ligature `ﬁ` at registration signs in as `fi`); citext
+         on the address; four concurrent refreshes of one token (one 200,
+         three `TOKEN_REUSE_DETECTED`, the winner's successor dead); the
+         access token dying two seconds after `logout-all` and surviving a
+         rotation or a `DELETE /sessions/{id}` of its own session (stateless
+         until `exp`, ADR-0025); the fail-open with Valkey stopped (201 in
+         292 ms on the first request, 36 ms on the next, health still UP);
+         the live `/v3/api-docs` identical to the committed document;
+         `alg=none`, a forged `sub` and a bent signature all 401; nothing
+         under `/actuator` but health, even with a bearer; every per-email
+         and per-IP bucket at doc 06 §4's numbers. The one-second window on
+         `logout-all` behaved exactly as ADR-0019 §4 documents.
+         **What the script could not see.** A trailing slash — `/api/v1/me/`
+         — is a 404 whose body has no `type` (Spring 7 emits `null`; the
+         contract lists it as required), the title "Not Found" instead of
+         our prose, and the detail "No static resource api/v1/me." on an API
+         that serves none. Every error Spring raises for itself — 404, 405,
+         406, 415 — had the same three defects; slice B's handler stamped
+         `code` onto them and looked complete. They are now rebuilt through
+         `ProblemDetails` like every other error, keeping Spring's headers
+         and, except for the 404, its detail; two tests and two smoke probes
+         hold it. Recorded, not fixed: `HEAD /actuator/health` is 401 (only
+         GET is permitted, and kamal-proxy uses GET); a missing required
+         property is a 400 `MALFORMED_REQUEST` that does not name the field
+         — deliberate, doc 06 §2 makes 400 the client's fault, but a client
+         author will wish it did. And a third script fault: an absent header
+         made `header_is` exit the whole run under `pipefail` with no FAIL
+         line, which is how the new 405 probe was found to be in the wrong
+         place.
+Wrong about: where the first failure would be. I took the API for the thing
+         under test and the script for the instrument; the instrument failed
+         first, for the reason ("which `java`?") every works-on-my-machine
+         story has in it. And "every error carries a `type`" was something
+         I believed because our builder sets it — the errors that never
+         touch the builder were exactly the ones I had never asked the
+         running application for.
