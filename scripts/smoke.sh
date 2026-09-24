@@ -6,7 +6,8 @@
 # sign-in, refresh rotation, logout, password reset — answers with the status
 # and the error code the API contract (doc 06) promises — on the happy path AND on
 # the edges that have bitten before: malformed JSON, wrong method, reused
-# token, unknown address, duplicate registration. Since slice F it also drives
+# token, unknown address, duplicate registration. Since Phase 2 it also proves
+# that two accounts' bonds are invisible to a third (T-02). Since slice F it drives
 # every rate limit in doc 06 §4 to its 429 (FR-012, ADR-0023) and checks the
 # X-RateLimit-* headers and Retry-After on the way, against the compose Valkey.
 #
@@ -294,16 +295,63 @@ sleep 1
 for needle in "$PASSWORD" "$NEW_PASSWORD" "$REFRESH" "$REFRESH2" "$ACCESS"; do if grep -qF -- "$needle" "$MOYI_LOG"; then fail "secret in log" "a password or token appears in the log"; SECRET_LEAK=1; fi; done
 [ "${SECRET_LEAK:-0}" = 0 ] && pass "no password, refresh token or access token appears in the log"
 
+echo; echo "bonds (FR-020, FR-022, FR-025, T-02, ADR-0026)"
+flush_buckets
+expect "sign in as the verified account" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$NEW_PASSWORD")"
+BOND_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+bond_body() { printf '{"name":"%s","type":"COUPLE","anchorTimezone":"Africa/Lagos"}' "$1"; }
+
+expect "POST /bonds is 201, pending its second member" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Us")"
+BOND_ID="$(printf '%s' "$LAST_BODY" | jget id)"
+CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+header_is "…with an ETag of the row version" ETag '"0"'
+# The alphabet is states.md §2's thirty symbols; 0/O, 1/I/L and U are absent
+# because a code is read aloud down a phone line (T-06, ADR-0026).
+if [[ "$CODE" =~ ^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{6}$ ]]; then pass "…code $CODE is six characters of the 30-symbol alphabet"; else fail "invite code" "got '$CODE'"; fi
+if [[ "$LAST_BODY" == *"\"link\":\"https://moyi.com/i/$CODE\""* ]]; then pass "…and the link carries it"; else fail "invite link" "${LAST_BODY:0:200}"; fi
+# states.md §8: never the other member's settings. And a user id is identity's
+# to hand out, not this module's to echo.
+if [[ "$LAST_BODY" != *userId* && "$LAST_BODY" != *reminderTimezone* ]]; then pass "…and no userId or partner settings in the body"; else fail "response leakage" "${LAST_BODY:0:200}"; fi
+
+expect "GET /bonds lists it" 200 "\"id\":\"$BOND_ID\"" -- "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS"
+expect "GET /bonds/{id} is 200 for the owner" 200 '"role":"OWNER"' -- "$API/bonds/$BOND_ID" -H "Authorization: Bearer $BOND_ACCESS"
+header_is "…with the ETag" ETag '"0"'
+
+expect "a fixed-offset zone is 422 on anchorTimezone" 422 '"field":"anchorTimezone"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"COUPLE","anchorTimezone":"Etc/GMT+3"}'
+expect "an unknown type is 422 on type" 422 '"field":"type"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"THROUPLE","anchorTimezone":"Africa/Lagos"}'
+
+expect "second bond is 201" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Two")"
+expect "third bond is 201" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Three")"
+expect "a fourth open bond is 409 BOND_LIMIT_REACHED" 409 '"code":"BOND_LIMIT_REACHED"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Four")"
+
+# A third account: registered, never verified. It may sign in (FR-002) and it
+# may not create a bond — and somebody else's bond does not exist for it.
+STRANGER="stranger-$(date +%s)-$RANDOM@example.com"
+expect "register a stranger" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.30' -d "$(register_body "$STRANGER")"
+expect "the stranger signs in, unverified" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$STRANGER" "$PASSWORD")"
+STRANGER_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+expect "an unverified account cannot create a bond: 403 EMAIL_NOT_VERIFIED" 403 '"code":"EMAIL_NOT_VERIFIED"' -- -X POST "$API/bonds" -H "Authorization: Bearer $STRANGER_ACCESS" -d "$(bond_body "Mine")"
+expect "the stranger's GET of someone else's bond is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$BOND_ID" -H "Authorization: Bearer $STRANGER_ACCESS"
+STRANGER_404="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
+expect "a random id is 404 too" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$(python3 -c 'import uuid; print(uuid.uuid4())')" -H "Authorization: Bearer $BOND_ACCESS"
+RANDOM_404="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
+# T-02: a 403 for the stranger would confirm the bond is real. The bodies must
+# be indistinguishable apart from the path the caller typed.
+[ "$STRANGER_404" = "$RANDOM_404" ] && pass "…with a byte-identical body (no existence oracle)" || fail "identical 404s" "bodies differ"
+expect "a value that is not an id is 404 as well" 404 '"code":"NOT_FOUND"' -- "$API/bonds/not-a-bond" -H "Authorization: Bearer $BOND_ACCESS"
+expect "the stranger's list is empty" 200 '"bonds":[]' -- "$API/bonds" -H "Authorization: Bearer $STRANGER_ACCESS"
+if grep -qF -- "$CODE" "$MOYI_LOG"; then fail "code in log" "the invite code appears in the log"; else pass "the invite code never appears in the log"; fi
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.
 if [ "$ROW" = "ACTIVE|t|2|2" ]; then pass "user ACTIVE, verified, two tokens (verification + reset), both consumed"; elif [ "$ROW" = "psql-unavailable" ]; then echo "  skip database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|2|2, got '$ROW'"; fi
 SESSIONS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) || '|' || count(*) FILTER (WHERE revoked_at IS NULL) FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
-# Seven families were started and every one ended: two by reuse detection and
-# logout, the phone's and the watch's by DELETE /auth/sessions, the rest by
-# logout-all and the reset. The final login after the
-# reset is the one live token.
-case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|1") pass "refresh tokens stored as hashes; exactly one live session remains ($SESSIONS)";; *) fail "sessions" "expected exactly one live refresh token, got '$SESSIONS'";; esac
+# Every family started here was ended: two by reuse detection and logout,
+# the phone's and the watch's by DELETE /auth/sessions, the rest by
+# logout-all and the reset. Two live tokens remain — the login after the
+# reset, and the one the bond section signed in with.
+case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|2") pass "refresh tokens stored as hashes; exactly two live sessions remain ($SESSIONS)";; *) fail "sessions" "expected exactly two live refresh tokens, got '$SESSIONS'";; esac
 
 echo; printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 # The exit status is the failure count, as the README says (capped at what a
