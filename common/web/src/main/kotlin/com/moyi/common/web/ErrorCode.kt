@@ -76,6 +76,22 @@ enum class ErrorCode {
     PASSWORD_RESET_TOKEN_EXPIRED,
 
     /**
+     * FR-002: "unverified accounts may sign in but MUST NOT create or join a
+     * Bond." 403 rather than 401 — the token is perfectly valid, the account
+     * simply lacks the authority — and rather than 422, because nothing about
+     * the request is wrong. The client's move is `states.md` §1's screen 3,
+     * "Check again".
+     */
+    EMAIL_NOT_VERIFIED,
+
+    /**
+     * FR-025: a fourth open bond. 409, a state conflict rather than a
+     * validation failure, and safe to be specific about because it is a fact
+     * about the caller's own account, not about anyone else's bond.
+     */
+    BOND_LIMIT_REACHED,
+
+    /**
      * No usable bearer token: missing, malformed, expired, signed by the
      * wrong key, for the wrong audience, or issued before the user's sessions
      * were revoked. One code, deliberately — which of those it was is in the
