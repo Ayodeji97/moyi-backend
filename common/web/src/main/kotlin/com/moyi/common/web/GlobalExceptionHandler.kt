@@ -116,19 +116,29 @@ class GlobalExceptionHandler(
     }
 
     /**
-     * Stamps a [ErrorCode] onto the problem details Spring builds for itself.
+     * Rebuilds the problem details Spring produces for itself in our shape.
      *
      * Every exception `ResponseEntityExceptionHandler` handles without our
      * help — unsupported method, unreadable media type, no such route —
-     * already produced a correctly shaped `application/problem+json` body,
-     * and every one of them was missing `code`. Doc 06 §2 makes `code` the
-     * stable contract a client switches on, "enumerated and exhaustive,
-     * generated into the client as a sealed class". A third of the responses
-     * arriving without one does not break that design loudly; it breaks it by
-     * making the client's exhaustive `when` meet a value it cannot name.
+     * arrives as an `application/problem+json` body already, and it differs
+     * from ours in three ways a client notices. It has no `code`, the one
+     * field doc 06 §2 says a client switches on. It has no `type`
+     * (Spring 7 emits `null`), which the contract (ADR-0024) lists as
+     * required. And its `title` is the status phrase — "Not Found" — where
+     * ours reads as prose. So the body is rebuilt through [ProblemDetails],
+     * the same builder every other error uses, keeping Spring's headers
+     * (`Allow` on a 405 is the one a client acts on) and, except for a 404,
+     * Spring's own `detail`.
      *
-     * Found by asking for a 404, a 405 and a 415 against the running
-     * application rather than by reading the handler, which looked complete.
+     * The 404 detail is replaced because Spring's names the mechanism —
+     * "No static resource api/v1/me." on an API that serves none, or
+     * "No endpoint GET …" — and doc 18 §9 keeps implementation detail out of
+     * responses.
+     *
+     * Found twice by asking the running application rather than reading the
+     * handler: first for the missing `code` (a 405, 2026-09-20), then for the
+     * missing `type` (a 404 with a trailing slash, the Phase 1 smoke test of
+     * 2026-09-24). Both times the handler had looked complete.
      */
     override fun handleExceptionInternal(
         ex: Exception,
@@ -137,15 +147,38 @@ class GlobalExceptionHandler(
         statusCode: HttpStatusCode,
         request: WebRequest,
     ): ResponseEntity<Any>? {
-        val response = super.handleExceptionInternal(ex, body, headers, statusCode, request)
-        val problem = response?.body as? ProblemDetail ?: return response
+        val response = super.handleExceptionInternal(ex, body, headers, statusCode, request) ?: return null
+        // Only Spring's own: a body that already carries a code was built by
+        // one of our handlers on purpose, and a status-derived guess must
+        // never overwrite it.
+        val springsOwn = (response.body as? ProblemDetail)?.takeUnless { it.properties?.containsKey("code") == true }
+        return if (springsOwn == null) response else rebuilt(springsOwn, statusCode, response.headers, request)
+    }
 
-        // Only when absent: our own handlers set it deliberately, and a
-        // status-derived guess must never overwrite a specific code.
-        if (problem.properties?.containsKey("code") != true) {
-            problem.setProperty("code", codeFor(statusCode).name)
-        }
-        return response
+    private fun rebuilt(
+        spring: ProblemDetail,
+        statusCode: HttpStatusCode,
+        headers: HttpHeaders,
+        request: WebRequest,
+    ): ResponseEntity<Any> {
+        val errorCode = codeFor(statusCode)
+        val status = HttpStatus.valueOf(statusCode.value())
+        val detail =
+            when (errorCode) {
+                ErrorCode.NOT_FOUND -> "No such resource."
+                else -> spring.detail ?: "The request could not be handled."
+            }
+        return ResponseEntity
+            .status(status)
+            .headers(headers)
+            .body(
+                problems.of(
+                    status = status,
+                    errorCode = errorCode,
+                    detail = detail,
+                    instance = request.instanceUri(),
+                ),
+            )
     }
 
     private fun codeFor(status: HttpStatusCode): ErrorCode =
