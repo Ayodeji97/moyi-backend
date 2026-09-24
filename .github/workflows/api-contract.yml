@@ -1,0 +1,92 @@
+# The API contract (doc 06 §5, doc 12 §3.4, ADR-0024).
+#
+# `contracts/openapi.json` is generated from the running application by
+# OpenApiContractTest and committed; that test fails when the file is stale,
+# so by the time this workflow runs the file IS the contract. Two jobs:
+#
+#   breaking — on every pull request, diffs the PR's document against the
+#              base branch's and fails on a breaking change unless the PR
+#              carries the `breaking-api-change` label. "Breaking" is
+#              oasdiff's definition: a removed path or field, a narrowed type,
+#              a new required request property — the changes that break a
+#              client generated from the previous document.
+#   publish  — on every merge to main, attaches the document to the rolling
+#              `api-latest` release, which is what the client repository's
+#              build reads (doc 06 §5). Rolling rather than one release per
+#              merge: the client wants "the current contract", and the git
+#              history of contracts/openapi.json is the changelog.
+name: API contract
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths: [contracts/openapi.json]
+  push:
+    branches: [main]
+    paths: [contracts/openapi.json]
+
+permissions:
+  contents: read
+
+jobs:
+  breaking:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The base branch's copy, or nothing: the first PR to add the file has
+      # nothing to be compared with, and a missing base is not a breaking change.
+      - id: base
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh api "repos/${{ github.repository }}/contents/contracts/openapi.json?ref=${{ github.base_ref }}" \
+               -H 'Accept: application/vnd.github.raw' > base-openapi.json 2>/dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No contracts/openapi.json on ${{ github.base_ref }}; nothing to diff against." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - if: steps.base.outputs.present == 'true'
+        id: diff
+        # The action fails its step on a breaking change; the verdict is
+        # taken below so that the label can override it.
+        continue-on-error: true
+        uses: oasdiff/oasdiff-action/breaking@v0.1.17
+        with:
+          base: base-openapi.json
+          revision: contracts/openapi.json
+          fail-on: ERR
+
+      - if: steps.diff.outcome == 'failure' && !contains(github.event.pull_request.labels.*.name, 'breaking-api-change')
+        run: |
+          echo "::error::contracts/openapi.json changes the API in a way that breaks a client generated from the previous document. If that is intended, label the PR 'breaking-api-change' and say so in the description (doc 06 §5)."
+          exit 1
+
+      # A labelled break is allowed through, on the record.
+      - if: steps.diff.outcome == 'failure' && contains(github.event.pull_request.labels.*.name, 'breaking-api-change')
+        run: echo "Breaking change accepted under the breaking-api-change label." >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Recreated rather than updated: a release's tag does not move when its
+      # assets are replaced, and a rolling "latest" whose tag points at the
+      # first merge that ever published it would mislead. Delete and create
+      # is two commands and leaves the tag on the commit the body names.
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete api-latest --cleanup-tag --yes 2>/dev/null || true
+          gh release create api-latest contracts/openapi.json \
+            --target "$GITHUB_SHA" \
+            --title "API contract (latest)" \
+            --notes "openapi.json as generated from main at $GITHUB_SHA (ADR-0024). The client repository's build reads this asset; the history of contracts/openapi.json is the changelog." \
+            --latest=false

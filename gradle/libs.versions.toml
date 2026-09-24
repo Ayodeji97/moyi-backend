@@ -18,12 +18,19 @@ bouncycastle = "1.86"
 # 7, and the three calls the adapter makes (EVAL, GET, DEL) exist in both —
 # verified by the limiter's integration tests against a real Valkey 8.
 bucket4j = "8.20.0"
+# OpenAPI generation (doc 05, doc 06 §5, ADR-0024). springdoc 3.x is the line
+# built for Spring Boot 4 / Jackson 3; swagger-parser validates the document
+# the contract test reads back.
+springdoc = "3.1.1"
+swaggerParser = "2.1.48"
 
 [libraries]
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
 bouncycastle-provider = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 bucket4j-lettuce = { module = "com.bucket4j:bucket4j_jdk17-lettuce", version.ref = "bucket4j" }
+springdoc-webmvc-api = { module = "org.springdoc:springdoc-openapi-starter-webmvc-api", version.ref = "springdoc" }
+swagger-parser = { module = "io.swagger.parser.v3:swagger-parser", version.ref = "swaggerParser" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 # flyway-core / flyway-database-postgresql, the postgresql JDBC driver, and

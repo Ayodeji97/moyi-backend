@@ -18,6 +18,8 @@ dependencies {
     // Reachable transitively through identity already; declared so the
     // composition root names everything it composes.
     implementation(projects.common.security)
+    // springdoc and the OpenAPI document's shape (ADR-0024).
+    implementation(projects.contracts)
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
@@ -47,6 +49,19 @@ dependencies {
     // by project directory, not Gradle dependency graph, so placement
     // doesn't need every module to depend on every other.
     testImplementation(libs.konsist)
+    // Validates the generated OpenAPI document structurally (doc 12 §3.4).
+    // swagger-parser depends on the javax flavour of swagger-core, which
+    // carries the same class names as the jakarta flavour springdoc uses and
+    // shadows it with classes that need javax.xml.bind — every request for
+    // the document became a 500 until the javax pair was excluded.
+    testImplementation(libs.swagger.parser) {
+        exclude(group = "io.swagger.core.v3", module = "swagger-core")
+        exclude(group = "io.swagger.core.v3", module = "swagger-models")
+    }
+    // The jakarta models the parser then resolves against, and the
+    // OpenAPI type the contract test reads: `contracts` holds springdoc as
+    // `implementation`, which does not reach this module's test compile classpath.
+    testImplementation(libs.springdoc.webmvc.api)
 }
 
 springBoot {

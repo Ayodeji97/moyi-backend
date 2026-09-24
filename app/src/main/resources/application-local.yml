@@ -1,3 +1,9 @@
+springdoc:
+  api-docs:
+    # Served here, behind the bearer like everything else, so a developer can
+    # read the live document: curl -H "Authorization: Bearer …" :8080/v3/api-docs
+    enabled: true
+
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/moyi
