@@ -1,4 +1,16 @@
+logging:
+  level:
+    # Same line as app/src/main/resources/application.yml, for the same
+    # reason: Hibernate logs "Key (email)=(…)" on the duplicate-registration
+    # path. RegistrationEndpointTest asserts the address stays out of the log.
+    org.hibernate.orm.jdbc.error: "OFF"
+
 spring:
+  data:
+    redis:
+      # No @RedisHash entities; scanning for them costs a startup.
+      repositories:
+        enabled: false
   jpa:
     hibernate:
       # The guard that makes the entities and the migration one thing rather
@@ -31,3 +43,13 @@ moyi:
       # A fresh RSA pair per test context; the default source refuses to
       # start without configured PEMs (ADR-0019).
       key-source: ephemeral
+    hashing:
+      # Same posture for the personal-data hashing secret (ADR-0023).
+      secret-source: ephemeral
+    rate-limit:
+      # Off for the shared context: the lockout tests sign in six times in a
+      # row, which is exactly what `auth:login` per email exists to stop, and
+      # a bucket that carried over between tests would make each depend on
+      # what ran before it. `RateLimitingEndpointTest` turns it on in a
+      # context of its own and is the proof that every bucket is wired.
+      enabled: false
