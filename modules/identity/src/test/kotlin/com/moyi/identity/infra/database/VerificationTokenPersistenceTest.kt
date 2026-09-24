@@ -73,7 +73,7 @@ internal class VerificationTokenPersistenceTest(
     }
 
     @Test
-    fun `deleteLive removes only the person's other unspent tokens`() {
+    fun `deleteLive removes only the person's other tokens that are still live`() {
         val ada = insertUser()
         val grace = insertUser(email = "grace@example.com")
         val spent = VerificationSecret("spent")
@@ -81,15 +81,22 @@ internal class VerificationTokenPersistenceTest(
         insertToken(ada.id, VerificationSecret("waiting-1"), issuedAt = NOW)
         insertToken(ada.id, VerificationSecret("waiting-2"), issuedAt = NOW)
         insertToken(grace.id, VerificationSecret("someone-else"), issuedAt = NOW)
+        // Expired and never used: not live, so not ours to retire. It has to
+        // keep answering 410 "expired" until the reaper takes it — deleting it
+        // here would turn that into 422 "not recognised".
+        val expired = VerificationSecret("long-ago")
+        insertToken(ada.id, expired, issuedAt = NOW.minus(TTL).minusSeconds(1))
         inTransaction { tokens.consume(spent.hash(), NOW) } shouldBe true
 
-        val removed = inTransaction { tokens.deleteLive(ada.id, VerificationPurpose.EMAIL_VERIFICATION) }
+        val removed = inTransaction { tokens.deleteLive(ada.id, VerificationPurpose.EMAIL_VERIFICATION, NOW) }
 
         removed shouldBe 2
-        // The consumed one stays (it is the record of the verification), and
-        // another person's token is not ours to touch.
-        jdbc.queryForObject("SELECT count(*) FROM verification_tokens", Int::class.java) shouldBe 2
+        // The consumed one stays (it is the record of the verification), the
+        // expired one stays (it is the reaper's), and another person's token is
+        // not ours to touch.
+        jdbc.queryForObject("SELECT count(*) FROM verification_tokens", Int::class.java) shouldBe 3
         jdbc.queryForObject("SELECT count(*) FROM verification_tokens WHERE user_id = ?", Int::class.java, grace.id.value) shouldBe 1
+        tokens.findByHash(expired.hash(), VerificationPurpose.EMAIL_VERIFICATION)!!.isLive(NOW) shouldBe false
     }
 
     @Test
