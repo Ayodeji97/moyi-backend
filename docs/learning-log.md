@@ -1302,3 +1302,46 @@ Wrong about: where the design work was. I thought it was in the aggregate —
          value survives a round trip unchanged on one machine and not another,
          find out what the *store* does to it rather than adjusting what the
          test expects.
+
+## 2026-09-25 · Phase 2 · Invites, and the two defects the tests found before the reviewers could
+Expected: a mechanical slice. Four endpoints on top of B1's aggregate and
+         guard, a compare-and-set I already knew I needed, and the only
+         interesting thing being FR-024's one-answer rule, which I had
+         designed in the spec a day earlier.
+Reality: the one-answer rule was not a formatting exercise, it was a *test*,
+         and it failed. `InviteOneAnswerTest` builds all six unusable states
+         genuinely and asserts the six responses are the same bytes. It came
+         back red on the blocked case — because `resolve` did not check
+         blocks. I had reasoned that a preview should preview and `accept`
+         should refuse, which sounds like separation of concerns and is
+         actually a **block oracle**: the blocked person sees the bond's name
+         and the inviter's, then gets refused, and now knows the code is real
+         and that something is wrong with *them*. Doc 26 §2.1 says that person
+         must learn nothing, and I had written an endpoint that tells them
+         something. The endpoint test I had written first asserted the defect —
+         `resolve(...).status shouldBe 200` — which is the clearest reminder
+         I have had that a test written from the same wrong idea as the code
+         confirms the idea, not the behaviour. The exhaustive test is what
+         broke the loop.
+         **Then `InviteRaceTest` found the second one.** Two concurrent creates
+         each revoke the live invites *their own snapshot* can see and each
+         insert a new one, so a bond ends with two working codes — which
+         `states.md` §2 promises a member cannot happen. The CAS on accept does
+         not help: both codes are genuinely live. It is the same shape as the
+         refresh-token family race Codex found on PR #32, and I had already
+         written the lock into `accept` and not into `create`, which is what
+         "I fixed that class of bug once" buys you: nothing, unless the test
+         exists.
+         Smaller: detekt put `BondStore` over its method limit, which turned
+         out to be my own Phase 2 spec arriving late — it said invites get
+         their own store and B1 had put them in the bond's. And detekt flagged
+         `resolve`'s `CurrentUser` as unused, so I removed it; an hour later
+         the block check needed it back. The rule was right about the code as
+         written and wrong about the code as it should have been, which is
+         not something a linter can know.
+Wrong about: what "already designed" protects you from. The spec had the one
+         answer, the CAS and the block rule all written down, and I still
+         built two defects — one by applying a rule in fewer places than it
+         needed, one by fixing a race in one of the two places it occurs.
+         A design document tells you what to build. Only a test that tries
+         every case tells you whether you did.
