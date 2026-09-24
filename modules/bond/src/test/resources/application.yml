@@ -1,0 +1,36 @@
+spring:
+  data:
+    redis:
+      # No @RedisHash entities; scanning for them costs a startup.
+      repositories:
+        enabled: false
+  jpa:
+    hibernate:
+      # The guard that makes the entities and V9 one thing rather than two:
+      # Hibernate checks every mapped column against the schema Flyway just
+      # built and refuses to start on a mismatch. Without it, a renamed column
+      # is discovered by the first query that needs it.
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        # Enables the counters BondPersistenceTest asserts on. Statement counts
+        # are the only way to see the difference between one INSERT and a
+        # SELECT-then-INSERT, since both produce the same row.
+        generate_statistics: true
+
+moyi:
+  bond:
+    invite:
+      link-base-url: https://moyi.test/i
+  security:
+    jwt:
+      # A fresh RSA pair per test context; the default source refuses to start
+      # without configured PEMs (ADR-0019).
+      key-source: ephemeral
+    hashing:
+      secret-source: ephemeral
+    rate-limit:
+      # Off for the shared context, as in identity. Slice B2 turns it on in a
+      # context of its own to prove the invite buckets are wired.
+      enabled: false
