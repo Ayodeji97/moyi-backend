@@ -1,3 +1,17 @@
+springdoc:
+  api-docs:
+    # The OpenAPI document is generated in the test context and committed as
+    # contracts/openapi.json (ADR-0024); production serves nothing under
+    # /v3/api-docs. Only `local` and the test profile turn this on.
+    enabled: false
+  # Success bodies are JSON, never `*/*`: the generated client picks its
+  # serialiser from this.
+  default-produces-media-type: application/json
+  # Keys sorted and pretty-printed, so the committed document diffs by
+  # meaning and not by the order springdoc happened to discover routes in.
+  writer-with-order-by-keys: true
+  writer-with-default-pretty-printer: true
+
 spring:
   application:
     name: moyi-backend

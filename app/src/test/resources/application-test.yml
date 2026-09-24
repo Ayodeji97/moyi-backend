@@ -1,6 +1,12 @@
 # Applied by `@ActiveProfiles("test")` on the integration tests, rather than a
 # test-classpath `application.yml`, which would shadow the real one and quietly
 # drop everything it configures.
+springdoc:
+  api-docs:
+    # OpenApiContractTest reads the document from here and compares it with
+    # the committed contracts/openapi.json.
+    enabled: true
+
 spring:
   jpa:
     hibernate:

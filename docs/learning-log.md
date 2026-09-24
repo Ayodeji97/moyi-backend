@@ -1100,3 +1100,34 @@ Wrong about: where the difficulty would be. The design named the resolver;
          the day was spent on semantics — what "reset" means, which control
          fires first, what a 422 costs — each of which is a sentence in the
          ADR now and none of which was in the design.
+
+## 2026-09-24 · Phase 1 · The contract, and the two things the first document said that were not true
+Expected: to add springdoc, commit the document it produced, and write the
+         breaking-change job. The interesting part was expected to be CI.
+Reality: the first document springdoc produced was wrong in ways that a
+         generated client would have faithfully reproduced. `CurrentUser`
+         and `ClientContext` — the two types our argument resolvers fill from
+         the token and the socket — appeared as *query parameters* on `/me`,
+         `/logout-all` and `/register`, with their own schemas; a client built
+         from that would have sent them. `logout` was documented as 200 (it
+         returns `ResponseEntity.noContent()`, and springdoc reads the
+         annotation, not the builder). Every success body was `*/*`. No
+         operation had a single error response, and the public auth endpoints
+         inherited the bearer requirement. None of that was a springdoc bug;
+         it was a document that described the code as written rather than
+         the API as specified, and the gap between those two is exactly what
+         doc 12 §3.4's contract test exists to close. The test was written to
+         the specification first, and it failed on six of seven assertions.
+         Two more things learned by running: swagger-parser's javax
+         `swagger-core` shares every class name with springdoc's jakarta
+         flavour and shadowed it — every request for the document was a 500
+         until the javax pair was excluded from the test classpath; and
+         schemas placed on the `OpenAPI` bean are dropped when springdoc
+         rebuilds `components`, so the problem schema has to be added in a
+         customizer, after that pass. Also: a parallel shell call inherited
+         the other call's `cd` and ran a Gradle command in the wrong
+         worktree twice — every command now starts with an absolute path.
+Wrong about: what "generate the spec" means. Generation is the cheap part; the
+         document is a claim about the API, and like every other claim in
+         this project it needed a test that could fail before it was worth
+         committing.
