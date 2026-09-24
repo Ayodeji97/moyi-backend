@@ -33,8 +33,8 @@ internal class RefreshTokenEntity(
     var revokedAt: Instant?,
     @Column(name = "replaced_by")
     var replacedBy: UUID?,
-    @Column(name = "device_info", length = 200)
-    var deviceInfo: String?,
+    @Column(name = "device_id")
+    var deviceId: UUID?,
 ) : Persistable<UUID> {
     @Transient
     private var new: Boolean = true

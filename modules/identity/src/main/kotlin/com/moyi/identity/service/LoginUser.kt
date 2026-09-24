@@ -5,6 +5,7 @@ import com.moyi.common.security.ratelimit.RateLimitDecision
 import com.moyi.common.security.ratelimit.RateLimitExceededException
 import com.moyi.common.security.ratelimit.RateLimiter
 import com.moyi.identity.domain.Credentials
+import com.moyi.identity.domain.DeviceDescription
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.PasswordHasher
@@ -98,19 +99,19 @@ internal class LoginUser(
             throw InvalidCredentialsException()
         }
 
-        val refreshToken =
+        val family =
             transactions.execute {
                 // Serialised with logout-all and reset, so a sign-in that
                 // started before a "sign everything out" cannot survive it.
                 sessions.lockSessionsOf(authenticated.id)
                 accounts.clearFailedLogins(authenticated.id, now)
-                sessions.newFamily(authenticated.id, command.deviceInfo, now)
+                sessions.newFamily(authenticated.id, command.device, now)
             }!!
         log.info("Login succeeded for user {}", authenticated.id.value)
 
         return LoginResult(
             user = authenticated,
-            tokens = SessionTokens(sessions.accessTokenFor(authenticated.id), refreshToken),
+            tokens = SessionTokens(sessions.accessTokenFor(authenticated.id, family.familyId), family.refreshToken),
         )
     }
 
@@ -123,17 +124,16 @@ internal class LoginUser(
 }
 
 /**
- * The service's contract, with no HTTP in it. `deviceInfo` is the client's
- * free-text description of itself (`"Pixel 9 · Android 16 · 1.0.3"`); doc 07's
- * `devices` table arrives with FR-007's session list and this string moves
- * into it then — ADR-0020 records the deferral.
+ * The service's contract, with no HTTP in it. [device] is how the client
+ * described itself, already validated; `null` when it did not (FR-007,
+ * ADR-0025 — the free-text `deviceInfo` of ADR-0020 is gone).
  */
 internal data class LoginCommand(
     val email: String,
     val password: String,
-    val deviceInfo: String?,
+    val device: DeviceDescription?,
 ) {
-    override fun toString(): String = "LoginCommand(email=<redacted>, password=<redacted>, deviceInfo=$deviceInfo)"
+    override fun toString(): String = "LoginCommand(email=<redacted>, password=<redacted>, device=$device)"
 }
 
 internal data class LoginResult(

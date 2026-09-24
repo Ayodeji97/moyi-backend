@@ -512,6 +512,123 @@
         "tags" : [ "password-reset-controller" ]
       }
     },
+    "/api/v1/auth/sessions" : {
+      "get" : {
+        "operationId" : "list",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SessionsResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "sessions-controller" ]
+      }
+    },
+    "/api/v1/auth/sessions/{id}" : {
+      "delete" : {
+        "operationId" : "revoke",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "sessions-controller" ]
+      }
+    },
     "/api/v1/auth/verify-email" : {
       "post" : {
         "operationId" : "verify",
@@ -635,6 +752,42 @@
   },
   "components" : {
     "schemas" : {
+      "DeviceRequest" : {
+        "type" : "object",
+        "properties" : {
+          "appVersion" : {
+            "type" : "string",
+            "maxLength" : 40,
+            "minLength" : 0
+          },
+          "osVersion" : {
+            "type" : "string",
+            "maxLength" : 40,
+            "minLength" : 0
+          },
+          "platform" : {
+            "type" : "string",
+            "minLength" : 1,
+            "pattern" : "ANDROID|IOS|WEAR"
+          }
+        },
+        "required" : [ "appVersion", "osVersion", "platform" ]
+      },
+      "DeviceResponse" : {
+        "type" : "object",
+        "properties" : {
+          "appVersion" : {
+            "type" : "string"
+          },
+          "osVersion" : {
+            "type" : "string"
+          },
+          "platform" : {
+            "type" : "string",
+            "enum" : [ "ANDROID", "IOS", "WEAR" ]
+          }
+        }
+      },
       "FieldViolation" : {
         "type" : "object",
         "description" : "One rejected field. Never carries the rejected value.",
@@ -664,10 +817,12 @@
       "LoginRequest" : {
         "type" : "object",
         "properties" : {
-          "deviceInfo" : {
-            "type" : [ "string", "null" ],
-            "maxLength" : 200,
-            "minLength" : 0
+          "device" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/DeviceRequest"
+            }, {
+              "type" : "null"
+            } ]
           },
           "email" : {
             "type" : "string",
@@ -813,6 +968,44 @@
           }
         },
         "required" : [ "password", "token" ]
+      },
+      "SessionResponse" : {
+        "type" : "object",
+        "properties" : {
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "current" : {
+            "type" : "boolean"
+          },
+          "device" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/DeviceResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "lastSeenAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
+      },
+      "SessionsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "sessions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/SessionResponse"
+            }
+          }
+        }
       },
       "UserResponse" : {
         "type" : "object",

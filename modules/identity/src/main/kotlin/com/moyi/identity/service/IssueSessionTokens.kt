@@ -3,9 +3,12 @@ package com.moyi.identity.service
 import com.moyi.common.core.IdGenerator
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.security.IssuedAccessToken
+import com.moyi.identity.domain.Device
+import com.moyi.identity.domain.DeviceDescription
 import com.moyi.identity.domain.RefreshToken
 import com.moyi.identity.domain.TokenGenerator
 import com.moyi.identity.domain.UserId
+import com.moyi.identity.infra.database.DeviceStore
 import com.moyi.identity.infra.database.RefreshTokenStore
 import org.springframework.stereotype.Component
 import java.time.Instant
@@ -18,6 +21,12 @@ internal data class IssuedRefreshToken(
 ) {
     override fun toString(): String = "IssuedRefreshToken(secret=<redacted>, expiresAt=$expiresAt)"
 }
+
+/** A family just started: its id, which the access token will carry as `sid`, and its first refresh token. */
+internal data class NewFamily(
+    val familyId: UUID,
+    val refreshToken: IssuedRefreshToken,
+)
 
 /** What a sign-in or a rotation hands back: the short-lived JWT and the long-lived opaque secret (FR-003). */
 internal data class SessionTokens(
@@ -43,18 +52,51 @@ internal data class SessionTokens(
 @Component
 internal class IssueSessionTokens(
     private val tokens: RefreshTokenStore,
+    private val devices: DeviceStore,
     private val ids: IdGenerator,
     private val secrets: TokenGenerator,
     private val accessTokens: AccessTokenIssuer,
 ) {
-    /** A new family for a fresh sign-in. Inside the caller's transaction. */
+    /**
+     * A new family for a fresh sign-in, on the device the client described
+     * (FR-007) — a `devices` row per sign-in, see `Device`. Inside the
+     * caller's transaction.
+     */
     fun newFamily(
         userId: UserId,
-        deviceInfo: String?,
+        device: DeviceDescription?,
         now: Instant,
-    ): IssuedRefreshToken = mint(userId, familyId = ids.opaque(), deviceInfo, now)
+    ): NewFamily {
+        val deviceId =
+            device?.let {
+                val id = ids.timeOrdered()
+                devices.insert(
+                    Device(
+                        id = id,
+                        userId = userId,
+                        platform = it.platform,
+                        appVersion = it.appVersion,
+                        osVersion = it.osVersion,
+                        lastSeenAt = now,
+                    ),
+                )
+                id
+            }
+        val familyId = ids.opaque()
+        return NewFamily(familyId, mint(userId, familyId, deviceId, now))
+    }
 
-    fun accessTokenFor(userId: UserId): IssuedAccessToken = accessTokens.issue(userId.value)
+    /** The access token names its family (`sid`), which is how the sessions list marks the current one. */
+    fun accessTokenFor(
+        userId: UserId,
+        sessionId: UUID,
+    ): IssuedAccessToken = accessTokens.issue(userId.value, sessionId)
+
+    /** FR-007: a rotation is the family's device being seen again. Inside the caller's transaction. */
+    fun deviceSeen(
+        deviceId: UUID,
+        now: Instant,
+    ) = devices.touch(deviceId, now)
 
     /** The per-user sessions lock; see `RefreshTokenStore.lockSessionsOf`. Inside the caller's transaction. */
     fun lockSessionsOf(userId: UserId) = tokens.lockSessionsOf(userId)
@@ -72,7 +114,7 @@ internal class IssueSessionTokens(
                 familyId = previous.familyId,
                 secret = secret,
                 now = now,
-                deviceInfo = previous.deviceInfo,
+                deviceId = previous.deviceId,
             )
         return token to IssuedRefreshToken(secret.value, token.expiresAt)
     }
@@ -80,7 +122,7 @@ internal class IssueSessionTokens(
     private fun mint(
         userId: UserId,
         familyId: UUID,
-        deviceInfo: String?,
+        deviceId: UUID?,
         now: Instant,
     ): IssuedRefreshToken {
         val secret = secrets.verificationSecret()
@@ -91,7 +133,7 @@ internal class IssueSessionTokens(
                 familyId = familyId,
                 secret = secret,
                 now = now,
-                deviceInfo = deviceInfo,
+                deviceId = deviceId,
             )
         tokens.insert(token)
         return IssuedRefreshToken(secret.value, token.expiresAt)

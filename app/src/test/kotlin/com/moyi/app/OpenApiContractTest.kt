@@ -80,8 +80,14 @@ class OpenApiContractTest(
     fun `the argument resolvers' types are not parameters of any operation`() {
         // CurrentUser and ClientContext are resolved from the token and the
         // socket; documented as query parameters they would generate a client
-        // that sends them.
-        operations().flatMap { (_, op) -> op.parameters.orEmpty().map { it.name } }.shouldBeEmpty()
+        // that sends them. Path parameters (`/sessions/{id}`) are real.
+        operations()
+            .flatMap { (_, op) ->
+                op.parameters
+                    .orEmpty()
+                    .filter { it.`in` != "path" }
+                    .map { it.name }
+            }.shouldBeEmpty()
         api.components.schemas.keys
             .filter { it in setOf("CurrentUser", "ClientContext") }
             .shouldBeEmpty()

@@ -118,7 +118,7 @@ internal class RefreshTokenPersistenceTest(
         familyId = familyId,
         secret = secret,
         now = NOW,
-        deviceInfo = null,
+        deviceId = null,
     )
 
     private fun insertUser(): User {

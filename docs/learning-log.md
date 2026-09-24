@@ -1131,3 +1131,37 @@ Wrong about: what "generate the spec" means. Generation is the cheap part; the
          document is a claim about the API, and like every other claim in
          this project it needed a test that could fail before it was worth
          committing.
+
+## 2026-09-24 · Phase 1 · Sessions, and the three places the tests were wrong instead of the code
+Expected: a new table, two endpoints, and the first breaking change to the
+         API — a medium slice, with the interesting part being the `sid`
+         claim and the 404-not-403 rule.
+Reality: the code went in almost as designed; the day's corrections were to
+         tests and to my own earlier assumptions, which is a different kind
+         of finding. **A "not found" body legitimately contains the id**:
+         my test asserted the 404 body must not contain the session id, and
+         it failed because `instance` is the path the caller typed. The rule
+         is that the *sentence* must not repeat it; the path is theirs.
+         **The contract test forbade every parameter**, which was true for
+         ten operations and false the moment the API had a path variable;
+         the assertion now excludes `in: path`. **The migration-sequence
+         test pins the list of versions** — good, it caught V8 as intended,
+         and the fix was to add 8, not to loosen it.
+         Two detekt thresholds fired and both were design signals again:
+         the identity exception handler had grown one method per slice and
+         hit eleven, and the sessions 404 turned out to be the first
+         "not yours is not found" in the system — the shape every bond-
+         scoped endpoint will need (T-02) — so it became `NotFoundException`
+         in `common:web`, handled by the catch-all, and the module's handler
+         got shorter. And rotation's constructor hit seven parameters when
+         it learned to touch the device, which is how `deviceSeen` ended up
+         behind the session facade instead of a fourth store in rotation.
+         Decided while building, not before: a session *is* a refresh-token
+         family — no new table — and `lastSeenAt` is the live token's
+         `issuedAt`, so there is nothing to keep in step. Two sign-ins from
+         one phone are two devices until push tokens can fold them, and the
+         ADR says so rather than inventing a fingerprint.
+Wrong about: where the risk was. I expected the claim and the authorisation
+         to be the delicate parts; both were one line. The delicate parts
+         were three assertions I had written with a picture of the API that
+         the API had just outgrown.
