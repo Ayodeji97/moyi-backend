@@ -217,7 +217,7 @@ internal class RateLimitingEndpointTest(
         mockMvc
             .post("/api/v1/auth/login") {
                 contentType = MediaType.APPLICATION_JSON
-                content = """{"email":"$email","password":"not the password","deviceInfo":"test-device"}"""
+                content = """{"email":"$email","password":"not the password"}"""
                 with { request -> request.apply { remoteAddr = from } }
             }.andReturn()
             .response

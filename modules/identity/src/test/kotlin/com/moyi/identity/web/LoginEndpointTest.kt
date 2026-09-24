@@ -519,7 +519,8 @@ internal class LoginEndpointTest(
         mockMvc
             .post("/api/v1/auth/login") {
                 contentType = MediaType.APPLICATION_JSON
-                content = """{"email":"$email","password":"$password","deviceInfo":"test-device"}"""
+                content =
+                    """{"email":"$email","password":"$password","device":{"platform":"ANDROID","appVersion":"test","osVersion":"16"}}"""
             }.andReturn()
             .response
 

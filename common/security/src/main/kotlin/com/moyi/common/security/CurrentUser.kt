@@ -37,6 +37,8 @@ import java.util.UUID
  */
 data class CurrentUser(
     val id: UUID,
+    /** The refresh-token family the token was minted for (`sid`), or `null` for a token minted outside a session. */
+    val sessionId: UUID? = null,
 )
 
 @Component
@@ -56,7 +58,10 @@ class CurrentUserArgumentResolver : HandlerMethodArgumentResolver {
         val jwt =
             SecurityContextHolder.getContext().authentication?.principal as? Jwt
                 ?: throw AuthenticationCredentialsNotFoundException("No authenticated user on a request that requires one")
-        return CurrentUser(UUID.fromString(jwt.subject))
+        return CurrentUser(
+            id = UUID.fromString(jwt.subject),
+            sessionId = jwt.getClaimAsString(AccessTokenIssuer.SESSION_CLAIM)?.let(UUID::fromString),
+        )
     }
 }
 

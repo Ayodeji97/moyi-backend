@@ -187,6 +187,86 @@ internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID>
         userId: UUID,
         now: Instant,
     ): Int
+
+    /**
+     * FR-007: a family scoped to its owner. The `userId` predicate is the
+     * authorisation — a family id that is not the caller's matches no row,
+     * and no row is the 404 doc 06 §2 requires, never a 403 that confirms
+     * the id exists. `0` also for a family that is not a *live* session: one
+     * already revoked, or one whose last token has expired. Without the
+     * `EXISTS`, a family that had merely expired still had unrevoked rows to
+     * match, and a stale id from a client's cache got a 204 for a session the
+     * list had stopped showing (Codex's P2 on #35). Every row of a live family
+     * is revoked, rotated ones included, so the chain reads as ended.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.revokedAt = :now
+         WHERE t.familyId = :familyId
+           AND t.userId = :userId
+           AND t.revokedAt IS NULL
+           AND EXISTS (
+               SELECT 1 FROM RefreshTokenEntity live
+                WHERE live.familyId = t.familyId
+                  AND live.rotatedAt IS NULL
+                  AND live.revokedAt IS NULL
+                  AND live.expiresAt > :now
+           )
+        """,
+    )
+    fun revokeFamilyOf(
+        userId: UUID,
+        familyId: UUID,
+        now: Instant,
+    ): Int
+
+    /** The live tokens of one user — exactly one per live family, so this *is* the sessions list. */
+    @Query(
+        """
+        SELECT t FROM RefreshTokenEntity t
+         WHERE t.userId = :userId
+           AND t.rotatedAt IS NULL
+           AND t.revokedAt IS NULL
+           AND t.expiresAt > :now
+        """,
+    )
+    fun findLiveByUserId(
+        userId: UUID,
+        now: Instant,
+    ): List<RefreshTokenEntity>
+
+    /** When each of a user's families began: the first token's `issuedAt`. */
+    @Query(
+        """
+        SELECT new com.moyi.identity.infra.database.FamilyStart(t.familyId, MIN(t.issuedAt))
+          FROM RefreshTokenEntity t
+         WHERE t.userId = :userId
+         GROUP BY t.familyId
+        """,
+    )
+    fun familyStartsOf(userId: UUID): List<FamilyStart>
+}
+
+/** A family and the moment it was created (JPQL constructor projection). */
+internal data class FamilyStart(
+    val familyId: UUID,
+    val createdAt: Instant,
+)
+
+/** Devices (V8). No `findAll()`: a device row names a person's phone. */
+internal interface DeviceRepository : Repository<DeviceEntity, UUID> {
+    fun save(device: DeviceEntity): DeviceEntity
+
+    fun findAllByUserId(userId: UUID): List<DeviceEntity>
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE DeviceEntity d SET d.lastSeenAt = :now WHERE d.id = :id")
+    fun touch(
+        id: UUID,
+        now: Instant,
+    ): Int
 }
 
 /**

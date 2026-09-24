@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.Instant
+import java.util.UUID
 
 internal data class RotatedTokens(
     val user: User,
@@ -94,7 +95,7 @@ internal class RotateRefreshToken(
             is Outcome.Rotated -> {
                 RotatedTokens(
                     user = outcome.user,
-                    tokens = SessionTokens(sessions.accessTokenFor(outcome.user.id), outcome.refreshToken),
+                    tokens = SessionTokens(sessions.accessTokenFor(outcome.user.id, outcome.familyId), outcome.refreshToken),
                 )
             }
 
@@ -127,7 +128,9 @@ internal class RotateRefreshToken(
                 // this token a moment ago — a reuse by doc 09's definition.
                 if (tokens.rotate(previous.id, successor.id, now)) {
                     tokens.insert(successor)
-                    Outcome.Rotated(user, issued)
+                    // FR-007: a rotation is the device being seen again.
+                    previous.deviceId?.let { sessions.deviceSeen(it, now) }
+                    Outcome.Rotated(user, previous.familyId, issued)
                 } else {
                     reuse(previous, now)
                 }
@@ -155,6 +158,7 @@ internal class RotateRefreshToken(
     private sealed interface Outcome {
         data class Rotated(
             val user: User,
+            val familyId: UUID,
             val refreshToken: IssuedRefreshToken,
         ) : Outcome
 

@@ -52,4 +52,19 @@ internal class RefreshTokenStore(
     ) {
         tokens.revokeAllForUser(userId.value, now)
     }
+
+    /** @return whether a live family with that id belonged to the user and is now revoked. */
+    fun revokeFamilyOf(
+        userId: UserId,
+        familyId: UUID,
+        now: Instant,
+    ): Boolean = tokens.revokeFamilyOf(userId.value, familyId, now) > 0
+
+    /** The one live token of each of the user's live families. */
+    fun findLiveOf(
+        userId: UserId,
+        now: Instant,
+    ): List<RefreshToken> = tokens.findLiveByUserId(userId.value, now).map { it.toDomain() }
+
+    fun familyStartsOf(userId: UserId): Map<UUID, Instant> = tokens.familyStartsOf(userId.value).associate { it.familyId to it.createdAt }
 }

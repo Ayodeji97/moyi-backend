@@ -192,9 +192,9 @@ expect "another address is unaffected" 201 "" -- -X POST "$API/auth/register" -H
 # is paid for the sixth: the bucket is consumed before the verify.
 LIMITED_EMAIL="limit-$(date +%s)-$RANDOM@example.com"
 for i in 1 2 3 4 5; do
-  curl -s -o /dev/null -H 'Content-Type: application/json' -H 'X-Forwarded-For: 203.0.113.21' -X POST "$API/auth/login" -d "$(printf '{"email":"%s","password":"wrong %s","deviceInfo":"smoke"}' "$LIMITED_EMAIL" "$i")"
+  curl -s -o /dev/null -H 'Content-Type: application/json' -H 'X-Forwarded-For: 203.0.113.21' -X POST "$API/auth/login" -d "$(printf '{"email":"%s","password":"wrong %s"}' "$LIMITED_EMAIL" "$i")"
 done
-expect "the sixth sign-in for one (unknown) address in fifteen minutes is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/login" -H 'X-Forwarded-For: 203.0.113.21' -d "$(printf '{"email":"%s","password":"wrong 6","deviceInfo":"smoke"}' "$LIMITED_EMAIL")"
+expect "the sixth sign-in for one (unknown) address in fifteen minutes is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/login" -H 'X-Forwarded-For: 203.0.113.21' -d "$(printf '{"email":"%s","password":"wrong 6"}' "$LIMITED_EMAIL")"
 header_is "…Retry-After: one token back every three minutes" Retry-After 180
 header_is "…X-RateLimit-Limit is the per-email five, the bucket that decided" X-RateLimit-Limit 5
 [[ "$LAST_BODY" == *"Please wait 3 minutes before trying again."* ]] && pass "…copy names the three minutes" || fail "429 copy" "got: ${LAST_BODY:0:200}"
@@ -215,7 +215,7 @@ echo; echo "sign-in and sessions (FR-003, FR-004, ADR-0020–0022)"
 # The account is verified by now, so this is the ordinary sign-in; the
 # unverified sign-in FR-002 allows is covered by the endpoint tests.
 jget() { python3 -c "import json,sys; print(json.load(sys.stdin)['$1'])"; }
-login_body() { printf '{"email":"%s","password":"%s","deviceInfo":"smoke"}' "$1" "$2"; }
+login_body() { printf '{"email":"%s","password":"%s","device":{"platform":"ANDROID","appVersion":"smoke","osVersion":"16"}}' "$1" "$2"; }
 expect "login is 200 with a token pair and the profile" 200 '"expiresIn":900' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
 ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"; REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
 [[ "$LAST_BODY" == *'"emailVerified":true'* ]] && pass "…and the profile says the address is verified" || fail "profile" "emailVerified not true: ${LAST_BODY:0:120}"
@@ -254,6 +254,29 @@ expect "the logged-out token cannot refresh" 401 '"code":"REFRESH_TOKEN_INVALID"
 expect "logout-all without a bearer token is 401" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/auth/logout-all"
 expect "logout-all with one is 204" 204 "" -- -X POST "$API/auth/logout-all" -H "Authorization: Bearer $ACCESS3"
 
+echo; echo "sessions (FR-007, ADR-0025)"
+# Two sign-ins, two sessions: the list is the caller's live refresh-token
+# families, most recently seen first, and marks the one the bearer belongs to.
+expect "sign in on a phone" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
+PHONE_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"; PHONE_REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "sign in on a watch" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(printf '{"email":"%s","password":"%s","device":{"platform":"WEAR","appVersion":"smoke","osVersion":"5.1"}}' "$EMAIL" "$PASSWORD")"
+WATCH_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+expect "GET /auth/sessions lists both, the watch current" 200 '"current":true' -- "$API/auth/sessions" -H "Authorization: Bearer $WATCH_ACCESS"
+[[ "$LAST_BODY" == *'"platform":"WEAR"'* && "$LAST_BODY" == *'"platform":"ANDROID"'* ]] && pass "…with both devices" || fail "devices in list" "${LAST_BODY:0:200}"
+PHONE_SESSION="$(python3 -c "import json,sys; print(next(s['id'] for s in json.load(sys.stdin)['sessions'] if not s['current']))" <<<"$LAST_BODY")"
+expect "GET /auth/sessions without a bearer is 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/auth/sessions"
+expect "DELETE somebody else's (a random id) is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/auth/sessions/$(python3 -c 'import uuid; print(uuid.uuid4())')" -H "Authorization: Bearer $WATCH_ACCESS"
+expect "DELETE a value that is not an id is 404 too" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/auth/sessions/not-a-session" -H "Authorization: Bearer $WATCH_ACCESS"
+expect "DELETE the phone's session from the watch is 204" 204 "" -- -X DELETE "$API/auth/sessions/$PHONE_SESSION" -H "Authorization: Bearer $WATCH_ACCESS"
+expect "…and the phone's refresh token is dead" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$PHONE_REFRESH\"}"
+expect "…while the phone's access token still lists one session" 200 '"sessions":[{' -- "$API/auth/sessions" -H "Authorization: Bearer $PHONE_ACCESS"
+expect "DELETE the same session again is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/auth/sessions/$PHONE_SESSION" -H "Authorization: Bearer $WATCH_ACCESS"
+WATCH_SESSION="$(curl -s "$API/auth/sessions" -H "Authorization: Bearer $WATCH_ACCESS" | python3 -c "import json,sys; print(next(s['id'] for s in json.load(sys.stdin)['sessions'] if s['current']))")"
+expect "DELETE the current session is a logout: 204" 204 "" -- -X DELETE "$API/auth/sessions/$WATCH_SESSION" -H "Authorization: Bearer $WATCH_ACCESS"
+expect "…and the watch now lists no sessions" 200 '"sessions":[]' -- "$API/auth/sessions" -H "Authorization: Bearer $WATCH_ACCESS"
+expect "an unknown platform is 422 on device.platform" 422 '"field":"device.platform"' -- -X POST "$API/auth/login" -d "$(printf '{"email":"%s","password":"%s","device":{"platform":"BLACKBERRY","appVersion":"1","osVersion":"7"}}' "$EMAIL" "$PASSWORD")"
+flush_buckets
+
 echo; echo "password reset (FR-004, T-17, ADR-0022)"
 EMAILS_BEFORE="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
 expect "forgot-password for the account is 202, empty" 202 "" -- -X POST "$API/auth/forgot-password" -d "{\"email\":\"$EMAIL\"}"
@@ -276,8 +299,9 @@ ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.statu
 # Two tokens by now — the verification link and the reset link — both consumed.
 if [ "$ROW" = "ACTIVE|t|2|2" ]; then pass "user ACTIVE, verified, two tokens (verification + reset), both consumed"; elif [ "$ROW" = "psql-unavailable" ]; then echo "  skip database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|2|2, got '$ROW'"; fi
 SESSIONS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) || '|' || count(*) FILTER (WHERE revoked_at IS NULL) FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
-# Five families were started and every one ended: two by reuse detection and
-# logout, the rest by logout-all and the reset. The final login after the
+# Seven families were started and every one ended: two by reuse detection and
+# logout, the phone's and the watch's by DELETE /auth/sessions, the rest by
+# logout-all and the reset. The final login after the
 # reset is the one live token.
 case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|1") pass "refresh tokens stored as hashes; exactly one live session remains ($SESSIONS)";; *) fail "sessions" "expected exactly one live refresh token, got '$SESSIONS'";; esac
 

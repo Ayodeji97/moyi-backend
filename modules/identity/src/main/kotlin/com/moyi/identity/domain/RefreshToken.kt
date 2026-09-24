@@ -15,7 +15,8 @@ internal data class RefreshToken(
     val rotatedAt: Instant?,
     val revokedAt: Instant?,
     val replacedBy: UUID?,
-    val deviceInfo: String?,
+    /** The [Device] the family started on, or `null` for a sign-in that did not describe itself. */
+    val deviceId: UUID?,
 ) {
     fun isLive(now: Instant): Boolean = rotatedAt == null && revokedAt == null && expiresAt.isAfter(now)
 
@@ -29,7 +30,7 @@ internal data class RefreshToken(
             familyId: UUID,
             secret: VerificationSecret,
             now: Instant,
-            deviceInfo: String?,
+            deviceId: UUID?,
         ): RefreshToken =
             RefreshToken(
                 id = id,
@@ -41,7 +42,7 @@ internal data class RefreshToken(
                 rotatedAt = null,
                 revokedAt = null,
                 replacedBy = null,
-                deviceInfo = deviceInfo,
+                deviceId = deviceId,
             )
     }
 }

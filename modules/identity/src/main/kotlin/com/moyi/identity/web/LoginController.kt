@@ -2,10 +2,14 @@ package com.moyi.identity.web
 
 import com.moyi.common.security.ratelimit.RateLimitBucket
 import com.moyi.common.security.ratelimit.RateLimited
+import com.moyi.identity.domain.Device
+import com.moyi.identity.domain.DeviceDescription
+import com.moyi.identity.domain.DevicePlatform
 import com.moyi.identity.service.LoginCommand
 import com.moyi.identity.service.LoginUser
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -23,7 +27,7 @@ internal class LoginController(
     fun login(
         @Valid @RequestBody request: LoginRequest,
     ): LoginResponse {
-        val result = loginUser.login(LoginCommand(request.email, request.password, request.deviceInfo))
+        val result = loginUser.login(LoginCommand(request.email, request.password, request.device?.toDescription()))
         return LoginResponse(
             accessToken = result.tokens.accessToken.token,
             expiresIn = result.tokens.accessToken.expiresIn,
@@ -47,12 +51,31 @@ internal data class LoginRequest(
     @field:NotBlank
     @field:Size(max = MAX_PASSWORD_LENGTH)
     val password: String,
-    /** The client's free-text description of itself; see `LoginCommand`. */
-    @field:Size(max = MAX_DEVICE_INFO_LENGTH)
-    val deviceInfo: String? = null,
+    /** How the client describes itself (FR-007). Optional: a sign-in without it is still a session. */
+    @field:Valid
+    val device: DeviceRequest? = null,
 ) {
     /** The address is personal data (doc 11 NFR-044) and the password is a secret; neither prints. */
-    override fun toString(): String = "LoginRequest(email=<redacted>, password=<redacted>, deviceInfo=$deviceInfo)"
+    override fun toString(): String = "LoginRequest(email=<redacted>, password=<redacted>, device=$device)"
+}
+
+/**
+ * Doc 04's device, as the wire sees it. `platform` is a string with a
+ * pattern rather than the enum, so that an unknown value is a 422 naming
+ * the field (`device.platform`) and not a 400 "could not read the body".
+ */
+internal data class DeviceRequest(
+    @field:NotBlank
+    @field:Pattern(regexp = "ANDROID|IOS|WEAR", message = "must be one of ANDROID, IOS, WEAR")
+    val platform: String,
+    @field:NotBlank
+    @field:Size(max = Device.MAX_VERSION_LENGTH)
+    val appVersion: String,
+    @field:NotBlank
+    @field:Size(max = Device.MAX_VERSION_LENGTH)
+    val osVersion: String,
+) {
+    fun toDescription(): DeviceDescription = DeviceDescription(DevicePlatform.valueOf(platform), appVersion.trim(), osVersion.trim())
 }
 
 internal data class LoginResponse(
@@ -69,5 +92,3 @@ internal const val MAX_EMAIL_LENGTH = 254
 
 /** `Password.MAX_OCTETS`: nothing longer can be a valid password, so nothing longer is worth verifying. */
 internal const val MAX_PASSWORD_LENGTH = 512
-
-internal const val MAX_DEVICE_INFO_LENGTH = 200

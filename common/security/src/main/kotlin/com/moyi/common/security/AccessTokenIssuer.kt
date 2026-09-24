@@ -12,11 +12,14 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Mints access tokens (doc 09 §3): RS256, fifteen minutes, and exactly the
- * seven claims the document lists — `sub`, `jti`, `iat`, `exp`, `iss`,
- * `aud`, `scope`. **No PII in the token**: the subject is a UUID, and the
- * token carries no email, no name, no status. A JWT is base64, not
- * encrypted, and every client and proxy on the path can read it.
+ * Mints access tokens (doc 09 §3): RS256, fifteen minutes, and the seven
+ * claims the document lists — `sub`, `jti`, `iat`, `exp`, `iss`, `aud`,
+ * `scope` — plus, since FR-007, `sid`: the refresh-token family the token
+ * was minted for, so the sessions list can say which one is *this* one
+ * (ADR-0025). Another opaque UUID, no more personal than `jti`. **No PII in
+ * the token**: the subject is a UUID, and the token carries no email, no
+ * name, no status. A JWT is base64, not encrypted, and every client and
+ * proxy on the path can read it.
  *
  * `jti` comes from the injected [IdGenerator] so a test can predict it and
  * so the generator is the one place randomness for identifiers comes from.
@@ -35,7 +38,10 @@ class AccessTokenIssuer(
     private val ids: IdGenerator,
     private val clock: Clock,
 ) {
-    fun issue(userId: UUID): IssuedAccessToken {
+    fun issue(
+        userId: UUID,
+        sessionId: UUID? = null,
+    ): IssuedAccessToken {
         val now = clock.instant()
         val expiresAt = now.plus(properties.accessTokenTtl)
         val header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(keys.kid).build()
@@ -49,6 +55,7 @@ class AccessTokenIssuer(
                 .expiresAt(expiresAt)
                 .id(ids.opaque().toString())
                 .claim(SCOPE_CLAIM, DEFAULT_SCOPE)
+                .apply { sessionId?.let { claim(SESSION_CLAIM, it.toString()) } }
                 .build()
         val token = encoder.encode(JwtEncoderParameters.from(header, claims)).tokenValue
         return IssuedAccessToken(token, expiresAt, properties.accessTokenTtl.seconds)
@@ -56,6 +63,9 @@ class AccessTokenIssuer(
 
     companion object {
         const val SCOPE_CLAIM = "scope"
+
+        /** The refresh-token family this access token belongs to (FR-007). Absent on a token minted outside a session. */
+        const val SESSION_CLAIM = "sid"
 
         /** One scope for one client. Roles for the admin console (doc 09 §4) widen this when they exist. */
         const val DEFAULT_SCOPE = "user"
