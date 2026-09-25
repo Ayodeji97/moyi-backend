@@ -39,3 +39,40 @@ What none of them say: which springdoc, where its configuration lives, how the R
 ## Revisit when
 
 The client repository exists and consumes the release (the consumption side of doc 06 §5). Tracing lands (`traceId` joins the schema). A second client or team appears (contract-first becomes worth the second source). The invite, entry and media endpoints arrive with their 404-as-403 semantics (doc 06 §2), which the rule-based responses do not yet express.
+
+## Amendment — 2026-09-24: adding an error code is a breaking change, and that is the design working
+
+Slice B1 (ADR-0026) added two values to `ErrorCode` and nothing else that could
+break anybody: three new paths, six new schemas, no removals, no narrowed types,
+no new required request property. The PR was written claiming oasdiff would
+report no breaking change. **It reported 76 errors**, one per operation per
+documented status, all of the same shape:
+
+> in API POST /api/v1/auth/login added the new `BOND_LIMIT_REACHED` enum value
+> to the `code` response property for the response status `400`
+
+oasdiff classifies `response-property-enum-value-added` as ERR, and it is right
+to — **by this project's own design**. `06` §2 says the error codes are
+"enumerated and exhaustive, generated into the client as a sealed class, so an
+unhandled server error code is a compile error on the client". A Kotlin client
+with an exhaustive `when` over that sealed class does not compile against a
+document with a new value in it. That is the whole point of the sealed class,
+and it makes an error-code addition **source-breaking for the client while being
+entirely wire-compatible**: every existing request and response is unchanged.
+
+**Decision: these are labelled, not suppressed.** A PR that adds an error code
+carries `breaking-api-change`, exactly as one that renames a field does. The
+label's job is to tell whoever maintains the client that there is work to do
+before they upgrade, and for an error code there genuinely is. Suppressing the
+check with `err-ignore` would buy a quieter CI at the cost of the one signal the
+sealed-class design exists to produce.
+
+The cost is known and accepted: most slices in Phases 2 to 5 add at least one
+error code, so most of them will carry the label. That makes the label common
+rather than meaningless — it stops meaning "something was removed" and starts
+meaning "regenerate the client before you upgrade", which is the more useful of
+the two.
+
+*Revisit if* the label becomes noise the client author stops reading, at which
+point the answer is two labels — one for wire-breaking, one for
+regenerate-the-client — rather than one suppressed check.

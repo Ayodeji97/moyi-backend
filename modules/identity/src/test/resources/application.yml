@@ -6,6 +6,15 @@ logging:
     org.hibernate.orm.jdbc.error: "OFF"
 
 spring:
+  datasource:
+    hikari:
+      # A test context needs two or three connections, not the default ten.
+      # Spring caches one context per distinct configuration and every one of
+      # them holds a pool for the whole run, so the default multiplied by the
+      # number of contexts in this JVM exhausts the Testcontainers Postgres
+      # ("FATAL: sorry, too many clients already") — which is what adding one
+      # more test class did, with nothing wrong in the code it tested.
+      maximum-pool-size: 4
   data:
     redis:
       # No @RedisHash entities; scanning for them costs a startup.

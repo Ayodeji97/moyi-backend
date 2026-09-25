@@ -58,6 +58,13 @@ internal class AccountStore(
     fun findById(id: UserId): User? = users.findById(id.value).orElse(null)?.toDomain()
 
     /**
+     * Several users in one query, for `identity.api.UserDirectory` (ADR-0026):
+     * the bond module renders a bond's members, and one round trip per member
+     * is the N+1 that a batch lookup exists to avoid.
+     */
+    fun findAllById(ids: Collection<UserId>): List<User> = users.findAllById(ids.map { it.value }).map { it.toDomain() }
+
+    /**
      * Carries a changed [User] onto its existing row. Loads the managed entity
      * and applies the change to *it*, rather than saving a fresh entity that
      * claims to be new — see [applyTo] for the lost-update that would cause.

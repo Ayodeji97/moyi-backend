@@ -9,6 +9,9 @@ dependencies {
     // `app` is the composition root: it depends on every module so that
     // their beans, entities and migrations are on the runtime classpath.
     implementation(projects.modules.identity)
+    // Phase 2: bonds, members, invites and blocks (ADR-0026). Here for the
+    // same reason identity is — beans, entities and V9 on the classpath.
+    implementation(projects.modules.bond)
     // The email port and its Resend adapter. Wired here so the composition
     // root sees the EmailSender bean; identity depends on the module for the
     // `api` package only.
