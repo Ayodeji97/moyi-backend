@@ -201,12 +201,14 @@ class OpenApiContractTest(
         // four ways a code fails are one status and one code, and the client
         // switches on the code.
         val accept = api.paths["/api/v1/invites/{code}/accept"]!!.post
-        accept.responses shouldContainKey "404"
+        accept.responses.keys shouldContainAll listOf("404", "409", "422")
         accept.responses["200"]!!
             .content[MediaType.APPLICATION_JSON_VALUE]!!
             .schema.`$ref` shouldBe "#/components/schemas/BondResponse"
-        api.paths["/api/v1/invites/{code}"]!!.get.responses shouldContainKey "404"
-        api.paths["/api/v1/bonds/{bondId}/invites"]!!.post.responses shouldContainKey "201"
+        api.paths["/api/v1/invites/{code}"]!!
+            .get.responses.keys shouldContainAll listOf("404", "422")
+        api.paths["/api/v1/bonds/{bondId}/invites"]!!
+            .post.responses.keys shouldContainAll listOf("201", "409")
         api.paths["/api/v1/bonds/{bondId}/invites/{inviteId}"]!!.delete.responses shouldContainKey "204"
     }
 
