@@ -4,7 +4,7 @@ import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.Invite
 import com.moyi.bond.domain.Member
 import com.moyi.bond.domain.UserId
-import com.moyi.bond.infra.database.BondStore
+import com.moyi.bond.infra.database.InviteStore
 import com.moyi.identity.api.UserDirectory
 import org.springframework.stereotype.Component
 import java.net.URI
@@ -29,7 +29,7 @@ import java.time.Clock
 @Component
 internal class BondViews(
     private val users: UserDirectory,
-    private val bonds: BondStore,
+    private val invites: InviteStore,
     private val links: InviteLinks,
     private val clock: Clock,
 ) {
@@ -44,7 +44,7 @@ internal class BondViews(
     ): List<BondView> {
         if (bonds.isEmpty()) return emptyList()
         val names = users.findAll(bonds.flatMap { bond -> bond.members.map { it.userId.value } }.distinct())
-        val invites = this.bonds.findLiveInvites(bonds.map { it.id }, clock.instant())
+        val live = this.invites.findLiveOf(bonds.map { it.id }, clock.instant())
         return bonds.map { bond ->
             BondView(
                 bond = bond,
@@ -54,7 +54,7 @@ internal class BondViews(
                 // is a wiring mistake, and it should say so rather than produce
                 // a response with a hole in it.
                 me = bond.memberOf(viewer) ?: error("the viewer is not a member of this bond; the guard should have refused the request"),
-                invite = invites[bond.id]?.let { InviteView(it, links.linkFor(it.code)) },
+                invite = live[bond.id]?.let { InviteView(it, links.linkFor(it.code)) },
             )
         }
     }

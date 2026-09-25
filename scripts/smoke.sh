@@ -7,7 +7,8 @@
 # and the error code the API contract (doc 06) promises — on the happy path AND on
 # the edges that have bitten before: malformed JSON, wrong method, reused
 # token, unknown address, duplicate registration. Since Phase 2 it also proves
-# that two accounts' bonds are invisible to a third (T-02). Since slice F it drives
+# that two accounts can pair by a code and that their bond is invisible to a
+# third (M2, T-02, T-06). Since slice F it drives
 # every rate limit in doc 06 §4 to its 429 (FR-012, ADR-0023) and checks the
 # X-RateLimit-* headers and Retry-After on the way, against the compose Valkey.
 #
@@ -382,6 +383,61 @@ expect "a value that is not an id is 404 as well" 404 '"code":"NOT_FOUND"' -- "$
 expect "the stranger's list is empty" 200 '"bonds":[]' -- "$API/bonds" -H "Authorization: Bearer $STRANGER_ACCESS"
 if grep -qF -- "$CODE" "$MOYI_LOG"; then fail "code in log" "the invite code appears in the log"; else pass "the invite code never appears in the log"; fi
 
+echo; echo "invites and pairing — M2 (FR-022, FR-023, FR-024, T-06, ADR-0027)"
+flush_buckets
+# A second account, verified, so it may join (FR-002).
+JOINER="joiner-$(date +%s)-$RANDOM@example.com"
+EMAILS_BEFORE="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "register the joiner" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.40' -d "$(register_body "$JOINER")"
+for _ in $(seq 1 40); do [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$EMAILS_BEFORE" ] && break; sleep 0.25; done
+JOINER_TOKEN="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+expect "verify the joiner" 200 "" -- -X POST "$API/auth/verify-email" -d "{\"token\":\"$JOINER_TOKEN\"}"
+expect "the joiner signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$JOINER" "$PASSWORD")"
+JOINER_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+
+# BOND_ID and CODE are the bond and code from the previous section.
+expect "the joiner resolves the code and sees who invited them" 200 '"inviterDisplayName":"Smoke"' -- "$API/invites/$CODE" -H "Authorization: Bearer $JOINER_ACCESS"
+[[ "$LAST_BODY" == *'"bondName":"Us"'* ]] && pass "…and the bond's name" || fail "preview" "${LAST_BODY:0:200}"
+expect "a lowercase code resolves too" 200 '"bondName"' -- "$API/invites/$(echo "$CODE" | tr 'A-Z' 'a-z')" -H "Authorization: Bearer $JOINER_ACCESS"
+expect "a malformed code is 422 on the field" 422 '"field":"code"' -- "$API/invites/ABC" -H "Authorization: Bearer $JOINER_ACCESS"
+
+expect "the joiner accepts: 200, and the bond is ACTIVE" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$CODE/accept" -H "Authorization: Bearer $JOINER_ACCESS"
+MEMBERS="$(python3 -c "import json,sys; d=json.load(sys.stdin); print(len(d['members']))" <<<"$LAST_BODY")"
+[ "$MEMBERS" = 2 ] && pass "…with both members in it" || fail "members" "expected 2 members, got $MEMBERS"
+[[ "$LAST_BODY" == *'"invite":null'* ]] && pass "…and no live invite left" || fail "invite cleared" "${LAST_BODY:0:250}"
+expect "the creator sees the same active bond" 200 '"status":"ACTIVE"' -- "$API/bonds/$BOND_ID" -H "Authorization: Bearer $BOND_ACCESS"
+
+# FR-024: every way a code fails is one answer. A spent code and one that was
+# never issued must be indistinguishable.
+# A *verified* caller: the stranger above is deliberately unverified, and
+# FR-002 is checked before the code is, so they would be refused earlier.
+expect "the spent code is 404 INVITE_NOT_USABLE" 404 '"code":"INVITE_NOT_USABLE"' -- -X POST "$API/invites/$CODE/accept" -H "Authorization: Bearer $JOINER_ACCESS"
+SPENT_404="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
+expect "a code that never existed is 404 too" 404 '"code":"INVITE_NOT_USABLE"' -- -X POST "$API/invites/ZZZZZZ/accept" -H "Authorization: Bearer $JOINER_ACCESS"
+NEVER_404="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
+[ "$SPENT_404" = "$NEVER_404" ] && pass "…with a byte-identical body (FR-024, one answer)" || fail "one answer" "bodies differ"
+expect "a full bond takes no new invite: 409 BOND_FULL" 409 '"code":"BOND_FULL"' -- -X POST "$API/bonds/$BOND_ID/invites" -H "Authorization: Bearer $BOND_ACCESS"
+expect "an unverified account is refused before the code is even read: 403" 403 '"code":"EMAIL_NOT_VERIFIED"' -- -X POST "$API/invites/$CODE/accept" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "a non-member cannot invite into it: 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$BOND_ID/invites" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "…and still cannot read it" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$BOND_ID" -H "Authorization: Bearer $STRANGER_ACCESS"
+
+# Revoking, on a bond that still has room.
+expect "a second bond for the joiner" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $JOINER_ACCESS" -d '{"name":"Two","type":"FRIENDS","anchorTimezone":"Europe/London"}'
+SECOND_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+SECOND_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+SECOND_INVITE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['id'])" <<<"$LAST_BODY")"
+expect "issuing a new invite is 201" 201 '"code"' -- -X POST "$API/bonds/$SECOND_BOND/invites" -H "Authorization: Bearer $JOINER_ACCESS"
+THIRD_CODE="$(printf '%s' "$LAST_BODY" | jget code)"
+expect "…and the replaced code no longer works" 404 '"code":"INVITE_NOT_USABLE"' -- "$API/invites/$SECOND_CODE" -H "Authorization: Bearer $BOND_ACCESS"
+expect "the new one does" 200 '"bondName":"Two"' -- "$API/invites/$THIRD_CODE" -H "Authorization: Bearer $BOND_ACCESS"
+expect "revoking another bond's invite id is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$SECOND_BOND/invites/$SECOND_INVITE" -H "Authorization: Bearer $JOINER_ACCESS"
+THIRD_INVITE="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT id FROM bond_invites WHERE code='$THIRD_CODE'" 2>/dev/null | tr -d '[:space:]')"
+expect "revoking the live one is 204" 204 "" -- -X DELETE "$API/bonds/$SECOND_BOND/invites/$THIRD_INVITE" -H "Authorization: Bearer $JOINER_ACCESS"
+expect "…and it stops working at once" 404 '"code":"INVITE_NOT_USABLE"' -- "$API/invites/$THIRD_CODE" -H "Authorization: Bearer $BOND_ACCESS"
+expect "revoking it again is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$SECOND_BOND/invites/$THIRD_INVITE" -H "Authorization: Bearer $JOINER_ACCESS"
+
+if grep -qF -- "$CODE" "$MOYI_LOG" || grep -qF -- "$THIRD_CODE" "$MOYI_LOG"; then fail "code in log" "an invite code appears in the log"; else pass "no invite code appears in the log"; fi
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.
@@ -389,8 +445,9 @@ if [ "$ROW" = "ACTIVE|t|2|2" ]; then pass "user ACTIVE, verified, two tokens (ve
 SESSIONS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) || '|' || count(*) FILTER (WHERE revoked_at IS NULL) FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
 # Every family started here was ended: two by reuse detection and logout,
 # the phone's and the watch's by DELETE /auth/sessions, the rest by
-# logout-all and the reset. Two live tokens remain — the login after the
-# reset, and the one the bond section signed in with.
+# logout-all and the reset. Two live tokens remain for THIS account — the
+# login after the reset and the one the bond section signed in with; the
+# joiner is a different account and is not counted here.
 case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|2") pass "refresh tokens stored as hashes; exactly two live sessions remain ($SESSIONS)";; *) fail "sessions" "expected exactly two live refresh tokens, got '$SESSIONS'";; esac
 
 echo; printf '%d passed, %d failed\n' "$PASS" "$FAIL"

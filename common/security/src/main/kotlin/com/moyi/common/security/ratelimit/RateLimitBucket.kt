@@ -49,6 +49,26 @@ enum class RateLimitBucket(
     /** ADR-0023 addition, same reasoning as [AUTH_RESET_IP]. */
     AUTH_RESEND_IP("auth:resend:ip", Subject.IP, 20, Duration.ofHours(1)),
 
+    /** Doc 06 §4: "`invite:create` (per user) 10 / day". Creating one revokes the outstanding one, so this bounds churn. */
+    INVITE_CREATE_USER("invite:create:user", Subject.USER, 10, Duration.ofDays(1)),
+
+    /**
+     * Ten resolves an hour per user, above the per-IP bucket both code
+     * endpoints share. Added by ADR-0027: doc 06 §3.3 specifies "10/hour/user"
+     * on `GET /invites/{code}` in prose and §4's table carries only the per-IP
+     * half, so this is the table catching up with the endpoint.
+     */
+    INVITE_LOOKUP_USER("invite:lookup:user", Subject.USER, 10, Duration.ofHours(1)),
+
+    /**
+     * Doc 06 §4: "`invite:lookup` + `invite:accept` (per IP) 20 / hour
+     * **combined** — brute-forcing 6-char codes". One bucket named by both
+     * endpoints, which is what "combined" means: 30^6 is about 7.3 x 10^8
+     * codes, and doc 06 says plainly that "the limit is what makes it fine in
+     * practice" (T-06).
+     */
+    INVITE_CODE_IP("invite:code:ip", Subject.IP, 20, Duration.ofHours(1)),
+
     /** Doc 06 §4: "global authenticated 120 / min", per user, on every request that carries a valid token. */
     AUTHENTICATED("authenticated:user", Subject.USER, 120, Duration.ofMinutes(1)),
     ;

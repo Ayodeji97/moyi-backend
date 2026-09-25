@@ -109,6 +109,39 @@ internal data class Bond(
     /** This user's membership, current or ended; `null` for someone who was never in it. */
     fun memberOf(userId: UserId): Member? = members.firstOrNull { it.userId == userId }
 
+    /**
+     * Still waiting for someone, with a seat free (I-1). The question
+     * `POST /invites/{code}/accept` asks, and the answer is deliberately
+     * *not* visible to the caller when it is `false`: a full bond and a
+     * revoked code are one indistinguishable refusal (FR-024).
+     */
+    val hasRoom: Boolean get() = status == BondStatus.PENDING_MEMBER && activeMembers.size < maxMembers
+
+    /**
+     * Takes writes at all. `ARCHIVED` and `PENDING_DELETION` do not (I-5,
+     * BR-9): a bond that has ended is a record, and the only things it still
+     * accepts are reads, export and deletion.
+     */
+    val isOpen: Boolean get() = status == BondStatus.PENDING_MEMBER || status == BondStatus.ACTIVE
+
+    /**
+     * The second member joins (FR-022).
+     *
+     * The bond becomes `ACTIVE`, and that is what starts the clock rather than
+     * bookkeeping: doc 04 §8.3a suspends Bond-day evaluation entirely while a
+     * bond is `PENDING_MEMBER`, so a creator who writes before their partner
+     * arrives — which `02` J1 requires they can — accumulates no solo days and
+     * loses no streak that never began. The streak starts here.
+     *
+     * `check`, not `require`: a bond with no seat is a state conflict rather
+     * than a bad argument, and the service turns it into the one 404 that
+     * tells a stranger nothing about why (FR-024).
+     */
+    fun accept(member: Member): Bond {
+        check(hasRoom) { "a bond that is not waiting for a member cannot accept one" }
+        return copy(status = BondStatus.ACTIVE, members = members + member)
+    }
+
     companion object {
         /** Chosen in the Phase 2 design (§5.2), not by FR-020. Flagged for Daniel. */
         const val MAX_NAME_LENGTH = 60

@@ -155,6 +155,76 @@ class RateLimitInterceptorTest(
         response.contentAsString shouldContain "\"userAgentHash\":null"
     }
 
+    @Test
+    fun `a per-user bucket named by the annotation is keyed on the caller, not the address`() {
+        // Slice B2: `POST /bonds/{id}/invites` is ten a day per user, and two
+        // people behind one office NAT must not share that allowance.
+        val ada = issuer.issue(UUID.randomUUID()).token
+        val bob = issuer.issue(UUID.randomUUID()).token
+
+        val first = probe("/api/v1/probe/per-user", ada)
+        first.status shouldBe 200
+        first.getHeader("X-RateLimit-Limit") shouldBe "10"
+        first.getHeader("X-RateLimit-Remaining") shouldBe "9"
+
+        repeat(9) { probe("/api/v1/probe/per-user", ada).status shouldBe 200 }
+        probe("/api/v1/probe/per-user", ada).status shouldBe 429
+
+        // Same address, different token: untouched.
+        probe("/api/v1/probe/per-user", bob).status shouldBe 200
+    }
+
+    @Test
+    fun `two buckets on one handler are both consumed, and the headers describe the tighter one`() {
+        // `GET /invites/{code}` carries a per-user bucket of ten an hour above
+        // a per-IP bucket of twenty that it shares with accept. Both are
+        // consumed on every call, and the client is told about the one it will
+        // hit first.
+        val ada = issuer.issue(UUID.randomUUID()).token
+
+        val first = probe("/api/v1/probe/two-buckets", ada)
+        first.status shouldBe 200
+        // Ten is tighter than twenty, so the per-user bucket is described.
+        first.getHeader("X-RateLimit-Limit") shouldBe "10"
+        first.getHeader("X-RateLimit-Remaining") shouldBe "9"
+
+        repeat(9) { probe("/api/v1/probe/two-buckets", ada).status shouldBe 200 }
+        probe("/api/v1/probe/two-buckets", ada).status shouldBe 429
+
+        // Ten of the twenty shared tokens are gone, spent by Ada. Bob has a
+        // full per-user allowance and nine calls to make before the *shared*
+        // bucket becomes the tighter of the two.
+        val bob = issuer.issue(UUID.randomUUID()).token
+        repeat(9) { probe("/api/v1/probe/two-buckets", bob).status shouldBe 200 }
+
+        // Carol arrives at a shared bucket with one token in it. Hers is the
+        // last, and the headers now describe the per-IP bucket, because it is
+        // the one about to refuse her.
+        val carol = issuer.issue(UUID.randomUUID()).token
+        val last = probe("/api/v1/probe/two-buckets", carol)
+        last.status shouldBe 200
+        last.getHeader("X-RateLimit-Limit") shouldBe "20"
+        last.getHeader("X-RateLimit-Remaining") shouldBe "0"
+
+        // And the address is out, whoever is asking — which is the T-06 bound.
+        probe("/api/v1/probe/two-buckets", issuer.issue(UUID.randomUUID()).token).status shouldBe 429
+    }
+
+    @Test
+    fun `naming a bucket whose subject is in the body is refused, loudly`() {
+        // The interceptor runs before the body is read, so an EMAIL bucket
+        // cannot be consumed there. A wiring mistake must fail, not silently
+        // skip the limit.
+        val response = probe("/api/v1/probe/wrong-subject", issuer.issue(UUID.randomUUID()).token)
+
+        response.status shouldBe 500
+    }
+
+    private fun probe(
+        path: String,
+        token: String,
+    ): MockHttpServletResponse = mockMvc.get(path) { header(HttpHeaders.AUTHORIZATION, "Bearer $token") }.andReturn().response
+
     private fun register(
         from: String = "127.0.0.1",
         forwardedFor: String? = null,

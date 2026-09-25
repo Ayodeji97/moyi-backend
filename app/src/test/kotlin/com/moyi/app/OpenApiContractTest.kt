@@ -85,6 +85,10 @@ class OpenApiContractTest(
                 "/api/v1/me",
                 "/api/v1/bonds",
                 "/api/v1/bonds/{bondId}",
+                "/api/v1/bonds/{bondId}/invites",
+                "/api/v1/bonds/{bondId}/invites/{inviteId}",
+                "/api/v1/invites/{code}",
+                "/api/v1/invites/{code}/accept",
             )
     }
 
@@ -189,6 +193,23 @@ class OpenApiContractTest(
                     withClue("$name -> $status") { response.headers.orEmpty() shouldContainKey "ETag" }
                 }
         }
+    }
+
+    @Test
+    fun `joining by a code returns a bond, and every code operation documents its 404`() {
+        // FR-024's one answer has to be modellable by a generated client: the
+        // four ways a code fails are one status and one code, and the client
+        // switches on the code.
+        val accept = api.paths["/api/v1/invites/{code}/accept"]!!.post
+        accept.responses.keys shouldContainAll listOf("404", "409", "422")
+        accept.responses["200"]!!
+            .content[MediaType.APPLICATION_JSON_VALUE]!!
+            .schema.`$ref` shouldBe "#/components/schemas/BondResponse"
+        api.paths["/api/v1/invites/{code}"]!!
+            .get.responses.keys shouldContainAll listOf("404", "422")
+        api.paths["/api/v1/bonds/{bondId}/invites"]!!
+            .post.responses.keys shouldContainAll listOf("201", "409")
+        api.paths["/api/v1/bonds/{bondId}/invites/{inviteId}"]!!.delete.responses shouldContainKey "204"
     }
 
     @Test

@@ -44,22 +44,52 @@ class RateLimitInterceptor(
     ): Boolean {
         val method = handler as? HandlerMethod ?: return true
 
-        val perUser = authenticatedUserId()?.let { userId -> consume(RateLimitBucket.AUTHENTICATED, userId) }
-        val perAddress =
-            method.getMethodAnnotation(RateLimited::class.java)?.let { annotation ->
-                check(annotation.bucket.subject == RateLimitBucket.Subject.IP) {
-                    "@RateLimited on ${method.shortLogMessage} names ${annotation.bucket}, whose subject is " +
-                        "${annotation.bucket.subject}; only an IP bucket can be consumed before the body is read."
-                }
-                consume(annotation.bucket, addresses.resolve(request).rateLimitKey)
+        val caller = authenticatedUserId()
+        val global = caller?.let { userId -> consume(RateLimitBucket.AUTHENTICATED, userId) }
+        val named =
+            method.getMethodAnnotation(RateLimited::class.java)?.buckets.orEmpty().map { bucket ->
+                consume(bucket, keyFor(bucket, method, request, caller))
             }
 
-        listOfNotNull(perUser, perAddress)
+        (listOfNotNull(global) + named)
             .filterIsInstance<RateLimitDecision.Allowed>()
             .minByOrNull { it.remaining }
             ?.let { response.writeRateLimit(it.limit, it.remaining, it.resetAt.epochSecond) }
         return true
     }
+
+    /**
+     * What this bucket is keyed on, and the refusal for the one kind that
+     * cannot be. The `check`s fail the request rather than skipping the limit:
+     * a bucket that quietly does not apply is worse than a 500, because
+     * nothing ever notices.
+     */
+    private fun keyFor(
+        bucket: RateLimitBucket,
+        method: HandlerMethod,
+        request: HttpServletRequest,
+        caller: String?,
+    ): String =
+        when (bucket.subject) {
+            RateLimitBucket.Subject.IP -> {
+                addresses.resolve(request).rateLimitKey
+            }
+
+            RateLimitBucket.Subject.USER -> {
+                checkNotNull(caller) {
+                    "@RateLimited on ${method.shortLogMessage} names $bucket, which is keyed on the caller, " +
+                        "but the request carries no verified token. A per-user bucket belongs on an authenticated endpoint."
+                }
+            }
+
+            RateLimitBucket.Subject.EMAIL -> {
+                error(
+                    "@RateLimited on ${method.shortLogMessage} names $bucket, whose subject is an email address. " +
+                        "That is in the request body, which this interceptor has not read; a per-email bucket is " +
+                        "consumed by the service that reads it.",
+                )
+            }
+        }
 
     private fun consume(
         bucket: RateLimitBucket,
