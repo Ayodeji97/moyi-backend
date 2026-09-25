@@ -1231,3 +1231,74 @@ Wrong about: where the first failure would be. I took the API for the thing
          I believed because our builder sets it — the errors that never
          touch the builder were exactly the ones I had never asked the
          running application for.
+
+## 2026-09-24 · Phase 2 · The bond module, and the authorisation check that cannot be forgotten
+Expected: a second module much like the first — a migration, an aggregate, a
+         store, three endpoints — with the interesting part being the guard,
+         which I expected to be a service the controllers remember to call.
+Reality: the guard turned out to be a *type*. Doc 12 §3.6 asks for a Konsist
+         rule that "every controller method taking a bondId passes through
+         BondAccessGuard", and that rule cannot be written: whether the guard
+         ran is a fact about the call graph, which Konsist does not see. What
+         is checkable is the signature one layer down. So `Membership` became
+         a value only the guard can construct, every bond-scoped service takes
+         one, and two rules hold the halves the compiler cannot — nothing else
+         constructs it, and no service function names a bond without it. The
+         authorisation check stopped being a step someone can forget and
+         became an argument they must be holding.
+         **Three things the verification found that reading would not.**
+         (1) Breaking `BondStore.findByMember`'s membership predicate did
+         *not* fail the cross-tenant suite, because the guard re-checks
+         membership on the loaded aggregate. That is defence in depth working,
+         and it means the two layers need two tests: the store's is
+         BondPersistenceTest, which did fail. Breaking the guard itself failed
+         the suite with "a stranger: expected 404, got 200".
+         (2) My first deliberate violation of the BondId rule slipped through,
+         because I wrote the parameter type fully qualified and the rule
+         matches the simple name. The gap is now in the rule's comment. A rule
+         that has never failed is not known to work, and a rule verified once
+         is not known to work *generally*.
+         (3) Adding one test class to identity broke the whole build with
+         "FATAL: sorry, too many clients already". Spring caches a context per
+         distinct configuration, every one holds a ten-connection Hikari pool
+         for the entire run, and the count finally crossed Postgres's default.
+         Nothing was wrong with the code under test. The pools are capped at
+         four now.
+         Two smaller ones: detekt's six-parameter limit split `Member.join`
+         into `owner()` and `member()`, and it was right — the role was the
+         only difference between the two call sites, and a name reads better
+         than an enum argument. And springdoc documented `POST /bonds` as 200,
+         because the status lived in the ResponseEntity; the annotation is
+         what it reads, so the method now carries both and two tests hold them
+         together.
+Wrong about: where the design work was. I thought it was in the aggregate —
+         ADR-0003 had already decided the shape, so modelling it took an hour.
+         The design work was in making the authorisation unforgettable, and
+         the answer came from a constraint I first read as an obstacle: that
+         Konsist cannot see a call graph.
+         **Added after CI.** I wrote "additive, oasdiff should report no
+         breaking change" in the ADR and the PR body, and oasdiff reported 76
+         errors. Adding a value to `ErrorCode` is `response-property-enum-value-
+         added`, which oasdiff calls breaking — and it is right by doc 06 §2's
+         own design, which wants the generated client's sealed class to be
+         exhaustive so an unhandled code is a compile error there. So an error
+         code is source-breaking for the client while being entirely
+         wire-compatible. Labelled rather than suppressed, and ADR-0024 amended
+         to say so once rather than every slice re-deciding it. The lesson is
+         narrower than "check before claiming": I reasoned about the wire and
+         the document's shape, and forgot that the contract's consumer is a
+         *generated sealed class* whose exhaustiveness is the feature.
+         **Added after CI, second time.** `SessionsEndpointTest` went red on
+         the Linux runner with two timestamp assertions — the *same* symptom
+         slice H met and "fixed" by truncating the assertion side to
+         microseconds. That fix was half right. **Postgres rounds fractional
+         seconds to microseconds; it does not truncate** — confirmed at a psql
+         prompt: `.123456789` comes back `.123457`. So a nanosecond-precision
+         Linux clock and a truncating assertion disagree whenever the
+         remainder rounds up, which is about half the time. Green on a Mac,
+         green on some CI runs, red on others. `MutableClock` now truncates at
+         the source, so there is nothing left for the database to round, and a
+         test in `common:testing` pins that invariant. The lesson: when a
+         value survives a round trip unchanged on one machine and not another,
+         find out what the *store* does to it rather than adjusting what the
+         test expects.

@@ -4,10 +4,14 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.security.SecurityConfiguration
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.ErrorCode
+import com.moyi.contracts.OpenApiConfiguration
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.maps.shouldContainKey
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
 import io.swagger.v3.oas.models.OpenAPI
@@ -73,7 +77,15 @@ class OpenApiContractTest(
     @Test
     fun `it is OpenAPI 3 and knows every route that exists`() {
         api.openapi shouldStartWith "3."
-        api.paths.keys shouldContainAll listOf("/api/v1/auth/register", "/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/me")
+        api.paths.keys shouldContainAll
+            listOf(
+                "/api/v1/auth/register",
+                "/api/v1/auth/login",
+                "/api/v1/auth/refresh",
+                "/api/v1/me",
+                "/api/v1/bonds",
+                "/api/v1/bonds/{bondId}",
+            )
     }
 
     @Test
@@ -137,12 +149,78 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `reading a bond documents its 404, and creating one its 201`() {
+        // Doc 06 §2 and ADR-0024's amendment: an operation that names a
+        // resource by a path parameter can answer "not found or not permitted
+        // to know it exists", and a generated client has to be able to model
+        // that. For bonds it is the *usual* answer to a stranger (T-02), not
+        // an edge case.
+        val bond = api.paths["/api/v1/bonds/{bondId}"]!!.get
+        bond.responses shouldContainKey "404"
+        bond.responses["200"]!!.content.keys shouldContainExactly listOf(MediaType.APPLICATION_JSON_VALUE)
+        api.paths["/api/v1/bonds"]!!.post.responses shouldContainKey "201"
+        api.paths["/api/v1/bonds"]!!.post.responses shouldContainKey "409"
+    }
+
+    @Test
+    fun `a response carrying a versioned resource declares its ETag`() {
+        // The header is set on the ResponseEntity, so springdoc cannot see it
+        // and an OpenApiCustomizer adds it by rule. Without it a generated
+        // client has no typed way to keep the value that `If-Match` must send
+        // back, which is the whole reason these endpoints return one (doc 06
+        // §1). Raised by the review of PR #37.
+        val versioned =
+            operations().filter { (_, op) ->
+                op.responses.any { (status, response) ->
+                    status.startsWith("2") &&
+                        response.content?.values?.any {
+                            it.schema
+                                ?.`$ref`
+                                ?.substringAfterLast('/') in OpenApiConfiguration.VERSIONED_RESOURCE_SCHEMAS
+                        } == true
+                }
+            }
+
+        versioned.shouldNotBeEmpty()
+        versioned.forEach { (name, op) ->
+            op.responses
+                .filterKeys { it.startsWith("2") }
+                .forEach { (status, response) ->
+                    withClue("$name -> $status") { response.headers.orEmpty() shouldContainKey "ETag" }
+                }
+        }
+    }
+
+    @Test
     fun `logout is 204, and success bodies are JSON, not star-slash-star`() {
         api.paths["/api/v1/auth/logout"]!!.post.responses shouldContainKey "204"
         api.paths["/api/v1/auth/logout-all"]!!.post.responses shouldContainKey "204"
         api.paths["/api/v1/auth/login"]!!
             .post.responses["200"]!!
             .content.keys shouldContainExactly listOf(MediaType.APPLICATION_JSON_VALUE)
+    }
+
+    @Test
+    fun `every operation has a distinct id, and none was renamed by a collision`() {
+        // springdoc derives `operationId` from the *method name alone* — the
+        // controller class is not part of it — and silently appends `_1` when
+        // two collide, picking the loser by scan order. A generated client
+        // names its methods after these, so a collision renames a method for an
+        // endpoint that did not change, and `oasdiff` does not notice because
+        // no path or schema moved. Slice B1 renamed the sessions list that way
+        // and it took a reviewer to see it.
+        val ids = operations().map { (route, op) -> route to op.operationId }
+
+        ids.forEach { (route, id) ->
+            withClue(route) {
+                id.shouldNotBeNull()
+                // The suffix springdoc adds on a collision. Its presence means
+                // two controller methods share a name: rename one after what
+                // the *API* calls it, not after what reads well in Kotlin.
+                id.endsWith("_1") shouldBe false
+            }
+        }
+        ids.map { it.second }.toSet().size shouldBe ids.size
     }
 
     @Test

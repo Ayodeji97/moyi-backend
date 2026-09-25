@@ -1,0 +1,90 @@
+package com.moyi.bond.web
+
+import com.moyi.bond.domain.BondId
+import com.moyi.bond.domain.UserId
+import com.moyi.bond.service.BondAccessGuard
+import com.moyi.bond.service.BondNotFoundException
+import com.moyi.bond.service.CreateBond
+import com.moyi.bond.service.GetBond
+import com.moyi.bond.service.ListBonds
+import com.moyi.common.security.CurrentUser
+import jakarta.validation.Valid
+import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
+import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
+import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.ResponseStatus
+import org.springframework.web.bind.annotation.RestController
+import java.util.UUID
+
+/**
+ * `/api/v1/bonds` (doc 06 §3.3). Behind the bearer — none of these paths is in
+ * the chain's public list — and nothing here does any work (doc 18 §4).
+ *
+ * **A bond-scoped method's first statement is the guard**, before any body is
+ * validated and before any state is examined, so a non-member never sees a
+ * 409, 412 or 422 that a member would: every one of those would say that the
+ * bond is real.
+ *
+ * The id is taken as text and parsed here rather than as a `UUID` parameter,
+ * the `SessionsController` precedent: a value that is not a UUID cannot name a
+ * bond, and the answer to that is the same 404 as to a UUID that names
+ * nobody's — not a 400 complaining about the shape.
+ *
+ * Every response carrying a bond carries its `ETag`, so a client that later
+ * `PATCH`es (slice B4) already holds the `If-Match` it will need.
+ *
+ * **The method names are API names, not Kotlin ones.** springdoc derives each
+ * operation's `operationId` from the method name alone — the class is not part
+ * of it — so a `list()` here and a `list()` on the sessions controller collide,
+ * and springdoc silently renames one of them to `list_1` depending on scan
+ * order. That renames a *generated client's method* for an endpoint that did
+ * not change, and `oasdiff` does not catch it because no path or schema moved.
+ * Found by the review of PR #37. `OpenApiContractTest` now holds it.
+ */
+@RestController
+@RequestMapping("/api/v1/bonds")
+internal class BondsController(
+    private val guard: BondAccessGuard,
+    private val createBond: CreateBond,
+    private val getBond: GetBond,
+    private val bondList: ListBonds,
+) {
+    /**
+     * `@ResponseStatus` **and** a `ResponseEntity`, which looks redundant and
+     * is not. The entity carries the real status and the `ETag`; the
+     * annotation is what springdoc reads, and without it the generated
+     * contract says this returns 200 — a lie a generated client would be
+     * built on (ADR-0024). The two cannot drift unnoticed:
+     * `BondsEndpointTest` asserts the runtime status is 201, and
+     * `OpenApiContractTest` asserts the document says so.
+     */
+    @PostMapping
+    @ResponseStatus(HttpStatus.CREATED)
+    fun createBond(
+        caller: CurrentUser,
+        @Valid @RequestBody request: CreateBondRequest,
+    ): ResponseEntity<BondResponse> {
+        val view = createBond.create(request.toDraft(UserId(caller.id)))
+        return ResponseEntity.status(HttpStatus.CREATED).eTag(BondResponse.etagOf(view)).body(BondResponse.from(view))
+    }
+
+    @GetMapping
+    fun listBonds(caller: CurrentUser): BondsResponse = BondsResponse(bondList.forUser(UserId(caller.id)).map(BondResponse::from))
+
+    @GetMapping("/{bondId}")
+    fun getBond(
+        caller: CurrentUser,
+        @PathVariable bondId: String,
+    ): ResponseEntity<BondResponse> {
+        val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
+        val view = getBond.view(membership)
+        return ResponseEntity.ok().eTag(BondResponse.etagOf(view)).body(BondResponse.from(view))
+    }
+
+    private fun bondIdOrNotFound(raw: String): BondId =
+        BondId(runCatching { UUID.fromString(raw) }.getOrElse { throw BondNotFoundException() })
+}

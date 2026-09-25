@@ -92,6 +92,20 @@ class ArchitectureTest {
         /** `modules/<name>/src/…` — where a domain module's code lives on disk. */
         private val MODULE_SOURCE_PATH = Regex("""^/modules/([^/]+)/src/""")
 
+        /**
+         * A `Membership(` constructor *call*. The open bracket is what makes
+         * it a call rather than a `[Membership]` mention in KDoc, and the
+         * lookbehind excludes the declaration itself — `data class
+         * Membership(` in its own file is not a construction.
+         */
+        private val MEMBERSHIP_CONSTRUCTION = Regex("""(?<!class )\bMembership\(""")
+
+        /**
+         * The one file allowed to mint a `com.moyi.bond.domain.Membership`.
+         * Konsist reports a file's name without its extension.
+         */
+        private const val BOND_ACCESS_GUARD = "BondAccessGuard"
+
         private data class Location(
             val module: String,
             val layer: String,
@@ -325,6 +339,59 @@ class ArchitectureTest {
             violations.isEmpty(),
             "Constructor injection only (doc 18 §4) — @Autowired field found on: " +
                 violations.joinToString { it.name },
+        )
+    }
+
+    @Test
+    fun `a Membership is only ever constructed by BondAccessGuard`() {
+        // The spec's §4 and doc 05 §5.5 layer 2: the type is a *proof* that
+        // the guard said yes, and a proof anyone can forge is a data class.
+        // Text-matched, because Konsist exposes no call graph — the name is
+        // distinctive enough that a false positive is a loud build failure
+        // rather than a silent pass, which is the right way round.
+        val violations =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/modules/bond/src/main/") }
+                .filter { it.name != BOND_ACCESS_GUARD && MEMBERSHIP_CONSTRUCTION.containsMatchIn(it.text) }
+                .map { it.name }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Only $BOND_ACCESS_GUARD may construct a Membership: it is the evidence that the caller's " +
+                "access was checked, and anything else minting one is an authorisation check that did not happen. " +
+                "Found in: $violations",
+        )
+    }
+
+    @Test
+    fun `a bond service function that names a bond also takes the Membership the guard minted`() {
+        // Doc 12 §3.6 asks that "every @RestController method taking a bondId
+        // passes through BondAccessGuard". Enforced one layer down, where it
+        // is actually checkable: a service function that accepts a BondId
+        // without a Membership is one a controller could call having skipped
+        // the guard. The guard itself is the one legitimate exception — it is
+        // what turns the id into the proof.
+        //
+        // Matched on the simple type name, so a parameter written as
+        // `com.moyi.bond.domain.BondId` evades it — found while verifying this
+        // rule with a deliberate violation, which is what that exercise is
+        // for. The same gap the layer rule above documents for imports, and
+        // narrow for the same reason: Kotlin tooling writes imports and ktlint
+        // keeps them tidy. It is a gap, not a guarantee.
+        val violations =
+            project
+                .functions()
+                .filter { locationOf(it.packagee?.name) == Location("bond", "service") }
+                .filter { it.containingFile.name != BOND_ACCESS_GUARD }
+                .filter { function ->
+                    function.parameters.any { it.type.name == "BondId" } &&
+                        function.parameters.none { it.type.name == "Membership" }
+                }.map { "${it.containingFile.name}: ${it.name}" }
+
+        assertTrue(
+            violations.isEmpty(),
+            "A com.moyi.bond.service function with a BondId parameter must also take the Membership " +
+                "BondAccessGuard minted for that bond (doc 05 §5.5, doc 09 §4). Found: $violations",
         )
     }
 }
