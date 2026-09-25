@@ -52,7 +52,9 @@ fail() { FAIL=$((FAIL+1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
 # chosen: MOYI_JAVA, JAVA_HOME, SDKMAN's current and then any SDKMAN 25+,
 # macOS's java_home, and finally whatever `java` is. Prints its path.
 MIN_JAVA=25
-java_major() { "$1" -version 2>&1 | head -1 | sed -E 's/.*"([0-9]+)[^"]*".*/\1/'; }
+# The version line, not the first line: a set JAVA_TOOL_OPTIONS or _JAVA_OPTIONS
+# makes the JVM print "Picked up …" above it, and every JDK would then look too old.
+java_major() { "$1" -version 2>&1 | grep -m1 'version "' | sed -E 's/.*"([0-9]+)[^"]*".*/\1/'; }
 find_java() {
   local candidate
   for candidate in "${MOYI_JAVA:-}" "${JAVA_HOME:+$JAVA_HOME/bin/java}" \
