@@ -105,6 +105,7 @@ class OpenApiConfiguration {
             if (operation.requestBody != null) addAll(listOf(HttpStatus.BAD_REQUEST, HttpStatus.UNPROCESSABLE_ENTITY))
             if (!public) addAll(listOf(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN))
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
+            if (operation.operationId == "createBond") add(HttpStatus.CONFLICT)
             add(HttpStatus.TOO_MANY_REQUESTS)
             add(HttpStatus.INTERNAL_SERVER_ERROR)
         }

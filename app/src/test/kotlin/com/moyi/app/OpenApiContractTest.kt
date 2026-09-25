@@ -159,6 +159,7 @@ class OpenApiContractTest(
         bond.responses shouldContainKey "404"
         bond.responses["200"]!!.content.keys shouldContainExactly listOf(MediaType.APPLICATION_JSON_VALUE)
         api.paths["/api/v1/bonds"]!!.post.responses shouldContainKey "201"
+        api.paths["/api/v1/bonds"]!!.post.responses shouldContainKey "409"
     }
 
     @Test
