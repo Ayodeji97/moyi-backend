@@ -163,6 +163,47 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    fun `an error Spring raised on its own carries the problem type and our title`() {
+        // ADR-0024's contract lists `type` as required on every problem body,
+        // and Spring's own ProblemDetail arrives without one — with its own
+        // title-cased title, too. Found by asking the running jar for a 404
+        // during the Phase 1 smoke test (2026-09-24), not by reading the
+        // handler, which stamped `code` and looked complete.
+        val response =
+            mockMvc
+                .get("/things")
+                .andReturn()
+                .response
+
+        response.status shouldBe 405
+        response.contentAsString shouldContain "https://api.moyi.app/problems/method-not-allowed"
+        response.contentAsString shouldContain "\"title\":\"Method not allowed\""
+        response.contentAsString shouldContain "\"instance\":\"/things\""
+        // Spring's headers on its own errors survive the rebuild: `Allow` is
+        // the one a client can act on.
+        response.getHeader("Allow") shouldContain "POST"
+    }
+
+    @Test
+    fun `an unknown route is 404 and says nothing about static resources`() {
+        // The running application answers `/api/v1/me/` with Spring's
+        // "No static resource api/v1/me." — an implementation detail with
+        // the word "static" in it, on an API that serves none.
+        val response =
+            mockMvc
+                .get("/nothing-here")
+                .andReturn()
+                .response
+
+        response.status shouldBe 404
+        response.contentAsString shouldContain "\"code\":\"NOT_FOUND\""
+        response.contentAsString shouldContain "https://api.moyi.app/problems/not-found"
+        response.contentAsString shouldContain "\"detail\":\"No such resource.\""
+        response.contentAsString shouldNotContain "static resource"
+        response.contentAsString shouldNotContain "endpoint"
+    }
+
+    @Test
     fun `our own handlers keep their code, which the new stamping must not reach`() {
         // Honest about what this covers: our handlers build their response
         // directly and never pass through `handleExceptionInternal`, so the

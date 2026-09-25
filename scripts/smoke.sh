@@ -21,6 +21,14 @@
 #   PORT=18080 scripts/smoke.sh   # boot on another port
 #   BASE=http://localhost:8080 scripts/smoke.sh --attach  # probe a server you started yourself;
 #                                                          # needs MOYI_LOG=<its log file> to read the emailed link
+#   MOYI_JAVA=/path/to/jdk-25/bin/java scripts/smoke.sh   # boot with that JDK instead of the one found
+#
+# The jar is compiled for JDK 25 (build-logic's jvmToolchain), which is not
+# necessarily the `java` on PATH: Gradle downloads its own toolchain and
+# SDKMAN's `current` is only on PATH in an interactive shell. Booting the jar
+# on JDK 21 dies at once with UnsupportedClassVersionError — and the old loop
+# below waited its full ninety seconds before saying "timed out". Both found
+# on 2026-09-24 by running this script from a non-interactive shell.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -40,6 +48,24 @@ done
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
 fail() { FAIL=$((FAIL+1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+
+# The first JDK that can run the jar, in order of how deliberately it was
+# chosen: MOYI_JAVA, JAVA_HOME, SDKMAN's current and then any SDKMAN 25+,
+# macOS's java_home, and finally whatever `java` is. Prints its path.
+MIN_JAVA=25
+# The version line, not the first line: a set JAVA_TOOL_OPTIONS or _JAVA_OPTIONS
+# makes the JVM print "Picked up …" above it, and every JDK would then look too old.
+java_major() { "$1" -version 2>&1 | grep -m1 'version "' | sed -E 's/.*"([0-9]+)[^"]*".*/\1/'; }
+find_java() {
+  local candidate
+  for candidate in "${MOYI_JAVA:-}" "${JAVA_HOME:+$JAVA_HOME/bin/java}" \
+      "$HOME/.sdkman/candidates/java/current/bin/java" "$HOME"/.sdkman/candidates/java/*/bin/java \
+      "$(/usr/libexec/java_home -v "$MIN_JAVA+" 2>/dev/null)/bin/java" "$(command -v java || true)"; do
+    [ -n "$candidate" ] && [ -x "$candidate" ] || continue
+    [ "$(java_major "$candidate")" -ge "$MIN_JAVA" ] 2>/dev/null && { echo "$candidate"; return 0; }
+  done
+  return 1
+}
 
 # Empties every rate-limit bucket in the compose Valkey. The buckets are the
 # point of slice F, and they are also what makes a second run of this script —
@@ -74,7 +100,9 @@ expect() {
 # header_is <label> <header-name> <expected-value> — checked against LAST_HEADERS.
 header_is() {
   local label="$1" name="$2" want="$3" got
-  got="$(printf '%s\n' "$LAST_HEADERS" | grep -i "^$name:" | head -1 | cut -d' ' -f2-)"
+  # `|| true`: under `set -eo pipefail` a header that is simply absent made
+  # grep fail the assignment and the whole script exit 1 without a FAIL line.
+  got="$(printf '%s\n' "$LAST_HEADERS" | grep -i "^$name:" | head -1 | cut -d' ' -f2- || true)"
   if [ "$got" = "$want" ]; then pass "$label ($name: $got)"; else fail "$label" "expected $name: $want, got '${got:-<absent>}'"; fi
 }
 
@@ -86,14 +114,18 @@ if [ "$ATTACH" = 0 ]; then
     ./gradlew -q :app:bootJar
   fi
   JAR="$(ls app/build/libs/app-*-SNAPSHOT.jar | grep -v plain | head -1)"
+  JAVA="$(find_java)" || { echo "no JDK $MIN_JAVA or newer found: set MOYI_JAVA or JAVA_HOME, or install one (README: sdk install java 25.0.4-tem)"; exit 1; }
   MOYI_LOG="$(mktemp -t moyi-smoke.XXXXXX.log)"
-  echo "booting $JAR (local profile), log: $MOYI_LOG"
-  java -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" >"$MOYI_LOG" 2>&1 &
+  echo "booting $JAR (local profile) on $("$JAVA" -version 2>&1 | head -1), log: $MOYI_LOG"
+  "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
   trap 'kill $APP_PID 2>/dev/null; wait $APP_PID 2>/dev/null || true' EXIT
   for _ in $(seq 1 90); do
     grep -q "Started MoyiApplication" "$MOYI_LOG" && break
     grep -q "APPLICATION FAILED" "$MOYI_LOG" && { echo "the application failed to start:"; grep -A3 "APPLICATION FAILED" "$MOYI_LOG"; exit 1; }
+    # A JVM that could not even load the main class is gone long before any
+    # Spring banner: notice, rather than wait out the timeout.
+    kill -0 "$APP_PID" 2>/dev/null || { echo "the application exited before it started:"; head -5 "$MOYI_LOG"; exit 1; }
     sleep 1
   done
   grep -q "Started MoyiApplication" "$MOYI_LOG" || { echo "timed out waiting for startup"; tail -20 "$MOYI_LOG"; exit 1; }
@@ -222,6 +254,14 @@ ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"; REFRESH="$(printf '%s' 
 [[ "$LAST_BODY" == *'"emailVerified":true'* ]] && pass "…and the profile says the address is verified" || fail "profile" "emailVerified not true: ${LAST_BODY:0:120}"
 expect "GET /me with the access token is 200" 200 "\"email\":\"$EMAIL\"" -- "$API/me" -H "Authorization: Bearer $ACCESS"
 header_is "…and every authenticated request is counted against the per-user bucket (doc 06 §4)" X-RateLimit-Limit 120
+# Errors Spring raises for itself — no such route, wrong method — arrive in
+# the contract's shape too: `type` (required by contracts/openapi.json), our
+# prose title, and no implementation detail. Found by this smoke test on
+# 2026-09-24: a trailing slash was a 404 with `"type":null` and the detail
+# "No static resource api/v1/me." on an API that serves none.
+expect "a trailing slash is a 404 in the contract's shape" 404 '"type":"https://api.moyi.app/problems/not-found"' -- "$API/me/" -H "Authorization: Bearer $ACCESS"
+[[ "$LAST_BODY" == *'"detail":"No such resource."'* && "$LAST_BODY" != *"static resource"* ]] && pass "…that says only 'No such resource.'" || fail "404 detail" "${LAST_BODY:0:160}"
+expect "PUT /me is 405 METHOD_NOT_ALLOWED with a type" 405 '"type":"https://api.moyi.app/problems/method-not-allowed"' -- -X PUT "$API/me" -H "Authorization: Bearer $ACCESS"
 expect "wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "not the password")"
 WRONG="$LAST_BODY"
 expect "unknown address is 401 too" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "nobody-$RANDOM@example.com" "not the password")"
