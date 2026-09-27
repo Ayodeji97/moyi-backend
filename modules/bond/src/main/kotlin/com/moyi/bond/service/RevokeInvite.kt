@@ -2,6 +2,7 @@ package com.moyi.bond.service
 
 import com.moyi.bond.domain.InviteId
 import com.moyi.bond.domain.Membership
+import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.InviteStore
 import com.moyi.common.web.NotFoundException
 import org.slf4j.LoggerFactory
@@ -23,22 +24,32 @@ import java.time.Clock
  */
 @Service
 internal class RevokeInvite(
+    private val bonds: BondStore,
     private val invites: InviteStore,
     private val clock: Clock,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     /**
+     * @throws BondArchivedException the bond has ended (BR-9). Ending a bond
+     *   revokes its live invite already, so the alternative answer would be the
+     *   404 a dead invite gives — true, but less than the member is entitled to,
+     *   and different from what every other write on an archived bond says. The
+     *   design's §6.3 makes it one rule: every bond-scoped write on an archived
+     *   bond is this (ADR-0028).
      * @throws InviteNotFoundException the invite is already dead, belongs to
      *   another bond, or never existed — one answer for all three, because the
      *   caller is entitled to know about their own bond's invites and nothing
      *   else, and "which of those was it" is not theirs to learn.
      */
     @Transactional
+    @Suppress("ThrowsCount")
     fun revoke(
         membership: Membership,
         inviteId: InviteId,
     ) {
+        val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
+        if (!bond.isOpen) throw BondArchivedException()
         if (!invites.revoke(membership.bondId, inviteId, clock.instant())) throw InviteNotFoundException()
         log.info("Invite {} revoked in bond {}", inviteId.value, membership.bondId.value)
     }

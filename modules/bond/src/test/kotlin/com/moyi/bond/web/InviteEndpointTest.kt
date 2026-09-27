@@ -142,6 +142,25 @@ internal class InviteEndpointTest(
         revokeInvite(ada, bondIdOf(bond), "not-an-id").status shouldBe 404
     }
 
+    @Test
+    fun `revoking an invite on a bond that has ended is 409 BOND_ARCHIVED`() {
+        // The design's §6.3: an archived bond takes no writes, and this is one.
+        // Leaving already revoked the code, so the alternative answer is a 404
+        // that is true and says less than the member is entitled to (ADR-0028).
+        val ada = users.verified("Ada")
+        val bond = createBond(ada)
+        mockMvc
+            .post("/api/v1/bonds/${bondIdOf(bond)}/leave") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(ada).token}")
+            }.andReturn()
+            .response.status shouldBe 204
+
+        val response = revokeInvite(ada, bondIdOf(bond), inviteIdOf(bond))
+
+        response.status shouldBe 409
+        response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+    }
+
     // ---- resolving and accepting --------------------------------------------
 
     @Test
