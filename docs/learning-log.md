@@ -1345,3 +1345,56 @@ Wrong about: what "already designed" protects you from. The spec had the one
          needed, one by fixing a race in one of the two places it occurs.
          A design document tells you what to build. Only a test that tries
          every case tells you whether you did.
+
+## 2026-09-27 · Phase 2 · Ending a bond, and the channel I nearly shipped in the ETag
+Expected: the smallest slice of Phase 2. Two `204` endpoints, one archive flag,
+         one `blocks` insert, and a test that the two responses look the same —
+         the design had it all written down and B2's `InviteOneAnswerTest` was
+         the pattern to copy.
+Reality: the interesting part was not the bodies. Doc 26 §2.1 says a blocked
+         person must learn nothing from the other side, and the bodies of a
+         left bond and a blocked bond are trivially identical because both are
+         just an archived bond. The channel that is *not* trivial is the
+         **`ETag`** — a bond's `ETag` is its row version, so if the block path
+         wrote to the bond row once more than the leave path did, the other
+         member would be holding a number that counts how many times something
+         happened to them. Nothing in the JSON would differ. I only noticed
+         because I was writing the assertion list and asked what else the
+         response carries, which is a thin reason to catch something that
+         thin. It is now asserted in `DiscreetExitTest` and again in the smoke
+         script.
+         **The first mutation of that assertion did not kill it, and the reason
+         was the more useful finding.** I added two writes to the block path
+         that changed a field and changed it back, expecting the version to
+         tick twice — it did not move at all, because both writes live in one
+         transaction and Hibernate coalesces them into a single flush and a
+         single version bump. Forcing a flush between them (a bulk JPQL update
+         does that) made the version jump to 4 against the leave's 2 and the
+         test failed properly: `expected:<"2"> but was:<"4">`. So the version
+         is only exposed when a write crosses a flush boundary — worth knowing
+         before B4 makes `If-Match` load-bearing, and a reminder that a
+         mutation that fails to kill a test has two explanations and the
+         flattering one is usually wrong.
+         The lock mutation was blunter: deleting `lockBond` from `EndBond` made
+         both race tests fail three runs out of three — with a **500**, not
+         corruption, because `@Version` catches the conflicting write. The lock
+         is not what prevents the bad state; the version is. The lock is what
+         stops the user seeing a server error for asking two reasonable things
+         at once. Same for the archived check: removing it gives 500, not a
+         wrong 204, because `Bond.leave`'s `check(isOpen)` still refuses. Two
+         layers hold every guard here, and only the outer one knows the right
+         status — which is an argument for keeping both, not for trusting one.
+         Smaller: `DELETE /bonds/{id}/invites/{id}` on an archived bond used to
+         answer 404, which is true (ending a bond revokes its code) and is not
+         what the design's §6.3 promises — "every other bond-scoped write is
+         409 BOND_ARCHIVED". Nearly-true rules are the ones that get built on,
+         so it is 409 now, and the contract gained one response. And the
+         cross-tenant suite failed on both new routes before I added their
+         fixtures, naming them in the message, exactly as B1 designed it to.
+Wrong about: which part of "indistinguishable" is hard. I assumed it was the
+         copy and the status codes — the things a person reads. Those were
+         free. The hard part was the metadata the *client* is told to keep,
+         and I would not have found it by reading FR-029 or by comparing
+         response bodies more carefully. It came from enumerating everything
+         that crosses the wire, headers included, which is now the question I
+         want to ask on every slice where two paths must look alike.
