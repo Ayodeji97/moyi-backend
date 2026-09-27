@@ -687,7 +687,6 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
-import java.time.Instant
 
 /**
  * `POST /bonds/{bondId}/leave` and `POST /bonds/{bondId}/block` (FR-026,
