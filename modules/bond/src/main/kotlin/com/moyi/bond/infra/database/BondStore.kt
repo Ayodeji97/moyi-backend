@@ -130,6 +130,25 @@ internal class BondStore(
     }
 
     /**
+     * Writes a bond that has ended: the status and `archived_at` on the bond
+     * row, and `left_at` on whichever member rows the aggregate now says have
+     * left — together, so the two cannot disagree about what happened.
+     *
+     * [bond] is the aggregate *after* `leave` or `end`. Nothing is written for
+     * a row that already matches: Hibernate's dirty check is what keeps
+     * `version` — and therefore the `ETag` — still after a repeat block, which
+     * doc 26 §2.1 requires (`BondPersistenceTest` holds it).
+     */
+    fun archive(bond: Bond) {
+        val rows = members.findAllByBondId(bond.id.value).associateBy { it.getId() }
+        bond.members.forEach { member -> rows[member.id.value]?.let(member::applyTo) }
+        members.saveAll(rows.values)
+        val entity = bonds.findById(bond.id.value) ?: error("cannot archive a bond that does not exist")
+        bond.applyTo(entity)
+        bonds.save(entity)
+    }
+
+    /**
      * Everyone who has ever held a membership row in this bond, those who
      * left included — which is who FR-029's block check has to consider: a
      * bond somebody walked away from is exactly where a block would have been

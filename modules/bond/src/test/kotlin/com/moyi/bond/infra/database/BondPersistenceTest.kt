@@ -396,4 +396,57 @@ internal class BondPersistenceTest(
         transactions.execute { blocks.existsBetween(blocked, listOf(stranger)) } shouldBe false
         transactions.execute { blocks.existsBetween(blocked, emptyList()) } shouldBe false
     }
+
+    @Test
+    fun `archiving writes the members who left and the bond's status together`() {
+        val (bond, invite) = newBond()
+        transactions.executeWithoutResult { store.insert(bond).also { invites.insert(invite) } }
+        val memberId = bond.members.single().id
+
+        transactions.executeWithoutResult { store.archive(bond.leave(memberId, now)) }
+
+        val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+        loaded.status shouldBe BondStatus.ARCHIVED
+        loaded.archivedAt shouldBe now
+        loaded.activeMembers shouldHaveSize 0
+        loaded.memberOf(bond.createdBy).shouldNotBeNull().leftAt shouldBe now
+        // The version moved once, which is the ETag a client must now send back.
+        loaded.version shouldBe 1
+    }
+
+    @Test
+    fun `archiving a bond that has already ended does not move the version`() {
+        // The ETag is the row version, and doc 26 §2.1 says the other side
+        // learns nothing from a block — including how many times it happened.
+        // Hibernate's dirty check is what makes that true, so it is on trial.
+        val (bond, invite) = newBond()
+        transactions.executeWithoutResult { store.insert(bond).also { invites.insert(invite) } }
+        val memberId = bond.members.single().id
+        transactions.executeWithoutResult { store.archive(bond.leave(memberId, now)) }
+        val once = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+
+        transactions.executeWithoutResult { store.archive(once.end(memberId, now.plusSeconds(60))) }
+
+        val twice = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+        twice.version shouldBe once.version
+        twice shouldBe once
+    }
+
+    @Test
+    fun `a block is written once, however many times it is made`() {
+        // FR-029 allows blocking a bond that has already ended, so it allows
+        // blocking twice: the second call must be the same 204 as the first,
+        // and a check-then-insert would make two concurrent ones a 500.
+        val (bond, invite) = newBond()
+        transactions.executeWithoutResult { store.insert(bond).also { invites.insert(invite) } }
+        val other = UserId(UUID.randomUUID())
+        val block = Block(bond.createdBy, other, bond.id, now)
+
+        transactions.execute { blocks.insertIfAbsent(block) } shouldBe true
+        transactions.execute { blocks.insertIfAbsent(block.copy(createdAt = now.plusSeconds(60))) } shouldBe false
+
+        jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
+        jdbc.queryForObject("SELECT created_at FROM blocks", Instant::class.java) shouldBe now
+        transactions.execute { blocks.existsBetween(other, listOf(bond.createdBy)) } shouldBe true
+    }
 }
