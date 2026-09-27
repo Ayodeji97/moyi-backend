@@ -86,9 +86,9 @@ and `CreateInvite` already take. Without it a leave and an accept are two transa
 READ COMMITTED snapshots: the accept sees a free seat, the leave sees an open bond, and both
 commit, leaving somebody an active member of an archived bond.
 
-**7. A bond already in `PENDING_DELETION` keeps that status.** `Bond.end` archives only a
-bond that is still open, so a block during B5's deletion cooling-off fills `archived_at` and
-leaves the status the deletion job reads alone.
+**7. A bond already in `PENDING_DELETION` is untouched.** `Bond.end` changes only a bond
+that is still open, so a block during B5's deletion cooling-off writes its `blocks` rows and
+leaves the status — and everything else — exactly as the deletion job expects to find it.
 
 **8. Nothing anywhere says "block".** No response body, no error code, no log line. The
 service logs "a member ended bond {id}" for both paths and names no user (doc 18 §5).
