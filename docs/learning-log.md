@@ -1391,6 +1391,19 @@ Reality: the interesting part was not the bodies. Doc 26 §2.1 says a blocked
          so it is 409 now, and the contract gained one response. And the
          cross-tenant suite failed on both new routes before I added their
          fixtures, naming them in the message, exactly as B1 designed it to.
+         **CI found the one real mistake in the slice, and it was in a test.**
+         `EndBondRaceTest` asserted that after a concurrent leave and block
+         nobody is left active — true in the ordering my machine produced, and
+         false in CI's. `left_at` is only ever the *caller's own*: if the block
+         wins, the bond is archived by the time the leave arrives, so the leave
+         is a 409 and that member keeps `left_at IS NULL`. Which is the ordinary
+         state of whoever did not end the bond, and here reached by losing a
+         race. The assertion is now written per branch and says why, because the
+         state is worth documenting rather than discovering: no slot is held
+         (FR-025 counts open bonds only), and block still stamps them if they
+         want out. Third time CI's Linux runner has caught an assumption that
+         held on this laptop.
+
 Wrong about: which part of "indistinguishable" is hard. I assumed it was the
          copy and the status codes — the things a person reads. Those were
          free. The hard part was the metadata the *client* is told to keep,

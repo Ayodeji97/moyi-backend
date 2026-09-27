@@ -88,7 +88,7 @@ internal class EndBondRaceTest(
     }
 
     @Test
-    fun `both members ending it at the same moment leaves one archive and nobody active`() {
+    fun `both members ending it at the same moment archive it once, and the loser is told`() {
         val ada = users.verified("Ada")
         val bea = users.verified("Bea")
         val created = createBond(ada)
@@ -96,14 +96,32 @@ internal class EndBondRaceTest(
         accept(bea, codeOf(created)).status shouldBe 200
 
         val statuses = inParallel(listOf({ leave(ada, bondId) }, { block(bea, bondId) })).map { it.status }
+        val leaving = statuses.first()
+        val blocking = statuses.last()
 
-        // The two serialise on the row lock. The block is always 204; the leave
-        // is 204 if it went first and 409 if it found the bond already archived.
-        statuses.last() shouldBe 204
-        statuses.first() shouldBeIn listOf(204, 409)
-        jdbc.queryForObject("SELECT count(*) FROM bond_members WHERE left_at IS NULL", Int::class.java) shouldBe 0
+        // The two serialise on the row lock, and which of them gets there first
+        // decides one thing only: whether the *leave* succeeds. The block is
+        // accepted either way — that is FR-029, and the reason it is.
+        blocking shouldBe 204
+        leaving shouldBeIn listOf(204, 409)
         jdbc.queryForObject("SELECT count(*) FROM bonds WHERE archived_at IS NOT NULL", Int::class.java) shouldBe 1
         jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
+
+        // **`left_at` is only ever the caller's own.** If the leave went first,
+        // both members end up stamped — each ended their own membership. If the
+        // block went first, the bond was already archived when the leave
+        // arrived, so it is 409 and the leaver's row keeps `left_at IS NULL`:
+        // an active member of an archived bond, which is the ordinary state of
+        // the person who did *not* end it, here reached by losing a race.
+        //
+        // That is not a leak — FR-025 counts memberships in *open* bonds, so no
+        // slot is held — and there is still a way out: block is accepted on an
+        // archived bond and stamps them. But it is worth asserting rather than
+        // discovering. CI found this: the first version of this test asserted
+        // nobody was active, which is true only in the ordering my machine
+        // happened to produce.
+        val stillActive = jdbc.queryForObject("SELECT count(*) FROM bond_members WHERE left_at IS NULL", Int::class.java)!!
+        stillActive shouldBe if (leaving == 204) 0 else 1
     }
 
     /** Runs every call on its own thread and releases them together. */
