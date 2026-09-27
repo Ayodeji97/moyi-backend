@@ -8,7 +8,9 @@
 # the edges that have bitten before: malformed JSON, wrong method, reused
 # token, unknown address, duplicate registration. Since Phase 2 it also proves
 # that two accounts can pair by a code and that their bond is invisible to a
-# third (M2, T-02, T-06). Since slice F it drives
+# third (M2, T-02, T-06), and since slice B3 that a bond can be ended and that a
+# block is indistinguishable from a leave from the other side — the same bytes
+# and the same ETag (doc 26 §2.1, T-09). Since slice F it drives
 # every rate limit in doc 06 §4 to its 429 (FR-012, ADR-0023) and checks the
 # X-RateLimit-* headers and Retry-After on the way, against the compose Valkey.
 #
@@ -437,6 +439,116 @@ expect "…and it stops working at once" 404 '"code":"INVITE_NOT_USABLE"' -- "$A
 expect "revoking it again is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$SECOND_BOND/invites/$THIRD_INVITE" -H "Authorization: Bearer $JOINER_ACCESS"
 
 if grep -qF -- "$CODE" "$MOYI_LOG" || grep -qF -- "$THIRD_CODE" "$MOYI_LOG"; then fail "code in log" "an invite code appears in the log"; else pass "no invite code appears in the log"; fi
+
+echo; echo "ending — leave and block (FR-026, FR-029, T-09, doc 26 §2.1, ADR-0028)"
+flush_buckets
+
+# Registers, verifies and signs in one account, leaving its token in
+# ACCOUNT_ACCESS. Factored out because this section needs four accounts and the
+# sequence was already written twice inline above. Every account has the same
+# display name ("Smoke", from register_body), which is what lets two bonds be
+# compared byte for byte below. A different X-Forwarded-For each time, so the
+# per-IP registration bucket is not what this section ends up testing.
+verified_account() {
+  local label="$1" ip="$2" email before token
+  email="end-$label-$(date +%s)-$RANDOM@example.com"
+  before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+  expect "register $label" 201 "" -- -X POST "$API/auth/register" -H "X-Forwarded-For: $ip" -d "$(register_body "$email")"
+  for _ in $(seq 1 40); do [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$before" ] && break; sleep 0.25; done
+  token="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+  expect "verify $label" 200 "" -- -X POST "$API/auth/verify-email" -d "{\"token\":\"$token\"}"
+  expect "$label signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$email" "$PASSWORD")"
+  ACCOUNT_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+}
+
+etag_of() { printf '%s\n' "$LAST_HEADERS" | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
+
+# Two pairs, built identically, ended differently. Doc 26 §2.1 is about what the
+# OTHER member can see, so anything that differs between the two archived bonds
+# is something a blocked person could use to tell they were blocked (T-09).
+verified_account "leaver" "203.0.113.50";  LEAVER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "stayer" "203.0.113.51";  STAYER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "blocker" "203.0.113.52"; BLOCKER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "blocked" "203.0.113.53"; BLOCKED_ACCESS="$ACCOUNT_ACCESS"
+
+expect "a bond to leave is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Us")"
+LEFT_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+LEFT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+LEFT_INVITE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['id'])" <<<"$LAST_BODY")"
+expect "the other member joins it" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$LEFT_CODE/accept" -H "Authorization: Bearer $STAYER_ACCESS"
+expect "leaving is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/leave" -H "Authorization: Bearer $LEAVER_ACCESS"
+
+expect "a bond to block in is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BLOCKER_ACCESS" -d "$(bond_body "Us")"
+BLOCK_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+BLOCK_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "the other member joins that one too" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$BLOCK_CODE/accept" -H "Authorization: Bearer $BLOCKED_ACCESS"
+expect "blocking is 204 — the same 204" 204 "" -- -X POST "$API/bonds/$BLOCK_BOND/block" -H "Authorization: Bearer $BLOCKER_ACCESS"
+
+# The archive stays readable for both, including whoever left (states.md §9).
+expect "the member who left still reads the bond" 200 '"status":"ARCHIVED"' -- "$API/bonds/$LEFT_BOND" -H "Authorization: Bearer $LEAVER_ACCESS"
+[[ "$LAST_BODY" == *'"invite":null'* ]] && pass "…and its code is gone from the body" || fail "invite cleared" "${LAST_BODY:0:200}"
+expect "the one who stayed reads it too" 200 '"status":"ARCHIVED"' -- "$API/bonds/$LEFT_BOND" -H "Authorization: Bearer $STAYER_ACCESS"
+LEFT_VIEW="$LAST_BODY"; LEFT_ETAG="$(etag_of)"
+expect "the blocked member reads theirs, unaware" 200 '"status":"ARCHIVED"' -- "$API/bonds/$BLOCK_BOND" -H "Authorization: Bearer $BLOCKED_ACCESS"
+BLOCK_VIEW="$LAST_BODY"; BLOCK_ETAG="$(etag_of)"
+
+# Doc 26 §2.1 on the wire: normalise the ids and timestamps two different bonds
+# cannot share, and what is left must be the same bytes.
+if python3 - "$LEFT_VIEW" "$BLOCK_VIEW" <<'PYEOF'
+import re, sys
+
+def normalise(body):
+    ids = {}
+    body = re.sub(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        lambda m: ids.setdefault(m.group(0), "uuid-%d" % len(ids)),
+        body,
+    )
+    return re.sub(r"\d{4}-\d{2}-\d{2}T[0-9:.]+Z", "timestamp", body)
+
+left, blocked = normalise(sys.argv[1]), normalise(sys.argv[2])
+if left != blocked:
+    print(left, file=sys.stderr)
+    print(blocked, file=sys.stderr)
+    sys.exit(1)
+PYEOF
+then pass "a block is indistinguishable from a leave, byte for byte (doc 26 §2.1)"
+else fail "discreet exit" "the two archived bonds do not read the same"; fi
+# The ETag is the row version: a block that wrote once more than a leave would
+# show here and nowhere else.
+[ "$LEFT_ETAG" = "$BLOCK_ETAG" ] && pass "…and the ETags match, so the version counts no blocks ($LEFT_ETAG)" || fail "discreet exit etag" "leave $LEFT_ETAG vs block $BLOCK_ETAG"
+[[ "${BLOCK_VIEW,,}" != *block* ]] && pass "…and no response anywhere says block" || fail "discreet exit wording" "${BLOCK_VIEW:0:200}"
+
+# An archived bond takes no writes (BR-9, the design's §6.3).
+expect "leaving twice is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X POST "$API/bonds/$LEFT_BOND/leave" -H "Authorization: Bearer $STAYER_ACCESS"
+expect "inviting into an archived bond is 409" 409 '"code":"BOND_ARCHIVED"' -- -X POST "$API/bonds/$LEFT_BOND/invites" -H "Authorization: Bearer $STAYER_ACCESS"
+expect "revoking its invite is 409 too" 409 '"code":"BOND_ARCHIVED"' -- -X DELETE "$API/bonds/$LEFT_BOND/invites/$LEFT_INVITE" -H "Authorization: Bearer $LEAVER_ACCESS"
+expect "the code it carried is dead" 404 '"code":"INVITE_NOT_USABLE"' -- "$API/invites/$LEFT_CODE" -H "Authorization: Bearer $STAYER_ACCESS"
+
+# Block is the one write an archived bond accepts, and it repeats (FR-029).
+expect "blocking an archived bond is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
+expect "blocking again is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
+BLOCK_ROWS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) FROM blocks WHERE bond_id='$LEFT_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+case "$BLOCK_ROWS" in psql-unavailable) echo "  skip block row count";; 1) pass "…and one row, not two";; *) fail "block rows" "expected 1, got '$BLOCK_ROWS'";; esac
+
+# A non-member is refused before the bond's state is even looked at (T-02).
+expect "a stranger cannot leave someone else's bond" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$LEFT_BOND/leave" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "…nor block in it" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STRANGER_ACCESS"
+
+# FR-029: the pair cannot be put back in touch, whichever of them holds the code.
+expect "the blocker starts a new bond" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BLOCKER_ACCESS" -d "$(bond_body "Again")"
+REPAIR_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "the blocked account cannot join it: 404 INVITE_NOT_USABLE" 404 '"code":"INVITE_NOT_USABLE"' -- -X POST "$API/invites/$REPAIR_CODE/accept" -H "Authorization: Bearer $BLOCKED_ACCESS"
+
+# FR-025: leaving frees the slot the limit counts.
+# The bond they left is archived and no longer counts, so all three open slots
+# are free again — a fourth create is the one that would have been refused.
+expect "the leaver opens another bond" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Two")"
+expect "and another" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Three")"
+expect "a third open one is 201, because the bond they left frees its slot" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Four")"
+expect "…and a fourth is 409 BOND_LIMIT_REACHED" 409 '"code":"BOND_LIMIT_REACHED"' -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Five")"
+
+if grep -qiE '\bblock' "$MOYI_LOG"; then fail "block in log" "the log says block"; else pass "the log never says who blocked whom"; fi
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
