@@ -156,7 +156,12 @@ internal class BondEndingEndpointTest(
         block(ada, bondId).status shouldBe 204
 
         jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
-        jdbc.queryForObject("SELECT count(*) FROM bond_members WHERE left_at IS NULL", Int::class.java) shouldBe 0
+        // And the blocker's own membership is deliberately *not* stamped: the
+        // person who left keeps read access, and a `leftAt` appearing on the
+        // other member would tell them they were blocked, since block is the
+        // only mutation this bond still accepts (doc 26 §2.1). `left_at` is only
+        // ever set by ending a bond that is still open.
+        jdbc.queryForObject("SELECT count(*) FROM bond_members WHERE left_at IS NULL", Int::class.java) shouldBe 1
     }
 
     @Test

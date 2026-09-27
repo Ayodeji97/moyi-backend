@@ -169,30 +169,47 @@ internal data class Bond(
     }
 
     /**
-     * [leave]'s effect with no state check — what FR-029's block does, and the
-     * reason it is a separate function.
+     * [leave]'s effect on a bond that is still open, and **nothing at all** on
+     * one that has already ended — what FR-029's block does, and the reason it
+     * is a separate function.
      *
-     * Block is permitted on an **archived** bond, because blocking someone who
-     * left first is exactly the case FR-029 exists for (ADR-0028), and it must
-     * also be safe to repeat: a second call returns an object equal to the
-     * first, so the row is never rewritten and the `version` behind the `ETag`
-     * does not move. That is not tidiness. A version that ticked on a repeat
-     * block would let the other side count how many times it happened, and doc
-     * 26 §2.1 says the other side learns nothing at all.
+     * Block is permitted on an archived bond, because blocking someone who left
+     * first is exactly the case FR-029 exists for (ADR-0028). On that bond this
+     * returns `this`, and that is the whole of doc 26 §2.1 in one line.
      *
-     * A bond already in `PENDING_DELETION` keeps that status: B5's cooling-off
-     * is running and the deletion job reads it. Only [archivedAt] is filled,
-     * and only if it was empty.
+     * **The reason, because it is not obvious and it was nearly wrong.** After
+     * one member leaves, their `left_at` is stamped and the other's is null, and
+     * the leaver keeps read access to the archive (`states.md` §9) where
+     * `MemberResponse` shows both. If blocking then stamped the blocker's
+     * `left_at`, the leaver's next `GET /bonds/{id}` would *change* — and since
+     * block is the only mutation an archived bond accepts, the only thing that
+     * change could mean is "they blocked me". An oracle delivered to precisely
+     * the person T-09 says must not be told, and one no amount of matching
+     * status codes would have closed. Found by the Codex review bot on PR #39;
+     * `DiscreetExitTest` now holds it.
+     *
+     * Leaving the blocker's membership unstamped costs nothing: FR-025 counts
+     * memberships in *open* bonds, so no slot is held, and the record of the
+     * block is the `blocks` row, which no response exposes. It also makes a
+     * repeat block a true no-op — the returned object is equal, so nothing is
+     * written and the `version` behind the `ETag` cannot count blocks either.
+     *
+     * A bond already in `PENDING_DELETION` is likewise untouched: B5's
+     * cooling-off is running and the deletion job reads that status.
      */
     fun end(
         memberId: MemberId,
         now: Instant,
     ): Bond =
-        copy(
-            status = if (isOpen) BondStatus.ARCHIVED else status,
-            archivedAt = archivedAt ?: now,
-            members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it },
-        )
+        if (!isOpen) {
+            this
+        } else {
+            copy(
+                status = BondStatus.ARCHIVED,
+                archivedAt = now,
+                members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it },
+            )
+        }
 
     companion object {
         /** Chosen in the Phase 2 design (§5.2), not by FR-020. Flagged for Daniel. */

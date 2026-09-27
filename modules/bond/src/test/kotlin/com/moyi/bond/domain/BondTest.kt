@@ -239,7 +239,12 @@ internal class BondTest {
     }
 
     @Test
-    fun `ending a bond somebody else already left leaves the archive stamp alone`() {
+    fun `ending a bond somebody else already left changes nothing they could see`() {
+        // The oracle this closes: the leaver keeps read access to the archive
+        // and `MemberResponse` shows both members' `leftAt`, so stamping the
+        // blocker's would make the leaver's next GET change — and block is the
+        // only mutation an archived bond accepts, so the change could only mean
+        // "they blocked me" (doc 26 §2.1, T-09). Found by the Codex bot on #39.
         val joined = create().let { it.accept(joiner(it)) }
         val owner = joined.members.first { it.role == MemberRole.OWNER }
         val other = joined.members.first { it.role == MemberRole.MEMBER }
@@ -247,9 +252,9 @@ internal class BondTest {
 
         val blocked = archived.end(other.id, now.plusSeconds(3600))
 
+        blocked shouldBe archived
         blocked.archivedAt shouldBe now
-        blocked.memberOf(other.userId)!!.leftAt shouldBe now.plusSeconds(3600)
-        blocked.activeMembers shouldHaveSize 0
+        blocked.memberOf(other.userId)!!.leftAt.shouldBeNull()
     }
 
     @Test

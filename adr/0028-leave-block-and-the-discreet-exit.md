@@ -38,11 +38,26 @@ indistinguishability doc 26 requires is therefore a property of *one implementat
 rather than something two implementations have to keep agreeing about as later slices
 touch them.
 
-**2. Leave refuses an archived bond; block does not.** `leave` is `409 BOND_ARCHIVED` on a
-bond that has already ended. `block` is accepted there, because blocking somebody who left
-first is precisely the case FR-029 exists for, and it is idempotent: a repeat call writes
-nothing. This is the only difference in what the two accept, and it is invisible from the
-other side, because the other side cannot call either one on the caller's behalf.
+**2. Leave refuses an archived bond; block does not — and on an archived bond a block
+changes nothing visible at all.** `leave` is `409 BOND_ARCHIVED` on a bond that has already
+ended. `block` is accepted there, because blocking somebody who left first is precisely the
+case FR-029 exists for. On such a bond it writes the `blocks` rows and **`Bond.end` returns
+the aggregate unchanged** — no `left_at` for the blocker, no status change, no version bump.
+
+That last clause is the whole of doc 26 §2.1 in one line, and it was nearly wrong. The
+first implementation stamped the blocker's `left_at`. The member who left keeps read access
+to the archive (`states.md` §9), `MemberResponse` shows every member's `leftAt`, and block is
+the *only* mutation an archived bond accepts — so a `leftAt` appearing on the other member
+could mean exactly one thing, and the person reading it is the person T-09 says must not be
+told. **Found by the Codex review bot on PR #39**, after a test suite that compared two
+bonds ended by the same member and therefore never looked at the asymmetric order.
+`DiscreetExitTest` now has that case: Bea leaves, Ada blocks, and Bea's `GET /bonds/{id}` is
+byte-identical before and after, `ETag` included.
+
+Leaving the blocker unstamped costs nothing. FR-025 counts memberships in *open* bonds, so
+no slot is held; the record of the block is the `blocks` row, which no response exposes; and
+`left_at` keeps one clear meaning — **it is set only by ending a bond that was still
+open, and only for the caller.**
 
 **3. A block is one row per other member, current or left**, written with `INSERT … ON
 CONFLICT DO NOTHING`. Someone who walked away is still someone this account does not want
@@ -94,6 +109,9 @@ service logs "a member ended bond {id}" for both paths and names no user (doc 18
 - **FR-029a — withdrawing your entries on a block — is Phase 3**, when there are entries to
   withdraw. Doc 26 §5.1's open question (whether withdrawal destroys the author's own copy)
   is still Daniel's to answer.
+- **`left_at` means one thing only, and later slices must keep it that way:** the caller
+  ended a bond that was open. Anything that stamps it for another reason re-opens the oracle
+  decision 2 closes.
 - **The `blocks` table now has a writer.** Its rows are read by `AcceptInvite` in both
   directions (B2), and nothing ever deletes one. If a block is ever liftable, that is a
   delete and a new decision.
@@ -102,6 +120,11 @@ service logs "a member ended bond {id}" for both paths and names no user (doc 18
 
 - **A distinct status or error code for a bond ended by a block.** Rejected: it is exactly
   the oracle doc 26 §2.1 and T-09 forbid, delivered to the one person who must not have it.
+- **Stamping the blocker's `left_at` when they block an already-archived bond.** Rejected
+  once the review showed what it discloses (decision 2). The alternative fix — dropping
+  `leftAt` from `MemberResponse` — was considered and rejected as the wrong lever: the field
+  is honest information about who ended the bond, and it is the *change* after the fact that
+  leaks, not the field.
 - **Deleting the member row on leave.** Rejected: `states.md` §9 keeps the archive readable
   for both, so "is this person a member of this bond" has to stay answerable — and FR-029's
   block check needs the person who walked away to still be findable.

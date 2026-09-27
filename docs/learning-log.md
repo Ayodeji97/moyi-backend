@@ -1404,6 +1404,23 @@ Reality: the interesting part was not the bodies. Doc 26 §2.1 says a blocked
          want out. Third time CI's Linux runner has caught an assumption that
          held on this laptop.
 
+         **Then the Codex bot found a P1 my own tests could not have caught,
+         and it was the same class of mistake as the `ETag`.** Blocking an
+         already-archived bond stamped the blocker's `left_at`. The person who
+         left keeps read access, `MemberResponse` shows every member's `leftAt`,
+         and block is the only mutation an archived bond accepts — so from her
+         side a field *changed*, and the only thing that change could mean is
+         "she blocked me". My `DiscreetExitTest` compares two bonds ended by the
+         same member, which is the symmetric case; the oracle lives in the
+         asymmetric one (she leaves, then he blocks), and I never wrote that
+         test. `Bond.end` now returns the aggregate unchanged on a bond that has
+         already ended, and the new test asserts her GET is byte-identical
+         before and after, `ETag` included. Reverting the fix makes it fail, so
+         it holds. That is twice in one slice that the leak was a *change over
+         time* rather than a difference between two responses — comparing two
+         snapshots is not the same as comparing before and after, and I had only
+         built the first kind.
+
 Wrong about: which part of "indistinguishable" is hard. I assumed it was the
          copy and the status codes — the things a person reads. Those were
          free. The hard part was the metadata the *client* is told to keep,

@@ -117,6 +117,44 @@ internal class DiscreetExitTest(
         normalise(blockedAgain.contentAsString) shouldBe normalise(leftAgain.contentAsString)
     }
 
+    @Test
+    fun `a block after the other member has already left changes nothing they can see`() {
+        // **The case the two tests above do not cover, and the one the Codex
+        // review bot found on PR #39.** They compare two bonds ended *by the
+        // same member*. This one is the asymmetric order: Bea leaves, and Ada —
+        // who is still in it — blocks her afterwards, which FR-029 exists to
+        // allow.
+        //
+        // Bea keeps read access to the archive (`states.md` §9) and
+        // `MemberResponse` shows every member's `leftAt`. So if the block
+        // stamped Ada's, Bea's next GET would *change* — and since block is the
+        // only mutation an archived bond accepts, the only thing that change
+        // could mean is "she blocked me". An oracle aimed at exactly the person
+        // T-09 says must not be told, and one that no comparison of two leave-
+        // ended bonds would ever have caught.
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        accept(bea, codeOf(created)).status shouldBe 200
+        post(bea, "/api/v1/bonds/$bondId/leave").status shouldBe 204
+        val before = getBond(bea, bondId)
+
+        post(ada, "/api/v1/bonds/$bondId/block").status shouldBe 204
+
+        val after = getBond(bea, bondId)
+        withClue("what Bea sees after being blocked") {
+            after.status shouldBe before.status
+            after.getHeader(HttpHeaders.ETAG) shouldBe before.getHeader(HttpHeaders.ETAG)
+            // Not normalised: it is the same bond, so this is equality, not
+            // equivalence. Nothing at all may change.
+            after.contentAsString shouldBe before.contentAsString
+        }
+        // The block itself did happen — it is simply invisible to her.
+        jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
+        before.contentAsString shouldContain "\"status\":\"ARCHIVED\""
+    }
+
     /**
      * A bond built the same way every time: Ada creates it, Bea joins, and then
      * [ending] finishes it. The display names are fixed so that two of these

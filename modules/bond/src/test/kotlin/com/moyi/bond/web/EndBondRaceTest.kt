@@ -107,21 +107,18 @@ internal class EndBondRaceTest(
         jdbc.queryForObject("SELECT count(*) FROM bonds WHERE archived_at IS NOT NULL", Int::class.java) shouldBe 1
         jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
 
-        // **`left_at` is only ever the caller's own.** If the leave went first,
-        // both members end up stamped — each ended their own membership. If the
-        // block went first, the bond was already archived when the leave
-        // arrived, so it is 409 and the leaver's row keeps `left_at IS NULL`:
-        // an active member of an archived bond, which is the ordinary state of
-        // the person who did *not* end it, here reached by losing a race.
+        // **`left_at` is only ever stamped by ending a bond that is still open**,
+        // and only for the caller. So exactly one member is left unstamped in
+        // either ordering: whichever request arrived second found the bond
+        // already archived, and neither path touches membership there — the
+        // leave because it is refused, the block because stamping would tell the
+        // other member they were blocked (doc 26 §2.1).
         //
-        // That is not a leak — FR-025 counts memberships in *open* bonds, so no
-        // slot is held — and there is still a way out: block is accepted on an
-        // archived bond and stamps them. But it is worth asserting rather than
-        // discovering. CI found this: the first version of this test asserted
-        // nobody was active, which is true only in the ordering my machine
-        // happened to produce.
-        val stillActive = jdbc.queryForObject("SELECT count(*) FROM bond_members WHERE left_at IS NULL", Int::class.java)!!
-        stillActive shouldBe if (leaving == 204) 0 else 1
+        // No slot is held by that row: FR-025 counts memberships in *open*
+        // bonds. Worth asserting rather than discovering — the first version of
+        // this test expected zero, which held only in the ordering my machine
+        // produced, and CI failed it.
+        jdbc.queryForObject("SELECT count(*) FROM bond_members WHERE left_at IS NULL", Int::class.java) shouldBe 1
     }
 
     /** Runs every call on its own thread and releases them together. */
