@@ -194,4 +194,72 @@ internal class BondTest {
         member.copy(nicknameForOther = "x".repeat(40)).nicknameForOther shouldBe "x".repeat(40)
         member.copy(nicknameForOther = null).nicknameForOther.shouldBeNull()
     }
+
+    @Test
+    fun `leaving archives the bond and stamps the member who left`() {
+        val bond = create()
+        val ownerId = bond.members.single().id
+        val later = now.plusSeconds(60)
+
+        val left = bond.leave(ownerId, later)
+
+        left.status shouldBe BondStatus.ARCHIVED
+        left.archivedAt shouldBe later
+        left.activeMembers shouldHaveSize 0
+        left.memberOf(creator)!!.leftAt shouldBe later
+    }
+
+    @Test
+    fun `the other member stays active when one leaves`() {
+        val joined = create().let { it.accept(joiner(it)) }
+        val owner = joined.members.first { it.role == MemberRole.OWNER }
+
+        val left = joined.leave(owner.id, now)
+
+        left.status shouldBe BondStatus.ARCHIVED
+        left.activeMembers.map { it.role } shouldBe listOf(MemberRole.MEMBER)
+    }
+
+    @Test
+    fun `an archived bond cannot be left again`() {
+        val bond = create()
+        val memberId = bond.members.single().id
+        val archived = bond.leave(memberId, now)
+
+        shouldThrow<IllegalStateException> { archived.leave(memberId, now) }
+    }
+
+    @Test
+    fun `ending is idempotent, so blocking twice changes nothing`() {
+        val bond = create()
+        val memberId = bond.members.single().id
+        val ended = bond.end(memberId, now)
+
+        ended.end(memberId, now.plusSeconds(600)) shouldBe ended
+    }
+
+    @Test
+    fun `ending a bond somebody else already left leaves the archive stamp alone`() {
+        val joined = create().let { it.accept(joiner(it)) }
+        val owner = joined.members.first { it.role == MemberRole.OWNER }
+        val other = joined.members.first { it.role == MemberRole.MEMBER }
+        val archived = joined.leave(owner.id, now)
+
+        val blocked = archived.end(other.id, now.plusSeconds(3600))
+
+        blocked.archivedAt shouldBe now
+        blocked.memberOf(other.userId)!!.leftAt shouldBe now.plusSeconds(3600)
+        blocked.activeMembers shouldHaveSize 0
+    }
+
+    @Test
+    fun `ending a bond already heading for deletion does not drag it back to archived`() {
+        // B5 owns PENDING_DELETION and its cooling-off. Blocking during it must
+        // not reset the status the deletion job reads.
+        val pending = create().copy(status = BondStatus.PENDING_DELETION)
+
+        pending.end(pending.members.single().id, now).status shouldBe BondStatus.PENDING_DELETION
+    }
+
+    private fun joiner(bond: Bond): Member = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)
 }

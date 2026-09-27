@@ -64,7 +64,9 @@ internal data class BondDraft(
  *
  * - **I-1** at most [maxMembers] active members, and no user twice.
  * - **I-5 / BR-9** an archived bond accepts no writes — enforced by the
- *   transition methods, which arrive with B3–B5; B1 has none to guard.
+ *   transition methods: [accept] and [leave] refuse one, and [end] is the
+ *   single deliberate exception, because FR-029 allows a block after the bond
+ *   has ended (ADR-0028).
  *
  * [members] includes people who have **left**. That is deliberate:
  * `states.md` §9 keeps the archive readable for both members afterwards, so
@@ -141,6 +143,56 @@ internal data class Bond(
         check(hasRoom) { "a bond that is not waiting for a member cannot accept one" }
         return copy(status = BondStatus.ACTIVE, members = members + member)
     }
+
+    /**
+     * FR-026: this member walks away, and the bond becomes a record.
+     *
+     * One member leaving archives the whole bond rather than leaving the other
+     * alone in it. Doc 04 §4.3 has no state for a bond of one and the product
+     * has no screen for it: a gratitude exchange between two people is over
+     * when either of them stops, and `states.md` §9 keeps what was written
+     * readable for both afterwards instead of pretending the bond continues.
+     *
+     * Nobody is notified — T-09's "discreet exit". The other member finds out
+     * by opening the app, which is also how they would find out about a block,
+     * and that is the point (doc 26 §2.1).
+     *
+     * `check`, not `require`: leaving a bond that has already ended is a state
+     * conflict, and the service turns it into `409 BOND_ARCHIVED`.
+     */
+    fun leave(
+        memberId: MemberId,
+        now: Instant,
+    ): Bond {
+        check(isOpen) { "a bond that has ended cannot be left again" }
+        return end(memberId, now)
+    }
+
+    /**
+     * [leave]'s effect with no state check — what FR-029's block does, and the
+     * reason it is a separate function.
+     *
+     * Block is permitted on an **archived** bond, because blocking someone who
+     * left first is exactly the case FR-029 exists for (ADR-0028), and it must
+     * also be safe to repeat: a second call returns an object equal to the
+     * first, so the row is never rewritten and the `version` behind the `ETag`
+     * does not move. That is not tidiness. A version that ticked on a repeat
+     * block would let the other side count how many times it happened, and doc
+     * 26 §2.1 says the other side learns nothing at all.
+     *
+     * A bond already in `PENDING_DELETION` keeps that status: B5's cooling-off
+     * is running and the deletion job reads it. Only [archivedAt] is filled,
+     * and only if it was empty.
+     */
+    fun end(
+        memberId: MemberId,
+        now: Instant,
+    ): Bond =
+        copy(
+            status = if (isOpen) BondStatus.ARCHIVED else status,
+            archivedAt = archivedAt ?: now,
+            members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it },
+        )
 
     companion object {
         /** Chosen in the Phase 2 design (§5.2), not by FR-020. Flagged for Daniel. */
