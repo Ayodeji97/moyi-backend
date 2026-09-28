@@ -217,3 +217,26 @@ read-then-conditional-write one decision.
   the job was down should do.
 - Somebody asks for a one-sided deletion of their own data on an archived bond, which §10
   deliberately does not offer.
+
+## Review amendment: consent names the proposal
+
+`pendingTimezoneChange` includes its immutable `id`. Confirmation requires a JSON
+body `{ "proposalId": "<id the member reviewed>" }`. Under the bond lock the service
+compares that id with the live proposal; a cancelled, expired or replaced proposal
+returns the existing indistinguishable 404. Without this binding, cancelling a
+London proposal and replacing it with Tokyo lets an old London confirmation apply
+Tokyo silently. The current proposal can still be confirmed normally. Time is
+sampled after acquiring the lock, so time spent waiting cannot extend consent TTL.
+
+The bond representation ETag now includes the visible timezone proposal, deletion
+request and scheduled deletion date, extending ADR-0029's representation validator.
+Creation, cancellation and clock-driven expiry invalidate conditional GETs even
+when the bond row version is unchanged. Private settings and blocks remain excluded.
+Clients echo the complete opaque ETag, and send the proposal id from their reviewed
+response when confirming; the generated OpenAPI contract and smoke flow show both.
+
+Cancellation also rechecks the caller's current membership from the bond loaded
+under the lifecycle lock. `Membership.left` is a guard-time snapshot: a leave can
+commit before the cancellation obtains its lock. The deterministic interleaving
+test captures that snapshot, commits leave, then verifies cancellation cannot
+clear the existing deletion countdown.

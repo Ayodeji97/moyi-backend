@@ -23,12 +23,23 @@ internal fun BondView.entityTag(): String {
                     bond.maxMembers,
                     bond.createdAt,
                     bond.archivedAt,
+                    bond.deletionScheduledFor,
                 ),
             )
             members.forEach { view ->
                 val member = view.member
                 addAll(listOf(member.id.value, view.displayName, member.role, member.joinedAt, member.leftAt))
             }
+            addAll(
+                listOf(
+                    timezoneChange?.id?.value,
+                    timezoneChange?.payload,
+                    timezoneChange?.proposedByMemberId?.value,
+                    timezoneChange?.proposedAt,
+                    timezoneChange?.expiresAt,
+                ),
+            )
+            addAll(listOf(deletion?.proposedByMemberId?.value, deletion?.proposedAt, deletion?.expiresAt))
             addAll(listOf(me.id.value, me.role))
             addAll(listOf(invite?.invite?.id?.value, invite?.invite?.code?.value, invite?.link, invite?.invite?.expiresAt))
         }

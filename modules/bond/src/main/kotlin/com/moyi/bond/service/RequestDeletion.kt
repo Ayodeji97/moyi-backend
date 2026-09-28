@@ -89,17 +89,12 @@ internal class RequestDeletion(
      * open, so if this consulted it the cooling-off could never be cancelled —
      * which is the one thing a cooling-off exists for.
      *
-     * **Which is why this is the one path that has to read
-     * [Membership.left] itself.** Everywhere else a member who has left is
-     * refused by `isOpen`, because leaving archives the bond — so the flag has
-     * never been load-bearing and nothing consulted it. Here `isOpen` is gone
-     * on purpose, and without the flag a member could agree to the deletion,
-     * walk out, and revoke the agreement on the way: the bond would land in
-     * `ARCHIVED` with the countdown cleared, and the member still in it could
-     * never delete it, because every re-request answers `409` on an archived
-     * bond. `Bond.end` already says the rule this enforces — one of them
-     * walking away is not a reason to undo what both agreed. Found by the
-     * second review of PR #41.
+     * **This path rechecks active membership under the bond lock.** The
+     * guard's [Membership.left] is only a snapshot: a concurrent leave can
+     * commit before cancellation acquires its lock. Without the current check,
+     * a member could agree to deletion, walk out, then revoke that agreement
+     * and strand the remaining member in an archived bond that cannot be
+     * deleted. Walking away must not undo what both agreed.
      *
      * The refusal is [ProposalNotFoundException]'s one answer, not a new code:
      * "never made, already answered, cancelled, lapsed" gains a fifth cause
@@ -117,10 +112,11 @@ internal class RequestDeletion(
         val cancelled =
             when {
                 // A member who has left has nothing to call off. First, so that
-                // it holds however the bond got here — and inside this `when`
+                // re-read under the lock: membership.left was captured by the
+                // guard before a concurrent leave could commit. Inside this `when`
                 // rather than as an early throw, so that every "nothing to
                 // cancel" leaves by the one door below.
-                membership.left -> {
+                bond.memberOf(membership.userId)?.isActive != true -> {
                     false
                 }
 

@@ -1,10 +1,16 @@
 package com.moyi.bond.web
 
+import com.moyi.bond.domain.BondId
+import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.BondTestApplication
 import com.moyi.bond.infra.FakeUserDirectory
+import com.moyi.bond.service.BondAccessGuard
+import com.moyi.bond.service.ProposalNotFoundException
+import com.moyi.bond.service.RequestDeletion
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.api.UserDirectory
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeIn
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -46,6 +52,8 @@ import javax.sql.DataSource
 internal class ProposalRaceTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
+    @Autowired private val guard: BondAccessGuard,
+    @Autowired private val deletions: RequestDeletion,
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
@@ -167,6 +175,21 @@ internal class ProposalRaceTest(
             }
             clear()
         }
+    }
+
+    @Test
+    fun `a cancellation authorized before a leave cannot undo deletion after that leave commits`() {
+        val (ada, bea, bondId) = pairedBond(0)
+        requestDeletion(ada, bondId).status shouldBe 202
+        requestDeletion(bea, bondId).status shouldBe 202
+        // The controller's guard read and service transaction are separate. This
+        // interleaving deterministically exercises the stale authorization window.
+        val beforeLeave = guard.membershipOf(UserId(ada), BondId(UUID.fromString(bondId)))
+        leave(ada, bondId).status shouldBe 204
+
+        shouldThrow<ProposalNotFoundException> { deletions.cancel(beforeLeave) }
+        jdbc.queryForObject("SELECT status FROM bonds", String::class.java) shouldBe "PENDING_DELETION"
+        jdbc.queryForObject("SELECT deletion_requested_at IS NOT NULL FROM bonds", Boolean::class.java) shouldBe true
     }
 
     /** Runs every call on its own thread and releases them together. */

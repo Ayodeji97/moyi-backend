@@ -1255,7 +1255,7 @@
             "description" : "Accepted",
             "headers" : {
               "ETag" : {
-                "description" : "The resource's version, quoted (RFC 9110 §8.8.3). Send it back as `If-Match` to update it (doc 06 §1).",
+                "description" : "Opaque representation validator (RFC 9110 §8.8.3). Echo the entire value as `If-Match` when updating (doc 06 §1).",
                 "schema" : {
                   "type" : "string"
                 }
@@ -1867,7 +1867,7 @@
             "description" : "OK",
             "headers" : {
               "ETag" : {
-                "description" : "The resource's version, quoted (RFC 9110 §8.8.3). Send it back as `If-Match` to update it (doc 06 §1).",
+                "description" : "Opaque representation validator (RFC 9110 §8.8.3). Echo the entire value as `If-Match` when updating (doc 06 §1).",
                 "schema" : {
                   "type" : "string"
                 }
@@ -1969,6 +1969,16 @@
             "type" : "string"
           }
         } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ConfirmTimezoneRequest"
+              }
+            }
+          },
+          "required" : true
+        },
         "responses" : {
           "200" : {
             "content" : {
@@ -1981,12 +1991,22 @@
             "description" : "OK",
             "headers" : {
               "ETag" : {
-                "description" : "The resource's version, quoted (RFC 9110 §8.8.3). Send it back as `If-Match` to update it (doc 06 §1).",
+                "description" : "Opaque representation validator (RFC 9110 §8.8.3). Echo the entire value as `If-Match` when updating (doc 06 §1).",
                 "schema" : {
                   "type" : "string"
                 }
               }
             }
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
           },
           "401" : {
             "content" : {
@@ -2027,6 +2047,16 @@
               }
             },
             "description" : "Conflict"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
           },
           "429" : {
             "content" : {
@@ -2394,10 +2424,20 @@
         "properties" : {
           "anchorTimezone" : {
             "type" : "string",
-            "pattern" : "(?sU).*\\S.*"
+            "pattern" : "[\\s\\S]*[^\\u0009-\\u000d\\u001c-\\u0020\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000][\\s\\S]*"
           }
         },
         "required" : [ "anchorTimezone" ]
+      },
+      "ConfirmTimezoneRequest" : {
+        "type" : "object",
+        "properties" : {
+          "proposalId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        },
+        "required" : [ "proposalId" ]
       },
       "CreateBondRequest" : {
         "type" : "object",
@@ -2724,6 +2764,10 @@
           "expiresAt" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
           },
           "proposedAt" : {
             "type" : "string",
