@@ -1483,3 +1483,51 @@ Wrong about: how much a mechanism being *present* tells you about it being
          The general form: a component can be in the right place, with the
          right name, working correctly, and still not be the thing standing
          between you and the bug. Only breaking it tells you which.
+
+## 2026-09-28 · Phase 2 · Consent, and the two oracles the spec would have shipped
+Expected: the largest slice of Phase 2 but the least surprising one — a table,
+         five endpoints, a seven-day window and a thirty-day one. The design
+         had all of it written down, including the `bond_proposals` shape.
+Reality: **the design also had two defects, and both were visible before I
+         wrote a line** — which is new. B2's and B3's defects were things I
+         built and then found; these were things I found by reading the spec
+         against the rest of the corpus, and I put them to Daniel as decisions
+         rather than discovering them in a test later.
+         The first is the one that matters. §6.4 said a deletion request is
+         refused on a bond ended by a **block** and allowed on one ended by a
+         **leave**. That is an oracle, and the same oracle B3's review found in
+         the `left_at` stamp: the blocked member tries it once and learns which
+         happened. Doc 26 §2.1 forbids exactly that, and the spec sentence
+         forbidding it and the sentence creating it are four paragraphs apart
+         in the same document. Refusing it on *any* archived bond costs a
+         member who left the ability to start a mutual deletion — real, and
+         cheaper than the leak.
+         The second is smaller and more technical: V10's partial unique index
+         is `WHERE confirmed_at IS NULL AND cancelled_at IS NULL`, and §6.4
+         says lapsed proposals are "never reaped". Both cannot hold — a lapsed
+         row still occupies the slot, because **an index cannot ask what time
+         it is**. The fix is to close a lapsed row when a new proposal needs
+         it, which is what `CreateInvite` already does for the outstanding
+         code; the alternative was dropping the index and holding the invariant
+         only in the application. `ProposalPersistenceTest` pins the tension
+         down rather than leaving it in a comment.
+         **Three mutations, all killed.** Dropping the lazy close turns a
+         legitimate 200 into a 500 from the unique index. Dropping the proposer
+         check lets one person confirm their own request — consent by clicking
+         twice. Dropping the compare-and-set from `confirm` failed all three
+         runs, which is the one I expected least to be reliable.
+         And one self-inflicted wound worth writing down: I ran `git checkout
+         -- modules/bond` to revert a mutation and destroyed my *uncommitted*
+         EndBond work along with it. The mutation was in one file and I reverted
+         a directory. Copying the file to `/tmp` first, as I had done for every
+         other mutation in this project, is the habit; skipping it once cost
+         twenty minutes of re-typing.
+Wrong about: where a design review pays. I have been treating the corpus as
+         the thing that tells me what to build, and the tests as the thing that
+         tells me whether I built it. But the corpus contradicts itself in
+         places, and a contradiction between two documents is not something a
+         test can find — the test only knows what I told it. Reading §6.4
+         against doc 26 §2.1 before writing the plan found in ten minutes what
+         a review found in B3 only after the code existed. The practice worth
+         keeping: for each rule the spec states, ask which *other* document
+         constrains it, and check the two agree before planning the work.
