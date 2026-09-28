@@ -52,7 +52,7 @@ internal class AcceptInvite(
     private val blocks: BlockStore,
     private val users: UserDirectory,
     private val views: BondViews,
-    private val support: AcceptSupport,
+    private val support: BondSupport,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -103,12 +103,15 @@ internal class AcceptInvite(
 }
 
 /**
- * The two ports this service needs beyond its collaborators, behind one
+ * The two ports a bond service needs beyond its collaborators, behind one
  * dependency — detekt's constructor limit is six, and a clock and an id
  * generator are the least interesting six-and-seventh arguments imaginable.
+ *
+ * Shared by `AcceptInvite`, `ChangeTimezone` and `RequestDeletion` since slice
+ * B5 (it was `AcceptSupport` when only one service needed it).
  */
 @Service
-internal class AcceptSupport(
+internal class BondSupport(
     val clock: Clock,
     val ids: IdGenerator,
 )

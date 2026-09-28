@@ -43,7 +43,16 @@ CREATE TABLE bond_proposals (
         CHECK ((confirmed_at IS NULL) = (confirmed_by_member_id IS NULL)),
     -- Confirmed or cancelled, never both: those are the two ways it ends.
     CONSTRAINT bond_proposals_one_ending_check
-        CHECK (confirmed_at IS NULL OR cancelled_at IS NULL)
+        CHECK (confirmed_at IS NULL OR cancelled_at IS NULL),
+    -- A timezone proposal carries the zone it proposes. Without this the domain
+    -- type's `require` is the only guard, and a row inserted around it (a manual
+    -- fix, a future writer) makes `GET /bonds` a 500 for both members, because
+    -- the mapper throws inside the response assembler. Added after the review of
+    -- PR #41 pointed out that two of `Proposal`'s four invariants had no CHECK
+    -- despite its KDoc claiming parity.
+    CONSTRAINT bond_proposals_timezone_payload_check
+        CHECK (kind <> 'TIMEZONE_CHANGE' OR payload IS NOT NULL),
+    CONSTRAINT bond_proposals_expiry_after_proposal_check CHECK (expires_at > proposed_at)
 );
 
 -- One open proposal per kind per bond (FR-027, FR-028). Partial, so a bond may

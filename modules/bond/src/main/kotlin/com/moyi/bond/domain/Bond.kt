@@ -176,6 +176,19 @@ internal data class Bond(
     val isOpen: Boolean get() = status == BondStatus.PENDING_MEMBER || status == BondStatus.ACTIVE
 
     /**
+     * Can still be left or blocked out of.
+     *
+     * Wider than [isOpen] by exactly one state, and the extra state is the whole
+     * point: during FR-028's 30-day cooling-off the bond takes no *settings*
+     * write, and a member must still be able to walk away or block. Refusing for
+     * thirty days would make FR-029's protection depend on what the other person
+     * had agreed to a fortnight earlier — and, worse, refusing `leave` while
+     * permitting `block` would make the two distinguishable, which is the oracle
+     * doc 26 §2.1 forbids. Found by the review of PR #41.
+     */
+    val canBeEnded: Boolean get() = isOpen || status == BondStatus.PENDING_DELETION
+
+    /**
      * The second member joins (FR-022).
      *
      * The bond becomes `ACTIVE`, and that is what starts the clock rather than
@@ -213,7 +226,7 @@ internal data class Bond(
         memberId: MemberId,
         now: Instant,
     ): Bond {
-        check(isOpen) { "a bond that has ended cannot be left again" }
+        check(canBeEnded) { "a bond that has ended cannot be left again" }
         return end(memberId, now)
     }
 
@@ -250,14 +263,29 @@ internal data class Bond(
         memberId: MemberId,
         now: Instant,
     ): Bond =
-        if (!isOpen) {
-            this
-        } else {
-            copy(
-                status = BondStatus.ARCHIVED,
-                archivedAt = now,
-                members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it },
-            )
+        when {
+            // Already a record: nothing changes, which is what keeps a block
+            // invisible to the member who left first.
+            !canBeEnded -> {
+                this
+            }
+
+            // Mid-cooling-off. The membership ends and the **status does not**:
+            // both members agreed to destroy this bond and one of them walking
+            // away is not a reason to undo that agreement. Keeping `leftAt` is
+            // also what stops `cancelDeletion` reviving a bond with somebody in
+            // it who has been blocked (the review of PR #41 found that path).
+            status == BondStatus.PENDING_DELETION -> {
+                copy(members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it })
+            }
+
+            else -> {
+                copy(
+                    status = BondStatus.ARCHIVED,
+                    archivedAt = now,
+                    members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it },
+                )
+            }
         }
 
     /**
@@ -355,7 +383,25 @@ internal data class Bond(
      */
     fun cancelDeletion(): Bond {
         check(status == BondStatus.PENDING_DELETION) { "there is no deletion to cancel" }
-        val restored = if (members.any { !it.isActive }) BondStatus.ARCHIVED else BondStatus.ACTIVE
+        val restored =
+            when {
+                // Somebody left, or was blocked out, while it was counting down.
+                // A bond does not come back to life because a deletion was
+                // called off.
+                members.any { !it.isActive } -> BondStatus.ARCHIVED
+
+                // **It never had its second member.** Restoring `ACTIVE` here
+                // would orphan the bond permanently: `hasRoom` requires
+                // `PENDING_MEMBER`, so the invite it still advertises could
+                // never be used and `CreateInvite` would answer "this bond
+                // already has both of you in it" to somebody sitting in it
+                // alone. Doc 04 §8.3a wants this state for a second reason —
+                // Phase 3 opens no Bond-days while a bond is waiting. Found by
+                // the review of PR #41.
+                activeMembers.size < maxMembers -> BondStatus.PENDING_MEMBER
+
+                else -> BondStatus.ACTIVE
+            }
         return copy(status = restored, deletionRequestedAt = null)
     }
 

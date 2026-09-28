@@ -132,7 +132,13 @@ internal class BondTimezoneEndpointTest(
         // and still holds V10's unique slot until a new proposal needs it.
         val (ada, bea, bondId) = pairedBond()
         propose(ada, bondId, "Europe/London").status shouldBe 200
-        jdbc.update("UPDATE bond_proposals SET expires_at = now() - interval '1 day'")
+        // Both columns, not just the expiry: V10 requires `expires_at >
+        // proposed_at`, so a row with an expiry before its own proposal cannot
+        // exist — which is what the constraint is for, and it caught this
+        // fixture the moment it was added.
+        jdbc.update(
+            "UPDATE bond_proposals SET proposed_at = now() - interval '9 days', expires_at = now() - interval '2 days'",
+        )
 
         confirm(bea, bondId).status shouldBe 404
         getBond(bea, bondId).contentAsString shouldContain "\"pendingTimezoneChange\":null"

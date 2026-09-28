@@ -8,11 +8,9 @@ import com.moyi.bond.domain.ProposalKind
 import com.moyi.bond.domain.RegionZone
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.ProposalStore
-import com.moyi.common.core.IdGenerator
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.Clock
 
 /**
  * `PATCH /bonds/{bondId}/timezone`, `POST …/timezone/confirm` and
@@ -37,8 +35,7 @@ internal class ChangeTimezone(
     private val bonds: BondStore,
     private val proposals: ProposalStore,
     private val views: BondViews,
-    private val ids: IdGenerator,
-    private val clock: Clock,
+    private val support: BondSupport,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -57,7 +54,7 @@ internal class ChangeTimezone(
         membership: Membership,
         zone: RegionZone,
     ): BondView {
-        val now = clock.instant()
+        val now = support.clock.instant()
         bonds.lockBond(membership.bondId)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         if (!bond.isOpen) throw BondArchivedException()
@@ -79,7 +76,7 @@ internal class ChangeTimezone(
         if (proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) != null) {
             throw ProposalPendingException()
         }
-        proposals.insert(Proposal.timezoneChange(ProposalId(ids.timeOrdered()), bond.id, zone, membership.memberId, now))
+        proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))
         log.info("A zone change was proposed on bond {}", membership.bondId.value)
         return view(membership)
     }
@@ -96,7 +93,7 @@ internal class ChangeTimezone(
     @Transactional
     @Suppress("ThrowsCount")
     fun confirm(membership: Membership): BondView {
-        val now = clock.instant()
+        val now = support.clock.instant()
         bonds.lockBond(membership.bondId)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         if (!bond.isOpen) throw BondArchivedException()
@@ -126,7 +123,7 @@ internal class ChangeTimezone(
      */
     @Transactional
     fun cancel(membership: Membership) {
-        val now = clock.instant()
+        val now = support.clock.instant()
         bonds.lockBond(membership.bondId)
         val proposal =
             proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()

@@ -191,6 +191,138 @@ internal class BondDeletionEndpointTest(
         cancel(eve, bondId).status shouldBe 404
     }
 
+    @Test
+    fun `cancelling a solo bond's deletion leaves it joinable`() {
+        // The review of PR #41's first finding, end to end: restoring ACTIVE
+        // would advertise a code that could never be used again.
+        val ada = users.verified("Ada")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        val code = codeOf(created)
+        request(ada, bondId).status shouldBe 202
+
+        cancel(ada, bondId).status shouldBe 204
+
+        val after = getBond(ada, bondId)
+        after.contentAsString shouldContain "\"status\":\"PENDING_MEMBER\""
+        after.contentAsString shouldContain "\"invite\":null"
+
+        // **The old code stays dead, and that is deliberate.** Scheduling the
+        // deletion revoked it (a code into a room nobody could enter), and
+        // cancelling does not resurrect a credential that was already shared
+        // and withdrawn. The creator issues a fresh one, which is possible
+        // again precisely because the status came back as PENDING_MEMBER rather
+        // than ACTIVE — the bug this test was written for.
+        val bea = users.verified("Bea")
+        accept(bea, code).status shouldBe 404
+        val reissued = createInvite(ada, bondId)
+        reissued.status shouldBe 201
+        accept(bea, codeOf(reissued)).status shouldBe 200
+    }
+
+    @Test
+    fun `scheduling a deletion revokes the live invite`() {
+        // The review's fourth finding: a bond counting down refuses every join,
+        // so a code it kept advertising would be a code that cannot work.
+        val ada = users.verified("Ada")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        val code = codeOf(created)
+
+        request(ada, bondId).status shouldBe 202
+
+        getBond(ada, bondId).contentAsString shouldContain "\"invite\":null"
+        accept(users.verified("Bea"), code).status shouldBe 404
+    }
+
+    @Test
+    fun `blocking during the cooling-off ends the blocker's membership, and the bond cannot be revived with them in it`() {
+        // The review's second finding, and the safety-critical one: `block` had
+        // no effect during the cooling-off, so the other member could cancel and
+        // the blocker was back in a live bond with the person they blocked.
+        val (ada, bea, bondId) = pairedBond()
+        request(ada, bondId).status shouldBe 202
+        request(bea, bondId).status shouldBe 202
+
+        block(ada, bondId).status shouldBe 204
+
+        jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
+        jdbc.queryForObject("SELECT count(*) FROM bond_members WHERE left_at IS NULL", Int::class.java) shouldBe 1
+
+        // Bea calls the deletion off — and the bond must not come back with Ada
+        // in it.
+        cancel(bea, bondId).status shouldBe 204
+        val after = getBond(bea, bondId)
+        after.contentAsString shouldContain "\"status\":\"ARCHIVED\""
+        // And the pair cannot be put back in touch (FR-029).
+        accept(bea, codeOf(createBond(ada))).status shouldBe 404
+    }
+
+    @Test
+    fun `leaving during the cooling-off is allowed, and looks exactly like blocking`() {
+        // The two must stay indistinguishable wherever both are permitted (doc
+        // 26 §2.1). Refusing `leave` for thirty days while permitting `block`
+        // would have been an oracle on its own.
+        val left = coolingOffBond { ada, bondId -> leave(ada, bondId) }
+        val blocked = coolingOffBond { ada, bondId -> block(ada, bondId) }
+
+        left.ending.status shouldBe 204
+        blocked.ending.status shouldBe left.ending.status
+        normalise(getBond(blocked.other, blocked.bondId).contentAsString) shouldBe
+            normalise(getBond(left.other, left.bondId).contentAsString)
+    }
+
+    @Test
+    fun `a bond in its cooling-off still counts toward the three-bond limit`() {
+        // The review's third finding: the cooling-off used to free a slot, so a
+        // user at the cap could start a deletion, create a fourth bond, and then
+        // cancel the deletion to hold four.
+        val ada = users.verified("Ada")
+        val first = bondIdOf(createBond(ada))
+        createBond(ada).status shouldBe 201
+        createBond(ada).status shouldBe 201
+        createBond(ada).status shouldBe 409
+
+        request(ada, first).status shouldBe 202
+
+        createBond(ada).status shouldBe 409
+        cancel(ada, first).status shouldBe 204
+        createBond(ada).status shouldBe 409
+    }
+
+    /** A bond in its cooling-off, ended by [ending]. Ada acts; Bea is the one who sees. */
+    private fun coolingOffBond(ending: (UUID, String) -> MockHttpServletResponse): Ended {
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        accept(bea, codeOf(created)).status shouldBe 200
+        request(ada, bondId).status shouldBe 202
+        request(bea, bondId).status shouldBe 202
+        return Ended(bondId, bea, ending(ada, bondId))
+    }
+
+    private data class Ended(
+        val bondId: String,
+        val other: UUID,
+        val ending: MockHttpServletResponse,
+    )
+
+    /** Ids and timestamps two different bonds cannot share; everything else must match. */
+    private fun normalise(body: String): String {
+        val ids = mutableMapOf<String, String>()
+        return body
+            .replace(Regex("""[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}""")) { match ->
+                ids.getOrPut(match.value) { "uuid-${ids.size}" }
+            }.replace(Regex("""\d{4}-\d{2}-\d{2}T[0-9:.]+Z"""), "timestamp")
+    }
+
+    private fun block(
+        userId: UUID,
+        bondId: String,
+    ): MockHttpServletResponse =
+        mockMvc.post("/api/v1/bonds/$bondId/block") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+
     // ---- helpers ------------------------------------------------------------
 
     private fun pairedBond(): Triple<UUID, UUID, String> {

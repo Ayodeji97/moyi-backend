@@ -1,5 +1,6 @@
 package com.moyi.bond.domain
 
+import com.moyi.bond.service.TimezoneChangeTooSoonException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
@@ -8,6 +9,7 @@ import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -470,6 +472,82 @@ internal class BondTest {
         val left = create().let { it.leave(it.members.single().id, now) }
 
         shouldThrow<IllegalStateException> { left.requestDeletion(now) }
+    }
+
+    @Test
+    fun `cancelling a deletion on a bond still waiting returns it to PENDING_MEMBER`() {
+        // The review of PR #41: restoring ACTIVE here orphans the bond
+        // permanently — `hasRoom` requires PENDING_MEMBER, so the invite it
+        // still advertises could never be used, and doc 04 §8.3a wants no
+        // Bond-days opened while a bond waits.
+        val solo = create()
+
+        val cancelled = solo.requestDeletion(now).cancelDeletion()
+
+        cancelled.status shouldBe BondStatus.PENDING_MEMBER
+        cancelled.hasRoom shouldBe true
+        cancelled.deletionRequestedAt.shouldBeNull()
+    }
+
+    @Test
+    fun `a member may leave during the cooling-off, and the deletion stays scheduled`() {
+        // Refusing for thirty days would make FR-029's protection depend on what
+        // the other person agreed to a fortnight earlier — and refusing `leave`
+        // while permitting `block` would make the two distinguishable, which is
+        // the oracle doc 26 §2.1 forbids.
+        val joined = create().let { it.accept(joiner(it)) }
+        val owner = joined.members.first { it.role == MemberRole.OWNER }
+        val pending = joined.requestDeletion(now)
+
+        pending.canBeEnded shouldBe true
+        val left = pending.leave(owner.id, now.plusSeconds(60))
+
+        left.memberOf(owner.userId)!!.leftAt shouldBe now.plusSeconds(60)
+        // The status does **not** change: both agreed to destroy this bond, and
+        // one of them walking away is not a reason to undo that.
+        left.status shouldBe BondStatus.PENDING_DELETION
+        left.deletionScheduledFor shouldBe now.plus(Duration.ofDays(30))
+    }
+
+    @Test
+    fun `cancelling after somebody left during the cooling-off cannot revive the bond`() {
+        // The second half of the review's finding: without the `leftAt` stamp
+        // above, the other member's cancel would return this bond to ACTIVE with
+        // a blocker still inside it.
+        val joined = create().let { it.accept(joiner(it)) }
+        val owner = joined.members.first { it.role == MemberRole.OWNER }
+        val ended = joined.requestDeletion(now).end(owner.id, now)
+
+        val cancelled = ended.cancelDeletion()
+
+        cancelled.status shouldBe BondStatus.ARCHIVED
+        cancelled.isOpen shouldBe false
+    }
+
+    @Test
+    fun `ending a bond that is already archived still changes nothing`() {
+        // The B3 property the wider `canBeEnded` must not break.
+        val archived = create().let { it.leave(it.members.single().id, now) }
+
+        archived.end(archived.members.single().id, now.plusSeconds(600)) shouldBe archived
+        shouldThrow<IllegalStateException> { archived.leave(archived.members.single().id, now) }
+    }
+
+    @Test
+    fun `the too-soon refusal names an English date whatever the server's locale is`() {
+        // The review of PR #41: `MMMM` resolves against the JVM's default
+        // locale, so this API would have answered "28 octobre 2026" on a
+        // container whose locale happened to be French — output that varies with
+        // the deployment rather than with anything the client sent.
+        val original = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.FRANCE)
+            val refusal = TimezoneChangeTooSoonException(Instant.parse("2026-10-28T09:00:00Z"), lagos)
+
+            refusal.detail shouldBe "The shared time zone can change again from 28 October 2026."
+        } finally {
+            Locale.setDefault(original)
+        }
     }
 
     private fun joiner(bond: Bond): Member = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)

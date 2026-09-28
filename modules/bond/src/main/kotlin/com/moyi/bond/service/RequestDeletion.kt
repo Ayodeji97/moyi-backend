@@ -7,12 +7,11 @@ import com.moyi.bond.domain.Proposal
 import com.moyi.bond.domain.ProposalId
 import com.moyi.bond.domain.ProposalKind
 import com.moyi.bond.infra.database.BondStore
+import com.moyi.bond.infra.database.InviteStore
 import com.moyi.bond.infra.database.ProposalStore
-import com.moyi.common.core.IdGenerator
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.Clock
 import java.time.Instant
 
 /**
@@ -39,9 +38,9 @@ import java.time.Instant
 internal class RequestDeletion(
     private val bonds: BondStore,
     private val proposals: ProposalStore,
+    private val invites: InviteStore,
     private val views: BondViews,
-    private val ids: IdGenerator,
-    private val clock: Clock,
+    private val support: BondSupport,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -56,7 +55,7 @@ internal class RequestDeletion(
      */
     @Transactional
     fun request(membership: Membership): BondView {
-        val now = clock.instant()
+        val now = support.clock.instant()
         bonds.lockBond(membership.bondId)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         // Already counting down: both have asked, and asking again changes
@@ -94,7 +93,7 @@ internal class RequestDeletion(
      */
     @Transactional
     fun cancel(membership: Membership) {
-        val now = clock.instant()
+        val now = support.clock.instant()
         bonds.lockBond(membership.bondId)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         val pending = proposals.findLive(membership.bondId, ProposalKind.DELETION, now)
@@ -132,11 +131,11 @@ internal class RequestDeletion(
         membership: Membership,
         now: Instant,
     ) {
-        val proposal = Proposal.deletion(ProposalId(ids.timeOrdered()), bond.id, membership.memberId, now)
+        val proposal = Proposal.deletion(ProposalId(support.ids.timeOrdered()), bond.id, membership.memberId, now)
         proposals.insert(proposal)
         if (bond.activeMembers.size == 1) {
             proposals.confirm(proposal.id, membership.memberId, now)
-            bonds.update(bond.requestDeletion(now))
+            schedule(bond, now)
             log.info("Bond {} was scheduled for deletion by its only member", bond.id.value)
         } else {
             log.info("A deletion was requested on bond {}", bond.id.value)
@@ -153,9 +152,26 @@ internal class RequestDeletion(
         // Compare-and-set: if somebody else answered it in the meantime, the
         // bond is already counting down and there is nothing left to do.
         if (proposals.confirm(proposal.id, membership.memberId, now)) {
-            bonds.update(bond.requestDeletion(now))
+            schedule(bond, now)
             log.info("Bond {} was scheduled for deletion by agreement", bond.id.value)
         }
+    }
+
+    /**
+     * Starts the cooling-off, and **revokes any live invite**.
+     *
+     * A bond counting down to deletion refuses every join — `hasRoom` requires
+     * `PENDING_MEMBER` — so a code it went on advertising would be a code that
+     * cannot work, offered for thirty days. `EndBond` revokes for the same
+     * reason when a bond ends ("a code into a closed room"); this path had been
+     * missed, and the review of PR #41 found it.
+     */
+    private fun schedule(
+        bond: Bond,
+        now: Instant,
+    ) {
+        bonds.update(bond.requestDeletion(now))
+        invites.revokeLiveOf(bond.id, now)
     }
 
     private fun view(membership: Membership): BondView {

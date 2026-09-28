@@ -7,6 +7,7 @@ import com.moyi.common.web.NotFoundException
 import org.springframework.http.HttpStatus
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 // The refusals this module gives that are facts about the **caller's own**
 // account, and are therefore safe to name precisely — unlike anything about a
@@ -133,8 +134,18 @@ internal class TimezoneChangeTooSoonException(
         "The shared time zone can change again from ${DATE.format(allowedFrom.atZone(zone.zone))}.",
     ) {
     private companion object {
-        /** The date as a person reads it, in the bond's own zone. */
-        val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy")
+        /**
+         * The date as a person reads it, in the bond's own zone.
+         *
+         * **`Locale.ENGLISH` explicitly.** `MMMM` resolves against
+         * `Locale.getDefault(FORMAT)`, so without it the same API that answers
+         * in English everywhere else would say "28 octobre 2026" on a container
+         * whose locale happened to be French — output that varies with the
+         * deployment rather than with anything the client sent. Found by the
+         * review of PR #41. When doc 14's i18n arrives, this becomes the
+         * *request's* locale, not the server's.
+         */
+        val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH)
     }
 }
 

@@ -200,13 +200,15 @@ internal class ProposalPersistenceTest(
             confirmedAt: String,
             cancelledAt: String,
             kind: String = "TIMEZONE_CHANGE",
+            payload: String = "'Europe/London'",
+            expires: String = "now() + interval '7 days'",
         ) = jdbc.update(
             """
             INSERT INTO bond_proposals
                 (id, bond_id, kind, payload, proposed_by_member_id, proposed_at, expires_at,
                  confirmed_by_member_id, confirmed_at, cancelled_at)
-            VALUES ('${ids.timeOrdered()}', '${bond.id.value}', '$kind', 'Europe/London', '$member',
-                    now(), now() + interval '7 days', $confirmedBy, $confirmedAt, $cancelledAt)
+            VALUES ('${ids.timeOrdered()}', '${bond.id.value}', '$kind', $payload, '$member',
+                    now(), $expires, $confirmedBy, $confirmedAt, $cancelledAt)
             """.trimIndent(),
         )
 
@@ -218,6 +220,13 @@ internal class ProposalPersistenceTest(
         shouldThrow<DataIntegrityViolationException> { insert("'$member'", "now()", "now()") }
         // A kind the enum does not have.
         shouldThrow<DataIntegrityViolationException> { insert("NULL", "NULL", "NULL", kind = "RENAME") }
+        // A timezone proposal with no zone in it. Added after the review of PR
+        // #41: the domain type's `require` was the only guard, and a row
+        // inserted around it makes `GET /bonds` a 500 for both members, because
+        // the mapper throws inside the response assembler.
+        shouldThrow<DataIntegrityViolationException> { insert("NULL", "NULL", "NULL", payload = "NULL") }
+        // An expiry before the proposal.
+        shouldThrow<DataIntegrityViolationException> { insert("NULL", "NULL", "NULL", expires = "now() - interval '1 day'") }
 
         jdbc.queryForObject("SELECT count(*) FROM bond_proposals", Int::class.java) shouldBe 0
     }

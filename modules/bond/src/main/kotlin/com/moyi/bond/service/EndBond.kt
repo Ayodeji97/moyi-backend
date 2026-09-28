@@ -59,7 +59,11 @@ internal class EndBond(
     @Transactional
     fun leave(membership: Membership) {
         val bond = lockAndLoad(membership)
-        if (!bond.isOpen) throw BondArchivedException()
+        // `canBeEnded`, not `isOpen`: a member may leave during FR-028's
+        // cooling-off. Refusing for thirty days would also make leaving and
+        // blocking distinguishable there, which is the oracle doc 26 §2.1
+        // forbids (the review of PR #41).
+        if (!bond.canBeEnded) throw BondArchivedException()
         end(bond.leave(membership.memberId, clock.instant()), bond)
         log.info("A member left bond {}", membership.bondId.value)
     }
