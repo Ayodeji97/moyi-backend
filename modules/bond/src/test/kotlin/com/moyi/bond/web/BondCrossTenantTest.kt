@@ -91,6 +91,8 @@ internal class BondCrossTenantTest(
             "PATCH /api/v1/bonds/{bondId}/timezone" to Fixture(body = """{"anchorTimezone":"Europe/London"}"""),
             "POST /api/v1/bonds/{bondId}/timezone/confirm" to Fixture(),
             "DELETE /api/v1/bonds/{bondId}/timezone" to Fixture(),
+            "POST /api/v1/bonds/{bondId}/deletion-request" to Fixture(),
+            "DELETE /api/v1/bonds/{bondId}/deletion-request" to Fixture(),
         )
 
     private data class Fixture(

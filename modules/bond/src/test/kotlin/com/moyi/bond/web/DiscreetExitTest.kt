@@ -155,6 +155,27 @@ internal class DiscreetExitTest(
         before.contentAsString shouldContain "\"status\":\"ARCHIVED\""
     }
 
+    @Test
+    fun `a deletion request is refused the same way on a bond that was left and one that was blocked`() {
+        // **The decision this test exists for.** The Phase 2 spec refused a
+        // deletion request only on a bond ended by a *block*, which is an
+        // oracle: the blocked member would learn which happened by trying it
+        // once. Daniel took the decision to refuse it on *any* archived bond, so
+        // the two stay indistinguishable (doc 26 §2.1, ADR-0030) — at the cost
+        // that a member who left cannot start a mutual deletion, which account
+        // deletion (FR-008) and export (FR-009) still cover.
+        val left = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave") }
+        val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block") }
+
+        val afterLeave = post(left.other, "/api/v1/bonds/${left.bondId}/deletion-request")
+        val afterBlock = post(blocked.other, "/api/v1/bonds/${blocked.bondId}/deletion-request")
+
+        afterLeave.status shouldBe 409
+        afterLeave.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        afterBlock.status shouldBe afterLeave.status
+        normalise(afterBlock.contentAsString) shouldBe normalise(afterLeave.contentAsString)
+    }
+
     /**
      * A bond built the same way every time: Ada creates it, Bea joins, and then
      * [ending] finishes it. The display names are fixed so that two of these
