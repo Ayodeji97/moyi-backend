@@ -475,9 +475,14 @@ internal class BondPersistenceTest(
         //
         // `update` re-reads the row inside its own transaction and `applyTo`
         // deliberately does not copy `version` (Hibernate's to increment), so
-        // the UPDATE always carries the *current* version and the optimistic
-        // check can never fail on this path. Handing it a stale aggregate
-        // therefore overwrites the newer values — silently.
+        // the UPDATE carries whatever the row currently holds and the optimistic
+        // check has nothing to compare *in this sequential case*. Handing it a
+        // stale aggregate therefore overwrites the newer values — silently.
+        //
+        // Under genuine concurrency `@Version` does fire, because each
+        // transaction loads its own copy before the other commits; it just
+        // arrives as a 500. `BondSettingsRaceTest` shows that by removing the
+        // lock.
         //
         // That is why `UpdateBond` takes the bond's row lock before it reads and
         // compares `If-Match` (ADR-0029): the protection lives there, in one

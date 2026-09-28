@@ -20,13 +20,24 @@ import org.springframework.transaction.annotation.Transactional
  * prevent that, so the whole decision happens under the bond's row lock, the
  * same lock `AcceptInvite`, `CreateInvite` and `EndBond` take.
  *
- * It is worth being explicit about what does **not** protect this, because the
- * first version of this slice assumed it did: `@Version` on `BondEntity` does
- * not catch the second writer. `BondStore.update` re-reads the row inside this
- * transaction and the mapper deliberately leaves `version` to Hibernate, so the
- * UPDATE always carries the row's current version and the optimistic check has
- * nothing to compare. The column's job here is to *be* the `ETag`; the lock's
- * job is to make the check atomic. `BondSettingsRaceTest` is what proves it.
+ * **What `@Version` does and does not do here**, because the first version of
+ * this slice got it wrong in both directions and the tests corrected it twice:
+ *
+ * - It cannot catch a *stale aggregate* handed to the store in a later
+ *   transaction. `BondStore.update` re-reads the row and the mapper leaves
+ *   `version` to Hibernate, so the UPDATE carries whatever the row currently
+ *   holds and there is nothing to compare (`BondPersistenceTest` says so
+ *   outright).
+ * - Under genuine concurrency it *does* fire: two transactions each load
+ *   version 0, the first commits 1, and the second's UPDATE finds no row at
+ *   version 0. Removing the lock and running `BondSettingsRaceTest` shows it —
+ *   as a **500**, because an optimistic-lock failure is not an answer any
+ *   client asked for.
+ *
+ * So the column's job is to *be* the `ETag`, Hibernate's check is a backstop
+ * against corruption, and **the lock is what turns a race into the `412` this
+ * endpoint promises** rather than a server error. All three are doing something
+ * different, which is why all three are here.
  */
 @Service
 internal class UpdateBond(
