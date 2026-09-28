@@ -13,6 +13,11 @@ springdoc:
   writer-with-default-pretty-printer: true
 
 spring:
+  jpa:
+    # Keep entities scoped to each service transaction. The bond access guard
+    # reads before EndBond takes its row lock; sharing an EntityManager across
+    # both would let the locked read reuse the guard's stale bond/version.
+    open-in-view: false
   application:
     name: moyi-backend
   threads:

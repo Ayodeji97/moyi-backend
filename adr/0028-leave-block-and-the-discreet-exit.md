@@ -86,6 +86,13 @@ and `CreateInvite` already take. Without it a leave and an accept are two transa
 READ COMMITTED snapshots: the accept sees a free seat, the leave sees an open bond, and both
 commit, leaving somebody an active member of an archived bond.
 
+The shared application configuration disables Open Session in View. Otherwise the
+access guard's entity remains cached across service transactions, and the read after
+acquiring the row lock can reuse its stale version. Concurrent leave/accept and
+leave/block requests then fail with an optimistic-lock exception despite holding the
+lock. Local and application tests inherit this setting; `JpaTransactionScopeTest`
+checks that the web interceptor is absent so a profile-only fix cannot hide the issue.
+
 **7. A bond already in `PENDING_DELETION` is untouched.** `Bond.end` changes only a bond
 that is still open, so a block during B5's deletion cooling-off writes its `blocks` rows and
 leaves the status — and everything else — exactly as the deletion job expects to find it.
