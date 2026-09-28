@@ -31,3 +31,11 @@ style:
     # than the method names keeps this narrow: only a method that JPA itself
     # will call is exempt.
     ignoreAnnotated: ['PostPersist', 'PostLoad', 'PostUpdate', 'PrePersist', 'PreUpdate', 'PreRemove']
+  UnusedPrivateProperty:
+    # A cross-field `@AssertTrue` getter is read by Hibernate Validator through
+    # reflection and by nothing else, so static analysis is right that no code
+    # calls it and wrong that it is dead. It is `private` on purpose: springdoc
+    # publishes every public getter as a writable request field, and these are
+    # checks rather than fields (review of PR #40). Narrow by annotation, so an
+    # actually-unused private property is still a finding.
+    ignoreAnnotated: ['AssertTrue']

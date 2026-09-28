@@ -23,6 +23,15 @@ import java.util.Optional
  * Only `revealTimeLocal` needs it. The other three settings are not nullable, so
  * for them a plain nullable field already means "not named".
  *
+ * **The three `@AssertTrue` properties are `private`**, which is what keeps
+ * them out of the generated contract. They are cross-field checks wearing a
+ * property's clothes, and springdoc reads every public getter as a writable
+ * request field — so `revealTimeLocalIsTimeOfDay`, `anchorTimezoneNotAllowedHere`
+ * and `atLeastOneSetting` were advertised to clients as booleans they could
+ * send, which the server ignores and recomputes. Hibernate Validator finds a
+ * constrained getter whatever its visibility; Jackson and springdoc do not.
+ * Raised by the review of PR #40.
+ *
  * `anchorTimezone` is declared here **only in order to refuse it.** FR-027 makes
  * the anchor zone two-party and at most once every 30 days, which is `PATCH
  * /bonds/{bondId}/timezone` in slice B5. A client that sends it here has misread
@@ -31,7 +40,7 @@ import java.util.Optional
  */
 internal data class PatchBondRequest(
     @field:Size(min = 1, max = Bond.MAX_NAME_LENGTH)
-    @field:Pattern(regexp = NOT_ONLY_SPACES, message = "must not be blank")
+    @field:Pattern(regexp = NOT_ONLY_SPACE, message = "must not be blank")
     val name: String? = null,
     @field:ValidBondType
     val type: String? = null,
@@ -49,7 +58,7 @@ internal data class PatchBondRequest(
      * there.
      */
     @get:AssertTrue(message = "must be a time of day such as 21:00")
-    val revealTimeLocalIsTimeOfDay: Boolean
+    private val revealTimeLocalIsTimeOfDay: Boolean
         get() = revealTimeLocal?.orElse(null)?.matches(Regex(TIME_OF_DAY)) ?: true
 
     /**
@@ -63,7 +72,7 @@ internal data class PatchBondRequest(
      * and no idea which field to fix. The property is named for what it says.
      */
     @get:AssertTrue(message = "can only be changed through /bonds/{bondId}/timezone, with the other member's agreement")
-    val anchorTimezoneNotAllowedHere: Boolean get() = anchorTimezone == null
+    private val anchorTimezoneNotAllowedHere: Boolean get() = anchorTimezone == null
 
     /**
      * An empty body would otherwise be a successful write that changes nothing
@@ -72,7 +81,7 @@ internal data class PatchBondRequest(
      * things".
      */
     @get:AssertTrue(message = "must name at least one setting to change")
-    val atLeastOneSetting: Boolean
+    private val atLeastOneSetting: Boolean
         get() = name != null || type != null || revealTimeLocal != null || strictMode != null
 
     /**
@@ -93,8 +102,5 @@ internal data class PatchBondRequest(
     private companion object {
         /** 24-hour, zero-padded — the one shape this API takes (doc 06 §1). */
         const val TIME_OF_DAY = "^([01]\\d|2[0-3]):[0-5]\\d$"
-
-        /** At least one character that is not whitespace, so the violation names `name` itself. */
-        const val NOT_ONLY_SPACES = "^(?!\\s*$).+$"
     }
 }

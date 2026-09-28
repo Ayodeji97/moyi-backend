@@ -362,6 +362,9 @@ header_is "…with the ETag" ETag '"0"'
 
 expect "a fixed-offset zone is 422 on anchorTimezone" 422 '"field":"anchorTimezone"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"COUPLE","anchorTimezone":"Etc/GMT+3"}'
 expect "an unknown type is 422 on type" 422 '"field":"type"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"THROUPLE","anchorTimezone":"Africa/Lagos"}'
+# A non-breaking space passes `@NotBlank` and is blank to Kotlin, so before the
+# review of #40 this was a 500 on a well-formed request (ADR-0029 §13).
+expect "a name of one non-breaking space is 422, not 500" 422 '"field":"name"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"\u00a0","type":"COUPLE","anchorTimezone":"Africa/Lagos"}'
 
 expect "second bond is 201" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Two")"
 expect "third bond is 201" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Three")"

@@ -349,6 +349,20 @@ internal class BondSettingsEndpointTest(
     }
 
     @Test
+    fun `a patched name blank once trimmed is 422, whatever kind of space it is`() {
+        val ada = users.verified("Ada")
+        val bondId = bondIdOf(createBond(ada))
+
+        for (blank in listOf("", " ", "\u00a0")) {
+            val response = patch(ada, bondId, """{"name":"$blank"}""", "\"0\"")
+
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"name\""
+        }
+        patch(ada, bondId, """{"name":"  Us  "}""", "\"0\"").status shouldBe 200
+    }
+
+    @Test
     fun `a blank nickname is 422 while null clears it and surrounding spaces are trimmed`() {
         val ada = users.verified("Ada")
         val bondId = bondIdOf(createBond(ada))

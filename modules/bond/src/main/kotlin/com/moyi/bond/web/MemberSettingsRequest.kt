@@ -23,7 +23,7 @@ import java.time.LocalTime
  */
 internal data class MemberSettingsRequest(
     @field:Size(min = 1, max = Member.MAX_NICKNAME_LENGTH)
-    @field:Pattern(regexp = "(?sU).*\\S.*", message = "must not be blank")
+    @field:Pattern(regexp = NOT_ONLY_SPACE, message = "must not be blank")
     val nicknameForOther: String? = null,
     @field:NotNull
     @field:Pattern(regexp = TIME_OF_DAY, message = "must be a time of day such as 21:00")
@@ -43,9 +43,12 @@ internal data class MemberSettingsRequest(
      * `BondConstraints` explains why the edge *delegates* to the domain wherever
      * it can be asked; this rule cannot be asked without building a `Member`, so
      * it is stated in both places and the aggregate keeps the last word.
+     *
+     * `private`, so springdoc does not advertise a cross-field check as a field
+     * a client can send. [PatchBondRequest] carries the long version.
      */
     @get:AssertTrue(message = "need both a start and an end, or neither")
-    val quietHoursArePaired: Boolean get() = (quietHoursStart == null) == (quietHoursEnd == null)
+    private val quietHoursArePaired: Boolean get() = (quietHoursStart == null) == (quietHoursEnd == null)
 
     fun toSettings() =
         MemberSettings(
