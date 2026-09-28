@@ -49,7 +49,7 @@ import org.springframework.http.HttpStatus
  *   and `ClientContext` from the socket; documented as query parameters they
  *   would generate a client that sends them.
  * - **The `ETag` on a versioned resource.** A success response whose body is
- *   one of [VERSIONED_RESOURCE_SCHEMAS] carries the row version as an `ETag`,
+ *   one of [VERSIONED_RESOURCE_SCHEMAS] carries an opaque representation `ETag`,
  *   which is what `If-Match` compares against (doc 06 §1). The header is set
  *   on the `ResponseEntity`, so springdoc cannot see it, and a client
  *   generated without it has no typed way to keep the value it must send
@@ -140,7 +140,8 @@ class OpenApiConfiguration {
                     ETAG,
                     Header()
                         .description(
-                            "The resource's version, quoted (RFC 9110 §8.8.3). Send it back as `If-Match` to update it (doc 06 §1).",
+                            "Opaque representation validator (RFC 9110 §8.8.3). " +
+                                "Echo the entire value as `If-Match` when updating (doc 06 §1).",
                         ).schema(StringSchema()),
                 )
             }

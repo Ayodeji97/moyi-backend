@@ -338,6 +338,8 @@ sleep 1
 for needle in "$PASSWORD" "$NEW_PASSWORD" "$REFRESH" "$REFRESH2" "$ACCESS"; do if grep -qF -- "$needle" "$MOYI_LOG"; then fail "secret in log" "a password or token appears in the log"; SECRET_LEAK=1; fi; done
 [ "${SECRET_LEAK:-0}" = 0 ] && pass "no password, refresh token or access token appears in the log"
 
+etag_of() { printf '%s\n' "$LAST_HEADERS" | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
+
 echo; echo "bonds (FR-020, FR-022, FR-025, T-02, ADR-0026)"
 flush_buckets
 expect "sign in as the verified account" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$NEW_PASSWORD")"
@@ -347,7 +349,8 @@ bond_body() { printf '{"name":"%s","type":"COUPLE","anchorTimezone":"Africa/Lago
 expect "POST /bonds is 201, pending its second member" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Us")"
 BOND_ID="$(printf '%s' "$LAST_BODY" | jget id)"
 CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
-header_is "…with an ETag of the row version" ETag '"0"'
+BOND_ETAG="$(etag_of)"
+[[ "$BOND_ETAG" == \"0-* ]] && pass "…with a representation ETag" || fail "ETag" "$BOND_ETAG"
 # The alphabet is states.md §2's thirty symbols; 0/O, 1/I/L and U are absent
 # because a code is read aloud down a phone line (T-06, ADR-0026).
 if [[ "$CODE" =~ ^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{6}$ ]]; then pass "…code $CODE is six characters of the 30-symbol alphabet"; else fail "invite code" "got '$CODE'"; fi
@@ -358,7 +361,7 @@ if [[ "$LAST_BODY" != *userId* && "$LAST_BODY" != *reminderTimezone* ]]; then pa
 
 expect "GET /bonds lists it" 200 "\"id\":\"$BOND_ID\"" -- "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS"
 expect "GET /bonds/{id} is 200 for the owner" 200 '"role":"OWNER"' -- "$API/bonds/$BOND_ID" -H "Authorization: Bearer $BOND_ACCESS"
-header_is "…with the ETag" ETag '"0"'
+header_is "…with the ETag" ETag "$BOND_ETAG"
 
 expect "a fixed-offset zone is 422 on anchorTimezone" 422 '"field":"anchorTimezone"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"COUPLE","anchorTimezone":"Etc/GMT+3"}'
 expect "an unknown type is 422 on type" 422 '"field":"type"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"THROUPLE","anchorTimezone":"Africa/Lagos"}'
@@ -464,7 +467,6 @@ verified_account() {
   ACCOUNT_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
 }
 
-etag_of() { printf '%s\n' "$LAST_HEADERS" | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
 
 # Two pairs, built identically, ended differently. Doc 26 §2.1 is about what the
 # OTHER member can see, so anything that differs between the two archived bonds
@@ -517,9 +519,9 @@ if left != blocked:
 PYEOF
 then pass "a block is indistinguishable from a leave, byte for byte (doc 26 §2.1)"
 else fail "discreet exit" "the two archived bonds do not read the same"; fi
-# The ETag is the row version: a block that wrote once more than a leave would
+# The ETag prefix is the row version: a block that wrote once more than a leave would
 # show here and nowhere else.
-[ "$LEFT_ETAG" = "$BLOCK_ETAG" ] && pass "…and the ETags match, so the version counts no blocks ($LEFT_ETAG)" || fail "discreet exit etag" "leave $LEFT_ETAG vs block $BLOCK_ETAG"
+[ "${LEFT_ETAG%%-*}" = "${BLOCK_ETAG%%-*}" ] && pass "…and the version prefixes match, so the version counts no blocks ($LEFT_ETAG)" || fail "discreet exit etag" "leave $LEFT_ETAG vs block $BLOCK_ETAG"
 [[ "${BLOCK_VIEW,,}" != *block* ]] && pass "…and no response anywhere says block" || fail "discreet exit wording" "${BLOCK_VIEW:0:200}"
 
 # An archived bond takes no writes (BR-9, the design's §6.3).
@@ -558,7 +560,8 @@ flush_buckets
 verified_account "settler" "203.0.113.60"; SETTLER_ACCESS="$ACCOUNT_ACCESS"
 expect "a bond to configure is 201" 201 '"name":"Us"' -- -X POST "$API/bonds" -H "Authorization: Bearer $SETTLER_ACCESS" -d "$(bond_body "Us")"
 SET_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
-header_is "…with an ETag of 0" ETag '"0"'
+SET_INITIAL_ETAG="$(etag_of)"
+SET_ETAG="$SET_INITIAL_ETAG"
 
 # The four ways a condition can be wrong, before the one way it can be right.
 expect "a PATCH with no If-Match is 428" 428 '"code":"PRECONDITION_REQUIRED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{"name":"Us two"}'
@@ -566,27 +569,31 @@ expect "a stale If-Match is 412" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH 
 # ADR-0029's two deliberate departures from RFC 9110, probed on the wire so
 # they stay decisions rather than drifting into accidents.
 expect "If-Match: * is 428, deliberately" 428 '"code":"PRECONDITION_REQUIRED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: *' -d '{"name":"Us two"}'
-expect "a weak validator is 412" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: W/"0"' -d '{"name":"Us two"}'
-expect "the right If-Match is 200" 200 '"name":"Us two"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "0"' -d '{"name":"Us two","strictMode":true}'
-header_is "…and the response carries the NEW ETag" ETag '"1"'
-expect "the same If-Match again is 412 — it is spent" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "0"' -d '{"name":"Us three"}'
+expect "a weak validator is 412" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: W/$SET_INITIAL_ETAG" -d '{"name":"Us two"}'
+expect "the right If-Match is 200" 200 '"name":"Us two"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_INITIAL_ETAG" -d '{"name":"Us two","strictMode":true}'
+SET_ETAG="$(etag_of)"
+[ "$SET_ETAG" != "$SET_INITIAL_ETAG" ] && pass "…with a new ETag" || fail "ETag" "unchanged after patch"
+expect "the same If-Match again is 412 — it is spent" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_INITIAL_ETAG" -d '{"name":"Us three"}'
 
-expect "an empty patch is 422" 422 '"code":"VALIDATION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "1"' -d '{}'
+expect "an empty patch is 422" 422 '"code":"VALIDATION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{}'
 # FR-027 makes the anchor zone two-party and once per 30 days, which is B5's
 # endpoint. Ignoring the field here would report success for a change that
 # never happened.
-expect "the anchor zone is refused here, not ignored" 422 'anchorTimezone' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "1"' -d '{"anchorTimezone":"Europe/London"}'
-expect "the type is patchable" 200 '"type":"FRIENDS"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "1"' -d '{"type":"FRIENDS"}'
+expect "the anchor zone is refused here, not ignored" 422 'anchorTimezone' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"anchorTimezone":"Europe/London"}'
+expect "the type is patchable" 200 '"type":"FRIENDS"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"type":"FRIENDS"}'
+SET_ETAG="$(etag_of)"
 [[ "$LAST_BODY" == *'"maxMembers":2'* ]] && pass "…and the seats do not move with it" || fail "maxMembers" "${LAST_BODY:0:200}"
-expect "a reveal time can be set" 200 '"revealTimeLocal":"21:00"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "2"' -d '{"revealTimeLocal":"21:00"}'
-expect "a named null clears it" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "3"' -d '{"revealTimeLocal":null}'
+expect "a reveal time can be set" 200 '"revealTimeLocal":"21:00"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"revealTimeLocal":"21:00"}'
+SET_ETAG="$(etag_of)"
+expect "a named null clears it" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"revealTimeLocal":null}'
+SET_ETAG="$(etag_of)"
 [[ "$LAST_BODY" == *'"strictMode":true'* ]] && pass "…and leaves the setting it did not name" || fail "patch isolation" "${LAST_BODY:0:250}"
 # A patch whose values are already the row's values writes nothing, so the
 # version does not move and the other member's ETag stays valid. Found by this
 # script: the probe below expected a bump and there was none, because clearing
 # an already-null field changes nothing (Hibernate's dirty check).
-expect "a patch that changes nothing is 200 and moves no version" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "4"' -d '{"revealTimeLocal":null}'
-header_is "…the same ETag it was given" ETag '"4"' 
+expect "a patch that changes nothing is 200 and moves no version" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"revealTimeLocal":null}'
+header_is "…the same ETag it was given" ETag "$SET_ETAG"
 
 # The member's own settings: no condition, and nobody else's to see.
 expect "the member reads their own settings" 200 '"reminderTimeLocal":"20:00"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS"
@@ -597,10 +604,10 @@ expect "one quiet hour without the other is 422" 422 'quietHours' -- -X PUT "$AP
 expect "a missing reminder time is 422 rather than a silent 20:00" 422 'reminderTimeLocal' -- -X PUT "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{}'
 # A settings write is one member's business, so the bond's ETag must not move.
 expect "the bond is where the last PATCH left it" 200 '"type":"FRIENDS"' -- "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS"
-header_is "…with the version the last PATCH produced, unmoved by the settings write" ETag '"4"'
+header_is "…with the version the last PATCH produced, unmoved by the settings write" ETag "$SET_ETAG"
 
 # T-02: a non-member is refused before the header is even read.
-expect "a stranger patching it is 404, headers and all" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $STRANGER_ACCESS" -H 'If-Match: "3"' -d '{"name":"Mine"}'
+expect "a stranger patching it is 404, headers and all" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $STRANGER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"name":"Mine"}'
 expect "…404 without a condition too, not 428" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $STRANGER_ACCESS" -d '{"name":"Mine"}'
 expect "…and cannot read its settings either" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $STRANGER_ACCESS"
 
