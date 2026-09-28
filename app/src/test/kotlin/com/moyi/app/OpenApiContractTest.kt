@@ -208,6 +208,11 @@ class OpenApiContractTest(
         patch.responses.keys shouldContainAll listOf("200", "404", "409", "412", "422", "428")
         patch.parameters.map { it.name } shouldContain HttpHeaders.IF_MATCH
         patch.parameters.first { it.name == HttpHeaders.IF_MATCH }.`in` shouldBe "header"
+        // Required in the document even though the handler takes it as optional:
+        // the optionality exists so an absent condition is our 428 rather than
+        // Spring's 400, and a client generated from `required: false` would
+        // offer a call that cannot succeed (review of #40).
+        patch.parameters.first { it.name == HttpHeaders.IF_MATCH }.required shouldBe true
         patch.responses["200"]!!.headers.orEmpty() shouldContainKey "ETag"
 
         // The member-settings endpoints take no condition, and the document says
