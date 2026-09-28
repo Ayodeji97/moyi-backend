@@ -3,6 +3,7 @@ package com.moyi.bond.service
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.bond.domain.BondId
+import com.moyi.bond.domain.BondStatus
 import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.database.BondStore
 import org.springframework.stereotype.Service
@@ -41,6 +42,7 @@ internal class BondAccessAdapter(
             strictMode = bond.strictMode,
             isOpen = bond.isOpen,
             hasLeft = membership.left,
+            isPendingMember = bond.status == BondStatus.PENDING_MEMBER,
         )
     }
 }

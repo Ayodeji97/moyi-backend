@@ -187,6 +187,31 @@ enum class ErrorCode {
      */
     IDEMPOTENCY_KEY_IN_FLIGHT,
 
+    /**
+     * `POST /bonds/{bondId}/entries` by a member who already wrote today's
+     * entry (BR-2). 409: enforced by `entries_one_per_member_per_day`
+     * (V12) and raised from that constraint being violated, never from a
+     * read-before-write check — a caller races the index, not this code.
+     */
+    ENTRY_ALREADY_EXISTS,
+
+    /**
+     * `POST /bonds/{bondId}/entries` for a day that has already closed
+     * (BR-10). 409: the day this entry would have landed on is no longer
+     * open to writes — a fact about the day's own state, the same shape of
+     * refusal [BOND_ARCHIVED] is for the bond's.
+     */
+    DAY_CLOSED,
+
+    /**
+     * `POST /bonds/{bondId}/entries` naming `imageMediaId` or
+     * `voiceMediaId` (spec §1): refused outright rather than stored and
+     * silently ignored, because Phase 4 has not built anywhere for either
+     * to go yet. 422 — the request is well-formed, the media reference is
+     * simply not one this deployment can honour today.
+     */
+    MEDIA_NOT_YET_SUPPORTED,
+
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,
 

@@ -40,10 +40,10 @@ interface BondAccess {
  * check it.** Do not assume `isOpen` covers it — that assumption is exactly
  * what the second review of PR #41 found in `RequestDeletion.cancel`.
  *
- * Eight fields, not six arguments to reorder by accident: every one is named
- * at every call site (`BondAccessAdapter`'s only constructor), and the shape
- * is the four bond facts above plus the caller's own identifiers — splitting
- * it into a nested value would just move the count, not reduce it.
+ * Nine fields, not seven arguments to reorder by accident: every one is
+ * named at every call site (`BondAccessAdapter`'s only constructor), and the
+ * shape is the five bond facts above plus the caller's own identifiers —
+ * splitting it into a nested value would just move the count, not reduce it.
  */
 @Suppress("LongParameterList")
 class BondMembership internal constructor(
@@ -55,6 +55,18 @@ class BondMembership internal constructor(
     val strictMode: Boolean,
     val isOpen: Boolean,
     val hasLeft: Boolean,
+    /**
+     * True while this bond has only its creator (`BondStatus.PENDING_MEMBER`),
+     * false once a second member has accepted an invite. Added for
+     * `gratitude`'s `POST /bonds/{bondId}/entries` (doc 04 §8.3a, as the
+     * Phase 3 design §12.4 resolves it): the creator may write before their
+     * partner joins (`02` J1), and the Bond-day that write lands on has to
+     * open `SUSPENDED` rather than `OPEN` so the close job and the streak
+     * walk both leave it alone. [isOpen] cannot answer this — it is `true`
+     * for both `PENDING_MEMBER` and `ACTIVE` — so this is a fifth bond fact
+     * rather than a reinterpretation of one already here.
+     */
+    val isPendingMember: Boolean,
 ) {
     /** Ids only — a bond's name is the couple's words (doc 18 §9). */
     override fun toString(): String = "BondMembership(bondId=$bondId, memberId=$memberId)"

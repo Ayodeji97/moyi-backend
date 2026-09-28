@@ -24,6 +24,13 @@ spring:
     open-in-view: false
 
 moyi:
+  bond:
+    invite:
+      # Task 7: this context now scans `com.moyi.bond` too (real `bond`
+      # endpoints, for `EntriesEndpointTest`/`GratitudeCrossTenantTest` to
+      # drive), which pulls in `InviteProperties` — required, no default,
+      # same value `modules/bond`'s own test `application.yml` uses.
+      link-base-url: https://moyi.test/i
   security:
     jwt:
       # A fresh RSA pair per test context; the default source refuses to
