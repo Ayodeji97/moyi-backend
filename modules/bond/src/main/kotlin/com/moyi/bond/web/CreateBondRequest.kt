@@ -5,7 +5,7 @@ import com.moyi.bond.domain.BondDraft
 import com.moyi.bond.domain.BondType
 import com.moyi.bond.domain.RegionZone
 import com.moyi.bond.domain.UserId
-import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.NotNull
 import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
 import java.time.LocalTime
@@ -22,15 +22,26 @@ import java.time.LocalTime
  * `type` and the two zones are `String`s with constraints rather than typed
  * fields, so a wrong value is a `422` naming the field rather than Jackson's
  * `400` for the whole body.
+ *
+ * `@NotBlank` is deliberately absent from the three required fields. It is the
+ * weaker rule — [NOT_ONLY_SPACE] and [ValidBondType] both reject everything it
+ * rejects and the Unicode spaces it admits — and keeping both would report one
+ * mistake twice. `@NotNull` stays in its place — not because it can fire (these
+ * are non-nullable Kotlin properties, so an explicit `null` is Jackson's `400`
+ * before validation runs at all) but because it is what puts the field in the
+ * document's `required` list, and a generated client that thinks a name is
+ * optional is a client that cannot create a bond.
  */
 internal data class CreateBondRequest(
-    @field:NotBlank
+    @field:NotNull
+    @field:Pattern(regexp = NOT_ONLY_SPACE, message = "must not be blank")
     @field:Size(max = Bond.MAX_NAME_LENGTH)
     val name: String,
-    @field:NotBlank
+    @field:NotNull
     @field:ValidBondType
     val type: String,
-    @field:NotBlank
+    @field:NotNull
+    @field:Pattern(regexp = NOT_ONLY_SPACE, message = "must not be blank")
     @field:ValidRegionZone
     val anchorTimezone: String,
     /**

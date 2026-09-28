@@ -362,6 +362,9 @@ header_is "…with the ETag" ETag '"0"'
 
 expect "a fixed-offset zone is 422 on anchorTimezone" 422 '"field":"anchorTimezone"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"COUPLE","anchorTimezone":"Etc/GMT+3"}'
 expect "an unknown type is 422 on type" 422 '"field":"type"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"THROUPLE","anchorTimezone":"Africa/Lagos"}'
+# A non-breaking space passes `@NotBlank` and is blank to Kotlin, so before the
+# review of #40 this was a 500 on a well-formed request (ADR-0029 §13).
+expect "a name of one non-breaking space is 422, not 500" 422 '"field":"name"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"\u00a0","type":"COUPLE","anchorTimezone":"Africa/Lagos"}'
 
 expect "second bond is 201" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Two")"
 expect "third bond is 201" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Three")"
@@ -549,6 +552,64 @@ expect "a third open one is 201, because the bond they left frees its slot" 201 
 expect "…and a fourth is 409 BOND_LIMIT_REACHED" 409 '"code":"BOND_LIMIT_REACHED"' -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Five")"
 
 if grep -qiE '\bblock' "$MOYI_LOG"; then fail "block in log" "the log says block"; else pass "the log never says who blocked whom"; fi
+
+echo; echo "settings — the conditional update (FR-027, doc 06 §1, ADR-0029)"
+flush_buckets
+verified_account "settler" "203.0.113.60"; SETTLER_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond to configure is 201" 201 '"name":"Us"' -- -X POST "$API/bonds" -H "Authorization: Bearer $SETTLER_ACCESS" -d "$(bond_body "Us")"
+SET_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+header_is "…with an ETag of 0" ETag '"0"'
+
+# The four ways a condition can be wrong, before the one way it can be right.
+expect "a PATCH with no If-Match is 428" 428 '"code":"PRECONDITION_REQUIRED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{"name":"Us two"}'
+expect "a stale If-Match is 412" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "7"' -d '{"name":"Us two"}'
+# ADR-0029's two deliberate departures from RFC 9110, probed on the wire so
+# they stay decisions rather than drifting into accidents.
+expect "If-Match: * is 428, deliberately" 428 '"code":"PRECONDITION_REQUIRED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: *' -d '{"name":"Us two"}'
+expect "a weak validator is 412" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: W/"0"' -d '{"name":"Us two"}'
+expect "the right If-Match is 200" 200 '"name":"Us two"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "0"' -d '{"name":"Us two","strictMode":true}'
+header_is "…and the response carries the NEW ETag" ETag '"1"'
+expect "the same If-Match again is 412 — it is spent" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "0"' -d '{"name":"Us three"}'
+
+expect "an empty patch is 422" 422 '"code":"VALIDATION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "1"' -d '{}'
+# FR-027 makes the anchor zone two-party and once per 30 days, which is B5's
+# endpoint. Ignoring the field here would report success for a change that
+# never happened.
+expect "the anchor zone is refused here, not ignored" 422 'anchorTimezone' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "1"' -d '{"anchorTimezone":"Europe/London"}'
+expect "the type is patchable" 200 '"type":"FRIENDS"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "1"' -d '{"type":"FRIENDS"}'
+[[ "$LAST_BODY" == *'"maxMembers":2'* ]] && pass "…and the seats do not move with it" || fail "maxMembers" "${LAST_BODY:0:200}"
+expect "a reveal time can be set" 200 '"revealTimeLocal":"21:00"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "2"' -d '{"revealTimeLocal":"21:00"}'
+expect "a named null clears it" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "3"' -d '{"revealTimeLocal":null}'
+[[ "$LAST_BODY" == *'"strictMode":true'* ]] && pass "…and leaves the setting it did not name" || fail "patch isolation" "${LAST_BODY:0:250}"
+# A patch whose values are already the row's values writes nothing, so the
+# version does not move and the other member's ETag stays valid. Found by this
+# script: the probe below expected a bump and there was none, because clearing
+# an already-null field changes nothing (Hibernate's dirty check).
+expect "a patch that changes nothing is 200 and moves no version" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "4"' -d '{"revealTimeLocal":null}'
+header_is "…the same ETag it was given" ETag '"4"' 
+
+# The member's own settings: no condition, and nobody else's to see.
+expect "the member reads their own settings" 200 '"reminderTimeLocal":"20:00"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS"
+expect "and replaces them" 200 '"quietHoursEnd":"07:00"' -- -X PUT "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{"nicknameForOther":"Ada","reminderTimeLocal":"07:30","reminderTimezone":"Europe/London","quietHoursStart":"22:00","quietHoursEnd":"07:00"}'
+expect "a PUT that omits a field clears it" 200 '"nicknameForOther":null' -- -X PUT "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{"reminderTimeLocal":"21:00"}'
+[[ "$LAST_BODY" == *'"reminderTimezone":"Europe/London"'* ]] && pass "…but keeps the zone, which is not the caller's to lose" || fail "zone reset" "${LAST_BODY:0:250}"
+expect "one quiet hour without the other is 422" 422 'quietHours' -- -X PUT "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{"reminderTimeLocal":"21:00","quietHoursStart":"22:00"}'
+expect "a missing reminder time is 422 rather than a silent 20:00" 422 'reminderTimeLocal' -- -X PUT "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{}'
+# A settings write is one member's business, so the bond's ETag must not move.
+expect "the bond is where the last PATCH left it" 200 '"type":"FRIENDS"' -- "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS"
+header_is "…with the version the last PATCH produced, unmoved by the settings write" ETag '"4"'
+
+# T-02: a non-member is refused before the header is even read.
+expect "a stranger patching it is 404, headers and all" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $STRANGER_ACCESS" -H 'If-Match: "3"' -d '{"name":"Mine"}'
+expect "…404 without a condition too, not 428" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $STRANGER_ACCESS" -d '{"name":"Mine"}'
+expect "…and cannot read its settings either" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $STRANGER_ACCESS"
+
+# BR-9: an archived bond keeps its settings readable and takes no writes.
+expect "leaving it is 204" 204 "" -- -X POST "$API/bonds/$SET_BOND/leave" -H "Authorization: Bearer $SETTLER_ACCESS"
+expect "…the PATCH is then 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "5"' -d '{"name":"Us four"}'
+expect "…the settings PUT is too" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{"reminderTimeLocal":"21:00"}'
+expect "…and the settings are still readable" 200 '"reminderTimeLocal":"21:00"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS"
+if grep -qE '"(nickname|quietHours)' "$MOYI_LOG"; then fail "settings in log" "a member's settings appear in the log"; else pass "no member setting appears in the log"; fi
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

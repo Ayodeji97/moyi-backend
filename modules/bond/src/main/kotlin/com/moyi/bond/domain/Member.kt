@@ -48,9 +48,38 @@ internal data class Member(
         require(nicknameForOther == null || nicknameForOther.length in 1..MAX_NICKNAME_LENGTH) {
             "a nickname must be between 1 and $MAX_NICKNAME_LENGTH characters"
         }
+        // A start with no end is not a window: Phase 4's scheduler would have
+        // to invent the other half, and V9 permits either column alone — so
+        // this is the layer that says no. A window that wraps midnight
+        // (22:00 → 07:00) is ordinary and stays legal.
+        require((quietHoursStart == null) == (quietHoursEnd == null)) {
+            "quiet hours need both a start and an end, or neither"
+        }
     }
 
     val isActive: Boolean get() = leftAt == null
+
+    /**
+     * Replaces this member's own settings (`PUT …/members/me/settings`).
+     *
+     * Identity, role, the membership dates and [leftAt] are not the caller's to
+     * change and are not in [MemberSettings] at all — which is stronger than
+     * checking them, because there is nothing to check.
+     *
+     * `reminderTimezone` absent means the caller did not say, and the member
+     * keeps the zone they had rather than falling back to the bond's anchor:
+     * losing a zone you deliberately set, because you edited a nickname, is the
+     * kind of quiet damage doc 04 §6 is about. Every other field is cleared
+     * when absent, which is what a `PUT` means.
+     */
+    fun withSettings(settings: MemberSettings): Member =
+        copy(
+            nicknameForOther = settings.nicknameForOther,
+            reminderTimeLocal = settings.reminderTimeLocal,
+            reminderTimezone = settings.reminderTimezone ?: reminderTimezone,
+            quietHoursStart = settings.quietHoursStart,
+            quietHoursEnd = settings.quietHoursEnd,
+        )
 
     companion object {
         /**
@@ -111,3 +140,26 @@ internal data class Member(
             )
     }
 }
+
+/**
+ * One member's own notification settings — the whole of what `PUT
+ * /bonds/{bondId}/members/me/settings` replaces (doc 06 §3.3, `states.md` §8).
+ *
+ * All five fields together, because the endpoint is a `PUT`: it replaces, so an
+ * absent field is a cleared field. That is a deliberate choice over a second
+ * `PATCH` — these are five small fields on one screen, a client always holds all
+ * of them, and "replace what is there" needs no [Change] wrapper and no
+ * ambiguity about what a `null` meant.
+ *
+ * [reminderTimeLocal] has no default here on purpose:
+ * [Member.DEFAULT_REMINDER_TIME] is the default for a *new* member, and a `PUT`
+ * that omits the one field a member cannot be without should be told so rather
+ * than silently set back to 20:00.
+ */
+internal data class MemberSettings(
+    val nicknameForOther: String? = null,
+    val reminderTimeLocal: LocalTime,
+    val reminderTimezone: RegionZone? = null,
+    val quietHoursStart: LocalTime? = null,
+    val quietHoursEnd: LocalTime? = null,
+)

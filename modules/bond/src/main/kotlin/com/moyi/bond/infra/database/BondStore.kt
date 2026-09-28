@@ -149,12 +149,32 @@ internal class BondStore(
     }
 
     /**
-     * Everyone who has ever held a membership row in this bond, those who
-     * left included — which is who FR-029's block check has to consider: a
-     * bond somebody walked away from is exactly where a block would have been
-     * made.
+     * Writes a settings change to the bond row. [bond] is the aggregate *after*
+     * `update`.
+     *
+     * **This is not the layer that prevents a lost update, and it cannot be.**
+     * It re-reads the row inside the caller's transaction and `applyTo` does not
+     * copy `version` — which is right, the version is Hibernate's to increment —
+     * so the UPDATE always carries the row's current version and the optimistic
+     * check has nothing to catch. Hand this a stale aggregate and it will
+     * happily overwrite newer values.
+     *
+     * The protection is one layer up: `UpdateBond` takes [lockBond] and then
+     * compares `If-Match`, so the read, the check and the write are one
+     * serialised decision (ADR-0029). `BondPersistenceTest` states this
+     * explicitly so nobody rediscovers it the hard way.
+     *
+     * It does flush, for a different reason: `@Version` is incremented at flush,
+     * and a caller that writes and then re-reads to build its response would
+     * otherwise report the *old* version as the `ETag` — a value the client's
+     * next `If-Match` would be refused with (see
+     * [BondRepository.saveAndFlush]).
      */
-    fun memberUserIdsEverOf(bondId: BondId): List<UserId> = members.findAllByBondId(bondId.value).map { UserId(it.userId) }
+    fun update(bond: Bond) {
+        val entity = bonds.findById(bond.id.value) ?: error("cannot update a bond that does not exist")
+        bond.applyTo(entity)
+        bonds.saveAndFlush(entity)
+    }
 
     private companion object {
         /** FR-025 counts a bond waiting for its partner exactly as much as one that has them. */

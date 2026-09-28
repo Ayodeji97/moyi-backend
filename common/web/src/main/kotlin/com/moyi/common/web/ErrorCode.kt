@@ -144,6 +144,26 @@ enum class ErrorCode {
      */
     INVITE_NOT_USABLE,
 
+    /**
+     * A conditional request's condition is missing: `PATCH /bonds/{bondId}` with
+     * no `If-Match` (doc 06 §1, ADR-0029). 428.
+     *
+     * The client's move is to read the resource, keep the `ETag` it carries, and
+     * send that back. Not `400`: the request is well formed, and what is wrong
+     * is that it is unsafe — RFC 6585 added this status for that difference.
+     */
+    PRECONDITION_REQUIRED,
+
+    /**
+     * The condition was sent and does not hold: the `If-Match` names a version
+     * that is no longer current, so somebody changed the resource between the
+     * caller reading it and writing it. 412.
+     *
+     * Also the answer when two writers both pass that check and one loses the
+     * race at flush, which is the same fact a moment later (ADR-0029).
+     */
+    PRECONDITION_FAILED,
+
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,
 

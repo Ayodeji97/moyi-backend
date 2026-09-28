@@ -945,6 +945,155 @@
           }
         },
         "tags" : [ "bonds-controller" ]
+      },
+      "patch" : {
+        "operationId" : "patchBond",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PatchBondRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/BondResponse"
+                }
+              }
+            },
+            "description" : "OK",
+            "headers" : {
+              "ETag" : {
+                "description" : "The resource's version, quoted (RFC 9110 §8.8.3). Send it back as `If-Match` to update it (doc 06 §1).",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "412" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Precondition Failed"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "428" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Precondition Required"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "bonds-controller" ]
       }
     },
     "/api/v1/bonds/{bondId}/block" : {
@@ -1265,6 +1414,196 @@
           }
         },
         "tags" : [ "bonds-controller" ]
+      }
+    },
+    "/api/v1/bonds/{bondId}/members/me/settings" : {
+      "get" : {
+        "operationId" : "getMemberSettings",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MemberSettingsResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "bond-member-settings-controller" ]
+      },
+      "put" : {
+        "operationId" : "replaceMemberSettings",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MemberSettingsRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MemberSettingsResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "bond-member-settings-controller" ]
       }
     },
     "/api/v1/invites/{code}" : {
@@ -1591,12 +1930,13 @@
         "properties" : {
           "anchorTimezone" : {
             "type" : "string",
-            "minLength" : 1
+            "pattern" : "(?sU).*\\S.*"
           },
           "name" : {
             "type" : "string",
             "maxLength" : 60,
-            "minLength" : 0
+            "minLength" : 0,
+            "pattern" : "(?sU).*\\S.*"
           },
           "reminderTimezone" : {
             "type" : [ "string", "null" ]
@@ -1606,8 +1946,7 @@
             "pattern" : "^([01]\\d|2[0-3]):[0-5]\\d$"
           },
           "type" : {
-            "type" : "string",
-            "minLength" : 1
+            "type" : "string"
           }
         },
         "required" : [ "anchorTimezone", "name", "type" ]
@@ -1818,13 +2157,83 @@
           }
         }
       },
+      "MemberSettingsRequest" : {
+        "type" : "object",
+        "properties" : {
+          "nicknameForOther" : {
+            "type" : [ "string", "null" ],
+            "maxLength" : 40,
+            "minLength" : 1,
+            "pattern" : "(?sU).*\\S.*"
+          },
+          "quietHoursEnd" : {
+            "type" : [ "string", "null" ],
+            "pattern" : "^([01]\\d|2[0-3]):[0-5]\\d$"
+          },
+          "quietHoursStart" : {
+            "type" : [ "string", "null" ],
+            "pattern" : "^([01]\\d|2[0-3]):[0-5]\\d$"
+          },
+          "reminderTimeLocal" : {
+            "type" : [ "string", "null" ],
+            "pattern" : "^([01]\\d|2[0-3]):[0-5]\\d$"
+          },
+          "reminderTimezone" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "reminderTimeLocal" ]
+      },
+      "MemberSettingsResponse" : {
+        "type" : "object",
+        "properties" : {
+          "nicknameForOther" : {
+            "type" : [ "string", "null" ]
+          },
+          "quietHoursEnd" : {
+            "type" : [ "string", "null" ]
+          },
+          "quietHoursStart" : {
+            "type" : [ "string", "null" ]
+          },
+          "reminderTimeLocal" : {
+            "type" : "string"
+          },
+          "reminderTimezone" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PatchBondRequest" : {
+        "type" : "object",
+        "properties" : {
+          "anchorTimezone" : {
+            "type" : [ "string", "null" ]
+          },
+          "name" : {
+            "type" : [ "string", "null" ],
+            "maxLength" : 60,
+            "minLength" : 1,
+            "pattern" : "(?sU).*\\S.*"
+          },
+          "revealTimeLocal" : {
+            "type" : [ "string", "null" ]
+          },
+          "strictMode" : {
+            "type" : [ "boolean", "null" ]
+          },
+          "type" : {
+            "type" : [ "string", "null" ]
+          }
+        }
+      },
       "ProblemDetail" : {
         "type" : "object",
         "description" : "RFC 9457 problem details (doc 06 §2). Switch on `code`; `detail` is prose and may change.",
         "properties" : {
           "code" : {
             "type" : "string",
-            "enum" : [ "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"

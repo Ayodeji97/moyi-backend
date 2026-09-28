@@ -56,6 +56,12 @@ import org.springframework.http.HttpStatus
  *   back — raised by the review of PR #37. Keyed on the response schema
  *   rather than a list of paths, so the `PATCH` that arrives with slice B4
  *   is documented by having a body, not by somebody remembering.
+ * - **`If-Match`, required.** The handler takes the header as optional so that
+ *   an absent condition is our `428` rather than Spring's `400`, and springdoc
+ *   copies that optionality into the document — where it means something else
+ *   entirely: that a client may leave it out. [CONDITIONAL_OPERATIONS] is the
+ *   one list of operations that demand a condition, and it now says so in both
+ *   places. Raised by the review of PR #40.
  *
  * Which codes a *particular* operation returns is doc 06 §3's table, not this
  * document: the contract a generated client is built from is the shape.
@@ -93,6 +99,7 @@ class OpenApiConfiguration {
                         operation.responses.addApiResponse(status.value().toString(), problemResponse(status))
                     }
                     documentETags(operation)
+                    requireIfMatch(operation)
                 }
             }
         }
@@ -106,6 +113,9 @@ class OpenApiConfiguration {
             if (!public) addAll(listOf(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN))
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
             if (operation.operationId in CONFLICTING_OPERATIONS) add(HttpStatus.CONFLICT)
+            if (operation.operationId in CONDITIONAL_OPERATIONS) {
+                addAll(listOf(HttpStatus.PRECONDITION_FAILED, HttpStatus.PRECONDITION_REQUIRED))
+            }
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER && it.name == "code" }) {
                 add(HttpStatus.UNPROCESSABLE_ENTITY)
             }
@@ -134,6 +144,23 @@ class OpenApiConfiguration {
                         ).schema(StringSchema()),
                 )
             }
+    }
+
+    /**
+     * Marks `If-Match` required on the operations that demand one.
+     *
+     * The handler declares the header `required = false` on purpose, so that an
+     * absent condition is *our* `428` with an `ErrorCode` rather than Spring's
+     * bare `400` — but springdoc reads that declaration literally and a client
+     * generated from it offers the call without the header, which cannot
+     * succeed. The document states the rule the API actually enforces. Raised
+     * by the review of PR #40.
+     */
+    private fun requireIfMatch(operation: Operation) {
+        if (operation.operationId !in CONDITIONAL_OPERATIONS) return
+        operation.parameters.orEmpty().filter { it.name == IF_MATCH && it.`in` == HEADER_PARAMETER }.forEach {
+            it.required = true
+        }
     }
 
     private fun problemResponse(status: HttpStatus): ApiResponse =
@@ -170,7 +197,9 @@ class OpenApiConfiguration {
         private const val FIELD_VIOLATION_REF = "#/components/schemas/$FIELD_VIOLATION"
         private const val PROBLEM_JSON = "application/problem+json"
         private const val PATH_PARAMETER = "path"
+        private const val HEADER_PARAMETER = "header"
         private const val ETAG = "ETag"
+        private const val IF_MATCH = "If-Match"
 
         /**
          * The operations that answer `409`, by id.
@@ -183,7 +212,18 @@ class OpenApiConfiguration {
          * (ADR-0028).
          */
         private val CONFLICTING_OPERATIONS =
-            setOf("createBond", "createBondInvite", "accept", "leaveBond", "revokeBondInvite")
+            setOf("createBond", "createBondInvite", "accept", "leaveBond", "revokeBondInvite", "patchBond", "replaceMemberSettings")
+
+        /**
+         * Operations that require `If-Match` (doc 06 §1) and can therefore answer
+         * `412` and `428`.
+         *
+         * By id, for the same reason the conflict list is: it is a property of
+         * the operation's rule rather than of its shape. `replaceMemberSettings`
+         * has a body and a path parameter exactly like `patchBond` and takes no
+         * condition at all, because nobody else can write that row (ADR-0029).
+         */
+        private val CONDITIONAL_OPERATIONS = setOf("patchBond")
 
         /**
          * Response schemas whose resource carries a row version, and therefore

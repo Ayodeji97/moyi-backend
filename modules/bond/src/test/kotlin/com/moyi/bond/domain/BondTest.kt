@@ -266,5 +266,125 @@ internal class BondTest {
         pending.end(pending.members.single().id, now).status shouldBe BondStatus.PENDING_DELETION
     }
 
+    @Test
+    fun `updating changes only the fields the caller named`() {
+        val bond = create().copy(revealTimeLocal = LocalTime.of(21, 0), strictMode = true)
+
+        val renamed = bond.update(BondSettings(name = "Us two"))
+
+        renamed.name shouldBe "Us two"
+        renamed.type shouldBe bond.type
+        renamed.revealTimeLocal shouldBe LocalTime.of(21, 0)
+        renamed.strictMode shouldBe true
+        renamed.version shouldBe bond.version
+    }
+
+    @Test
+    fun `a named null clears the reveal time, and an absent one leaves it`() {
+        // PATCH's one genuine ambiguity: `"revealTimeLocal": null` means clear
+        // it, and omitting the field means leave it alone. `Change` is what
+        // keeps the two apart all the way down from the wire.
+        val bond = create().copy(revealTimeLocal = LocalTime.of(21, 0))
+
+        bond.update(BondSettings(revealTimeLocal = Change(null))).revealTimeLocal.shouldBeNull()
+        bond.update(BondSettings(revealTimeLocal = null)).revealTimeLocal shouldBe LocalTime.of(21, 0)
+        bond.update(BondSettings(revealTimeLocal = Change(LocalTime.of(7, 30)))).revealTimeLocal shouldBe LocalTime.of(7, 30)
+    }
+
+    @Test
+    fun `updating a bond that has ended is refused`() {
+        val archived = create().let { it.leave(it.members.single().id, now) }
+
+        shouldThrow<IllegalStateException> { archived.update(BondSettings(name = "Us two")) }
+    }
+
+    @Test
+    fun `changing the type leaves the seats alone`() {
+        // FR-021 puts the member limit on the row, and every v1 type seats two.
+        // A type change is not the place to move it: a type that ever seats a
+        // different number needs a rule about existing members (ADR-0029).
+        val bond = create()
+
+        val friends = bond.update(BondSettings(type = BondType.FRIENDS))
+
+        friends.type shouldBe BondType.FRIENDS
+        friends.maxMembers shouldBe bond.maxMembers
+    }
+
+    @Test
+    fun `a name the aggregate would refuse cannot be set by an update either`() {
+        // The edge validates too, and this is the layer that cannot be bypassed.
+        val bond = create()
+
+        shouldThrow<IllegalArgumentException> { bond.update(BondSettings(name = " ")) }
+        shouldThrow<IllegalArgumentException> { bond.update(BondSettings(name = "x".repeat(Bond.MAX_NAME_LENGTH + 1))) }
+    }
+
+    @Test
+    fun `a member's settings are replaced wholesale`() {
+        val member = create().members.single()
+
+        val updated =
+            member.withSettings(
+                MemberSettings(
+                    nicknameForOther = "Ada",
+                    reminderTimeLocal = LocalTime.of(7, 0),
+                    reminderTimezone = RegionZone.of("Europe/London"),
+                    quietHoursStart = LocalTime.of(22, 0),
+                    quietHoursEnd = LocalTime.of(7, 0),
+                ),
+            )
+
+        updated.nicknameForOther shouldBe "Ada"
+        updated.reminderTimeLocal shouldBe LocalTime.of(7, 0)
+        updated.reminderTimezone shouldBe RegionZone.of("Europe/London")
+        updated.quietHoursStart shouldBe LocalTime.of(22, 0)
+        updated.quietHoursEnd shouldBe LocalTime.of(7, 0)
+        // Identity, role and dates are not in MemberSettings at all, which is
+        // stronger than checking them.
+        updated.id shouldBe member.id
+        updated.userId shouldBe member.userId
+        updated.role shouldBe member.role
+        updated.joinedAt shouldBe member.joinedAt
+        updated.leftAt shouldBe member.leftAt
+    }
+
+    @Test
+    fun `a PUT clears what it omits, except the zone it would silently reset`() {
+        val member =
+            create().members.single().withSettings(
+                MemberSettings(
+                    nicknameForOther = "Ada",
+                    reminderTimeLocal = LocalTime.of(7, 0),
+                    reminderTimezone = RegionZone.of("Europe/London"),
+                    quietHoursStart = LocalTime.of(22, 0),
+                    quietHoursEnd = LocalTime.of(7, 0),
+                ),
+            )
+
+        val replaced = member.withSettings(MemberSettings(reminderTimeLocal = LocalTime.of(20, 0)))
+
+        replaced.nicknameForOther.shouldBeNull()
+        replaced.quietHoursStart.shouldBeNull()
+        replaced.quietHoursEnd.shouldBeNull()
+        // Losing a zone you deliberately set, because you edited a nickname, is
+        // the quiet damage doc 04 §6 warns about.
+        replaced.reminderTimezone shouldBe RegionZone.of("Europe/London")
+    }
+
+    @Test
+    fun `one quiet hour without the other is not a state a member can be in`() {
+        // A start with no end is not a window, and Phase 4's scheduler would
+        // have to invent the other half. V9 permits either column alone, so the
+        // aggregate is the layer that says no.
+        val member = create().members.single()
+        val settings = MemberSettings(reminderTimeLocal = LocalTime.of(20, 0), quietHoursStart = LocalTime.of(22, 0))
+
+        shouldThrow<IllegalArgumentException> { member.withSettings(settings) }
+        shouldThrow<IllegalArgumentException> { member.copy(quietHoursEnd = LocalTime.of(7, 0)) }
+        // A window that wraps midnight is ordinary and stays legal.
+        member.withSettings(settings.copy(quietHoursEnd = LocalTime.of(7, 0))).quietHoursStart shouldBe LocalTime.of(22, 0)
+    }
+
     private fun joiner(bond: Bond): Member = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)
 }
