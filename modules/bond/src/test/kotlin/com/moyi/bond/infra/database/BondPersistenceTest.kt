@@ -4,6 +4,7 @@ import com.moyi.bond.domain.Block
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.BondDraft
 import com.moyi.bond.domain.BondId
+import com.moyi.bond.domain.BondSettings
 import com.moyi.bond.domain.BondStatus
 import com.moyi.bond.domain.BondType
 import com.moyi.bond.domain.Invite
@@ -11,6 +12,7 @@ import com.moyi.bond.domain.InviteCode
 import com.moyi.bond.domain.InviteId
 import com.moyi.bond.domain.Member
 import com.moyi.bond.domain.MemberId
+import com.moyi.bond.domain.MemberSettings
 import com.moyi.bond.domain.RegionZone
 import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.BondTestApplication
@@ -448,5 +450,77 @@ internal class BondPersistenceTest(
         jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
         jdbc.queryForObject("SELECT created_at FROM blocks", Instant::class.java) shouldBe now
         transactions.execute { blocks.existsBetween(other, listOf(bond.createdBy)) } shouldBe true
+    }
+
+    @Test
+    fun `updating a bond writes the change and moves the version`() {
+        val (bond, invite) = newBond()
+        transactions.executeWithoutResult { store.insert(bond).also { invites.insert(invite) } }
+
+        transactions.executeWithoutResult { store.update(bond.update(BondSettings(name = "Us two", strictMode = true))) }
+
+        val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+        loaded.name shouldBe "Us two"
+        loaded.strictMode shouldBe true
+        loaded.version shouldBe 1
+    }
+
+    @Test
+    fun `the store applies whatever aggregate it is given - it is not the layer that stops a lost update`() {
+        // Written down because the first version of this test expected the
+        // opposite, and the expectation was wrong in a way worth keeping.
+        //
+        // `update` re-reads the row inside its own transaction and `applyTo`
+        // deliberately does not copy `version` (Hibernate's to increment), so
+        // the UPDATE always carries the *current* version and the optimistic
+        // check can never fail on this path. Handing it a stale aggregate
+        // therefore overwrites the newer values — silently.
+        //
+        // That is why `UpdateBond` takes the bond's row lock before it reads and
+        // compares `If-Match` (ADR-0029): the protection lives there, in one
+        // serialised read-check-write, and not in this method.
+        val (bond, invite) = newBond()
+        transactions.executeWithoutResult { store.insert(bond).also { invites.insert(invite) } }
+        transactions.executeWithoutResult { store.update(bond.update(BondSettings(name = "First"))) }
+
+        // `bond` is still the version-0 object this test loaded at the start.
+        transactions.executeWithoutResult { store.update(bond.update(BondSettings(name = "Second"))) }
+
+        val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+        loaded.name shouldBe "Second"
+        loaded.version shouldBe 2
+    }
+
+    @Test
+    fun `a member's settings round-trip, and the bond's version does not move`() {
+        // The member row is not the bond row: a reminder time is nobody else's
+        // business and must not invalidate the other member's ETag (doc 06 §1,
+        // states.md §8).
+        val (bond, invite) = newBond()
+        transactions.executeWithoutResult { store.insert(bond).also { invites.insert(invite) } }
+        val member = bond.members.single()
+
+        transactions.executeWithoutResult {
+            store.updateMember(
+                member.withSettings(
+                    MemberSettings(
+                        nicknameForOther = "Ada",
+                        reminderTimeLocal = LocalTime.of(7, 30),
+                        reminderTimezone = RegionZone.of("Europe/London"),
+                        quietHoursStart = LocalTime.of(22, 0),
+                        quietHoursEnd = LocalTime.of(7, 0),
+                    ),
+                ),
+            )
+        }
+
+        val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+        val reloaded = loaded.memberOf(bond.createdBy).shouldNotBeNull()
+        reloaded.nicknameForOther shouldBe "Ada"
+        reloaded.reminderTimeLocal shouldBe LocalTime.of(7, 30)
+        reloaded.reminderTimezone shouldBe RegionZone.of("Europe/London")
+        reloaded.quietHoursStart shouldBe LocalTime.of(22, 0)
+        reloaded.quietHoursEnd shouldBe LocalTime.of(7, 0)
+        loaded.version shouldBe 0
     }
 }

@@ -149,6 +149,41 @@ internal class BondStore(
     }
 
     /**
+     * Writes a settings change to the bond row. [bond] is the aggregate *after*
+     * `update`.
+     *
+     * **This is not the layer that prevents a lost update, and it cannot be.**
+     * It re-reads the row inside the caller's transaction and `applyTo` does not
+     * copy `version` — which is right, the version is Hibernate's to increment —
+     * so the UPDATE always carries the row's current version and the optimistic
+     * check has nothing to catch. Hand this a stale aggregate and it will
+     * happily overwrite newer values.
+     *
+     * The protection is one layer up: `UpdateBond` takes [lockBond] and then
+     * compares `If-Match`, so the read, the check and the write are one
+     * serialised decision (ADR-0029). `BondPersistenceTest` states this
+     * explicitly so nobody rediscovers it the hard way.
+     */
+    fun update(bond: Bond) {
+        val entity = bonds.findById(bond.id.value) ?: error("cannot update a bond that does not exist")
+        bond.applyTo(entity)
+        bonds.save(entity)
+    }
+
+    /**
+     * Writes one member's own settings. The bond row is untouched, so the other
+     * member's `ETag` stays valid: a reminder time is not part of the bond
+     * (`states.md` §8).
+     */
+    fun updateMember(member: Member) {
+        val entity =
+            members.findAllByBondId(member.bondId.value).firstOrNull { it.getId() == member.id.value }
+                ?: error("cannot update a member row that does not exist")
+        member.applyTo(entity)
+        members.saveAll(listOf(entity))
+    }
+
+    /**
      * Everyone who has ever held a membership row in this bond, those who
      * left included — which is who FR-029's block check has to consider: a
      * bond somebody walked away from is exactly where a block would have been
