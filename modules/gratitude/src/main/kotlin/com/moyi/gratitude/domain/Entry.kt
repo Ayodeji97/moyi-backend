@@ -19,8 +19,9 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  * One member's words for one [BondDay] (doc 04 §3, doc 07 §2) — a leaf, not
  * an aggregate of its own that holds a day: [BondDay] never carries a
  * `List<Entry>`, and this never carries a `BondDay`. `EntryStore` (Task 6)
- * finds one by [id] or by [bondDayId] alone; nothing here is walked from the
- * other (ADR-0026, V12's own comment on why `bond_day_id` is a plain column).
+ * finds every entry for a [bondDayId], never a [BondDay] for an entry's id —
+ * nothing here is walked from the other (ADR-0026, V12's own comment on why
+ * `bond_day_id` is a plain column).
  *
  * **[text] is required, though `entries.text` allows `NULL`.** The column is
  * nullable for the media-only entry a later Phase 4 slice adds; this slice

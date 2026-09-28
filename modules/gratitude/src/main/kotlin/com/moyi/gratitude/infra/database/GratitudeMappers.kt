@@ -63,6 +63,16 @@ internal fun BondDay.applyTo(entity: BondDayEntity) {
     entity.closedAt = closedAt
 }
 
+/**
+ * `EntryText.of` re-validates on the way out exactly as `ZoneId.of` does
+ * above, including the 500-grapheme cap — which V12's `CHECK` does not
+ * restate; the schema bounds `text` by octets alone. A row the database
+ * would accept but this function would refuse to read cannot exist today
+ * because every write already goes through `EntryText.of` first (`Entry.submit`),
+ * so the two bounds never actually diverge — but they are two separate
+ * statements of the limit, not one, and only the schema's is enforced at
+ * the boundary a second writer could someday bypass.
+ */
 internal fun EntryEntity.toDomain(): Entry =
     Entry(
         id = EntryId(getId()),

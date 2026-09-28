@@ -35,10 +35,14 @@ internal class EntityIdentityTest {
 
     @Test
     fun `a bond-day's toString names its id, bond and status, and nothing about its counts or timestamps`() {
-        val entity = bondDayEntity(id)
+        val entity = bondDayEntity(id, entryCount = 2)
 
         entity.toString() shouldContain id.toString()
         entity.toString() shouldContain "OPEN"
+        // now's exact ISO instant is distinctive enough that its absence is
+        // meaningful — unlike the raw entryCount digit, which a random UUID
+        // could contain by coincidence and make this assertion flaky.
+        entity.toString() shouldNotContain now.toString()
     }
 
     @Test

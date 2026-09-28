@@ -22,9 +22,6 @@ spring:
       # column is discovered by the first query that needs it.
       ddl-auto: validate
     open-in-view: false
-    properties:
-      hibernate:
-        generate_statistics: true
 
 moyi:
   security:

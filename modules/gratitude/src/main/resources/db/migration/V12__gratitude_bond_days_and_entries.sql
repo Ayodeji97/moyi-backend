@@ -1,5 +1,4 @@
--- Bond-day and entry — doc 07 §2 "gratitude", with three deltas from that
--- DDL, each recorded in the Phase 3 design §12.
+-- Bond-day and entry — doc 07 §2 "gratitude".
 --
 -- Owned by `modules/gratitude` (ADR-0014, as V9 is bond's): the module's own
 -- test context builds this schema by itself, because the entities under test
