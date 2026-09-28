@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 /**
  * `POST /bonds/{bondId}/deletion-request` and `DELETE …/deletion-request`
@@ -56,7 +57,7 @@ internal class RequestDeletion(
     @Transactional
     fun request(membership: Membership): BondView {
         bonds.lockBond(membership.bondId)
-        val now = support.clock.instant()
+        val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         // Already counting down: both have asked, and asking again changes
         // nothing. Deliberately *not* an error — `states.md` §9's screen shows
@@ -106,7 +107,7 @@ internal class RequestDeletion(
     @Transactional
     fun cancel(membership: Membership) {
         bonds.lockBond(membership.bondId)
-        val now = support.clock.instant()
+        val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         val pending = proposals.findLive(membership.bondId, ProposalKind.DELETION, now)
         val cancelled =

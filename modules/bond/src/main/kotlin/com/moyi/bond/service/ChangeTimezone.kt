@@ -11,6 +11,7 @@ import com.moyi.bond.infra.database.ProposalStore
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.temporal.ChronoUnit
 
 /**
  * `PATCH /bonds/{bondId}/timezone`, `POST …/timezone/confirm` and
@@ -55,7 +56,7 @@ internal class ChangeTimezone(
         zone: RegionZone,
     ): BondView {
         bonds.lockBond(membership.bondId)
-        val now = support.clock.instant()
+        val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         if (!bond.isOpen) throw BondArchivedException()
         if (!bond.mayChangeTimezoneAt(now)) {
@@ -97,7 +98,7 @@ internal class ChangeTimezone(
         expectedProposalId: ProposalId,
     ): BondView {
         bonds.lockBond(membership.bondId)
-        val now = support.clock.instant()
+        val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         if (!bond.isOpen) throw BondArchivedException()
         val proposal =
@@ -128,7 +129,7 @@ internal class ChangeTimezone(
     @Transactional
     fun cancel(membership: Membership) {
         bonds.lockBond(membership.bondId)
-        val now = support.clock.instant()
+        val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val proposal =
             proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()
         if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()
