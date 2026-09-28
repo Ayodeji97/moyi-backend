@@ -57,7 +57,7 @@ internal class BondsEndpointTest(
         val response = create(ada, body(name = "Us"))
 
         response.status shouldBe 201
-        response.getHeader(HttpHeaders.ETAG) shouldBe "\"0\""
+        response.getHeader(HttpHeaders.ETAG)!!.startsWith("\"0-") shouldBe true
 
         val json = response.contentAsString
         json shouldContain "\"name\":\"Us\""
@@ -227,7 +227,7 @@ internal class BondsEndpointTest(
 
         val mine = get(ada, bondId)
         mine.status shouldBe 200
-        mine.getHeader(HttpHeaders.ETAG) shouldBe "\"0\""
+        mine.getHeader(HttpHeaders.ETAG)!!.startsWith("\"0-") shouldBe true
         mine.contentAsString shouldContain "\"id\":\"$bondId\""
         mine.contentAsString shouldContain "\"me\":{\"memberId\":\""
 

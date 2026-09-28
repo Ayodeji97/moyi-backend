@@ -15,6 +15,16 @@ import org.junit.jupiter.api.Test
  */
 internal class IfMatchTest {
     @Test
+    fun `opaque tags compare exactly and commas inside quotes are not separators`() {
+        listOf("\"03\"", "\"+3\"", "\"prefix, \"3\"", "garbage, \"3\"").forEach {
+            IfMatch.parse(it).matches(3) shouldBe false
+        }
+        IfMatch.parse("W/\"abc\", \"a,b\", \"abc\"").matches("\"a,b\"") shouldBe true
+        IfMatch.parse("\"abc\"").matches("\"abc\"") shouldBe true
+        IfMatch.parse("W/\"abc\"").matches("\"abc\"") shouldBe false
+    }
+
+    @Test
     fun `a quoted version matches that version and no other`() {
         val ifMatch = IfMatch.parse("\"3\"")
 

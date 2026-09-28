@@ -8,9 +8,8 @@ import org.springframework.http.HttpStatus
  * Doc 06 §1 requires one on every bond-settings update, and the reason is the
  * lost update: two members open the settings screen, both change the name, and
  * without a condition the second write silently erases the first — with no
- * error for either of them to see. The `ETag` this compares against is the row
- * `@Version`, so the check is made against the same number the database itself
- * enforces at flush.
+ * error for either of them to see. Entity tags are opaque strings;
+ * each resource supplies its current validator under its update lock.
  *
  * **Two deliberate deviations from the RFC, both recorded in ADR-0029:**
  *
@@ -30,32 +29,32 @@ import org.springframework.http.HttpStatus
  */
 @JvmInline
 value class IfMatch private constructor(
-    private val versions: List<Int>,
+    private val tags: Set<String>,
 ) {
-    /** True when [version] is one of the versions the caller said it would accept. */
-    fun matches(version: Int): Boolean = versions.contains(version)
+    /** Strong comparison is byte equality, never numeric coercion. */
+    fun matches(etag: String): Boolean = etag in tags
+
+    fun matches(version: Int): Boolean = matches("\"$version\"")
 
     companion object {
-        /**
-         * @throws PreconditionRequiredException the header is absent, blank, or `*`
-         */
-        fun parse(header: String?): IfMatch {
-            val raw = header?.trim()
-            if (raw.isNullOrBlank() || raw == "*") throw PreconditionRequiredException()
-            return IfMatch(raw.split(',').mapNotNull { it.trim().toVersionOrNull() })
-        }
+        private const val ENTITY_TAG = "(?:W/)?\"[\\x21\\x23-\\x7E\\x80-\\xFF]*\""
+        private val tag = Regex(ENTITY_TAG)
+        private val list = Regex("[ \t]*(?:$ENTITY_TAG)?(?:[ \t]*,[ \t]*(?:$ENTITY_TAG)?)*[ \t]*")
 
-        /**
-         * `"3"` → `3`. Anything else is `null`, and a `null` matches nothing: a
-         * weak validator, an unquoted number, an empty tag, something that is
-         * not a number, a negative one, or two tags that were not comma
-         * separated.
-         */
-        private fun String.toVersionOrNull(): Int? =
-            takeIf { it.length >= 2 && it.startsWith('"') && it.endsWith('"') }
-                ?.substring(1, length - 1)
-                ?.toIntOrNull()
-                ?.takeIf { it >= 0 }
+        /** Missing conditions are 428; malformed lists fail closed with 412. */
+        fun parse(header: String?): IfMatch {
+            if (header.isNullOrBlank() || header.trim() == "*") throw PreconditionRequiredException()
+            // Commas inside an opaque tag are data, not list delimiters. Validate
+            // the entire field before accepting any individual strong tag.
+            if (!list.matches(header)) return IfMatch(emptySet())
+            return IfMatch(
+                tag
+                    .findAll(header)
+                    .map { it.value }
+                    .filterNot { it.startsWith("W/") }
+                    .toSet(),
+            )
+        }
     }
 }
 

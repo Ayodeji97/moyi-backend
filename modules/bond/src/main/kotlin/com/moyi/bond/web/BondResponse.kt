@@ -7,6 +7,7 @@ import com.moyi.bond.domain.Proposal
 import com.moyi.bond.service.BondView
 import com.moyi.bond.service.InviteView
 import com.moyi.bond.service.MemberView
+import com.moyi.bond.service.entityTag
 import java.net.URI
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -73,8 +74,8 @@ internal data class BondResponse(
                 pendingDeletionRequest = view.deletion?.let(PendingDeletionRequestResponse::from),
             )
 
-        /** The `ETag` for a bond: its row version, quoted, as RFC 9110 §8.8.3 requires. */
-        fun etagOf(view: BondView): String = "\"${view.bond.version}\""
+        /** The `ETag` for a bond: an opaque validator of this caller’s public representation. */
+        fun etagOf(view: BondView): String = view.entityTag()
     }
 }
 

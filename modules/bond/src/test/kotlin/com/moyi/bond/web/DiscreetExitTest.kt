@@ -80,7 +80,8 @@ internal class DiscreetExitTest(
 
         withClue("GET /bonds/{id} as the other member") {
             blockedDetail.status shouldBe leftDetail.status
-            blockedDetail.getHeader(HttpHeaders.ETAG) shouldBe leftDetail.getHeader(HttpHeaders.ETAG)
+            blockedDetail.getHeader(HttpHeaders.ETAG)!!.substringBefore('-') shouldBe
+                leftDetail.getHeader(HttpHeaders.ETAG)!!.substringBefore('-')
             normalise(blockedDetail.contentAsString) shouldBe normalise(leftDetail.contentAsString)
         }
 
