@@ -16,9 +16,9 @@ import org.springframework.transaction.annotation.Transactional
  *
  * **No `If-Match` here, and that is a decision rather than an omission**
  * (ADR-0029): the row belongs to one member and nobody else can write it, so
- * there is no update for a concurrent writer to lose. Requiring a condition
- * where nothing can conflict is ceremony, and ceremony teaches clients to send
- * headers they do not mean.
+ * competing edits use last-write-wins. Lifecycle transitions still write this
+ * row: the bond lock serialises settings with leave and block, without changing
+ * the bond version or requiring a client condition.
  *
  * `me` is the only member this can name — there is no member id in the route —
  * so "never show the other member's settings" is not a check that could be
@@ -51,6 +51,9 @@ internal class MemberSettingsService(
         membership: Membership,
         settings: MemberSettings,
     ): Member {
+        // EndBond also writes this member row. Lock before loading it so a
+        // settings update cannot restore a stale leftAt after leave or block.
+        bonds.lockBond(membership.bondId)
         val bond = bondOf(membership)
         if (!bond.isOpen) throw BondArchivedException()
         val updated = memberIn(bond, membership).withSettings(settings)

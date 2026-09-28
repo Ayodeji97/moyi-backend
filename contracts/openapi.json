@@ -958,7 +958,7 @@
         }, {
           "in" : "header",
           "name" : "If-Match",
-          "required" : false,
+          "required" : true,
           "schema" : {
             "type" : "string"
           }
@@ -2404,12 +2404,13 @@
         "properties" : {
           "anchorTimezone" : {
             "type" : "string",
-            "minLength" : 1
+            "pattern" : "(?sU).*\\S.*"
           },
           "name" : {
             "type" : "string",
             "maxLength" : 60,
-            "minLength" : 0
+            "minLength" : 0,
+            "pattern" : "(?sU).*\\S.*"
           },
           "reminderTimezone" : {
             "type" : [ "string", "null" ]
@@ -2419,8 +2420,7 @@
             "pattern" : "^([01]\\d|2[0-3]):[0-5]\\d$"
           },
           "type" : {
-            "type" : "string",
-            "minLength" : 1
+            "type" : "string"
           }
         },
         "required" : [ "anchorTimezone", "name", "type" ]
@@ -2637,10 +2637,8 @@
           "nicknameForOther" : {
             "type" : [ "string", "null" ],
             "maxLength" : 40,
-            "minLength" : 1
-          },
-          "quietHoursArePaired" : {
-            "type" : "boolean"
+            "minLength" : 1,
+            "pattern" : "(?sU).*\\S.*"
           },
           "quietHoursEnd" : {
             "type" : [ "string", "null" ],
@@ -2686,23 +2684,14 @@
           "anchorTimezone" : {
             "type" : [ "string", "null" ]
           },
-          "anchorTimezoneNotAllowedHere" : {
-            "type" : "boolean"
-          },
-          "atLeastOneSetting" : {
-            "type" : "boolean"
-          },
           "name" : {
             "type" : [ "string", "null" ],
             "maxLength" : 60,
             "minLength" : 1,
-            "pattern" : "^(?!\\s*$).+$"
+            "pattern" : "(?sU).*\\S.*"
           },
           "revealTimeLocal" : {
             "type" : [ "string", "null" ]
-          },
-          "revealTimeLocalIsTimeOfDay" : {
-            "type" : "boolean"
           },
           "strictMode" : {
             "type" : [ "boolean", "null" ]

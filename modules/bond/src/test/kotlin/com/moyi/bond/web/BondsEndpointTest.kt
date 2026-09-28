@@ -166,6 +166,26 @@ internal class BondsEndpointTest(
     }
 
     @Test
+    fun `a name blank once trimmed is 422 on name, whatever kind of space it is`() {
+        val ada = users.verified("Ada")
+
+        // U+00A0 and U+2007 are `isSpaceChar` but not `isWhitespace`, so Java's
+        // `trim` and `@NotBlank` leave them alone while Kotlin's `trim` removes
+        // them — and the Bond invariant then rejects a name the edge admitted.
+        for (blank in listOf(" ", "\u00a0", "\u2007")) {
+            val response = create(ada, body(name = blank))
+
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"name\""
+        }
+        create(ada, body(name = "  Us  ")).status shouldBe 201
+
+        val zone = create(ada, body(anchorTimezone = "\"\u00a0\""))
+        zone.status shouldBe 422
+        zone.contentAsString shouldContain "\"field\":\"anchorTimezone\""
+    }
+
+    @Test
     fun `an unknown type is 422 on type, a long name 422 on name, and unparseable JSON is 400`() {
         val ada = users.verified("Ada")
 

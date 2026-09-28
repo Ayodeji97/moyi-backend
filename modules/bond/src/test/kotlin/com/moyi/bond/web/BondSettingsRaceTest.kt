@@ -8,6 +8,7 @@ import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.collections.shouldBeIn
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -21,6 +22,8 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.put
+import org.springframework.transaction.support.TransactionTemplate
+import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
@@ -50,6 +53,7 @@ internal class BondSettingsRaceTest(
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
+    @Autowired private val transactions: TransactionTemplate,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -96,10 +100,9 @@ internal class BondSettingsRaceTest(
     }
 
     @Test
-    fun `a patch and a member settings write do not block each other`() {
-        // Different rows, so neither has to wait and neither invalidates the
-        // other. If this ever fails, something has started taking the bond's
-        // lock for a write that belongs to one member alone.
+    fun `a patch and a member settings write both succeed without invalidating the condition`() {
+        // Both take the lifecycle lock, but settings only change the member
+        // row, so they do not invalidate the patch's bond version.
         val ada = users.verified("Ada")
         val bondId = bondIdOf(createBond(ada))
 
@@ -113,6 +116,46 @@ internal class BondSettingsRaceTest(
 
         statuses shouldContainExactlyInAnyOrder listOf(200, 200)
         jdbc.queryForObject("SELECT version FROM bonds", Int::class.java) shouldBe 1
+    }
+
+    @Test
+    fun `settings wait for an ending transaction and cannot erase its membership timestamp`() {
+        val ada = users.verified("Ada")
+        val bondId = bondIdOf(createBond(ada))
+        val pool = Executors.newSingleThreadExecutor()
+        try {
+            val saving =
+                transactions.execute {
+                    // Hold exactly the rows EndBond changes before it commits. The
+                    // guard can still read their previous values under MVCC.
+                    val blocker = jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!
+                    jdbc.update(
+                        "UPDATE bonds SET status = 'ARCHIVED', archived_at = now(), version = version + 1 WHERE id = ?",
+                        UUID.fromString(bondId),
+                    )
+                    jdbc.update("UPDATE bond_members SET left_at = now() WHERE bond_id = ?", UUID.fromString(bondId))
+                    val request =
+                        pool.submit<MockHttpServletResponse> {
+                            putSettings(ada, bondId, """{"reminderTimeLocal":"07:30"}""")
+                        }
+                    // Wait until the PUT actually reaches a contended row. Without
+                    // the bond lock it waits on the member UPDATE instead, then
+                    // writes its stale leftAt after this transaction commits.
+                    await().atMost(Duration.ofSeconds(10)).until {
+                        request.isDone || jdbc.queryForObject(
+                            "SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))",
+                            Int::class.java,
+                            blocker,
+                        )!! > 0
+                    }
+                    request
+                }!!
+            saving.get(10, TimeUnit.SECONDS).status shouldBe 409
+            jdbc.queryForObject("SELECT left_at IS NOT NULL FROM bond_members", Boolean::class.java) shouldBe true
+            jdbc.queryForObject("SELECT reminder_time_local::text FROM bond_members", String::class.java) shouldBe "20:00:00"
+        } finally {
+            pool.shutdownNow()
+        }
     }
 
     /** Runs every call on its own thread and releases them together. */
