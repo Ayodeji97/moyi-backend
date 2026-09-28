@@ -23,6 +23,21 @@ internal class BlockStore(
     }
 
     /**
+     * Records a block unless the same one is already recorded.
+     *
+     * @return `false` when it was already there — a repeat block, which FR-029
+     *   allows and which must look to the caller exactly like the first.
+     */
+    fun insertIfAbsent(block: Block): Boolean =
+        blocks.insertIfAbsent(
+            id = ids.timeOrdered(),
+            blockerUserId = block.blockerUserId.value,
+            blockedUserId = block.blockedUserId.value,
+            bondId = block.bondId.value,
+            createdAt = block.createdAt,
+        ) == 1
+
+    /**
      * Is there a block in **either direction** between this user and any of
      * these? Empty [others] is `false` without a query — a bond with no other
      * members cannot have a block in it.

@@ -64,7 +64,9 @@ internal data class BondDraft(
  *
  * - **I-1** at most [maxMembers] active members, and no user twice.
  * - **I-5 / BR-9** an archived bond accepts no writes — enforced by the
- *   transition methods, which arrive with B3–B5; B1 has none to guard.
+ *   transition methods: [accept] and [leave] refuse one, and [end] is the
+ *   single deliberate exception, because FR-029 allows a block after the bond
+ *   has ended (ADR-0028).
  *
  * [members] includes people who have **left**. That is deliberate:
  * `states.md` §9 keeps the archive readable for both members afterwards, so
@@ -141,6 +143,73 @@ internal data class Bond(
         check(hasRoom) { "a bond that is not waiting for a member cannot accept one" }
         return copy(status = BondStatus.ACTIVE, members = members + member)
     }
+
+    /**
+     * FR-026: this member walks away, and the bond becomes a record.
+     *
+     * One member leaving archives the whole bond rather than leaving the other
+     * alone in it. Doc 04 §4.3 has no state for a bond of one and the product
+     * has no screen for it: a gratitude exchange between two people is over
+     * when either of them stops, and `states.md` §9 keeps what was written
+     * readable for both afterwards instead of pretending the bond continues.
+     *
+     * Nobody is notified — T-09's "discreet exit". The other member finds out
+     * by opening the app, which is also how they would find out about a block,
+     * and that is the point (doc 26 §2.1).
+     *
+     * `check`, not `require`: leaving a bond that has already ended is a state
+     * conflict, and the service turns it into `409 BOND_ARCHIVED`.
+     */
+    fun leave(
+        memberId: MemberId,
+        now: Instant,
+    ): Bond {
+        check(isOpen) { "a bond that has ended cannot be left again" }
+        return end(memberId, now)
+    }
+
+    /**
+     * [leave]'s effect on a bond that is still open, and **nothing at all** on
+     * one that has already ended — what FR-029's block does, and the reason it
+     * is a separate function.
+     *
+     * Block is permitted on an archived bond, because blocking someone who left
+     * first is exactly the case FR-029 exists for (ADR-0028). On that bond this
+     * returns `this`, and that is the whole of doc 26 §2.1 in one line.
+     *
+     * **The reason, because it is not obvious and it was nearly wrong.** After
+     * one member leaves, their `left_at` is stamped and the other's is null, and
+     * the leaver keeps read access to the archive (`states.md` §9) where
+     * `MemberResponse` shows both. If blocking then stamped the blocker's
+     * `left_at`, the leaver's next `GET /bonds/{id}` would *change* — and since
+     * block is the only mutation an archived bond accepts, the only thing that
+     * change could mean is "they blocked me". An oracle delivered to precisely
+     * the person T-09 says must not be told, and one no amount of matching
+     * status codes would have closed. Found by the Codex review bot on PR #39;
+     * `DiscreetExitTest` now holds it.
+     *
+     * Leaving the blocker's membership unstamped costs nothing: FR-025 counts
+     * memberships in *open* bonds, so no slot is held, and the record of the
+     * block is the `blocks` row, which no response exposes. It also makes a
+     * repeat block a true no-op — the returned object is equal, so nothing is
+     * written and the `version` behind the `ETag` cannot count blocks either.
+     *
+     * A bond already in `PENDING_DELETION` is likewise untouched: B5's
+     * cooling-off is running and the deletion job reads that status.
+     */
+    fun end(
+        memberId: MemberId,
+        now: Instant,
+    ): Bond =
+        if (!isOpen) {
+            this
+        } else {
+            copy(
+                status = BondStatus.ARCHIVED,
+                archivedAt = now,
+                members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it },
+            )
+        }
 
     companion object {
         /** Chosen in the Phase 2 design (§5.2), not by FR-020. Flagged for Daniel. */

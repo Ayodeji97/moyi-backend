@@ -241,6 +241,37 @@ internal interface BlockRepository : Repository<BlockEntity, UUID> {
     fun save(block: BlockEntity): BlockEntity
 
     /**
+     * Records a block, or does nothing if that exact one is already recorded.
+     *
+     * `ON CONFLICT DO NOTHING` rather than a read followed by an insert,
+     * because FR-029 permits blocking a bond that has already ended and
+     * therefore permits blocking twice: the second call has to be the same
+     * `204` as the first, and a check-then-insert would turn two concurrent
+     * ones into a constraint violation the caller sees as a 500.
+     *
+     * Native, because JPQL has no `INSERT`. `flushAutomatically` so anything
+     * pending in this transaction is written before the statement runs.
+     *
+     * @return `1` if this call wrote the row, `0` if it was already there.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query(
+        nativeQuery = true,
+        value = """
+            INSERT INTO blocks (id, blocker_user_id, blocked_user_id, bond_id, created_at)
+            VALUES (:id, :blockerUserId, :blockedUserId, :bondId, :createdAt)
+            ON CONFLICT (blocker_user_id, blocked_user_id, bond_id) DO NOTHING
+            """,
+    )
+    fun insertIfAbsent(
+        id: UUID,
+        blockerUserId: UUID,
+        blockedUserId: UUID,
+        bondId: UUID,
+        createdAt: Instant,
+    ): Int
+
+    /**
      * Is there a block **either way** between [userId] and any of [others]?
      *
      * Both directions in one query, because FR-029 says a block prevents any

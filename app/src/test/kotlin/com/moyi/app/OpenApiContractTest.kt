@@ -10,6 +10,7 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.maps.shouldContainKey
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -85,6 +86,8 @@ class OpenApiContractTest(
                 "/api/v1/me",
                 "/api/v1/bonds",
                 "/api/v1/bonds/{bondId}",
+                "/api/v1/bonds/{bondId}/leave",
+                "/api/v1/bonds/{bondId}/block",
                 "/api/v1/bonds/{bondId}/invites",
                 "/api/v1/bonds/{bondId}/invites/{inviteId}",
                 "/api/v1/invites/{code}",
@@ -164,6 +167,20 @@ class OpenApiContractTest(
         bond.responses["200"]!!.content.keys shouldContainExactly listOf(MediaType.APPLICATION_JSON_VALUE)
         api.paths["/api/v1/bonds"]!!.post.responses shouldContainKey "201"
         api.paths["/api/v1/bonds"]!!.post.responses shouldContainKey "409"
+    }
+
+    @Test
+    fun `ending a bond is documented as 204, and only leaving can conflict`() {
+        // Spec §5.2 rows #8-#9. Leave answers 409 BOND_ARCHIVED; block answers
+        // no conflict at all, because it is accepted on a bond that has already
+        // ended. A generated client modelling a 409 on block would be modelling
+        // a state this API never returns (ADR-0028).
+        val leave = api.paths["/api/v1/bonds/{bondId}/leave"]!!.post
+        val block = api.paths["/api/v1/bonds/{bondId}/block"]!!.post
+
+        leave.responses.keys shouldContainAll listOf("204", "404", "409")
+        block.responses.keys shouldContainAll listOf("204", "404")
+        block.responses.keys shouldNotContain "409"
     }
 
     @Test

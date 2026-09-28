@@ -5,6 +5,7 @@ import com.moyi.bond.domain.UserId
 import com.moyi.bond.service.BondAccessGuard
 import com.moyi.bond.service.BondNotFoundException
 import com.moyi.bond.service.CreateBond
+import com.moyi.bond.service.EndBond
 import com.moyi.bond.service.GetBond
 import com.moyi.bond.service.ListBonds
 import com.moyi.common.security.CurrentUser
@@ -52,6 +53,7 @@ internal class BondsController(
     private val createBond: CreateBond,
     private val getBond: GetBond,
     private val bondList: ListBonds,
+    private val endBond: EndBond,
 ) {
     /**
      * `@ResponseStatus` **and** a `ResponseEntity`, which looks redundant and
@@ -83,6 +85,41 @@ internal class BondsController(
         val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
         val view = getBond.view(membership)
         return ResponseEntity.ok().eTag(BondResponse.etagOf(view)).body(BondResponse.from(view))
+    }
+
+    /**
+     * FR-026. `204` and no body: there is nothing to return, the bond the caller
+     * just left is still readable at [getBond], and a body would be one more
+     * place for a difference between this and [blockBond] to hide.
+     *
+     * `POST` rather than `DELETE`: nothing is deleted. The bond becomes a record
+     * both members keep (`states.md` §9).
+     */
+    @PostMapping("/{bondId}/leave")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun leaveBond(
+        caller: CurrentUser,
+        @PathVariable bondId: String,
+    ) {
+        val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
+        endBond.leave(membership)
+    }
+
+    /**
+     * FR-029. `204`, byte for byte the response [leaveBond] gives, which doc 26
+     * §2.1 requires and `DiscreetExitTest` proves.
+     *
+     * Unlike leave it is accepted on a bond that has already ended: blocking
+     * somebody who left first is what the requirement is for.
+     */
+    @PostMapping("/{bondId}/block")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    fun blockBond(
+        caller: CurrentUser,
+        @PathVariable bondId: String,
+    ) {
+        val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
+        endBond.block(membership)
     }
 
     private fun bondIdOrNotFound(raw: String): BondId =

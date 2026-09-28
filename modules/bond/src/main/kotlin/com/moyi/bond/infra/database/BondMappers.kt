@@ -20,8 +20,9 @@ import com.moyi.bond.domain.UserId
  * The direction matters. [toDomain] is total — anything in the table can be
  * expressed. [toEntity] is **insert-only**: it builds a brand-new object whose
  * `isNew` flag is true, so handing its result to `save()` asks for an
- * `INSERT`. The update path arrives with slice B3 as `applyTo` functions,
- * which carry a changed domain object onto the managed entity it came from.
+ * `INSERT`. The update path is the two `applyTo` functions, which carry a
+ * changed domain object onto the managed entity it came from — the bond's
+ * since B2's join, the member's since B3's leave.
  *
  * `RegionZone.of` on the way **out** of the database re-validates the stored
  * id. A zone the JDK's tzdb has since dropped fails here, loudly, rather than
@@ -125,6 +126,28 @@ internal fun Member.toEntity(): BondMemberEntity =
         quietHoursEnd = quietHoursEnd,
         nicknameForOther = nicknameForOther,
     )
+
+/**
+ * Carries a changed [Member] onto the managed row it came from — the member's
+ * update path, as [Bond.applyTo] is the bond's, and for the same reason:
+ * `save(member.toEntity())` hands Hibernate a detached object whose `isNew`
+ * flag is true, which persists rather than merges.
+ *
+ * `id`, `bondId`, `userId` and `joinedAt` are not copied — those columns are
+ * `updatable = false`, so the database would refuse anyway. Everything a
+ * member can change is here, which is what slice B4's settings `PUT` will use;
+ * slice B3 changes only [Member.leftAt].
+ */
+internal fun Member.applyTo(entity: BondMemberEntity) {
+    require(entity.getId() == id.value) { "cannot apply a member onto a different member's row" }
+    entity.role = role
+    entity.leftAt = leftAt
+    entity.reminderTimeLocal = reminderTimeLocal
+    entity.reminderTimezone = reminderTimezone.id
+    entity.quietHoursStart = quietHoursStart
+    entity.quietHoursEnd = quietHoursEnd
+    entity.nicknameForOther = nicknameForOther
+}
 
 internal fun BondInviteEntity.toDomain(): Invite =
     Invite(

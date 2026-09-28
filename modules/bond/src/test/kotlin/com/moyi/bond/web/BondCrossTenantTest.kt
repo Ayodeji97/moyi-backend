@@ -68,6 +68,12 @@ internal class BondCrossTenantTest(
             // invite id is even looked at.
             "POST /api/v1/bonds/{bondId}/invites" to Fixture(),
             "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}" to Fixture(),
+            // Slice B3. Neither takes a body: a non-member must be refused
+            // before anything about the bond's state is examined — including,
+            // for block, that it is archived, which is the one state that path
+            // accepts from a member.
+            "POST /api/v1/bonds/{bondId}/leave" to Fixture(),
+            "POST /api/v1/bonds/{bondId}/block" to Fixture(),
         )
 
     private data class Fixture(

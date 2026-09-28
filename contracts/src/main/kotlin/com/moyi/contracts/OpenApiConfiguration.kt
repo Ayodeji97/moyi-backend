@@ -105,7 +105,7 @@ class OpenApiConfiguration {
             if (operation.requestBody != null) addAll(listOf(HttpStatus.BAD_REQUEST, HttpStatus.UNPROCESSABLE_ENTITY))
             if (!public) addAll(listOf(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN))
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
-            if (operation.operationId in setOf("createBond", "createBondInvite", "accept")) add(HttpStatus.CONFLICT)
+            if (operation.operationId in CONFLICTING_OPERATIONS) add(HttpStatus.CONFLICT)
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER && it.name == "code" }) {
                 add(HttpStatus.UNPROCESSABLE_ENTITY)
             }
@@ -171,6 +171,19 @@ class OpenApiConfiguration {
         private const val PROBLEM_JSON = "application/problem+json"
         private const val PATH_PARAMETER = "path"
         private const val ETAG = "ETag"
+
+        /**
+         * The operations that answer `409`, by id.
+         *
+         * A list rather than a rule, because "can this conflict" is a property
+         * of an operation's logic and not of its shape — and a wrong entry is a
+         * generated client modelling a state the API never returns. `blockBond`
+         * is deliberately absent: it is accepted on a bond that has already
+         * ended, which is the only thing it could have conflicted with
+         * (ADR-0028).
+         */
+        private val CONFLICTING_OPERATIONS =
+            setOf("createBond", "createBondInvite", "accept", "leaveBond", "revokeBondInvite")
 
         /**
          * Response schemas whose resource carries a row version, and therefore
