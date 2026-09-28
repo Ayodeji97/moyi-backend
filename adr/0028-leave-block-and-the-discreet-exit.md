@@ -93,6 +93,21 @@ leave/block requests then fail with an optimistic-lock exception despite holding
 lock. Local and application tests inherit this setting; `JpaTransactionScopeTest`
 checks that the web interceptor is absent so a profile-only fix cannot hide the issue.
 
+**6a. The rule the slice ended up with: any bond-scoped write that reads `isOpen` takes the
+row lock first.** Added after the review of PR #39, which found the third instance of the same
+shape — `RevokeInvite` read the bond as open, a concurrent leave archived it *and* revoked its
+live invite, and the conditional UPDATE then matched nothing, so the caller got a `404` that
+neither serial ordering produces (revoke first is `204`, leave first is `409`). Leave, block,
+create-invite, accept and revoke-invite all take it now, and slice B4's `PATCH` does too. The
+lock is cheap on a two-person aggregate; the class of bug it closes has now appeared three times
+in two slices.
+
+Honest note on the evidence: removing that particular lock did **not** reliably reproduce the
+`404` — one failure in five runs with a single pair, none in three with four pairs, because the
+window between the read and the update is tiny. The fix rests on the ordering analysis rather
+than on a reproduction, and `EndBondRaceTest` says so where somebody might otherwise read it as
+a proof.
+
 **7. A bond already in `PENDING_DELETION` is untouched.** `Bond.end` changes only a bond
 that is still open, so a block during B5's deletion cooling-off writes its `blocks` rows and
 leaves the status — and everything else — exactly as the deletion job expects to find it.
