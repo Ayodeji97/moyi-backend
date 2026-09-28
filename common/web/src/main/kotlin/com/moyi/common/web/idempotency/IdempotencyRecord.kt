@@ -102,13 +102,7 @@ class IdempotencyKeyStore(
             insert(record)
             null
         } catch (violation: DataIntegrityViolationException) {
-            val existing = find(record.userId, record.idempotencyKey, record.createdAt)
-            if (existing != null) {
-                existing
-            } else {
-                reclaimExpired(record)
-                null
-            }
+            find(record.userId, record.idempotencyKey, record.createdAt) ?: reclaimExpired(record)
         }
 
     /**
@@ -161,14 +155,43 @@ class IdempotencyKeyStore(
         )
     }
 
-    /** See the class KDoc: the row under this key has expired, and there is no reaper yet to have cleared it. */
-    private fun reclaimExpired(record: IdempotencyRecord) {
+    /**
+     * See the class KDoc: the row under this key has expired, and there is
+     * no reaper yet to have cleared it.
+     *
+     * **Race-safe against a second caller reclaiming the same key**
+     * (Important #N1, review round 2): the `DELETE` is scoped to
+     * `expires_at <= :now` so it can only ever remove a row that is
+     * genuinely expired — never a live reservation a concurrent caller just
+     * inserted, which is what an unconditional `DELETE FROM ... WHERE
+     * user_id = ? AND idempotency_key = ?` would otherwise have been free to
+     * wipe out from under them. Two callers can still both see the row as
+     * expired and both attempt to reclaim it: both `DELETE`s are then
+     * idempotent (the second matches nothing), but only one `INSERT` wins —
+     * the loser's re-collides with the winner's fresh row. That collision is
+     * caught here and resolved by looping back through [reserve] rather than
+     * surfacing a second, uncaught `DataIntegrityViolationException`: by
+     * then the winner's row is live, not expired, so the retry finds it
+     * through the ordinary `find` path and this caller becomes an ordinary
+     * second reservation against it (409 in flight, from
+     * [IdempotencyInterceptor]'s side) instead of a 500. The caught exception
+     * itself is, again, the signal this branch acts on rather than an error
+     * being hidden — same reasoning as [reserve]'s own `@Suppress`.
+     */
+    @Suppress("SwallowedException")
+    private fun reclaimExpired(record: IdempotencyRecord): IdempotencyRecord? {
         jdbc.update(
-            "DELETE FROM idempotency_keys WHERE user_id = ? AND idempotency_key = ?",
+            "DELETE FROM idempotency_keys WHERE user_id = ? AND idempotency_key = ? AND expires_at <= ?",
             record.userId,
             record.idempotencyKey,
+            Timestamp.from(record.createdAt),
         )
-        insert(record)
+        return try {
+            insert(record)
+            null
+        } catch (violation: DataIntegrityViolationException) {
+            reserve(record)
+        }
     }
 
     private fun find(

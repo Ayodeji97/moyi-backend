@@ -174,20 +174,30 @@ class IdempotencyInterceptorTest(
         //   racing a schedule where it happens to see a completed row
         //   instead — a schedule under which this test used to pass even
         //   with the reservation moved after the handler (see the PR body).
+        //
+        // Review round 2, N2: the second call now runs on the pool and is
+        // bounded by its own `.get(TIMEOUT_SECONDS, ...)`, not called
+        // synchronously with no timeout of its own. Under round 1's version
+        // of this test, a genuine future regression of the reserve-before-
+        // handler ordering would have hung this call — and the whole test
+        // run — indefinitely, since only `firstCall` had a bound. Now both
+        // sides fail within TIMEOUT_SECONDS instead.
         val key = UUID.randomUUID().toString()
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
         controller.enteredGate = entered
         controller.releaseGate = release
 
-        val pool = Executors.newSingleThreadExecutor()
+        val pool = Executors.newFixedThreadPool(2)
         val firstCall = pool.submit<Int> { post(ada, key, """{"text":"thank you"}""").status }
         entered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS) shouldBe true
 
         // The first request has reserved the key and is now blocked inside
-        // the handler (response_status still null): this call is answered
-        // synchronously, on this thread, entirely before the first is let go.
-        val secondStatus = post(ada, key, """{"text":"thank you"}""").status
+        // the handler (response_status still null): the second is expected
+        // to be answered — 409, without ever entering the handler — well
+        // before the first is let go.
+        val secondCall = pool.submit<Int> { post(ada, key, """{"text":"thank you"}""").status }
+        val secondStatus = secondCall.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
         release.countDown()
         val statuses = listOf(firstCall.get(TIMEOUT_SECONDS, TimeUnit.SECONDS), secondStatus)
@@ -195,6 +205,26 @@ class IdempotencyInterceptorTest(
 
         statuses shouldBe listOf(201, 409)
         handlerRuns shouldBe 1
+    }
+
+    @Test
+    fun `a missing principal is 401 UNAUTHENTICATED, not a 500`() {
+        // Important #5, review round 1, tested directly per review round 2's
+        // N3: every other test in this file applies the `userPrincipal`
+        // post-processor inside `post()` — this is the same request with
+        // that one thing omitted, no new fixture needed.
+        val response =
+            mockMvc
+                .post(ENTRIES_PATH) {
+                    header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                    contentType = MediaType.APPLICATION_JSON
+                    content = """{"text":"thank you"}"""
+                }.andReturn()
+                .response
+
+        response.status shouldBe 401
+        response.contentAsString shouldContain "\"code\":\"UNAUTHENTICATED\""
+        handlerRuns shouldBe 0
     }
 
     @TestConfiguration
