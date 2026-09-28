@@ -365,9 +365,11 @@ internal class BondPersistenceTest(
     }
 
     @Test
-    fun `everyone who has ever been a member is listed, including those who left`() {
-        // FR-029's block check has to consider the person who walked away:
-        // a bond they left is exactly where a block would have been made.
+    fun `everyone who has ever been a member is on the aggregate, including those who left`() {
+        // FR-029's block check has to consider the person who walked away: a
+        // bond they left is exactly where a block would have been made. Answered
+        // by the loaded aggregate since B4 — it used to be a second query for
+        // data the caller already had in hand.
         val (bond, invite) = newBond()
         val joiner = Member.member(MemberId(ids.timeOrdered()), bond.id, UserId(UUID.randomUUID()), lagos, now)
         transactions.executeWithoutResult {
@@ -376,9 +378,10 @@ internal class BondPersistenceTest(
         }
         jdbc.update("UPDATE bond_members SET left_at = now() WHERE user_id = ?", joiner.userId.value)
 
-        transactions
-            .execute { store.memberUserIdsEverOf(bond.id) }
-            .shouldNotBeNull() shouldContainExactlyInAnyOrder listOf(bond.createdBy, joiner.userId)
+        val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+
+        loaded.everyMemberUserId() shouldContainExactlyInAnyOrder listOf(bond.createdBy, joiner.userId)
+        loaded.activeMembers.map { it.userId } shouldContainExactly listOf(bond.createdBy)
     }
 
     @Test
@@ -489,38 +492,5 @@ internal class BondPersistenceTest(
         val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
         loaded.name shouldBe "Second"
         loaded.version shouldBe 2
-    }
-
-    @Test
-    fun `a member's settings round-trip, and the bond's version does not move`() {
-        // The member row is not the bond row: a reminder time is nobody else's
-        // business and must not invalidate the other member's ETag (doc 06 §1,
-        // states.md §8).
-        val (bond, invite) = newBond()
-        transactions.executeWithoutResult { store.insert(bond).also { invites.insert(invite) } }
-        val member = bond.members.single()
-
-        transactions.executeWithoutResult {
-            store.updateMember(
-                member.withSettings(
-                    MemberSettings(
-                        nicknameForOther = "Ada",
-                        reminderTimeLocal = LocalTime.of(7, 30),
-                        reminderTimezone = RegionZone.of("Europe/London"),
-                        quietHoursStart = LocalTime.of(22, 0),
-                        quietHoursEnd = LocalTime.of(7, 0),
-                    ),
-                ),
-            )
-        }
-
-        val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
-        val reloaded = loaded.memberOf(bond.createdBy).shouldNotBeNull()
-        reloaded.nicknameForOther shouldBe "Ada"
-        reloaded.reminderTimeLocal shouldBe LocalTime.of(7, 30)
-        reloaded.reminderTimezone shouldBe RegionZone.of("Europe/London")
-        reloaded.quietHoursStart shouldBe LocalTime.of(22, 0)
-        reloaded.quietHoursEnd shouldBe LocalTime.of(7, 0)
-        loaded.version shouldBe 0
     }
 }

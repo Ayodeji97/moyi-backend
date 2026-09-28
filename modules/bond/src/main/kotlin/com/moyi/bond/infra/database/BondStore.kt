@@ -170,27 +170,6 @@ internal class BondStore(
         bonds.save(entity)
     }
 
-    /**
-     * Writes one member's own settings. The bond row is untouched, so the other
-     * member's `ETag` stays valid: a reminder time is not part of the bond
-     * (`states.md` §8).
-     */
-    fun updateMember(member: Member) {
-        val entity =
-            members.findAllByBondId(member.bondId.value).firstOrNull { it.getId() == member.id.value }
-                ?: error("cannot update a member row that does not exist")
-        member.applyTo(entity)
-        members.saveAll(listOf(entity))
-    }
-
-    /**
-     * Everyone who has ever held a membership row in this bond, those who
-     * left included — which is who FR-029's block check has to consider: a
-     * bond somebody walked away from is exactly where a block would have been
-     * made.
-     */
-    fun memberUserIdsEverOf(bondId: BondId): List<UserId> = members.findAllByBondId(bondId.value).map { UserId(it.userId) }
-
     private companion object {
         /** FR-025 counts a bond waiting for its partner exactly as much as one that has them. */
         val OPEN_STATUSES = listOf(BondStatus.PENDING_MEMBER, BondStatus.ACTIVE)

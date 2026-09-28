@@ -145,6 +145,17 @@ internal data class Bond(
     /** The people currently in it. The pair, once someone has joined. */
     val activeMembers: List<Member> get() = members.filter(Member::isActive)
 
+    /**
+     * Everyone who has ever held a membership row here, those who have left
+     * included — which is who FR-029's block check has to consider: a bond
+     * somebody walked away from is exactly where a block would have been made.
+     *
+     * On the aggregate rather than in the store (where it was until B4) because
+     * every caller has already loaded the bond with its members, so the query it
+     * used to make was a second trip for data in hand.
+     */
+    fun everyMemberUserId(): List<UserId> = members.map { it.userId }.distinct()
+
     /** This user's membership, current or ended; `null` for someone who was never in it. */
     fun memberOf(userId: UserId): Member? = members.firstOrNull { it.userId == userId }
 
