@@ -7,6 +7,7 @@ import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -256,6 +257,47 @@ internal class BondDeletionEndpointTest(
         after.contentAsString shouldContain "\"status\":\"ARCHIVED\""
         // And the pair cannot be put back in touch (FR-029).
         accept(bea, codeOf(createBond(ada))).status shouldBe 404
+    }
+
+    @Test
+    fun `a member who has left cannot call off a deletion the two of them agreed to`() {
+        // `cancel` skips the `isOpen` check on purpose — PENDING_DELETION is not
+        // open, so consulting it would make the cooling-off uncancellable. It
+        // has to refuse a *left* member some other way, and nothing did: every
+        // other write path refuses them only incidentally, by checking `isOpen`.
+        // Without this, Ada agrees to the deletion, walks out, and then revokes
+        // the agreement on her way — leaving Bea holding a bond she consented to
+        // destroy and can never delete, because every re-request is 409 on an
+        // archived bond.
+        val (ada, bea, bondId) = pairedBond()
+        request(ada, bondId).status shouldBe 202
+        request(bea, bondId).status shouldBe 202
+        leave(ada, bondId).status shouldBe 204
+
+        cancel(ada, bondId).status shouldBe 404
+
+        // Still counting down, and still Bea's to call off — the escape hatch
+        // belongs to whoever is actually in the bond.
+        getBond(bea, bondId).contentAsString shouldContain "\"status\":\"PENDING_DELETION\""
+        cancel(bea, bondId).status shouldBe 204
+    }
+
+    @Test
+    fun `a deletion called off after the other member left leaves an archived bond that knows when it ended`() {
+        // The one path that produced ARCHIVED without `archivedAt`. Every other
+        // archived bond carries the timestamp, and Phase 5's deletion job and
+        // the export both read it as "when did this end".
+        val (ada, bea, bondId) = pairedBond()
+        request(ada, bondId).status shouldBe 202
+        request(bea, bondId).status shouldBe 202
+        leave(ada, bondId).status shouldBe 204
+
+        cancel(bea, bondId).status shouldBe 204
+
+        val after = getBond(bea, bondId)
+        after.contentAsString shouldContain "\"status\":\"ARCHIVED\""
+        after.contentAsString shouldNotContain "\"archivedAt\":null"
+        jdbc.queryForObject("SELECT count(*) FROM bonds WHERE archived_at IS NULL", Int::class.java) shouldBe 0
     }
 
     @Test

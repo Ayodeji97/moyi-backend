@@ -692,6 +692,24 @@ expect "the blocked member's deletion request is 409 too" 409 '"code":"BOND_ARCH
 BLOCK_REFUSAL="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
 [ "$LEFT_REFUSAL" = "$BLOCK_REFUSAL" ] && pass "…byte-identical to the left bond's refusal (doc 26 §2.1, ADR-0030)" || fail "deletion oracle" "the two refusals differ"
 
+# The second review of #41: a member who walks out during the cooling-off must
+# not be able to revoke the agreement on the way, or the member still in the
+# bond is left holding something they consented to destroy and can never delete.
+verified_account "walker" "203.0.113.76"; WALKER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "holder" "203.0.113.77"; HOLDER_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond the two agree to close" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $WALKER_ACCESS" -d "$(bond_body "Us")"
+WALK_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+WALK_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$WALK_CODE/accept" -H "Authorization: Bearer $HOLDER_ACCESS"
+expect "…both ask" 202 "" -- -X POST "$API/bonds/$WALK_BOND/deletion-request" -H "Authorization: Bearer $WALKER_ACCESS"
+expect "…and it is counting down" 202 '"status":"PENDING_DELETION"' -- -X POST "$API/bonds/$WALK_BOND/deletion-request" -H "Authorization: Bearer $HOLDER_ACCESS"
+expect "one of them leaves mid-cooling-off: 204" 204 "" -- -X POST "$API/bonds/$WALK_BOND/leave" -H "Authorization: Bearer $WALKER_ACCESS"
+expect "…and cannot then call the deletion off: 404" 404 "" -- -X DELETE "$API/bonds/$WALK_BOND/deletion-request" -H "Authorization: Bearer $WALKER_ACCESS"
+expect "…the bond is still counting down for the member who is in it" 200 '"status":"PENDING_DELETION"' -- "$API/bonds/$WALK_BOND" -H "Authorization: Bearer $HOLDER_ACCESS"
+expect "…whose own cancel still works: 204" 204 "" -- -X DELETE "$API/bonds/$WALK_BOND/deletion-request" -H "Authorization: Bearer $HOLDER_ACCESS"
+expect "…leaving an archived bond that knows when it ended" 200 '"status":"ARCHIVED"' -- "$API/bonds/$WALK_BOND" -H "Authorization: Bearer $HOLDER_ACCESS"
+[[ "$LAST_BODY" != *'"archivedAt":null'* ]] && pass "…with archivedAt set, like every other archived bond" || fail "null archivedAt" "${LAST_BODY:0:250}"
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.

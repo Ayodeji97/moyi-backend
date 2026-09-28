@@ -1574,3 +1574,48 @@ Wrong about: what "the same check, in two places" means. `BondConstraints`
          *obvious* it looks, because nobody checks the obvious ones for
          disagreement. The zones were delegated on the first try. The word
          "blank" was not.
+
+## 2026-09-28 · Phase 2 · The second review of #41, and the flag nobody read
+Expected: a formality. B5 had already had a `max`-effort review that found six
+         defects and I had fixed all six; the branch was green, the smoke suite
+         was green, and the only thing that had changed since was a merge.
+         Another pass would confirm it.
+Reality: two more, and **the serious one was created by the first review's own
+         fix.** That review made `leave` legal during a deletion cooling-off —
+         correctly, because refusing `leave` while permitting `block` would have
+         made the two distinguishable, which doc 26 §2.1 forbids. But legalising
+         it opened a sequence that had never been reachable: both members ask
+         for the deletion, one leaves, and then *that* member cancels. The bond
+         lands in `ARCHIVED` with the countdown cleared, and the member still in
+         it can never delete it, because every re-request is `409` on an archived
+         bond. One person consented to destruction and the other revoked the
+         agreement on their way out.
+         `RequestDeletion.cancel` drops the `isOpen` check on purpose —
+         `PENDING_DELETION` is not open, so consulting it would make a
+         cooling-off uncancellable. What it should have read instead is
+         `Membership.left`. **And `Membership.left` has no readers anywhere in
+         the module.** The guard's own KDoc says "it is the write paths that
+         refuse them", and they do — by checking `isOpen`, because leaving
+         archives the bond. The flag has been decorative since B1, and `cancel`
+         is the first path that drops `isOpen`, so it is the first place the
+         guarantee was ever load-bearing.
+         The second defect was in the same three lines: `cancelDeletion` is the
+         only path to `ARCHIVED` that does not go through `Bond.end`, and it set
+         the status without `archived_at` — minting the one archived bond in the
+         system with a null timestamp, in a column Phase 5's deletion job and the
+         export both read as "when did this end".
+Wrong about: what "already reviewed" covers. I treated the first review as a
+         property of the slice — B5 has been reviewed — when it is a property of
+         a *diff*. Three commits had landed since, one of them a behaviour change
+         to the exact method the new defect lives in, and I still described the
+         PR as reviewed. The rule that falls out is narrower and more useful than
+         "review everything twice": **a fix that makes a previously unreachable
+         state reachable needs its own pass, and it cannot be the pass that
+         produced it.** The first review could not have found this one; the
+         defect did not exist until its recommendation was taken.
+         Second, smaller: `Membership.left` is the third mechanism this project
+         has found that was present, correctly named, visibly doing something,
+         and not standing between anyone and a bug — after `@Version` in B4 and
+         the `blocks` check in B2. The tell is the same every time. Nothing reads
+         it. `grep` for the readers of a flag before believing the sentence that
+         says it is enforced.

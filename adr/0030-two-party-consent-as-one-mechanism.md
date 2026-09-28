@@ -57,6 +57,31 @@ forbids, since a `left_at` appearing could then only mean a block. **This supers
 decision 7's "a bond already in `PENDING_DELETION` is untouched"**, which was written when only
 a block could reach that state.
 
+**4a-i. A member who has left cannot call the deletion off** — the defect §4a created, found by
+the *second* review of #41. Permitting `leave` during a cooling-off opened a path nothing
+refused: both members ask, one leaves, and then *that* member cancels. `RequestDeletion.cancel`
+skips the `isOpen` check deliberately — `PENDING_DELETION` is not open, so consulting it would
+make the cooling-off uncancellable — and it read nothing else, so the bond landed in `ARCHIVED`
+with the countdown cleared and the member still in it could never delete it, because every
+re-request answers `409` on an archived bond. One of them consented to destruction and the other
+revoked the agreement on their way out, which is exactly what §4a's own sentence forbids.
+
+**The wider fact, and the reason nothing caught it:** `Membership.left` had **no readers
+anywhere in the module.** `BondAccessGuard`'s KDoc said "it is the write paths that refuse
+them", and they do — but by checking `isOpen`, because leaving archives the bond. The flag has
+been decorative since B1 and `cancel` is the first path that drops `isOpen`, so it is the first
+place the guarantee was load-bearing. That is ADR-0029's lesson in a second location: a
+mechanism present, correctly named, visibly doing something, and not the thing standing between
+you and the bug. The refusal reuses `ProposalNotFoundException`'s one answer rather than adding
+a code — "never made, already answered, cancelled, lapsed" gains a fifth cause that reads
+identically.
+
+**4a-ii. The revived-as-archived bond carries `archived_at`.** `cancelDeletion` is the only path
+that reaches `ARCHIVED` without going through `Bond.end`, and it set the status without the
+timestamp — so §4a's own scenario minted the single archived bond in the system whose
+`archived_at` is null, while Phase 5's deletion job and the export both read that column as
+"when did this end". It takes `now` now, and the domain test asserts it.
+
 **4b. Cancelling restores `PENDING_MEMBER` when the bond never had its second member.** Also
 from the review: a solo bond's request self-confirms (§8), so `PENDING_MEMBER` →
 `PENDING_DELETION` → cancel used to give `ACTIVE` — and `hasRoom` requires `PENDING_MEMBER`, so
@@ -146,6 +171,13 @@ read-then-conditional-write one decision.
 - **Four of these decisions came from the review of PR #41, two of them serious** (§4a, §4b),
   and all four were in the interaction between `PENDING_DELETION` and states that already
   existed — the one area B5's tests did not cover when it was first written. They do now.
+- **A second review found two more, and one of them was created by the first review's own fix**
+  (§4a-i, §4a-ii). That is the finding worth carrying forward rather than the two defects:
+  permitting `leave` during a cooling-off was right, and it opened a path that had never been
+  reachable, in a method whose deliberate omission of `isOpen` was the only thing keeping the
+  bond's other refusals from applying. **A fix that makes a previously unreachable state
+  reachable needs its own review pass, not the one that produced it.** Both are proved by
+  mutation: restore either and the test that names it fails.
 - **`PATCH …/timezone` inherits ADR-0029 §13's constraint, not `@NotBlank`.** The timezone
   route repeated `POST /bonds`'s edge — `@NotBlank` plus `ValidRegionZone` — and therefore
   repeated its defect: `U+00A0` is not blank to Bean Validation and is blank to Kotlin, so a

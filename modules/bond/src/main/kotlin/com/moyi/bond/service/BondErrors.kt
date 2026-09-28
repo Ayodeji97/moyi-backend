@@ -6,6 +6,8 @@ import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.NotFoundException
 import org.springframework.http.HttpStatus
 import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -131,9 +133,29 @@ internal class TimezoneChangeTooSoonException(
 ) : ApiException(
         HttpStatus.CONFLICT,
         ErrorCode.TIMEZONE_CHANGE_TOO_SOON,
-        "The shared time zone can change again from ${DATE.format(allowedFrom.atZone(zone.zone))}.",
+        "The shared time zone can change again from ${DATE.format(readableDate(allowedFrom, zone))}.",
     ) {
     private companion object {
+        /**
+         * The first date on which the change is allowed *all day*, in the bond's
+         * own zone.
+         *
+         * Thirty days from an afternoon lands in an afternoon, so naming that
+         * calendar date makes the sentence false for most of the day it names —
+         * a client that read "28 October" and retried at 10:00 on the 28th got
+         * the identical refusal naming the identical date. Rounding **up** to
+         * the next whole day is the honest direction to be wrong in: the answer
+         * may arrive sooner than promised, never later. Found by the second
+         * review of PR #41.
+         */
+        fun readableDate(
+            allowedFrom: Instant,
+            zone: RegionZone,
+        ): LocalDate =
+            allowedFrom.atZone(zone.zone).let {
+                if (it.toLocalTime() == LocalTime.MIDNIGHT) it.toLocalDate() else it.toLocalDate().plusDays(1)
+            }
+
         /**
          * The date as a person reads it, in the bond's own zone.
          *

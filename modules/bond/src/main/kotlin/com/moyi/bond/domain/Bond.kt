@@ -380,8 +380,14 @@ internal data class Bond(
      *
      * The status returns to `ACTIVE`, or to `ARCHIVED` if anybody has left: a
      * bond does not come back to life because a deletion was cancelled.
+     *
+     * [now] is here for the `ARCHIVED` case only, and it is not optional: this
+     * is the one path that *reaches* `ARCHIVED` without going through [end], so
+     * without it this method minted the only archived bond in the system with a
+     * null `archived_at` — which Phase 5's deletion job and the export both read
+     * as "when did this end". Found by the second review of PR #41.
      */
-    fun cancelDeletion(): Bond {
+    fun cancelDeletion(now: Instant): Bond {
         check(status == BondStatus.PENDING_DELETION) { "there is no deletion to cancel" }
         val restored =
             when {
@@ -402,7 +408,13 @@ internal data class Bond(
 
                 else -> BondStatus.ACTIVE
             }
-        return copy(status = restored, deletionRequestedAt = null)
+        return copy(
+            status = restored,
+            deletionRequestedAt = null,
+            // Only when this is the transition that archives it. Any other
+            // restored status leaves the column exactly as it was.
+            archivedAt = if (restored == BondStatus.ARCHIVED) now else archivedAt,
+        )
     }
 
     companion object {
