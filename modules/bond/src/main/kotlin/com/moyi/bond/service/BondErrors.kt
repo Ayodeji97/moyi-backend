@@ -1,8 +1,12 @@
 package com.moyi.bond.service
 
+import com.moyi.bond.domain.RegionZone
 import com.moyi.common.web.ApiException
 import com.moyi.common.web.ErrorCode
+import com.moyi.common.web.NotFoundException
 import org.springframework.http.HttpStatus
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 
 // The refusals this module gives that are facts about the **caller's own**
 // account, and are therefore safe to name precisely — unlike anything about a
@@ -83,3 +87,56 @@ internal class InviteNotUsableException :
         ErrorCode.INVITE_NOT_USABLE,
         "That code cannot be used. Ask them to send you a new one.",
     )
+
+/**
+ * FR-027, FR-028: a proposal of that kind is already waiting for the other
+ * member. The caller is a member, so naming it discloses nothing — and
+ * `states.md` §8 has a screen for the pending state, which is what the client
+ * should show instead of retrying.
+ */
+internal class ProposalPendingException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.PROPOSAL_PENDING,
+        "There is already a change waiting for the other person to agree to.",
+    )
+
+/**
+ * BR-6, doc 04 §8.5: the *other* member agrees. One person clicking twice is
+ * not two-party consent, and this is the refusal that says so.
+ */
+internal class ProposalNeedsOtherMemberException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.PROPOSAL_NEEDS_OTHER_MEMBER,
+        "This needs the other person to agree to it.",
+    )
+
+/**
+ * FR-027's once-per-30-days rule on the anchor zone.
+ *
+ * The detail names the **date** it becomes allowed, which is safe: it is a fact
+ * about the caller's own bond, and `states.md` §8 says the constraints belong in
+ * front of a person rather than behind a retry. A date rather than a countdown,
+ * for the reason that file gives about the deletion screen — a countdown framed
+ * as a deadline is urgency, a date is a fact.
+ *
+ * `409` and not `429` (ADR-0030): a month is not a rate limit, and a client that
+ * treated it as one would show "please wait" and then retry into the same wall.
+ */
+internal class TimezoneChangeTooSoonException(
+    allowedFrom: Instant,
+    zone: RegionZone,
+) : ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.TIMEZONE_CHANGE_TOO_SOON,
+        "The shared time zone can change again from ${DATE.format(allowedFrom.atZone(zone.zone))}.",
+    ) {
+    private companion object {
+        /** The date as a person reads it, in the bond's own zone. */
+        val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy")
+    }
+}
+
+/** No live proposal of that kind: never made, already answered, cancelled, or lapsed — one answer for all four. */
+internal class ProposalNotFoundException : NotFoundException("There is nothing waiting to be agreed.")

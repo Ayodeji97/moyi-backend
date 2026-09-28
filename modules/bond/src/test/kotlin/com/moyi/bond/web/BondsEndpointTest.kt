@@ -83,6 +83,12 @@ internal class BondsEndpointTest(
         // The version travels as the ETag, not as a field a client might
         // decide to compare itself.
         json shouldNotContain "version"
+        // B5's three fields are present and empty on a new bond. Additive fields
+        // are the one API change that is not breaking, and this is what makes
+        // that claim checkable rather than asserted in a PR description.
+        json shouldContain "\"deletionScheduledFor\":null"
+        json shouldContain "\"pendingTimezoneChange\":null"
+        json shouldContain "\"pendingDeletionRequest\":null"
 
         jdbc.queryForObject("SELECT reminder_timezone FROM bond_members", String::class.java) shouldBe "Africa/Lagos"
     }
