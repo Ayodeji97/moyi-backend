@@ -2163,7 +2163,8 @@
           "nicknameForOther" : {
             "type" : [ "string", "null" ],
             "maxLength" : 40,
-            "minLength" : 1
+            "minLength" : 1,
+            "pattern" : "(?sU).*\\S.*"
           },
           "quietHoursArePaired" : {
             "type" : "boolean"

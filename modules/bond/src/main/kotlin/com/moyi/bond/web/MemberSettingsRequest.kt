@@ -23,6 +23,7 @@ import java.time.LocalTime
  */
 internal data class MemberSettingsRequest(
     @field:Size(min = 1, max = Member.MAX_NICKNAME_LENGTH)
+    @field:Pattern(regexp = "(?sU).*\\S.*", message = "must not be blank")
     val nicknameForOther: String? = null,
     @field:NotNull
     @field:Pattern(regexp = TIME_OF_DAY, message = "must be a time of day such as 21:00")

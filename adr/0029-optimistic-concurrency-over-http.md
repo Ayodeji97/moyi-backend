@@ -59,9 +59,14 @@ member's `ETag` stays valid. Found by the smoke script. An **empty** patch is a 
 than a successful no-op, because "change these zero things" is a client mistake worth naming.
 
 **6. Member settings take no `If-Match`, deliberately.** The row belongs to one member and
-nobody else can write it, so there is no update for a concurrent writer to lose. Requiring a
-condition where nothing can conflict is ceremony, and ceremony teaches clients to send headers
-they do not mean. The contract says so by documenting no `412` on that operation.
+competing settings edits use last-write-wins. The contract documents no `412` on that
+operation. This does not make the row free of other writers: leave and block update its
+`left_at`. The settings PUT therefore takes the bond's row lock before reading and checking
+its status. Otherwise a PUT can load an open bond, wait for leave to commit, then overwrite
+the membership with its stale `left_at = NULL`. The lock also prevents a settings write on a
+bond that has become archived, without changing the bond's version. A regression test holds
+an ending transaction open, waits for the PUT to contend on its rows, then commits and
+asserts `409`, an intact `left_at`, and unchanged settings.
 
 **7. `PUT`, not `PATCH`, for member settings** — five small fields on one screen, which a client
 always holds in full. It replaces: an absent field is cleared. The single exception is
@@ -130,7 +135,7 @@ same body gets the same answer. Both are asserted.
   by checking first.
 - **The row lock alone, without `If-Match`.** Rejected: it prevents corruption and permits a
   lost update — the second writer's values simply win, which is the behaviour doc 06 §1 forbids.
-- **`If-Match` on the member-settings `PUT` too**, for consistency. Rejected as ceremony (§6).
+- **`If-Match` on the member-settings `PUT` too**, for consistency. Not required for last-write-wins settings edits (§6).
 - **A `PATCH` for member settings.** Rejected: it would need `Change<T>` for five fields to say
   what a `PUT` says by existing, and the client always has all five.
 - **Dropping `leftAt`-style cross-field validation into the edge only.** Rejected: the quiet-hours

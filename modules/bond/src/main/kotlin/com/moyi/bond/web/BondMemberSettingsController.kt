@@ -46,8 +46,8 @@ internal class BondMemberSettingsController(
     }
 
     /**
-     * A full replacement, and no `If-Match`: nobody else can write this row, so
-     * there is no update to lose (ADR-0029).
+     * A full replacement with last-write-wins settings and no `If-Match`.
+     * The service serialises this with leave and block (ADR-0029).
      */
     @PutMapping
     fun replaceMemberSettings(

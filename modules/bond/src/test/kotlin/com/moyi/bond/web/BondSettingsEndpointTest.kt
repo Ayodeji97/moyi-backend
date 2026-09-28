@@ -336,6 +336,37 @@ internal class BondSettingsEndpointTest(
         putSettings(eve, bondId, """{"reminderTimeLocal":"07:30"}""").status shouldBe 404
     }
 
+    @Test
+    fun `a supplied blank type is 422 while an omitted type is allowed`() {
+        val ada = users.verified("Ada")
+        val bondId = bondIdOf(createBond(ada))
+        listOf("", "   ", "\u00a0").forEach { blank ->
+            val response = patch(ada, bondId, """{"type":"$blank"}""", "\"0\"")
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"type\""
+        }
+        patch(ada, bondId, """{"name":"Still us"}""", "\"0\"").status shouldBe 200
+    }
+
+    @Test
+    fun `a blank nickname is 422 while null clears it and surrounding spaces are trimmed`() {
+        val ada = users.verified("Ada")
+        val bondId = bondIdOf(createBond(ada))
+        listOf("", "   ", "\u00a0").forEach { blank ->
+            val response = putSettings(ada, bondId, """{"reminderTimeLocal":"07:30","nicknameForOther":"$blank"}""")
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"nicknameForOther\""
+        }
+        putSettings(ada, bondId, """{"reminderTimeLocal":"07:30","nicknameForOther":"  Ada  "}""").let {
+            it.status shouldBe 200
+            it.contentAsString shouldContain "\"nicknameForOther\":\"Ada\""
+        }
+        putSettings(ada, bondId, """{"reminderTimeLocal":"07:30","nicknameForOther":null}""").let {
+            it.status shouldBe 200
+            it.contentAsString shouldContain "\"nicknameForOther\":null"
+        }
+    }
+
     // ---- helpers ------------------------------------------------------------
 
     private fun createBond(userId: UUID): MockHttpServletResponse =

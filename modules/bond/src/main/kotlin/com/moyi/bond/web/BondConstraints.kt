@@ -16,8 +16,8 @@ import kotlin.reflect.KClass
 // three of them reachable. Delegating removes the class of bug rather than the
 // instances, because there is only ever one definition.
 //
-// Null and blank are @NotBlank's job here, so these return `true` for them: a
-// constraint that also reports them produces two errors for one mistake.
+// Null is allowed for optional settings. Bond types must reject a supplied
+// blank too: PATCH omits @NotBlank because an absent type is valid.
 
 /** The anchor or reminder zone: an IANA region id (ADR-0004, doc 04 §6). */
 @Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
@@ -64,7 +64,7 @@ internal class BondTypeConstraintValidator : ConstraintValidator<ValidBondType, 
     override fun isValid(
         value: String?,
         context: ConstraintValidatorContext,
-    ): Boolean = value.isNullOrBlank() || BondType.entries.any { it.name == value.trim() }
+    ): Boolean = value == null || BondType.entries.any { it.name == value.trim() }
 }
 
 /**
