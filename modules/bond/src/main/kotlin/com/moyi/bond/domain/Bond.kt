@@ -55,6 +55,43 @@ internal data class BondDraft(
 )
 
 /**
+ * A value the caller **named**, which may itself be `null`.
+ *
+ * `PATCH` has one genuine ambiguity and this is the answer to it: a field the
+ * client omitted must keep its current value, and a field the client sent as
+ * `null` must be cleared. A plain nullable parameter cannot tell those apart,
+ * and guessing is how a client's untouched setting gets wiped by a request
+ * about something else.
+ *
+ * Only nullable settings need one, so `revealTimeLocal` is the only field that
+ * has one today. Slice B5's proposals will want it again.
+ */
+internal data class Change<T : Any>(
+    val value: T?,
+)
+
+/** [Change]'s whole purpose, as one readable expression: named wins, absent keeps. */
+internal fun <T : Any> Change<T>?.orKeep(current: T?): T? = if (this != null) value else current
+
+/**
+ * The fields `PATCH /bonds/{bondId}` may change (doc 06 §3.3, ADR-0013 §8).
+ *
+ * `null` means "not named" for every property; [revealTimeLocal] is a [Change]
+ * because it is the one that can also be set *to* null.
+ *
+ * **`anchorTimezone` is deliberately absent.** FR-027 makes it two-party and at
+ * most once per 30 days, which is slice B5's `PATCH /bonds/{bondId}/timezone`.
+ * The web layer refuses a body that names it rather than ignoring it, because a
+ * silently dropped setting reports success for a change that never happened.
+ */
+internal data class BondSettings(
+    val name: String? = null,
+    val type: BondType? = null,
+    val revealTimeLocal: Change<LocalTime>? = null,
+    val strictMode: Boolean? = null,
+)
+
+/**
  * The aggregate root (ADR-0003): a relationship between a small number of
  * people, generic over what kind of relationship it is.
  *
@@ -210,6 +247,32 @@ internal data class Bond(
                 members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it },
             )
         }
+
+    /**
+     * A settings change (`PATCH /bonds/{bondId}`, ADR-0013 §8, ADR-0029).
+     *
+     * Every field of [settings] is optional and an absent one is left alone.
+     * The constructor's `require`s run on the result, so a name that is blank
+     * or too long cannot produce an object — the edge validates as well, and
+     * this is the layer that cannot be bypassed.
+     *
+     * `check(isOpen)`: BR-9, and the same rule [leave] applies, because an
+     * archived bond is a record rather than a thing with settings (ADR-0028).
+     *
+     * **The seats do not move when the type does.** FR-021 puts the limit on
+     * the row, every v1 type seats two, and a type that ever seats a different
+     * number needs a rule about the members already in the bond rather than an
+     * arithmetic side effect here.
+     */
+    fun update(settings: BondSettings): Bond {
+        check(isOpen) { "a bond that has ended cannot be changed" }
+        return copy(
+            name = settings.name ?: name,
+            type = settings.type ?: type,
+            revealTimeLocal = settings.revealTimeLocal.orKeep(revealTimeLocal),
+            strictMode = settings.strictMode ?: strictMode,
+        )
+    }
 
     companion object {
         /** Chosen in the Phase 2 design (§5.2), not by FR-020. Flagged for Daniel. */
