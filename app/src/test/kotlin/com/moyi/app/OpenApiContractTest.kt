@@ -116,8 +116,12 @@ class OpenApiContractTest(
         // exhaustive on purpose: a *new* header parameter should have to be
         // justified here, which is what this assertion makes someone do.
         operations()
-            .flatMap { (_, op) -> op.parameters.orEmpty().filter { it.`in` == "header" }.map { it.name } }
-            .toSet() shouldBe setOf(HttpHeaders.IF_MATCH)
+            .flatMap { (_, op) ->
+                op.parameters
+                    .orEmpty()
+                    .filter { it.`in` == "header" }
+                    .map { it.name }
+            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH)
         api.components.schemas.keys
             .filter { it in setOf("CurrentUser", "ClientContext") }
             .shouldBeEmpty()
@@ -209,7 +213,9 @@ class OpenApiContractTest(
         // The member-settings endpoints take no condition, and the document says
         // so by not offering one: nobody else can write that row (ADR-0029).
         val settings = api.paths["/api/v1/bonds/{bondId}/members/me/settings"]!!
-        settings.put.parameters.orEmpty().map { it.name } shouldNotContain HttpHeaders.IF_MATCH
+        settings.put.parameters
+            .orEmpty()
+            .map { it.name } shouldNotContain HttpHeaders.IF_MATCH
         settings.put.responses.keys shouldContainAll listOf("200", "404", "409", "422")
         settings.put.responses.keys shouldNotContain "412"
         settings.get.responses shouldContainKey "404"
