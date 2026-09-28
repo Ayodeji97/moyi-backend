@@ -102,6 +102,37 @@ have it. A malformed *body*, by contrast, is a `422` for member and non-member a
 discloses nothing: the answer depends only on what the caller sent, and a member sending the
 same body gets the same answer. Both are asserted.
 
+**11. The document says `If-Match` is required, even though the handler takes it as optional.**
+`@RequestHeader(required = false)` is what lets an absent condition be our `428` with an
+`ErrorCode` rather than Spring's bare `400` about a missing header — but springdoc copies that
+optionality into the contract, where it means something else entirely: that a client may leave
+it out. A generated client would then offer a call that cannot succeed. `OpenApiConfiguration`
+marks the header required for every operation in `CONDITIONAL_OPERATIONS`, which is already the
+one list that decides which operations document `412` and `428`, so the rule is stated once.
+Raised by the review of PR #40.
+
+**12. A cross-field check is `private`, because springdoc publishes every public getter.**
+`@AssertTrue` on a computed property is the only way to make a cross-field violation name a
+field rather than the whole object (§10's reason, and `GlobalExceptionHandler` maps field errors
+only) — but `revealTimeLocalIsTimeOfDay`, `anchorTimezoneNotAllowedHere`, `atLeastOneSetting`
+and `quietHoursArePaired` were then advertised to clients as booleans they could send, which the
+server ignores and recomputes. Making them `private` removes them from the document and changes
+nothing about validation: Hibernate Validator finds a constrained getter whatever its
+visibility, and the tests that prove each rule still pass. Detekt's `UnusedPrivateProperty` is
+exempted for `@AssertTrue` specifically, so an actually-unused private property is still a
+finding. Raised by the review of PR #40.
+
+**13. Blank is the *domain's* definition of blank, not Bean Validation's.** `@NotBlank` trims
+with Java's `String.trim`, which removes only characters at or below `U+0020`; Kotlin's `trim`
+and `isBlank` also remove every `isSpaceChar`. A name of one non-breaking space therefore passed
+the edge, was trimmed to the empty string on its way into the domain, and `require(name
+.isNotBlank())` answered a well-formed request with a **500** — on `POST /bonds` since slice B1
+as well as on this slice's `PATCH`, and on `nicknameForOther` too. One constant, `NOT_ONLY_SPACE`
+(`(?sU).*\S.*`), is the edge's statement of the rule the domain enforces, and `@NotBlank` is gone
+from the fields that carry it so that one mistake is reported once. `@NotNull` stays where
+`@NotBlank` was removed from a required field, because it is what puts the field in the
+document's `required` list.
+
 ## Consequences
 
 - **Two new `ErrorCode` values, so this is a breaking change** and the PR carries
@@ -119,6 +150,10 @@ same body gets the same answer. Both are asserted.
   reinventing the distinction. On the wire that distinction is `Optional<T>`, and the container
   form of a constraint (`Optional<@Pattern String>`) **compiles and does not run**, which cost a
   500 until a test caught it.
+- **The contract is generated, so a contract defect is an edge defect.** Both #40 review findings
+  that touched `contracts/openapi.json` were fixed in the module the document is generated from,
+  not in the document — the committed file is a build output, and editing it would have been
+  undone by the next regeneration.
 - **A member's settings write does not invalidate the bond's `ETag`.** That is a property a
   future "load the aggregate, change a member, save the aggregate" refactor would quietly break,
   so it is asserted at both the persistence and the endpoint level.

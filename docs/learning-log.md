@@ -1483,3 +1483,46 @@ Wrong about: how much a mechanism being *present* tells you about it being
          The general form: a component can be in the right place, with the
          right name, working correctly, and still not be the thing standing
          between you and the bug. Only breaking it tells you which.
+
+## 2026-09-28 · Phase 2 · The review of #40, and the space that is not a space
+Expected: a triage pass. Five findings on the settings PR, one of them a P1
+         about serialising a settings write with leave and block; take the
+         lock, answer the two contract nits, push.
+Reality: the P1 was real and the fix was one line, but proving it took a test
+         that had to catch the PUT *while* it waited. Holding an ending
+         transaction open and asserting on the result is not enough — without
+         the lock the PUT blocks on the member `UPDATE` instead and then
+         commits its stale `leftAt` afterwards, which passes a naive test.
+         `BondSettingsRaceTest` now polls `pg_blocking_pids` until the request
+         is genuinely contending, and only then commits the ending. Remove the
+         `lockBond` line and it fails; that is the only reason to believe it.
+         The two "contract nits" were both **edge defects wearing a document's
+         clothes**. `If-Match` was `required: false` in `openapi.json` because
+         the handler declares it optional — deliberately, so an absent header
+         is our `428` rather than Spring's `400` — and springdoc copied the
+         declaration without knowing why it was made. And four `@AssertTrue`
+         cross-field checks were being published as writable request fields,
+         because springdoc reads every public getter as one. Neither could be
+         fixed in the file: it is generated, and the next regeneration would
+         have eaten the edit.
+         Then the third finding, about a nickname of one space, turned out to
+         name a defect class rather than a field. **`@NotBlank` and Kotlin's
+         `isBlank` do not agree.** Bean Validation trims with Java's
+         `String.trim`, which removes only characters at or below `U+0020`;
+         Kotlin's `trim` also removes every `isSpaceChar` — `U+00A0`, `U+2007`,
+         the whole set. So a name of one non-breaking space passed the edge,
+         arrived at the domain as `""`, and `require(name.isNotBlank())` turned
+         a well-formed request into a **500**. On `POST /bonds` too, merged in
+         B1 and live since. A `create` with `name = " "` returns 500 today
+         on `main`; the test that says so went in before the fix did.
+Wrong about: what "the same check, in two places" means. `BondConstraints`
+         opens by saying the edge should *ask the domain* instead of restating
+         its rules, and I read that as being about the interesting rules —
+         zones, types, the things with a factory to call. Blankness looked too
+         small to be a rule at all, so it got `@NotBlank` at the edge and
+         `isNotBlank()` in the aggregate, and those are two different
+         predicates that agree on every input anybody types by hand. The
+         general form: a restated rule is dangerous in proportion to how
+         *obvious* it looks, because nobody checks the obvious ones for
+         disagreement. The zones were delegated on the first try. The word
+         "blank" was not.
