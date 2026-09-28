@@ -41,6 +41,42 @@ still refuses a second live proposal even if a future caller forgets the lock.
 the proposal row. Two confirmations arriving together produce one applied change, and the
 loser is told there is nothing waiting — which, by the time it looked, is true.
 
+**4a. A bond in its cooling-off can still be left, and blocked out of** — added after the review
+of PR #41 found that neither worked. `PENDING_DELETION` is not `isOpen`, and `Bond.end`
+returned the aggregate unchanged for any non-open status, so `block` wrote its `blocks` row,
+left the membership alone, and returned `204`; the other member's cancel then brought the bond
+back to `ACTIVE` with the blocker inside it. `leave` was refused outright for the full thirty
+days.
+
+Both are permitted now, and both stamp `left_at` while **keeping** the status: the two members
+agreed to destroy this bond and one of them walking away is not a reason to undo that, and a
+`left_at` on the row is what makes a later `cancelDeletion` restore `ARCHIVED` rather than
+`ACTIVE`. Permitting *both* is not a convenience — refusing `leave` while permitting `block`
+would make the two distinguishable during a cooling-off, which is the oracle doc 26 §2.1
+forbids, since a `left_at` appearing could then only mean a block. **This supersedes ADR-0028
+decision 7's "a bond already in `PENDING_DELETION` is untouched"**, which was written when only
+a block could reach that state.
+
+**4b. Cancelling restores `PENDING_MEMBER` when the bond never had its second member.** Also
+from the review: a solo bond's request self-confirms (§8), so `PENDING_MEMBER` →
+`PENDING_DELETION` → cancel used to give `ACTIVE` — and `hasRoom` requires `PENDING_MEMBER`, so
+the bond was orphaned permanently: the code it still advertised could never be used, and
+`CreateInvite` answered "this bond already has both of you in it" to somebody sitting in it
+alone. Doc 04 §8.3a wants the same restoration for its own reason — Phase 3 opens no Bond-days
+while a bond waits.
+
+**4c. A bond in its cooling-off counts toward FR-025's three.** `BondStore.OPEN_STATUSES`
+omitted `PENDING_DELETION`, so a user at the limit could start a deletion (freeing a slot),
+create a fourth bond, and cancel the deletion to hold four. A bond you might still get back is
+a bond you are in.
+
+**4d. Scheduling a deletion revokes the live invite.** `EndBond` already did this when a bond
+ended ("a code into a closed room") and this path had been missed, so a `PENDING_MEMBER` bond
+entering the cooling-off went on advertising a code that every join refused for thirty days.
+Cancelling deliberately does **not** resurrect it: a credential that was shared and withdrawn
+stays withdrawn, and the creator issues a fresh one — which is possible precisely because the
+status comes back as `PENDING_MEMBER` (§4b).
+
 **5. Either member may cancel, at any point.** `DELETE …/timezone` withdraws a proposal;
 `DELETE …/deletion-request` withdraws a request *or* calls off a cooling-off already running.
 Neither consults `isOpen`, and for the deletion that is load-bearing: `PENDING_DELETION` is
@@ -107,6 +143,9 @@ read-then-conditional-write one decision.
 - **Phase 4 owes the notification** a pending proposal implies. Nothing tells the other member
   a change is waiting; they see it when they open the app, which is consistent with T-09 but
   is not what FR-027's screen assumes forever.
+- **Four of these decisions came from the review of PR #41, two of them serious** (§4a, §4b),
+  and all four were in the interaction between `PENDING_DELETION` and states that already
+  existed — the one area B5's tests did not cover when it was first written. They do now.
 - **The proposal rows are the audit trail.** Closed proposals accumulate and nothing deletes
   them, which is deliberate: doc 26 §4 would want to know what was asked and what came of it.
 - **`bond_proposals` is a delta from doc 07 §2**, which describes the rules without naming a
