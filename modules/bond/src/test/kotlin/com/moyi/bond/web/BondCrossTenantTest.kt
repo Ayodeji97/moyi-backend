@@ -84,6 +84,13 @@ internal class BondCrossTenantTest(
                 ),
             "GET /api/v1/bonds/{bondId}/members/me/settings" to Fixture(),
             "PUT /api/v1/bonds/{bondId}/members/me/settings" to Fixture(body = """{"reminderTimeLocal":"07:30"}"""),
+            // Slice B5. The PATCH needs a body; confirm and cancel take none —
+            // and all three must answer a non-member before they look at
+            // whether anything is pending, or the 404 would depend on state
+            // only a member can know about.
+            "PATCH /api/v1/bonds/{bondId}/timezone" to Fixture(body = """{"anchorTimezone":"Europe/London"}"""),
+            "POST /api/v1/bonds/{bondId}/timezone/confirm" to Fixture(),
+            "DELETE /api/v1/bonds/{bondId}/timezone" to Fixture(),
         )
 
     private data class Fixture(
