@@ -139,7 +139,7 @@ jobs:
       # run, and the action installs whatever Claude Code version is current
       # (2.1.278 today). Neither exposes a version input here.
       - if: steps.configured.outputs.enabled == 'true'
-        uses: anthropics/claude-code-action@v1.0.231
+        uses: anthropics/claude-code-action@v1.0.235
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # The action hides the SDK transcript by default, which is why the
