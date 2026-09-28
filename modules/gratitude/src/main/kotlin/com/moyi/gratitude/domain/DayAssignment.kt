@@ -48,7 +48,7 @@ import java.time.ZoneId
  * it supplies the lookup: `{ date -> days.statusOf(bondId, date)?.isClosed
  * == true }`.
  */
-object DayAssignment {
+internal object DayAssignment {
     private const val CLOCK_SKEW_MINUTES = 5L
     private const val OFFLINE_WINDOW_HOURS = 36L
     private val CLOCK_SKEW: Duration = Duration.ofMinutes(CLOCK_SKEW_MINUTES)
