@@ -7,18 +7,35 @@ import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
 
-/** The `idempotency_keys` row (V11). See [IdempotencyKeyStore] for why this is a plain class and not a JPA `@Entity`. */
+/**
+ * The `idempotency_keys` row (V11). See [IdempotencyKeyStore] for why this
+ * is a plain class and not a JPA `@Entity`, and V11's own comment for why
+ * [responseBody] is a bounded-lifetime duplicate of data that lives
+ * elsewhere, never the row of record.
+ */
 data class IdempotencyRecord(
     val id: UUID,
     val userId: UUID,
+    /** `METHOD path` — stored, not part of the unique key (Ruling A, V11's header comment). */
     val endpoint: String,
     val idempotencyKey: String,
     val requestHash: String,
     /** Null while the handler this row reserved is still running. */
     val responseStatus: Short?,
     val responseBody: String?,
+    /** Doc 06 §1's replay allowlist — see V11's comment on why only these two. */
+    val responseEtag: String?,
+    val responseLocation: String?,
     val createdAt: Instant,
     val expiresAt: Instant,
+)
+
+/** What [IdempotencyKeyStore.complete] needs from the response the handler produced, bundled to keep that call to three parameters. */
+data class CapturedResponse(
+    val status: Int,
+    val body: String,
+    val etag: String?,
+    val location: String?,
 )
 
 /**
@@ -38,82 +55,145 @@ data class IdempotencyRecord(
  * an ordinary `implementation` dependency of `common:web` was enough to make
  * Spring Boot build a `DataSource` eagerly on every context that inherited
  * it, which broke `SecurityTestApplication`'s suite outright — see this
- * module's `build.gradle.kts` for why that dependency is `compileOnly`
- * instead. [IdempotencyKeyStore] and [IdempotencyInterceptor] are therefore
- * plain classes, wired by an explicit `@Bean` wherever the feature is
- * actually used (this module's own test context, and eventually `app`), and
- * `IdempotencyRecord` carries no JPA annotation for the same reason: nothing
- * here needs any module's `@EntityScan` to widen.
+ * module's `build.gradle.kts` for the fix (the plain `spring-jdbc` artifact
+ * instead of the starter, not `compileOnly`, as of review round 1's
+ * optional follow-up). [IdempotencyKeyStore] and [IdempotencyInterceptor]
+ * are therefore plain classes, wired by an explicit `@Bean` wherever the
+ * feature is actually used (this module's own test context, and eventually
+ * `app`), and `IdempotencyRecord` carries no JPA annotation for the same
+ * reason: nothing here needs any module's `@EntityScan` to widen.
  *
  * **The reservation is one `INSERT`, not read-then-write.** [reserve] relies
- * on V11's `idempotency_keys_unique` constraint to make a concurrent second
- * reservation for the same `(userId, endpoint, idempotencyKey)` fail rather
+ * on V11's `idempotency_keys_unique` constraint — `(userId, idempotencyKey)`
+ * — to make a concurrent second reservation for the same key fail rather
  * than race — see [IdempotencyInterceptor]'s KDoc for why that ordering is
  * load-bearing.
+ *
+ * **The 24h window is enforced here, at read** (Ruling B, review round 1):
+ * [find] filters `expires_at > :now`, the same shape `verification_tokens`,
+ * `refresh_tokens` and `bond_invites` already use, so an expired row is
+ * never handed back as something a retry can replay. No reaper exists yet —
+ * that is slice C3 — so the physical row can still be sitting there under
+ * the unique constraint when the *next* legitimate use of the same key
+ * arrives, 24 hours or more later; [reserve] reclaims it in that one case,
+ * because a client picking the same key twice, a day apart, is not a
+ * conflict doc 06 §1 asks this to detect.
  */
 class IdempotencyKeyStore(
     private val jdbc: JdbcTemplate,
 ) {
     /**
      * Inserts [record] and returns `null` — this caller is first. On a
-     * unique violation, returns the row already there instead, for
-     * [IdempotencyInterceptor] to decide between a replay, a 409 for a
-     * request still in flight, or a 422 for a reused key.
+     * unique violation, looks up the current, non-expired row under the same
+     * key: if one exists, it is returned for [IdempotencyInterceptor] to
+     * decide between a replay, a 409 for a request still in flight, or a 422
+     * for a reused key; if the only row under that key has expired, it is
+     * reclaimed (see the class KDoc) and this reservation proceeds as if it
+     * had been first, returning `null`.
+     *
+     * The unique violation itself is the signal this catch block acts on —
+     * a fresh reservation losing the race to an existing row, not an error
+     * being hidden — so there is nothing further to do with the caught
+     * exception; `@Suppress` below is for that.
      */
+    @Suppress("SwallowedException")
     fun reserve(record: IdempotencyRecord): IdempotencyRecord? =
         try {
-            jdbc.update(
-                """
-                INSERT INTO idempotency_keys
-                    (id, user_id, endpoint, idempotency_key, request_hash, created_at, expires_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """.trimIndent(),
-                record.id,
-                record.userId,
-                record.endpoint,
-                record.idempotencyKey,
-                record.requestHash,
-                Timestamp.from(record.createdAt),
-                Timestamp.from(record.expiresAt),
-            )
+            insert(record)
             null
         } catch (violation: DataIntegrityViolationException) {
-            findByKey(record.userId, record.endpoint, record.idempotencyKey) ?: throw violation
+            val existing = find(record.userId, record.idempotencyKey, record.createdAt)
+            if (existing != null) {
+                existing
+            } else {
+                reclaimExpired(record)
+                null
+            }
         }
 
-    /** Fills in the response the reserved handler produced, once it has run. */
+    /**
+     * Fills in the response the reserved handler produced — or, when
+     * [captured]'s status is a server error, discards the reservation
+     * instead (Important #1, review round 1): a transient 500 cached as "the
+     * response" would be replayed to every retry for the rest of the 24h
+     * window, which defeats the entire point of retrying. Also discarded
+     * when [ex] is non-null: the handler threw, and whatever the advice
+     * chain rendered from that is not "the response" either.
+     */
     fun complete(
         id: UUID,
-        responseStatus: Int,
-        responseBody: String,
+        captured: CapturedResponse,
+        ex: Throwable?,
     ) {
+        if (ex != null || captured.status >= SERVER_ERROR_THRESHOLD) {
+            discard(id)
+            return
+        }
         jdbc.update(
-            "UPDATE idempotency_keys SET response_status = ?, response_body = ? WHERE id = ?",
-            responseStatus,
-            responseBody,
+            "UPDATE idempotency_keys SET response_status = ?, response_body = ?, response_etag = ?, response_location = ? WHERE id = ?",
+            captured.status,
+            captured.body,
+            captured.etag,
+            captured.location,
             id,
         )
     }
 
-    private fun findByKey(
+    /** Removes a reservation outright — a discarded server-error attempt, or a wiring failure that cannot be completed. */
+    fun discard(id: UUID) {
+        jdbc.update("DELETE FROM idempotency_keys WHERE id = ?", id)
+    }
+
+    private fun insert(record: IdempotencyRecord) {
+        jdbc.update(
+            """
+            INSERT INTO idempotency_keys
+                (id, user_id, endpoint, idempotency_key, request_hash, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            record.id,
+            record.userId,
+            record.endpoint,
+            record.idempotencyKey,
+            record.requestHash,
+            Timestamp.from(record.createdAt),
+            Timestamp.from(record.expiresAt),
+        )
+    }
+
+    /** See the class KDoc: the row under this key has expired, and there is no reaper yet to have cleared it. */
+    private fun reclaimExpired(record: IdempotencyRecord) {
+        jdbc.update(
+            "DELETE FROM idempotency_keys WHERE user_id = ? AND idempotency_key = ?",
+            record.userId,
+            record.idempotencyKey,
+        )
+        insert(record)
+    }
+
+    private fun find(
         userId: UUID,
-        endpoint: String,
         idempotencyKey: String,
+        now: Instant,
     ): IdempotencyRecord? =
         jdbc
             .query(
                 """
-                SELECT id, user_id, endpoint, idempotency_key, request_hash, response_status, response_body, created_at, expires_at
+                SELECT id, user_id, endpoint, idempotency_key, request_hash,
+                       response_status, response_body, response_etag, response_location,
+                       created_at, expires_at
                 FROM idempotency_keys
-                WHERE user_id = ? AND endpoint = ? AND idempotency_key = ?
+                WHERE user_id = ? AND idempotency_key = ? AND expires_at > ?
                 """.trimIndent(),
                 ROW_MAPPER,
                 userId,
-                endpoint,
                 idempotencyKey,
+                Timestamp.from(now),
             ).firstOrNull()
 
     private companion object {
+        const val SERVER_ERROR_THRESHOLD = 500
+
         val ROW_MAPPER =
             RowMapper { rs, _ ->
                 IdempotencyRecord(
@@ -124,6 +204,8 @@ class IdempotencyKeyStore(
                     requestHash = rs.getString("request_hash"),
                     responseStatus = rs.getObject("response_status", Short::class.javaObjectType),
                     responseBody = rs.getString("response_body"),
+                    responseEtag = rs.getString("response_etag"),
+                    responseLocation = rs.getString("response_location"),
                     createdAt = rs.getTimestamp("created_at").toInstant(),
                     expiresAt = rs.getTimestamp("expires_at").toInstant(),
                 )

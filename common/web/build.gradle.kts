@@ -12,27 +12,39 @@ dependencies {
     // The injected Clock and IdGenerator (doc 18 §3) that
     // IdempotencyInterceptor stamps its reservation rows with.
     implementation(projects.common.core)
-    // JdbcTemplate for the idempotency_keys table (V11) — compileOnly, and
-    // this is load-bearing, not tidiness. `implementation` was tried first
-    // and `./gradlew build` was the check that ruled it out: merely having
-    // spring-boot-starter-jdbc on the classpath makes Spring Boot's
-    // DataSourceAutoConfiguration build a `DataSource` bean *eagerly*, as
-    // part of context refresh, whether or not anything ever autowires one —
-    // which broke every test built on `SecurityTestApplication`
-    // (common:security's context, deliberately "no database at all") the
-    // moment this dependency became transitive through `common:web`.
-    // `compileOnly` lets IdempotencyKeyStore compile against `JdbcTemplate`
-    // here without forcing the starter onto any consumer's classpath;
-    // `app` already brings the real thing transitively through its own
-    // spring-boot-starter-data-jpa, and this module's own tests add it back
-    // below, where a real Postgres is actually configured. See
-    // IdempotencyKeyStore's KDoc for the JPA half of this same reasoning.
-    compileOnly("org.springframework.boot:spring-boot-starter-jdbc")
+    // JdbcTemplate for the idempotency_keys table (V11): the plain Spring
+    // Framework artifact, not the `spring-boot-starter-jdbc` starter — and
+    // this choice is load-bearing, not tidiness. The starter was tried
+    // first, as an ordinary `implementation`, and `./gradlew build` was the
+    // check that ruled it out (review round 1): merely having it on the
+    // classpath makes Spring Boot's `DataSourceAutoConfiguration` build a
+    // `DataSource` bean *eagerly*, as part of context refresh, whether or
+    // not anything ever autowires one — which broke every test built on
+    // `SecurityTestApplication` (common:security's context, deliberately
+    // "no database at all") the moment the starter became transitive
+    // through `common:web`. Swapping the starter for the bare
+    // `org.springframework:spring-jdbc` artifact (also review round 1, the
+    // reviewer's own hypothesis) fixes that at the source rather than
+    // working around it: the starter is what drags in HikariCP, and
+    // `DataSourceAutoConfiguration`'s pooled-datasource branch — the one
+    // that built a `DataSource` unconditionally — is itself conditional on
+    // HikariCP being present. Without the starter, that branch never
+    // activates, `SecurityTestApplication` passes, and `IdempotencyKeyStore`
+    // still gets a real, transitive `JdbcTemplate` type to compile against —
+    // confirmed by re-running the full `./gradlew build` with this in place.
+    // See `IdempotencyKeyStore`'s KDoc for the JPA half of this same
+    // reasoning (why no `@Entity`, not just why no starter).
+    implementation("org.springframework:spring-jdbc")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    // compileOnly above is not visible to the test source set by default;
-    // this module's own tests need the real thing, against the real
-    // Postgres testImplementation(projects.common.testing) starts below.
+    // The plain artifact above has no autoconfiguration in it — this
+    // module's own tests need `spring-boot-starter-jdbc` back to get
+    // `JdbcTemplateAutoConfiguration`, which is what actually builds the
+    // `JdbcTemplate` *bean* from the real Postgres
+    // testImplementation(projects.common.testing) starts below. Safe here
+    // in a way it was not as a main dependency: this module's own test
+    // context always configures a real `DataSource`, so the eager creation
+    // above is exactly what should happen.
     testImplementation("org.springframework.boot:spring-boot-starter-jdbc")
     // Spring Boot 4 split MockMvc's auto-configuration out of
     // spring-boot-test-autoconfigure into a stack-specific module, needed by

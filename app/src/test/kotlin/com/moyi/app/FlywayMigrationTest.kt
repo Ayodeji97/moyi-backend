@@ -38,12 +38,24 @@ class FlywayMigrationTest(
         // assertion is what notices when a module's migrations are not on
         // the classpath at all, a failure that otherwise shows up as a
         // missing table much later.
+        //
+        // The rule checked is "every module's migrations landed, as one
+        // ascending sequence" — not "exactly this list forever". A hard-coded
+        // exact list broke the moment this task landed V11, and would break
+        // again the moment the next task in this slice lands V12 (review
+        // round 1, Minor #2): checking numeric order plus a minimum-required
+        // subset survives that without losing what the test is actually for.
         val appliedVersions =
             jdbcTemplate.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = true ORDER BY installed_rank",
                 String::class.java,
             )
-        assertEquals(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "11"), appliedVersions)
+        val versions = appliedVersions.map { it!!.toInt() }
+        assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
+        assertTrue(
+            versions.containsAll(listOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 11)),
+            "Expected every module's migrations through V11, found: $versions",
+        )
 
         val extensions =
             jdbcTemplate.queryForList(
