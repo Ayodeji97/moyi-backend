@@ -163,11 +163,17 @@ internal class BondStore(
      * compares `If-Match`, so the read, the check and the write are one
      * serialised decision (ADR-0029). `BondPersistenceTest` states this
      * explicitly so nobody rediscovers it the hard way.
+     *
+     * It does flush, for a different reason: `@Version` is incremented at flush,
+     * and a caller that writes and then re-reads to build its response would
+     * otherwise report the *old* version as the `ETag` — a value the client's
+     * next `If-Match` would be refused with (see
+     * [BondRepository.saveAndFlush]).
      */
     fun update(bond: Bond) {
         val entity = bonds.findById(bond.id.value) ?: error("cannot update a bond that does not exist")
         bond.applyTo(entity)
-        bonds.save(entity)
+        bonds.saveAndFlush(entity)
     }
 
     private companion object {

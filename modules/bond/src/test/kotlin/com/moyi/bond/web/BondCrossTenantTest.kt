@@ -74,6 +74,14 @@ internal class BondCrossTenantTest(
             // accepts from a member.
             "POST /api/v1/bonds/{bondId}/leave" to Fixture(),
             "POST /api/v1/bonds/{bondId}/block" to Fixture(),
+            // Slice B4. The PATCH needs a body **and** an `If-Match`, or it is
+            // refused at 428 before the guard is what is being tested — which
+            // would make this case pass for the wrong reason.
+            "PATCH /api/v1/bonds/{bondId}" to
+                Fixture(
+                    body = """{"name":"Mine"}""",
+                    headers = mapOf(HttpHeaders.IF_MATCH to "\"0\""),
+                ),
         )
 
     private data class Fixture(

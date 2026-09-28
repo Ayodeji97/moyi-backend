@@ -22,6 +22,19 @@ import java.util.UUID
 internal interface BondRepository : Repository<BondEntity, UUID> {
     fun save(bond: BondEntity): BondEntity
 
+    /**
+     * Writes and flushes.
+     *
+     * The flush is not for the optimistic check — that cannot fire on this path
+     * (see [BondStore.update]). It is for the **`ETag`**: `@Version` is
+     * incremented at flush, and `EntityManager.find` answers from the
+     * persistence context without one, so a service that writes and then
+     * re-reads sees the *old* version and hands the client an `ETag` that its
+     * next `If-Match` would be refused with. Found by `BondSettingsEndpointTest`
+     * — expected `"1"`, got `"0"`.
+     */
+    fun saveAndFlush(bond: BondEntity): BondEntity
+
     fun findById(id: UUID): BondEntity?
 
     fun findAllByIdIn(ids: Collection<UUID>): List<BondEntity>
