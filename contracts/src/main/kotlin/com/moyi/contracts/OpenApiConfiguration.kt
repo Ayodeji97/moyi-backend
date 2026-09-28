@@ -186,7 +186,21 @@ class OpenApiConfiguration {
          * (ADR-0028).
          */
         private val CONFLICTING_OPERATIONS =
-            setOf("createBond", "createBondInvite", "accept", "leaveBond", "revokeBondInvite", "patchBond", "replaceMemberSettings")
+            setOf(
+                "createBond",
+                "createBondInvite",
+                "accept",
+                "leaveBond",
+                "revokeBondInvite",
+                "patchBond",
+                "replaceMemberSettings",
+                // Slice B5. `cancelBondTimezoneChange` and `cancelBondDeletion`
+                // are deliberately absent: cancelling is never a conflict, it is
+                // either done or there was nothing there (a `404`).
+                "proposeBondTimezone",
+                "confirmBondTimezone",
+                "requestBondDeletion",
+            )
 
         /**
          * Operations that require `If-Match` (doc 06 §1) and can therefore answer
