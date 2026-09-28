@@ -106,6 +106,9 @@ class OpenApiConfiguration {
             if (!public) addAll(listOf(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN))
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
             if (operation.operationId in CONFLICTING_OPERATIONS) add(HttpStatus.CONFLICT)
+            if (operation.operationId in CONDITIONAL_OPERATIONS) {
+                addAll(listOf(HttpStatus.PRECONDITION_FAILED, HttpStatus.PRECONDITION_REQUIRED))
+            }
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER && it.name == "code" }) {
                 add(HttpStatus.UNPROCESSABLE_ENTITY)
             }
@@ -183,7 +186,18 @@ class OpenApiConfiguration {
          * (ADR-0028).
          */
         private val CONFLICTING_OPERATIONS =
-            setOf("createBond", "createBondInvite", "accept", "leaveBond", "revokeBondInvite")
+            setOf("createBond", "createBondInvite", "accept", "leaveBond", "revokeBondInvite", "patchBond", "replaceMemberSettings")
+
+        /**
+         * Operations that require `If-Match` (doc 06 §1) and can therefore answer
+         * `412` and `428`.
+         *
+         * By id, for the same reason the conflict list is: it is a property of
+         * the operation's rule rather than of its shape. `replaceMemberSettings`
+         * has a body and a path parameter exactly like `patchBond` and takes no
+         * condition at all, because nobody else can write that row (ADR-0029).
+         */
+        private val CONDITIONAL_OPERATIONS = setOf("patchBond")
 
         /**
          * Response schemas whose resource carries a row version, and therefore
