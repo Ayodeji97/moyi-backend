@@ -133,13 +133,34 @@ internal data class BondDay(
          * The ordinary open (doc 04 §3): the first thing either member's
          * write touches for a given bond and date, before any [Entry]
          * exists for it.
+         *
+         * [id] is supplied rather than minted here — as
+         * [com.moyi.bond.domain.Bond.create] and [Entry.submit] both take
+         * theirs — so the calling service mints it from the injected
+         * [com.moyi.common.core.IdGenerator] port (`timeOrdered()`), the one
+         * place this codebase gets a v7's bit layout, counter included,
+         * right, and the one seam [com.moyi.common.testing.DeterministicIdGenerator]
+         * can stand in for. See [BondDayId]'s class doc for the fuller reasoning.
          */
         fun open(
+            id: BondDayId,
             bondId: UUID,
             date: LocalDate,
             zone: ZoneId,
             now: Instant,
-        ): BondDay = newDay(bondId, date, zone, now, status = BondDayStatus.OPEN)
+        ): BondDay =
+            BondDay(
+                id = id,
+                bondId = bondId,
+                date = date,
+                status = BondDayStatus.OPEN,
+                anchorTimezone = zone,
+                entryCount = 0,
+                revealedAt = null,
+                closedAt = null,
+                createdAt = now,
+                version = 0,
+            )
 
         /**
          * The [BondDayStatus.SUSPENDED] open (doc 04 §8.3a, as the Phase 3
@@ -148,26 +169,25 @@ internal data class BondDay(
          * write before that member arrives — so the row has to exist for
          * their [Entry] to hang off, and it opens excluded from evaluation
          * from the first write rather than becoming so later.
+         *
+         * [id], as [open]'s own doc explains, is the caller's to mint. The
+         * five-line body below duplicates [open]'s rather than sharing a
+         * private helper: a shared six-parameter factory tripped detekt's
+         * `LongParameterList` on a function that would have existed for no
+         * reason but to avoid this duplication, which is the worse trade.
          */
         fun openSuspended(
+            id: BondDayId,
             bondId: UUID,
             date: LocalDate,
             zone: ZoneId,
             now: Instant,
-        ): BondDay = newDay(bondId, date, zone, now, status = BondDayStatus.SUSPENDED)
-
-        private fun newDay(
-            bondId: UUID,
-            date: LocalDate,
-            zone: ZoneId,
-            now: Instant,
-            status: BondDayStatus,
         ): BondDay =
             BondDay(
-                id = BondDayId.fresh(now),
+                id = id,
                 bondId = bondId,
                 date = date,
-                status = status,
+                status = BondDayStatus.SUSPENDED,
                 anchorTimezone = zone,
                 entryCount = 0,
                 revealedAt = null,

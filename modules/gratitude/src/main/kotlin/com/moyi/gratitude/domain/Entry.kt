@@ -38,8 +38,16 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  * Postgres's own derived search artifact (C6), never read or written by
  * anything this aggregate does, so it has no seat on the domain object at
  * all — it belongs on the persistence entity alone, once C6 populates it.
+ *
+ * No `@Suppress("LongParameterList")` needed for the sixteen properties
+ * below: detekt's `LongParameterList` ships with `ignoreDataClasses: true`
+ * by default, this project's `config/detekt/detekt.yml` never overrides it,
+ * and `Entry` is a `data class` — the same reason
+ * [com.moyi.bond.domain.Bond] (fifteen properties) carries no suppression
+ * either. `BondMembership` in `bond.api` needs one because it is a plain
+ * `class`, not a `data class`; that is a different rule shape, not a
+ * threshold this one sits under and `Entry` sits over.
  */
-@Suppress("LongParameterList")
 internal data class Entry(
     val id: EntryId,
     val bondDayId: BondDayId,
@@ -93,7 +101,17 @@ internal data class Entry(
          * [createdAt] and [updatedAt] start equal, as they do for every row
          * until its first edit; nothing this slice does ever produces a
          * second one.
+         *
+         * `@Suppress("LongParameterList")` here, on the function rather than
+         * the class (`Entry` itself needs none — detekt's `LongParameterList`
+         * ships `ignoreDataClasses: true`, and this project never overrides
+         * it): seven parameters is the row's own arity, each one a distinct
+         * fact the caller already has in hand, and there is no `BondDraft`-
+         * shaped request object to bundle them into here — that pattern
+         * belongs to a web-layer input doc 06 §3.3 defines, and this is pure
+         * domain with nothing upstream of it in this module.
          */
+        @Suppress("LongParameterList")
         fun submit(
             id: EntryId,
             bondDayId: BondDayId,
