@@ -1428,3 +1428,101 @@ Wrong about: which part of "indistinguishable" is hard. I assumed it was the
          response bodies more carefully. It came from enumerating everything
          that crosses the wire, headers included, which is now the question I
          want to ask on every slice where two paths must look alike.
+
+## 2026-09-28 · Phase 2 · The conditional update, and the mechanism I was sure was doing the work
+Expected: a mechanical slice. `@Version` has been on the bond row since B1 for
+         exactly this, the `ETag` has been going out since then, so `PATCH`
+         was surely just "read the header, compare it, write, and let
+         Hibernate catch anybody who slipped through".
+Reality: **the mechanism I planned the slice around cannot fire on the path I
+         planned it for, and the test said so before I had written the
+         endpoint.** `BondStore.update` re-reads the row inside its own
+         transaction and the mapper deliberately leaves `version` to Hibernate,
+         so the UPDATE always carries the row's *current* version — hand it a
+         stale aggregate and it overwrites newer values in silence. My plan had
+         a whole step about flushing so the optimistic-lock exception could be
+         caught; there was no exception to catch.
+         So the protection had to move up a layer: `UpdateBond` takes the
+         bond's row lock, then compares `If-Match`, so the read, the check and
+         the write are one serialised decision. Removing that lock fails
+         `BondSettingsRaceTest` three runs out of three — and it fails as
+         `[200, 500]`, which corrected me a second time: `@Version` **does**
+         fire under genuine concurrency, because each transaction loads its own
+         copy before the other commits. It just arrives as a 500. So the three
+         things are doing three different jobs — the column is the `ETag`,
+         Hibernate's check is a backstop against corruption, the lock is what
+         turns a race into the `412` the contract promises — and I had
+         collapsed all three into one sentence in the plan.
+         The flush turned out to be needed anyway, for a reason I had not
+         thought of: `@Version` increments at flush and `EntityManager.find`
+         answers from the persistence context without one, so the re-read that
+         builds the response saw version 0 and the endpoint returned
+         `ETag: "0"` after a successful write — a value the client's next
+         `If-Match` would be refused with. Right instinct, wrong reason,
+         and only the test knew.
+         Two smaller ones, both found by running rather than reading.
+         `Optional<@Pattern String>` **compiles and does not run**: `"9am"`
+         sailed past validation and `LocalTime.parse` threw a 500. And the
+         smoke script found that a patch whose values already match the row
+         writes nothing, so the version does not move — I had written a probe
+         expecting a bump. That behaviour is right (the other member's `ETag`
+         should not be invalidated for nothing) and is now asserted rather than
+         incidental.
+         Also: detekt pushed `BondStore` over its method limit for the second
+         time in three slices, and for the second time the fix was a real
+         boundary rather than a bigger threshold — `MemberStore` holds what
+         belongs to one member and nobody else. While moving things I noticed
+         `memberUserIdsEverOf` was a second query for data both callers already
+         had loaded; it is `Bond.everyMemberUserId()` now, one fewer round trip
+         on every resolve and accept.
+Wrong about: how much a mechanism being *present* tells you about it being
+         *load-bearing*. `@Version` was in the schema, mapped, and visibly
+         doing something — it had been bumping the number in the `ETag` since
+         B1. That made it easy to believe it was also enforcing the thing it is
+         famous for enforcing, and it was not, on the one path that mattered.
+         The general form: a component can be in the right place, with the
+         right name, working correctly, and still not be the thing standing
+         between you and the bug. Only breaking it tells you which.
+
+## 2026-09-28 · Phase 2 · The review of #40, and the space that is not a space
+Expected: a triage pass. Five findings on the settings PR, one of them a P1
+         about serialising a settings write with leave and block; take the
+         lock, answer the two contract nits, push.
+Reality: the P1 was real and the fix was one line, but proving it took a test
+         that had to catch the PUT *while* it waited. Holding an ending
+         transaction open and asserting on the result is not enough — without
+         the lock the PUT blocks on the member `UPDATE` instead and then
+         commits its stale `leftAt` afterwards, which passes a naive test.
+         `BondSettingsRaceTest` now polls `pg_blocking_pids` until the request
+         is genuinely contending, and only then commits the ending. Remove the
+         `lockBond` line and it fails; that is the only reason to believe it.
+         The two "contract nits" were both **edge defects wearing a document's
+         clothes**. `If-Match` was `required: false` in `openapi.json` because
+         the handler declares it optional — deliberately, so an absent header
+         is our `428` rather than Spring's `400` — and springdoc copied the
+         declaration without knowing why it was made. And four `@AssertTrue`
+         cross-field checks were being published as writable request fields,
+         because springdoc reads every public getter as one. Neither could be
+         fixed in the file: it is generated, and the next regeneration would
+         have eaten the edit.
+         Then the third finding, about a nickname of one space, turned out to
+         name a defect class rather than a field. **`@NotBlank` and Kotlin's
+         `isBlank` do not agree.** Bean Validation trims with Java's
+         `String.trim`, which removes only characters at or below `U+0020`;
+         Kotlin's `trim` also removes every `isSpaceChar` — `U+00A0`, `U+2007`,
+         the whole set. So a name of one non-breaking space passed the edge,
+         arrived at the domain as `""`, and `require(name.isNotBlank())` turned
+         a well-formed request into a **500**. On `POST /bonds` too, merged in
+         B1 and live since. A `create` with `name = " "` returns 500 today
+         on `main`; the test that says so went in before the fix did.
+Wrong about: what "the same check, in two places" means. `BondConstraints`
+         opens by saying the edge should *ask the domain* instead of restating
+         its rules, and I read that as being about the interesting rules —
+         zones, types, the things with a factory to call. Blankness looked too
+         small to be a rule at all, so it got `@NotBlank` at the edge and
+         `isNotBlank()` in the aggregate, and those are two different
+         predicates that agree on every input anybody types by hand. The
+         general form: a restated rule is dangerous in proportion to how
+         *obvious* it looks, because nobody checks the obvious ones for
+         disagreement. The zones were delegated on the first try. The word
+         "blank" was not.

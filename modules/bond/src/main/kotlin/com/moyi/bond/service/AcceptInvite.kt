@@ -85,7 +85,7 @@ internal class AcceptInvite(
         bonds.lockBondsOf(caller)
         if (bonds.countOpenBondsOf(caller) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()
         if (!bond.hasRoom) throw InviteNotUsableException()
-        if (blocks.existsBetween(caller, bonds.memberUserIdsEverOf(bond.id))) throw InviteNotUsableException()
+        if (blocks.existsBetween(caller, bond.everyMemberUserId())) throw InviteNotUsableException()
 
         if (!invites.consume(invite.id, caller, now)) throw InviteNotUsableException()
 

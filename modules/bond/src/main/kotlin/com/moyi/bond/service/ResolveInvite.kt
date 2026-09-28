@@ -63,7 +63,7 @@ internal class ResolveInvite(
         val invite = invites.findLiveByCode(code, now) ?: throw InviteNotUsableException()
         val bond = bonds.findAnyForInvite(invite.bondId) ?: throw InviteNotUsableException()
         if (!bond.hasRoom) throw InviteNotUsableException()
-        if (blocks.existsBetween(caller, bonds.memberUserIdsEverOf(bond.id))) throw InviteNotUsableException()
+        if (blocks.existsBetween(caller, bond.everyMemberUserId())) throw InviteNotUsableException()
 
         val inviter = bond.members.firstOrNull { it.id == invite.createdByMemberId }
         return InvitePreview(

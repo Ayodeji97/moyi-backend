@@ -8,14 +8,19 @@ import com.moyi.bond.service.CreateBond
 import com.moyi.bond.service.EndBond
 import com.moyi.bond.service.GetBond
 import com.moyi.bond.service.ListBonds
+import com.moyi.bond.service.UpdateBond
 import com.moyi.common.security.CurrentUser
+import com.moyi.common.web.IfMatch
 import jakarta.validation.Valid
+import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
+import org.springframework.web.bind.annotation.RequestHeader
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
@@ -54,6 +59,7 @@ internal class BondsController(
     private val getBond: GetBond,
     private val bondList: ListBonds,
     private val endBond: EndBond,
+    private val updateBond: UpdateBond,
 ) {
     /**
      * `@ResponseStatus` **and** a `ResponseEntity`, which looks redundant and
@@ -84,6 +90,32 @@ internal class BondsController(
     ): ResponseEntity<BondResponse> {
         val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
         val view = getBond.view(membership)
+        return ResponseEntity.ok().eTag(BondResponse.etagOf(view)).body(BondResponse.from(view))
+    }
+
+    /**
+     * `PATCH /bonds/{bondId}` (doc 06 §1 and §3.3): a settings change,
+     * conditional on the `ETag` any bond response carries.
+     *
+     * **The guard runs before `If-Match` is even parsed**, and that order is the
+     * security property: a `428` or a `412` to a non-member would confirm that
+     * the bond is real, which is T-02's oracle delivered to the one caller who
+     * must not have it. A stranger gets the same 404 whatever their headers say.
+     *
+     * The body is validated by Spring *before* this method runs, so a malformed
+     * body is a `422` for member and non-member alike. That discloses nothing —
+     * it is a fact about the caller's own request, and the answer does not depend
+     * on the bond existing — which is why `@Valid` stays where it reads best.
+     */
+    @PatchMapping("/{bondId}")
+    fun patchBond(
+        caller: CurrentUser,
+        @PathVariable bondId: String,
+        @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) ifMatch: String?,
+        @Valid @RequestBody request: PatchBondRequest,
+    ): ResponseEntity<BondResponse> {
+        val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
+        val view = updateBond.patch(membership, request.toSettings(), IfMatch.parse(ifMatch))
         return ResponseEntity.ok().eTag(BondResponse.etagOf(view)).body(BondResponse.from(view))
     }
 

@@ -16,8 +16,25 @@ import kotlin.reflect.KClass
 // three of them reachable. Delegating removes the class of bug rather than the
 // instances, because there is only ever one definition.
 //
-// Null and blank are @NotBlank's job here, so these return `true` for them: a
-// constraint that also reports them produces two errors for one mistake.
+// Null is allowed for optional settings. Bond types must reject a supplied
+// blank too: PATCH omits @NotBlank because an absent type is valid.
+
+/**
+ * At least one character the *domain* does not consider whitespace.
+ *
+ * `@NotBlank` is not this rule. Bean Validation blanks a string with Java's
+ * `String.trim`, which removes only characters at or below `U+0020`, while
+ * Kotlin's `trim` and `isBlank` also remove every `isSpaceChar` — `U+00A0`,
+ * `U+2007`, and the rest. A name of one non-breaking space therefore passed
+ * `@NotBlank`, was trimmed to the empty string on its way into the domain, and
+ * `require(name.isNotBlank())` turned it into a 500 on a well-formed request.
+ * Found by `BondsEndpointTest`; the same hole existed on `PATCH`.
+ *
+ * `(?U)` is what makes `\S` agree with Kotlin here, and `(?s)` lets `.` cross a
+ * newline so a multi-line value is judged by its content rather than its shape.
+ * Null passes, as every Bean Validation constraint but `@NotNull` does.
+ */
+internal const val NOT_ONLY_SPACE = "(?sU).*\\S.*"
 
 /** The anchor or reminder zone: an IANA region id (ADR-0004, doc 04 §6). */
 @Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
@@ -64,7 +81,7 @@ internal class BondTypeConstraintValidator : ConstraintValidator<ValidBondType, 
     override fun isValid(
         value: String?,
         context: ConstraintValidatorContext,
-    ): Boolean = value.isNullOrBlank() || BondType.entries.any { it.name == value.trim() }
+    ): Boolean = value == null || BondType.entries.any { it.name == value.trim() }
 }
 
 /**

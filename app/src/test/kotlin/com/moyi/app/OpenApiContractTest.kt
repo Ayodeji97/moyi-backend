@@ -7,6 +7,7 @@ import com.moyi.common.web.ErrorCode
 import com.moyi.contracts.OpenApiConfiguration
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotBeEmpty
@@ -87,6 +88,7 @@ class OpenApiContractTest(
                 "/api/v1/bonds",
                 "/api/v1/bonds/{bondId}",
                 "/api/v1/bonds/{bondId}/leave",
+                "/api/v1/bonds/{bondId}/members/me/settings",
                 "/api/v1/bonds/{bondId}/block",
                 "/api/v1/bonds/{bondId}/invites",
                 "/api/v1/bonds/{bondId}/invites/{inviteId}",
@@ -100,13 +102,26 @@ class OpenApiContractTest(
         // CurrentUser and ClientContext are resolved from the token and the
         // socket; documented as query parameters they would generate a client
         // that sends them. Path parameters (`/sessions/{id}`) are real.
+        // Query and cookie parameters: none, ever. A resolver type documented as
+        // one would generate a client that sends it.
         operations()
             .flatMap { (_, op) ->
                 op.parameters
                     .orEmpty()
-                    .filter { it.`in` != "path" }
+                    .filter { it.`in` != "path" && it.`in` != "header" }
                     .map { it.name }
             }.shouldBeEmpty()
+        // Headers are not all accidental — `If-Match` is required by doc 06 §1
+        // and has to appear, or a generated client cannot send it. The list is
+        // exhaustive on purpose: a *new* header parameter should have to be
+        // justified here, which is what this assertion makes someone do.
+        operations()
+            .flatMap { (_, op) ->
+                op.parameters
+                    .orEmpty()
+                    .filter { it.`in` == "header" }
+                    .map { it.name }
+            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH)
         api.components.schemas.keys
             .filter { it in setOf("CurrentUser", "ClientContext") }
             .shouldBeEmpty()
@@ -181,6 +196,34 @@ class OpenApiContractTest(
         leave.responses.keys shouldContainAll listOf("204", "404", "409")
         block.responses.keys shouldContainAll listOf("204", "404")
         block.responses.keys shouldNotContain "409"
+    }
+
+    @Test
+    fun `the conditional update documents its If-Match, its 428 and its 412`() {
+        // Doc 06 §1. A generated client has to be able to *send* the condition
+        // and to model both ways it can fail, or the concurrency control is
+        // something a client author has to discover by reading prose.
+        val patch = api.paths["/api/v1/bonds/{bondId}"]!!.patch
+
+        patch.responses.keys shouldContainAll listOf("200", "404", "409", "412", "422", "428")
+        patch.parameters.map { it.name } shouldContain HttpHeaders.IF_MATCH
+        patch.parameters.first { it.name == HttpHeaders.IF_MATCH }.`in` shouldBe "header"
+        // Required in the document even though the handler takes it as optional:
+        // the optionality exists so an absent condition is our 428 rather than
+        // Spring's 400, and a client generated from `required: false` would
+        // offer a call that cannot succeed (review of #40).
+        patch.parameters.first { it.name == HttpHeaders.IF_MATCH }.required shouldBe true
+        patch.responses["200"]!!.headers.orEmpty() shouldContainKey "ETag"
+
+        // The member-settings endpoints take no condition, and the document says
+        // so by not offering one: nobody else can write that row (ADR-0029).
+        val settings = api.paths["/api/v1/bonds/{bondId}/members/me/settings"]!!
+        settings.put.parameters
+            .orEmpty()
+            .map { it.name } shouldNotContain HttpHeaders.IF_MATCH
+        settings.put.responses.keys shouldContainAll listOf("200", "404", "409", "422")
+        settings.put.responses.keys shouldNotContain "412"
+        settings.get.responses shouldContainKey "404"
     }
 
     @Test

@@ -4,6 +4,7 @@ import com.moyi.bond.domain.Block
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.BondDraft
 import com.moyi.bond.domain.BondId
+import com.moyi.bond.domain.BondSettings
 import com.moyi.bond.domain.BondStatus
 import com.moyi.bond.domain.BondType
 import com.moyi.bond.domain.Invite
@@ -11,6 +12,7 @@ import com.moyi.bond.domain.InviteCode
 import com.moyi.bond.domain.InviteId
 import com.moyi.bond.domain.Member
 import com.moyi.bond.domain.MemberId
+import com.moyi.bond.domain.MemberSettings
 import com.moyi.bond.domain.RegionZone
 import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.BondTestApplication
@@ -363,9 +365,11 @@ internal class BondPersistenceTest(
     }
 
     @Test
-    fun `everyone who has ever been a member is listed, including those who left`() {
-        // FR-029's block check has to consider the person who walked away:
-        // a bond they left is exactly where a block would have been made.
+    fun `everyone who has ever been a member is on the aggregate, including those who left`() {
+        // FR-029's block check has to consider the person who walked away: a
+        // bond they left is exactly where a block would have been made. Answered
+        // by the loaded aggregate since B4 — it used to be a second query for
+        // data the caller already had in hand.
         val (bond, invite) = newBond()
         val joiner = Member.member(MemberId(ids.timeOrdered()), bond.id, UserId(UUID.randomUUID()), lagos, now)
         transactions.executeWithoutResult {
@@ -374,9 +378,10 @@ internal class BondPersistenceTest(
         }
         jdbc.update("UPDATE bond_members SET left_at = now() WHERE user_id = ?", joiner.userId.value)
 
-        transactions
-            .execute { store.memberUserIdsEverOf(bond.id) }
-            .shouldNotBeNull() shouldContainExactlyInAnyOrder listOf(bond.createdBy, joiner.userId)
+        val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+
+        loaded.everyMemberUserId() shouldContainExactlyInAnyOrder listOf(bond.createdBy, joiner.userId)
+        loaded.activeMembers.map { it.userId } shouldContainExactly listOf(bond.createdBy)
     }
 
     @Test
@@ -448,5 +453,49 @@ internal class BondPersistenceTest(
         jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
         jdbc.queryForObject("SELECT created_at FROM blocks", Instant::class.java) shouldBe now
         transactions.execute { blocks.existsBetween(other, listOf(bond.createdBy)) } shouldBe true
+    }
+
+    @Test
+    fun `updating a bond writes the change and moves the version`() {
+        val (bond, invite) = newBond()
+        transactions.executeWithoutResult { store.insert(bond).also { invites.insert(invite) } }
+
+        transactions.executeWithoutResult { store.update(bond.update(BondSettings(name = "Us two", strictMode = true))) }
+
+        val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+        loaded.name shouldBe "Us two"
+        loaded.strictMode shouldBe true
+        loaded.version shouldBe 1
+    }
+
+    @Test
+    fun `the store applies whatever aggregate it is given - it is not the layer that stops a lost update`() {
+        // Written down because the first version of this test expected the
+        // opposite, and the expectation was wrong in a way worth keeping.
+        //
+        // `update` re-reads the row inside its own transaction and `applyTo`
+        // deliberately does not copy `version` (Hibernate's to increment), so
+        // the UPDATE carries whatever the row currently holds and the optimistic
+        // check has nothing to compare *in this sequential case*. Handing it a
+        // stale aggregate therefore overwrites the newer values — silently.
+        //
+        // Under genuine concurrency `@Version` does fire, because each
+        // transaction loads its own copy before the other commits; it just
+        // arrives as a 500. `BondSettingsRaceTest` shows that by removing the
+        // lock.
+        //
+        // That is why `UpdateBond` takes the bond's row lock before it reads and
+        // compares `If-Match` (ADR-0029): the protection lives there, in one
+        // serialised read-check-write, and not in this method.
+        val (bond, invite) = newBond()
+        transactions.executeWithoutResult { store.insert(bond).also { invites.insert(invite) } }
+        transactions.executeWithoutResult { store.update(bond.update(BondSettings(name = "First"))) }
+
+        // `bond` is still the version-0 object this test loaded at the start.
+        transactions.executeWithoutResult { store.update(bond.update(BondSettings(name = "Second"))) }
+
+        val loaded = transactions.execute { store.findByMember(bond.id, bond.createdBy) }.shouldNotBeNull()
+        loaded.name shouldBe "Second"
+        loaded.version shouldBe 2
     }
 }
