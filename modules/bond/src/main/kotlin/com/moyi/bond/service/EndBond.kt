@@ -6,6 +6,7 @@ import com.moyi.bond.domain.Membership
 import com.moyi.bond.infra.database.BlockStore
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.InviteStore
+import com.moyi.bond.infra.database.ProposalStore
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -27,6 +28,10 @@ import java.time.Clock
  * Nobody is notified by either path (T-09, "the discreet exit"). There is no
  * email, no push, and no field anywhere that says which of the two happened.
  *
+ * Ending a bond also **cancels whatever was waiting to be agreed** — the
+ * obligation ADR-0028 recorded and could not discharge, because
+ * `bond_proposals` did not exist until slice B5.
+ *
  * Both take the bond's row lock before reading, the same lock `AcceptInvite`
  * and `CreateInvite` take. Without it a leave and an accept are two
  * transactions over READ COMMITTED snapshots: the accept sees a free seat, the
@@ -38,6 +43,7 @@ internal class EndBond(
     private val bonds: BondStore,
     private val blocks: BlockStore,
     private val invites: InviteStore,
+    private val proposals: ProposalStore,
     private val clock: Clock,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -111,9 +117,16 @@ internal class EndBond(
     ) {
         if (ended == before) return
         bonds.archive(ended)
+        val at = ended.archivedAt ?: clock.instant()
         // After the aggregate, so the bulk update's automatic flush has the
         // member and bond changes to write first. A live invite outliving the
         // bond it belongs to would be a code into a closed room.
-        invites.revokeLiveOf(ended.id, ended.archivedAt ?: clock.instant())
+        invites.revokeLiveOf(ended.id, at)
+        // **ADR-0028's obligation, paid now that `bond_proposals` exists.** A
+        // confirmation arriving after this would otherwise try to move the
+        // anchor zone of a bond that has ended, or start a cooling-off on one
+        // nobody can write to. Both are refused at the endpoint as well; this is
+        // the half that stops the pending state being shown at all.
+        proposals.cancelLiveOf(ended.id, at)
     }
 }
