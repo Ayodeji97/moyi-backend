@@ -54,8 +54,8 @@ internal class ChangeTimezone(
         membership: Membership,
         zone: RegionZone,
     ): BondView {
-        val now = support.clock.instant()
         bonds.lockBond(membership.bondId)
+        val now = support.clock.instant()
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         if (!bond.isOpen) throw BondArchivedException()
         if (!bond.mayChangeTimezoneAt(now)) {
@@ -92,13 +92,17 @@ internal class ChangeTimezone(
      */
     @Transactional
     @Suppress("ThrowsCount")
-    fun confirm(membership: Membership): BondView {
-        val now = support.clock.instant()
+    fun confirm(
+        membership: Membership,
+        expectedProposalId: ProposalId,
+    ): BondView {
         bonds.lockBond(membership.bondId)
+        val now = support.clock.instant()
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         if (!bond.isOpen) throw BondArchivedException()
         val proposal =
             proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()
+        if (proposal.id != expectedProposalId) throw ProposalNotFoundException()
         if (proposal.proposedByMemberId == membership.memberId) throw ProposalNeedsOtherMemberException()
         if (!bond.mayChangeTimezoneAt(now)) {
             throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)
@@ -123,8 +127,8 @@ internal class ChangeTimezone(
      */
     @Transactional
     fun cancel(membership: Membership) {
-        val now = support.clock.instant()
         bonds.lockBond(membership.bondId)
+        val now = support.clock.instant()
         val proposal =
             proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()
         if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()

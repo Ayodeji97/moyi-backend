@@ -89,7 +89,7 @@ internal class BondCrossTenantTest(
             // whether anything is pending, or the 404 would depend on state
             // only a member can know about.
             "PATCH /api/v1/bonds/{bondId}/timezone" to Fixture(body = """{"anchorTimezone":"Europe/London"}"""),
-            "POST /api/v1/bonds/{bondId}/timezone/confirm" to Fixture(),
+            "POST /api/v1/bonds/{bondId}/timezone/confirm" to Fixture(body = """{"proposalId":"00000000-0000-0000-0000-000000000001"}"""),
             "DELETE /api/v1/bonds/{bondId}/timezone" to Fixture(),
             "POST /api/v1/bonds/{bondId}/deletion-request" to Fixture(),
             "DELETE /api/v1/bonds/{bondId}/deletion-request" to Fixture(),

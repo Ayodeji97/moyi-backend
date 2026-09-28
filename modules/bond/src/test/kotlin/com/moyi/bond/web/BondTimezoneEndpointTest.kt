@@ -255,6 +255,65 @@ internal class BondTimezoneEndpointTest(
         cancel(eve, bondId).status shouldBe 404
     }
 
+    @Test
+    fun `a stale confirmation cannot approve a replacement proposal`() {
+        val (ada, bea, bondId) = pairedBond()
+        val london = propose(ada, bondId, "Europe/London")
+        val observedId =
+            Regex("\"pendingTimezoneChange\":\\{\"id\":\"([^\"]+)\"")
+                .find(london.contentAsString)!!
+                .groupValues[1]
+        cancel(ada, bondId).status shouldBe 204
+        propose(ada, bondId, "Asia/Tokyo").status shouldBe 200
+
+        val stale =
+            mockMvc
+                .post("/api/v1/bonds/$bondId/timezone/confirm") {
+                    header(HttpHeaders.AUTHORIZATION, bearer(bea))
+                    contentType = MediaType.APPLICATION_JSON
+                    content = """{"proposalId":"$observedId"}"""
+                }.andReturn()
+                .response
+
+        stale.status shouldBe 404
+        getBond(bea, bondId).contentAsString shouldContain "\"anchorTimezone\":\"Africa/Lagos\""
+        getBond(bea, bondId).contentAsString shouldContain "\"proposedTimezone\":\"Asia/Tokyo\""
+        jdbc.queryForObject("SELECT count(*) FROM bond_proposals WHERE confirmed_at IS NOT NULL", Int::class.java) shouldBe 0
+        confirm(bea, bondId).status shouldBe 200
+    }
+
+    @Test
+    fun `proposal creation cancellation and expiry invalidate the other member's cached view`() {
+        val (ada, bea, bondId) = pairedBond()
+        val initialTag = getBond(bea, bondId).getHeader(HttpHeaders.ETAG)!!
+        propose(ada, bondId, "Europe/London").status shouldBe 200
+        val proposed = conditionalGet(bea, bondId, initialTag)
+        proposed.status shouldBe 200
+        proposed.contentAsString shouldContain "Europe/London"
+        conditionalGet(bea, bondId, proposed.getHeader(HttpHeaders.ETAG)!!).status shouldBe 304
+        cancel(ada, bondId).status shouldBe 204
+        conditionalGet(bea, bondId, proposed.getHeader(HttpHeaders.ETAG)!!).status shouldBe 200
+
+        propose(ada, bondId, "Asia/Tokyo").status shouldBe 200
+        val liveTag = getBond(bea, bondId).getHeader(HttpHeaders.ETAG)!!
+        jdbc.update("UPDATE bond_proposals SET proposed_at = now() - interval '8 days', expires_at = now() - interval '1 day'")
+        val expired = conditionalGet(bea, bondId, liveTag)
+        expired.status shouldBe 200
+        expired.contentAsString shouldContain "\"pendingTimezoneChange\":null"
+    }
+
+    private fun conditionalGet(
+        userId: UUID,
+        bondId: String,
+        etag: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .get("/api/v1/bonds/$bondId") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                header(HttpHeaders.IF_NONE_MATCH, etag)
+            }.andReturn()
+            .response
+
     // ---- helpers ------------------------------------------------------------
 
     /** Ada creates, Bea joins: the ordinary two-member bond every consent rule is about. */
@@ -294,8 +353,17 @@ internal class BondTimezoneEndpointTest(
         bondId: String,
     ): MockHttpServletResponse =
         mockMvc
-            .post("/api/v1/bonds/$bondId/timezone/confirm") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }
-            .andReturn()
+            .post("/api/v1/bonds/$bondId/timezone/confirm") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = MediaType.APPLICATION_JSON
+                content =
+                    """{"proposalId":"${jdbc
+                        .queryForList(
+                            "SELECT id FROM bond_proposals WHERE bond_id = ? AND kind = 'TIMEZONE_CHANGE' ORDER BY proposed_at DESC",
+                            UUID.fromString(bondId),
+                        ).firstOrNull()
+                        ?.get("id") ?: UUID.randomUUID()}"}"""
+            }.andReturn()
             .response
 
     private fun cancel(

@@ -55,8 +55,8 @@ internal class RequestDeletion(
      */
     @Transactional
     fun request(membership: Membership): BondView {
-        val now = support.clock.instant()
         bonds.lockBond(membership.bondId)
+        val now = support.clock.instant()
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         // Already counting down: both have asked, and asking again changes
         // nothing. Deliberately *not* an error — `states.md` §9's screen shows
@@ -93,8 +93,8 @@ internal class RequestDeletion(
      */
     @Transactional
     fun cancel(membership: Membership) {
-        val now = support.clock.instant()
         bonds.lockBond(membership.bondId)
+        val now = support.clock.instant()
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         val pending = proposals.findLive(membership.bondId, ProposalKind.DELETION, now)
         val cancelled =

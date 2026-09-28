@@ -622,10 +622,11 @@ expect "the other member joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites
 
 # states.md §8's three steps, on the wire.
 expect "proposing a zone is 200 and moves nothing yet" 200 '"proposedTimezone":"Europe/London"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Europe/London"}'
+TIMEZONE_PROPOSAL_ID="$(python3 -c "import json,sys; print(json.load(sys.stdin)['pendingTimezoneChange']['id'])" <<<"$LAST_BODY")"
 [[ "$LAST_BODY" == *'"anchorTimezone":"Africa/Lagos"'* ]] && pass "…the bond still says Africa/Lagos" || fail "premature move" "${LAST_BODY:0:250}"
-expect "the proposer cannot confirm their own: 409" 409 '"code":"PROPOSAL_NEEDS_OTHER_MEMBER"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "the proposer cannot confirm their own: 409" 409 '"code":"PROPOSAL_NEEDS_OTHER_MEMBER"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $PROPOSER_ACCESS" -d "{\"proposalId\":\"$TIMEZONE_PROPOSAL_ID\"}"
 expect "a second proposal is 409 PROPOSAL_PENDING" 409 '"code":"PROPOSAL_PENDING"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $AGREER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
-expect "the other member confirms: 200 and the zone moves" 200 '"anchorTimezone":"Europe/London"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $AGREER_ACCESS"
+expect "the other member confirms: 200 and the zone moves" 200 '"anchorTimezone":"Europe/London"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $AGREER_ACCESS" -d "{\"proposalId\":\"$TIMEZONE_PROPOSAL_ID\"}"
 [[ "$LAST_BODY" == *'"pendingTimezoneChange":null'* ]] && pass "…and nothing is pending any more" || fail "pending not cleared" "${LAST_BODY:0:250}"
 # FR-027's month, as a 409 with a date rather than a 429 with a retry (ADR-0030).
 expect "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON" 409 '"code":"TIMEZONE_CHANGE_TOO_SOON"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
@@ -665,7 +666,7 @@ expect "cancelling nothing is 404" 404 "" -- -X DELETE "$API/bonds/$CONSENT_BOND
 
 # T-02 on all five routes.
 expect "a stranger cannot propose a zone" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $STRANGER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
-expect "…nor confirm one" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "…nor confirm one" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $STRANGER_ACCESS" -d "{\"proposalId\":\"$TIMEZONE_PROPOSAL_ID\"}"
 expect "…nor cancel one" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $STRANGER_ACCESS"
 expect "…nor ask for a deletion" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $STRANGER_ACCESS"
 expect "…nor cancel one" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $STRANGER_ACCESS"

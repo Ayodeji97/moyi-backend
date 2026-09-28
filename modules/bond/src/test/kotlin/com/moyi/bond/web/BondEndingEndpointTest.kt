@@ -245,8 +245,17 @@ internal class BondEndingEndpointTest(
         bondId: String,
     ): MockHttpServletResponse =
         mockMvc
-            .post("/api/v1/bonds/$bondId/timezone/confirm") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }
-            .andReturn()
+            .post("/api/v1/bonds/$bondId/timezone/confirm") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = MediaType.APPLICATION_JSON
+                content =
+                    """{"proposalId":"${jdbc
+                        .queryForList(
+                            "SELECT id FROM bond_proposals WHERE bond_id = ? AND kind = 'TIMEZONE_CHANGE' ORDER BY proposed_at DESC",
+                            UUID.fromString(bondId),
+                        ).firstOrNull()
+                        ?.get("id") ?: UUID.randomUUID()}"}"""
+            }.andReturn()
             .response
 
     // ---- helpers ------------------------------------------------------------

@@ -31,8 +31,8 @@ import java.util.UUID
  * condition protects a blind overwrite of fields the client last read; a
  * proposal is a fresh intent about one named value, and requiring the bond's
  * `ETag` here would make the three-step flow fail whenever anything else about
- * the bond had moved in between — including the other member's own reminder
- * time.
+ * the bond had moved in between — including unrelated public settings. Confirmation instead names the immutable
+ * proposal id the member reviewed.
  */
 @RestController
 @RequestMapping("/api/v1/bonds/{bondId}/timezone")
@@ -56,9 +56,10 @@ internal class BondTimezoneController(
     fun confirmBondTimezone(
         caller: CurrentUser,
         @PathVariable bondId: String,
+        @Valid @RequestBody request: ConfirmTimezoneRequest,
     ): ResponseEntity<BondResponse> {
         val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
-        val view = changeTimezone.confirm(membership)
+        val view = changeTimezone.confirm(membership, request.toProposalId())
         return ResponseEntity.ok().eTag(BondResponse.etagOf(view)).body(BondResponse.from(view))
     }
 

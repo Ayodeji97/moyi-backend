@@ -132,6 +132,7 @@ internal data class InviteResponse(
  * this API names one.
  */
 internal data class PendingTimezoneChangeResponse(
+    val id: UUID,
     val proposedTimezone: String,
     val proposedByMemberId: UUID,
     val proposedAt: Instant,
@@ -140,6 +141,7 @@ internal data class PendingTimezoneChangeResponse(
     companion object {
         fun from(proposal: Proposal) =
             PendingTimezoneChangeResponse(
+                id = proposal.id.value,
                 proposedTimezone = proposal.proposedZone().id,
                 proposedByMemberId = proposal.proposedByMemberId.value,
                 proposedAt = proposal.proposedAt,
