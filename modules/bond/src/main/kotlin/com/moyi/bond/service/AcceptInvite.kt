@@ -14,6 +14,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
+import java.time.temporal.ChronoUnit
 
 /**
  * `POST /invites/{code}/accept` (FR-022) — **milestone M2**: the moment two
@@ -73,7 +74,7 @@ internal class AcceptInvite(
         caller: UserId,
         code: InviteCode,
     ): BondView {
-        val now = support.clock.instant()
+        val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val joiner = users.find(caller.value)
         if (joiner == null || !joiner.emailVerified) throw EmailNotVerifiedException()
 

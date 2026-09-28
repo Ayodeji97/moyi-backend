@@ -3,11 +3,15 @@ package com.moyi.bond.infra
 import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.identity.api.UserDirectory
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.boot.persistence.autoconfigure.EntityScan
 import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Primary
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories
+import java.time.Clock
+import java.time.Duration
 
 /**
  * A Spring context just large enough to test this module, and test-only — the
@@ -35,6 +39,13 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
 @EntityScan("com.moyi.bond")
 @EnableJpaRepositories("com.moyi.bond")
 internal class BondTestApplication {
+    /** Exercise Linux-style nanosecond timestamps even on a microsecond-resolution host. */
+    @Bean
+    @Primary
+    fun highResolutionClock(
+        @Qualifier("clock") source: Clock,
+    ): Clock = Clock.offset(Clock.tick(source, Duration.ofNanos(1000)), Duration.ofNanos(789))
+
     @Bean
     fun userDirectory(): UserDirectory = FakeUserDirectory()
 
