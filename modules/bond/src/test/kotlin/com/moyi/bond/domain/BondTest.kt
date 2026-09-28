@@ -386,5 +386,91 @@ internal class BondTest {
         member.withSettings(settings.copy(quietHoursEnd = LocalTime.of(7, 0))).quietHoursStart shouldBe LocalTime.of(22, 0)
     }
 
+    @Test
+    fun `the anchor zone can be changed once, and not again for thirty days`() {
+        val bond = create()
+        val london = RegionZone.of("Europe/London")
+
+        val moved = bond.withAnchorTimezone(london, now)
+
+        moved.anchorTimezone shouldBe london
+        moved.timezoneChangedAt shouldBe now
+        moved.mayChangeTimezoneAt(now) shouldBe false
+        moved.mayChangeTimezoneAt(now.plus(Duration.ofDays(29))) shouldBe false
+        moved.mayChangeTimezoneAt(now.plus(Duration.ofDays(30))) shouldBe true
+        moved.nextTimezoneChangeAt shouldBe now.plus(Duration.ofDays(30))
+        shouldThrow<IllegalStateException> { moved.withAnchorTimezone(lagos, now) }
+    }
+
+    @Test
+    fun `a bond that has never moved its zone may move it at once`() {
+        val bond = create()
+
+        bond.timezoneChangedAt.shouldBeNull()
+        bond.mayChangeTimezoneAt(now) shouldBe true
+        bond.nextTimezoneChangeAt.shouldBeNull()
+    }
+
+    @Test
+    fun `an archived bond's anchor zone cannot be moved`() {
+        val archived = create().let { it.leave(it.members.single().id, now) }
+
+        shouldThrow<IllegalStateException> { archived.withAnchorTimezone(RegionZone.of("Europe/London"), now) }
+    }
+
+    @Test
+    fun `requesting deletion starts a thirty-day cooling-off`() {
+        val joined = create().let { it.accept(joiner(it)) }
+
+        val pending = joined.requestDeletion(now)
+
+        pending.status shouldBe BondStatus.PENDING_DELETION
+        pending.deletionRequestedAt shouldBe now
+        pending.deletionScheduledFor shouldBe now.plus(Duration.ofDays(30))
+        // Not open, so every other write is refused during it (ADR-0028, ADR-0029)
+        // — and cancelling, which ignores `isOpen`, is the one thing that works.
+        pending.isOpen shouldBe false
+    }
+
+    @Test
+    fun `cancelling a deletion returns an active bond to active`() {
+        val joined = create().let { it.accept(joiner(it)) }
+
+        val cancelled = joined.requestDeletion(now).cancelDeletion()
+
+        cancelled.status shouldBe BondStatus.ACTIVE
+        cancelled.deletionRequestedAt.shouldBeNull()
+        cancelled.deletionScheduledFor.shouldBeNull()
+        cancelled.isOpen shouldBe true
+    }
+
+    @Test
+    fun `cancelling a deletion does not bring back a bond somebody had left`() {
+        // §6.4: the status returns to ARCHIVED if any member has left. A bond
+        // does not come back to life because a deletion was called off.
+        val joined = create().let { it.accept(joiner(it)) }
+        val owner = joined.members.first { it.role == MemberRole.OWNER }
+        val archived = joined.leave(owner.id, now)
+
+        val cancelled = archived.copy(status = BondStatus.PENDING_DELETION, deletionRequestedAt = now).cancelDeletion()
+
+        cancelled.status shouldBe BondStatus.ARCHIVED
+        cancelled.deletionRequestedAt.shouldBeNull()
+    }
+
+    @Test
+    fun `a bond with no deletion pending has nothing to cancel`() {
+        shouldThrow<IllegalStateException> { create().cancelDeletion() }
+    }
+
+    @Test
+    fun `an archived bond cannot be scheduled for deletion`() {
+        // ADR-0030: refused whichever way it ended, so a blocked member cannot
+        // tell a block from a leave by trying it (doc 26 §2.1).
+        val left = create().let { it.leave(it.members.single().id, now) }
+
+        shouldThrow<IllegalStateException> { left.requestDeletion(now) }
+    }
+
     private fun joiner(bond: Bond): Member = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)
 }

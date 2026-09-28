@@ -1,5 +1,6 @@
 package com.moyi.bond.domain
 
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
 
@@ -285,9 +286,88 @@ internal data class Bond(
         )
     }
 
+    /**
+     * Whether the anchor zone may move (FR-027's once-per-30-days rule).
+     *
+     * A bond that has never moved it may move it at once: the column is null
+     * until the first change, and ADR-0004 expects an onboarding mistake to be
+     * correctable.
+     */
+    fun mayChangeTimezoneAt(now: Instant): Boolean = timezoneChangedAt?.plus(TIMEZONE_CHANGE_INTERVAL)?.isAfter(now)?.not() ?: true
+
+    /** When the zone may next move, or `null` if it may move now. The `409`'s detail names this date. */
+    val nextTimezoneChangeAt: Instant? get() = timezoneChangedAt?.plus(TIMEZONE_CHANGE_INTERVAL)
+
+    /**
+     * Moves the anchor zone (FR-027).
+     *
+     * **This is not "the timezone setting".** Doc 04 §6 calls the distinction
+     * between the bond's anchor and a member's own reminder zone the single most
+     * misunderstood thing in the system: this one decides *which day an entry
+     * belongs to*, for both members, which is why FR-027 makes it two-party and
+     * limits it to once a month. A member's own zone is B4's settings row and
+     * changes freely.
+     *
+     * BR-6 and doc 04 §8.5: "effective from the next Bond-day, never
+     * retroactively". In Phase 2 there are no Bond-days, so the column simply
+     * changes — Phase 3's day opener reads the zone when it opens a day and
+     * never recomputes a `bond_days` row that already exists. Written here
+     * because this is the method a Phase 3 author will read first.
+     */
+    fun withAnchorTimezone(
+        zone: RegionZone,
+        now: Instant,
+    ): Bond {
+        check(isOpen) { "a bond that has ended cannot move its anchor zone" }
+        check(mayChangeTimezoneAt(now)) { "the anchor zone may move at most once every 30 days" }
+        return copy(anchorTimezone = zone, timezoneChangedAt = now)
+    }
+
+    /** When the bond would be destroyed, if a deletion is pending (FR-028's cooling-off). */
+    val deletionScheduledFor: Instant? get() = deletionRequestedAt?.plus(DELETION_COOLING_OFF)
+
+    /**
+     * Both members have asked for the bond to be destroyed (FR-028).
+     *
+     * `PENDING_DELETION` is deliberately **not** [isOpen]: during the
+     * cooling-off the bond takes no writes and stays readable, and the one thing
+     * that still works is cancelling — which is what a cooling-off is *for*, and
+     * why `RequestDeletion.cancel` does not consult `isOpen`.
+     *
+     * Nothing here destroys anything. Phase 5's job reads this status and
+     * `deletion_requested_at`; until then a `PENDING_DELETION` bond is a bond
+     * with a date on it.
+     *
+     * Refused on a bond that has already ended, **whichever way it ended**
+     * (ADR-0030): refusing only on a blocked one would let the blocked member
+     * tell a block from a leave by trying it, which doc 26 §2.1 forbids.
+     */
+    fun requestDeletion(now: Instant): Bond {
+        check(isOpen) { "a bond that has ended cannot be scheduled for deletion" }
+        return copy(status = BondStatus.PENDING_DELETION, deletionRequestedAt = now)
+    }
+
+    /**
+     * Either member calls the deletion off (FR-028's 30-day escape hatch).
+     *
+     * The status returns to `ACTIVE`, or to `ARCHIVED` if anybody has left: a
+     * bond does not come back to life because a deletion was cancelled.
+     */
+    fun cancelDeletion(): Bond {
+        check(status == BondStatus.PENDING_DELETION) { "there is no deletion to cancel" }
+        val restored = if (members.any { !it.isActive }) BondStatus.ARCHIVED else BondStatus.ACTIVE
+        return copy(status = restored, deletionRequestedAt = null)
+    }
+
     companion object {
         /** Chosen in the Phase 2 design (§5.2), not by FR-020. Flagged for Daniel. */
         const val MAX_NAME_LENGTH = 60
+
+        /** FR-027. A month, not a rate limit — the refusal is a `409` and names the date (ADR-0030). */
+        val TIMEZONE_CHANGE_INTERVAL: Duration = Duration.ofDays(30)
+
+        /** FR-028, and `states.md` §9 is explicit that it differs from account deletion's 14 days. */
+        val DELETION_COOLING_OFF: Duration = Duration.ofDays(30)
 
         const val MIN_MEMBERS = 2
 
