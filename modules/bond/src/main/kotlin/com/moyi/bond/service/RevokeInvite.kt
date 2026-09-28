@@ -48,6 +48,14 @@ internal class RevokeInvite(
         membership: Membership,
         inviteId: InviteId,
     ) {
+        // Under the bond's row lock, for the reason the Codex bot gave on PR #39:
+        // without it, a revoke that reads the bond as open can be overtaken by a
+        // leave, which archives the bond *and* revokes its live invite — and the
+        // conditional UPDATE below then matches nothing, so the caller gets a
+        // `404` that neither serial ordering produces (revoke first is `204`,
+        // leave first is `409 BOND_ARCHIVED`). The lock makes the two orderings
+        // the only outcomes, which is what ADR-0028's archived rule promises.
+        bonds.lockBond(membership.bondId)
         val bond = bonds.findByMember(membership.bondId, membership.userId) ?: throw BondNotFoundException()
         if (!bond.isOpen) throw BondArchivedException()
         if (!invites.revoke(membership.bondId, inviteId, clock.instant())) throw InviteNotFoundException()

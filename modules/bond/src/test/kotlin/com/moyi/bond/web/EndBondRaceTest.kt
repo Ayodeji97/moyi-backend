@@ -6,6 +6,7 @@ import com.moyi.bond.infra.FakeUserDirectory
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.api.UserDirectory
+import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeIn
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.AfterEach
@@ -18,6 +19,7 @@ import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.post
 import java.util.UUID
 import java.util.concurrent.Callable
@@ -51,6 +53,11 @@ internal class EndBondRaceTest(
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
+
+    private companion object {
+        /** A few pairs rather than one: cheap, and more chances to hit a narrow window. */
+        const val RACES = 4
+    }
 
     @AfterEach
     fun clear() {
@@ -121,6 +128,41 @@ internal class EndBondRaceTest(
         jdbc.queryForObject("SELECT count(*) FROM bond_members WHERE left_at IS NULL", Int::class.java) shouldBe 1
     }
 
+    @Test
+    fun `a revoke and a leave at the same moment give only the two answers either ordering gives`() {
+        // The Codex bot's P2 on PR #39. Leaving archives the bond *and* revokes
+        // its live invite, so a revoke that read the bond as open a moment
+        // earlier would find nothing to update and answer `404` — an outcome
+        // neither serial ordering produces. Both take the bond's row lock now,
+        // so the only answers are the two that make sense.
+        //
+        // **Honest about what this test is.** Removing the lock did *not*
+        // reliably reproduce the 404: one failure in five runs with a single
+        // pair, and none in three runs with several pairs. The window between
+        // the read and the conditional UPDATE is simply too small to hit on
+        // demand here. So this documents the promise and would catch a coarser
+        // regression; the argument for the lock is the ordering analysis in
+        // `RevokeInvite`'s comment, not a reproduction. Repeated a few times
+        // because that is cheap and can only help.
+        repeat(RACES) {
+            val ada = users.verified("Ada $it")
+            val created = createBond(ada)
+            val bondId = bondIdOf(created)
+            val inviteId = inviteIdOf(created)
+
+            val statuses = inParallel(listOf({ revokeInvite(ada, bondId, inviteId) }, { leave(ada, bondId) })).map { it.status }
+
+            withClue("run $it: revoke ${statuses.first()}, leave ${statuses.last()}") {
+                // The leave is `204` either way: it either goes first, or finds
+                // a bond that is still open.
+                statuses.last() shouldBe 204
+                // And the revoke is `204` if it won the lock and `409
+                // BOND_ARCHIVED` if it did not. Never `404`.
+                statuses.first() shouldBeIn listOf(204, 409)
+            }
+        }
+    }
+
     /** Runs every call on its own thread and releases them together. */
     private fun <T> inParallel(calls: List<() -> T>): List<T> {
         val pool = Executors.newFixedThreadPool(calls.size)
@@ -167,6 +209,19 @@ internal class EndBondRaceTest(
         bondId: String,
     ): MockHttpServletResponse =
         mockMvc.post("/api/v1/bonds/$bondId/block") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+
+    private fun revokeInvite(
+        userId: UUID,
+        bondId: String,
+        inviteId: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .delete("/api/v1/bonds/$bondId/invites/$inviteId") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }
+            .andReturn()
+            .response
+
+    private fun inviteIdOf(response: MockHttpServletResponse): String =
+        Regex(""""invite":\{"id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
 
     private fun accept(
         userId: UUID,
