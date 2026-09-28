@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -222,6 +223,119 @@ internal class BondSettingsEndpointTest(
         getBond(ada, bondId).getHeader(HttpHeaders.ETAG) shouldBe "\"0\""
     }
 
+    @Test
+    fun `a member reads and replaces their own settings`() {
+        val ada = users.verified("Ada")
+        val bondId = bondIdOf(createBond(ada))
+
+        val initial = getSettings(ada, bondId)
+        initial.status shouldBe 200
+        initial.contentAsString shouldContain "\"reminderTimeLocal\":\"20:00\""
+        initial.contentAsString shouldContain "\"reminderTimezone\":\"Africa/Lagos\""
+        initial.contentAsString shouldContain "\"nicknameForOther\":null"
+
+        val replaced =
+            putSettings(
+                ada,
+                bondId,
+                """{"nicknameForOther":"Ada","reminderTimeLocal":"07:30","reminderTimezone":"Europe/London",""" +
+                    """"quietHoursStart":"22:00","quietHoursEnd":"07:00"}""",
+            )
+
+        replaced.status shouldBe 200
+        replaced.contentAsString shouldContain "\"nicknameForOther\":\"Ada\""
+        replaced.contentAsString shouldContain "\"quietHoursEnd\":\"07:00\""
+        getSettings(ada, bondId).contentAsString shouldBe replaced.contentAsString
+    }
+
+    @Test
+    fun `PUT replaces, so an omitted field is cleared - except the zone`() {
+        val ada = users.verified("Ada")
+        val bondId = bondIdOf(createBond(ada))
+        putSettings(
+            ada,
+            bondId,
+            """{"nicknameForOther":"Ada","reminderTimeLocal":"07:30","reminderTimezone":"Europe/London"}""",
+        ).status shouldBe 200
+
+        val response = putSettings(ada, bondId, """{"reminderTimeLocal":"21:00"}""")
+
+        response.status shouldBe 200
+        response.contentAsString shouldContain "\"nicknameForOther\":null"
+        // The one exception, and deliberate: losing a zone you set, because you
+        // edited a nickname, is silent damage (doc 04 §6).
+        response.contentAsString shouldContain "\"reminderTimezone\":\"Europe/London\""
+    }
+
+    @Test
+    fun `settings are the caller's own, and writing them does not move the bond's ETag`() {
+        // states.md §8: never the other member's settings. There is no member id
+        // in the route, so there is nothing to ask for — and a member's reminder
+        // time is not a change to the bond, so the other member's ETag survives.
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        accept(bea, codeOf(created)).status shouldBe 200
+        val etagBefore = getBond(bea, bondId).getHeader(HttpHeaders.ETAG)
+
+        putSettings(ada, bondId, """{"nicknameForOther":"My Ada","reminderTimeLocal":"07:30"}""").status shouldBe 200
+
+        getBond(bea, bondId).getHeader(HttpHeaders.ETAG) shouldBe etagBefore
+        val beaSettings = getSettings(bea, bondId)
+        beaSettings.contentAsString shouldContain "\"reminderTimeLocal\":\"20:00\""
+        beaSettings.contentAsString shouldNotContain "My Ada"
+        getBond(bea, bondId).contentAsString shouldNotContain "My Ada"
+    }
+
+    @Test
+    fun `settings are refused on an archived bond, and still readable`() {
+        val ada = users.verified("Ada")
+        val bondId = bondIdOf(createBond(ada))
+        putSettings(ada, bondId, """{"reminderTimeLocal":"07:30"}""").status shouldBe 200
+        leave(ada, bondId).status shouldBe 204
+
+        getSettings(ada, bondId).status shouldBe 200
+        val refused = putSettings(ada, bondId, """{"reminderTimeLocal":"08:00"}""")
+        refused.status shouldBe 409
+        refused.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+    }
+
+    @Test
+    fun `a bad settings body is 422 naming the field`() {
+        val ada = users.verified("Ada")
+        val bondId = bondIdOf(createBond(ada))
+
+        putSettings(ada, bondId, "{}").let {
+            it.status shouldBe 422
+            it.contentAsString shouldContain "\"field\":\"reminderTimeLocal\""
+        }
+        putSettings(ada, bondId, """{"reminderTimeLocal":"7am"}""").status shouldBe 422
+        putSettings(ada, bondId, """{"reminderTimeLocal":"07:30","reminderTimezone":"Etc/GMT+3"}""").let {
+            it.status shouldBe 422
+            it.contentAsString shouldContain "\"field\":\"reminderTimezone\""
+        }
+        putSettings(ada, bondId, """{"reminderTimeLocal":"07:30","nicknameForOther":"${"x".repeat(41)}"}""").let {
+            it.status shouldBe 422
+            it.contentAsString shouldContain "\"field\":\"nicknameForOther\""
+        }
+        // One quiet hour without the other is not a window.
+        putSettings(ada, bondId, """{"reminderTimeLocal":"07:30","quietHoursStart":"22:00"}""").let {
+            it.status shouldBe 422
+            it.contentAsString shouldContain "quietHours"
+        }
+    }
+
+    @Test
+    fun `a non-member gets the same 404 on both settings routes`() {
+        val ada = users.verified("Ada")
+        val eve = users.verified("Eve")
+        val bondId = bondIdOf(createBond(ada))
+
+        getSettings(eve, bondId).status shouldBe 404
+        putSettings(eve, bondId, """{"reminderTimeLocal":"07:30"}""").status shouldBe 404
+    }
+
     // ---- helpers ------------------------------------------------------------
 
     private fun createBond(userId: UUID): MockHttpServletResponse =
@@ -259,6 +373,37 @@ internal class BondSettingsEndpointTest(
         bondId: String,
     ): MockHttpServletResponse =
         mockMvc.post("/api/v1/bonds/$bondId/leave") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+
+    private fun getSettings(
+        userId: UUID,
+        bondId: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .get("/api/v1/bonds/$bondId/members/me/settings") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }
+            .andReturn()
+            .response
+
+    private fun putSettings(
+        userId: UUID,
+        bondId: String,
+        body: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .put("/api/v1/bonds/$bondId/members/me/settings") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = MediaType.APPLICATION_JSON
+                content = body
+            }.andReturn()
+            .response
+
+    private fun accept(
+        userId: UUID,
+        code: String,
+    ): MockHttpServletResponse =
+        mockMvc.post("/api/v1/invites/$code/accept") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+
+    private fun codeOf(response: MockHttpServletResponse): String =
+        Regex(""""code":"([A-Z0-9]{6})"""").find(response.contentAsString)!!.groupValues[1]
 
     private fun bearer(userId: UUID): String = "Bearer ${tokens.issue(userId).token}"
 

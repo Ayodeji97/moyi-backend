@@ -82,6 +82,8 @@ internal class BondCrossTenantTest(
                     body = """{"name":"Mine"}""",
                     headers = mapOf(HttpHeaders.IF_MATCH to "\"0\""),
                 ),
+            "GET /api/v1/bonds/{bondId}/members/me/settings" to Fixture(),
+            "PUT /api/v1/bonds/{bondId}/members/me/settings" to Fixture(body = """{"reminderTimeLocal":"07:30"}"""),
         )
 
     private data class Fixture(
