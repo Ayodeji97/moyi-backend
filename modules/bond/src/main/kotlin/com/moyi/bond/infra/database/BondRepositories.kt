@@ -357,9 +357,18 @@ internal interface BondProposalRepository : Repository<BondProposalEntity, UUID>
     /**
      * Cancels one open proposal, lapsed or not.
      *
-     * Deliberately **no** `expires_at` predicate: cancelling something that has
-     * quietly lapsed is a no-op the caller does not need told about, and
-     * `states.md` §8's pending screen may well still be showing it.
+     * Deliberately **no** `expires_at` predicate, so that this statement is
+     * about the row and not about the clock: a lapsed row is still cancellable
+     * here, and `cancelOpen` relies on that when a bond ends.
+     *
+     * **It does not follow that a member can cancel a lapsed proposal**, and
+     * the earlier version of this comment claimed it did. Both service callers
+     * locate the row with `findLive`, which filters lapsed rows out, so a member
+     * tapping cancel on a stale `states.md` §8 screen gets `404` — the same one
+     * answer they get for a proposal that was never made. That is the behaviour
+     * the tests assert and the one the contract documents; this method is
+     * simply not where that decision is taken. Corrected by the second review
+     * of PR #41.
      */
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query(

@@ -21,8 +21,11 @@ internal enum class ProposalKind { TIMEZONE_CHANGE, DELETION }
  * an unanswered one lapses rather than nagging. [payload] is the only thing
  * that differs — a zone id for a timezone change, nothing for a deletion.
  *
- * Lapsing is a **predicate, not a state**: [isLive] asks the clock, and nothing
- * ever writes a row to say "this expired". `states.md` §8 words it for a
+ * Lapsing is a **predicate, not a state**: the clock is asked at read time, in
+ * `BondProposalRepository.findLive`, and nothing ever writes a row to say "this
+ * expired". The predicate is stated **there and only there** — an unused copy of
+ * it here read well and was a second definition of one rule, which is the shape
+ * of every drift defect this module has had. `states.md` §8 words it for a
  * person — *"lapses in seven days if not"* — and a `confirmedAt` still null
  * past [expiresAt] is exactly that sentence. The one place the absence of a
  * state costs something is V10's partial unique index, which cannot ask what
@@ -55,9 +58,6 @@ internal data class Proposal(
         }
         require(expiresAt.isAfter(proposedAt)) { "a proposal expires after it is made" }
     }
-
-    /** Open, and not yet lapsed — the only kind of proposal any read acts on. */
-    fun isLive(now: Instant): Boolean = confirmedAt == null && cancelledAt == null && expiresAt.isAfter(now)
 
     /**
      * The zone this proposes.

@@ -4,6 +4,7 @@ import com.moyi.bond.service.TimezoneChangeTooSoonException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.time.Duration
@@ -438,7 +439,7 @@ internal class BondTest {
     fun `cancelling a deletion returns an active bond to active`() {
         val joined = create().let { it.accept(joiner(it)) }
 
-        val cancelled = joined.requestDeletion(now).cancelDeletion()
+        val cancelled = joined.requestDeletion(now).cancelDeletion(now)
 
         cancelled.status shouldBe BondStatus.ACTIVE
         cancelled.deletionRequestedAt.shouldBeNull()
@@ -454,15 +455,18 @@ internal class BondTest {
         val owner = joined.members.first { it.role == MemberRole.OWNER }
         val archived = joined.leave(owner.id, now)
 
-        val cancelled = archived.copy(status = BondStatus.PENDING_DELETION, deletionRequestedAt = now).cancelDeletion()
+        val cancelled = archived.copy(status = BondStatus.PENDING_DELETION, deletionRequestedAt = now).cancelDeletion(now)
 
         cancelled.status shouldBe BondStatus.ARCHIVED
         cancelled.deletionRequestedAt.shouldBeNull()
+        // The one path that reaches ARCHIVED without going through `end`, and
+        // so the one that used to leave the column null (review of #41).
+        cancelled.archivedAt shouldBe now
     }
 
     @Test
     fun `a bond with no deletion pending has nothing to cancel`() {
-        shouldThrow<IllegalStateException> { create().cancelDeletion() }
+        shouldThrow<IllegalStateException> { create().cancelDeletion(now) }
     }
 
     @Test
@@ -482,7 +486,7 @@ internal class BondTest {
         // Bond-days opened while a bond waits.
         val solo = create()
 
-        val cancelled = solo.requestDeletion(now).cancelDeletion()
+        val cancelled = solo.requestDeletion(now).cancelDeletion(now)
 
         cancelled.status shouldBe BondStatus.PENDING_MEMBER
         cancelled.hasRoom shouldBe true
@@ -518,9 +522,10 @@ internal class BondTest {
         val owner = joined.members.first { it.role == MemberRole.OWNER }
         val ended = joined.requestDeletion(now).end(owner.id, now)
 
-        val cancelled = ended.cancelDeletion()
+        val cancelled = ended.cancelDeletion(now)
 
         cancelled.status shouldBe BondStatus.ARCHIVED
+        cancelled.archivedAt.shouldNotBeNull()
         cancelled.isOpen shouldBe false
     }
 
@@ -544,10 +549,28 @@ internal class BondTest {
             Locale.setDefault(Locale.FRANCE)
             val refusal = TimezoneChangeTooSoonException(Instant.parse("2026-10-28T09:00:00Z"), lagos)
 
-            refusal.detail shouldBe "The shared time zone can change again from 28 October 2026."
+            // The 29th, not the 28th: see the rounding test below.
+            refusal.detail shouldBe "The shared time zone can change again from 29 October 2026."
         } finally {
             Locale.setDefault(original)
         }
+    }
+
+    @Test
+    fun `the too-soon refusal names the first date the change is allowed all day`() {
+        // The second review of PR #41. Thirty days from an afternoon lands in an
+        // afternoon, so naming *that* calendar date makes the sentence false for
+        // most of the day it names — a client reading "28 October" and retrying
+        // at 10:00 on the 28th got the identical refusal naming the identical
+        // date. Rounding up is the honest direction to be wrong in: the answer
+        // may arrive sooner than promised, never later.
+        val midMorning = TimezoneChangeTooSoonException(Instant.parse("2026-10-28T09:00:00Z"), lagos)
+        midMorning.detail shouldBe "The shared time zone can change again from 29 October 2026."
+
+        // Exactly midnight in the bond's own zone is already a whole day, so it
+        // is not pushed out by one. Africa/Lagos is UTC+1.
+        val midnightInLagos = TimezoneChangeTooSoonException(Instant.parse("2026-10-27T23:00:00Z"), lagos)
+        midnightInLagos.detail shouldBe "The shared time zone can change again from 28 October 2026."
     }
 
     private fun joiner(bond: Bond): Member = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)

@@ -89,7 +89,24 @@ internal class RequestDeletion(
      * open, so if this consulted it the cooling-off could never be cancelled —
      * which is the one thing a cooling-off exists for.
      *
-     * @throws ProposalNotFoundException nothing was pending
+     * **Which is why this is the one path that has to read
+     * [Membership.left] itself.** Everywhere else a member who has left is
+     * refused by `isOpen`, because leaving archives the bond — so the flag has
+     * never been load-bearing and nothing consulted it. Here `isOpen` is gone
+     * on purpose, and without the flag a member could agree to the deletion,
+     * walk out, and revoke the agreement on the way: the bond would land in
+     * `ARCHIVED` with the countdown cleared, and the member still in it could
+     * never delete it, because every re-request answers `409` on an archived
+     * bond. `Bond.end` already says the rule this enforces — one of them
+     * walking away is not a reason to undo what both agreed. Found by the
+     * second review of PR #41.
+     *
+     * The refusal is [ProposalNotFoundException]'s one answer, not a new code:
+     * "never made, already answered, cancelled, lapsed" gains a fifth cause
+     * that reads identically, and a member who has left has nothing pending in
+     * any sense they can act on.
+     *
+     * @throws ProposalNotFoundException nothing was pending, or the caller has left
      */
     @Transactional
     fun cancel(membership: Membership) {
@@ -99,6 +116,14 @@ internal class RequestDeletion(
         val pending = proposals.findLive(membership.bondId, ProposalKind.DELETION, now)
         val cancelled =
             when {
+                // A member who has left has nothing to call off. First, so that
+                // it holds however the bond got here — and inside this `when`
+                // rather than as an early throw, so that every "nothing to
+                // cancel" leaves by the one door below.
+                membership.left -> {
+                    false
+                }
+
                 // An unanswered ask: withdraw it, and the bond never changed status.
                 pending != null -> {
                     proposals.cancel(pending.id, now)
@@ -106,7 +131,7 @@ internal class RequestDeletion(
 
                 // Already counting down: this is the escape hatch itself.
                 bond.status == BondStatus.PENDING_DELETION -> {
-                    bonds.update(bond.cancelDeletion())
+                    bonds.update(bond.cancelDeletion(now))
                     true
                 }
 
