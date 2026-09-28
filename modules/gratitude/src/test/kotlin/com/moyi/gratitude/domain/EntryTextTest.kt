@@ -4,6 +4,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotBeEmpty
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 
 internal class EntryTextTest {
@@ -16,9 +17,9 @@ internal class EntryTextTest {
         // legitimately typed all the same — so the cap has to count graphemes,
         // not code points, and 500 of them (5,500 bytes) has to fit under the
         // octet cap too, with room to spare.
-        val family = "👨‍👩"
-        EntryText.of(family.repeat(500)).value.shouldNotBeEmpty()
-        shouldThrow<IllegalArgumentException> { EntryText.of(family.repeat(501)) }
+        val couple = "👨‍👩"
+        EntryText.of(couple.repeat(500)).value.shouldNotBeEmpty()
+        shouldThrow<IllegalArgumentException> { EntryText.of(couple.repeat(501)) }
     }
 
     @Test
@@ -46,5 +47,16 @@ internal class EntryTextTest {
         // Doc 04 §7: stored raw and unmodified. No case folding, no collapsing
         // of internal whitespace, no stripping of emoji.
         EntryText.of("Thank  YOU 🙏").value shouldBe "Thank  YOU 🙏"
+    }
+
+    @Test
+    fun `an entry never prints itself`() {
+        // Doc 18 §5/§9. Mirrors PasswordTest's `a password never prints
+        // itself` — the same leak, the same fix, for the other kind of
+        // sensitive text this codebase wraps in a value class.
+        val entry = EntryText.of("something I am grateful for and nobody else's business")
+
+        "$entry" shouldBe "EntryText(redacted)"
+        entry.toString() shouldNotContain "grateful"
     }
 }

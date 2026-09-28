@@ -46,6 +46,15 @@ import java.util.Locale
 internal value class EntryText private constructor(
     val value: String,
 ) {
+    /**
+     * Never the raw text — doc 18 §5/§9 forbids exactly the leak an unguarded
+     * `toString` would cause the first time an `EntryText` is logged or
+     * interpolated into an exception message. `identity`'s `Password` is the
+     * precedent this follows, not `RegionZone`: `RegionZone` wraps a
+     * `ZoneId`, nobody's words, and has nothing to redact.
+     */
+    override fun toString(): String = "EntryText(redacted)"
+
     companion object {
         const val MAX_GRAPHEMES = 500
         const val MAX_OCTETS = 8192
