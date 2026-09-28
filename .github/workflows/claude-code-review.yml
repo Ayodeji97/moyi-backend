@@ -169,6 +169,16 @@ jobs:
             /code-review:code-review
             ${{ github.event.pull_request.html_url }}
 
+            Complete this review within this invocation and post its result before ending.
+            Run review agents in the foreground only (run_in_background: false), wait for their
+            results, and never finish with a promise to wait for background notifications:
+            the action closes the session at the end of the turn. Pass these constraints to agents.
+            Read command output directly. Do not redirect shell output, create scratch files,
+            or combine commands with pipes or shell operators; those writes are outside the
+            read-only tool allowlist. Use Read, Grep and Glob for repository files, and separate
+            allowed gh/git commands for the diff and history. If an optional command is denied,
+            continue with the available evidence and state the limitation in the posted review.
+
             Review only the current PR diff. Treat README.md, .github/PULL_REQUEST_TEMPLATE.md,
             build-logic/src/main/kotlin, revision/, docs/, and adr/ as the project's source of truth.
             Check Kotlin idioms and conventions, Spring boundaries, module boundaries, transaction
