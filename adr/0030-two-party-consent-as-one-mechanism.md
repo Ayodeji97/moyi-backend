@@ -146,6 +146,12 @@ read-then-conditional-write one decision.
 - **Four of these decisions came from the review of PR #41, two of them serious** (§4a, §4b),
   and all four were in the interaction between `PENDING_DELETION` and states that already
   existed — the one area B5's tests did not cover when it was first written. They do now.
+- **`PATCH …/timezone` inherits ADR-0029 §13's constraint, not `@NotBlank`.** The timezone
+  route repeated `POST /bonds`'s edge — `@NotBlank` plus `ValidRegionZone` — and therefore
+  repeated its defect: `U+00A0` is not blank to Bean Validation and is blank to Kotlin, so a
+  zone of one non-breaking space reached `RegionZone.of("")` and answered a well-formed request
+  with a 500. It uses `NOT_ONLY_SPACE` now, like the other two. The lesson is the one the
+  learning log records: a rule copied from a neighbour copies the neighbour's bugs.
 - **The proposal rows are the audit trail.** Closed proposals accumulate and nothing deletes
   them, which is deliberate: doc 26 §4 would want to know what was asked and what came of it.
 - **`bond_proposals` is a delta from doc 07 §2**, which describes the rules without naming a

@@ -631,6 +631,7 @@ expect "the other member confirms: 200 and the zone moves" 200 '"anchorTimezone"
 expect "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON" 409 '"code":"TIMEZONE_CHANGE_TOO_SOON"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
 [[ "$LAST_BODY" == *"can change again from"* ]] && pass "…and the detail names the date it becomes allowed" || fail "no date" "${LAST_BODY:0:250}"
 expect "a fixed-offset zone is 422 on the field" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Etc/GMT+3"}'
+expect "a zone of one non-breaking space is 422, not 500" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"\u00a0"}'
 
 # Cancelling a proposal, on a second bond where the month has not been spent.
 expect "a second bond for the pair" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $AGREER_ACCESS" -d "$(bond_body "Two")"

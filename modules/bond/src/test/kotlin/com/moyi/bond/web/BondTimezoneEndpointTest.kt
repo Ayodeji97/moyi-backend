@@ -216,6 +216,21 @@ internal class BondTimezoneEndpointTest(
     }
 
     @Test
+    fun `a zone blank once trimmed is 422, whatever kind of space it is`() {
+        val (ada, _, bondId) = pairedBond()
+
+        // `@NotBlank` trims with Java's rules and `RegionZone.of` is reached
+        // with Kotlin's, so U+00A0 passed the edge and threw deeper down
+        // (ADR-0029 §13). `POST /bonds` had the same hole.
+        for (blank in listOf("", " ", "\u00a0")) {
+            val response = propose(ada, bondId, blank)
+
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"anchorTimezone\""
+        }
+    }
+
+    @Test
     fun `an archived bond refuses the proposal and the confirmation`() {
         val ada = users.verified("Ada")
         val bondId = bondIdOf(createBond(ada))
