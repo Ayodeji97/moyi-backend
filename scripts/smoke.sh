@@ -608,6 +608,86 @@ expect "…the settings PUT is too" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API
 expect "…and the settings are still readable" 200 '"reminderTimeLocal":"21:00"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS"
 if grep -qE '"(nickname|quietHours)' "$MOYI_LOG"; then fail "settings in log" "a member's settings appear in the log"; else pass "no member setting appears in the log"; fi
 
+echo; echo "two-party consent — the shared zone and closing the box (FR-027, FR-028, BR-6, ADR-0030)"
+flush_buckets
+verified_account "proposer" "203.0.113.70"; PROPOSER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "agreer" "203.0.113.71";   AGREER_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond for two is 201" 201 '"anchorTimezone":"Africa/Lagos"' -- -X POST "$API/bonds" -H "Authorization: Bearer $PROPOSER_ACCESS" -d "$(bond_body "Us")"
+CONSENT_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "the other member joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$CONSENT_CODE/accept" -H "Authorization: Bearer $AGREER_ACCESS"
+
+# states.md §8's three steps, on the wire.
+expect "proposing a zone is 200 and moves nothing yet" 200 '"proposedTimezone":"Europe/London"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Europe/London"}'
+[[ "$LAST_BODY" == *'"anchorTimezone":"Africa/Lagos"'* ]] && pass "…the bond still says Africa/Lagos" || fail "premature move" "${LAST_BODY:0:250}"
+expect "the proposer cannot confirm their own: 409" 409 '"code":"PROPOSAL_NEEDS_OTHER_MEMBER"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "a second proposal is 409 PROPOSAL_PENDING" 409 '"code":"PROPOSAL_PENDING"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $AGREER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+expect "the other member confirms: 200 and the zone moves" 200 '"anchorTimezone":"Europe/London"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $AGREER_ACCESS"
+[[ "$LAST_BODY" == *'"pendingTimezoneChange":null'* ]] && pass "…and nothing is pending any more" || fail "pending not cleared" "${LAST_BODY:0:250}"
+# FR-027's month, as a 409 with a date rather than a 429 with a retry (ADR-0030).
+expect "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON" 409 '"code":"TIMEZONE_CHANGE_TOO_SOON"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+[[ "$LAST_BODY" == *"can change again from"* ]] && pass "…and the detail names the date it becomes allowed" || fail "no date" "${LAST_BODY:0:250}"
+expect "a fixed-offset zone is 422 on the field" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Etc/GMT+3"}'
+
+# Cancelling a proposal, on a second bond where the month has not been spent.
+expect "a second bond for the pair" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $AGREER_ACCESS" -d "$(bond_body "Two")"
+SECOND_CONSENT="$(printf '%s' "$LAST_BODY" | jget id)"
+SECOND_CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$SECOND_CONSENT_CODE/accept" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "a proposal on it is 200" 200 '"proposedTimezone":"Asia/Tokyo"' -- -X PATCH "$API/bonds/$SECOND_CONSENT/timezone" -H "Authorization: Bearer $AGREER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+expect "either member may cancel it: 204" 204 "" -- -X DELETE "$API/bonds/$SECOND_CONSENT/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "cancelling again is 404" 404 "" -- -X DELETE "$API/bonds/$SECOND_CONSENT/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "…and a fresh proposal is allowed" 200 '"proposedTimezone":"Asia/Tokyo"' -- -X PATCH "$API/bonds/$SECOND_CONSENT/timezone" -H "Authorization: Bearer $AGREER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+
+# Closing the box: one route asks and agrees (FR-028, states.md §9).
+expect "the first deletion request is 202, and nothing is deleted" 202 '"requestedByMemberId"' -- -X POST "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $PROPOSER_ACCESS"
+[[ "$LAST_BODY" == *'"status":"ACTIVE"'* ]] && pass "…the bond is still ACTIVE" || fail "premature deletion" "${LAST_BODY:0:250}"
+expect "repeating it is an idempotent 202" 202 '"status":"ACTIVE"' -- -X POST "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "the other member's request confirms it: PENDING_DELETION" 202 '"status":"PENDING_DELETION"' -- -X POST "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $AGREER_ACCESS"
+[[ "$LAST_BODY" == *'"deletionScheduledFor":"'* ]] && pass "…with a date thirty days out" || fail "no schedule" "${LAST_BODY:0:250}"
+
+# BR-9 during the cooling-off: readable, and no other write.
+CONSENT_ETAG="$(curl -sS -o /dev/null -D - "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $PROPOSER_ACCESS" | tr -d '\r' | awk 'tolower($1)=="etag:"{print $2}')"
+expect "a PATCH during the cooling-off is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X PATCH "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $PROPOSER_ACCESS" -H "If-Match: $CONSENT_ETAG" -d '{"name":"Us two"}'
+expect "…so is a settings write" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/bonds/$CONSENT_BOND/members/me/settings" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"reminderTimeLocal":"07:30"}'
+expect "…and a zone proposal" 409 '"code":"BOND_ARCHIVED"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+expect "both members still read it" 200 '"status":"PENDING_DELETION"' -- "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $AGREER_ACCESS"
+
+# The escape hatch, which is what makes the thirty days a cooling-off.
+expect "either member calls it off: 204" 204 "" -- -X DELETE "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $AGREER_ACCESS"
+expect "…and the bond is ACTIVE again" 200 '"status":"ACTIVE"' -- "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $PROPOSER_ACCESS"
+[[ "$LAST_BODY" == *'"deletionScheduledFor":null'* ]] && pass "…with no date on it" || fail "schedule not cleared" "${LAST_BODY:0:250}"
+expect "cancelling nothing is 404" 404 "" -- -X DELETE "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $AGREER_ACCESS"
+
+# T-02 on all five routes.
+expect "a stranger cannot propose a zone" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $STRANGER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+expect "…nor confirm one" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "…nor cancel one" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "…nor ask for a deletion" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "…nor cancel one" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $STRANGER_ACCESS"
+
+# ADR-0030's decision: an archived bond refuses a deletion request whichever way
+# it ended, so the blocked member cannot tell a block from a leave by trying it.
+verified_account "ender" "203.0.113.72";  ENDER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "stayer2" "203.0.113.73"; STAYER2_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond to leave" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $ENDER_ACCESS" -d "$(bond_body "Us")"
+LEFT_CONSENT="$(printf '%s' "$LAST_BODY" | jget id)"
+LEFT_CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$LEFT_CONSENT_CODE/accept" -H "Authorization: Bearer $STAYER2_ACCESS"
+expect "…and left" 204 "" -- -X POST "$API/bonds/$LEFT_CONSENT/leave" -H "Authorization: Bearer $ENDER_ACCESS"
+expect "a deletion request on it is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X POST "$API/bonds/$LEFT_CONSENT/deletion-request" -H "Authorization: Bearer $STAYER2_ACCESS"
+LEFT_REFUSAL="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
+verified_account "blocker2" "203.0.113.74"; BLOCKER2_ACCESS="$ACCOUNT_ACCESS"
+verified_account "blocked2" "203.0.113.75"; BLOCKED2_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond to block in" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BLOCKER2_ACCESS" -d "$(bond_body "Us")"
+BLOCK_CONSENT="$(printf '%s' "$LAST_BODY" | jget id)"
+BLOCK_CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$BLOCK_CONSENT_CODE/accept" -H "Authorization: Bearer $BLOCKED2_ACCESS"
+expect "…and blocked" 204 "" -- -X POST "$API/bonds/$BLOCK_CONSENT/block" -H "Authorization: Bearer $BLOCKER2_ACCESS"
+expect "the blocked member's deletion request is 409 too" 409 '"code":"BOND_ARCHIVED"' -- -X POST "$API/bonds/$BLOCK_CONSENT/deletion-request" -H "Authorization: Bearer $BLOCKED2_ACCESS"
+BLOCK_REFUSAL="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
+[ "$LEFT_REFUSAL" = "$BLOCK_REFUSAL" ] && pass "…byte-identical to the left bond's refusal (doc 26 §2.1, ADR-0030)" || fail "deletion oracle" "the two refusals differ"
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.
