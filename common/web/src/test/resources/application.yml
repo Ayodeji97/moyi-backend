@@ -1,0 +1,7 @@
+spring:
+  datasource:
+    hikari:
+      # This module has one test context needing Postgres; a small pool is
+      # enough and keeps this consistent with every other module's test
+      # application.yml (see modules/bond's, which explains why).
+      maximum-pool-size: 4

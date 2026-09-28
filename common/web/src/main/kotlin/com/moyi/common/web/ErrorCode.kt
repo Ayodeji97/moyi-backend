@@ -164,6 +164,29 @@ enum class ErrorCode {
      */
     PRECONDITION_FAILED,
 
+    /**
+     * `Idempotency-Key` (doc 06 §1) was reused with a request whose body
+     * hashes differently from the one it was first sent with. 422: the caller
+     * picked a key that means one specific request, and this one is not it —
+     * the fix is a fresh key, not a retry.
+     */
+    IDEMPOTENCY_KEY_REUSED,
+
+    /**
+     * A second request carrying an `Idempotency-Key` (doc 06 §1) whose first
+     * attempt has reserved the row but not yet finished. 409, not the 422
+     * [IDEMPOTENCY_KEY_REUSED] gets: the body matches, nothing here is
+     * invalid, the caller's own first attempt just has not returned yet — the
+     * fix is to wait, not to change anything about the request.
+     *
+     * Not in the brief's own file list for this slice, added because doc
+     * 06 §1's behaviour — "response_status null -> 409" — has no other code
+     * to return under this contract, and reusing [IDEMPOTENCY_KEY_REUSED]
+     * for a fact about *timing* rather than the request itself would make one
+     * code answer two different questions a client needs to tell apart.
+     */
+    IDEMPOTENCY_KEY_IN_FLIGHT,
+
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,
 

@@ -29,18 +29,21 @@ class FlywayMigrationTest(
     @Test
     fun `every module's migrations run, in one sequence, against one schema`() {
         // V1 lives in `app` (database-wide extensions); V2 to V8 live in
-        // `modules/identity` and V9 in `modules/bond` (each its own tables).
-        // Flyway merges every
-        // `classpath:db/migration` it finds, which is what lets a module own
-        // its schema without `app` restating it — and this assertion is what
-        // notices when a module's migrations are not on the classpath at all,
-        // a failure that otherwise shows up as a missing table much later.
+        // `modules/identity`, V9 in `modules/bond`, and V11 in `common:web`
+        // (idempotency_keys, doc 06 §1). Versions are one global sequence
+        // across modules, so V10 is reserved elsewhere and simply is not on
+        // this worktree's classpath yet — Flyway tolerates the gap. Flyway
+        // merges every `classpath:db/migration` it finds, which is what lets
+        // a module own its schema without `app` restating it — and this
+        // assertion is what notices when a module's migrations are not on
+        // the classpath at all, a failure that otherwise shows up as a
+        // missing table much later.
         val appliedVersions =
             jdbcTemplate.queryForList(
                 "SELECT version FROM flyway_schema_history WHERE success = true ORDER BY installed_rank",
                 String::class.java,
             )
-        assertEquals(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9"), appliedVersions)
+        assertEquals(listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "11"), appliedVersions)
 
         val extensions =
             jdbcTemplate.queryForList(
@@ -72,6 +75,16 @@ class FlywayMigrationTest(
         assertTrue(
             bondTables.containsAll(listOf("bonds", "bond_members", "bond_invites", "blocks")),
             "Expected the bond module's tables (V9), found: $bondTables",
+        )
+
+        val webTables =
+            jdbcTemplate.queryForList(
+                "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = 'idempotency_keys'",
+                String::class.java,
+            )
+        assertTrue(
+            webTables.contains("idempotency_keys"),
+            "Expected common:web's idempotency_keys table (V11), found: $webTables",
         )
     }
 }
