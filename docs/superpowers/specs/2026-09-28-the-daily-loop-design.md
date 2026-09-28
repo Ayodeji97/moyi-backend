@@ -55,8 +55,7 @@ engineering in them. Full scope.
 
 ## 2. The modules
 
-Three modules gain code, and one of the three is new to this phase only in the sense that its
-directory has been empty since Phase 0.
+Four modules gain code; `common:events` is new. `bond` also gains the public access port below.
 
 | Module | What lands here |
 |---|---|
@@ -85,11 +84,17 @@ class BondMembership internal constructor(
     val revealTimeLocal: LocalTime?,
     val strictMode: Boolean,
     val isOpen: Boolean,
+    val isAwaitingPartner: Boolean,
+    val activeSince: Instant?,
+    val endedAt: Instant?,
 )
 
 interface BondAccess {
     /** The caller's membership, or a NotFoundException — never a 403 (doc 06 §2, T-02). */
     fun membershipOf(userId: UUID, bondId: UUID): BondMembership
+
+    /** Requires an existing transaction; locks the bond and re-reads membership/state. */
+    fun lockMembershipOf(userId: UUID, bondId: UUID): BondMembership
 }
 ```
 
@@ -102,6 +107,15 @@ because a display name is not an authorisation decision; this is.
 `gratitude` depends on `modules:bond` with `implementation`, not `api`, exactly as `bond`
 depends on `identity`. No foreign key crosses the boundary: `entries.bond_id` and
 `entries.author_member_id` are ids, not references.
+
+Writes use `lockMembershipOf` with transaction propagation `MANDATORY` in the same
+transaction as the gratitude mutation, and keep the lock until commit. A membership value is
+a snapshot, not a durable authorization grant. The lock order is **bond, then bond-day, then
+entry** on submission, editing, closing and lifecycle reconciliation. This serializes writes
+with leave, block, deletion and timezone confirmation; checking `isOpen` before taking a
+separate day lock would allow a write to commit after the bond ended. The port also exposes
+activation/end intervals and the effective anchor timeline to the closer through public DTOs,
+so gratitude does not query bond's private tables.
 
 ### 2.2 Why `scheduling` does not own the transitions
 
@@ -132,7 +146,7 @@ pattern from ADR-0026, unchanged.
 
 ```
 id · bondId · date (LocalDate, in the anchor zone) · status
-entryCount · revealedAt? · closedAt? · anchorTimezone · version
+entryCount · revealedAt? · closedAt? · anchorTimezone · startsAt · endsAt · version
 ```
 
 **`anchorTimezone` is copied onto the row, and that is deliberate.** ADR-0030 and BR-6 require
@@ -141,6 +155,18 @@ are never recomputed. If the day read the zone from the Bond at query time, ever
 day would silently move the moment the anchor changed. Copying it at creation is what makes
 "never recomputed" true by construction rather than by everybody remembering, and it is what
 `Bond.withAnchorTimezone`'s KDoc already promises a Phase 3 author.
+
+A timezone snapshot alone does not defer a mid-day change. C1 also persists the day's
+UTC interval `[startsAt, endsAt)` and a bond-owned effective anchor timeline. Confirmation
+records the requested zone immediately, as B5 does today, but day assignment keeps the
+previous effective zone until the end of the current logical day, even when no row has yet
+been opened. Under the bond lock, resolve that interval before creating any day. At the
+handoff, skipped calendar labels become `FROZEN` without consuming a freeze; an already-used
+label is not opened a second time (extend the handoff to the next unused date boundary).
+Intervals remain contiguous and non-overlapping. Historical/offline instants use the
+recorded interval, never the bond's latest requested zone. This requires extending B5's
+confirmation path and the public timeline port in C1; copying a string at lazy row creation
+is insufficient. Tests cover both forward and backward date-line changes mid-day.
 
 **Eight statuses, not five** (doc 04 §3; see §12.1 — doc 07's DDL lists five and is stale):
 
@@ -205,10 +231,14 @@ FR-060's acceptance clause calls this "the single most important test in the sys
 12 §3 calls the file that holds it "the single most important test file in the repository".
 It is worth being precise about what it forbids and what it deliberately permits.
 
-**BR-1 — `canRead(M, E)`** is true when `E.author == M`, **or** `E.bondDay.status == REVEALED`,
-**or** (`status == SOLO` **and** `closedAt != null`). Nothing else. Note the first clause: an
-author always reads their own words, which is what makes a `SUSPENDED` day (§8.3a) legible to
-the person who wrote into it.
+**BR-1 — `canRead(M, E)`** first requires membership in E's bond. A deleted or withdrawn
+entry returns a tombstone for everyone. Otherwise content is readable when `E.author == M`
+or `E.revealedAt != null`. Reveal sets the entry's timestamp transactionally, both on the
+second submission and on a closed `SOLO` day. That timestamp is monotonic: applying a freeze
+to a solo day or later suspending the bond must not hide previously revealed words. A
+`FROZEN` status alone does not reveal an entry. An author can still read their own live entry
+on a `SUSPENDED` day. The same gate applies to archive, search, favourites and replayed
+responses, not just `today`.
 
 **BR-8 — a locked entry serialises to `{authorMemberId, status: LOCKED}` and nothing else.**
 No length, no `createdAt`, no `hasImage`, no media presence flag. The response shape *is* the
@@ -275,9 +305,13 @@ addition is source-breaking there. Each slice carries the `breaking-api-change` 
 Doc 06 §1 has specified this since the corpus was written and nothing has built it. It is due
 now because `POST /entries` is the first endpoint that *requires* it.
 
-- Keyed on **`userId` + endpoint + key**, storing a hash of the request body and the original
-  response for **24 hours**.
-- A replay returns the stored response with **`Idempotency-Replayed: true`**.
+- Keyed on **`userId` + key**, storing the HTTP method, canonical concrete path (including
+  bond/entry ids), request-body hash and response metadata for **24 hours**. Route templates
+  are not sufficient: two bonds are two different targets.
+- A replay returns the original status and stable result identity with **`Idempotency-Replayed: true`**,
+  after current authorization and deletion/withdrawal checks. Store result ids, not an extra
+  retained copy of entry text. Render current tombstones when content has since been erased;
+  byte-for-byte replay never overrides erasure. Unchanged resources reproduce the original response.
 - The same key against a different endpoint or a different body is **`422 IDEMPOTENCY_KEY_REUSED`**,
   never the wrong stored response.
 - **Postgres, not Redis.** Doc 06 §1's `idem:{userId}:{endpoint}:{key}` notation implies Redis;
@@ -285,8 +319,11 @@ now because `POST /entries` is the first endpoint that *requires* it.
   optional fast path, so Redis can be removed in one session if the memory budget bites". The
   second statement is the load-bearing one and this follows it. See §12.3.
 - A request that is **in flight** under the same key gets `409` rather than a second execution:
-  the record is inserted before the handler runs, with a unique constraint on
-  `(user_id, endpoint, key)`, and completed afterwards.
+  take a transaction-scoped nonblocking advisory lock for `(user_id, key)` before lookup,
+  then insert/reserve, mutate the domain and complete the result **in one database transaction**.
+  A crash rolls all three back, so there is no committed entry with an incomplete key and no
+  permanently stuck reservation. The unique constraint is `(user_id, key)`; fingerprint
+  comparison includes method, concrete path and body. Expired-key replacement uses the same lock.
 
 ### 5.5 Rate limiting (doc 06 §4)
 
@@ -301,13 +338,16 @@ bearer, and an attacker with a token is rate-limited as a user.
 1. The candidate instant is `intendedAt` when the client sent one, else the submission instant.
 2. `intendedAt` is **refused as the candidate** — and the submission instant used instead — if
    it is more than **5 minutes in the future**, more than **36 hours in the past**, or falls on
-   a Bond-day that is **already closed** (`REVEALED`, `SOLO` **or `EMPTY`**).
-3. The Bond-day is `candidate.atZone(bondDay.anchorTimezone).toLocalDate()`. The client never
-   names the date.
+   a Bond-day that is **already settled** (`closedAt != null`, including `FROZEN` and
+   elapsed `SUSPENDED`), or already `REVEALED` before midnight.
+3. Resolve the candidate against the persisted effective anchor intervals (§3.1), then find
+   or create its day under the bond lock. This avoids needing a `bondDay` before choosing one.
+   The client never names the date. Recheck closed/revealed state under the day lock; if a
+   close raced with offline assignment, redirect once to the submission-time day.
 
 **Why `EMPTY` is in that list**, spelled out because it was missing from the corpus's first
 draft and the reason is not obvious: BR-10 makes a closed day's status authoritative and BR-1
-grants read access only on `REVEALED` or closed `SOLO`. Two entries back-filled onto a closed
+requires an actual reveal transition for partner content. Two entries back-filled onto a closed
 `EMPTY` day would satisfy neither clause — permanently unreadable by either member, with no
 transition able to release them, contributing nothing to the streak. Silently swallowing words
 is the exact harm BR-3a exists to prevent.
@@ -322,10 +362,10 @@ comment.
   `(bond_day_id, author_member_id) WHERE deleted_at IS NULL`, and BR-2 says "enforced by a
   unique index, not by application logic alone". A second attempt is `409 ENTRY_ALREADY_EXISTS`,
   produced by catching the constraint, not by checking first.
-- The Bond-day row is created lazily: `INSERT … ON CONFLICT (bond_id, date) DO NOTHING`, then
+- With the bond lock already held, the Bond-day row is created lazily: `INSERT … ON CONFLICT (bond_id, date) DO NOTHING`, then
   `SELECT … FOR UPDATE`. Two first-entries racing produce one row. This is B2's invite-creation
   pattern (ADR-0027) and the reason it is that shape rather than a check-then-insert.
-- A write to an **archived** Bond is `409 BOND_ARCHIVED` (BR-9, ADR-0028's rule).
+- A write to a **non-open** Bond (including `PENDING_DELETION`) is `409 BOND_ARCHIVED` (BR-9, ADR-0028's rule).
 - A write to a **closed** day — reachable only through `intendedAt`, and rule 6.1.2 already
   redirects it — is `409 DAY_CLOSED` if it ever arrives another way.
 
@@ -359,31 +399,31 @@ Under the Bond-day's row lock, in the same transaction that persists the entry:
 Every fifteen minutes, not hourly: IANA has 45-minute offsets (`Asia/Kathmandu` +5:45,
 `Pacific/Chatham` +12:45) and an hourly job closes those Bonds up to 45 minutes late.
 
-For each **distinct anchor timezone among active Bonds**, let `today = now.atZone(zone).toLocalDate()`.
-Then, for every Bond in that zone:
+The job has two inputs: recorded activation intervals for gap creation, and **all existing
+unsettled days**, regardless of the bond's current status or current requested zone.
 
-1. **Upsert the missing days.** A day on which neither member wrote has no row — rows are lazy —
-   so the job cannot find it by scanning `bond_days`. It walks from the day after that Bond's
-   greatest existing `bond_days.date`, or the local date the Bond became active (the **later**
-   of its two `bond_members.joined_at` — there is no `bonds.activated_at`, and the second join
-   is the moment §8.3a's pause ends), whichever is later, up to `today - 1`, inserting `EMPTY`.
-   This is what NFR-034's "O(bonds in the affected timezone)" means. The walk is **capped at
-   400 days** and a longer gap raises an alert rather than inserting silently — a job that has
-   been down for a year should say so.
+1. **Upsert missing elapsed dates in active intervals.** Generate candidate date labels from
+   activation through the earlier of the interval's end and now, using the effective anchor
+   timeline, and anti-join against `bond_days`. Do not start at the greatest existing date:
+   a lazy row created today must not hide several missing days before it. Use bounded SQL
+   ranges and batches of at most **400 missing days**, commit completed batches, and resume
+   from the remaining gaps on the next run. Alert on a large backlog but keep draining it.
+   Never manufacture `EMPTY` dates in pending-member, suspension, deletion or archived
+   intervals; gaps before an interval ended still need closure.
+2. **Transition existing elapsed days using their stored `endsAt`.** `OPEN → EMPTY`,
+   `PARTIAL → SOLO` with the live entry revealed, and `PENDING_REVEAL → REVEALED`.
+   Set `closedAt` idempotently, including on elapsed `SUSPENDED` rows without revealing
+   previously private suspended entries. Already revealed content remains readable.
+   Current `ARCHIVED` or `PENDING_DELETION` status cannot strand an earlier partial or
+   pending-reveal day. The timed-reveal sweep also scans existing rows in their snapshot
+   zone independently of the current bond status.
+3. **Evaluate the streak** for changed bonds (§6.5), from C4 onward.
 
-   **Only `ACTIVE` Bonds are walked.** A `PENDING_MEMBER` Bond gets no `EMPTY` rows at all,
-   which is §8.3a's rule honoured at the only place it can be: the rows that exist for such a
-   Bond are the `SUSPENDED` ones an entry created (§12.4). An `ARCHIVED` Bond creates no further
-   days (§8.3).
-2. **Transition what is open.** `OPEN → EMPTY`. `PARTIAL → SOLO`, and the lone entry
-   auto-unlocks to `REVEALED`, which makes it immutable from that moment (BR-7) because the
-   partner can now read it. `PENDING_REVEAL → REVEALED`. `SUSPENDED` is left exactly as it is.
-3. **Evaluate the streak** for that Bond (§6.5), from C4 onward.
-
-**It derives, it does not remember.** There is no "last run" cursor. The job asks what date it
-is in the zone and closes everything before it, so a missed run, a deploy, a restart or a
-fifteen-minute outage is self-healing, and every run is idempotent because every transition is
-guarded by the status it moves from. The dead-man's switch below is what proves it ran at all.
+**It derives gaps and unfinished transitions rather than remembering the last scheduler
+run.** Missing-row queries must cover interior gaps as well as trailing ones. Bond and day
+locks plus status predicates make retries idempotent. A persisted optimization watermark is
+allowed only if it advances atomically after verifying every earlier eligible date is settled;
+the greatest observed row is never such a watermark.
 
 **Two counters, because one cannot tell the difference between healthy and stopped** (doc 11):
 `gratitude_close_job_last_success_timestamp` is set on **every** run, including the many that
@@ -400,16 +440,21 @@ apart, and a member crossing the date line.
 ### 6.5 Streaks (BR-4, BR-5, BR-6, FR-070 – FR-076)
 
 - **BR-4.** `currentStreak` is the maximal run of days where `status ∈ {REVEALED, FROZEN}`,
-  ending at `today` or `today - 1`. If the run ends before `today - 1`, the streak is 0.
-  `SUSPENDED` days are **skipped** when walking the run — they neither extend it nor break it
+  ending at the latest eligible day (today, if complete, otherwise the latest elapsed
+  non-suspended day). `SUSPENDED` days are **skipped** both when finding that endpoint and
+  walking the run — they neither extend it nor break it
   (§8.1, §8.2, §8.3a). `longestStreak` is never decreased (FR-071).
-- **BR-5 — freezes accrue incrementally and this is not a formula.** Every 14th complete day
-  increments `freezeProgress`, and a freeze is banked (cap 2) **only if the Bond is not in
-  Strict mode at that moment**. It is explicitly *not* recomputed as
+- **BR-5 — freezes accrue incrementally and this is not a formula.** Each complete day increments
+  `freezeProgress`; reaching 14 resets progress and banks a freeze (cap 2) **only if the Bond
+  is not in Strict mode at that moment**. A threshold reached in Strict mode resets progress
+  without banking; switching Strict mode off does not replay past thresholds. It is explicitly *not* recomputed as
   `floor(totalCompleteDays / 14) - freezesConsumed`: that formula retroactively grants freezes
   for days spent in Strict mode the instant Strict mode is switched off, which contradicts
   FR-073's "toggling Strict mode never alters past days".
-- A freeze is consumed automatically on the first missed day, and that day becomes `FROZEN`.
+- Outside Strict mode, a banked freeze is consumed on the next missed day, which becomes
+  `FROZEN`; no banked freeze means the day remains `SOLO`/`EMPTY` and breaks the run.
+  Strict mode never consumes a freeze. Persist the applied strict-mode and freeze events
+  alongside day outcomes so recalculation never substitutes today’s setting for past decisions.
 - **BR-6 / §8.5.** A date skipped outright by an approved anchor change (`Africa/Lagos` →
   `Pacific/Kiritimati` loses one) is `FROZEN`, not missed. Because the change is mutually
   confirmed (FR-027, ADR-0030), neither member can end a shared streak alone — a correctness fix
@@ -430,7 +475,9 @@ Strict mode never alters a past day.
 
 ### 6.6 The archive, favourites and search (FR-090 – FR-093, FR-050)
 
-- Revealed and solo days, newest first, cursor-paginated, `ETag` supported.
+- Days with revealed entries, including subsequently frozen solo days, newest first,
+  cursor-paginated. ETags cover the caller-specific rendered response, including favourites,
+  tombstones and visibility; a bond-row version alone is insufficient.
 - **Favourites are computed per caller and the partner's are never present in any response —
   not as a count, not as an aggregate, not as an `anyFavourited` flag.** An aggregate over two
   people discloses the other one, which is the read receipt FR-064 forbids. Doc 04 makes this
@@ -464,6 +511,14 @@ call back would be a module cycle. `block` writes a `BondBlocked { withdrawEntri
 its own transaction and `gratitude` consumes it — which is what a transactional outbox is for,
 and is the first real consumer in the system. It lands in **C5**, with the poller.
 
+Withdrawal must suppress reads **as soon as the block transaction commits**, even if the
+poller is stopped. Persist a withdrawal marker in bond in that transaction and expose it
+through the public read-access port. All gratitude content reads, search and idempotency
+replays consult that marker before returning content. The consumer later erases text, media
+references, search data, favourites and any derived content caches transactionally and
+idempotently. Until C5 provides this complete path, withdrawal must be rejected as unsupported,
+not acknowledged and silently deferred. No outbox payload contains entry text or credentials.
+
 Bond-day statuses are **not** recomputed afterwards. BR-10 again: the timeline is authoritative,
 and the surviving member's streak history is not a thing the blocker gets to rewrite.
 
@@ -476,7 +531,7 @@ slice order. `V10` is the last one Phase 2 uses.
 |---|---|---|---|
 | C1 | `V11__common_idempotency_keys.sql` | `common:web` | `idempotency_keys` |
 | C1 | `V12__gratitude_bond_days_and_entries.sql` | `modules:gratitude` | `bond_days`, `entries` |
-| C2 | `V13__common_outbox_events.sql` | `common:events` | `outbox_events` |
+| C2 | `V13__common_outbox_events.sql` | `common:events` | `outbox_events`, `outbox_deliveries` |
 | C3 | `V14__scheduling_shedlock.sql` | `modules:scheduling` | `shedlock` |
 | C4 | `V15__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events` |
 | C5 | `V16__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
@@ -490,13 +545,14 @@ exceptions recorded in §12 because doc 07 is wrong about them.
 - `bond_days` **unique `(bond_id, date)`** — the constraint the whole phase rests on.
 - `entries` **unique `(bond_day_id, author_member_id) WHERE deleted_at IS NULL`** — BR-2.
 - `reactions` unique `(entry_id, member_id, type)`; `entry_favourites` unique `(entry_id, member_id)`.
-- `idempotency_keys` unique `(user_id, endpoint, key)`.
+- `idempotency_keys` unique `(user_id, key)`; method, concrete path and body hash are compared data.
+- `outbox_deliveries` unique `(event_id, consumer_id)` for independent consumer acknowledgements.
 
 **Indexes that are performance:** `bond_days (bond_id, date DESC)` for the archive feed, the
 hottest read; `bond_days (status, date) WHERE status IN ('OPEN','PARTIAL','PENDING_REVEAL')`, a
 partial index so the close job's scan stays small; a GIN index on `entries.search_vector`;
 `entry_favourites (member_id, created_at DESC)` for the favourites filter; and
-`outbox_events (next_attempt_at) WHERE processed_at IS NULL`, partial so it stays small as the
+`outbox_deliveries (consumer_id, next_attempt_at) WHERE processed_at IS NULL`, partial so it stays small as the
 table grows.
 
 ## 8. The outbox
@@ -515,6 +571,15 @@ Phase 3 writes: `EntrySubmitted`, `DayRevealed`, `DayClosed`, `StreakBroken`, `S
 `MilestoneReached`. C5 adds the first consumer (§6.7). `gratitude_outbox_pending` is the gauge
 that says the poller is stuck.
 
+Delivery state belongs to `(eventId, consumerId)`, not a global `processed_at` on the event.
+The withdrawal consumer must not mark events as consumed for later notifications or analytics.
+Register each consumer with an explicit starting position; retain immutable, content-free
+events for the promised history, and backfill delivery rows when a new consumer is registered.
+Each handler and its delivery acknowledgement commit together; retries are at least once and
+handlers deduplicate by event id. External effects require their own idempotent delivery step.
+The pending gauge is per consumer and counts due registered deliveries, not events with no
+consumer yet. These guarantees apply across process restarts and concurrent pollers.
+
 ## 9. Testing
 
 Beyond the project's standing bar — TDD, Testcontainers, 80% JaCoCo, Konsist, mutation-testing
@@ -526,11 +591,15 @@ the load-bearing assertions:
 | **Cache poisoning** | Prime `today` as A, read as B before B has written, assert none of A's content. Doc 12 names it as a bypass no authorisation layer sees. |
 | **Concurrent submission** | Both members submit at once; exactly one `DayRevealed`. Must fail with the lock removed. |
 | **The timezone matrix** | Spring forward, fall back, Kathmandu, Chatham, members ≥12 h apart, a date-line crossing. |
-| **`intendedAt` back-fill** | Each of BR-3a's three refusals, and the `EMPTY` clause specifically. |
-| **Close-job idempotency** | Run it twice over the same window; no duplicate transitions, no duplicate events. |
+| **`intendedAt` back-fill** | Refuse settled `EMPTY`, `FROZEN` and elapsed `SUSPENDED`; race assignment against close. |
+| **Close-job idempotency** | Run twice; test interior missing dates before a newer lazy row, backlog over 400 dates, and ended bonds with pending reveal. |
+| **Consent and lifecycle races** | Submit versus leave/block/deletion/zone confirmation; lock order prevents post-end writes or duplicate date labels. |
+| **Idempotency recovery** | Same key across bonds/routes is 422; concurrent requests execute once; crash before commit rolls back both entry and key; replay after erasure contains no old text. |
+| **Reveal persistence** | A revealed solo entry stays readable after freezing; joining on the current suspended day resumes it; prior suspended days stay private. |
+| **Withdrawal and outbox** | With poller stopped, committed withdrawal immediately hides content; independent consumers and crash retries do not lose events. |
 | **Streak properties** | Randomised timelines; the four invariants in §6.5. |
 | **Cross-tenant** | The existing route-driven suite picks up every new endpoint automatically (ADR-0026), and a route added without a fixture fails the build. |
-| **Grapheme counting** | A ZWJ family emoji, a flag, a combining sequence; 500 of each accepted, 501 refused, and the octet cap refusing what graphemes allow. |
+| **Grapheme counting** | A ZWJ family emoji, a flag, a combining sequence; 500 accepted only within the independent 8192-byte cap; 501 refused; large emoji strings exercise the byte cap. |
 
 ## 10. Slices
 
@@ -564,8 +633,10 @@ otherwise was an error in its first draft. They are built in C4.
 ## 12. Corpus corrections this phase forces
 
 Each of these is a document being brought in line with a decision made elsewhere, or a
-contradiction between two documents that code will have to resolve one way or the other. All
-are amended on the Gratitude branch `docs/phase-3-daily-loop`.
+contradiction between two documents that code will have to resolve one way or the other. The initial
+corpus amendments are on the Gratitude branch `docs/phase-3-daily-loop`; the review
+clarifications in this specification must also be carried into the relevant corpus and ADRs
+when implementing each slice.
 
 ### 12.1 Doc 07's `bond_days.status` lists five of the eight statuses
 
@@ -606,8 +677,11 @@ written.
 is the same one §8.1 already uses for suspension", and that mechanism is a status, not an
 absence. So the day exists and holds the entry; the author reads their own words under BR-1's
 first clause; the close job leaves it alone; and the streak walk skips it, so those days neither
-extend nor break anything. The streak begins on the first day both members exist, which is what
-§8.3a was protecting. Doc 04 §8.3a is amended to say so.
+extend nor break anything. On the joining day, the first gratitude operation or close sweep reconciles the current
+`SUSPENDED` row under the bond/day locks: zero entries becomes `OPEN`, one becomes `PARTIAL`,
+and two follow the reveal rule. Use the recorded activation instant to distinguish this day
+from earlier suspended days, which remain private and excluded. The streak begins on the
+first day both members exist, which is what §8.3a was protecting. Doc 04 §8.3a is amended to say so.
 
 ### 12.5 `bond_days` needs a column doc 07 does not give it
 
@@ -616,7 +690,9 @@ never recompute an existing day, and the only way to make that structural rather
 remembered is for the day to carry the zone it was opened in (§3.1). Without the column, every
 historical day silently moves the first time the anchor does — the Phase 2 defect class in a new
 place: a rule that is true only while nobody exercises the path that breaks it. The column is
-added, `NOT NULL`, with the same 64-character bound `bonds.anchor_timezone` carries.
+added, `NOT NULL`, with the same 64-character bound `bonds.anchor_timezone` carries. V12 also
+records `starts_at`/`ends_at`; C1 adds the bond-owned effective-zone timeline described in §3.1
+with its own coordinated global migration version before allocating later slices.
 
 ### 12.6 FR-074's "from the entry log" means the Bond-day timeline
 
@@ -646,8 +722,8 @@ document, and so that a reviewer can check the list rather than reconstruct it.
 
 1. `bond.api.BondMembership` has an **`internal` constructor**, so the compiler — not a Konsist
    rule — carries ADR-0026's guarantee across the module boundary (§2.1).
-2. The close job **derives the elapsed days rather than remembering a cursor**, which makes a
-   missed run self-healing (§6.4).
+2. The close job **derives interior gaps and elapsed unfinished days**, including on ended
+   bonds; the greatest existing date is not a completion watermark (§6.4).
 3. The job's **orchestration is in `scheduling` and its transitions are in `gratitude`**, so the
    synchronous path and the job cannot state the same rule twice (§2.2).
 4. `bond_days` **copies the anchor zone onto the row**, which is what makes BR-6's "never
