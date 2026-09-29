@@ -67,18 +67,23 @@ internal class RevealGateTest(
 
     @Test
     fun `a locked entry is exactly an author and a status, and nothing else`() {
-        submit(bea, bondId, """{"text":"a secret kindness"}""").status shouldBe 201
+        val beaSubmitted = submit(bea, bondId, """{"text":"a secret kindness"}""")
+        beaSubmitted.status shouldBe 201
+        val beaMemberId = authorMemberIdOf(beaSubmitted)
 
         val today = getToday(ada, bondId)
 
-        today.contentAsString shouldContain "\"partnerEntry\":{\"authorMemberId\":\""
-        today.contentAsString shouldContain "\"status\":\"LOCKED\""
-        // Not the text, and not one thing about it.
+        // Scoped to the partner's own object, not the whole body (fix round
+        // 1, M2) — a whole-body check for `createdAt`/`length`/`hasImage`/
+        // `intendedAt` would also pass once `ada` has an entry of her own
+        // carrying those very field names, for a reason unrelated to the
+        // gate. This pins `partnerEntry`'s exact wire shape: nothing but the
+        // author and the status, in that order, and nothing else — BR-8,
+        // byte for byte.
+        partnerEntryJson(today.contentAsString) shouldBe """{"authorMemberId":"$beaMemberId","status":"LOCKED"}"""
+        // The text itself, body-wide: it must never appear anywhere in the
+        // response, not only be absent from partnerEntry's own shape.
         today.contentAsString shouldNotContain "a secret kindness"
-        today.contentAsString shouldNotContain "createdAt"
-        today.contentAsString shouldNotContain "length"
-        today.contentAsString shouldNotContain "hasImage"
-        today.contentAsString shouldNotContain "intendedAt"
     }
 
     @Test
@@ -104,9 +109,16 @@ internal class RevealGateTest(
 
     @Test
     fun `priming today as one member does not serve it to the other`() {
-        // Doc 12 names cache poisoning as a reveal-gate bypass no authorisation
-        // layer sees. C1 caches nothing; this test is what makes adding a cache
-        // later a deliberate act rather than an accident.
+        // Doc 12 names cache poisoning as a reveal-gate bypass no
+        // authorisation layer sees. `bea`'s own GET below is the priming
+        // call that would matter: her response carries her own words under
+        // `myEntry` (BR-1's first clause — an author always reads their own
+        // in full), so a naive `bondId`-keyed cache that served that same
+        // response back to `ada` would leak exactly what test 1 above
+        // proves the reveal gate refuses her — a failure test 1 alone would
+        // never catch, since it never primes anything. C1 caches nothing;
+        // this test is what makes adding one later a deliberate act rather
+        // than an accident.
         submit(bea, bondId, """{"text":"a secret kindness"}""").status shouldBe 201
         getToday(bea, bondId).status shouldBe 200
 
@@ -135,6 +147,32 @@ internal class RevealGateTest(
         getToday(ada, bondId).status shouldBe 200
 
         jdbc.queryForObject("SELECT count(*) FROM bond_days", Int::class.java) shouldBe 0
+    }
+
+    /**
+     * Fix round 1, C1: `membership.awaitingSecondMember` (doc 04 §8.3a, J1)
+     * was in hand at `GetToday` and unused — a still-solo bond's `/today`
+     * reported `OPEN`, indistinguishable from a paired bond nobody has
+     * written in, in exactly the field BR-1's own contract says is returned
+     * *so that* the two can be told apart. This is also the regression
+     * proof for the status-travels-backwards bug that omission caused:
+     * `SubmitEntry` opens a still-solo bond's day `SUSPENDED`, so a creator
+     * who had just been told `OPEN` would watch it become `SUSPENDED` on
+     * their own write — an edge the state machine does not have. Asserted
+     * both before and after the creator's own write, so the status is shown
+     * not to move.
+     */
+    @Test
+    fun `a still-solo bond reports SUSPENDED before anybody has written, not OPEN`() {
+        val cara = users.verified("Cara")
+        val solo = createBond(cara)
+        val soloBondId = bondIdOf(solo)
+
+        getToday(cara, soloBondId).contentAsString shouldContain "\"status\":\"SUSPENDED\""
+
+        submit(cara, soloBondId, """{"text":"waiting for you"}""").status shouldBe 201
+
+        getToday(cara, soloBondId).contentAsString shouldContain "\"status\":\"SUSPENDED\""
     }
 
     // ---- helpers --------------------------------------------------------
@@ -186,4 +224,14 @@ internal class RevealGateTest(
 
     private fun bondIdOf(response: MockHttpServletResponse): String =
         Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
+
+    private fun authorMemberIdOf(response: MockHttpServletResponse): String =
+        Regex(""""authorMemberId":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
+
+    /** `partnerEntry`'s own JSON object, scoped out of the whole response body — fix round 1, M2. */
+    private fun partnerEntryJson(body: String): String = PARTNER_ENTRY.find(body)!!.groupValues[1]
+
+    private companion object {
+        val PARTNER_ENTRY = Regex(""""partnerEntry":(\{[^}]*})""")
+    }
 }

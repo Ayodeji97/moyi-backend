@@ -16,7 +16,10 @@ import java.time.LocalDate
  * only two places any content can appear, and BR-1 gates both.
  *
  * [myEntry] is the caller's own entry, in the same shape [EntryResponse]
- * already gives a fresh submission — `null` until they have written today.
+ * already gives a fresh submission — `null` until they have written today,
+ * or (never reachable today, but not assumed impossible — see `GetToday`'s
+ * own KDoc, fix round 1, I1) if BR-1 is ever narrowed to stop exempting an
+ * author from their own gate.
  *
  * [partnerEntry] is [PartnerEntryResponse]`?` — [EntryResponse] (in full,
  * when [com.moyi.gratitude.domain.Entry.canBeReadBy] grants it) or
@@ -75,13 +78,39 @@ internal data class TodayResponse(
 }
 
 /**
- * `myEntry`/`partnerEntry`'s shared type: either [EntryResponse] (BR-1
- * granted the read) or [LockedEntryResponse] (it did not). A marker
- * interface rather than a sealed class with its own fields — nothing about
- * "an entry response, revealed or locked" needs stating twice, and Jackson
- * serialises each implementation by its own runtime shape without needing
- * `@JsonTypeInfo` here: this type is only ever written to the wire, never
- * read back off it.
+ * [TodayResponse.partnerEntry]'s own type — not [myEntry]'s, which stays
+ * plain [EntryResponse]`?` because BR-1's first clause makes the locked
+ * shape unreachable for a caller's own entry (fix round 1, M1: an earlier
+ * version of this KDoc said "shared" between the two fields, which was
+ * never true of the code). Either [EntryResponse] (BR-1 granted the read)
+ * or [LockedEntryResponse] (it did not).
+ *
+ * **`sealed`, not merely an interface, and that is load-bearing.** A plain
+ * `interface` could be implemented from outside this module by anything —
+ * some future type nobody here reviewed, rendered into this exact field
+ * with no compiler check on its shape. `sealed` confines every
+ * implementation to this module (in fact, this file), so "either revealed
+ * in full or locked to exactly BR-8's shape, nothing else" is a closed set
+ * the compiler enforces, not a convention a reviewer has to keep re-checking
+ * (fix round 1).
+ *
+ * Jackson serialises each implementation by its own runtime shape without
+ * needing `@JsonTypeInfo` here — this type is only ever written to the
+ * wire, never read back off it.
+ *
+ * **The generated OpenAPI document cannot currently express this.** No
+ * `@Schema(oneOf = …)` is applied — `gratitude` has no compile-time
+ * dependency on springdoc's annotation package, and `contracts` is this
+ * codebase's one place springdoc concerns are meant to be configured
+ * (`OpenApiConfiguration`'s own KDoc). Without it, springdoc will describe
+ * [TodayResponse.partnerEntry] as an empty object, and a client generated
+ * from the document gets neither branch's shape for the one field carrying
+ * BR-8's own distinction — flagged prominently here, and in fix round 1's
+ * report, for whichever task next regenerates `contracts/openapi.json` to
+ * see and decide: an `OpenApiCustomizer` in `contracts` (the same pattern
+ * [com.moyi.contracts.OpenApiConfiguration] already uses for `ETag` and
+ * `Idempotency-Key`) is the fix that keeps this module's own dependencies
+ * as they are.
  */
 internal sealed interface PartnerEntryResponse
 
