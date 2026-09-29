@@ -114,6 +114,33 @@ internal data class BondDay(
      * the close job (C3) and the streak walk both skip it by status, and
      * flipping the status here would put it back in their path.
      *
+     * **Nothing in this codebase ever moves a day out of [BondDayStatus.SUSPENDED]
+     * once opened — that is the next slice's explicit obligation, not
+     * something this method defers by accident** (F4, whole-branch review;
+     * see ADR-0031 §4's own amendment). Walk the scenario this leaves open:
+     * Ada creates a bond and writes on day D — [BondDay.openSuspended] opens
+     * it [SUSPENDED]. Bea accepts the invite later the same day and writes
+     * too — [withEntry] runs *again*, on the same row, and this clause keeps
+     * it [SUSPENDED] rather than promoting it to [BondDayStatus.PARTIAL] the
+     * way an ordinary day's second entry does. The row now has `entry_count
+     * = 2` and `status = SUSPENDED` — both entries present, the bond no
+     * longer awaiting a second member — and nothing ever writes that status
+     * again: the reveal C2 adds looks for [BondDayStatus.PARTIAL] or
+     * [BondDayStatus.PENDING_REVEAL], and C3's close job excludes
+     * [SUSPENDED] from its own partial index (`bond_days_open_idx`,
+     * V12) by design, precisely because a genuinely-still-suspended day must
+     * not be swept into a close it does not qualify for. **Whichever slice
+     * next reads or writes this status has to add the transition that
+     * un-suspends a day once its bond stops awaiting a second member** — most
+     * naturally, the moment the second member's own membership is created,
+     * not buried in this method or in a later entry's own [withEntry] call.
+     * Miss it, and the couple's first shared day — the one this whole slice
+     * exists to let them write on together — never reveals, and both of
+     * their first entries stay locked to each other permanently. This method
+     * is deliberately left doing nothing about that: inventing the
+     * transition here, without the reveal's own state machine in view, risks
+     * building the wrong one.
+     *
      * **Every other day becomes [BondDayStatus.PARTIAL], including on the
      * second entry.** C1 has no reveal — see the class doc — so there is no
      * third value this could become yet; the second call is left honest

@@ -116,12 +116,14 @@ class IdempotencyInterceptorTest(
 
     @Test
     fun `the same key against a different endpoint is 422, not a fresh reservation`() {
-        // Ruling A, review round 1: doc 06 §1 keys a reservation on `userId +
-        // endpoint + key`, so a different endpoint under the same key is a
-        // reuse of the key, not an unrelated row — V11's unique constraint no
-        // longer enforces this itself (it can't, without making "different
-        // endpoint" impossible to detect at all), so this is the comparison
-        // that has to catch it instead.
+        // Ruling A, review round 1: V11's unique constraint is `(user_id,
+        // idempotency_key)` alone, so a different endpoint under the same
+        // key reads back as the same reserved row rather than colliding at
+        // the database — the constraint cannot enforce "different endpoint"
+        // itself, only this comparison in IdempotencyInterceptor.replay can
+        // (F6, whole-branch review corrected this comment's own
+        // `userId + endpoint + key` description of the key, which is not
+        // what V11 declares).
         val key = UUID.randomUUID().toString()
         post(ada, key, """{"text":"thank you"}""").status shouldBe 201
 

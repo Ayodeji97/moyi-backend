@@ -113,11 +113,16 @@ class IdempotencyInterceptor(
     /**
      * The three ways an already-reserved key can answer a second request —
      * see the class KDoc. A mismatch on *either* [endpoint] or [requestHash]
-     * is [IdempotencyKeyReusedException] (Ruling A, review round 1): doc 06
-     * §1 keys a reservation on `userId + endpoint + key`, so the same key
-     * against a different endpoint is a reuse of the key, not a fresh row —
-     * V11's unique constraint no longer includes `endpoint`, which is what
-     * makes that comparison this function's job instead of the database's.
+     * is [IdempotencyKeyReusedException] (Ruling A, review round 1): the
+     * unique key V11 enforces is `(user_id, idempotency_key)` only —
+     * `endpoint` is a stored column, not part of the constraint — so the
+     * same key against a different endpoint would otherwise read back as the
+     * same row rather than colliding at the database. This comparison is
+     * what makes that a `422`: it is the whole of what stops a key reused
+     * across two different requests, not a restatement of something the
+     * unique constraint already refuses on its own (F6, whole-branch review
+     * — this KDoc previously said the reservation was itself keyed on
+     * `userId + endpoint + key`, which is not what V11 declares).
      */
     private fun replay(
         existing: IdempotencyRecord,
@@ -140,7 +145,21 @@ class IdempotencyInterceptor(
                 response.setHeader(REPLAYED_HEADER, "true")
                 existing.responseEtag?.let { response.setHeader(HttpHeaders.ETAG, it) }
                 existing.responseLocation?.let { response.setHeader(HttpHeaders.LOCATION, it) }
-                existing.responseBody?.let { response.writer.write(it) }
+                // F10 (whole-branch review): written as UTF-8 bytes to the
+                // output stream, not through response.writer with no charset
+                // set. Every other response in this app is Jackson's own
+                // bytes, written UTF-8; response.writer resolves its charset
+                // from response.characterEncoding, which nothing here sets —
+                // MockMvc happens to default that to UTF-8, so the suite
+                // could not have caught a divergence, but a packaged jar on
+                // Tomcat defaults an unset response encoding to ISO-8859-1
+                // (server.servlet.encoding.force-response is not set), which
+                // would have corrupted every replayed body containing a
+                // non-ASCII character — an entry's own gratitude text among
+                // them. Writing the same bytes Jackson would have produced
+                // removes the question rather than fixing the servlet
+                // default by configuration.
+                existing.responseBody?.let { response.outputStream.write(it.toByteArray(Charsets.UTF_8)) }
                 false
             }
         }
@@ -231,9 +250,10 @@ class IdempotencyInterceptor(
  * reasoning through Spring's own source before writing a test that would
  * have failed opaquely on every `@Idempotent` `POST`.
  *
- * **Only applies to `POST`/`PUT`/`PATCH`, and never to a multipart body**
- * (review round 1, Important #3). A bare `Filter` bean is registered by
- * Spring Boot for every path, in every module that depends on
+ * **Only applies to `POST`/`PUT`/`PATCH`, never to a multipart body, and
+ * never above [MAX_CACHEABLE_BYTES]** (review round 1, Important #3; the
+ * size bound added by the whole-branch review, F3). A bare `Filter` bean is
+ * registered by Spring Boot for every path, in every module that depends on
  * `common:web` — and draining every body eagerly and buffering every
  * response is wrong for a `GET` (idempotency is meaningless on a method
  * HTTP already defines as idempotent, so `@Idempotent` is never put on one)
@@ -243,11 +263,37 @@ class IdempotencyInterceptor(
  * `@Idempotent`, so a path-based allowlist here would have to be guessed and
  * kept in sync by hand; a rule about *what kind of request this filter's
  * work could ever be needed for* does not.
+ *
+ * **Size is the half that argument does not consider, and it matters for a
+ * reason method/content-type scoping does not touch: this filter runs
+ * before Spring Security and before handler mapping, on every path,
+ * authenticated or not.** [ReplayableHttpServletRequest]'s constructor calls
+ * `request.inputStream.readBytes()` eagerly — the whole body, materialised
+ * in memory, before `@Idempotent` is even known to apply, before Jackson
+ * could stream-fail on a malformed body, and before `RateLimitInterceptor`
+ * (an MVC interceptor, which runs *after* every servlet filter) ever sees
+ * the request. `/api/v1/auth/login`, `/auth/register` and `/auth/refresh`
+ * are `POST`, public, and JSON — exactly the shape this filter buffers — so
+ * an unauthenticated multi-gigabyte `POST` to any of them is read fully into
+ * memory by this constructor with no `RateLimitInterceptor` or
+ * `server.tomcat.*` body-size limit (none is configured) having had a chance
+ * to refuse it first. [shouldNotFilter] adding a `Content-Length` cap closes
+ * that: a request whose declared length is missing or exceeds
+ * [MAX_CACHEABLE_BYTES] is not wrapped at all, so `@Idempotent` on an
+ * endpoint that legitimately needs a larger body is the signal to raise the
+ * bound deliberately, not a gap to be found by an oversized request first.
  */
 class IdempotencyRequestCachingFilter : OncePerRequestFilter() {
-    override fun shouldNotFilter(request: HttpServletRequest): Boolean {
+    /**
+     * `public`, widened from `OncePerRequestFilter`'s own `protected` — so
+     * [IdempotencyRequestCachingFilterTest] can drive this pure decision
+     * directly, without a full Spring context to prove F3's size bound.
+     */
+    public override fun shouldNotFilter(request: HttpServletRequest): Boolean {
         val isMultipart = request.contentType?.startsWith(MediaType.MULTIPART_FORM_DATA_VALUE) == true
-        return runCatching { HttpMethod.valueOf(request.method) }.getOrNull() !in APPLICABLE_METHODS || isMultipart
+        val contentLength = request.contentLengthLong
+        val isOversized = contentLength < 0 || contentLength > MAX_CACHEABLE_BYTES
+        return runCatching { HttpMethod.valueOf(request.method) }.getOrNull() !in APPLICABLE_METHODS || isMultipart || isOversized
     }
 
     override fun doFilterInternal(
@@ -265,6 +311,23 @@ class IdempotencyRequestCachingFilter : OncePerRequestFilter() {
 
     private companion object {
         val APPLICABLE_METHODS = setOf(HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH)
+
+        /**
+         * 1 MiB (whole-branch review, F3): every body this filter's own
+         * callers actually send is small — `EntryText.MAX_OCTETS` bounds an
+         * entry's text at 8,192 octets (FR-041), and every other
+         * `@Idempotent`/write body in this codebase is a handful of fields —
+         * so this is generous headroom over the largest legitimate request
+         * today, not a tuned-to-the-byte limit. A request with no declared
+         * `Content-Length` (chunked transfer, or a client that simply omits
+         * it) is treated as oversized too, deliberately: the attack this
+         * bound exists to stop is exactly a body whose size is not known in
+         * advance, so trusting an absent header would leave the same
+         * unbounded read this fix closes, just reachable by omitting the
+         * header instead of inflating it. Raise this only alongside a
+         * concrete need for a larger `@Idempotent` body, not preemptively.
+         */
+        const val MAX_CACHEABLE_BYTES = 1024L * 1024L
     }
 }
 

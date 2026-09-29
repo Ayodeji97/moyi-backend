@@ -11,8 +11,10 @@ import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
 /**
- * The port's only implementation: the guard, plus the four bond facts, in one
- * read. `internal`, so the boundary is the interface and not this class.
+ * The port's only implementation: the guard, plus the five bond facts, in one
+ * read (F7, whole-branch review — this KDoc previously said four;
+ * [BondAccess]'s own KDoc already said five). `internal`, so the boundary is
+ * the interface and not this class.
  *
  * It calls [BondAccessGuard] rather than reimplementing the check, so there is
  * one definition of "is this caller a member" and one 404. The guard's own

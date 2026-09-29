@@ -133,10 +133,11 @@ internal class SubmitEntry(
         val view =
             try {
                 transactions.execute {
-                    val date =
-                        DayAssignment.dateFor(now, draft.intendedAt, zone) { candidate ->
+                    val resolution =
+                        DayAssignment.resolve(now, draft.intendedAt, zone) { candidate ->
                             days.statusOf(bondId, candidate)?.isClosed == true
                         }
+                    val date = resolution.date
                     val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
                     val opened = days.openOrGet(bondId, date, zone, now, openStatus)
                     // Locked, then re-read fresh under that lock — see the
@@ -152,7 +153,7 @@ internal class SubmitEntry(
                             bondId = bondId,
                             authorMemberId = membership.memberId,
                             text = text,
-                            intendedAt = draft.intendedAt ?: now,
+                            intendedAt = resolution.resolvedAt,
                             now = now,
                         )
                     // The flush BR-2's index lives on. See EntryStore.insert's

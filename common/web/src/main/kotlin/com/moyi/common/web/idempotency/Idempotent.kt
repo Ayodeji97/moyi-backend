@@ -8,10 +8,12 @@ package com.moyi.common.web.idempotency
  * retry since before any code existed — a lost response on a flaky mobile
  * connection is exactly when a `POST` gets resent, and without this the
  * resend performs the thing a second time. An absent header is
- * `422 VALIDATION_FAILED`; a present one reserves a row keyed on the caller,
- * the endpoint and the key itself (doc 06 §1: `userId + endpoint + key`), so
- * a retry is answered from the first attempt's stored response instead of
- * running the handler again.
+ * `422 VALIDATION_FAILED`; a present one reserves a row under V11's own
+ * unique key, `(user_id, idempotency_key)` — the endpoint is stored
+ * alongside it and compared in code, not part of that key (F6, whole-branch
+ * review; see [IdempotencyInterceptor.replay] for why) — so a retry is
+ * answered from the first attempt's stored response instead of running the
+ * handler again.
  *
  * `POST /entries` (task 7) is the first handler to carry this — `common:web`
  * has no domain endpoint of its own, so this module's own test proves the

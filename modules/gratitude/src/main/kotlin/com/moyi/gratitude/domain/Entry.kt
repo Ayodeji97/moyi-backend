@@ -7,11 +7,17 @@ import java.util.UUID
  * Doc 07 §2's `entries.status` `CHECK`. [SUBMITTED] is every entry this
  * slice ever produces — [REVEALED] arrives with the reveal slice's own
  * transition, [DELETED] with whichever slice adds `DELETE /entries/{id}`.
- * BR-2 already depends on [DELETED] existing before either of the others
- * lands: `entries_one_per_member_per_day` (V12) is a *partial* unique index
- * that excludes a deleted row, so an author who deletes before reveal may
- * write again that day — the status this enum carries is what a future
- * `delete()` would flip, not something this task adds.
+ *
+ * **BR-2's slot is freed by `deleted_at`, not by [status] alone** (whole-
+ * branch review, F5 — an earlier version of this KDoc said the opposite).
+ * `entries_one_per_member_per_day` (V12) is `WHERE deleted_at IS NULL`, a
+ * *partial* unique index keyed on that column, not on `status`. A future
+ * `delete()` written from the wrong premise — setting `status = DELETED`
+ * and leaving `deleted_at` null — would leave the slot held: the index would
+ * still see a live row, and the author who "deleted" it could never write
+ * that day again. `delete()` must set both. [EntryStore.findForDay]'s own
+ * KDoc has the matching note on the read side: it returns a [DELETED] row
+ * too, harmless while nothing produces one yet, wrong the day this lands.
  */
 internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
 
@@ -95,10 +101,18 @@ internal data class Entry(
         /**
          * A member's write lands (`POST /bonds/{bondId}/entries`, Task 7).
          *
-         * [intendedAt] is [DayAssignment]'s own input, already resolved by
-         * the caller before this is reached — [submit] does not repeat
-         * BR-3/BR-3a's clock-skew or offline-window checks, it only records
-         * what the caller decided the day should be filed against.
+         * [intendedAt] is [DayAssignment.Resolution.resolvedAt], already
+         * resolved by the caller before this is reached — [submit] does not
+         * repeat BR-3/BR-3a's clock-skew or offline-window checks, it only
+         * records the instant [DayAssignment.resolve] decided the day should
+         * be filed against. **This is not the same value as the client's raw
+         * `intendedAt` claim** (whole-branch review, F1): `SubmitEntry` must
+         * pass [DayAssignment.resolve]'s `resolvedAt`, never
+         * `draft.intendedAt` directly — a claim [DayAssignment.resolve]
+         * rejected (too far ahead, too stale, or landing on a closed day)
+         * resolves to the submission instant instead, so what lands here is
+         * always the day this row is actually filed against, never an
+         * unvalidated value a caller typed.
          * [createdAt] and [updatedAt] start equal, as they do for every row
          * until its first edit; nothing this slice does ever produces a
          * second one.

@@ -47,6 +47,17 @@ import java.time.ZoneId
  * branch with nothing but values. The service is what has a day store, and
  * it supplies the lookup: `{ date -> days.statusOf(bondId, date)?.isClosed
  * == true }`.
+ *
+ * **F1 (whole-branch review): [resolve] is what [Entry.submit] must take its
+ * `intendedAt` from, never the raw client claim.** `entries.intended_at`'s
+ * own column comment and [Entry.submit]'s own KDoc both describe that value
+ * as "BR-3/BR-3a's resolved day" — a claim that was false before this fix:
+ * `SubmitEntry` persisted `draft.intendedAt ?: now` verbatim, so a client
+ * could send `intendedAt: 2099-01-01` and have it stored and echoed back
+ * even though [dateFor] rejected it for *date* purposes and fell back to
+ * today. [Resolution.resolvedAt] is the instant the trust checks actually
+ * accepted — [intendedAt] itself when every check in [dateFor] passed,
+ * [submittedAt] otherwise — so a rejected claim can never reach the archive.
  */
 internal object DayAssignment {
     private const val CLOCK_SKEW_MINUTES = 5L
@@ -54,19 +65,42 @@ internal object DayAssignment {
     private val CLOCK_SKEW: Duration = Duration.ofMinutes(CLOCK_SKEW_MINUTES)
     private val OFFLINE_WINDOW: Duration = Duration.ofHours(OFFLINE_WINDOW_HOURS)
 
-    fun dateFor(
+    /** [resolve]'s answer: the day an entry lands on, and the instant trusted as when it was intended. See [resolve]'s own KDoc. */
+    data class Resolution(
+        val date: LocalDate,
+        val resolvedAt: Instant,
+    )
+
+    /**
+     * [dateFor]'s own answer, plus the instant that produced it — see the
+     * class KDoc's F1 note. A pure function of the same four inputs, so the
+     * date this returns and the date [dateFor] returns can never disagree:
+     * [dateFor] is defined in terms of this one, not the other way round.
+     */
+    fun resolve(
         submittedAt: Instant,
         intendedAt: Instant?,
         zone: ZoneId,
         isClosed: (LocalDate) -> Boolean,
-    ): LocalDate {
+    ): Resolution {
         val fallback = submittedAt.atZone(zone).toLocalDate()
-        val trusted =
+        val acceptedDate =
             intendedAt
                 ?.takeIf { !it.isAfter(submittedAt.plus(CLOCK_SKEW)) }
                 ?.takeIf { !it.isBefore(submittedAt.minus(OFFLINE_WINDOW)) }
                 ?.let { it.atZone(zone).toLocalDate() }
                 ?.takeUnless(isClosed)
-        return trusted ?: fallback
+        return if (acceptedDate != null) {
+            Resolution(date = acceptedDate, resolvedAt = checkNotNull(intendedAt))
+        } else {
+            Resolution(date = fallback, resolvedAt = submittedAt)
+        }
     }
+
+    fun dateFor(
+        submittedAt: Instant,
+        intendedAt: Instant?,
+        zone: ZoneId,
+        isClosed: (LocalDate) -> Boolean,
+    ): LocalDate = resolve(submittedAt, intendedAt, zone, isClosed).date
 }

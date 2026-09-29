@@ -181,6 +181,29 @@ internal class EntriesEndpointTest(
         jdbc.queryForObject("SELECT date::text FROM bond_days", String::class.java) shouldBe "2026-09-15"
     }
 
+    /**
+     * F1, whole-branch review: `intended_at` must hold the instant
+     * [com.moyi.gratitude.domain.DayAssignment.resolve] actually accepted,
+     * never a raw client claim — three places said it already did
+     * (`Entry.submit`'s own KDoc, V12's column comment, this method's own
+     * behaviour before the fix) and only the third was false. `2099-01-01`
+     * is far enough ahead of `NOW` (2026-09-15) to fail the five-minute
+     * clock-skew check by a wide margin, so [DayAssignment.resolve] falls
+     * back to `submittedAt` for *both* the date and the resolved instant —
+     * before this fix, the raw claim was stored and echoed back regardless.
+     */
+    @Test
+    fun `a claim DayAssignment rejects is never the value stored or echoed`() {
+        val rejected = "2099-01-01T00:00:00Z"
+
+        val response = submit(ada, bondId, """{"text":"clock skew","intendedAt":"$rejected"}""")
+
+        response.status shouldBe 201
+        response.contentAsString shouldContain "\"date\":\"2026-09-15\""
+        intendedAtOf(response) shouldBe NOW
+        jdbc.queryForObject("SELECT intended_at FROM entries", java.sql.Timestamp::class.java)!!.toInstant() shouldBe NOW
+    }
+
     @Test
     fun `the creator may write before anybody joins, and that day is suspended`() {
         // 02 J1: never gate the creator on the invitee. Doc 04 §8.3a as the
@@ -258,9 +281,9 @@ internal class EntriesEndpointTest(
      * `userPrincipal` from it, and `JwtAuthenticationToken.getName()`
      * resolving to the `sub` claim `IdempotencyInterceptor.callerId` parses.
      *
-     * Also proves the reservation is scoped to `userId + endpoint + key`
-     * (doc 06 §1), not to the key alone: two different real callers reuse the
-     * identical literal key without colliding.
+     * Also proves the reservation is scoped to `(user_id, idempotency_key)`
+     * (V11's own unique constraint), not to the key alone: two different
+     * real callers reuse the identical literal key without colliding.
      */
     @Test
     fun `a real bearer token identity scopes Idempotency-Key, and two callers may share one key`() {
@@ -331,6 +354,9 @@ internal class EntriesEndpointTest(
 
     private fun bondIdOf(response: MockHttpServletResponse): String =
         Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
+
+    private fun intendedAtOf(response: MockHttpServletResponse): Instant =
+        Instant.parse(Regex(""""intendedAt":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1])
 
     /** `instance` is the path the caller typed, theirs to see (the lesson from #35's 404 body) — `BondCrossTenantTest`'s own helper. */
     private fun normalise(json: String): String = json.replace(Regex(""""instance":"[^"]*""""), "\"instance\":\"-\"")

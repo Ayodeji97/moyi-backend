@@ -71,6 +71,26 @@ rather than flipping it to `PARTIAL` the way an ordinary day's second entry does
 own mechanism, not `OPEN` wearing a different name, and treating it as the latter would put it
 back in a walk that is built to skip it.
 
+**Amendment (F4, whole-branch review): nothing in this slice ever writes a Bond-day back out
+of `SUSPENDED`, and that is an explicit obligation this ADR hands to whichever slice adds the
+reveal, not a gap this decision leaves unnoticed.** Walk it through: Ada creates a bond and
+writes on day D — the row opens `SUSPENDED`. Bea accepts the invite at 14:00 the same day and
+writes too; `GetToday` still reports `SUSPENDED` to her (`membership.awaitingSecondMember`
+governs that response, and it is still true the instant before her own write completes), and
+her write runs `withEntry()` against the same row a second time, which — correctly, per the
+decision above — keeps it `SUSPENDED` rather than promoting it to `PARTIAL`. The day now carries
+`entry_count = 2` and `status = SUSPENDED`, both members' words present, and the bond itself no
+longer awaiting anyone. Nothing in this branch, or in the state machine C2's reveal will read,
+ever moves a day off `SUSPENDED` again: C2 will look for `PARTIAL`/`PENDING_REVEAL` to decide
+what is due for reveal, and C3's close job's own partial index (`bond_days_open_idx`, V12)
+deliberately excludes `SUSPENDED` — built to leave a genuinely-still-suspended day alone. If the
+slice that adds the reveal does not also add the transition that un-suspends a day once its bond
+stops awaiting a second member, **the couple's first shared day — the one this whole slice exists
+to let them write on together — never reveals, and both of their first entries stay locked to
+each other permanently.** This slice deliberately does not build that transition: inventing it
+here, without the reveal's own state machine in view, risks contradicting it. `BondDay.withEntry`'s
+own KDoc carries the same note, for the reader who lands there instead of here.
+
 **5. `BondDayId` is a v7; `EntryId` is a v4 — different UUID versions on purpose, and each for
 a different clause of doc 06 §1.** A Bond-day is not a secret: nothing in `states.md` asks a
 caller to hide when one opened, no route puts a `BondDayId` where a stranger could guess at it,
@@ -205,6 +225,16 @@ different shape. Asserted in `OpenApiContractTest`.
   `BondDayStore.lockAndFind`. Any future store that locks a row before a read-modify-write needs
   to ask this question explicitly, because neither Hibernate nor the type system will ask it for
   you.
+- **`GET /bonds/{bondId}/today` reports `OPEN` for an archived bond's no-row day** (whole-branch
+  review; `GetToday.today`'s own no-row branch derives the reported status from
+  `membership.awaitingSecondMember` alone — never from whether the bond itself has ended). Ruled a
+  recorded gap, not a fix for this slice: there is no day status today that means "the bond ended"
+  — inventing one now risks contradicting a later slice's own state machine for it, the same
+  reasoning decision 4's amendment above gives for not inventing the un-suspend transition here.
+  The write path already refuses correctly (`SubmitEntry` answers `409 BOND_ARCHIVED` regardless
+  of what `GET /today` last reported), so the gap is cosmetic, not a security or data hole — a
+  caller reading `OPEN` on an archived bond cannot act on it successfully. Whichever slice gives
+  a bond's end a day-status meaning should close this alongside it.
 
 ## Alternatives considered
 

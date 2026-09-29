@@ -12,6 +12,19 @@
 -- yet — Flyway tolerates the gap). Forward-only (doc 07 §1) — a mistake here
 -- is corrected by a later version, never by editing this file.
 --
+-- **F11 (whole-branch review): this branch must never be applied to a
+-- database that has already run a V10 from other, unmerged work.** V10 is a
+-- gap on this worktree's own classpath, reserved but not present — Flyway
+-- tolerates that. It does NOT tolerate a schema where a *different* V10 has
+-- already run: `validate-on-migrate` (the default, and this project never
+-- turns it off) fails at boot with "Detected applied migration not resolved
+-- locally: 10" the moment this V12 — which that other V10's own author does
+-- not know about — is added to the classpath. Whoever merges this branch and
+-- whoever owns V10 elsewhere have to land in an order neither's own tests
+-- can catch: this is a merge-sequencing fact to hand-carry, not something
+-- `FlywayMigrationTest` (which only proves the versions actually on this
+-- worktree's classpath are contiguous and ascending) can verify by itself.
+--
 -- Three deltas from doc 07 §2's own DDL, each recorded in the Phase 3
 -- design §12:
 --
@@ -97,7 +110,12 @@ CREATE TABLE entries (
     author_deleted_account boolean     NOT NULL DEFAULT false,
     created_at             timestamptz NOT NULL,
     -- BR-3/BR-3a's resolved day, distinct from created_at when an offline
-    -- draft back-files (DayAssignment).
+    -- draft back-files (DayAssignment.resolve). Always the instant the day
+    -- assignment actually accepted, never the raw client claim (F1,
+    -- whole-branch review): when the caller's intendedAt fails BR-3a's
+    -- clock-skew/offline-window/closed-day checks, this column holds
+    -- submittedAt, the same as if none had been sent — an out-of-window
+    -- claim is never persisted here.
     intended_at            timestamptz NOT NULL,
     updated_at             timestamptz NOT NULL,
     revealed_at            timestamptz,

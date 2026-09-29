@@ -83,6 +83,34 @@ import org.springframework.http.HttpStatus
  *   branches already carry. Deferred by Task 8 (`PartnerEntryResponse`'s own
  *   KDoc) to whichever task next regenerated the document.
  *
+ * **F9 (whole-branch review) — three things a generated client could not
+ * previously do at all:**
+ * - **`text`/`name`'s documented `pattern` is now ECMA-262, not Java.**
+ *   [NOT_ONLY_SPACE_DOCUMENTED_PATTERN] replaces the literal `(?sU).*\S.*`
+ *   this document used to publish for both `SubmitEntryRequest.text` and
+ *   `CreateBondRequest.name` — valid to `java.util.regex.Pattern`, because
+ *   `bond.web.NOT_ONLY_SPACE` is a Java inline-flag pattern the *server*
+ *   enforces, but `new RegExp("(?sU).*\\S.*")` is a JS `SyntaxError: Invalid
+ *   group`, and Python's `re`/.NET's `Regex` reject the `U` flag the same
+ *   way. Only the *documented* pattern changes here; the server's own
+ *   enforcement (`bond.web.NOT_ONLY_SPACE`, `gratitude.web.ValidEntryText`)
+ *   is untouched. See [NOT_ONLY_SPACE_DOCUMENTED_PATTERN]'s own KDoc for the
+ *   equivalence.
+ * - **The `partnerEntry` discriminator property is now `required`.**
+ *   [discriminatePartnerEntry] used to add a `discriminator` keyed on
+ *   `status` without ever marking `status` required on either branch's own
+ *   schema — legal JSON Schema, but OpenAPI requires a discriminator's own
+ *   property to be `required`, and several generators (and every strict
+ *   validator) drop a discriminator that is not. [requireDiscriminatorProperty]
+ *   closes that on both [EntryResponse][com.moyi.gratitude.web.EntryResponse]
+ *   and [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse].
+ * - **`Idempotency-Replayed` is now a declared response header.**
+ *   [IdempotencyInterceptor][com.moyi.common.web.idempotency.IdempotencyInterceptor]
+ *   sets it on every replay, but nothing in this document said so, so a
+ *   generated client had no typed way to tell a replay from a fresh success.
+ *   [requireIdempotencyKey] adds it to every success response of
+ *   [IDEMPOTENT_OPERATIONS], mirroring how [documentETags] adds `ETag`.
+ *
  * Which codes a *particular* operation returns is doc 06 §3's table, not this
  * document: the contract a generated client is built from is the shape.
  */
@@ -124,7 +152,9 @@ class OpenApiConfiguration {
                 }
             }
             documentEntryTextLimits(api)
+            documentBondNamePattern(api)
             discriminatePartnerEntry(api)
+            requireDiscriminatorProperty(api)
         }
 
     /**
@@ -166,7 +196,7 @@ class OpenApiConfiguration {
                 ?.get(ENTRY_TEXT_PROPERTY) ?: return
         text.minLength = 1
         text.maxLength = ENTRY_TEXT_MAX_OCTETS
-        text.pattern = NOT_ONLY_SPACE
+        text.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
         text.description =
             "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does " +
             "not count either), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
@@ -242,6 +272,20 @@ class OpenApiConfiguration {
      * see the class KDoc's own bullet for why this is an addition rather
      * than, as [requireIfMatch] does for `If-Match`, a correction of what
      * springdoc already found.
+     *
+     * **Also adds the `Idempotency-Replayed` response header** to every
+     * success response of the same operations (F9, whole-branch review —
+     * folded into this function rather than kept a separate one, to stay
+     * under detekt's `TooManyFunctions` threshold the way
+     * [discriminatePartnerEntry]'s own KDoc explains for its sibling
+     * functions).
+     * [IdempotencyInterceptor][com.moyi.common.web.idempotency.IdempotencyInterceptor]
+     * sets that header on every replay and never on a fresh response, but
+     * nothing before this declared it anywhere in the document, so a
+     * generated client had no typed field to read it from — the same gap
+     * [documentETags] closes for `ETag`, and added the same way: the header
+     * is set on the response object directly, not through anything springdoc
+     * can introspect from the handler's own return type.
      */
     private fun requireIdempotencyKey(operation: Operation) {
         if (operation.operationId !in IDEMPOTENT_OPERATIONS) return
@@ -256,6 +300,19 @@ class OpenApiConfiguration {
                         "422; the same key while the first attempt is still in flight is 409.",
                 ).schema(StringSchema()),
         )
+        operation.responses
+            .filterKeys { it.startsWith("2") }
+            .values
+            .forEach { response ->
+                response.addHeaderObject(
+                    IDEMPOTENCY_REPLAYED_HEADER,
+                    Header()
+                        .description(
+                            "`true` when this response is a stored replay of an earlier request under the same " +
+                                "Idempotency-Key (doc 06 §1); absent on a fresh response.",
+                        ).schema(StringSchema()),
+                )
+            }
     }
 
     private fun problemResponse(status: HttpStatus): ApiResponse =
@@ -306,9 +363,6 @@ class OpenApiConfiguration {
         /** Mirrors `gratitude.domain.EntryText.MAX_GRAPHEMES` — see [ENTRY_TEXT_MAX_OCTETS]'s own note. */
         private const val ENTRY_TEXT_MAX_GRAPHEMES = 500
 
-        /** Mirrors `gratitude.web.NOT_ONLY_SPACE` (a copy of `bond.web.NOT_ONLY_SPACE`) — see [ENTRY_TEXT_MAX_OCTETS]'s own note. */
-        private const val NOT_ONLY_SPACE = "(?sU).*\\S.*"
-
         /**
          * The operations that answer `409`, by id.
          *
@@ -355,6 +409,7 @@ class OpenApiConfiguration {
         private val IDEMPOTENT_OPERATIONS = setOf("submitEntry")
 
         private const val IDEMPOTENCY_KEY = "Idempotency-Key"
+        private const val IDEMPOTENCY_REPLAYED_HEADER = "Idempotency-Replayed"
 
         /**
          * Response schemas whose resource carries a row version, and therefore
@@ -366,12 +421,74 @@ class OpenApiConfiguration {
     }
 }
 
-/** `TodayResponse`'s schema name and its `partnerEntry` property — see [discriminatePartnerEntry]. */
+/**
+ * The ECMA-262-compatible *documented* equivalent of `bond.web.NOT_ONLY_SPACE`'s
+ * Java-only `(?sU).*\S.*` (F9, whole-branch review — this constant used to be
+ * named `NOT_ONLY_SPACE`, live inside [OpenApiConfiguration]'s own companion,
+ * and its KDoc claimed it "mirrors `gratitude.web.NOT_ONLY_SPACE`", which an
+ * earlier fix round deleted; that mirror pointed at nothing). File-scoped
+ * rather than a class member, for the reason [discriminatePartnerEntry]'s own
+ * KDoc gives: [OpenApiConfiguration.documentEntryTextLimits] (a class member)
+ * and [documentBondNamePattern] (top-level, below) both need it.
+ *
+ * `(?sU)` is a Java `Pattern` inline-flag group: `s` for `DOTALL` (`.`
+ * crosses a newline) and `U` for `UNICODE_CHARACTER_CLASS` (`\S` excludes
+ * every Unicode whitespace code point, not just the ASCII ones). Neither
+ * flag has an ECMA-262 equivalent an inline group can express — `new
+ * RegExp("(?sU).*\\S.*")` is a JS `SyntaxError: Invalid group`, and Python's
+ * `re.compile` and .NET's `Regex` reject the `U` flag the same way a
+ * generated client's runtime would.
+ *
+ * `[\s\S]*\S[\s\S]*` says the same thing without either flag: `[\s\S]`
+ * matches any character at all (the classic flag-free `DOTALL` substitute,
+ * since a character class that is the union of "whitespace" and "not
+ * whitespace" excludes nothing), and the lone `\S` in the middle demands at
+ * least one non-whitespace character somewhere in the string — exactly
+ * `.*\S.*`'s own shape. No `(?U)` counterpart is needed: JS, Python and
+ * .NET's `\S` already excludes the Unicode whitespace category `(?U)` exists
+ * to add in Java, so the two patterns reject the same strings in every case
+ * this constant is used for (a lone non-breaking space, an all-whitespace
+ * multi-line value). This is the *documented* pattern only — the server's
+ * own enforcement (`bond.web.NOT_ONLY_SPACE`, `gratitude.web.ValidEntryText`)
+ * is untouched by this constant.
+ */
+private const val NOT_ONLY_SPACE_DOCUMENTED_PATTERN = "[\\s\\S]*\\S[\\s\\S]*"
+
+/** `CreateBondRequest`'s schema name and its `name` property — see [documentBondNamePattern]. */
+private const val CREATE_BOND_REQUEST = "CreateBondRequest"
+private const val BOND_NAME_PROPERTY = "name"
+
+/**
+ * `CreateBondRequest.name`'s documented `pattern`, corrected the same way
+ * [OpenApiConfiguration.documentEntryTextLimits] corrects
+ * `SubmitEntryRequest.text`'s (F9, whole-branch review). A top-level
+ * function, not a member — [discriminatePartnerEntry]'s own KDoc gives the
+ * reason: the class already sat at detekt's `TooManyFunctions` threshold.
+ *
+ * Unlike `text`, `name` carries a real `@field:Pattern(regexp =
+ * bond.web.NOT_ONLY_SPACE)`, which springdoc already reads and publishes as
+ * this schema's `pattern` — so, left alone, this document would keep
+ * publishing `bond.web.NOT_ONLY_SPACE`'s own Java-only `(?sU).*\S.*`
+ * verbatim. This overrides the *published* value only: `@field:Pattern`'s
+ * `regexp` keeps enforcing the original, server-side — nothing here touches
+ * `CreateBondRequest` itself.
+ */
+private fun documentBondNamePattern(api: OpenAPI) {
+    val name =
+        api.components.schemas[CREATE_BOND_REQUEST]
+            ?.properties
+            ?.get(BOND_NAME_PROPERTY) ?: return
+    name.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
+}
+
+/** `TodayResponse`'s schema name and its `partnerEntry` property — see [discriminatePartnerEntry] and [requireDiscriminatorProperty]. */
 private const val TODAY_RESPONSE = "TodayResponse"
 private const val PARTNER_ENTRY_PROPERTY = "partnerEntry"
 private const val DISCRIMINATOR_PROPERTY = "status"
-private const val ENTRY_RESPONSE_REF = "#/components/schemas/EntryResponse"
-private const val LOCKED_ENTRY_RESPONSE_REF = "#/components/schemas/LockedEntryResponse"
+private const val ENTRY_RESPONSE = "EntryResponse"
+private const val LOCKED_ENTRY_RESPONSE = "LockedEntryResponse"
+private const val ENTRY_RESPONSE_REF = "#/components/schemas/$ENTRY_RESPONSE"
+private const val LOCKED_ENTRY_RESPONSE_REF = "#/components/schemas/$LOCKED_ENTRY_RESPONSE"
 
 /**
  * Gives `TodayResponse.partnerEntry`'s `oneOf` a `discriminator` — the fix
@@ -429,4 +546,35 @@ private fun discriminatePartnerEntry(api: OpenAPI) {
                     "LOCKED" to LOCKED_ENTRY_RESPONSE_REF,
                 ),
             )
+}
+
+/**
+ * Marks [DISCRIMINATOR_PROPERTY] `required` on both of
+ * [discriminatePartnerEntry]'s branches — F9, whole-branch review.
+ * [discriminatePartnerEntry] gives `partnerEntry`'s `oneOf` a `discriminator`
+ * keyed on `status`, but neither
+ * [com.moyi.gratitude.web.EntryResponse] nor
+ * [com.moyi.gratitude.web.LockedEntryResponse] declared a `required` array of
+ * its own, which left the discriminator property optional in both branches —
+ * legal JSON Schema, but the OpenAPI spec requires a discriminator's own
+ * property to be `required`, and several generators (and every strict
+ * validator) drop a discriminator that is not, which would have silently
+ * undone the fix [discriminatePartnerEntry] makes.
+ *
+ * Each schema is `allOf: [$ref PartnerEntryResponse, {type: object,
+ * properties: {...}}]` (a Kotlin data class `allOf`-ing the sealed interface
+ * it implements) — `status` lives on the second, inline element of that list,
+ * not on the named schema itself, so this reaches into `allOf.last()` rather
+ * than the schema's own (empty) `properties`.
+ */
+private fun requireDiscriminatorProperty(api: OpenAPI) {
+    listOf(ENTRY_RESPONSE, LOCKED_ENTRY_RESPONSE).forEach { name ->
+        val fields =
+            api.components.schemas[name]
+                ?.allOf
+                ?.lastOrNull() ?: return@forEach
+        if (DISCRIMINATOR_PROPERTY !in fields.required.orEmpty()) {
+            fields.addRequiredItem(DISCRIMINATOR_PROPERTY)
+        }
+    }
 }

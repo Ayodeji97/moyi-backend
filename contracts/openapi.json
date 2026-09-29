@@ -1203,7 +1203,15 @@
                 }
               }
             },
-            "description" : "Created"
+            "description" : "Created",
+            "headers" : {
+              "Idempotency-Replayed" : {
+                "description" : "`true` when this response is a stored replay of an earlier request under the same Idempotency-Key (doc 06 §1); absent on a fresh response.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
           },
           "400" : {
             "content" : {
@@ -2149,7 +2157,7 @@
             "type" : "string",
             "maxLength" : 60,
             "minLength" : 0,
-            "pattern" : "(?sU).*\\S.*"
+            "pattern" : "[\\s\\S]*\\S[\\s\\S]*"
           },
           "reminderTimezone" : {
             "type" : [ "string", "null" ]
@@ -2237,7 +2245,8 @@
             "text" : {
               "type" : "string"
             }
-          }
+          },
+          "required" : [ "status" ]
         } ]
       },
       "FieldViolation" : {
@@ -2335,7 +2344,8 @@
               "type" : "string",
               "enum" : [ "LOCKED" ]
             }
-          }
+          },
+          "required" : [ "status" ]
         } ]
       },
       "LoginRequest" : {
@@ -2655,7 +2665,7 @@
             "description" : "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does not count either), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted.",
             "maxLength" : 8192,
             "minLength" : 1,
-            "pattern" : "(?sU).*\\S.*"
+            "pattern" : "[\\s\\S]*\\S[\\s\\S]*"
           },
           "voiceMediaId" : {
             "type" : [ "string", "null" ],

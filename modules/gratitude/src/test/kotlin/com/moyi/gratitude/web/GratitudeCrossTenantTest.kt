@@ -48,10 +48,15 @@ import javax.sql.DataSource
  * **Every request carries a fresh `Idempotency-Key`.** [call] mints one per
  * call regardless of route: harmless for a route `@Idempotent` does not
  * mark, and necessary for `POST /bonds/{bondId}/entries` — the reservation
- * is keyed on `userId + endpoint + key` (doc 06 §1), and `endpoint` is the
- * literal request URI, so reusing one key across this test's three distinct
- * URIs for the same caller (`ada`, against a random id and then a
- * non-`UUID`) would collide as a reused key rather than exercise the guard.
+ * is keyed on `(user_id, idempotency_key)` alone (V11's own unique
+ * constraint), with `endpoint` stored alongside it and compared in code
+ * (F6, whole-branch review — this KDoc previously described the key itself
+ * as `userId + endpoint + key`, which V11 does not declare). `endpoint` is
+ * the literal request URI, so reusing one key across this test's three
+ * distinct URIs for the same caller (`ada`, against a random id and then a
+ * non-`UUID`) would still collide as a reused key (`422
+ * IDEMPOTENCY_KEY_REUSED`, from that comparison) rather than exercise the
+ * guard this test is actually for.
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
