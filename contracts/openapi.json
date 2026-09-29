@@ -2540,7 +2540,11 @@
             "format" : "date-time"
           },
           "text" : {
-            "type" : "string"
+            "type" : "string",
+            "description" : "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does not count either), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted.",
+            "maxLength" : 8192,
+            "minLength" : 1,
+            "pattern" : "(?sU).*\\S.*"
           },
           "voiceMediaId" : {
             "type" : [ "string", "null" ],

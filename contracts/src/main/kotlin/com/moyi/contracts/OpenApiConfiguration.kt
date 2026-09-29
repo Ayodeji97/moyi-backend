@@ -113,7 +113,59 @@ class OpenApiConfiguration {
                     requireIdempotencyKey(operation)
                 }
             }
+            documentEntryTextLimits(api)
         }
+
+    /**
+     * States FR-041's octet cap on the wire schema, declaratively — fix
+     * round 2, N1. `gratitude.web.ValidEntryText` asks the domain
+     * (`EntryText.of`) instead of restating the limit as a Bean Validation
+     * annotation, which is the right call for *enforcement* (fix round 1,
+     * C1 — a restated `@Size` measured the wrong unit and let an over-length
+     * body reach the domain as an uncaught `500`) but left springdoc with
+     * nothing on the field to read at all: `SubmitEntryRequest.text`
+     * generated as a bare `{"type":"string"}`, so a generated client had no
+     * client-side hint and every over-length body became a round trip the
+     * server was always going to refuse anyway.
+     *
+     * `gratitude.domain.EntryText`'s two constants are `internal` to that
+     * module, which `contracts` does not depend on (the class KDoc's own
+     * "nothing here names a controller" — the same reason [CONFLICTING_OPERATIONS]
+     * and [CONDITIONAL_OPERATIONS] are literal operation ids rather than
+     * typed references), so [ENTRY_TEXT_MAX_OCTETS] and [ENTRY_TEXT_MAX_GRAPHEMES]
+     * below are literals that mirror those constants rather than references
+     * to them.
+     *
+     * **`maxLength` states the octet cap, not the grapheme cap, and the two
+     * are not the same number.** OpenAPI's `maxLength` counts UTF-16
+     * characters (the same unit `@Size` used, and the same unit mismatch
+     * fix round 1, C1 found) — a body of 501 plain ASCII graphemes is over
+     * FR-041's real, 500-grapheme limit while comfortably under a
+     * `maxLength: 8192` hint, and a body of a few thousand 4-byte-UTF-8
+     * emoji can be under `maxLength: 8192` while over the octet cap. The
+     * hint is therefore a client-side backstop against a clearly oversized
+     * body, not a promise that everything under it will be accepted — the
+     * description says so, and [EntryText.of] (`gratitude`, not this
+     * module) remains the one place both limits are actually enforced.
+     */
+    private fun documentEntryTextLimits(api: OpenAPI) {
+        val text =
+            api.components.schemas[SUBMIT_ENTRY_REQUEST]
+                ?.properties
+                ?.get(ENTRY_TEXT_PROPERTY) ?: return
+        text.minLength = 1
+        text.maxLength = ENTRY_TEXT_MAX_OCTETS
+        text.pattern = NOT_ONLY_SPACE
+        text.description =
+            "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does " +
+            "not count either), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
+            "$ENTRY_TEXT_MAX_GRAPHEMES user-perceived characters (graphemes, not UTF-16 code units — an " +
+            "emoji sequence can be one grapheme and several of those). `maxLength` here states the octet " +
+            "cap in UTF-16 characters, which is not the same unit as either real limit and both are wider " +
+            "than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a " +
+            "guarantee. The server enforces both limits exactly and is the only authority on whether a " +
+            "given body is accepted."
+    }
 
     private fun statusesFor(
         operation: Operation,
@@ -232,6 +284,19 @@ class OpenApiConfiguration {
         private const val HEADER_PARAMETER = "header"
         private const val ETAG = "ETag"
         private const val IF_MATCH = "If-Match"
+
+        /** `SubmitEntryRequest`'s schema name and its `text` property — see [documentEntryTextLimits]. */
+        private const val SUBMIT_ENTRY_REQUEST = "SubmitEntryRequest"
+        private const val ENTRY_TEXT_PROPERTY = "text"
+
+        /** Mirrors `gratitude.domain.EntryText.MAX_OCTETS` — `internal`, and this module does not depend on `gratitude`. */
+        private const val ENTRY_TEXT_MAX_OCTETS = 8192
+
+        /** Mirrors `gratitude.domain.EntryText.MAX_GRAPHEMES` — see [ENTRY_TEXT_MAX_OCTETS]'s own note. */
+        private const val ENTRY_TEXT_MAX_GRAPHEMES = 500
+
+        /** Mirrors `gratitude.web.NOT_ONLY_SPACE` (a copy of `bond.web.NOT_ONLY_SPACE`) — see [ENTRY_TEXT_MAX_OCTETS]'s own note. */
+        private const val NOT_ONLY_SPACE = "(?sU).*\\S.*"
 
         /**
          * The operations that answer `409`, by id.

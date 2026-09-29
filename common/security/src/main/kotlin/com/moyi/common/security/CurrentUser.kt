@@ -80,17 +80,23 @@ class SecurityWebMvcConfigurer(
     /**
      * Fix round 1, I4: an explicit order, not the registration order two
      * unrelated `WebMvcConfigurer` beans across two modules happen to run
-     * in. [RateLimitInterceptor] must run before `common.web.idempotency.IdempotencyInterceptor`
-     * — every wiring site of that interceptor (`app.MoyiApplication`,
-     * `gratitude.infra.GratitudeTestApplication`, `common:web`'s own
-     * `IdempotencyTestApplication`) registers it at [RATE_LIMIT_ORDER] `+ 10`
-     * or later for exactly this reason: a caller with no tokens left must
-     * never reach the point of reserving an `Idempotency-Key`, because a
-     * `429` is neither `ex != null` nor `>= 500` — the two conditions
-     * `IdempotencyKeyStore.complete` discards a reservation under — so a
-     * reservation made before the limiter refuses the request risks being
-     * stored as "the response" and replayed to the caller's own
-     * correctly-behaved retry for the rest of the 24h window.
+     * in. [RateLimitInterceptor] must run before `common.web.idempotency.IdempotencyInterceptor`:
+     * a caller with no tokens left must never reach the point of reserving
+     * an `Idempotency-Key`, because a `429` is neither `ex != null` nor
+     * `>= 500` — the two conditions `IdempotencyKeyStore.complete` discards
+     * a reservation under — so a reservation made before the limiter
+     * refuses the request risks being stored as "the response" and
+     * replayed to the caller's own correctly-behaved retry for the rest of
+     * the 24h window.
+     *
+     * `common.web.idempotency.IdempotencyConfiguration.ORDER` is a fixed,
+     * generously late value (`1000`), not an offset from [RATE_LIMIT_ORDER]
+     * — `common:web` cannot import this class (`common:security` depends on
+     * `common:web`, not the other way round; see `IdempotencyInterceptor.callerId`'s
+     * own KDoc for the same reason), so that file states its own reasoning
+     * rather than referencing this constant. [RATE_LIMIT_ORDER] only needs
+     * to stay well below `1000` for the two to agree; it is not read by
+     * that other module.
      */
     override fun addInterceptors(registry: InterceptorRegistry) {
         registry.addInterceptor(rateLimits).order(RATE_LIMIT_ORDER)

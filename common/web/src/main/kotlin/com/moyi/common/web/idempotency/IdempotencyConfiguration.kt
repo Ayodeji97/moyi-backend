@@ -19,10 +19,19 @@ import java.time.Clock
  * simply does nothing, which is how this was found — a replay test quietly
  * running the handler twice rather than replaying the first response. A
  * fourth context copying the same four methods by hand was only ever going
- * to repeat that discovery. `@Import(IdempotencyConfiguration::class)` is
- * the one thing every context that needs this feature has to remember now,
- * and forgetting it is a compile-time-visible absence of a bean a
- * `@Idempotent` handler needs, not a silent no-op.
+ * to repeat that discovery.
+ *
+ * **Correction (fix round 2, N4): forgetting `@Import(IdempotencyConfiguration::class)`
+ * is still a silent no-op, not a compile-time failure.** Nothing requires
+ * these beans to exist — a context that omits the import simply has no
+ * `IdempotencyInterceptor` registered, and `@Idempotent` on a handler in it
+ * does exactly what it did before this class existed: nothing, quietly. An
+ * earlier version of this KDoc claimed otherwise; it was wrong. What this
+ * class actually buys is that the wiring exists in exactly one place, so
+ * three copies cannot drift from each other into three different bugs —
+ * not that a missing import is caught. Catching that would need something
+ * else (a test asserting the bean exists in every context that declares an
+ * `@Idempotent` handler, say), which nothing here does yet.
  *
  * Deliberately **not** `@Component`-scanned into every module that merely
  * depends on `common:web` — see [IdempotencyKeyStore]'s own KDoc: several
@@ -43,6 +52,19 @@ import java.time.Clock
  * when it is named directly in an `@Import`, with no stereotype annotation
  * required — so leaving this class bare is what keeps it invisible to a
  * scan and visible only to a deliberate `@Import`.
+ *
+ * **Two costs of lite mode, both worth knowing before touching this file.**
+ * First: without `@Configuration`, Spring does not CGLIB-proxy this class,
+ * so a `@Bean` method calling *another `@Bean` method on this class
+ * directly* would not resolve to the container's singleton — it would run
+ * the plain Kotlin method body and construct a second, uncontained instance.
+ * Invisible today because every method below takes its dependencies as
+ * parameters rather than calling a sibling method; it stops being invisible
+ * the day someone "simplifies" one to call another directly. Second: most
+ * IDEs' Spring inspections (IntelliJ included) will flag a class full of
+ * `@Bean` methods with no `@Configuration` and suggest adding it — doing so
+ * reintroduces the exact `common:security` failure this class's own KDoc
+ * describes above. Leave it bare.
  */
 class IdempotencyConfiguration {
     @Bean
