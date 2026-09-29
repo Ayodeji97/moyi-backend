@@ -85,6 +85,10 @@ internal class GratitudeCrossTenantTest(
             // KDoc on why that ordering is still fine (a fact about the
             // caller's own request, not about the bond).
             "POST /api/v1/bonds/{bondId}/entries" to Fixture(body = """{"text":"cross-tenant"}"""),
+            // Task 8. A GET, no body — RevealGateTest is this route's own
+            // suite; this is only the T-02 stranger/unknown-id/malformed-id
+            // coverage every bond-scoped route owes this table.
+            "GET /api/v1/bonds/{bondId}/today" to Fixture(),
         )
 
     private data class Fixture(

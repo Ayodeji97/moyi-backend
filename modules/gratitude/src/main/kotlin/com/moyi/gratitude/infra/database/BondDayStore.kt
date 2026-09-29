@@ -65,6 +65,26 @@ internal class BondDayStore(
     fun find(id: BondDayId): BondDay? = days.findById(id.value)?.toDomain()
 
     /**
+     * The day for a bond and a date, if one has ever been opened — `null`,
+     * not created, when nobody has written yet.
+     *
+     * **This is [GetToday]'s own read, and the reason it exists separately
+     * from [openOrGet]: a `GET` must never manufacture the row [openOrGet]
+     * exists to lazily open for a write.** Every other caller of this store
+     * either already holds a [BondDayId] ([find], [lockAndFind]) or is about
+     * to create the row if it is missing ([openOrGet]) — [GetToday] is the
+     * first caller that has to ask "does this day exist" and accept "no" as
+     * a real, cheap answer, rather than opening it to find out. Delegates to
+     * the same [BondDayRepository.findByBondIdAndDate] [openOrGet] already
+     * uses internally to read back what it just opened or found — this is
+     * that same query, exposed for a caller with no write to make first.
+     */
+    fun findByBondAndDate(
+        bondId: UUID,
+        date: LocalDate,
+    ): BondDay? = days.findByBondIdAndDate(bondId, date)?.toDomain()
+
+    /**
      * Holds the day's row for the rest of the transaction, then reads it back
      * fresh under that lock (fix round 1, I3). `SubmitEntry`'s own use:
      * `entry_count`/`status` is a read-modify-write — [BondDay.withEntry] is
