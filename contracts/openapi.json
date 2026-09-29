@@ -1175,6 +1175,14 @@
           "schema" : {
             "type" : "string"
           }
+        }, {
+          "description" : "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the same body returns the first attempt's stored response; the same key with a different body is 422; the same key while the first attempt is still in flight is 409.",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
         } ],
         "requestBody" : {
           "content" : {
@@ -1236,6 +1244,16 @@
               }
             },
             "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
           },
           "422" : {
             "content" : {
@@ -2522,10 +2540,7 @@
             "format" : "date-time"
           },
           "text" : {
-            "type" : "string",
-            "maxLength" : 8192,
-            "minLength" : 0,
-            "pattern" : "(?sU).*\\S.*"
+            "type" : "string"
           },
           "voiceMediaId" : {
             "type" : [ "string", "null" ],

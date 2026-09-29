@@ -17,6 +17,7 @@ import io.swagger.v3.oas.models.media.MediaType
 import io.swagger.v3.oas.models.media.ObjectSchema
 import io.swagger.v3.oas.models.media.Schema
 import io.swagger.v3.oas.models.media.StringSchema
+import io.swagger.v3.oas.models.parameters.Parameter
 import io.swagger.v3.oas.models.responses.ApiResponse
 import io.swagger.v3.oas.models.security.SecurityRequirement
 import io.swagger.v3.oas.models.security.SecurityScheme
@@ -62,6 +63,15 @@ import org.springframework.http.HttpStatus
  *   entirely: that a client may leave it out. [CONDITIONAL_OPERATIONS] is the
  *   one list of operations that demand a condition, and it now says so in both
  *   places. Raised by the review of PR #40.
+ * - **`Idempotency-Key`, required.** `@Idempotent` (`common:web`) is a marker
+ *   annotation on the handler method, not a Spring-visible parameter, so
+ *   springdoc has no way to know the header exists at all — unlike `If-Match`,
+ *   there is nothing here to correct the optionality of, only a parameter to
+ *   add outright. [IDEMPOTENT_OPERATIONS] names the operations that carry
+ *   `@Idempotent`, mirroring [CONDITIONAL_OPERATIONS]'s own shape. Fix round
+ *   1, C2: found alongside the missing `409` below — a generated client had
+ *   no header to send at all, so every call to `POST /bonds/{bondId}/entries`
+ *   it made would have been refused as `422 VALIDATION_FAILED`.
  *
  * Which codes a *particular* operation returns is doc 06 §3's table, not this
  * document: the contract a generated client is built from is the shape.
@@ -100,6 +110,7 @@ class OpenApiConfiguration {
                     }
                     documentETags(operation)
                     requireIfMatch(operation)
+                    requireIdempotencyKey(operation)
                 }
             }
         }
@@ -163,6 +174,27 @@ class OpenApiConfiguration {
         }
     }
 
+    /**
+     * Adds `Idempotency-Key` outright to every `@Idempotent` operation —
+     * see the class KDoc's own bullet for why this is an addition rather
+     * than, as [requireIfMatch] does for `If-Match`, a correction of what
+     * springdoc already found.
+     */
+    private fun requireIdempotencyKey(operation: Operation) {
+        if (operation.operationId !in IDEMPOTENT_OPERATIONS) return
+        operation.addParametersItem(
+            Parameter()
+                .`in`(HEADER_PARAMETER)
+                .name(IDEMPOTENCY_KEY)
+                .required(true)
+                .description(
+                    "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the " +
+                        "same body returns the first attempt's stored response; the same key with a different body is " +
+                        "422; the same key while the first attempt is still in flight is 409.",
+                ).schema(StringSchema()),
+        )
+    }
+
     private fun problemResponse(status: HttpStatus): ApiResponse =
         ApiResponse()
             .description(status.reasonPhrase)
@@ -212,7 +244,21 @@ class OpenApiConfiguration {
          * (ADR-0028).
          */
         private val CONFLICTING_OPERATIONS =
-            setOf("createBond", "createBondInvite", "accept", "leaveBond", "revokeBondInvite", "patchBond", "replaceMemberSettings")
+            setOf(
+                "createBond",
+                "createBondInvite",
+                "accept",
+                "leaveBond",
+                "revokeBondInvite",
+                "patchBond",
+                "replaceMemberSettings",
+                // Fix round 1, C2: BOND_ARCHIVED, DAY_CLOSED, ENTRY_ALREADY_EXISTS
+                // and IDEMPOTENCY_KEY_IN_FLIGHT are all 409s this operation can
+                // give — the headline behaviour of the slice (BR-2) among them
+                // — and none of them was visible to a generated client without
+                // this entry.
+                "submitEntry",
+            )
 
         /**
          * Operations that require `If-Match` (doc 06 §1) and can therefore answer
@@ -224,6 +270,15 @@ class OpenApiConfiguration {
          * condition at all, because nobody else can write that row (ADR-0029).
          */
         private val CONDITIONAL_OPERATIONS = setOf("patchBond")
+
+        /**
+         * Operations carrying `@Idempotent` (doc 06 §1), by id — the reason
+         * [requireIdempotencyKey] exists at all: springdoc cannot read this
+         * off the controller the way it reads an actual `@RequestHeader`.
+         */
+        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry")
+
+        private const val IDEMPOTENCY_KEY = "Idempotency-Key"
 
         /**
          * Response schemas whose resource carries a row version, and therefore

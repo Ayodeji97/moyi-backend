@@ -30,10 +30,12 @@ interface BondAccess {
 }
 
 /**
- * A caller's place in a bond, and the four facts about the bond that a write
+ * A caller's place in a bond, and the five facts about the bond that a write
  * outside this module needs: whose calendar decides the day (doc 04 §6), when
- * a day reveals (FR-062), whether freezes are off (FR-073), and whether the
- * bond takes writes at all (BR-9).
+ * a day reveals (FR-062), whether freezes are off (FR-073), whether the bond
+ * takes writes at all (BR-9), and whether it is still waiting for a second
+ * member (doc 04 §8.3a, `gratitude`'s own use — [awaitingSecondMember]'s own
+ * KDoc has the reason).
  *
  * [hasLeft] is carried rather than withheld, for the reason `Membership` gives:
  * `states.md` §9 keeps the archive readable after a bond ends. **A caller must
@@ -66,7 +68,7 @@ class BondMembership internal constructor(
      * for both `PENDING_MEMBER` and `ACTIVE` — so this is a fifth bond fact
      * rather than a reinterpretation of one already here.
      */
-    val isPendingMember: Boolean,
+    val awaitingSecondMember: Boolean,
 ) {
     /** Ids only — a bond's name is the couple's words (doc 18 §9). */
     override fun toString(): String = "BondMembership(bondId=$bondId, memberId=$memberId)"

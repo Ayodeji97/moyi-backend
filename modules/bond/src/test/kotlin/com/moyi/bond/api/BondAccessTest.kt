@@ -62,7 +62,7 @@ internal class BondAccessTest(
         // Freshly created, waiting for its second member — the fact
         // `gratitude`'s SubmitEntry uses to open a day SUSPENDED (doc 04
         // §8.3a).
-        membership.isPendingMember shouldBe true
+        membership.awaitingSecondMember shouldBe true
 
         // Doc 06 §2 and T-02: one answer for a stranger and for an id that
         // names nobody, and it is the same one the bond routes give.

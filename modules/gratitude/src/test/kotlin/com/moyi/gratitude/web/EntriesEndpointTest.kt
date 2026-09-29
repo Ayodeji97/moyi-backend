@@ -26,6 +26,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -116,8 +117,13 @@ internal class EntriesEndpointTest(
     fun `an archived bond takes no entries, and a member who left is refused too`() {
         leave(ada, bondId).status shouldBe 204
 
-        submit(ada, bondId, """{"text":"one more"}""").contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
-        submit(bea, bondId, """{"text":"one more"}""").contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        val adasAttempt = submit(ada, bondId, """{"text":"one more"}""")
+        adasAttempt.status shouldBe 409
+        adasAttempt.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+
+        val beasAttempt = submit(bea, bondId, """{"text":"one more"}""")
+        beasAttempt.status shouldBe 409
+        beasAttempt.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
     }
 
     @Test
@@ -126,6 +132,53 @@ internal class EntriesEndpointTest(
 
         response.status shouldBe 422
         response.contentAsString shouldContain "\"code\":\"MEDIA_NOT_YET_SUPPORTED\""
+    }
+
+    /**
+     * Fix round 1, I6: the same refusal for the other media field —
+     * `SubmitEntry`'s check is `imageMediaId != null || voiceMediaId !=
+     * null`, not just the first half of it.
+     */
+    @Test
+    fun `a voice media id is refused too, not only an image one`() {
+        val response = submit(ada, bondId, """{"text":"listen","voiceMediaId":"${UUID.randomUUID()}"}""")
+
+        response.status shouldBe 422
+        response.contentAsString shouldContain "\"code\":\"MEDIA_NOT_YET_SUPPORTED\""
+    }
+
+    /**
+     * Fix round 1, I6: BR-3a is wired correctly — `DayAssignment.dateFor`'s
+     * `isClosed` lambda is null-safe and the offline-window/clock-skew limits
+     * are Task 4's own pure unit tests — but nothing before this exercised
+     * `SubmitEntryRequest.intendedAt` through the actual HTTP request, so a
+     * broken link between the wire field and `EntryDraft.intendedAt` (a typo
+     * in the Jackson property name, say) would have passed every existing
+     * test in this suite.
+     */
+    @Test
+    fun `an offline draft's intendedAt files the entry against that earlier day`() {
+        // 20 hours before NOW: inside the 36h offline window, not after
+        // NOW plus the 5-minute clock-skew allowance — trusted. NOW is
+        // 2026-09-15T10:00:00Z (2026-09-15 11:00 Lagos); 20 hours earlier is
+        // 2026-09-14T14:00:00Z (2026-09-14 15:00 Lagos) — a day *before* the
+        // one `submittedAt` alone would have filed this under.
+        val intendedAt = NOW.minus(Duration.ofHours(20))
+
+        val response = submit(ada, bondId, """{"text":"written on the flight","intendedAt":"$intendedAt"}""")
+
+        response.status shouldBe 201
+        jdbc.queryForObject("SELECT date::text FROM bond_days", String::class.java) shouldBe "2026-09-14"
+    }
+
+    @Test
+    fun `an intendedAt past the 36h offline window is ignored, and the entry lands on today`() {
+        val tooOld = NOW.minus(Duration.ofHours(40))
+
+        val response = submit(ada, bondId, """{"text":"too old to back-file","intendedAt":"$tooOld"}""")
+
+        response.status shouldBe 201
+        jdbc.queryForObject("SELECT date::text FROM bond_days", String::class.java) shouldBe "2026-09-15"
     }
 
     @Test
@@ -144,6 +197,32 @@ internal class EntriesEndpointTest(
     fun `an entry of only whitespace is 422 naming the field, and never a 500`() {
         for (blank in listOf("", " ", "\\u00a0")) {
             val response = submit(ada, bondId, """{"text":"$blank"}""")
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"text\""
+        }
+    }
+
+    /**
+     * Fix round 1, C1: the edge's first draft restated FR-041's octet limit
+     * with `@Size(max = 8192)`, which counts UTF-16 characters, not UTF-8
+     * octets — so a body that is under the character count but over the real
+     * byte count sailed past the edge and reached [com.moyi.gratitude.domain.EntryText.of]
+     * as an uncaught `IllegalArgumentException`, a `500` rather than FR-041's
+     * own `422`. `[ValidEntryText]` closes that by asking the domain instead
+     * of restating it — proven here on both limits it enforces.
+     */
+    @Test
+    fun `an entry over FR-041's limits is 422 naming the field, and never a 500`() {
+        // 501 graphemes: passes the old (wrong-unit) edge check by a wide
+        // margin, and was never checked for grapheme count at the edge at all.
+        val tooManyGraphemes = "a".repeat(501)
+        // 2,058 single-codepoint emoji: 4,116 UTF-16 characters (under the old
+        // `@Size(max = 8192)`) but 8,232 UTF-8 octets (over the real cap) —
+        // the exact shape of body the old edge check let through wrongly.
+        val tooManyOctets = "😀".repeat(2058)
+
+        for (tooLong in listOf(tooManyGraphemes, tooManyOctets)) {
+            val response = submit(ada, bondId, """{"text":"$tooLong"}""")
             response.status shouldBe 422
             response.contentAsString shouldContain "\"field\":\"text\""
         }

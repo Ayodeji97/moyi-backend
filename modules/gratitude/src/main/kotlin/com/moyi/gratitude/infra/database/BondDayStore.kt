@@ -4,6 +4,7 @@ import com.moyi.common.core.IdGenerator
 import com.moyi.gratitude.domain.BondDay
 import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.BondDayStatus
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 import java.time.Instant
 import java.time.LocalDate
@@ -25,6 +26,7 @@ import java.util.UUID
 internal class BondDayStore(
     private val days: BondDayRepository,
     private val ids: IdGenerator,
+    private val entityManager: EntityManager,
 ) {
     /**
      * The first write to reach a bond's date opens it; every later one
@@ -61,6 +63,40 @@ internal class BondDayStore(
 
     /** The day by its own id, for a caller that already holds one — `BondDayPersistenceTest`'s own check that the zone stuck. */
     fun find(id: BondDayId): BondDay? = days.findById(id.value)?.toDomain()
+
+    /**
+     * Holds the day's row for the rest of the transaction, then reads it back
+     * fresh under that lock (fix round 1, I3). `SubmitEntry`'s own use:
+     * `entry_count`/`status` is a read-modify-write — [BondDay.withEntry] is
+     * computed in application code from whatever was last read, then [update]
+     * writes it back — and two members submitting on the same day
+     * concurrently is the ordinary case this product exists for, not a race
+     * to guard against. Without a lock taken *before* that read, both
+     * transactions read the same `entry_count`, both compute `+1`, and the
+     * second's flush trips `@Version`: `ObjectOptimisticLockingFailureException`,
+     * uncaught, a `500`. See [BondDayRepository.lockRow]'s own KDoc for the
+     * precedent this follows (`bond.infra.database.BondRepositories.lockRow`,
+     * ADR-0028's lock rule) and why a row lock rather than an advisory one.
+     */
+    fun lockAndFind(id: BondDayId): BondDay {
+        days.lockRow(id.value)
+        val entity =
+            checkNotNull(days.findById(id.value)) {
+                "a bond-day locked by lockAndFind must still exist: $id"
+            }
+        // The lock alone is not enough: if `entity` was already loaded into
+        // this transaction's persistence context — exactly what happens here,
+        // by `openOrGet`'s own `findByBondIdAndDate` moments earlier —
+        // `findById` above answers from that identity map rather than the
+        // database, and returns the *same stale Java object*, lock or no
+        // lock. Found the hard way: `SubmitEntryConcurrencyTest` failed with
+        // a `500` even with `lockRow` wired in, because the entity `find`
+        // returned was the one read before the lock was ever taken.
+        // `refresh` is what forces Hibernate to re-populate it from the row
+        // this transaction now holds exclusively.
+        entityManager.refresh(entity)
+        return entity.toDomain()
+    }
 
     /**
      * Just the status, without loading the whole aggregate — see

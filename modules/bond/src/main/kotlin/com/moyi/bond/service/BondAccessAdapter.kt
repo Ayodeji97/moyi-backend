@@ -42,7 +42,7 @@ internal class BondAccessAdapter(
             strictMode = bond.strictMode,
             isOpen = bond.isOpen,
             hasLeft = membership.left,
-            isPendingMember = bond.status == BondStatus.PENDING_MEMBER,
+            awaitingSecondMember = bond.status == BondStatus.PENDING_MEMBER,
         )
     }
 }

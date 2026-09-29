@@ -77,7 +77,27 @@ class SecurityWebMvcConfigurer(
         resolvers.add(clientContext)
     }
 
+    /**
+     * Fix round 1, I4: an explicit order, not the registration order two
+     * unrelated `WebMvcConfigurer` beans across two modules happen to run
+     * in. [RateLimitInterceptor] must run before `common.web.idempotency.IdempotencyInterceptor`
+     * — every wiring site of that interceptor (`app.MoyiApplication`,
+     * `gratitude.infra.GratitudeTestApplication`, `common:web`'s own
+     * `IdempotencyTestApplication`) registers it at [RATE_LIMIT_ORDER] `+ 10`
+     * or later for exactly this reason: a caller with no tokens left must
+     * never reach the point of reserving an `Idempotency-Key`, because a
+     * `429` is neither `ex != null` nor `>= 500` — the two conditions
+     * `IdempotencyKeyStore.complete` discards a reservation under — so a
+     * reservation made before the limiter refuses the request risks being
+     * stored as "the response" and replayed to the caller's own
+     * correctly-behaved retry for the rest of the 24h window.
+     */
     override fun addInterceptors(registry: InterceptorRegistry) {
-        registry.addInterceptor(rateLimits)
+        registry.addInterceptor(rateLimits).order(RATE_LIMIT_ORDER)
+    }
+
+    companion object {
+        /** See [addInterceptors]'s own KDoc for why every `@Idempotent`-registering site must use a later order than this. */
+        const val RATE_LIMIT_ORDER = 0
     }
 }

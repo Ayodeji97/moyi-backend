@@ -69,7 +69,7 @@ internal data class EntryView(
  *    refused, never stored and quietly ignored.
  * 4. The day: [DayAssignment.dateFor] resolves which Bond-day this entry is
  *    for, then [BondDayStore.openOrGet] opens or finds it — `SUSPENDED`
- *    rather than `OPEN` while [BondMembership.isPendingMember] (doc 04
+ *    rather than `OPEN` while [BondMembership.awaitingSecondMember] (doc 04
  *    §8.3a, `02` J1: the creator may write before their partner joins).
  * 5. The insert. `entries_one_per_member_per_day` (V12/BR-2) is what
  *    refuses a second entry from the same member on the same day — this
@@ -77,6 +77,20 @@ internal data class EntryView(
  *    first and check: a read-then-insert here would race the very index it
  *    is trying to honour. See the boundary note below for why the catch has
  *    to sit where it does.
+ *
+ * **The day's row is locked before its `entryCount`/`status` are read for the
+ * update** (fix round 1, I3): [BondDayStore.lockAndFind] takes the row lock
+ * `bond`'s own writes already hold for a read-modify-write (ADR-0028,
+ * `BondRepositories.lockRow`), then reads the day fresh under it.
+ * [BondDay.withEntry] is computed from that fresh read, not from whatever
+ * [BondDayStore.openOrGet] happened to return — two members submitting on
+ * the same day concurrently is the ordinary case this product exists for,
+ * not a race to leave to `@Version` alone: without the lock, both
+ * transactions read the same `entryCount`, both compute `+1`, and the
+ * second's flush trips the optimistic check as an uncaught
+ * `ObjectOptimisticLockingFailureException` — a `500` on the normal path,
+ * not the race this slice's own tests ever exercised until this fix.
+ * `SubmitEntryConcurrencyTest` is the two-members-same-day proof.
  *
  * **One [TransactionTemplate] boundary, not `@Transactional`.** `RegisterUser.kt`
  * documents the trap this avoids: a `@Transactional` method that catches its
@@ -123,8 +137,12 @@ internal class SubmitEntry(
                         DayAssignment.dateFor(now, draft.intendedAt, zone) { candidate ->
                             days.statusOf(bondId, candidate)?.isClosed == true
                         }
-                    val openStatus = if (membership.isPendingMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
-                    val day = days.openOrGet(bondId, date, zone, now, openStatus)
+                    val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
+                    val opened = days.openOrGet(bondId, date, zone, now, openStatus)
+                    // Locked, then re-read fresh under that lock — see the
+                    // class KDoc's own note on I3. `opened`'s own entryCount/
+                    // status is not used past this point; `day` is.
+                    val day = days.lockAndFind(opened.id)
                     if (day.isClosed) throw DayClosedException()
 
                     val entry =

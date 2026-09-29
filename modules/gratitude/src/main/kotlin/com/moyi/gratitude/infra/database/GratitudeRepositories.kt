@@ -38,6 +38,22 @@ internal interface BondDayRepository : Repository<BondDayEntity, UUID> {
     ): BondDayEntity?
 
     /**
+     * Holds the day's row for the rest of the transaction — fix round 1, I3:
+     * `entry_count`/`status` is a read-modify-write (`BondDay.withEntry()`
+     * computed in application code, then [BondDayStore.update] writes it
+     * back), and two members submitting on the same day concurrently is not
+     * a race, it is the ordinary case this product is for. Without this,
+     * both transactions read the same `entry_count`, both compute `+1`, and
+     * the second's flush trips `@Version` — `ObjectOptimisticLockingFailureException`,
+     * uncaught, a `500` on the normal path. `bond.infra.database.BondRepositories.lockRow`
+     * is the precedent (ADR-0028's lock rule): a row lock rather than an
+     * advisory one, because the contended thing *is* a row, and `FOR UPDATE`
+     * releases at commit with no key to agree on.
+     */
+    @Query(nativeQuery = true, value = "SELECT 1 FROM bond_days WHERE id = :id FOR UPDATE")
+    fun lockRow(id: UUID): Int?
+
+    /**
      * Just the status, for [BondDayStore.statusOf] — the question
      * `DayAssignment.dateFor` asks on every offline-draft write (its own
      * KDoc: `{ date -> days.statusOf(bondId, date)?.isClosed == true }`), so

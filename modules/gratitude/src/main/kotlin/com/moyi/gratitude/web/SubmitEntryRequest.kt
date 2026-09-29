@@ -3,8 +3,6 @@ package com.moyi.gratitude.web
 import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.service.EntryDraft
 import jakarta.validation.constraints.NotNull
-import jakarta.validation.constraints.Pattern
-import jakarta.validation.constraints.Size
 import java.time.Instant
 import java.util.UUID
 
@@ -16,13 +14,16 @@ import java.util.UUID
  * with the service, and letting a rename of one silently rewrite the other
  * is exactly what a distinct type prevents.
  *
- * [text] carries two edge checks and nothing more. [NOT_ONLY_SPACE] is the
- * blank check ADR-0029 §13 requires be restated here (Java's `\s` and
- * Kotlin's `isBlank` disagree about `U+00A0`); [Size] is the octet backstop
- * FR-041 draws at the edge. The **grapheme count** — the 500-character limit
- * a person actually means — is [EntryText.of]'s alone, in the domain, and is
- * deliberately not restated here: one statement of that rule, not two that
- * could quietly drift apart.
+ * [text] carries exactly one edge check: [com.moyi.gratitude.web.ValidEntryText],
+ * which runs [EntryText.of] itself and reports whatever it complains about —
+ * blank (including a non-breaking space, ADR-0029 §13), over the 8192-octet
+ * cap, or over the 500-grapheme cap, in that factory's own order. Fix round
+ * 1 found the previous version of this field — `@Pattern(NOT_ONLY_SPACE)`
+ * plus `@Size(max = EntryText.MAX_OCTETS)` — restating FR-041 at the edge
+ * and getting it wrong (`@Size` counts UTF-16 characters, not UTF-8 octets,
+ * so an over-length body passed the edge and reached the domain as an
+ * uncaught `IllegalArgumentException`, a `500` rather than FR-041's own
+ * `422`). [ValidEntryText]'s own KDoc has the full account.
  *
  * [imageMediaId] and [voiceMediaId] carry no constraint of their own — a
  * well-formed id is refused all the same, by [com.moyi.gratitude.service.SubmitEntry]
@@ -37,8 +38,7 @@ import java.util.UUID
  */
 internal data class SubmitEntryRequest(
     @field:NotNull
-    @field:Pattern(regexp = NOT_ONLY_SPACE, message = "must not be blank")
-    @field:Size(max = EntryText.MAX_OCTETS)
+    @field:ValidEntryText
     val text: String,
     val imageMediaId: UUID? = null,
     val voiceMediaId: UUID? = null,

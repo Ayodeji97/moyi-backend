@@ -44,6 +44,12 @@ internal class EntriesController(
     private val access: BondAccess,
     private val submitEntry: SubmitEntry,
 ) {
+    // @ResponseStatus and the ResponseEntity below both set 201 — redundant
+    // at runtime (the entity's own status wins), load-bearing for springdoc:
+    // it reads the annotation, not the return value, so without it the
+    // generated document would say this returns 200 (BondsController.createBond's
+    // own KDoc has the fuller account, including the test that holds both
+    // in step: OpenApiContractTest's own 201 assertion for this operation).
     @Idempotent
     @PostMapping("/{bondId}/entries")
     @ResponseStatus(HttpStatus.CREATED)

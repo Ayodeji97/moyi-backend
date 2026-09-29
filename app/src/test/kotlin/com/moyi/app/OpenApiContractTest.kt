@@ -4,6 +4,7 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.security.SecurityConfiguration
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.ErrorCode
+import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.contracts.OpenApiConfiguration
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -115,13 +116,14 @@ class OpenApiContractTest(
         // and has to appear, or a generated client cannot send it. The list is
         // exhaustive on purpose: a *new* header parameter should have to be
         // justified here, which is what this assertion makes someone do.
+        // `Idempotency-Key` joined it in fix round 1, C2 (`submitEntry`).
         operations()
             .flatMap { (_, op) ->
                 op.parameters
                     .orEmpty()
                     .filter { it.`in` == "header" }
                     .map { it.name }
-            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH)
+            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH, IdempotencyInterceptor.HEADER)
         api.components.schemas.keys
             .filter { it in setOf("CurrentUser", "ClientContext") }
             .shouldBeEmpty()
@@ -224,6 +226,26 @@ class OpenApiContractTest(
         settings.put.responses.keys shouldContainAll listOf("200", "404", "409", "422")
         settings.put.responses.keys shouldNotContain "412"
         settings.get.responses shouldContainKey "404"
+    }
+
+    @Test
+    fun `submitting an entry documents its Idempotency-Key, and every 409 it can give`() {
+        // Fix round 1, C2: two things a generated client had no way to model.
+        // (a) The header doc 06 §1 requires — `@Idempotent` is invisible to
+        // springdoc, so without OpenApiConfiguration adding it explicitly a
+        // generated client would call this endpoint with no way to send it
+        // at all, and every call would be refused as 422. (b) The 409 this
+        // operation's own headline behaviour (BR-2, ENTRY_ALREADY_EXISTS)
+        // needs, alongside BOND_ARCHIVED, DAY_CLOSED and
+        // IDEMPOTENCY_KEY_IN_FLIGHT — all four are 409s the same ProblemDetail
+        // schema carries, so this asserts the status is offered at all, not
+        // one code at a time.
+        val submit = api.paths["/api/v1/bonds/{bondId}/entries"]!!.post
+
+        submit.responses.keys shouldContainAll listOf("201", "404", "409", "422")
+        submit.parameters.map { it.name } shouldContain IdempotencyInterceptor.HEADER
+        submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.`in` shouldBe "header"
+        submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.required shouldBe true
     }
 
     @Test

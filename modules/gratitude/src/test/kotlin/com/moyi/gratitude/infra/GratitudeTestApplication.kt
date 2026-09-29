@@ -1,21 +1,15 @@
 package com.moyi.gratitude.infra
 
-import com.moyi.common.core.IdGenerator
 import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
-import com.moyi.common.web.idempotency.IdempotencyInterceptor
-import com.moyi.common.web.idempotency.IdempotencyKeyStore
-import com.moyi.common.web.idempotency.IdempotencyRequestCachingFilter
+import com.moyi.common.web.idempotency.IdempotencyConfiguration
 import com.moyi.identity.api.UserDirectory
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.boot.persistence.autoconfigure.EntityScan
 import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories
-import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.web.servlet.config.annotation.InterceptorRegistry
-import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
-import java.time.Clock
 
 /**
  * A Spring context just large enough to test this module, and test-only —
@@ -35,7 +29,7 @@ import java.time.Clock
  * nothing: these tests are about bond-days and entries, and a token the test
  * issuer minted is valid by construction.
  *
- * **`com.moyi.bond` widened the scan in for a reason, and it is worth
+ * **`com.moyi.bond` widened the scan for a reason, and it is worth
  * recording.** `EntriesEndpointTest` and `GratitudeCrossTenantTest` need to
  * drive real `bond` endpoints (`createBond`, `leave`) to set up a bond and a
  * membership before they can even reach `POST /entries` — and
@@ -65,47 +59,26 @@ import java.time.Clock
  * other modules' dependencies, and Flyway merges every module's — which
  * costs a few tables nothing here touches.
  *
- * **The idempotency beans are wired here too, by hand, for the same reason
- * `IdempotencyTestApplication` wires them for its own context.**
- * `IdempotencyKeyStore`, [IdempotencyInterceptor] and
- * [IdempotencyRequestCachingFilter] are deliberately plain classes, not
- * `@Component`s — see that class's own KDoc — so `@SpringBootApplication`'s
- * scan of `com.moyi.common` never finds them on its own. `POST
- * /bonds/{bondId}/entries` is the first `@Idempotent` handler in this
- * module (and in the whole application), so without this a request through
+ * **`@Import(IdempotencyConfiguration::class)` wires `@Idempotent`'s beans**
+ * (fix round 1, I7) — one import rather than the four hand-copied `@Bean`
+ * methods this file used to carry (the same four `IdempotencyTestApplication`
+ * wires for its own context). `POST /bonds/{bondId}/entries` is the first
+ * `@Idempotent` handler in this module, so without this a request through
  * `EntriesEndpointTest` would sail past `@Idempotent` as if it were not
- * there at all — found by exactly that: a replay test that quietly ran the
- * handler twice.
+ * there at all — found originally by exactly that: a replay test that
+ * quietly ran the handler twice. `IdempotencyConfiguration`'s own KDoc has
+ * the fuller account, including why its interceptor orders itself after
+ * `common:security`'s `RateLimitInterceptor` (fix round 1, I4).
  */
 @SpringBootApplication(scanBasePackages = ["com.moyi.common", "com.moyi.gratitude", "com.moyi.bond"])
 @ConfigurationPropertiesScan("com.moyi.common", "com.moyi.gratitude", "com.moyi.bond")
 @EntityScan("com.moyi.gratitude", "com.moyi.bond")
 @EnableJpaRepositories("com.moyi.gratitude", "com.moyi.bond")
+@Import(IdempotencyConfiguration::class)
 internal class GratitudeTestApplication {
     @Bean
     fun userDirectory(): UserDirectory = FakeUserDirectory()
 
     @Bean
     fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }
-
-    @Bean
-    fun idempotencyKeyStore(jdbc: JdbcTemplate): IdempotencyKeyStore = IdempotencyKeyStore(jdbc)
-
-    @Bean
-    fun idempotencyInterceptor(
-        store: IdempotencyKeyStore,
-        clock: Clock,
-        ids: IdGenerator,
-    ): IdempotencyInterceptor = IdempotencyInterceptor(store, clock, ids)
-
-    @Bean
-    fun idempotencyRequestCachingFilter(): IdempotencyRequestCachingFilter = IdempotencyRequestCachingFilter()
-
-    @Bean
-    fun idempotencyWebMvcConfigurer(interceptor: IdempotencyInterceptor): WebMvcConfigurer =
-        object : WebMvcConfigurer {
-            override fun addInterceptors(registry: InterceptorRegistry) {
-                registry.addInterceptor(interceptor)
-            }
-        }
 }
