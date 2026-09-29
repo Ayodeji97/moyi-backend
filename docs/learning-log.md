@@ -1526,3 +1526,51 @@ Wrong about: what "the same check, in two places" means. `BondConstraints`
          *obvious* it looks, because nobody checks the obvious ones for
          disagreement. The zones were delegated on the first try. The word
          "blank" was not.
+
+## 2026-09-29 · Phase 3 · Closing C1 — a deferral that was half wrong, and a false failure the volume had to be empty to find
+Expected: the closing task to be paperwork against work already done — regenerate the
+         contract, write the smoke section, write the ADR. The one piece of code left,
+         `TodayResponse.partnerEntry`'s empty OpenAPI schema, had its own fix already
+         named in Task 8's KDoc: add an `OpenApiCustomizer`, the same shape as the
+         `ETag` and `Idempotency-Key` ones, so springdoc can express the `oneOf`.
+Reality: **springdoc had already fixed half of it, and the KDoc's fear was stale by
+         the time I ran the generator.** `PartnerEntryResponse` is a Kotlin `sealed
+         interface`, which compiles to a JVM sealed type with `permittedSubclasses`,
+         and this swagger-core version reads that on its own — `partnerEntry` came
+         out of the generator as `oneOf: [EntryResponse, LockedEntryResponse]`
+         already, no customizer involved. What actually stayed missing was narrower
+         and easy to miss precisely because the `oneOf` looked complete: no
+         `discriminator`, so a generated client would still have to try both shapes
+         structurally to learn which one it got. The customizer I wrote adds one,
+         keyed on `status`, mapped explicitly for every value either branch's enum
+         can hold — `SUBMITTED`/`REVEALED`/`DELETED` to `EntryResponse`, `LOCKED` to
+         `LockedEntryResponse` — because an unmapped discriminator value falls back
+         to naming a schema directly, and none of those four names one.
+         Then the smoke run found a false failure that had nothing to do with the
+         slice: "the log never says who blocked whom" failed on a database I had
+         just reset with `docker compose down -v` to clear an unrelated stale-migration
+         error, and passed again on the very next run against the same, by-then-
+         migrated volume. Flyway logs its own migration description on a genuinely
+         fresh boot, and V9's filename is `bond_bonds_members_invites_blocks` — the
+         word the check was grepping the *entire* log for is also half of a
+         migration's own name. Nobody had hit it before because nobody had run this
+         script against a truly empty Postgres since that migration was written;
+         every ordinary run reuses a volume already past that log line. Scoped the
+         check to lines written after its own section starts, the same idiom the
+         email-polling checks already use, rather than the whole log from boot.
+         Separately, re-ran the mutation the fix reports for Tasks 7/8 claimed:
+         flipping `Entry.canBeReadBy` to `= true` fails exactly two `RevealGateTest`
+         cases, both through the same mechanism (one member submits, the other reads
+         `partnerEntry`) — confirming an earlier fix report's claim that the second
+         failure came from `myEntry`'s own routing was wrong, and both tests exercise
+         `partnerEntry`, not `myEntry`, either way.
+Wrong about: trusting a KDoc's stated risk as still current just because it was
+         reasoned carefully when it was written. It was right about the *symptom*
+         (a generated client gets neither branch's shape) and wrong about the
+         *cause* by the time this task ran the actual generator — the shape was
+         already there, the discriminator was not. The general form, twice in one
+         task: a deferral note and a stale-log grep both describe a failure mode
+         that was true once, under conditions that had since changed underneath
+         them, and the only way to find out which parts still held was to run the
+         generator and the script rather than read what somebody expected them to
+         say.

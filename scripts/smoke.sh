@@ -445,6 +445,13 @@ if grep -qF -- "$CODE" "$MOYI_LOG" || grep -qF -- "$THIRD_CODE" "$MOYI_LOG"; the
 
 echo; echo "ending — leave and block (FR-026, FR-029, T-09, doc 26 §2.1, ADR-0028)"
 flush_buckets
+# V9's own migration filename is "bond_bonds_members_invites_blocks", and
+# Flyway logs that description verbatim on a genuinely fresh database — a
+# grep of the WHOLE log for the word below is a false FAIL on the very first
+# boot against an empty volume, found running this section against one after
+# `docker compose down -v`. The check below is scoped to what this section
+# itself wrote, the same way the email-polling checks scope to "since before".
+LOG_LINES_BEFORE_ENDING="$(wc -l < "$MOYI_LOG" | tr -d ' ')"
 
 # Registers, verifies and signs in one account, leaving its token in
 # ACCOUNT_ACCESS. Factored out because this section needs four accounts and the
@@ -551,7 +558,7 @@ expect "and another" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $L
 expect "a third open one is 201, because the bond they left frees its slot" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Four")"
 expect "…and a fourth is 409 BOND_LIMIT_REACHED" 409 '"code":"BOND_LIMIT_REACHED"' -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Five")"
 
-if grep -qiE '\bblock' "$MOYI_LOG"; then fail "block in log" "the log says block"; else pass "the log never says who blocked whom"; fi
+if tail -n "+$((LOG_LINES_BEFORE_ENDING + 1))" "$MOYI_LOG" | grep -qiE '\bblock'; then fail "block in log" "the log says block"; else pass "the log never says who blocked whom"; fi
 
 echo; echo "settings — the conditional update (FR-027, doc 06 §1, ADR-0029)"
 flush_buckets
@@ -610,6 +617,52 @@ expect "…the PATCH is then 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- 
 expect "…the settings PUT is too" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{"reminderTimeLocal":"21:00"}'
 expect "…and the settings are still readable" 200 '"reminderTimeLocal":"21:00"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS"
 if grep -qE '"(nickname|quietHours)' "$MOYI_LOG"; then fail "settings in log" "a member's settings appear in the log"; else pass "no member setting appears in the log"; fi
+
+echo; echo "gratitude — the bond-day and the first entry (FR-041, BR-1, BR-2, BR-10, C1, ADR-0031)"
+flush_buckets
+verified_account "author" "203.0.113.70"; AUTHOR_ACCESS="$ACCOUNT_ACCESS"
+verified_account "partner" "203.0.113.71"; PARTNER_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond to write into is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $AUTHOR_ACCESS" -d "$(bond_body "Us")"
+GRAT_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+GRAT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "the partner joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$GRAT_CODE/accept" -H "Authorization: Bearer $PARTNER_ACCESS"
+
+# The whole slice on the wire, one round trip per fact: a first entry, the
+# same member's second, the same key replayed, and the same key reused with a
+# different body.
+AUTHOR_KEY="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+ENTRY_TEXT="grateful for the light this morning"
+expect "the first entry is 201, SUBMITTED" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d "{\"text\":\"$ENTRY_TEXT\"}"
+ENTRY_ID="$(printf '%s' "$LAST_BODY" | jget id)"
+
+expect "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS" 409 '"code":"ENTRY_ALREADY_EXISTS"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"a second entry, same day"}'
+
+expect "replaying the same key with the same body is 201 again" 201 "\"id\":\"$ENTRY_ID\"" -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d "{\"text\":\"$ENTRY_TEXT\"}"
+header_is "…and says it was replayed" Idempotency-Replayed true
+ENTRY_ROWS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) FROM entries WHERE id='$ENTRY_ID'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+case "$ENTRY_ROWS" in psql-unavailable) echo "  skip entry row count";; 1) pass "…and exactly one row landed in entries";; *) fail "entry rows" "expected 1, got '$ENTRY_ROWS'";; esac
+
+expect "the same key with a different body is 422 IDEMPOTENCY_KEY_REUSED" 422 '"code":"IDEMPOTENCY_KEY_REUSED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d '{"text":"this is not the body that key reserved"}'
+
+# BR-1/BR-8: the partner's own read of the day sees PARTIAL and a locked
+# entry — the author and the status, nothing else, on the wire and in the log.
+expect "the partner's today is PARTIAL, with the entry locked" 200 '"status":"PARTIAL"' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $PARTNER_ACCESS"
+[[ "$LAST_BODY" == *'"partnerEntry":{"authorMemberId"'*'"status":"LOCKED"'* ]] && pass "…partnerEntry is exactly an author and a status" || fail "locked shape" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" != *"$ENTRY_TEXT"* ]] && pass "…and the text never appears in the response" || fail "text leaked in response" "${LAST_BODY:0:250}"
+if grep -qF "$ENTRY_TEXT" "$MOYI_LOG"; then fail "text in log" "the entry text appears in the log"; else pass "…nor anywhere in the log"; fi
+
+# FR-041, ADR-0029 §13's own edge, restated for an entry's text: a lone
+# non-breaking space is blank by the domain's definition and must be a 422 on
+# the field, not a 500 from an uncaught IllegalArgumentException.
+expect "an entry of one non-breaking space is 422 on text, not 500" 422 '"field":"text"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"\u00a0"}'
+
+# Doc 04 §8.3a: the creator may write before their partner joins, and the day
+# that write lands on opens SUSPENDED, not OPEN, so neither the close job nor
+# the streak walk (neither built yet) mistake it for an ordinary day.
+expect "a lone creator's bond is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $AUTHOR_ACCESS" -d "$(bond_body "Solo for now")"
+SOLO_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+expect "writing before a partner has joined is still 201" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$SOLO_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"writing alone, for now"}'
+expect "…and the day it landed on opens SUSPENDED, not OPEN" 200 '"status":"SUSPENDED"' -- "$API/bonds/$SOLO_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

@@ -1730,6 +1730,82 @@
         "tags" : [ "bond-member-settings-controller" ]
       }
     },
+    "/api/v1/bonds/{bondId}/today" : {
+      "get" : {
+        "operationId" : "today",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TodayResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "entries-controller" ]
+      }
+    },
     "/api/v1/invites/{code}" : {
       "get" : {
         "operationId" : "resolve",
@@ -1981,6 +2057,19 @@
   },
   "components" : {
     "schemas" : {
+      "BondDayResponse" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN" ]
+          }
+        }
+      },
       "BondResponse" : {
         "type" : "object",
         "properties" : {
@@ -2112,40 +2201,44 @@
         }
       },
       "EntryResponse" : {
-        "type" : "object",
-        "properties" : {
-          "authorMemberId" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "bondId" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "createdAt" : {
-            "type" : "string",
-            "format" : "date-time"
-          },
-          "date" : {
-            "type" : "string",
-            "format" : "date"
-          },
-          "id" : {
-            "type" : "string",
-            "format" : "uuid"
-          },
-          "intendedAt" : {
-            "type" : "string",
-            "format" : "date-time"
-          },
-          "status" : {
-            "type" : "string",
-            "enum" : [ "SUBMITTED", "REVEALED", "DELETED" ]
-          },
-          "text" : {
-            "type" : "string"
+        "allOf" : [ {
+          "$ref" : "#/components/schemas/PartnerEntryResponse"
+        }, {
+          "type" : "object",
+          "properties" : {
+            "authorMemberId" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "bondId" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "createdAt" : {
+              "type" : "string",
+              "format" : "date-time"
+            },
+            "date" : {
+              "type" : "string",
+              "format" : "date"
+            },
+            "id" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "intendedAt" : {
+              "type" : "string",
+              "format" : "date-time"
+            },
+            "status" : {
+              "type" : "string",
+              "enum" : [ "SUBMITTED", "REVEALED", "DELETED" ]
+            },
+            "text" : {
+              "type" : "string"
+            }
           }
-        }
+        } ]
       },
       "FieldViolation" : {
         "type" : "object",
@@ -2227,6 +2320,23 @@
             "format" : "uri"
           }
         }
+      },
+      "LockedEntryResponse" : {
+        "allOf" : [ {
+          "$ref" : "#/components/schemas/PartnerEntryResponse"
+        }, {
+          "type" : "object",
+          "properties" : {
+            "authorMemberId" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "status" : {
+              "type" : "string",
+              "enum" : [ "LOCKED" ]
+            }
+          }
+        } ]
       },
       "LoginRequest" : {
         "type" : "object",
@@ -2364,6 +2474,7 @@
           }
         }
       },
+      "PartnerEntryResponse" : { },
       "PatchBondRequest" : {
         "type" : "object",
         "properties" : {
@@ -2552,6 +2663,37 @@
           }
         },
         "required" : [ "text" ]
+      },
+      "TodayResponse" : {
+        "type" : "object",
+        "properties" : {
+          "bondDay" : {
+            "$ref" : "#/components/schemas/BondDayResponse"
+          },
+          "myEntry" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/EntryResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "partnerEntry" : {
+            "discriminator" : {
+              "mapping" : {
+                "DELETED" : "#/components/schemas/EntryResponse",
+                "LOCKED" : "#/components/schemas/LockedEntryResponse",
+                "REVEALED" : "#/components/schemas/EntryResponse",
+                "SUBMITTED" : "#/components/schemas/EntryResponse"
+              },
+              "propertyName" : "status"
+            },
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/EntryResponse"
+            }, {
+              "$ref" : "#/components/schemas/LockedEntryResponse"
+            } ]
+          }
+        }
       },
       "UserResponse" : {
         "type" : "object",

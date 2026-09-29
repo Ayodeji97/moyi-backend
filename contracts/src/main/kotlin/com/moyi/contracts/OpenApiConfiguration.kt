@@ -12,6 +12,7 @@ import io.swagger.v3.oas.models.headers.Header
 import io.swagger.v3.oas.models.info.Info
 import io.swagger.v3.oas.models.media.ArraySchema
 import io.swagger.v3.oas.models.media.Content
+import io.swagger.v3.oas.models.media.Discriminator
 import io.swagger.v3.oas.models.media.IntegerSchema
 import io.swagger.v3.oas.models.media.MediaType
 import io.swagger.v3.oas.models.media.ObjectSchema
@@ -72,6 +73,15 @@ import org.springframework.http.HttpStatus
  *   1, C2: found alongside the missing `409` below — a generated client had
  *   no header to send at all, so every call to `POST /bonds/{bondId}/entries`
  *   it made would have been refused as `422 VALIDATION_FAILED`.
+ * - **The `partnerEntry` discriminator.** `gratitude.web.TodayResponse.partnerEntry`
+ *   is a Kotlin sealed interface's `oneOf` — springdoc already splits it into
+ *   [EntryResponse][com.moyi.gratitude.web.EntryResponse] and
+ *   [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse] on its
+ *   own, but adds no `discriminator`, so a generated client has to try both
+ *   shapes structurally to learn which one it received rather than read one
+ *   field. [discriminatePartnerEntry] adds one, keyed on `status`, which both
+ *   branches already carry. Deferred by Task 8 (`PartnerEntryResponse`'s own
+ *   KDoc) to whichever task next regenerated the document.
  *
  * Which codes a *particular* operation returns is doc 06 §3's table, not this
  * document: the contract a generated client is built from is the shape.
@@ -114,6 +124,7 @@ class OpenApiConfiguration {
                 }
             }
             documentEntryTextLimits(api)
+            discriminatePartnerEntry(api)
         }
 
     /**
@@ -353,4 +364,69 @@ class OpenApiConfiguration {
         val VERSIONED_RESOURCE_SCHEMAS = setOf("BondResponse")
         private val VERSIONED_RESOURCE_REFS = VERSIONED_RESOURCE_SCHEMAS.map { "#/components/schemas/$it" }.toSet()
     }
+}
+
+/** `TodayResponse`'s schema name and its `partnerEntry` property — see [discriminatePartnerEntry]. */
+private const val TODAY_RESPONSE = "TodayResponse"
+private const val PARTNER_ENTRY_PROPERTY = "partnerEntry"
+private const val DISCRIMINATOR_PROPERTY = "status"
+private const val ENTRY_RESPONSE_REF = "#/components/schemas/EntryResponse"
+private const val LOCKED_ENTRY_RESPONSE_REF = "#/components/schemas/LockedEntryResponse"
+
+/**
+ * Gives `TodayResponse.partnerEntry`'s `oneOf` a `discriminator` — the fix
+ * `gratitude.web.PartnerEntryResponse`'s own KDoc names, for whichever task
+ * next regenerated the document (this one). A top-level function, not a
+ * member of [OpenApiConfiguration] — that class already sat at detekt's
+ * `TooManyFunctions` threshold, and this rule is no more a property of the
+ * *class* than [documentETags] or [requireIfMatch] are; it is called from
+ * [OpenApiConfiguration.problemResponsesAndPublicEndpoints] exactly the same
+ * way.
+ *
+ * **springdoc already resolves the `oneOf` itself.** `PartnerEntryResponse`
+ * is a Kotlin `sealed interface`, which compiles to a JVM sealed type
+ * (`Class.permittedSubclasses`), and swagger-core reads that to split the
+ * property into `oneOf: [EntryResponse, LockedEntryResponse]` without an
+ * annotation on either side — the KDoc's fear of an *empty* `partnerEntry`
+ * schema does not hold against this springdoc version. What springdoc does
+ * not add is a `discriminator`: a `oneOf` without one is a set of shapes a
+ * generated client must try structurally, one at a time, to find out which
+ * branch it received, rather than reading one field and knowing — the same
+ * gap a `sealed class` closes on the Kotlin side that this document was
+ * leaving open on the wire side.
+ *
+ * `status` is the discriminator, because both branches already carry a
+ * field of that name and nothing was added to either type to support this:
+ * [com.moyi.gratitude.domain.EntryStatus] (`SUBMITTED`, `REVEALED`,
+ * `DELETED`) on [com.moyi.gratitude.web.EntryResponse]'s branch and the
+ * one-value `LockedEntryStatus.LOCKED` on
+ * [com.moyi.gratitude.web.LockedEntryResponse]'s. Every value either enum
+ * can hold is mapped explicitly rather than left to the OpenAPI default (a
+ * mapping miss falls back to the value naming a schema directly —
+ * `"SUBMITTED"` names no schema in this document, so an unmapped value
+ * would be ambiguous exactly where this exists to remove ambiguity).
+ *
+ * The named `PartnerEntryResponse` schema in `components.schemas` itself
+ * stays the empty object springdoc produces for the interface — it is
+ * referenced only as each branch's own `allOf` marker, asserts nothing on
+ * its own, and rewriting it to a `oneOf` of the two types that already
+ * `allOf` it would be a schema that describes itself. Harmless, and left
+ * alone.
+ */
+private fun discriminatePartnerEntry(api: OpenAPI) {
+    val partnerEntry =
+        api.components.schemas[TODAY_RESPONSE]
+            ?.properties
+            ?.get(PARTNER_ENTRY_PROPERTY)
+    partnerEntry?.takeIf { it.oneOf.orEmpty().isNotEmpty() }?.discriminator =
+        Discriminator()
+            .propertyName(DISCRIMINATOR_PROPERTY)
+            .mapping(
+                mapOf(
+                    "SUBMITTED" to ENTRY_RESPONSE_REF,
+                    "REVEALED" to ENTRY_RESPONSE_REF,
+                    "DELETED" to ENTRY_RESPONSE_REF,
+                    "LOCKED" to LOCKED_ENTRY_RESPONSE_REF,
+                ),
+            )
 }

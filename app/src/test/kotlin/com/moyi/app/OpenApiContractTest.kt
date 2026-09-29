@@ -249,6 +249,41 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `the entry endpoints document their conflicts, and today its 404`() {
+        val entries = api.paths["/api/v1/bonds/{bondId}/entries"]!!.post
+        entries.responses.keys shouldContainAll listOf("201", "404", "409", "422")
+        entries.parameters.map { it.name } shouldContain "Idempotency-Key"
+        entries.parameters.first { it.name == "Idempotency-Key" }.required shouldBe true
+
+        api.paths["/api/v1/bonds/{bondId}/today"]!!.get.responses shouldContainKey "404"
+    }
+
+    @Test
+    fun `a locked partner entry is a distinct branch a generated client can tell apart, not an empty schema`() {
+        // Task 8 deliberately left this open (TodayResponse.PartnerEntryResponse's
+        // own KDoc): the sealed interface carries nothing springdoc can
+        // introspect on its own, so `partnerEntry` risked describing as an
+        // empty object with neither branch's shape. springdoc's own support
+        // for a Kotlin sealed interface already resolves the property to a
+        // `oneOf` of the two branches — asserted below — but the `oneOf`
+        // itself had no `discriminator`, which is what lets a generated
+        // client actually pick a branch at runtime instead of structurally
+        // guessing. OpenApiConfiguration adds one, keyed on `status`, which
+        // both branches already carry.
+        val today = api.components.schemas["TodayResponse"]!!
+        val partnerEntry = today.properties["partnerEntry"]!!
+        val refs = partnerEntry.oneOf.map { it.`$ref` }
+
+        refs shouldContainAll listOf("#/components/schemas/EntryResponse", "#/components/schemas/LockedEntryResponse")
+        partnerEntry.discriminator.shouldNotBeNull()
+        partnerEntry.discriminator.propertyName shouldBe "status"
+        partnerEntry.discriminator.mapping["LOCKED"] shouldBe "#/components/schemas/LockedEntryResponse"
+        listOf("SUBMITTED", "REVEALED", "DELETED").forEach { status ->
+            partnerEntry.discriminator.mapping[status] shouldBe "#/components/schemas/EntryResponse"
+        }
+    }
+
+    @Test
     fun `a response carrying a versioned resource declares its ETag`() {
         // The header is set on the ResponseEntity, so springdoc cannot see it
         // and an OpenApiCustomizer adds it by rule. Without it a generated
