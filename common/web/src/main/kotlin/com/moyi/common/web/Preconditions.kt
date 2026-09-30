@@ -39,21 +39,25 @@ value class IfMatch private constructor(
     companion object {
         private const val ENTITY_TAG = "(?:W/)?\"[\\x21\\x23-\\x7E\\x80-\\xFF]*\""
         private val tag = Regex(ENTITY_TAG)
-        private val list = Regex("[ \t]*(?:$ENTITY_TAG)?(?:[ \t]*,[ \t]*(?:$ENTITY_TAG)?)*[ \t]*")
 
         /** Missing conditions are 428; malformed lists fail closed with 412. */
+        @Suppress("ReturnCount") // Either grammar failure rejects the entire list, including earlier tags.
         fun parse(header: String?): IfMatch {
             if (header.isNullOrBlank() || header.trim() == "*") throw PreconditionRequiredException()
-            // Commas inside an opaque tag are data, not list delimiters. Validate
-            // the entire field before accepting any individual strong tag.
-            if (!list.matches(header)) return IfMatch(emptySet())
-            return IfMatch(
-                tag
-                    .findAll(header)
-                    .map { it.value }
-                    .filterNot { it.startsWith("W/") }
-                    .toSet(),
-            )
+            // Scan iteratively: a repeated-group list regex can overflow the
+            // stack on a valid header smaller than the server's 8 KB limit.
+            val tags = mutableSetOf<String>()
+            var offset = 0
+            while (offset < header.length) {
+                while (offset < header.length && header[offset] in " \t,") offset++
+                if (offset == header.length) break
+                val match = tag.matchAt(header, offset) ?: return IfMatch(emptySet())
+                if (!match.value.startsWith("W/")) tags.add(match.value)
+                offset = match.range.last + 1
+                while (offset < header.length && header[offset] in " \t") offset++
+                if (offset < header.length && header[offset] != ',') return IfMatch(emptySet())
+            }
+            return IfMatch(tags)
         }
     }
 }
