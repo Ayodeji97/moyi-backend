@@ -338,6 +338,8 @@ sleep 1
 for needle in "$PASSWORD" "$NEW_PASSWORD" "$REFRESH" "$REFRESH2" "$ACCESS"; do if grep -qF -- "$needle" "$MOYI_LOG"; then fail "secret in log" "a password or token appears in the log"; SECRET_LEAK=1; fi; done
 [ "${SECRET_LEAK:-0}" = 0 ] && pass "no password, refresh token or access token appears in the log"
 
+etag_of() { printf '%s\n' "$LAST_HEADERS" | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
+
 echo; echo "bonds (FR-020, FR-022, FR-025, T-02, ADR-0026)"
 flush_buckets
 expect "sign in as the verified account" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$NEW_PASSWORD")"
@@ -347,7 +349,8 @@ bond_body() { printf '{"name":"%s","type":"COUPLE","anchorTimezone":"Africa/Lago
 expect "POST /bonds is 201, pending its second member" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d "$(bond_body "Us")"
 BOND_ID="$(printf '%s' "$LAST_BODY" | jget id)"
 CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
-header_is "…with an ETag of the row version" ETag '"0"'
+BOND_ETAG="$(etag_of)"
+[[ "$BOND_ETAG" == \"0-* ]] && pass "…with a representation ETag" || fail "ETag" "$BOND_ETAG"
 # The alphabet is states.md §2's thirty symbols; 0/O, 1/I/L and U are absent
 # because a code is read aloud down a phone line (T-06, ADR-0026).
 if [[ "$CODE" =~ ^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{6}$ ]]; then pass "…code $CODE is six characters of the 30-symbol alphabet"; else fail "invite code" "got '$CODE'"; fi
@@ -358,7 +361,7 @@ if [[ "$LAST_BODY" != *userId* && "$LAST_BODY" != *reminderTimezone* ]]; then pa
 
 expect "GET /bonds lists it" 200 "\"id\":\"$BOND_ID\"" -- "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS"
 expect "GET /bonds/{id} is 200 for the owner" 200 '"role":"OWNER"' -- "$API/bonds/$BOND_ID" -H "Authorization: Bearer $BOND_ACCESS"
-header_is "…with the ETag" ETag '"0"'
+header_is "…with the ETag" ETag "$BOND_ETAG"
 
 expect "a fixed-offset zone is 422 on anchorTimezone" 422 '"field":"anchorTimezone"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"COUPLE","anchorTimezone":"Etc/GMT+3"}'
 expect "an unknown type is 422 on type" 422 '"field":"type"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BOND_ACCESS" -d '{"name":"Us","type":"THROUPLE","anchorTimezone":"Africa/Lagos"}'
@@ -464,7 +467,6 @@ verified_account() {
   ACCOUNT_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
 }
 
-etag_of() { printf '%s\n' "$LAST_HEADERS" | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
 
 # Two pairs, built identically, ended differently. Doc 26 §2.1 is about what the
 # OTHER member can see, so anything that differs between the two archived bonds
@@ -517,9 +519,9 @@ if left != blocked:
 PYEOF
 then pass "a block is indistinguishable from a leave, byte for byte (doc 26 §2.1)"
 else fail "discreet exit" "the two archived bonds do not read the same"; fi
-# The ETag is the row version: a block that wrote once more than a leave would
+# The ETag prefix is the row version: a block that wrote once more than a leave would
 # show here and nowhere else.
-[ "$LEFT_ETAG" = "$BLOCK_ETAG" ] && pass "…and the ETags match, so the version counts no blocks ($LEFT_ETAG)" || fail "discreet exit etag" "leave $LEFT_ETAG vs block $BLOCK_ETAG"
+[ "${LEFT_ETAG%%-*}" = "${BLOCK_ETAG%%-*}" ] && pass "…and the version prefixes match, so the version counts no blocks ($LEFT_ETAG)" || fail "discreet exit etag" "leave $LEFT_ETAG vs block $BLOCK_ETAG"
 [[ "${BLOCK_VIEW,,}" != *block* ]] && pass "…and no response anywhere says block" || fail "discreet exit wording" "${BLOCK_VIEW:0:200}"
 
 # An archived bond takes no writes (BR-9, the design's §6.3).
@@ -558,7 +560,8 @@ flush_buckets
 verified_account "settler" "203.0.113.60"; SETTLER_ACCESS="$ACCOUNT_ACCESS"
 expect "a bond to configure is 201" 201 '"name":"Us"' -- -X POST "$API/bonds" -H "Authorization: Bearer $SETTLER_ACCESS" -d "$(bond_body "Us")"
 SET_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
-header_is "…with an ETag of 0" ETag '"0"'
+SET_INITIAL_ETAG="$(etag_of)"
+SET_ETAG="$SET_INITIAL_ETAG"
 
 # The four ways a condition can be wrong, before the one way it can be right.
 expect "a PATCH with no If-Match is 428" 428 '"code":"PRECONDITION_REQUIRED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{"name":"Us two"}'
@@ -566,27 +569,31 @@ expect "a stale If-Match is 412" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH 
 # ADR-0029's two deliberate departures from RFC 9110, probed on the wire so
 # they stay decisions rather than drifting into accidents.
 expect "If-Match: * is 428, deliberately" 428 '"code":"PRECONDITION_REQUIRED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: *' -d '{"name":"Us two"}'
-expect "a weak validator is 412" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: W/"0"' -d '{"name":"Us two"}'
-expect "the right If-Match is 200" 200 '"name":"Us two"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "0"' -d '{"name":"Us two","strictMode":true}'
-header_is "…and the response carries the NEW ETag" ETag '"1"'
-expect "the same If-Match again is 412 — it is spent" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "0"' -d '{"name":"Us three"}'
+expect "a weak validator is 412" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: W/$SET_INITIAL_ETAG" -d '{"name":"Us two"}'
+expect "the right If-Match is 200" 200 '"name":"Us two"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_INITIAL_ETAG" -d '{"name":"Us two","strictMode":true}'
+SET_ETAG="$(etag_of)"
+[ "$SET_ETAG" != "$SET_INITIAL_ETAG" ] && pass "…with a new ETag" || fail "ETag" "unchanged after patch"
+expect "the same If-Match again is 412 — it is spent" 412 '"code":"PRECONDITION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_INITIAL_ETAG" -d '{"name":"Us three"}'
 
-expect "an empty patch is 422" 422 '"code":"VALIDATION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "1"' -d '{}'
+expect "an empty patch is 422" 422 '"code":"VALIDATION_FAILED"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{}'
 # FR-027 makes the anchor zone two-party and once per 30 days, which is B5's
 # endpoint. Ignoring the field here would report success for a change that
 # never happened.
-expect "the anchor zone is refused here, not ignored" 422 'anchorTimezone' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "1"' -d '{"anchorTimezone":"Europe/London"}'
-expect "the type is patchable" 200 '"type":"FRIENDS"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "1"' -d '{"type":"FRIENDS"}'
+expect "the anchor zone is refused here, not ignored" 422 'anchorTimezone' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"anchorTimezone":"Europe/London"}'
+expect "the type is patchable" 200 '"type":"FRIENDS"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"type":"FRIENDS"}'
+SET_ETAG="$(etag_of)"
 [[ "$LAST_BODY" == *'"maxMembers":2'* ]] && pass "…and the seats do not move with it" || fail "maxMembers" "${LAST_BODY:0:200}"
-expect "a reveal time can be set" 200 '"revealTimeLocal":"21:00"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "2"' -d '{"revealTimeLocal":"21:00"}'
-expect "a named null clears it" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "3"' -d '{"revealTimeLocal":null}'
+expect "a reveal time can be set" 200 '"revealTimeLocal":"21:00"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"revealTimeLocal":"21:00"}'
+SET_ETAG="$(etag_of)"
+expect "a named null clears it" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"revealTimeLocal":null}'
+SET_ETAG="$(etag_of)"
 [[ "$LAST_BODY" == *'"strictMode":true'* ]] && pass "…and leaves the setting it did not name" || fail "patch isolation" "${LAST_BODY:0:250}"
 # A patch whose values are already the row's values writes nothing, so the
 # version does not move and the other member's ETag stays valid. Found by this
 # script: the probe below expected a bump and there was none, because clearing
 # an already-null field changes nothing (Hibernate's dirty check).
-expect "a patch that changes nothing is 200 and moves no version" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H 'If-Match: "4"' -d '{"revealTimeLocal":null}'
-header_is "…the same ETag it was given" ETag '"4"' 
+expect "a patch that changes nothing is 200 and moves no version" 200 '"revealTimeLocal":null' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"revealTimeLocal":null}'
+header_is "…the same ETag it was given" ETag "$SET_ETAG"
 
 # The member's own settings: no condition, and nobody else's to see.
 expect "the member reads their own settings" 200 '"reminderTimeLocal":"20:00"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS"
@@ -597,10 +604,10 @@ expect "one quiet hour without the other is 422" 422 'quietHours' -- -X PUT "$AP
 expect "a missing reminder time is 422 rather than a silent 20:00" 422 'reminderTimeLocal' -- -X PUT "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{}'
 # A settings write is one member's business, so the bond's ETag must not move.
 expect "the bond is where the last PATCH left it" 200 '"type":"FRIENDS"' -- "$API/bonds/$SET_BOND" -H "Authorization: Bearer $SETTLER_ACCESS"
-header_is "…with the version the last PATCH produced, unmoved by the settings write" ETag '"4"'
+header_is "…with the version the last PATCH produced, unmoved by the settings write" ETag "$SET_ETAG"
 
 # T-02: a non-member is refused before the header is even read.
-expect "a stranger patching it is 404, headers and all" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $STRANGER_ACCESS" -H 'If-Match: "3"' -d '{"name":"Mine"}'
+expect "a stranger patching it is 404, headers and all" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $STRANGER_ACCESS" -H "If-Match: $SET_ETAG" -d '{"name":"Mine"}'
 expect "…404 without a condition too, not 428" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$SET_BOND" -H "Authorization: Bearer $STRANGER_ACCESS" -d '{"name":"Mine"}'
 expect "…and cannot read its settings either" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $STRANGER_ACCESS"
 
@@ -610,6 +617,106 @@ expect "…the PATCH is then 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- 
 expect "…the settings PUT is too" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS" -d '{"reminderTimeLocal":"21:00"}'
 expect "…and the settings are still readable" 200 '"reminderTimeLocal":"21:00"' -- "$API/bonds/$SET_BOND/members/me/settings" -H "Authorization: Bearer $SETTLER_ACCESS"
 if grep -qE '"(nickname|quietHours)' "$MOYI_LOG"; then fail "settings in log" "a member's settings appear in the log"; else pass "no member setting appears in the log"; fi
+
+echo; echo "two-party consent — the shared zone and closing the box (FR-027, FR-028, BR-6, ADR-0030)"
+flush_buckets
+verified_account "proposer" "203.0.113.70"; PROPOSER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "agreer" "203.0.113.71";   AGREER_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond for two is 201" 201 '"anchorTimezone":"Africa/Lagos"' -- -X POST "$API/bonds" -H "Authorization: Bearer $PROPOSER_ACCESS" -d "$(bond_body "Us")"
+CONSENT_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "the other member joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$CONSENT_CODE/accept" -H "Authorization: Bearer $AGREER_ACCESS"
+
+# states.md §8's three steps, on the wire.
+expect "proposing a zone is 200 and moves nothing yet" 200 '"proposedTimezone":"Europe/London"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Europe/London"}'
+TIMEZONE_PROPOSAL_ID="$(python3 -c "import json,sys; print(json.load(sys.stdin)['pendingTimezoneChange']['id'])" <<<"$LAST_BODY")"
+[[ "$LAST_BODY" == *'"anchorTimezone":"Africa/Lagos"'* ]] && pass "…the bond still says Africa/Lagos" || fail "premature move" "${LAST_BODY:0:250}"
+expect "the proposer cannot confirm their own: 409" 409 '"code":"PROPOSAL_NEEDS_OTHER_MEMBER"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $PROPOSER_ACCESS" -d "{\"proposalId\":\"$TIMEZONE_PROPOSAL_ID\"}"
+expect "a second proposal is 409 PROPOSAL_PENDING" 409 '"code":"PROPOSAL_PENDING"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $AGREER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+expect "the other member confirms: 200 and the zone moves" 200 '"anchorTimezone":"Europe/London"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $AGREER_ACCESS" -d "{\"proposalId\":\"$TIMEZONE_PROPOSAL_ID\"}"
+[[ "$LAST_BODY" == *'"pendingTimezoneChange":null'* ]] && pass "…and nothing is pending any more" || fail "pending not cleared" "${LAST_BODY:0:250}"
+# FR-027's month, as a 409 with a date rather than a 429 with a retry (ADR-0030).
+expect "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON" 409 '"code":"TIMEZONE_CHANGE_TOO_SOON"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+[[ "$LAST_BODY" == *"can change again from"* ]] && pass "…and the detail names the date it becomes allowed" || fail "no date" "${LAST_BODY:0:250}"
+expect "a fixed-offset zone is 422 on the field" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Etc/GMT+3"}'
+expect "a zone of one non-breaking space is 422, not 500" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"\u00a0"}'
+
+# Cancelling a proposal, on a second bond where the month has not been spent.
+expect "a second bond for the pair" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $AGREER_ACCESS" -d "$(bond_body "Two")"
+SECOND_CONSENT="$(printf '%s' "$LAST_BODY" | jget id)"
+SECOND_CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$SECOND_CONSENT_CODE/accept" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "a proposal on it is 200" 200 '"proposedTimezone":"Asia/Tokyo"' -- -X PATCH "$API/bonds/$SECOND_CONSENT/timezone" -H "Authorization: Bearer $AGREER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+expect "either member may cancel it: 204" 204 "" -- -X DELETE "$API/bonds/$SECOND_CONSENT/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "cancelling again is 404" 404 "" -- -X DELETE "$API/bonds/$SECOND_CONSENT/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "…and a fresh proposal is allowed" 200 '"proposedTimezone":"Asia/Tokyo"' -- -X PATCH "$API/bonds/$SECOND_CONSENT/timezone" -H "Authorization: Bearer $AGREER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+
+# Closing the box: one route asks and agrees (FR-028, states.md §9).
+expect "the first deletion request is 202, and nothing is deleted" 202 '"requestedByMemberId"' -- -X POST "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $PROPOSER_ACCESS"
+[[ "$LAST_BODY" == *'"status":"ACTIVE"'* ]] && pass "…the bond is still ACTIVE" || fail "premature deletion" "${LAST_BODY:0:250}"
+expect "repeating it is an idempotent 202" 202 '"status":"ACTIVE"' -- -X POST "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $PROPOSER_ACCESS"
+expect "the other member's request confirms it: PENDING_DELETION" 202 '"status":"PENDING_DELETION"' -- -X POST "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $AGREER_ACCESS"
+[[ "$LAST_BODY" == *'"deletionScheduledFor":"'* ]] && pass "…with a date thirty days out" || fail "no schedule" "${LAST_BODY:0:250}"
+
+# BR-9 during the cooling-off: readable, and no other write.
+CONSENT_ETAG="$(curl -sS -o /dev/null -D - "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $PROPOSER_ACCESS" | tr -d '\r' | awk 'tolower($1)=="etag:"{print $2}')"
+expect "a PATCH during the cooling-off is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X PATCH "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $PROPOSER_ACCESS" -H "If-Match: $CONSENT_ETAG" -d '{"name":"Us two"}'
+expect "…so is a settings write" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/bonds/$CONSENT_BOND/members/me/settings" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"reminderTimeLocal":"07:30"}'
+expect "…and a zone proposal" 409 '"code":"BOND_ARCHIVED"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+expect "both members still read it" 200 '"status":"PENDING_DELETION"' -- "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $AGREER_ACCESS"
+
+# The escape hatch, which is what makes the thirty days a cooling-off.
+expect "either member calls it off: 204" 204 "" -- -X DELETE "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $AGREER_ACCESS"
+expect "…and the bond is ACTIVE again" 200 '"status":"ACTIVE"' -- "$API/bonds/$CONSENT_BOND" -H "Authorization: Bearer $PROPOSER_ACCESS"
+[[ "$LAST_BODY" == *'"deletionScheduledFor":null'* ]] && pass "…with no date on it" || fail "schedule not cleared" "${LAST_BODY:0:250}"
+expect "cancelling nothing is 404" 404 "" -- -X DELETE "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $AGREER_ACCESS"
+
+# T-02 on all five routes.
+expect "a stranger cannot propose a zone" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $STRANGER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
+expect "…nor confirm one" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$CONSENT_BOND/timezone/confirm" -H "Authorization: Bearer $STRANGER_ACCESS" -d "{\"proposalId\":\"$TIMEZONE_PROPOSAL_ID\"}"
+expect "…nor cancel one" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "…nor ask for a deletion" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "…nor cancel one" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$CONSENT_BOND/deletion-request" -H "Authorization: Bearer $STRANGER_ACCESS"
+
+# ADR-0030's decision: an archived bond refuses a deletion request whichever way
+# it ended, so the blocked member cannot tell a block from a leave by trying it.
+verified_account "ender" "203.0.113.72";  ENDER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "stayer2" "203.0.113.73"; STAYER2_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond to leave" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $ENDER_ACCESS" -d "$(bond_body "Us")"
+LEFT_CONSENT="$(printf '%s' "$LAST_BODY" | jget id)"
+LEFT_CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$LEFT_CONSENT_CODE/accept" -H "Authorization: Bearer $STAYER2_ACCESS"
+expect "…and left" 204 "" -- -X POST "$API/bonds/$LEFT_CONSENT/leave" -H "Authorization: Bearer $ENDER_ACCESS"
+expect "a deletion request on it is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X POST "$API/bonds/$LEFT_CONSENT/deletion-request" -H "Authorization: Bearer $STAYER2_ACCESS"
+LEFT_REFUSAL="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
+verified_account "blocker2" "203.0.113.74"; BLOCKER2_ACCESS="$ACCOUNT_ACCESS"
+verified_account "blocked2" "203.0.113.75"; BLOCKED2_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond to block in" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BLOCKER2_ACCESS" -d "$(bond_body "Us")"
+BLOCK_CONSENT="$(printf '%s' "$LAST_BODY" | jget id)"
+BLOCK_CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$BLOCK_CONSENT_CODE/accept" -H "Authorization: Bearer $BLOCKED2_ACCESS"
+expect "…and blocked" 204 "" -- -X POST "$API/bonds/$BLOCK_CONSENT/block" -H "Authorization: Bearer $BLOCKER2_ACCESS"
+expect "the blocked member's deletion request is 409 too" 409 '"code":"BOND_ARCHIVED"' -- -X POST "$API/bonds/$BLOCK_CONSENT/deletion-request" -H "Authorization: Bearer $BLOCKED2_ACCESS"
+BLOCK_REFUSAL="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
+[ "$LEFT_REFUSAL" = "$BLOCK_REFUSAL" ] && pass "…byte-identical to the left bond's refusal (doc 26 §2.1, ADR-0030)" || fail "deletion oracle" "the two refusals differ"
+
+# The second review of #41: a member who walks out during the cooling-off must
+# not be able to revoke the agreement on the way, or the member still in the
+# bond is left holding something they consented to destroy and can never delete.
+verified_account "walker" "203.0.113.76"; WALKER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "holder" "203.0.113.77"; HOLDER_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond the two agree to close" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $WALKER_ACCESS" -d "$(bond_body "Us")"
+WALK_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+WALK_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$WALK_CODE/accept" -H "Authorization: Bearer $HOLDER_ACCESS"
+expect "…both ask" 202 "" -- -X POST "$API/bonds/$WALK_BOND/deletion-request" -H "Authorization: Bearer $WALKER_ACCESS"
+expect "…and it is counting down" 202 '"status":"PENDING_DELETION"' -- -X POST "$API/bonds/$WALK_BOND/deletion-request" -H "Authorization: Bearer $HOLDER_ACCESS"
+expect "one of them leaves mid-cooling-off: 204" 204 "" -- -X POST "$API/bonds/$WALK_BOND/leave" -H "Authorization: Bearer $WALKER_ACCESS"
+expect "…and cannot then call the deletion off: 404" 404 "" -- -X DELETE "$API/bonds/$WALK_BOND/deletion-request" -H "Authorization: Bearer $WALKER_ACCESS"
+expect "…the bond is still counting down for the member who is in it" 200 '"status":"PENDING_DELETION"' -- "$API/bonds/$WALK_BOND" -H "Authorization: Bearer $HOLDER_ACCESS"
+expect "…whose own cancel still works: 204" 204 "" -- -X DELETE "$API/bonds/$WALK_BOND/deletion-request" -H "Authorization: Bearer $HOLDER_ACCESS"
+expect "…leaving an archived bond that knows when it ended" 200 '"status":"ARCHIVED"' -- "$API/bonds/$WALK_BOND" -H "Authorization: Bearer $HOLDER_ACCESS"
+[[ "$LAST_BODY" != *'"archivedAt":null'* ]] && pass "…with archivedAt set, like every other archived bond" || fail "null archivedAt" "${LAST_BODY:0:250}"
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

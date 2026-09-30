@@ -67,13 +67,14 @@ internal class BondSettingsRaceTest(
     @Test
     fun `two patches with the same ETag - exactly one wins`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
         val statuses =
             inParallel(
                 listOf(
-                    { patch(ada, bondId, """{"name":"First"}""", "\"0\"") },
-                    { patch(ada, bondId, """{"name":"Second"}""", "\"0\"") },
+                    { patch(ada, bondId, """{"name":"First"}""", created.getHeader(HttpHeaders.ETAG)!!) },
+                    { patch(ada, bondId, """{"name":"Second"}""", created.getHeader(HttpHeaders.ETAG)!!) },
                 ),
             ).map { it.status }
 
@@ -90,9 +91,17 @@ internal class BondSettingsRaceTest(
         // lock that is merely *usually* taken stops looking correct — the same
         // escalation `InviteRaceTest` uses on accept.
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
-        val statuses = inParallel((1..8).map { n -> { patch(ada, bondId, """{"name":"Name $n"}""", "\"0\"") } }).map { it.status }
+        val statuses =
+            inParallel(
+                (1..8).map { n ->
+                    {
+                        patch(ada, bondId, """{"name":"Name $n"}""", created.getHeader(HttpHeaders.ETAG)!!)
+                    }
+                },
+            ).map { it.status }
 
         statuses.count { it == 200 } shouldBe 1
         statuses.count { it == 412 } shouldBe 7
@@ -104,12 +113,13 @@ internal class BondSettingsRaceTest(
         // Both take the lifecycle lock, but settings only change the member
         // row, so they do not invalidate the patch's bond version.
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
         val statuses =
             inParallel(
                 listOf(
-                    { patch(ada, bondId, """{"name":"First"}""", "\"0\"") },
+                    { patch(ada, bondId, """{"name":"First"}""", created.getHeader(HttpHeaders.ETAG)!!) },
                     { putSettings(ada, bondId, """{"reminderTimeLocal":"07:30"}""") },
                 ),
             ).map { it.status }
@@ -121,7 +131,8 @@ internal class BondSettingsRaceTest(
     @Test
     fun `settings wait for an ending transaction and cannot erase its membership timestamp`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
         val pool = Executors.newSingleThreadExecutor()
         try {
             val saving =

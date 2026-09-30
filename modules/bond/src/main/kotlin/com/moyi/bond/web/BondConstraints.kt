@@ -20,21 +20,13 @@ import kotlin.reflect.KClass
 // blank too: PATCH omits @NotBlank because an absent type is valid.
 
 /**
- * At least one character the *domain* does not consider whitespace.
- *
- * `@NotBlank` is not this rule. Bean Validation blanks a string with Java's
- * `String.trim`, which removes only characters at or below `U+0020`, while
- * Kotlin's `trim` and `isBlank` also remove every `isSpaceChar` — `U+00A0`,
- * `U+2007`, and the rest. A name of one non-breaking space therefore passed
- * `@NotBlank`, was trimmed to the empty string on its way into the domain, and
- * `require(name.isNotBlank())` turned it into a 500 on a well-formed request.
- * Found by `BondsEndpointTest`; the same hole existed on `PATCH`.
- *
- * `(?U)` is what makes `\S` agree with Kotlin here, and `(?s)` lets `.` cross a
- * newline so a multi-line value is judged by its content rather than its shape.
- * Null passes, as every Bean Validation constraint but `@NotNull` does.
+ * The whitespace set Kotlin trims (Character.isWhitespace or isSpaceChar).
+ * Explicit escapes work in Java and ECMAScript/OpenAPI alike; Java-only (?U)
+ * flags both broke schema validators and missed the U+001C–U+001F separators.
  */
-internal const val NOT_ONLY_SPACE = "(?sU).*\\S.*"
+internal const val NOT_ONLY_SPACE =
+    "[\\s\\S]*[^\\u0009-\\u000d\\u001c-\\u0020\\u00a0\\u1680" +
+        "\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000][\\s\\S]*"
 
 /** The anchor or reminder zone: an IANA region id (ADR-0004, doc 04 §6). */
 @Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)

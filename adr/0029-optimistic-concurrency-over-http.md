@@ -183,3 +183,26 @@ document's `required` list.
 - Phase 3 makes an entry editable, and the `ETag` question above needs answering.
 - A client ever needs to change the anchor zone and a member setting in one round trip, which
   this design deliberately does not offer.
+
+## Review amendment: representation validators
+
+An ETag is now an opaque quoted token containing a row-version prefix and a
+SHA-256 digest of the caller-visible bond view. The digest includes public member
+names, the caller's membership, and the live invite, including its disappearance
+at expiry. The row version alone missed invite rotation/expiry and changes owned
+by the identity module, incorrectly returning 304 for a changed response.
+Private settings and block records are excluded: changing them cannot invalidate
+another member's representation. Leave-versus-block tests compare normalized
+bodies and the version prefix across different bonds; repeated operations on the
+same bond still require identical complete ETags.
+
+Clients must echo the entire returned token, never construct one from a number.
+A previously cached numeric token fails with 412; refreshing the bond supplies the
+new token. PATCH compares the current caller-visible token while holding the bond
+lock. If-Match parses the complete HTTP entity-tag list and compares opaque strong
+tags exactly: `"03"` and `"+3"` do not match `"3"`, and commas inside quotes are
+part of a tag. Missing conditions and `*` retain the documented 428 behavior.
+
+The nonblank constraint also uses an explicit Kotlin-trim whitespace set instead
+of Java-only inline regex flags. This rejects U+001C–U+001F before domain parsing
+and produces an OpenAPI pattern usable by ECMAScript clients.

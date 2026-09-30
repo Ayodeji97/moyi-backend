@@ -6,6 +6,7 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
@@ -55,23 +56,24 @@ internal class BondSettingsEndpointTest(
         val ada = users.verified("Ada")
         val created = createBond(ada)
         val bondId = bondIdOf(created)
-        created.getHeader(HttpHeaders.ETAG) shouldBe "\"0\""
+        created.getHeader(HttpHeaders.ETAG)!!.startsWith("\"0-") shouldBe true
 
-        val response = patch(ada, bondId, """{"name":"Us two"}""", "\"0\"")
+        val response = patch(ada, bondId, """{"name":"Us two"}""", created.getHeader(HttpHeaders.ETAG)!!)
 
         response.status shouldBe 200
         response.contentAsString shouldContain "\"name\":\"Us two\""
         // The NEW version, not the one that was sent: a client told to keep a
         // stale value would be refused on its next write (the lesson from the
         // review of PR #38, where accept documented an ETag it never sent).
-        response.getHeader(HttpHeaders.ETAG) shouldBe "\"1\""
-        getBond(ada, bondId).getHeader(HttpHeaders.ETAG) shouldBe "\"1\""
+        response.getHeader(HttpHeaders.ETAG) shouldNotBe created.getHeader(HttpHeaders.ETAG)
+        getBond(ada, bondId).getHeader(HttpHeaders.ETAG) shouldBe response.getHeader(HttpHeaders.ETAG)
     }
 
     @Test
     fun `no If-Match is 428 PRECONDITION_REQUIRED and changes nothing`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
         val response = patch(ada, bondId, """{"name":"Us two"}""", ifMatch = null)
 
@@ -83,10 +85,11 @@ internal class BondSettingsEndpointTest(
     @Test
     fun `a stale If-Match is 412 and changes nothing`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
-        patch(ada, bondId, """{"name":"First"}""", "\"0\"").status shouldBe 200
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        patch(ada, bondId, """{"name":"First"}""", created.getHeader(HttpHeaders.ETAG)!!).status shouldBe 200
 
-        val response = patch(ada, bondId, """{"name":"Second"}""", "\"0\"")
+        val response = patch(ada, bondId, """{"name":"Second"}""", created.getHeader(HttpHeaders.ETAG)!!)
 
         response.status shouldBe 412
         response.contentAsString shouldContain "\"code\":\"PRECONDITION_FAILED\""
@@ -98,19 +101,21 @@ internal class BondSettingsEndpointTest(
         // ADR-0029's two deviations from RFC 9110, asserted so that they are
         // decisions rather than accidents.
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
         patch(ada, bondId, """{"name":"Us two"}""", "*").status shouldBe 428
-        patch(ada, bondId, """{"name":"Us two"}""", "W/\"0\"").status shouldBe 412
+        patch(ada, bondId, """{"name":"Us two"}""", "W/${created.getHeader(HttpHeaders.ETAG)}").status shouldBe 412
         getBond(ada, bondId).contentAsString shouldContain "\"name\":\"Us\""
     }
 
     @Test
     fun `a list of ETags matches if one of them is current`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
-        patch(ada, bondId, """{"name":"Us two"}""", "\"7\", \"0\"").status shouldBe 200
+        patch(ada, bondId, """{"name":"Us two"}""", "\"7\", ${created.getHeader(HttpHeaders.ETAG)}").status shouldBe 200
     }
 
     @Test
@@ -120,10 +125,11 @@ internal class BondSettingsEndpointTest(
         // to the one caller who must not have it.
         val ada = users.verified("Ada")
         val eve = users.verified("Eve")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
         patch(eve, bondId, """{"name":"Mine"}""", ifMatch = null).status shouldBe 404
-        patch(eve, bondId, """{"name":"Mine"}""", "\"0\"").status shouldBe 404
+        patch(eve, bondId, """{"name":"Mine"}""", created.getHeader(HttpHeaders.ETAG)!!).status shouldBe 404
         patch(eve, bondId, """{"name":"Mine"}""", "\"99\"").status shouldBe 404
 
         // A malformed body is a 422 for a non-member too, and that is not an
@@ -132,17 +138,18 @@ internal class BondSettingsEndpointTest(
         // same body gets the same 422, and nothing about the bond is disclosed.
         // Worth asserting rather than assuming; the first draft of this test
         // expected 404 and the reasoning above is why it does not.
-        patch(eve, bondId, """{"name":""}""", "\"0\"").status shouldBe 422
-        patch(ada, bondId, """{"name":""}""", "\"0\"").status shouldBe 422
+        patch(eve, bondId, """{"name":""}""", created.getHeader(HttpHeaders.ETAG)!!).status shouldBe 422
+        patch(ada, bondId, """{"name":""}""", created.getHeader(HttpHeaders.ETAG)!!).status shouldBe 422
     }
 
     @Test
     fun `patching an archived bond is 409 BOND_ARCHIVED`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
         leave(ada, bondId).status shouldBe 204
 
-        val response = patch(ada, bondId, """{"name":"Us two"}""", "\"1\"")
+        val response = patch(ada, bondId, """{"name":"Us two"}""", getBond(ada, bondId).getHeader(HttpHeaders.ETAG)!!)
 
         response.status shouldBe 409
         response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
@@ -151,9 +158,10 @@ internal class BondSettingsEndpointTest(
     @Test
     fun `the type is patchable, and the seats do not move`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
-        val response = patch(ada, bondId, """{"type":"FRIENDS"}""", "\"0\"")
+        val response = patch(ada, bondId, """{"type":"FRIENDS"}""", created.getHeader(HttpHeaders.ETAG)!!)
 
         response.status shouldBe 200
         response.contentAsString shouldContain "\"type\":\"FRIENDS\""
@@ -163,13 +171,14 @@ internal class BondSettingsEndpointTest(
     @Test
     fun `a named null clears the reveal time and an absent field is left alone`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
-        patch(ada, bondId, """{"revealTimeLocal":"21:00","strictMode":true}""", "\"0\"").let {
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        patch(ada, bondId, """{"revealTimeLocal":"21:00","strictMode":true}""", created.getHeader(HttpHeaders.ETAG)!!).let {
             it.status shouldBe 200
             it.contentAsString shouldContain "\"revealTimeLocal\":\"21:00\""
         }
 
-        val cleared = patch(ada, bondId, """{"revealTimeLocal":null}""", "\"1\"")
+        val cleared = patch(ada, bondId, """{"revealTimeLocal":null}""", getBond(ada, bondId).getHeader(HttpHeaders.ETAG)!!)
 
         cleared.status shouldBe 200
         cleared.contentAsString shouldContain "\"revealTimeLocal\":null"
@@ -184,9 +193,10 @@ internal class BondSettingsEndpointTest(
         // `PATCH /bonds/{id}/timezone`. Silently dropping the field would tell
         // a client the change succeeded.
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
-        val response = patch(ada, bondId, """{"anchorTimezone":"Europe/London"}""", "\"0\"")
+        val response = patch(ada, bondId, """{"anchorTimezone":"Europe/London"}""", created.getHeader(HttpHeaders.ETAG)!!)
 
         response.status shouldBe 422
         response.contentAsString shouldContain "anchorTimezone"
@@ -196,37 +206,40 @@ internal class BondSettingsEndpointTest(
     @Test
     fun `an empty patch is 422 rather than a version bump for nothing`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
-        patch(ada, bondId, "{}", "\"0\"").status shouldBe 422
-        getBond(ada, bondId).getHeader(HttpHeaders.ETAG) shouldBe "\"0\""
+        patch(ada, bondId, "{}", created.getHeader(HttpHeaders.ETAG)!!).status shouldBe 422
+        getBond(ada, bondId).getHeader(HttpHeaders.ETAG) shouldBe created.getHeader(HttpHeaders.ETAG)!!
     }
 
     @Test
     fun `a name that is too long, blank, or the wrong type is 422 naming the field`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
-        patch(ada, bondId, """{"name":"${"x".repeat(61)}"}""", "\"0\"").let {
+        patch(ada, bondId, """{"name":"${"x".repeat(61)}"}""", created.getHeader(HttpHeaders.ETAG)!!).let {
             it.status shouldBe 422
             it.contentAsString shouldContain "name"
             // Doc 18 §5: a failure response does not echo the input.
             it.contentAsString shouldNotContain "xxxxx"
         }
-        patch(ada, bondId, """{"name":"  "}""", "\"0\"").status shouldBe 422
-        patch(ada, bondId, """{"type":"THROUPLE"}""", "\"0\"").let {
+        patch(ada, bondId, """{"name":"  "}""", created.getHeader(HttpHeaders.ETAG)!!).status shouldBe 422
+        patch(ada, bondId, """{"type":"THROUPLE"}""", created.getHeader(HttpHeaders.ETAG)!!).let {
             it.status shouldBe 422
             it.contentAsString shouldContain "\"field\":\"type\""
         }
-        patch(ada, bondId, """{"revealTimeLocal":"9am"}""", "\"0\"").status shouldBe 422
+        patch(ada, bondId, """{"revealTimeLocal":"9am"}""", created.getHeader(HttpHeaders.ETAG)!!).status shouldBe 422
         // And nothing was written by any of them.
-        getBond(ada, bondId).getHeader(HttpHeaders.ETAG) shouldBe "\"0\""
+        getBond(ada, bondId).getHeader(HttpHeaders.ETAG) shouldBe created.getHeader(HttpHeaders.ETAG)!!
     }
 
     @Test
     fun `a member reads and replaces their own settings`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
         val initial = getSettings(ada, bondId)
         initial.status shouldBe 200
@@ -251,7 +264,8 @@ internal class BondSettingsEndpointTest(
     @Test
     fun `PUT replaces, so an omitted field is cleared - except the zone`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
         putSettings(
             ada,
             bondId,
@@ -291,7 +305,8 @@ internal class BondSettingsEndpointTest(
     @Test
     fun `settings are refused on an archived bond, and still readable`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
         putSettings(ada, bondId, """{"reminderTimeLocal":"07:30"}""").status shouldBe 200
         leave(ada, bondId).status shouldBe 204
 
@@ -304,7 +319,8 @@ internal class BondSettingsEndpointTest(
     @Test
     fun `a bad settings body is 422 naming the field`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
         putSettings(ada, bondId, "{}").let {
             it.status shouldBe 422
@@ -330,7 +346,8 @@ internal class BondSettingsEndpointTest(
     fun `a non-member gets the same 404 on both settings routes`() {
         val ada = users.verified("Ada")
         val eve = users.verified("Eve")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
         getSettings(eve, bondId).status shouldBe 404
         putSettings(eve, bondId, """{"reminderTimeLocal":"07:30"}""").status shouldBe 404
@@ -339,34 +356,37 @@ internal class BondSettingsEndpointTest(
     @Test
     fun `a supplied blank type is 422 while an omitted type is allowed`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
-        listOf("", "   ", "\u00a0").forEach { blank ->
-            val response = patch(ada, bondId, """{"type":"$blank"}""", "\"0\"")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        listOf("", "   ", "\u00a0", "\\u001c", "\\u001f").forEach { blank ->
+            val response = patch(ada, bondId, """{"type":"$blank"}""", created.getHeader(HttpHeaders.ETAG)!!)
             response.status shouldBe 422
             response.contentAsString shouldContain "\"field\":\"type\""
         }
-        patch(ada, bondId, """{"name":"Still us"}""", "\"0\"").status shouldBe 200
+        patch(ada, bondId, """{"name":"Still us"}""", created.getHeader(HttpHeaders.ETAG)!!).status shouldBe 200
     }
 
     @Test
     fun `a patched name blank once trimmed is 422, whatever kind of space it is`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
 
-        for (blank in listOf("", " ", "\u00a0")) {
-            val response = patch(ada, bondId, """{"name":"$blank"}""", "\"0\"")
+        for (blank in listOf("", " ", "\u00a0", "\\u001c", "\\u001f")) {
+            val response = patch(ada, bondId, """{"name":"$blank"}""", created.getHeader(HttpHeaders.ETAG)!!)
 
             response.status shouldBe 422
             response.contentAsString shouldContain "\"field\":\"name\""
         }
-        patch(ada, bondId, """{"name":"  Us  "}""", "\"0\"").status shouldBe 200
+        patch(ada, bondId, """{"name":"  Us  "}""", created.getHeader(HttpHeaders.ETAG)!!).status shouldBe 200
     }
 
     @Test
     fun `a blank nickname is 422 while null clears it and surrounding spaces are trimmed`() {
         val ada = users.verified("Ada")
-        val bondId = bondIdOf(createBond(ada))
-        listOf("", "   ", "\u00a0").forEach { blank ->
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        listOf("", "   ", "\u00a0", "\\u001c", "\\u001f").forEach { blank ->
             val response = putSettings(ada, bondId, """{"reminderTimeLocal":"07:30","nicknameForOther":"$blank"}""")
             response.status shouldBe 422
             response.contentAsString shouldContain "\"field\":\"nicknameForOther\""
@@ -380,6 +400,56 @@ internal class BondSettingsEndpointTest(
             it.contentAsString shouldContain "\"nicknameForOther\":null"
         }
     }
+
+    @Test
+    fun `rotating and expiring an invite invalidate a cached bond without a row version change`() {
+        val ada = users.verified("Ada")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        val originalTag = created.getHeader(HttpHeaders.ETAG)!!
+        conditionalGet(ada, bondId, originalTag).status shouldBe 304
+
+        mockMvc
+            .post("/api/v1/bonds/$bondId/invites") {
+                header(HttpHeaders.AUTHORIZATION, bearer(ada))
+            }.andReturn()
+            .response.status shouldBe 201
+        val rotated = conditionalGet(ada, bondId, originalTag)
+        rotated.status shouldBe 200
+        rotated.getHeader(HttpHeaders.ETAG) shouldNotBe originalTag
+        jdbc.queryForObject("SELECT version FROM bonds", Int::class.java) shouldBe 0
+        patch(ada, bondId, """{"name":"Stale invite view"}""", originalTag).status shouldBe 412
+
+        jdbc.update("UPDATE bond_invites SET expires_at = now() - interval '1 second'")
+        val expired = conditionalGet(ada, bondId, rotated.getHeader(HttpHeaders.ETAG)!!)
+        expired.status shouldBe 200
+        expired.contentAsString shouldContain "\"invite\":null"
+        conditionalGet(ada, bondId, expired.getHeader(HttpHeaders.ETAG)!!).status shouldBe 304
+    }
+
+    @Test
+    fun `a changed public display name invalidates the cached bond`() {
+        val ada = users.verified("Ada")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        users.rename(ada, "New name")
+        val changed = conditionalGet(ada, bondId, created.getHeader(HttpHeaders.ETAG)!!)
+        changed.status shouldBe 200
+        changed.contentAsString shouldContain "New name"
+        jdbc.queryForObject("SELECT version FROM bonds", Int::class.java) shouldBe 0
+    }
+
+    private fun conditionalGet(
+        userId: UUID,
+        bondId: String,
+        etag: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .get("/api/v1/bonds/$bondId") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                header(HttpHeaders.IF_NONE_MATCH, etag)
+            }.andReturn()
+            .response
 
     // ---- helpers ------------------------------------------------------------
 

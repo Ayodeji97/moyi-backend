@@ -21,6 +21,7 @@ import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
+import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
 import java.util.UUID
 import javax.sql.DataSource
@@ -46,7 +47,7 @@ internal class BondEndingEndpointTest(
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE blocks, bond_invites, bond_members, bonds CASCADE")
+        jdbc.execute("TRUNCATE TABLE bond_proposals, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
 
@@ -204,6 +205,58 @@ internal class BondEndingEndpointTest(
         val seen = getBond(bea, bondId).contentAsString + listBonds(bea).contentAsString
         seen.lowercase() shouldNotContain "block"
     }
+
+    @Test
+    fun `ending a bond cancels what was waiting to be agreed`() {
+        // ADR-0028 promised this and could not deliver it until B5 built the
+        // table. Without it, a confirmation arriving after a leave would try to
+        // move the anchor zone of a bond that has ended.
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        accept(bea, codeOf(created)).status shouldBe 200
+        proposeTimezone(ada, bondId).status shouldBe 200
+        getBond(bea, bondId).contentAsString shouldContain "\"proposedTimezone\""
+
+        leave(ada, bondId).status shouldBe 204
+
+        getBond(bea, bondId).contentAsString shouldContain "\"pendingTimezoneChange\":null"
+        jdbc.queryForObject("SELECT count(*) FROM bond_proposals WHERE cancelled_at IS NULL", Int::class.java) shouldBe 0
+        // And confirming afterwards is the archived refusal, not a zone change.
+        confirmTimezone(bea, bondId).status shouldBe 409
+        jdbc.queryForObject("SELECT anchor_timezone FROM bonds", String::class.java) shouldBe "Africa/Lagos"
+    }
+
+    private fun proposeTimezone(
+        userId: UUID,
+        bondId: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .patch("/api/v1/bonds/$bondId/timezone") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"anchorTimezone":"Europe/London"}"""
+            }.andReturn()
+            .response
+
+    private fun confirmTimezone(
+        userId: UUID,
+        bondId: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/timezone/confirm") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = MediaType.APPLICATION_JSON
+                content =
+                    """{"proposalId":"${jdbc
+                        .queryForList(
+                            "SELECT id FROM bond_proposals WHERE bond_id = ? AND kind = 'TIMEZONE_CHANGE' ORDER BY proposed_at DESC",
+                            UUID.fromString(bondId),
+                        ).firstOrNull()
+                        ?.get("id") ?: UUID.randomUUID()}"}"""
+            }.andReturn()
+            .response
 
     // ---- helpers ------------------------------------------------------------
 
