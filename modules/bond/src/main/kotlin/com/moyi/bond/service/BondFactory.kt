@@ -10,6 +10,7 @@ import com.moyi.bond.domain.MemberId
 import com.moyi.common.core.IdGenerator
 import org.springframework.stereotype.Component
 import java.time.Clock
+import java.time.temporal.ChronoUnit
 
 /**
  * A new bond with the invite that will bring its second member.
@@ -31,7 +32,9 @@ internal class BondFactory(
     private val clock: Clock,
 ) {
     fun create(draft: BondDraft): NewBond {
-        val now = clock.instant()
+        // PostgreSQL timestamps have microsecond precision. Align before writing
+        // so the create response and its later persisted representation agree.
+        val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
         val bond = Bond.create(BondId(ids.timeOrdered()), MemberId(ids.timeOrdered()), draft, now)
         val invite = Invite.issue(InviteId(ids.timeOrdered()), bond.id, codes.next(), bond.members.single().id, now)
         return NewBond(bond, invite)

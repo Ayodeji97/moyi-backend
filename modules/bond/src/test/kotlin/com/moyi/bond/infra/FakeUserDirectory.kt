@@ -27,6 +27,13 @@ internal class FakeUserDirectory : UserDirectory {
     /** Registered, not yet verified: may sign in, may not create or join a bond. */
     fun unverified(displayName: String): UUID = add(displayName, verified = false)
 
+    fun rename(
+        id: UUID,
+        displayName: String,
+    ) {
+        users.computeIfPresent(id) { _, user -> user.copy(displayName = displayName) }
+    }
+
     fun clear() = users.clear()
 
     override fun find(id: UUID): UserSummary? = users[id]

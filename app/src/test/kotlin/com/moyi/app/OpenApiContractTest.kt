@@ -90,6 +90,9 @@ class OpenApiContractTest(
                 "/api/v1/bonds/{bondId}",
                 "/api/v1/bonds/{bondId}/leave",
                 "/api/v1/bonds/{bondId}/members/me/settings",
+                "/api/v1/bonds/{bondId}/timezone",
+                "/api/v1/bonds/{bondId}/timezone/confirm",
+                "/api/v1/bonds/{bondId}/deletion-request",
                 "/api/v1/bonds/{bondId}/block",
                 "/api/v1/bonds/{bondId}/invites",
                 "/api/v1/bonds/{bondId}/invites/{inviteId}",
@@ -226,6 +229,36 @@ class OpenApiContractTest(
         settings.put.responses.keys shouldContainAll listOf("200", "404", "409", "422")
         settings.put.responses.keys shouldNotContain "412"
         settings.get.responses shouldContainKey "404"
+    }
+
+    @Test
+    fun `the consent endpoints document their conflicts, and the deletion request its 202`() {
+        // FR-027, FR-028. A generated client has to be able to model the three
+        // ways consent is refused, and to know that asking for a deletion is
+        // accepted rather than done (`202`).
+        val timezone = api.paths["/api/v1/bonds/{bondId}/timezone"]!!
+        timezone.patch.responses.keys shouldContainAll listOf("200", "404", "409", "422")
+        timezone.patch.responses["200"]!!
+            .headers
+            .orEmpty() shouldContainKey "ETag"
+        timezone.delete.responses shouldContainKey "204"
+        // Cancelling is never a conflict: either it was there or it was not.
+        timezone.delete.responses.keys shouldNotContain "409"
+        api.paths["/api/v1/bonds/{bondId}/timezone/confirm"]!!
+            .post.responses.keys shouldContainAll listOf("200", "404", "409")
+
+        val deletion = api.paths["/api/v1/bonds/{bondId}/deletion-request"]!!
+        deletion.post.responses.keys shouldContainAll listOf("202", "404", "409")
+        deletion.post.responses.keys shouldNotContain "200"
+        deletion.delete.responses shouldContainKey "204"
+
+        // The three new codes are in the one enum a client switches on, which is
+        // what makes them a breaking change and worth the label (ADR-0024).
+        api.components.schemas["ProblemDetail"]!!
+            .properties["code"]!!
+            .enum
+            .map { it.toString() } shouldContainAll
+            listOf("PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON")
     }
 
     @Test

@@ -85,6 +85,16 @@ internal class GratitudeCrossTenantTest(
                 ),
             "GET /api/v1/bonds/{bondId}/members/me/settings" to Fixture(),
             "PUT /api/v1/bonds/{bondId}/members/me/settings" to Fixture(body = """{"reminderTimeLocal":"07:30"}"""),
+            // Slice B5, copied from `bond`'s table with the rest. The PATCH
+            // needs a body; confirm and cancel take none — and all three must
+            // answer a non-member before they look at whether anything is
+            // pending, or the 404 would depend on state only a member can know
+            // about.
+            "PATCH /api/v1/bonds/{bondId}/timezone" to Fixture(body = """{"anchorTimezone":"Europe/London"}"""),
+            "POST /api/v1/bonds/{bondId}/timezone/confirm" to Fixture(body = """{"proposalId":"00000000-0000-0000-0000-000000000001"}"""),
+            "DELETE /api/v1/bonds/{bondId}/timezone" to Fixture(),
+            "POST /api/v1/bonds/{bondId}/deletion-request" to Fixture(),
+            "DELETE /api/v1/bonds/{bondId}/deletion-request" to Fixture(),
             // Task 7. A body, since @Valid runs before the guard would ever
             // refuse anything about the bond — see EntriesController's own
             // KDoc on why that ordering is still fine (a fact about the

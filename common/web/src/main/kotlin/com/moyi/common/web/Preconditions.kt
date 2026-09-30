@@ -8,9 +8,8 @@ import org.springframework.http.HttpStatus
  * Doc 06 §1 requires one on every bond-settings update, and the reason is the
  * lost update: two members open the settings screen, both change the name, and
  * without a condition the second write silently erases the first — with no
- * error for either of them to see. The `ETag` this compares against is the row
- * `@Version`, so the check is made against the same number the database itself
- * enforces at flush.
+ * error for either of them to see. Entity tags are opaque strings;
+ * each resource supplies its current validator under its update lock.
  *
  * **Two deliberate deviations from the RFC, both recorded in ADR-0029:**
  *
@@ -19,7 +18,7 @@ import org.springframework.http.HttpStatus
  *   But the *point* of requiring the condition is to prevent a lost update, and
  *   `If-Match: *` is a request to skip that check — honouring it would make the
  *   requirement decorative. A client that genuinely means to overwrite re-reads
- *   and sends the version it saw.
+ *   and echoes the complete ETag it received.
  * - **An unparseable validator matches nothing**, producing `412` rather than a
  *   `400` about the header's shape. The asymmetry is the argument: a false "does
  *   not match" costs a client one retry, and a false "matches" is a write lost
@@ -30,32 +29,36 @@ import org.springframework.http.HttpStatus
  */
 @JvmInline
 value class IfMatch private constructor(
-    private val versions: List<Int>,
+    private val tags: Set<String>,
 ) {
-    /** True when [version] is one of the versions the caller said it would accept. */
-    fun matches(version: Int): Boolean = versions.contains(version)
+    /** Strong comparison is byte equality, never numeric coercion. */
+    fun matches(etag: String): Boolean = etag in tags
+
+    fun matches(version: Int): Boolean = matches("\"$version\"")
 
     companion object {
-        /**
-         * @throws PreconditionRequiredException the header is absent, blank, or `*`
-         */
-        fun parse(header: String?): IfMatch {
-            val raw = header?.trim()
-            if (raw.isNullOrBlank() || raw == "*") throw PreconditionRequiredException()
-            return IfMatch(raw.split(',').mapNotNull { it.trim().toVersionOrNull() })
-        }
+        private const val ENTITY_TAG = "(?:W/)?\"[\\x21\\x23-\\x7E\\x80-\\xFF]*\""
+        private val tag = Regex(ENTITY_TAG)
 
-        /**
-         * `"3"` → `3`. Anything else is `null`, and a `null` matches nothing: a
-         * weak validator, an unquoted number, an empty tag, something that is
-         * not a number, a negative one, or two tags that were not comma
-         * separated.
-         */
-        private fun String.toVersionOrNull(): Int? =
-            takeIf { it.length >= 2 && it.startsWith('"') && it.endsWith('"') }
-                ?.substring(1, length - 1)
-                ?.toIntOrNull()
-                ?.takeIf { it >= 0 }
+        /** Missing conditions are 428; malformed lists fail closed with 412. */
+        @Suppress("ReturnCount") // Either grammar failure rejects the entire list, including earlier tags.
+        fun parse(header: String?): IfMatch {
+            if (header.isNullOrBlank() || header.trim() == "*") throw PreconditionRequiredException()
+            // Scan iteratively: a repeated-group list regex can overflow the
+            // stack on a valid header smaller than the server's 8 KB limit.
+            val tags = mutableSetOf<String>()
+            var offset = 0
+            while (offset < header.length) {
+                while (offset < header.length && header[offset] in " \t,") offset++
+                if (offset == header.length) break
+                val match = tag.matchAt(header, offset) ?: return IfMatch(emptySet())
+                if (!match.value.startsWith("W/")) tags.add(match.value)
+                offset = match.range.last + 1
+                while (offset < header.length && header[offset] in " \t") offset++
+                if (offset < header.length && header[offset] != ',') return IfMatch(emptySet())
+            }
+            return IfMatch(tags)
+        }
     }
 }
 
@@ -70,11 +73,11 @@ class PreconditionRequiredException :
     ApiException(
         HttpStatus.PRECONDITION_REQUIRED,
         ErrorCode.PRECONDITION_REQUIRED,
-        "Read this first, then send its version back as If-Match.",
+        "Read this first, then echo the complete ETag header value as If-Match.",
     )
 
 /**
- * 412: the version the caller holds is not the current one.
+ * 412: the ETag the caller holds does not match the current representation.
  *
  * Also the answer when two writers both pass the header check and one loses the
  * race at flush — from the loser's side the precondition had stopped being true,

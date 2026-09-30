@@ -29,15 +29,14 @@ class FlywayMigrationTest(
     @Test
     fun `every module's migrations run, in one sequence, against one schema`() {
         // V1 lives in `app` (database-wide extensions); V2 to V8 live in
-        // `modules/identity`, V9 in `modules/bond`, and V11 in `common:web`
-        // (idempotency_keys, doc 06 §1). Versions are one global sequence
-        // across modules, so V10 is reserved elsewhere and simply is not on
-        // this worktree's classpath yet — Flyway tolerates the gap. Flyway
-        // merges every `classpath:db/migration` it finds, which is what lets
-        // a module own its schema without `app` restating it — and this
-        // assertion is what notices when a module's migrations are not on
-        // the classpath at all, a failure that otherwise shows up as a
-        // missing table much later.
+        // `modules/identity`, V9 and V10 in `modules/bond` (its own tables and
+        // its proposals), V11 in `common:web` (idempotency_keys, doc 06 §1) and
+        // V12 in `modules/gratitude`. Versions are one global sequence across
+        // modules. Flyway merges every `classpath:db/migration` it finds, which
+        // is what lets a module own its schema without `app` restating it — and
+        // this assertion is what notices when a module's migrations are not on
+        // the classpath at all, a failure that otherwise shows up as a missing
+        // table much later.
         //
         // The rule checked is "every module's migrations landed, as one
         // ascending sequence" — not "exactly this list forever". A hard-coded
@@ -53,8 +52,8 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll(listOf(1, 2, 3, 4, 5, 6, 7, 8, 9, 11)),
-            "Expected every module's migrations through V11, found: $versions",
+            versions.containsAll((1..12).toList()),
+            "Expected every module's migrations through V12, found: $versions",
         )
 
         val extensions =
@@ -81,7 +80,7 @@ class FlywayMigrationTest(
         val bondTables =
             jdbcTemplate.queryForList(
                 "SELECT tablename FROM pg_tables WHERE schemaname = 'public' " +
-                    "AND tablename IN ('bonds', 'bond_members', 'bond_invites', 'blocks')",
+                    "AND tablename IN ('bonds', 'bond_members', 'bond_invites', 'blocks', 'bond_proposals')",
                 String::class.java,
             )
         assertTrue(

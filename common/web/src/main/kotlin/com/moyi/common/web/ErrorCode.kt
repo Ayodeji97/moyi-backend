@@ -165,6 +165,28 @@ enum class ErrorCode {
     PRECONDITION_FAILED,
 
     /**
+     * A proposal of that kind is already open on this bond (FR-027, FR-028).
+     * The client's move is to show the pending one — `states.md` §8 draws it —
+     * rather than to retry. 409.
+     */
+    PROPOSAL_PENDING,
+
+    /**
+     * The caller tried to confirm their own proposal. Two-party consent means
+     * the *other* member agrees (BR-6, doc 04 §8.5); one person clicking twice
+     * is not consent. 409.
+     */
+    PROPOSAL_NEEDS_OTHER_MEMBER,
+
+    /**
+     * FR-027's once-per-30-days rule on the anchor zone. A `409` rather than the
+     * `429` doc 06 §3.3 specified, which ADR-0030 supersedes: a month is not a
+     * rate limit a client should render as "please wait a moment", and the detail
+     * names the date it becomes allowed.
+     */
+    TIMEZONE_CHANGE_TOO_SOON,
+
+    /**
      * `Idempotency-Key` (doc 06 §1) was reused with a request whose body
      * hashes differently from the one it was first sent with. 422: the caller
      * picked a key that means one specific request, and this one is not it —

@@ -1,8 +1,15 @@
 package com.moyi.bond.service
 
+import com.moyi.bond.domain.RegionZone
 import com.moyi.common.web.ApiException
 import com.moyi.common.web.ErrorCode
+import com.moyi.common.web.NotFoundException
 import org.springframework.http.HttpStatus
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 // The refusals this module gives that are facts about the **caller's own**
 // account, and are therefore safe to name precisely — unlike anything about a
@@ -83,3 +90,86 @@ internal class InviteNotUsableException :
         ErrorCode.INVITE_NOT_USABLE,
         "That code cannot be used. Ask them to send you a new one.",
     )
+
+/**
+ * FR-027, FR-028: a proposal of that kind is already waiting for the other
+ * member. The caller is a member, so naming it discloses nothing — and
+ * `states.md` §8 has a screen for the pending state, which is what the client
+ * should show instead of retrying.
+ */
+internal class ProposalPendingException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.PROPOSAL_PENDING,
+        "There is already a change waiting for the other person to agree to.",
+    )
+
+/**
+ * BR-6, doc 04 §8.5: the *other* member agrees. One person clicking twice is
+ * not two-party consent, and this is the refusal that says so.
+ */
+internal class ProposalNeedsOtherMemberException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.PROPOSAL_NEEDS_OTHER_MEMBER,
+        "This needs the other person to agree to it.",
+    )
+
+/**
+ * FR-027's once-per-30-days rule on the anchor zone.
+ *
+ * The detail names the **date** it becomes allowed, which is safe: it is a fact
+ * about the caller's own bond, and `states.md` §8 says the constraints belong in
+ * front of a person rather than behind a retry. A date rather than a countdown,
+ * for the reason that file gives about the deletion screen — a countdown framed
+ * as a deadline is urgency, a date is a fact.
+ *
+ * `409` and not `429` (ADR-0030): a month is not a rate limit, and a client that
+ * treated it as one would show "please wait" and then retry into the same wall.
+ */
+internal class TimezoneChangeTooSoonException(
+    allowedFrom: Instant,
+    zone: RegionZone,
+) : ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.TIMEZONE_CHANGE_TOO_SOON,
+        "The shared time zone can change again from ${DATE.format(readableDate(allowedFrom, zone))}.",
+    ) {
+    private companion object {
+        /**
+         * The first date on which the change is allowed *all day*, in the bond's
+         * own zone.
+         *
+         * Thirty days from an afternoon lands in an afternoon, so naming that
+         * calendar date makes the sentence false for most of the day it names —
+         * a client that read "28 October" and retried at 10:00 on the 28th got
+         * the identical refusal naming the identical date. Rounding **up** to
+         * the next whole day is the honest direction to be wrong in: the answer
+         * may arrive sooner than promised, never later. Found by the second
+         * review of PR #41.
+         */
+        fun readableDate(
+            allowedFrom: Instant,
+            zone: RegionZone,
+        ): LocalDate =
+            allowedFrom.atZone(zone.zone).let {
+                if (it.toLocalTime() == LocalTime.MIDNIGHT) it.toLocalDate() else it.toLocalDate().plusDays(1)
+            }
+
+        /**
+         * The date as a person reads it, in the bond's own zone.
+         *
+         * **`Locale.ENGLISH` explicitly.** `MMMM` resolves against
+         * `Locale.getDefault(FORMAT)`, so without it the same API that answers
+         * in English everywhere else would say "28 octobre 2026" on a container
+         * whose locale happened to be French — output that varies with the
+         * deployment rather than with anything the client sent. Found by the
+         * review of PR #41. When doc 14's i18n arrives, this becomes the
+         * *request's* locale, not the server's.
+         */
+        val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH)
+    }
+}
+
+/** No live proposal of that kind: never made, already answered, cancelled, or lapsed — one answer for all four. */
+internal class ProposalNotFoundException : NotFoundException("There is nothing waiting to be agreed.")

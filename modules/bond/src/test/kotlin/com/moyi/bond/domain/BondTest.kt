@@ -1,13 +1,16 @@
 package com.moyi.bond.domain
 
+import com.moyi.bond.service.TimezoneChangeTooSoonException
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalTime
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -384,6 +387,190 @@ internal class BondTest {
         shouldThrow<IllegalArgumentException> { member.copy(quietHoursEnd = LocalTime.of(7, 0)) }
         // A window that wraps midnight is ordinary and stays legal.
         member.withSettings(settings.copy(quietHoursEnd = LocalTime.of(7, 0))).quietHoursStart shouldBe LocalTime.of(22, 0)
+    }
+
+    @Test
+    fun `the anchor zone can be changed once, and not again for thirty days`() {
+        val bond = create()
+        val london = RegionZone.of("Europe/London")
+
+        val moved = bond.withAnchorTimezone(london, now)
+
+        moved.anchorTimezone shouldBe london
+        moved.timezoneChangedAt shouldBe now
+        moved.mayChangeTimezoneAt(now) shouldBe false
+        moved.mayChangeTimezoneAt(now.plus(Duration.ofDays(29))) shouldBe false
+        moved.mayChangeTimezoneAt(now.plus(Duration.ofDays(30))) shouldBe true
+        moved.nextTimezoneChangeAt shouldBe now.plus(Duration.ofDays(30))
+        shouldThrow<IllegalStateException> { moved.withAnchorTimezone(lagos, now) }
+    }
+
+    @Test
+    fun `a bond that has never moved its zone may move it at once`() {
+        val bond = create()
+
+        bond.timezoneChangedAt.shouldBeNull()
+        bond.mayChangeTimezoneAt(now) shouldBe true
+        bond.nextTimezoneChangeAt.shouldBeNull()
+    }
+
+    @Test
+    fun `an archived bond's anchor zone cannot be moved`() {
+        val archived = create().let { it.leave(it.members.single().id, now) }
+
+        shouldThrow<IllegalStateException> { archived.withAnchorTimezone(RegionZone.of("Europe/London"), now) }
+    }
+
+    @Test
+    fun `requesting deletion starts a thirty-day cooling-off`() {
+        val joined = create().let { it.accept(joiner(it)) }
+
+        val pending = joined.requestDeletion(now)
+
+        pending.status shouldBe BondStatus.PENDING_DELETION
+        pending.deletionRequestedAt shouldBe now
+        pending.deletionScheduledFor shouldBe now.plus(Duration.ofDays(30))
+        // Not open, so every other write is refused during it (ADR-0028, ADR-0029)
+        // — and cancelling, which ignores `isOpen`, is the one thing that works.
+        pending.isOpen shouldBe false
+    }
+
+    @Test
+    fun `cancelling a deletion returns an active bond to active`() {
+        val joined = create().let { it.accept(joiner(it)) }
+
+        val cancelled = joined.requestDeletion(now).cancelDeletion(now)
+
+        cancelled.status shouldBe BondStatus.ACTIVE
+        cancelled.deletionRequestedAt.shouldBeNull()
+        cancelled.deletionScheduledFor.shouldBeNull()
+        cancelled.isOpen shouldBe true
+    }
+
+    @Test
+    fun `cancelling a deletion does not bring back a bond somebody had left`() {
+        // §6.4: the status returns to ARCHIVED if any member has left. A bond
+        // does not come back to life because a deletion was called off.
+        val joined = create().let { it.accept(joiner(it)) }
+        val owner = joined.members.first { it.role == MemberRole.OWNER }
+        val archived = joined.leave(owner.id, now)
+
+        val cancelled = archived.copy(status = BondStatus.PENDING_DELETION, deletionRequestedAt = now).cancelDeletion(now)
+
+        cancelled.status shouldBe BondStatus.ARCHIVED
+        cancelled.deletionRequestedAt.shouldBeNull()
+        // The one path that reaches ARCHIVED without going through `end`, and
+        // so the one that used to leave the column null (review of #41).
+        cancelled.archivedAt shouldBe now
+    }
+
+    @Test
+    fun `a bond with no deletion pending has nothing to cancel`() {
+        shouldThrow<IllegalStateException> { create().cancelDeletion(now) }
+    }
+
+    @Test
+    fun `an archived bond cannot be scheduled for deletion`() {
+        // ADR-0030: refused whichever way it ended, so a blocked member cannot
+        // tell a block from a leave by trying it (doc 26 §2.1).
+        val left = create().let { it.leave(it.members.single().id, now) }
+
+        shouldThrow<IllegalStateException> { left.requestDeletion(now) }
+    }
+
+    @Test
+    fun `cancelling a deletion on a bond still waiting returns it to PENDING_MEMBER`() {
+        // The review of PR #41: restoring ACTIVE here orphans the bond
+        // permanently — `hasRoom` requires PENDING_MEMBER, so the invite it
+        // still advertises could never be used, and doc 04 §8.3a wants no
+        // Bond-days opened while a bond waits.
+        val solo = create()
+
+        val cancelled = solo.requestDeletion(now).cancelDeletion(now)
+
+        cancelled.status shouldBe BondStatus.PENDING_MEMBER
+        cancelled.hasRoom shouldBe true
+        cancelled.deletionRequestedAt.shouldBeNull()
+    }
+
+    @Test
+    fun `a member may leave during the cooling-off, and the deletion stays scheduled`() {
+        // Refusing for thirty days would make FR-029's protection depend on what
+        // the other person agreed to a fortnight earlier — and refusing `leave`
+        // while permitting `block` would make the two distinguishable, which is
+        // the oracle doc 26 §2.1 forbids.
+        val joined = create().let { it.accept(joiner(it)) }
+        val owner = joined.members.first { it.role == MemberRole.OWNER }
+        val pending = joined.requestDeletion(now)
+
+        pending.canBeEnded shouldBe true
+        val left = pending.leave(owner.id, now.plusSeconds(60))
+
+        left.memberOf(owner.userId)!!.leftAt shouldBe now.plusSeconds(60)
+        // The status does **not** change: both agreed to destroy this bond, and
+        // one of them walking away is not a reason to undo that.
+        left.status shouldBe BondStatus.PENDING_DELETION
+        left.deletionScheduledFor shouldBe now.plus(Duration.ofDays(30))
+    }
+
+    @Test
+    fun `cancelling after somebody left during the cooling-off cannot revive the bond`() {
+        // The second half of the review's finding: without the `leftAt` stamp
+        // above, the other member's cancel would return this bond to ACTIVE with
+        // a blocker still inside it.
+        val joined = create().let { it.accept(joiner(it)) }
+        val owner = joined.members.first { it.role == MemberRole.OWNER }
+        val ended = joined.requestDeletion(now).end(owner.id, now)
+
+        val cancelled = ended.cancelDeletion(now)
+
+        cancelled.status shouldBe BondStatus.ARCHIVED
+        cancelled.archivedAt.shouldNotBeNull()
+        cancelled.isOpen shouldBe false
+    }
+
+    @Test
+    fun `ending a bond that is already archived still changes nothing`() {
+        // The B3 property the wider `canBeEnded` must not break.
+        val archived = create().let { it.leave(it.members.single().id, now) }
+
+        archived.end(archived.members.single().id, now.plusSeconds(600)) shouldBe archived
+        shouldThrow<IllegalStateException> { archived.leave(archived.members.single().id, now) }
+    }
+
+    @Test
+    fun `the too-soon refusal names an English date whatever the server's locale is`() {
+        // The review of PR #41: `MMMM` resolves against the JVM's default
+        // locale, so this API would have answered "28 octobre 2026" on a
+        // container whose locale happened to be French — output that varies with
+        // the deployment rather than with anything the client sent.
+        val original = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.FRANCE)
+            val refusal = TimezoneChangeTooSoonException(Instant.parse("2026-10-28T09:00:00Z"), lagos)
+
+            // The 29th, not the 28th: see the rounding test below.
+            refusal.detail shouldBe "The shared time zone can change again from 29 October 2026."
+        } finally {
+            Locale.setDefault(original)
+        }
+    }
+
+    @Test
+    fun `the too-soon refusal names the first date the change is allowed all day`() {
+        // The second review of PR #41. Thirty days from an afternoon lands in an
+        // afternoon, so naming *that* calendar date makes the sentence false for
+        // most of the day it names — a client reading "28 October" and retrying
+        // at 10:00 on the 28th got the identical refusal naming the identical
+        // date. Rounding up is the honest direction to be wrong in: the answer
+        // may arrive sooner than promised, never later.
+        val midMorning = TimezoneChangeTooSoonException(Instant.parse("2026-10-28T09:00:00Z"), lagos)
+        midMorning.detail shouldBe "The shared time zone can change again from 29 October 2026."
+
+        // Exactly midnight in the bond's own zone is already a whole day, so it
+        // is not pushed out by one. Africa/Lagos is UTC+1.
+        val midnightInLagos = TimezoneChangeTooSoonException(Instant.parse("2026-10-27T23:00:00Z"), lagos)
+        midnightInLagos.detail shouldBe "The shared time zone can change again from 28 October 2026."
     }
 
     private fun joiner(bond: Bond): Member = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)

@@ -21,9 +21,21 @@ package com.moyi.bond.domain
  * consult and get wrong.
  *
  * [left] is true for someone who has left an archived bond. They may read —
- * `states.md` §9 keeps the archive open to both members — and every write
- * path refuses them, so the flag is carried rather than the membership being
- * withheld.
+ * `states.md` §9 keeps the archive open to both members — so the flag is
+ * carried rather than the membership being withheld.
+ *
+ * **What refuses them is `isOpen`, in each write path, and not this flag.**
+ * The earlier version of this sentence said "every write path refuses them",
+ * which was true and was not a description of any mechanism: leaving archives
+ * the bond, so `check(isOpen)` turns them away without anything reading
+ * [left]. The flag had **no readers at all** until `RequestDeletion.cancel`,
+ * which drops the `isOpen` check on purpose — a cooling-off that consulted it
+ * could never be cancelled — and therefore has to consult this instead
+ * (ADR-0030 §4a-i). Found by the second review of PR #41, after a member who
+ * had walked out of a bond revoked the deletion both members had agreed to.
+ *
+ * So: **a write path that does not check `isOpen` must check [left] itself.**
+ * The sentence this replaces was the reason nobody did.
  */
 internal data class Membership(
     val bondId: BondId,

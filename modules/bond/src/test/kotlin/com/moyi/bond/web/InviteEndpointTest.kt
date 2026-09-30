@@ -210,7 +210,7 @@ internal class InviteEndpointTest(
         joined.status shouldBe 200
         val etag = joined.getHeader(HttpHeaders.ETAG)
         val version = jdbc.queryForObject("SELECT version FROM bonds WHERE id = ?::uuid", Int::class.java, bondIdOf(bond))
-        etag shouldBe "\"$version\""
+        etag!!.substringBefore('-') shouldBe "\"$version"
         // And it moved, so a client holding the create-time ETag is correctly
         // refused by a later If-Match.
         etag shouldNotBe "\"0\""

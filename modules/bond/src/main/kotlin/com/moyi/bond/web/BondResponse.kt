@@ -3,9 +3,11 @@ package com.moyi.bond.web
 import com.moyi.bond.domain.BondStatus
 import com.moyi.bond.domain.BondType
 import com.moyi.bond.domain.MemberRole
+import com.moyi.bond.domain.Proposal
 import com.moyi.bond.service.BondView
 import com.moyi.bond.service.InviteView
 import com.moyi.bond.service.MemberView
+import com.moyi.bond.service.entityTag
 import java.net.URI
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -37,9 +39,15 @@ internal data class BondResponse(
     val maxMembers: Int,
     val createdAt: Instant,
     val archivedAt: Instant?,
+    /** FR-028: when the bond would be destroyed, if a deletion is pending. Null otherwise. */
+    val deletionScheduledFor: Instant?,
     val members: List<MemberResponse>,
     val me: MeResponse,
     val invite: InviteResponse?,
+    /** FR-027: the zone change waiting for the other member, if there is one. `states.md` §8 draws it. */
+    val pendingTimezoneChange: PendingTimezoneChangeResponse?,
+    /** FR-028: the deletion request waiting for the other member. */
+    val pendingDeletionRequest: PendingDeletionRequestResponse?,
 ) {
     companion object {
         private val HH_MM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -58,13 +66,16 @@ internal data class BondResponse(
                 maxMembers = view.bond.maxMembers,
                 createdAt = view.bond.createdAt,
                 archivedAt = view.bond.archivedAt,
+                deletionScheduledFor = view.bond.deletionScheduledFor,
                 members = view.members.map(MemberResponse::from),
                 me = MeResponse(view.me.id.value, view.me.role),
                 invite = view.invite?.let(InviteResponse::from),
+                pendingTimezoneChange = view.timezoneChange?.let(PendingTimezoneChangeResponse::from),
+                pendingDeletionRequest = view.deletion?.let(PendingDeletionRequestResponse::from),
             )
 
-        /** The `ETag` for a bond: its row version, quoted, as RFC 9110 §8.8.3 requires. */
-        fun etagOf(view: BondView): String = "\"${view.bond.version}\""
+        /** The `ETag` for a bond: an opaque validator of this caller’s public representation. */
+        fun etagOf(view: BondView): String = view.entityTag()
     }
 }
 
@@ -109,6 +120,49 @@ internal data class InviteResponse(
                 code = view.invite.code.value,
                 link = view.link,
                 expiresAt = view.invite.expiresAt,
+            )
+    }
+}
+
+/**
+ * A zone change waiting for the other member (FR-027).
+ *
+ * **A member id, never a user id** — the same rule the members list follows.
+ * `states.md` §8 words the pending state as "It changes once Tunde agrees", so
+ * the client needs to know *which* member proposed it, and a member id is how
+ * this API names one.
+ */
+internal data class PendingTimezoneChangeResponse(
+    val id: UUID,
+    val proposedTimezone: String,
+    val proposedByMemberId: UUID,
+    val proposedAt: Instant,
+    val expiresAt: Instant,
+) {
+    companion object {
+        fun from(proposal: Proposal) =
+            PendingTimezoneChangeResponse(
+                id = proposal.id.value,
+                proposedTimezone = proposal.proposedZone().id,
+                proposedByMemberId = proposal.proposedByMemberId.value,
+                proposedAt = proposal.proposedAt,
+                expiresAt = proposal.expiresAt,
+            )
+    }
+}
+
+/** A deletion request waiting for the other member (FR-028). No payload: the request *is* the content. */
+internal data class PendingDeletionRequestResponse(
+    val requestedByMemberId: UUID,
+    val requestedAt: Instant,
+    val expiresAt: Instant,
+) {
+    companion object {
+        fun from(proposal: Proposal) =
+            PendingDeletionRequestResponse(
+                requestedByMemberId = proposal.proposedByMemberId.value,
+                requestedAt = proposal.proposedAt,
+                expiresAt = proposal.expiresAt,
             )
     }
 }
