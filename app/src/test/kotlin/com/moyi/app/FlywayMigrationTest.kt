@@ -29,9 +29,10 @@ class FlywayMigrationTest(
     @Test
     fun `every module's migrations run, in one sequence, against one schema`() {
         // V1 lives in `app` (database-wide extensions); V2 to V8 live in
-        // `modules/identity`, V9, V10 and V13 in `modules/bond` (its own tables,
-        // its proposals, and the effective-anchor timeline), V11 in `common:web`
-        // (idempotency_keys, doc 06 §1) and V12 in `modules/gratitude`. Versions are one global sequence across
+        // `modules/identity`, V9, V10 and V13 in `modules/bond` (its own
+        // tables, its proposals, and the effective-anchor timeline), V11 in
+        // `common:web` (idempotency_keys, doc 06 §1) and V12 in
+        // `modules/gratitude`. Versions are one global sequence across
         // modules. Flyway merges every `classpath:db/migration` it finds, which
         // is what lets a module own its schema without `app` restating it — and
         // this assertion is what notices when a module's migrations are not on

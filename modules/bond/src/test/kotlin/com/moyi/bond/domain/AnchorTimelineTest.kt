@@ -64,6 +64,68 @@ internal class AnchorTimelineTest {
     }
 
     @Test
+    fun `a westward handoff merges the transitional day rather than repeating a label`() {
+        val handoff = Instant.parse("2026-09-16T10:00:00Z")
+        val timeline =
+            timelineOf(
+                AnchorInterval(kiritimati, Instant.parse("2026-09-01T00:00:00Z"), handoff, LocalDate.of(2026, 9, 1)),
+                AnchorInterval(honolulu, handoff, null, LocalDate.of(2026, 9, 16)),
+            )
+
+        // Kiritimati's own clock would open the 16th at 2026-09-15T10:00Z, a
+        // full day before the handoff — but Honolulu's first day is also the
+        // 16th. Reopening that label here would violate bond_days' unique
+        // (bond_id, date) (review round 1, Important #2), so this stretch
+        // keeps the 15th's label and runs all the way to the handoff,
+        // merging two zone-days into one ~48-hour one.
+        val merged = timeline.dayBoundsAt(Instant.parse("2026-09-15T20:00:00Z"))
+        merged.date shouldBe LocalDate.of(2026, 9, 15)
+        merged.endsAt shouldBe handoff
+        Duration.between(merged.startsAt, merged.endsAt).toHours() shouldBe 48L
+
+        // And the day immediately after the handoff opens fresh, under
+        // Honolulu, at exactly the label the merge protected.
+        val next = timeline.dayBoundsAt(handoff)
+        next.date shouldBe LocalDate.of(2026, 9, 16)
+        next.startsAt shouldBe handoff
+    }
+
+    @Test
+    fun `walking a timeline day by day across a westward handoff never repeats a label`() {
+        val handoff = Instant.parse("2026-09-16T10:00:00Z")
+        val timeline =
+            timelineOf(
+                AnchorInterval(kiritimati, Instant.parse("2026-09-01T00:00:00Z"), handoff, LocalDate.of(2026, 9, 1)),
+                AnchorInterval(honolulu, handoff, null, LocalDate.of(2026, 9, 16)),
+            )
+
+        // Starting a few days before the handoff and walking forward using
+        // each day's own `endsAt` as the next query instant is exactly how a
+        // day-opener traverses this timeline. No date this walk visits
+        // repeats — the merge above is what guarantees it.
+        var at = Instant.parse("2026-09-13T00:00:00Z")
+        val labels = mutableListOf<LocalDate>()
+        repeat(6) {
+            val day = timeline.dayBoundsAt(at)
+            labels += day.date
+            at = day.endsAt
+        }
+
+        labels shouldBe labels.distinct()
+        labels.zipWithNext().forEach { (earlier, later) -> later.isAfter(earlier) shouldBe true }
+    }
+
+    @Test
+    fun `an eastward-skipped label's day is degenerate`() {
+        // A label an eastward handoff skips over entirely (doc 04 §8.5) has
+        // no instant that maps to it — this is the shape its DayBounds take.
+        val skipped = Instant.parse("2026-09-16T10:00:00Z")
+        val day = DayBounds(date = LocalDate.of(2026, 9, 16), startsAt = skipped, endsAt = skipped)
+
+        day.isDegenerate shouldBe true
+    }
+
+    @Test
     fun `moving east defers to the end of the current logical day and names the skipped labels`() {
         val timeline = timelineOf(AnchorInterval(lagos, Instant.parse("2026-09-01T00:00:00Z"), null, LocalDate.of(2026, 9, 1)))
 

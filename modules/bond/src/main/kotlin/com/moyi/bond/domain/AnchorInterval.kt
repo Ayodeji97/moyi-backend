@@ -38,6 +38,15 @@ internal data class AnchorInterval(
         require(effectiveTo == null || effectiveTo.isAfter(effectiveFrom)) {
             "an anchor interval ends after it begins"
         }
+        // usedLabelsUpTo, and every handoffFor call that defaults from it,
+        // trusts this without re-deriving it against `zone` — re-deriving it
+        // is the whole reason this column exists instead of a query (doc 25
+        // §6). It has to be true by construction, here, or both of those
+        // report the wrong labels (review round 1, Important #1).
+        require(firstLabel == effectiveFrom.atZone(zone).toLocalDate()) {
+            "firstLabel must be the date at effectiveFrom in zone " +
+                "(expected ${effectiveFrom.atZone(zone).toLocalDate()}, got $firstLabel)"
+        }
     }
 
     fun contains(at: Instant): Boolean = !at.isBefore(effectiveFrom) && (effectiveTo == null || at.isBefore(effectiveTo))
@@ -102,13 +111,42 @@ internal class AnchorTimeline(
      * that decides it**. Clipping is what keeps days contiguous across a
      * handoff: the zone's own midnight before the handoff may lie inside the
      * previous interval, where a different zone was in charge.
+     *
+     * **Merging, not just clipping, is sometimes required.** An interval's own
+     * zone can still be mid-day when its successor is about to open its
+     * [AnchorInterval.firstLabel] under a *different* zone. If the two land on
+     * the same calendar label, opening it here would reopen the label the
+     * successor is about to issue — the exact collision [handoffFor]'s push
+     * loop exists to prevent when choosing where the boundary falls, and this
+     * is what has to honour that choice once an instant is actually queried
+     * against it (review round 1, Important #2). So the day that would do
+     * this instead keeps the label it opened with and runs through to the
+     * handoff, merging what would otherwise be two zone-days into one long
+     * one — R3's "no day is missed", realised here rather than in [handoffFor].
      */
     fun dayBoundsAt(at: Instant): DayBounds {
-        val interval = intervalAt(at)
-        val zoned = at.atZone(interval.zone)
-        val date = zoned.toLocalDate()
+        val index = intervalIndexAt(at)
+        val interval = intervals[index]
+        val successor = intervals.getOrNull(index + 1)
+
+        var date = at.atZone(interval.zone).toLocalDate()
+        while (successor != null && !date.isBefore(successor.firstLabel)) {
+            date = date.minusDays(1)
+        }
+
         val naturalStart = date.atStartOfDay(interval.zone).toInstant()
-        val naturalEnd = date.plusDays(1).atStartOfDay(interval.zone).toInstant()
+        val nextDate = date.plusDays(1)
+        val naturalEnd =
+            if (successor != null && !nextDate.isBefore(successor.firstLabel)) {
+                // The merged day: it ends exactly where this interval does,
+                // not at this zone's own next midnight — which is the label
+                // the loop above just backed away from.
+                checkNotNull(interval.effectiveTo) {
+                    "an interval with a successor always has an end (contiguity)"
+                }
+            } else {
+                nextDate.atStartOfDay(interval.zone).toInstant()
+            }
         val start = maxOf(naturalStart, interval.effectiveFrom)
         val end = interval.effectiveTo?.let { minOf(naturalEnd, it) } ?: naturalEnd
         return DayBounds(date = date, startsAt = start, endsAt = end)
@@ -143,9 +181,14 @@ internal class AnchorTimeline(
      * - **Westward**, the new zone's label at the handoff may be one the bond
      *   has already used. Opening it again would violate `bond_days`'s unique
      *   `(bond_id, date)`. The handoff is pushed to the next new-zone midnight
-     *   until the label is unused, which extends the current day rather than
-     *   duplicating a label (R3 in the plan; no compensating `FROZEN` day,
-     *   because no label was lost).
+     *   until the label is unused (R3 in the plan; no compensating `FROZEN`
+     *   day, because no label was lost). **This function only chooses where
+     *   that boundary falls** — it does not itself extend anything. Once the
+     *   returned [Handoff.at] becomes the new interval's `effectiveFrom`,
+     *   [dayBoundsAt] is what actually reports the day immediately before it
+     *   as the merged, extended one, for the same reason: the two must agree
+     *   on which label was already used, or the collision this exists to
+     *   prevent happens anyway, one layer up.
      *
      * [usedLabels] defaults to [usedLabelsUpTo] at [now] — a caller only needs
      * to pass its own set when it wants to reason about labels this timeline
@@ -156,8 +199,9 @@ internal class AnchorTimeline(
         newZone: ZoneId,
         usedLabels: Set<LocalDate> = usedLabelsUpTo(now),
     ): Handoff {
-        var at = dayBoundsAt(now).endsAt
-        val previousLabel = dayBoundsAt(now).date
+        val currentDay = dayBoundsAt(now)
+        var at = currentDay.endsAt
+        val previousLabel = currentDay.date
         var label = at.atZone(newZone).toLocalDate()
         while (label in usedLabels || !label.isAfter(previousLabel)) {
             at = label.plusDays(1).atStartOfDay(newZone).toInstant()
@@ -187,7 +231,11 @@ internal class AnchorTimeline(
      * `init`), including the open last interval, which contains everything
      * from its own [AnchorInterval.effectiveFrom] onward.
      */
-    private fun intervalAt(at: Instant): AnchorInterval =
-        intervals.lastOrNull { it.contains(at) }
-            ?: error("an anchor timeline covers every instant from the bond's creation: $at")
+    private fun intervalAt(at: Instant): AnchorInterval = intervals[intervalIndexAt(at)]
+
+    /** As [intervalAt], but the index too — [dayBoundsAt] needs the successor, if any. */
+    private fun intervalIndexAt(at: Instant): Int {
+        val index = intervals.indexOfLast { it.contains(at) }
+        return if (index >= 0) index else error("an anchor timeline covers every instant from the bond's creation: $at")
+    }
 }
