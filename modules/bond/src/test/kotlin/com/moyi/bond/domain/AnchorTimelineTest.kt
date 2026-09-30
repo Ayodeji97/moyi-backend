@@ -96,13 +96,32 @@ internal class AnchorTimelineTest {
     }
 
     @Test
-    fun `moving west never opens a label the bond has already used`() {
+    fun `moving west into today's own label extends the day by one day`() {
         val timeline = timelineOf(AnchorInterval(kiritimati, Instant.parse("2026-09-01T00:00:00Z"), null, LocalDate.of(2026, 9, 1)))
 
         // Kiritimati's 15th ends at 2026-09-15T10:00Z. At that instant
-        // Honolulu is on the 15th, and one midnight later it is on the 16th —
-        // both already used — so the handoff pushes past both, to Honolulu's
-        // *next* unused midnight.
+        // Honolulu is also on the 15th — and `usedLabelsUpTo(now)` (the
+        // default this test exercises, by not naming `usedLabels`) reports
+        // the 15th as used, because `now` falls inside it. So the handoff is
+        // pushed to Honolulu's next midnight instead, extending the current
+        // day by exactly one day.
+        val handoff = timeline.handoffFor(now = Instant.parse("2026-09-15T00:00:00Z"), newZone = honolulu)
+
+        handoff.at shouldBe Instant.parse("2026-09-16T10:00:00Z")
+        handoff.firstLabel shouldBe LocalDate.of(2026, 9, 16)
+        handoff.skippedLabels shouldBe emptyList()
+    }
+
+    @Test
+    fun `moving west past several already-used labels keeps pushing until one is free`() {
+        val timeline = timelineOf(AnchorInterval(kiritimati, Instant.parse("2026-09-01T00:00:00Z"), null, LocalDate.of(2026, 9, 1)))
+
+        // `usedLabelsUpTo(now)` can never produce a set containing 09-16 here
+        // — it only ever reports labels through *today's*, and `now` is still
+        // on the 15th. This is a direct exercise of `handoffFor` with a
+        // caller-supplied `usedLabels`, to prove the loop keeps pushing past
+        // more than one already-used label in a single call; no production
+        // caller passes `usedLabels` explicitly like this.
         val handoff =
             timeline.handoffFor(
                 now = Instant.parse("2026-09-15T00:00:00Z"),
