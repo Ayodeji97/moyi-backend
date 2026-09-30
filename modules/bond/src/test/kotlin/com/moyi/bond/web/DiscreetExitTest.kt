@@ -80,7 +80,8 @@ internal class DiscreetExitTest(
 
         withClue("GET /bonds/{id} as the other member") {
             blockedDetail.status shouldBe leftDetail.status
-            blockedDetail.getHeader(HttpHeaders.ETAG) shouldBe leftDetail.getHeader(HttpHeaders.ETAG)
+            blockedDetail.getHeader(HttpHeaders.ETAG)!!.substringBefore('-') shouldBe
+                leftDetail.getHeader(HttpHeaders.ETAG)!!.substringBefore('-')
             normalise(blockedDetail.contentAsString) shouldBe normalise(leftDetail.contentAsString)
         }
 
@@ -153,6 +154,27 @@ internal class DiscreetExitTest(
         // The block itself did happen — it is simply invisible to her.
         jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
         before.contentAsString shouldContain "\"status\":\"ARCHIVED\""
+    }
+
+    @Test
+    fun `a deletion request is refused the same way on a bond that was left and one that was blocked`() {
+        // **The decision this test exists for.** The Phase 2 spec refused a
+        // deletion request only on a bond ended by a *block*, which is an
+        // oracle: the blocked member would learn which happened by trying it
+        // once. Daniel took the decision to refuse it on *any* archived bond, so
+        // the two stay indistinguishable (doc 26 §2.1, ADR-0030) — at the cost
+        // that a member who left cannot start a mutual deletion, which account
+        // deletion (FR-008) and export (FR-009) still cover.
+        val left = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave") }
+        val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block") }
+
+        val afterLeave = post(left.other, "/api/v1/bonds/${left.bondId}/deletion-request")
+        val afterBlock = post(blocked.other, "/api/v1/bonds/${blocked.bondId}/deletion-request")
+
+        afterLeave.status shouldBe 409
+        afterLeave.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        afterBlock.status shouldBe afterLeave.status
+        normalise(afterBlock.contentAsString) shouldBe normalise(afterLeave.contentAsString)
     }
 
     /**

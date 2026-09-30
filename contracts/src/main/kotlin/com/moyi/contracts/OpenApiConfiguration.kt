@@ -49,7 +49,7 @@ import org.springframework.http.HttpStatus
  *   and `ClientContext` from the socket; documented as query parameters they
  *   would generate a client that sends them.
  * - **The `ETag` on a versioned resource.** A success response whose body is
- *   one of [VERSIONED_RESOURCE_SCHEMAS] carries the row version as an `ETag`,
+ *   one of [VERSIONED_RESOURCE_SCHEMAS] carries an opaque representation `ETag`,
  *   which is what `If-Match` compares against (doc 06 §1). The header is set
  *   on the `ResponseEntity`, so springdoc cannot see it, and a client
  *   generated without it has no typed way to keep the value it must send
@@ -140,7 +140,8 @@ class OpenApiConfiguration {
                     ETAG,
                     Header()
                         .description(
-                            "The resource's version, quoted (RFC 9110 §8.8.3). Send it back as `If-Match` to update it (doc 06 §1).",
+                            "Opaque representation validator (RFC 9110 §8.8.3). " +
+                                "Echo the entire value as `If-Match` when updating (doc 06 §1).",
                         ).schema(StringSchema()),
                 )
             }
@@ -212,7 +213,21 @@ class OpenApiConfiguration {
          * (ADR-0028).
          */
         private val CONFLICTING_OPERATIONS =
-            setOf("createBond", "createBondInvite", "accept", "leaveBond", "revokeBondInvite", "patchBond", "replaceMemberSettings")
+            setOf(
+                "createBond",
+                "createBondInvite",
+                "accept",
+                "leaveBond",
+                "revokeBondInvite",
+                "patchBond",
+                "replaceMemberSettings",
+                // Slice B5. `cancelBondTimezoneChange` and `cancelBondDeletion`
+                // are deliberately absent: cancelling is never a conflict, it is
+                // either done or there was nothing there (a `404`).
+                "proposeBondTimezone",
+                "confirmBondTimezone",
+                "requestBondDeletion",
+            )
 
         /**
          * Operations that require `If-Match` (doc 06 §1) and can therefore answer

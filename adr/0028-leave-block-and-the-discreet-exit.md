@@ -108,9 +108,17 @@ window between the read and the update is tiny. The fix rests on the ordering an
 than on a reproduction, and `EndBondRaceTest` says so where somebody might otherwise read it as
 a proof.
 
-**7. A bond already in `PENDING_DELETION` is untouched.** `Bond.end` changes only a bond
-that is still open, so a block during B5's deletion cooling-off writes its `blocks` rows and
-leaves the status — and everything else — exactly as the deletion job expects to find it.
+**7. A bond already in `PENDING_DELETION` keeps its status.** `Bond.end` leaves the status
+alone there, so a block during B5's deletion cooling-off writes its `blocks` rows and the
+deletion job still finds what it expects.
+
+**Amended 2026-09-28 (slice B5, ADR-0030 §4a).** This decision originally said the bond was
+*untouched*, and that was wrong in a way the review of PR #41 found: the membership was left
+alone too, so blocking during a cooling-off recorded the block and nothing else — and the other
+member's cancel then returned the bond to `ACTIVE` with the blocker inside it. `end` now stamps
+`left_at` in `PENDING_DELETION` and keeps only the *status*; `leave` is permitted there as well,
+because refusing one while permitting the other would make them distinguishable, which is what
+§2.1 forbids and what this ADR exists to prevent.
 
 **8. Nothing anywhere says "block".** No response body, no error code, no log line. The
 service logs "a member ended bond {id}" for both paths and names no user (doc 18 §5).

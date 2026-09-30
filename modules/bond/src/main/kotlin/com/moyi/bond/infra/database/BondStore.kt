@@ -177,7 +177,16 @@ internal class BondStore(
     }
 
     private companion object {
-        /** FR-025 counts a bond waiting for its partner exactly as much as one that has them. */
-        val OPEN_STATUSES = listOf(BondStatus.PENDING_MEMBER, BondStatus.ACTIVE)
+        /**
+         * FR-025 counts a bond waiting for its partner exactly as much as one
+         * that has them — and one counting down to deletion as much again.
+         *
+         * `PENDING_DELETION` is in this list because the cooling-off is
+         * cancellable: leaving it out let a user at the three-bond limit start a
+         * deletion (freeing a slot), create a fourth bond, and then cancel the
+         * deletion to hold four. Found by the review of PR #41. A bond you might
+         * still get back is a bond you are in.
+         */
+        val OPEN_STATUSES = listOf(BondStatus.PENDING_MEMBER, BondStatus.ACTIVE, BondStatus.PENDING_DELETION)
     }
 }
