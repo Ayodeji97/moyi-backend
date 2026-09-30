@@ -15,6 +15,13 @@ import org.junit.jupiter.api.Test
  */
 internal class IfMatchTest {
     @Test
+    fun `a long valid list does not exhaust the parser stack`() {
+        val header = "\"3\",".repeat(1200)
+        IfMatch.parse(header).matches(3) shouldBe true
+        IfMatch.parse(header + "garbage").matches(3) shouldBe false
+    }
+
+    @Test
     fun `opaque tags compare exactly and commas inside quotes are not separators`() {
         listOf("\"03\"", "\"+3\"", "\"prefix, \"3\"", "garbage, \"3\"").forEach {
             IfMatch.parse(it).matches(3) shouldBe false
