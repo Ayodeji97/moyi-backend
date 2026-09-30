@@ -18,7 +18,7 @@ import org.springframework.http.HttpStatus
  *   But the *point* of requiring the condition is to prevent a lost update, and
  *   `If-Match: *` is a request to skip that check — honouring it would make the
  *   requirement decorative. A client that genuinely means to overwrite re-reads
- *   and sends the version it saw.
+ *   and echoes the complete ETag it received.
  * - **An unparseable validator matches nothing**, producing `412` rather than a
  *   `400` about the header's shape. The asymmetry is the argument: a false "does
  *   not match" costs a client one retry, and a false "matches" is a write lost
@@ -73,11 +73,11 @@ class PreconditionRequiredException :
     ApiException(
         HttpStatus.PRECONDITION_REQUIRED,
         ErrorCode.PRECONDITION_REQUIRED,
-        "Read this first, then send its version back as If-Match.",
+        "Read this first, then echo the complete ETag header value as If-Match.",
     )
 
 /**
- * 412: the version the caller holds is not the current one.
+ * 412: the ETag the caller holds does not match the current representation.
  *
  * Also the answer when two writers both pass the header check and one loses the
  * race at flush — from the loser's side the precondition had stopped being true,

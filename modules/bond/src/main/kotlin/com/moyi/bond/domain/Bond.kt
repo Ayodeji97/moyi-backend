@@ -124,7 +124,7 @@ internal data class Bond(
     val createdAt: Instant,
     val archivedAt: Instant?,
     val deletionRequestedAt: Instant?,
-    /** The row version behind the `ETag` (doc 06 §1). `0` until the first update; B4 compares it. */
+    /** The row-version prefix of the representation ETag. `0` until the first update. */
     val version: Int,
     val members: List<Member>,
 ) {
