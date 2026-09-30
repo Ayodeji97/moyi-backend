@@ -12,7 +12,7 @@ import java.util.UUID
  * is T-02. `@JvmInline value class`, so the wrapping costs nothing at
  * runtime — the JVM sees a bare UUID.
  *
- * All four are UUID v7 ([com.moyi.common.core.IdGenerator.timeOrdered]): none
+ * All five are UUID v7 ([com.moyi.common.core.IdGenerator.timeOrdered]): none
  * of them is a secret, so the creation time a v7 embeds is not something to
  * hide, and the index locality is worth having. Doc 06 §1 reserves v4 for
  * entry and media ids, where BR-8 suppresses exactly that metadata.
@@ -29,6 +29,11 @@ internal value class MemberId(
 
 @JvmInline
 internal value class InviteId(
+    val value: UUID,
+)
+
+@JvmInline
+internal value class ProposalId(
     val value: UUID,
 )
 

@@ -1,6 +1,7 @@
 package com.moyi.bond.infra.database
 
 import com.moyi.bond.domain.BondStatus
+import com.moyi.bond.domain.ProposalKind
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
@@ -239,6 +240,171 @@ internal interface BondInviteRepository : Repository<BondInviteEntity, UUID> {
     fun consume(
         id: UUID,
         userId: UUID,
+        now: Instant,
+    ): Int
+}
+
+/**
+ * Proposals (FR-027, FR-028). Every finder is scoped to a bond — there is no
+ * "all proposals", for the reason doc 05 §5.5 gives about every other table
+ * here.
+ *
+ * Nothing in this interface loads a proposal by id alone, either: the two state
+ * changes take the id *and* the predicate that makes the change legal, so a
+ * caller cannot read one, decide, and write over somebody else's decision.
+ */
+internal interface BondProposalRepository : Repository<BondProposalEntity, UUID> {
+    fun save(proposal: BondProposalEntity): BondProposalEntity
+
+    /** The open, unlapsed proposal of one kind, if there is one. */
+    @Query(
+        """
+        SELECT p FROM BondProposalEntity p
+         WHERE p.bondId = :bondId
+           AND p.kind = :kind
+           AND p.confirmedAt IS NULL
+           AND p.cancelledAt IS NULL
+           AND p.expiresAt > :now
+        """,
+    )
+    fun findLive(
+        bondId: UUID,
+        kind: ProposalKind,
+        now: Instant,
+    ): BondProposalEntity?
+
+    /**
+     * Every live proposal of the listed bonds, for the response assembler.
+     *
+     * Batched over a list rather than called per bond: `GET /bonds` returns up
+     * to three and this is the query that would otherwise be the N+1 — the same
+     * reason [findAllLiveByBondIdIn] exists for invites.
+     */
+    @Query(
+        """
+        SELECT p FROM BondProposalEntity p
+         WHERE p.bondId IN :bondIds
+           AND p.confirmedAt IS NULL
+           AND p.cancelledAt IS NULL
+           AND p.expiresAt > :now
+        """,
+    )
+    fun findAllLiveOf(
+        bondIds: Collection<UUID>,
+        now: Instant,
+    ): List<BondProposalEntity>
+
+    /**
+     * Closes a **lapsed** proposal of this kind, so V10's partial unique index
+     * stops holding its slot (ADR-0030).
+     *
+     * `cancelled_at` rather than a third ending, because from the system's point
+     * of view a lapsed proposal is one nobody will ever confirm and this is the
+     * moment it stopped being considered. Nothing runs on a schedule — a row is
+     * closed only when a new proposal needs the slot, which is what spec §6.4's
+     * "never reaped" means in practice.
+     *
+     * @return how many were closed: zero or one, and a number rather than a
+     *   boolean because two would mean the unique index was not doing its job.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE BondProposalEntity p
+           SET p.cancelledAt = :now
+         WHERE p.bondId = :bondId
+           AND p.kind = :kind
+           AND p.confirmedAt IS NULL
+           AND p.cancelledAt IS NULL
+           AND p.expiresAt <= :now
+        """,
+    )
+    fun closeLapsed(
+        bondId: UUID,
+        kind: ProposalKind,
+        now: Instant,
+    ): Int
+
+    /**
+     * Confirms a proposal, if it is still live — the compare-and-set that makes
+     * two simultaneous confirmations produce one applied change. The same shape
+     * as `BondInviteRepository.consume`, and for the same reason: a
+     * read-then-check-then-write in Kotlin has no such guarantee, and what it
+     * permits here is a zone change applied twice, the second time from a
+     * proposal that was already answered.
+     *
+     * @return `1` if this call confirmed it; `0` if somebody else did, or it was
+     *   cancelled or lapsed in the meantime.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE BondProposalEntity p
+           SET p.confirmedAt = :now,
+               p.confirmedByMemberId = :memberId
+         WHERE p.id = :id
+           AND p.confirmedAt IS NULL
+           AND p.cancelledAt IS NULL
+           AND p.expiresAt > :now
+        """,
+    )
+    fun confirm(
+        id: UUID,
+        memberId: UUID,
+        now: Instant,
+    ): Int
+
+    /**
+     * Cancels one open proposal, lapsed or not.
+     *
+     * Deliberately **no** `expires_at` predicate, so that this statement is
+     * about the row and not about the clock: a lapsed row is still cancellable
+     * here, and `cancelOpen` relies on that when a bond ends.
+     *
+     * **It does not follow that a member can cancel a lapsed proposal**, and
+     * the earlier version of this comment claimed it did. Both service callers
+     * locate the row with `findLive`, which filters lapsed rows out, so a member
+     * tapping cancel on a stale `states.md` §8 screen gets `404` — the same one
+     * answer they get for a proposal that was never made. That is the behaviour
+     * the tests assert and the one the contract documents; this method is
+     * simply not where that decision is taken. Corrected by the second review
+     * of PR #41.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE BondProposalEntity p
+           SET p.cancelledAt = :now
+         WHERE p.id = :id
+           AND p.confirmedAt IS NULL
+           AND p.cancelledAt IS NULL
+        """,
+    )
+    fun cancel(
+        id: UUID,
+        now: Instant,
+    ): Int
+
+    /**
+     * Cancels every open proposal of a bond — what ADR-0028 requires when a bond
+     * ends, and the obligation that ADR recorded because this table did not yet
+     * exist. A confirmation arriving on an archived bond would otherwise try to
+     * move the anchor zone of a bond that has ended.
+     *
+     * @return how many were cancelled, for the test and the log line.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE BondProposalEntity p
+           SET p.cancelledAt = :now
+         WHERE p.bondId = :bondId
+           AND p.confirmedAt IS NULL
+           AND p.cancelledAt IS NULL
+        """,
+    )
+    fun cancelLiveOf(
+        bondId: UUID,
         now: Instant,
     ): Int
 }

@@ -3,8 +3,11 @@ package com.moyi.bond.service
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.Invite
 import com.moyi.bond.domain.Member
+import com.moyi.bond.domain.Proposal
+import com.moyi.bond.domain.ProposalKind
 import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.database.InviteStore
+import com.moyi.bond.infra.database.ProposalStore
 import com.moyi.identity.api.UserDirectory
 import org.springframework.stereotype.Component
 import java.net.URI
@@ -30,6 +33,7 @@ import java.time.Clock
 internal class BondViews(
     private val users: UserDirectory,
     private val invites: InviteStore,
+    private val proposals: ProposalStore,
     private val links: InviteLinks,
     private val clock: Clock,
 ) {
@@ -44,7 +48,12 @@ internal class BondViews(
     ): List<BondView> {
         if (bonds.isEmpty()) return emptyList()
         val names = users.findAll(bonds.flatMap { bond -> bond.members.map { it.userId.value } }.distinct())
-        val live = this.invites.findLiveOf(bonds.map { it.id }, clock.instant())
+        val now = clock.instant()
+        val live = this.invites.findLiveOf(bonds.map { it.id }, now)
+        // One query for however many bonds, like the invite one above and for
+        // the same reason: `GET /bonds` returns up to three, and a query per
+        // bond would be an N+1 nobody would notice until there were more.
+        val pending = this.proposals.findAllLiveOf(bonds.map { it.id }, now)
         return bonds.map { bond ->
             BondView(
                 bond = bond,
@@ -55,6 +64,7 @@ internal class BondViews(
                 // a response with a hole in it.
                 me = bond.memberOf(viewer) ?: error("the viewer is not a member of this bond; the guard should have refused the request"),
                 invite = live[bond.id]?.let { InviteView(it, links.linkFor(it.code)) },
+                proposals = pending[bond.id].orEmpty(),
             )
         }
     }
@@ -76,7 +86,19 @@ internal data class BondView(
     val members: List<MemberView>,
     val me: Member,
     val invite: InviteView?,
-)
+    /**
+     * Whatever is waiting for the other member to agree to (FR-027, FR-028).
+     *
+     * A list rather than two fields, because that is what the store returns and
+     * the two kinds are one mechanism; [timezoneChange] and [deletion] are the
+     * two questions the HTTP layer asks of it.
+     */
+    val proposals: List<Proposal> = emptyList(),
+) {
+    val timezoneChange: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.TIMEZONE_CHANGE }
+
+    val deletion: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.DELETION }
+}
 
 internal data class MemberView(
     val member: Member,

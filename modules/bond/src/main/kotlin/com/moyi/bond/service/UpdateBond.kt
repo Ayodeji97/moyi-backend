@@ -64,7 +64,7 @@ internal class UpdateBond(
         // gets the same `409` whatever version they hold, because "this has
         // ended" is the more useful answer and it is true regardless of theirs.
         if (!bond.isOpen) throw BondArchivedException()
-        if (!ifMatch.matches(bond.version)) throw PreconditionFailedException()
+        if (!ifMatch.matches(views.of(bond, membership.userId).entityTag())) throw PreconditionFailedException()
 
         bonds.update(bond.update(settings))
         log.info("Bond {} settings updated", membership.bondId.value)
