@@ -67,7 +67,23 @@ internal class ChangeTimezone(
 
         if (bond.status == BondStatus.PENDING_MEMBER) {
             bonds.update(bond.withAnchorTimezone(zone, now))
-            log.info("Bond {} moved its anchor zone directly, having one member", membership.bondId.value)
+
+            // BR-6 applies here too, and for the same reason `confirm` defers:
+            // a `PENDING_MEMBER` bond can already have `SUSPENDED` `bond_days`
+            // rows the creator wrote before the invitee joined, so relabelling
+            // the seed interval in place would relabel days that already have
+            // entries under them. The same deferred handoff closes the seed
+            // interval and opens the next one at the end of the current
+            // logical day, rather than rewriting it.
+            val timeline = anchorIntervals.timelineOf(membership.bondId)
+            val handoff = timeline.handoffFor(now = now, newZone = zone.zone)
+            anchorIntervals.scheduleHandoff(membership.bondId, handoff, zone.zone, now)
+            log.info(
+                "Bond {} moved its anchor zone directly, having one member; effective from {}, {} label(s) skipped",
+                membership.bondId.value,
+                handoff.at,
+                handoff.skippedLabels.size,
+            )
             return view(membership)
         }
 

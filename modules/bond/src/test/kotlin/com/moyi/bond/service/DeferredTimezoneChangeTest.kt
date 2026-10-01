@@ -118,25 +118,68 @@ internal class DeferredTimezoneChangeTest(
     @Test
     fun `a westward change never schedules a handoff onto a label the bond has used`() {
         val bond = bondForTwo(anchor = "Pacific/Kiritimati", createdAt = Instant.parse("2026-09-01T00:00:00Z"))
-        writeDayLabel(bond, LocalDate.of(2026, 9, 15))
-        writeDayLabel(bond, LocalDate.of(2026, 9, 16))
+        liveInto(bond, LocalDate.of(2026, 9, 15))
+        liveInto(bond, LocalDate.of(2026, 9, 16))
 
-        proposeAndConfirm(bond, to = "Pacific/Honolulu", at = Instant.parse("2026-09-15T00:00:00Z"))
+        // The clock is already at 2026-09-15T11:00Z after the two `liveInto`
+        // calls above (01:00 on the 16th, Kiritimati time) — passed here as
+        // the literal instant it actually is, not a stale one `proposeAndConfirm`
+        // would silently ignore (fix round 1, minor (a)).
+        proposeAndConfirm(bond, to = "Pacific/Honolulu", at = Instant.parse("2026-09-15T11:00:00Z"))
 
-        // Kiritimati alone (UTC+14, no handoff at all) would already report the
-        // 17th for the instant below, so that assertion on its own cannot tell
-        // a pushed-back handoff from one that never fired. This is what rules
-        // the second case out: the handoff did happen, it is just not the
-        // naive one — confirmed again below by zone, not only by date.
+        // Confirms the handoff fired at all (rules out the mechanism simply
+        // being absent) before asserting anything about where.
         val rows = rawIntervals(bond)
         rows.size shouldBe 2
         rows.single { it.effectiveTo == null }.zone shouldBe "Pacific/Honolulu"
 
         val timeline = intervals(bond)
-        // Honolulu's first label for this bond is the 17th: the 15th and 16th
-        // are already used, so the handoff was pushed past them (R3).
-        timeline.dateAt(Instant.parse("2026-09-16T10:00:00Z")) shouldBe LocalDate.of(2026, 9, 17)
-        timeline.zoneAt(Instant.parse("2026-09-16T10:00:00Z")) shouldBe ZoneId.of("Pacific/Kiritimati")
+        // Kiritimati alone (UTC+14, no handoff at all) would already report
+        // the 17th for a naive, zone-only date at the instant below, so a
+        // bare `dateAt` assertion there cannot tell a correctly pushed-back
+        // handoff from one that was never applied — or from one pushed one
+        // day too far, onto the 17th itself, which Honolulu's own interval
+        // issues as *its* first label (fix round 1, Important #2). The 15th
+        // and 16th are already used, so R3 extends the 16th into this merged,
+        // nearly-48-hour day instead, up to the handoff — which is what these
+        // two assertions pin, before confirming the 17th belongs to Honolulu.
+        val mergedDay = timeline.dayBoundsAt(Instant.parse("2026-09-16T10:00:00Z"))
+        mergedDay.date shouldBe LocalDate.of(2026, 9, 16)
+        mergedDay.endsAt shouldBe Instant.parse("2026-09-17T10:00:00Z")
+        timeline.dateAt(Instant.parse("2026-09-17T10:00:00Z")) shouldBe LocalDate.of(2026, 9, 17)
+        timeline.zoneAt(Instant.parse("2026-09-17T10:00:00Z")) shouldBe ZoneId.of("Pacific/Honolulu")
+    }
+
+    @Test
+    fun `the PENDING_MEMBER early-apply path defers to the timeline too`() {
+        clock.set(Instant.parse("2026-09-01T00:00:00Z"))
+        val ada = users.verified("Ada")
+        val created = createBond(ada, "Africa/Lagos")
+        val bondId = bondIdOf(created)
+        val code = codeOf(created)
+
+        // Within the invite's own 7-day TTL (`Invite.TTL`) — unlike the
+        // propose+confirm scenarios above, the partner still has to join on
+        // this path, through a code that would otherwise have lapsed by the
+        // time this test could assert anything about it.
+        val appliedAt = Instant.parse("2026-09-03T11:00:00Z") // midday, Lagos
+        clock.set(appliedAt)
+        propose(ada, bondId, "Pacific/Kiritimati").status shouldBe 200
+
+        // The partner joins afterwards, at the same instant — the seed
+        // interval is not rewritten for them either.
+        val bea = users.verified("Bea")
+        accept(bea, code).status shouldBe 200
+
+        val bond = TestBond(bondId, ada, bea, ZoneId.of("Africa/Lagos"))
+        val rows = rawIntervals(bond)
+        rows.size shouldBe 2
+
+        val timeline = intervals(bond)
+        // Lagos' own day ends 2026-09-03T23:00Z; nothing is used yet at this
+        // young a bond, so the handoff lands exactly there with no push.
+        timeline.zoneAt(appliedAt) shouldBe ZoneId.of("Africa/Lagos")
+        timeline.zoneAt(Instant.parse("2026-09-03T23:00:00Z")) shouldBe ZoneId.of("Pacific/Kiritimati")
     }
 
     // ---- fixtures -------------------------------------------------------
@@ -175,8 +218,8 @@ internal class DeferredTimezoneChangeTest(
 
     /**
      * Proposes and confirms a zone change, moving the clock to [at] first —
-     * never backward, so a prior [writeDayLabel] call that already carried
-     * the clock past [at] is left alone rather than rewound. `now` inside
+     * never backward, so a prior [liveInto] call that already carried the
+     * clock past [at] is left alone rather than rewound. `now` inside
      * `ChangeTimezone.confirm` is read from the same injected clock, so this
      * is what fixes the instant the deferred handoff is computed against.
      */
@@ -191,14 +234,14 @@ internal class DeferredTimezoneChangeTest(
     }
 
     /**
-     * Simulates a calendar label the bond has already issued, by carrying the
-     * clock forward into [date] (in the bond's own anchor zone) if it is not
-     * there already — never backward. `usedLabelsUpTo` derives every label a
-     * bond has issued purely from elapsed time (doc 25 §6, ADR-0026): there is
-     * no `bond_days` row for `bond` to write or read, so living through the
-     * day is the only fixture this mechanism has.
+     * Carries the clock forward into [date] (in the bond's own anchor zone)
+     * if it is not there already — never backward — simulating that the bond
+     * has lived through that calendar label. `usedLabelsUpTo` derives every
+     * label a bond has issued purely from elapsed time (doc 25 §6, ADR-0026):
+     * there is no `bond_days` row for `bond` to write or read, so moving the
+     * clock is the only fixture this mechanism has; nothing is written here.
      */
-    private fun writeDayLabel(
+    private fun liveInto(
         bond: TestBond,
         date: LocalDate,
     ) {

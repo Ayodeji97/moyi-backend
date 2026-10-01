@@ -97,6 +97,16 @@ internal class AnchorIntervalStore(
         newZone: ZoneId,
         now: Instant,
     ) {
+        // The same invariant `AnchorInterval.init` holds its own `firstLabel`
+        // to. `handoffFor` is the only producer of a `Handoff`, so this should
+        // never fire — but it is cheap insurance against a caller passing a
+        // `handoff` computed against a different zone than `newZone`, which
+        // would otherwise write a row this store's own reader later refuses
+        // to load (fix round 1, Important #2's sibling check).
+        require(handoff.firstLabel == handoff.at.atZone(newZone).toLocalDate()) {
+            "a handoff's firstLabel must be the date at its own instant in the new zone " +
+                "(expected ${handoff.at.atZone(newZone).toLocalDate()}, got ${handoff.firstLabel})"
+        }
         val open =
             intervals.findByBondIdAndEffectiveToIsNull(bondId.value)
                 ?: error("a bond always has one open anchor interval")

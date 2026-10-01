@@ -104,7 +104,21 @@ internal class AnchorTimeline(
 
     fun zoneAt(at: Instant): ZoneId = intervalAt(at).zone
 
-    fun dateAt(at: Instant): LocalDate = at.atZone(zoneAt(at)).toLocalDate()
+    /**
+     * The calendar label [at] belongs to.
+     *
+     * Deliberately **not** `at.atZone(zoneAt(at)).toLocalDate()` — that naive
+     * form agrees with [dayBoundsAt] everywhere except the merged stretch a
+     * westward handoff creates, where it would report the label the merge
+     * exists to avoid reopening (review round 1 of this task's own PR,
+     * Important #2: an instant late in that stretch sits inside the
+     * *predecessor* interval, whose own zone has already turned over to the
+     * next natural date — the one [dayBoundsAt] folds back into the day
+     * before it). Delegating to [dayBoundsAt] is what keeps the two answering
+     * the same question the same way, by construction, rather than by two
+     * independent calculations staying in sync by coincidence.
+     */
+    fun dateAt(at: Instant): LocalDate = dayBoundsAt(at).date
 
     /**
      * The bounds of the logical day containing [at], **clipped to the interval

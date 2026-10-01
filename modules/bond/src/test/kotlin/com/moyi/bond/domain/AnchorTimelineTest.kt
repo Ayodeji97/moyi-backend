@@ -91,6 +91,27 @@ internal class AnchorTimelineTest {
     }
 
     @Test
+    fun `dateAt agrees with dayBoundsAt inside a merged day, not the zone's own naive date`() {
+        val handoff = Instant.parse("2026-09-16T10:00:00Z")
+        val timeline =
+            timelineOf(
+                AnchorInterval(kiritimati, Instant.parse("2026-09-01T00:00:00Z"), handoff, LocalDate.of(2026, 9, 1)),
+                AnchorInterval(honolulu, handoff, null, LocalDate.of(2026, 9, 16)),
+            )
+
+        // Kiritimati's own clock reads 2026-09-15T20:00:00Z as the 16th — the
+        // very label the merge exists to keep from being reopened once
+        // Honolulu's interval issues its own 16th. A `dateAt` computed from
+        // the zone alone (`at.atZone(zoneAt(at)).toLocalDate()`) would report
+        // that naive 16th; this is the review's Important #2 (fix round 1),
+        // and the reason `dateAt` now delegates to `dayBoundsAt` instead of
+        // computing its own answer.
+        val at = Instant.parse("2026-09-15T20:00:00Z")
+        timeline.dateAt(at) shouldBe timeline.dayBoundsAt(at).date
+        timeline.dateAt(at) shouldBe LocalDate.of(2026, 9, 15)
+    }
+
+    @Test
     fun `walking a timeline day by day across a westward handoff never repeats a label`() {
         val handoff = Instant.parse("2026-09-16T10:00:00Z")
         val timeline =
