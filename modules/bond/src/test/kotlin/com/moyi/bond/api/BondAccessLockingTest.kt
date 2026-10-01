@@ -7,6 +7,7 @@ import com.moyi.bond.infra.FakeUserDirectory
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
+import com.moyi.common.web.NotFoundException
 import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
@@ -29,6 +30,7 @@ import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -88,6 +90,30 @@ internal class BondAccessLockingTest(
     }
 
     @Test
+    fun `lockMembershipOf refuses a non-member exactly as membershipOf does`() {
+        // Ruling on lock order (fix round 1): the guard runs before the lock
+        // is taken, the same order ChangeTimezone, EndBond, RequestDeletion
+        // and UpdateBond all use. A stranger must get the one 404 both
+        // methods give — and never take `FOR UPDATE` on a bond that is not
+        // theirs on the way to it.
+        val bond = bondForTwo()
+        val stranger = users.verified("Eve")
+
+        shouldThrow<NotFoundException> { access.membershipOf(stranger, bond.id) }
+        // The `shouldThrow` wraps `inTransaction`, not the other way round:
+        // `guard.membershipOf` is itself `@Transactional`, so it marks the
+        // surrounding transaction rollback-only the instant it throws.
+        // Swallowing the exception *inside* the transaction and letting the
+        // callback return normally would make `TransactionTemplate` try to
+        // commit a transaction already marked rollback-only, which raises
+        // `UnexpectedRollbackException` instead of the `NotFoundException`
+        // this test is actually about — found by running it, not by reading.
+        shouldThrow<NotFoundException> {
+            inTransaction { access.lockMembershipOf(stranger, bond.id) }
+        }
+    }
+
+    @Test
     fun `lockMembershipOf actually blocks a concurrent lock-taker on the same bond`() {
         // A test that would pass with the lock removed proves nothing: if
         // `lockBond` were deleted, `waiter` would never appear in
@@ -101,8 +127,13 @@ internal class BondAccessLockingTest(
             val holder =
                 pool.submit {
                     transactions.execute {
-                        holderPid.complete(jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java))
+                        // The pid is only published once the lock is actually
+                        // held — completing it beforehand let the waiter start
+                        // (and sometimes win the lock) before `lockMembershipOf`
+                        // had run at all, which is exactly the race that made
+                        // this test flake (fix round 1, Minor #2).
                         access.lockMembershipOf(bond.ada, bond.id)
+                        holderPid.complete(jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java))
                         release.await(10, TimeUnit.SECONDS)
                     }
                 }
@@ -148,6 +179,50 @@ internal class BondAccessLockingTest(
 
         inTransaction {
             access.lockMembershipOf(bond.ada, bond.id).activeSince.shouldBeNull()
+        }
+    }
+
+    @Test
+    fun `a creator who leaves before anyone accepts still has no activeSince`() {
+        // Fix round 1, Important #1: `Bond.end` archives a one-member bond
+        // exactly as readily as a two-member one. A status check
+        // (`PENDING_MEMBER`) would have missed this — the bond is `ARCHIVED`
+        // here, not `PENDING_MEMBER` — and reported the creator's own
+        // `joinedAt` as `activeSince`, which is the harm this field exists to
+        // prevent.
+        val bond = bondPendingMember()
+        leave(bond.ada, bond.id)
+
+        inTransaction {
+            access.lockMembershipOf(bond.ada, bond.id).activeSince.shouldBeNull()
+        }
+    }
+
+    @Test
+    fun `a creator who requests deletion before anyone accepts still has no activeSince`() {
+        // Same harm as above, through `RequestDeletion` instead of `EndBond`:
+        // the bond is `PENDING_DELETION` with one member row, not
+        // `PENDING_MEMBER`.
+        val bond = bondPendingMember()
+        requestDeletion(bond.ada, bond.id)
+
+        inTransaction {
+            access.lockMembershipOf(bond.ada, bond.id).activeSince.shouldBeNull()
+        }
+    }
+
+    @Test
+    fun `activeSince is unchanged once one of the two members later leaves`() {
+        val created = Instant.parse("2026-09-01T00:00:00Z")
+        val joined = Instant.parse("2026-09-04T09:00:00Z")
+        val bond = bondForTwo(createdAt = created, joinedAt = joined)
+
+        leave(bond.ada, bond.id)
+
+        inTransaction {
+            // The left member's row survives (`states.md` §9), so the
+            // second-earliest `joinedAt` is still the same instant.
+            access.lockMembershipOf(bond.ada, bond.id).activeSince shouldBe joined
         }
     }
 
@@ -216,6 +291,30 @@ internal class BondAccessLockingTest(
                 membership.anchorTimeline.zoneIdAt(at) shouldBe direct.zoneAt(at).id
                 membership.anchorTimeline.dateAt(at) shouldBe direct.dateAt(at)
             }
+
+            // Fix round 1, Minor #4: port-level assertions against known
+            // values (Europe/London is on BST in September; Pacific/Auckland
+            // is still on NZST, DST not starting until late September), not
+            // only against a second computation through the same mechanism —
+            // so a swapped `startsAt`/`endsAt`, or a `dayBoundsAtFn` that
+            // silently returned the wrong projection, would fail this.
+            val beforeHandoff = membership.anchorTimeline.dayBoundsAt(probes[0])
+            beforeHandoff.date shouldBe LocalDate.of(2026, 9, 5)
+            beforeHandoff.startsAt shouldBe Instant.parse("2026-09-04T23:00:00Z")
+            beforeHandoff.endsAt shouldBe Instant.parse("2026-09-05T23:00:00Z")
+            beforeHandoff.isDegenerate shouldBe false
+
+            val afterHandoff = membership.anchorTimeline.dayBoundsAt(probes[2])
+            afterHandoff.date shouldBe LocalDate.of(2026, 9, 13)
+            afterHandoff.startsAt shouldBe Instant.parse("2026-09-12T12:00:00Z")
+            afterHandoff.endsAt shouldBe Instant.parse("2026-09-13T12:00:00Z")
+            afterHandoff.isDegenerate shouldBe false
+
+            // Every label from the bond's creation (2026-09-01, London) through
+            // the label in force at the last probe (2026-09-13, Auckland) —
+            // the handoff cost no skipped label, so the run has no gap.
+            membership.anchorTimeline.usedLabelsUpTo(probes[2]) shouldBe
+                (1..13).map { LocalDate.of(2026, 9, it) }.toSet()
         }
     }
 
@@ -290,6 +389,18 @@ internal class BondAccessLockingTest(
                 header(HttpHeaders.AUTHORIZATION, bearer(userId))
             }.andReturn()
             .response.status shouldBe 204
+    }
+
+    /** The solo-member path: `RequestDeletion.request` schedules deletion at once (`202`), no second member to ask. */
+    private fun requestDeletion(
+        userId: UUID,
+        bondId: UUID,
+    ) {
+        mockMvc
+            .post("/api/v1/bonds/$bondId/deletion-request") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+            }.andReturn()
+            .response.status shouldBe 202
     }
 
     private fun archivedAtOf(bondId: UUID): Instant =

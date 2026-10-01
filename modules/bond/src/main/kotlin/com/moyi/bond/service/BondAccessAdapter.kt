@@ -62,9 +62,15 @@ internal class BondAccessAdapter(
     ): BondMembership {
         val caller = UserId(userId)
         val id = BondId(bondId)
-        // Before any read (spec §2.1): everything below sees state no other
-        // writer can change out from under it until this transaction commits.
+        // Guard first, unlocked — the same order `ChangeTimezone`, `EndBond`,
+        // `RequestDeletion` and `UpdateBond` all use (e.g. `EndBond.lockAndLoad`):
+        // guard, then the bond's row lock, then a re-read under it. A non-member
+        // must never take `FOR UPDATE` on a bond that is not theirs — locking
+        // first would do exactly that, for any syntactically valid id.
+        guard.membershipOf(caller, id)
         bonds.lockBond(id)
+        // Re-read under the lock: between the check above and the lock, a
+        // concurrent write could have changed what either read would answer.
         val membership = guard.membershipOf(caller, id)
         val bond = bonds.findByMember(id, caller) ?: throw BondNotFoundException()
         return assemble(membership, bond)
@@ -90,13 +96,25 @@ internal class BondAccessAdapter(
         )
 
     /**
-     * The second member's `joined_at` — the maximum across every member row,
-     * current or left — or `null` while the bond has only its creator.
-     * `bonds.created_at` would manufacture `EMPTY` days across the whole
-     * waiting window (see [BondMembership.activeSince]'s own KDoc).
+     * The second member's `joined_at` — the second-earliest across every
+     * member row, current or left — or `null` while the bond has only ever
+     * had one member row.
+     *
+     * **Derived from the member rows, not from `bond.status`.** `status ==
+     * PENDING_MEMBER` is *not* the same fact: `Bond.end` archives a bond with
+     * only one member exactly as readily as a two-member one (a creator who
+     * leaves, or requests deletion, before anyone accepts), so a status check
+     * alone would report the creator's own `joinedAt` as `activeSince` on a
+     * one-member `ARCHIVED` or `PENDING_DELETION` bond — the exact harm this
+     * field exists to prevent (fix round 1, Important #1). Left members keep
+     * their row (`states.md` §9), so this still answers correctly once a
+     * second member has joined and later left.
      */
     private fun activeSinceOf(bond: Bond): Instant? =
-        if (bond.status == BondStatus.PENDING_MEMBER) null else bond.members.maxOf { it.joinedAt }
+        bond.members
+            .map { it.joinedAt }
+            .sorted()
+            .getOrNull(1)
 
     /**
      * Closes over the real [AnchorTimeline] so [BondAnchorTimeline] can answer
@@ -116,5 +134,11 @@ internal class BondAccessAdapter(
         )
     }
 
-    private fun DayBounds.toApi(): BondDayBounds = BondDayBounds(date, startsAt, endsAt, isDegenerate)
+    private fun DayBounds.toApi(): BondDayBounds =
+        BondDayBounds(
+            date = date,
+            startsAt = startsAt,
+            endsAt = endsAt,
+            isDegenerate = isDegenerate,
+        )
 }
