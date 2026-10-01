@@ -6,6 +6,7 @@ import com.moyi.bond.domain.Proposal
 import com.moyi.bond.domain.ProposalId
 import com.moyi.bond.domain.ProposalKind
 import com.moyi.bond.domain.RegionZone
+import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.ProposalStore
 import org.slf4j.LoggerFactory
@@ -35,6 +36,7 @@ import java.time.temporal.ChronoUnit
 internal class ChangeTimezone(
     private val bonds: BondStore,
     private val proposals: ProposalStore,
+    private val anchorIntervals: AnchorIntervalStore,
     private val views: BondViews,
     private val support: BondSupport,
 ) {
@@ -112,8 +114,24 @@ internal class ChangeTimezone(
         // Compare-and-set: losing this race means somebody else answered it,
         // which from here is indistinguishable from it never having been live.
         if (!proposals.confirm(proposal.id, membership.memberId, now)) throw ProposalNotFoundException()
+
+        // B5's own behaviour, unchanged: the bond records what was agreed the
+        // moment it is agreed, so `GET /bonds/{id}` reflects consent at once.
         bonds.update(bond.withAnchorTimezone(proposal.proposedZone(), now))
-        log.info("Bond {} moved its anchor zone by agreement", membership.bondId.value)
+
+        // BR-6: what changes *dates* is deferred to the end of the current
+        // logical day. Without this the couple's current day would be
+        // recomputed under the new zone mid-day, which is exactly what
+        // ADR-0030 forbids and what a copied string cannot prevent.
+        val timeline = anchorIntervals.timelineOf(membership.bondId)
+        val handoff = timeline.handoffFor(now = now, newZone = proposal.proposedZone().zone)
+        anchorIntervals.scheduleHandoff(membership.bondId, handoff, proposal.proposedZone().zone, now)
+        log.info(
+            "Bond {} moved its anchor zone by agreement; effective from {}, {} label(s) skipped",
+            membership.bondId.value,
+            handoff.at,
+            handoff.skippedLabels.size,
+        )
         return view(membership)
     }
 
