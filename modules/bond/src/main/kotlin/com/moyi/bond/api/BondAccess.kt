@@ -1,5 +1,7 @@
 package com.moyi.bond.api
 
+import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalTime
 import java.util.UUID
 
@@ -27,6 +29,32 @@ interface BondAccess {
         userId: UUID,
         bondId: UUID,
     ): BondMembership
+
+    /**
+     * The caller's membership, read **under the bond's own row lock**, which
+     * this method takes and the caller's transaction holds until commit.
+     *
+     * `MANDATORY` propagation, not `REQUIRED`: a caller without a transaction
+     * would take a lock that is released the instant this method returns,
+     * which looks identical to working and protects nothing. Failing loudly is
+     * the only honest option (spec §2.1).
+     *
+     * **The lock order across this application is bond, then bond-day, then
+     * entry**, on submission, editing, closing and lifecycle reconciliation.
+     * `ChangeTimezone`, `EndBond`, `RequestDeletion`, `UpdateBond`,
+     * `CreateInvite`, `RevokeInvite`, `AcceptInvite` and `MemberSettingsService`
+     * already take this same lock first, which is what makes a gratitude write
+     * serialise against leave, block, deletion and zone confirmation rather
+     * than merely check `isOpen` and hope. Checking `isOpen` and then taking a
+     * separate day lock would let a write commit after the bond ended.
+     *
+     * @throws com.moyi.common.web.NotFoundException as [membershipOf]
+     * @throws org.springframework.transaction.IllegalTransactionStateException no transaction
+     */
+    fun lockMembershipOf(
+        userId: UUID,
+        bondId: UUID,
+    ): BondMembership
 }
 
 /**
@@ -42,10 +70,12 @@ interface BondAccess {
  * check it.** Do not assume `isOpen` covers it — that assumption is exactly
  * what the second review of PR #41 found in `RequestDeletion.cancel`.
  *
- * Nine fields, not seven arguments to reorder by accident: every one is
- * named at every call site (`BondAccessAdapter`'s only constructor), and the
- * shape is the five bond facts above plus the caller's own identifiers —
- * splitting it into a nested value would just move the count, not reduce it.
+ * Twelve fields, not seven arguments to reorder by accident: every one is
+ * named at every call site (`BondAccessAdapter`'s one projection, shared by
+ * [BondAccess.membershipOf] and [BondAccess.lockMembershipOf]), and the shape
+ * is the bond facts above plus the caller's own identifiers, [activeSince],
+ * [endedAt] and [anchorTimeline] — splitting it into a nested value would just
+ * move the count, not reduce it.
  */
 @Suppress("LongParameterList")
 class BondMembership internal constructor(
@@ -69,7 +99,80 @@ class BondMembership internal constructor(
      * rather than a reinterpretation of one already here.
      */
     val awaitingSecondMember: Boolean,
+    /**
+     * When the bond became `ACTIVE` — the **second** member's
+     * `bond_members.joined_at`, not `bonds.created_at`. Null while the bond is
+     * still `PENDING_MEMBER`.
+     *
+     * The distinction is load-bearing for C3, which generates missing day
+     * labels from activation forward: starting at `created_at` instead would
+     * manufacture `EMPTY` days across the whole waiting window, which is
+     * precisely the harm doc 04 §8.3a's `SUSPENDED` resolution exists to
+     * prevent. There is no activation column on `bonds`; this is derived.
+     */
+    val activeSince: Instant?,
+    /** When the bond ended (`bonds.archived_at`), or null while it is live. */
+    val endedAt: Instant?,
+    /**
+     * The zone that **decides dates** over time, which is not
+     * [anchorTimezone] — that is the zone the bond currently *requests*. They
+     * differ for up to one logical day after a change is confirmed (BR-6).
+     */
+    val anchorTimeline: BondAnchorTimeline,
 ) {
     /** Ids only — a bond's name is the couple's words (doc 18 §9). */
     override fun toString(): String = "BondMembership(bondId=$bondId, memberId=$memberId)"
+}
+
+/**
+ * The UTC span `[startsAt, endsAt)` of one Bond-day, and whether it is the
+ * degenerate, empty one an eastward anchor move can produce — a projection of
+ * `bond.domain.DayBounds` for a caller outside this module (spec §2.1).
+ *
+ * `internal constructor`, the same mechanism as [BondMembership] and
+ * [BondAnchorTimeline]: `gratitude` may hold and read one of these but cannot
+ * build one from parts it has no business asserting about the domain.
+ */
+class BondDayBounds internal constructor(
+    val date: LocalDate,
+    val startsAt: Instant,
+    val endsAt: Instant,
+    val isDegenerate: Boolean,
+)
+
+/**
+ * `bond`'s effective-zone history, as much of it as another module may ask
+ * about — a projection of `bond.domain.AnchorTimeline`, answering the same
+ * four questions, rather than that type itself: the domain type is `internal`
+ * to `bond`, and keeping it that way is what stops `gratitude` from reaching
+ * `bond`'s private tables (spec §2.1).
+ *
+ * **Holds closures, not the domain `AnchorTimeline` object.** A reference to
+ * `bond.domain.AnchorTimeline` cannot appear in a file under `bond.api`:
+ * `ArchitectureTest`'s "layers only depend inwards" rule treats `api` the same
+ * as `domain` — depending on nothing within its own module — precisely so a
+ * caller in `gratitude` can never drag `bond`'s internals in through this
+ * type. `BondAccessAdapter`, in `bond.service` (which *may* import `domain`),
+ * is the only place that builds one, closing over the real timeline so every
+ * question is still answered by the one implementation of the date
+ * arithmetic, in the domain; this type only forwards to it.
+ *
+ * The constructor is `internal` for ADR-0026's reason, unchanged: a caller
+ * outside `bond` can hold one, read it and pass it down, and cannot forge one.
+ */
+class BondAnchorTimeline internal constructor(
+    private val zoneIdAtFn: (Instant) -> String,
+    private val dateAtFn: (Instant) -> LocalDate,
+    private val dayBoundsAtFn: (Instant) -> BondDayBounds,
+    private val usedLabelsUpToFn: (Instant) -> Set<LocalDate>,
+) {
+    fun zoneIdAt(at: Instant): String = zoneIdAtFn(at)
+
+    fun dateAt(at: Instant): LocalDate = dateAtFn(at)
+
+    /** The UTC span `[startsAt, endsAt)` of the logical day containing [at]. */
+    fun dayBoundsAt(at: Instant): BondDayBounds = dayBoundsAtFn(at)
+
+    /** Every calendar label this bond has issued up to [now]. */
+    fun usedLabelsUpTo(now: Instant): Set<LocalDate> = usedLabelsUpToFn(now)
 }
