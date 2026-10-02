@@ -5,6 +5,7 @@ import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.BondStatus
 import com.moyi.bond.domain.Member
 import com.moyi.bond.domain.UserId
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 import java.time.Instant
 
@@ -34,6 +35,7 @@ import java.time.Instant
 internal class BondStore(
     private val bonds: BondRepository,
     private val members: BondMemberRepository,
+    private val entityManager: EntityManager,
 ) {
     /** A new bond and its member rows. Its first invite is [InviteStore]'s, written in the same transaction. */
     fun insert(bond: Bond) {
@@ -109,9 +111,33 @@ internal class BondStore(
      * Holds the bond's row until this transaction ends. Taken before reading
      * the state an accept decides on, so that two accepts of one code cannot
      * both see a free seat (slice B2).
+     *
+     * **[refreshReads]: the lock alone does not make a re-read fresh.** A
+     * caller that ran the guard first has already loaded the bond and its
+     * member rows into this transaction's persistence context, and Hibernate
+     * answers a later `findById` from that identity map — and hands back the
+     * *same managed instances*, old state and all, from a query — lock or no
+     * lock. So a leave or an archive that committed while the caller queued on
+     * `FOR UPDATE` is invisible to its "re-read under the lock" unless those
+     * instances are refreshed from the row it now holds.
+     * `SubmitEntryBondLockTest` (`gratitude`) found it: an entry committed onto
+     * a bond that had ended while the submission waited. `BondDayStore.lockAndFind`
+     * met the same trap for the same reason.
+     *
+     * `true` only for `BondAccess.lockMembershipOf` today. The other callers
+     * all *write* the bond afterwards, so a stale read meets `@Version` as a
+     * conflict rather than passing silently; whether they should refresh too
+     * is a question for those callers, not settled here.
      */
-    fun lockBond(bondId: BondId) {
+    fun lockBond(
+        bondId: BondId,
+        refreshReads: Boolean = false,
+    ) {
         bonds.lockRow(bondId.value)
+        if (refreshReads) {
+            bonds.findById(bondId.value)?.let(entityManager::refresh)
+            members.findAllByBondId(bondId.value).forEach(entityManager::refresh)
+        }
     }
 
     /**

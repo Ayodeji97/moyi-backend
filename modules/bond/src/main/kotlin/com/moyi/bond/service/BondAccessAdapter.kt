@@ -68,7 +68,10 @@ internal class BondAccessAdapter(
         // must never take `FOR UPDATE` on a bond that is not theirs — locking
         // first would do exactly that, for any syntactically valid id.
         guard.membershipOf(caller, id)
-        bonds.lockBond(id)
+        // `refreshReads`: the guard above has already loaded the bond and its
+        // members into this transaction, and without the refresh the "re-read"
+        // below would be answered from that pre-lock copy (see lockBond's KDoc).
+        bonds.lockBond(id, refreshReads = true)
         // Re-read under the lock: between the check above and the lock, a
         // concurrent write could have changed what either read would answer.
         val membership = guard.membershipOf(caller, id)
@@ -127,6 +130,7 @@ internal class BondAccessAdapter(
     private fun anchorTimelineOf(membership: Membership): BondAnchorTimeline {
         val timeline = anchorIntervals.timelineOf(membership.bondId)
         return BondAnchorTimeline(
+            beginsAt = timeline.intervals.first().effectiveFrom,
             zoneIdAtFn = { at -> timeline.zoneAt(at).id },
             dateAtFn = timeline::dateAt,
             dayBoundsAtFn = { at -> timeline.dayBoundsAt(at).toApi() },

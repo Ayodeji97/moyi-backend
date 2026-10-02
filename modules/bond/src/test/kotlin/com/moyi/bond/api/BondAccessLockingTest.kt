@@ -28,6 +28,8 @@ import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
 import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.support.TransactionTemplate
+import java.sql.Connection
+import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -63,7 +65,7 @@ internal class BondAccessLockingTest(
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired private val transactions: TransactionTemplate,
     @Autowired directory: UserDirectory,
-    @Autowired dataSource: DataSource,
+    @Autowired private val dataSource: DataSource,
 ) : IntegrationTest() {
     @TestBean(name = "clock")
     private lateinit var clock: MutableClock
@@ -161,6 +163,69 @@ internal class BondAccessLockingTest(
             pool.shutdownNow()
         }
     }
+
+    @Test
+    fun `lockMembershipOf sees what committed while it waited for the lock, not what the guard read`() {
+        // The guard runs before the lock and loads the bond into this
+        // transaction; Hibernate would answer the "re-read under the lock"
+        // from that copy. Drop `refreshReads = true` from lockMembershipOf and
+        // the waiter reports the bond still open although it ended before the
+        // waiter held the lock. The holder is raw JDBC so it can pause while
+        // holding the lock, exactly where a real `EndBond` would be.
+        val bond = bondForTwo()
+        val pool = Executors.newFixedThreadPool(1)
+        try {
+            withBondRowLocked(bond.id) { holder, pid ->
+                val waiter = pool.submit<BondMembership> { transactions.execute { access.lockMembershipOf(bond.ada, bond.id) } }
+                await().atMost(Duration.ofSeconds(10)).until { waiter.isDone || blockedBy(pid) }
+                waiter.isDone shouldBe false
+
+                holder.prepareStatement("UPDATE bonds SET status = 'ARCHIVED', archived_at = ? WHERE id = ?").use {
+                    it.setTimestamp(1, Timestamp.from(ENDED))
+                    it.setObject(2, bond.id)
+                    it.executeUpdate()
+                }
+                holder.commit()
+
+                val seen = waiter.get(10, TimeUnit.SECONDS)
+                seen.isOpen shouldBe false
+                seen.endedAt shouldBe ENDED
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    /** A transaction on its own connection holding `lockRow`'s exact statement on [bondId]; rolled back unless [block] commits. */
+    private fun withBondRowLocked(
+        bondId: UUID,
+        block: (holder: Connection, pid: Int) -> Unit,
+    ) {
+        dataSource.connection.use { holder ->
+            holder.autoCommit = false
+            try {
+                holder.prepareStatement("SELECT 1 FROM bonds WHERE id = ? FOR UPDATE").use {
+                    it.setObject(1, bondId)
+                    it.executeQuery().close()
+                }
+                block(holder, backendPidOf(holder))
+            } finally {
+                holder.rollback()
+                holder.autoCommit = true
+            }
+        }
+    }
+
+    private fun backendPidOf(connection: Connection): Int =
+        connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT pg_backend_pid()").use {
+                it.next()
+                it.getInt(1)
+            }
+        }
+
+    private fun blockedBy(pid: Int): Boolean =
+        jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))", Int::class.java, pid)!! > 0
 
     @Test
     fun `activeSince is the second member's join, not the bond's creation`() {
@@ -315,6 +380,11 @@ internal class BondAccessLockingTest(
             // the handoff cost no skipped label, so the run has no gap.
             membership.anchorTimeline.usedLabelsUpTo(probes[2]) shouldBe
                 (1..13).map { LocalDate.of(2026, 9, it) }.toSet()
+
+            // Where the timeline starts: the bond's creation, not the handoff
+            // and not a midnight.
+            membership.anchorTimeline.beginsAt shouldBe Instant.parse("2026-09-01T00:00:00Z")
+            membership.anchorTimeline.beginsAt shouldBe direct.intervals.first().effectiveFrom
         }
     }
 
@@ -475,5 +545,7 @@ internal class BondAccessLockingTest(
         /** [TestBean]'s default naming convention: a static method named after the field it overrides. */
         @JvmStatic
         fun clock(): MutableClock = MutableClock(start = Instant.parse("2020-01-01T00:00:00Z"))
+
+        val ENDED: Instant = Instant.parse("2026-09-02T12:00:00Z")
     }
 }

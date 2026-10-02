@@ -143,7 +143,7 @@ class BondDayBounds internal constructor(
 /**
  * `bond`'s effective-zone history, as much of it as another module may ask
  * about — a projection of `bond.domain.AnchorTimeline`, answering the same
- * four questions, rather than that type itself: the domain type is `internal`
+ * four questions (and saying where it begins), rather than that type itself: the domain type is `internal`
  * to `bond`, and keeping it that way is what stops `gratitude` from reaching
  * `bond`'s private tables (spec §2.1).
  *
@@ -161,6 +161,15 @@ class BondDayBounds internal constructor(
  * outside `bond` can hold one, read it and pass it down, and cannot forge one.
  */
 class BondAnchorTimeline internal constructor(
+    /**
+     * The first instant the timeline covers — the bond's creation, where its
+     * first interval begins. Every question below is answerable from here on
+     * and from nowhere earlier: an instant before it has no day on this
+     * bond's calendar, because the bond did not exist. `gratitude` uses it to
+     * refuse an offline draft claiming a time before then (BR-3a) rather than
+     * asking the questions below of an instant they cannot answer.
+     */
+    val beginsAt: Instant,
     private val zoneIdAtFn: (Instant) -> String,
     private val dateAtFn: (Instant) -> LocalDate,
     private val dayBoundsAtFn: (Instant) -> BondDayBounds,
