@@ -38,6 +38,8 @@ internal fun BondDayEntity.toDomain(): BondDay =
         date = date,
         status = status,
         anchorTimezone = ZoneId.of(anchorTimezone),
+        startsAt = startsAt,
+        endsAt = endsAt,
         entryCount = entryCount.toInt(),
         revealedAt = revealedAt,
         closedAt = closedAt,
@@ -49,10 +51,10 @@ internal fun BondDayEntity.toDomain(): BondDay =
  * Carries a changed [BondDay] onto the managed entity it came from — the
  * update path, for [BondDayStore.update].
  *
- * `id`, `bondId`, `date`, `anchorTimezone` and `createdAt` are not copied:
- * none of them is a bond-day's to change after it opens — `anchorTimezone`
- * above all, per [BondDay]'s own KDoc on why the zone it opened under never
- * moves. Neither is `version`, which is Hibernate's to increment — assigning
+ * `id`, `bondId`, `date`, `anchorTimezone`, `startsAt`, `endsAt` and
+ * `createdAt` are not copied: none of them is a bond-day's to change after it
+ * opens — the span above all, per [BondDay]'s own KDoc on why the interval it
+ * was resolved against never moves. Neither is `version`, which is Hibernate's to increment — assigning
  * it here would fight the optimistic lock rather than use it.
  */
 internal fun BondDay.applyTo(entity: BondDayEntity) {

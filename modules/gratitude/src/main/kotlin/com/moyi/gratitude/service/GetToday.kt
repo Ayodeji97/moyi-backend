@@ -10,11 +10,10 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
 import java.time.LocalDate
-import java.time.ZoneId
 
 /**
  * What [GetToday.today] hands the web layer: the date "today" resolves to in
- * the bond's own zone, the status that date's row carries (or [BondDayStatus.OPEN]
+ * the bond's own calendar, the status that date's row carries (or [BondDayStatus.OPEN]
  * when no row exists yet — see [GetToday]'s own KDoc), the caller's own entry
  * in full, and their partner's entry exactly as BR-1 says the caller may see
  * it.
@@ -40,9 +39,10 @@ internal data class TodayView(
  *
  * **A read never writes.** [DayAssignment.dateFor] resolves which date
  * "today" is, the same function [SubmitEntry] uses — `null` for `intendedAt`
- * (nobody backdates a read) and `{ false }` for `isClosed` (today is never a
- * closed day; the function needs the lambda to resolve an offline draft's
- * date, not this one). [BondDayStore.findByBondAndDate] then **reads** the
+ * (nobody backdates a read) and `{ false }` for `isSettled` (the lambda only
+ * matters for an offline draft's claimed date, and a read makes no claim),
+ * against the same effective-zone calendar ([asCalendar]) [SubmitEntry]
+ * resolves its writes on. [BondDayStore.findByBondAndDate] then **reads** the
  * row rather than opening it: [BondDayStore.openOrGet] is `SubmitEntry`'s
  * own call, made once a write is actually happening, and calling it here
  * instead would `INSERT` a row for every bond anyone merely opened the app
@@ -96,8 +96,12 @@ internal class GetToday(
 ) {
     @Transactional(readOnly = true)
     fun today(membership: BondMembership): TodayView {
-        val zone = ZoneId.of(membership.anchorTimezone)
-        val date = DayAssignment.dateFor(clock.instant(), null, zone) { false }
+        // The same calendar SubmitEntry files against — the bond's effective
+        // zone over time, not the zone it currently requests (BR-6). Reading
+        // `anchorTimezone` here would, for the rest of the day a confirmed
+        // change is deferred, report a date the caller's own write would not
+        // land on.
+        val date = DayAssignment.dateFor(clock.instant(), null, membership.anchorTimeline.asCalendar()) { false }
         val day = days.findByBondAndDate(membership.bondId, date)
 
         if (day == null) {

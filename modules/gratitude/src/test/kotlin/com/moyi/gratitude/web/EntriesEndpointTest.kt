@@ -63,15 +63,20 @@ internal class EntriesEndpointTest(
 
     @BeforeEach
     fun setUp() {
-        clock.set(NOW)
         ada = users.verified("Ada")
         bea = users.verified("Bea")
         eve = users.verified("Eve")
         cara = users.verified("Cara")
 
+        // Created two days before NOW, so an offline draft from yesterday
+        // names a time the bond already existed — a bond's calendar starts at
+        // its creation, and a claim from before then is refused (see the
+        // pre-creation test below).
+        clock.set(BOND_CREATED)
         val created = createBond(ada)
         bondId = bondIdOf(created)
         accept(bea, codeOf(created)).status shouldBe 200
+        clock.set(NOW)
     }
 
     @AfterEach
@@ -169,6 +174,23 @@ internal class EntriesEndpointTest(
 
         response.status shouldBe 201
         jdbc.queryForObject("SELECT date::text FROM bond_days", String::class.java) shouldBe "2026-09-14"
+    }
+
+    @Test
+    fun `an intendedAt from before the bond existed is ignored, not a 500`() {
+        // Cara's bond is created at NOW; one hour earlier is inside BR-3a's
+        // windows but before the bond's calendar begins. The anchor timeline
+        // cannot place that instant, and must not be asked to: the claim
+        // falls back to the submission instant like any other rejected one.
+        val solo = createBond(cara)
+        val beforeTheBond = NOW.minus(Duration.ofHours(1))
+
+        val response = submit(cara, bondIdOf(solo), """{"text":"before we began","intendedAt":"$beforeTheBond"}""")
+
+        response.status shouldBe 201
+        val filedOn = jdbc.queryForObject("SELECT date::text FROM bond_days WHERE bond_id = ?::uuid", String::class.java, bondIdOf(solo))
+        filedOn shouldBe "2026-09-15"
+        intendedAtOf(response) shouldBe NOW
     }
 
     @Test
@@ -371,5 +393,8 @@ internal class EntriesEndpointTest(
     private companion object {
         /** Midday UTC on the 15th is midday-plus-one in Africa/Lagos — nowhere near a midnight boundary either side. */
         val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
+
+        /** Two days before [NOW] — see [setUp]. */
+        val BOND_CREATED: Instant = Instant.parse("2026-09-13T10:00:00Z")
     }
 }

@@ -88,7 +88,7 @@ internal interface BondDayRepository : Repository<BondDayEntity, UUID> {
      *   had — either way [com.moyi.gratitude.infra.database.BondDayStore.openOrGet]
      *   reads the row back afterwards, so the caller never has to tell the two apart.
      *
-     * `@Suppress("LongParameterList")`: six parameters is this native
+     * `@Suppress("LongParameterList")`: eight parameters is this native
      * statement's own arity — one per column it actually varies, each a
      * distinct fact the caller already has in hand — the same justification
      * `Entry.submit` gives for its own suppression (detekt's
@@ -100,8 +100,8 @@ internal interface BondDayRepository : Repository<BondDayEntity, UUID> {
     @Query(
         nativeQuery = true,
         value = """
-            INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, entry_count, created_at, version)
-            VALUES (:id, :bondId, :date, :status, :anchorTimezone, 0, :createdAt, 0)
+            INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, entry_count, created_at, version)
+            VALUES (:id, :bondId, :date, :status, :anchorTimezone, :startsAt, :endsAt, 0, :createdAt, 0)
             ON CONFLICT (bond_id, date) DO NOTHING
             """,
     )
@@ -111,6 +111,8 @@ internal interface BondDayRepository : Repository<BondDayEntity, UUID> {
         date: LocalDate,
         status: String,
         anchorTimezone: String,
+        startsAt: Instant,
+        endsAt: Instant,
         createdAt: Instant,
     ): Int
 }

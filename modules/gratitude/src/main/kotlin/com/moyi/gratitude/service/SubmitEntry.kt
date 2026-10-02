@@ -1,5 +1,6 @@
 package com.moyi.gratitude.service
 
+import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.common.core.IdGenerator
 import com.moyi.gratitude.domain.BondDay
@@ -35,8 +36,8 @@ import java.util.UUID
  * visible to the caller, not just to whoever reads this module's source.
  *
  * [intendedAt], BR-3a's offline-draft claim, is optional and rarely sent;
- * `null` means "filed against today, in the bond's own zone" — exactly
- * [DayAssignment.dateFor]'s own fallback.
+ * `null` means "filed against today, on the bond's own calendar" — exactly
+ * [DayAssignment.resolve]'s own fallback.
  */
 internal data class EntryDraft(
     val text: String,
@@ -55,10 +56,22 @@ internal data class EntryView(
  * `POST /bonds/{bondId}/entries` (spec §6.2): a member's words for the
  * Bond-day their own submission resolves to.
  *
- * **The check order is the contract**, and it continues the guard the
- * controller already ran: [membership] is already proof the caller belongs
- * to this bond (`BondAccess.membershipOf`, doc 06 §2/T-02), so nothing below
- * that could hand a non-member a different answer runs before it. In order:
+ * **The lock order is bond, then bond-day, then entry, held to commit (spec
+ * §2.1).** [submit] opens its own transaction and the first thing it does
+ * inside it — before reading anything — is [BondAccess.lockMembershipOf],
+ * which guards, takes the `bonds` row's `FOR UPDATE` and re-reads the
+ * membership under it. A leave, block, deletion or zone confirmation (every
+ * one of which takes that same lock first) therefore either commits before
+ * this write reads the bond, or waits behind it until this write commits.
+ * The old shape — the controller resolving membership outside any
+ * transaction and this method checking `isOpen` on that stale copy — let an
+ * entry commit after the bond had ended. Only then is the day's row locked
+ * ([BondDayStore.lockAndFind]) and the entry inserted.
+ *
+ * **The check order is the contract**, and it starts with the guard:
+ * [BondAccess.lockMembershipOf] answers a non-member with the same `404` as
+ * a bond that does not exist (doc 06 §2, T-02), so nothing below that could
+ * hand a non-member a different answer runs before it. In order:
  *
  * 1. `membership.hasLeft` — `409 BOND_ARCHIVED`. Checked explicitly, not
  *    inferred from [BondMembership.isOpen] — the second review of PR #41
@@ -67,10 +80,15 @@ internal data class EntryView(
  * 2. `!membership.isOpen` — `409 BOND_ARCHIVED` (BR-9).
  * 3. Either media id present — `422 MEDIA_NOT_YET_SUPPORTED` (spec §1):
  *    refused, never stored and quietly ignored.
- * 4. The day: [DayAssignment.dateFor] resolves which Bond-day this entry is
- *    for, then [BondDayStore.openOrGet] opens or finds it — `SUSPENDED`
- *    rather than `OPEN` while [BondMembership.awaitingSecondMember] (doc 04
- *    §8.3a, `02` J1: the creator may write before their partner joins).
+ * 4. The day: [DayAssignment.resolve] resolves which Bond-day this entry is
+ *    for against the bond's **effective-zone timeline**
+ *    ([BondMembership.anchorTimeline], adapted by [asCalendar]) — not
+ *    [BondMembership.anchorTimezone], which is the zone the bond *requests*
+ *    and differs for up to a day after a change is confirmed (BR-6). Then
+ *    [BondDayStore.openOrGet] opens or finds it with the span the timeline
+ *    gave — `SUSPENDED` rather than `OPEN` while
+ *    [BondMembership.awaitingSecondMember] (doc 04 §8.3a, `02` J1: the
+ *    creator may write before their partner joins).
  * 5. The insert. `entries_one_per_member_per_day` (V12/BR-2) is what
  *    refuses a second entry from the same member on the same day — this
  *    method attempts the write and catches the conflict, it does not read
@@ -83,14 +101,11 @@ internal data class EntryView(
  * `bond`'s own writes already hold for a read-modify-write (ADR-0028,
  * `BondRepositories.lockRow`), then reads the day fresh under it.
  * [BondDay.withEntry] is computed from that fresh read, not from whatever
- * [BondDayStore.openOrGet] happened to return — two members submitting on
- * the same day concurrently is the ordinary case this product exists for,
- * not a race to leave to `@Version` alone: without the lock, both
- * transactions read the same `entryCount`, both compute `+1`, and the
- * second's flush trips the optimistic check as an uncaught
- * `ObjectOptimisticLockingFailureException` — a `500` on the normal path,
- * not the race this slice's own tests ever exercised until this fix.
- * `SubmitEntryConcurrencyTest` is the two-members-same-day proof.
+ * [BondDayStore.openOrGet] happened to return. Two members of one bond now
+ * also serialise on the bond lock before they get this far, so for the
+ * submit path alone the day lock is belt to the bond lock's braces; it stays
+ * because writers that take no bond lock (C3's close job, plan R1) contend
+ * for the same row.
  *
  * **One [TransactionTemplate] boundary, not `@Transactional`.** `RegisterUser.kt`
  * documents the trap this avoids: a `@Transactional` method that catches its
@@ -102,9 +117,13 @@ internal data class EntryView(
  * explicit boundary is kept regardless, for the same reason `RegisterUser`
  * keeps its own: the boundary is something a reader can see, rather than an
  * annotation whose extent has to be inferred from where the class starts.
+ * It is also what [BondAccess.lockMembershipOf]'s `MANDATORY` propagation
+ * requires: the lock is only worth taking inside the transaction that does
+ * the write.
  */
 @Service
 internal class SubmitEntry(
+    private val access: BondAccess,
     private val days: BondDayStore,
     private val entries: EntryStore,
     private val ids: IdGenerator,
@@ -112,6 +131,7 @@ internal class SubmitEntry(
     private val transactions: TransactionTemplate,
 ) {
     /**
+     * @throws com.moyi.common.web.NotFoundException the caller is not a member of [bondId], or there is no such bond
      * @throws BondArchivedException `membership.hasLeft`, or the bond has ended (BR-9)
      * @throws MediaNotYetSupportedException either media id is present (spec §1)
      * @throws DayClosedException the Bond-day this entry resolves to has already closed
@@ -119,51 +139,29 @@ internal class SubmitEntry(
      */
     @Suppress("ThrowsCount")
     fun submit(
-        membership: BondMembership,
+        userId: UUID,
+        bondId: UUID,
         draft: EntryDraft,
     ): EntryView {
-        if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
-        if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()
-
+        // Pure validation of the caller's own request, no read: `@ValidEntryText`
+        // has already run this same factory at the web edge, so it cannot fail
+        // here for a request that reached this method.
         val text = EntryText.of(draft.text)
-        val zone = ZoneId.of(membership.anchorTimezone)
         val now = clock.instant()
-        val bondId = membership.bondId
 
         val view =
             try {
                 transactions.execute {
-                    val resolution =
-                        DayAssignment.resolve(now, draft.intendedAt, zone) { candidate ->
-                            days.statusOf(bondId, candidate)?.isClosed == true
-                        }
-                    val date = resolution.date
-                    val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
-                    val opened = days.openOrGet(bondId, date, zone, now, openStatus)
-                    // Locked, then re-read fresh under that lock — see the
-                    // class KDoc's own note on I3. `opened`'s own entryCount/
-                    // status is not used past this point; `day` is.
-                    val day = days.lockAndFind(opened.id)
-                    if (day.isClosed) throw DayClosedException()
-
-                    val entry =
-                        Entry.submit(
-                            id = EntryId(ids.opaque()),
-                            bondDayId = day.id,
-                            bondId = bondId,
-                            authorMemberId = membership.memberId,
-                            text = text,
-                            intendedAt = resolution.resolvedAt,
-                            now = now,
-                        )
-                    // The flush BR-2's index lives on. See EntryStore.insert's
-                    // own KDoc: the constraint is what refuses a second entry,
-                    // raised here rather than deferred to a commit this catch
-                    // could no longer be on the stack for.
-                    entries.insert(entry)
-                    val updated = day.withEntry()
-                    days.update(updated)
-                    EntryView(entry, updated)
+                    // Bond, then bond-day, then entry — spec §2.1. The lock is
+                    // taken INSIDE the transaction and before anything is read,
+                    // so a leave, block, deletion or zone confirmation either
+                    // completes before this write begins or waits behind it.
+                    // Reading membership outside the transaction and checking
+                    // `isOpen` would let this commit after the bond ended.
+                    val membership = access.lockMembershipOf(userId, bondId)
+                    if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
+                    if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()
+                    write(membership, text, draft, now)
                 }
             } catch (violation: DataIntegrityViolationException) {
                 if (!violation.violates(GratitudeConstraints.ENTRY_ONE_PER_MEMBER_PER_DAY)) throw violation
@@ -171,5 +169,51 @@ internal class SubmitEntry(
             }
 
         return checkNotNull(view) { "submit's transaction produces an EntryView unless it threw" }
+    }
+
+    /** Steps 4 and 5 of the class KDoc, under the bond lock [submit] already holds. */
+    private fun write(
+        membership: BondMembership,
+        text: EntryText,
+        draft: EntryDraft,
+        now: Instant,
+    ): EntryView {
+        val bondId = membership.bondId
+        val timeline = membership.anchorTimeline
+        val resolution =
+            DayAssignment.resolve(now, draft.intendedAt, timeline.asCalendar()) { candidate ->
+                days.statusOf(bondId, candidate)?.isClosed == true
+            }
+        val window = resolution.bounds
+        // The snapshot `anchor_timezone` keeps: the zone in force when this
+        // day began. Taken at `startsAt`, not at `now` or `resolvedAt`, so
+        // whichever writer opens the row stamps the same zone.
+        val zone = ZoneId.of(timeline.zoneIdAt(window.startsAt))
+        val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
+        val opened = days.openOrGet(bondId, window, zone, now, openStatus)
+        // Locked, then re-read fresh under that lock — see the class KDoc's
+        // own note on I3. `opened`'s own entryCount/status is not used past
+        // this point; `day` is.
+        val day = days.lockAndFind(opened.id)
+        if (day.isClosed) throw DayClosedException()
+
+        val entry =
+            Entry.submit(
+                id = EntryId(ids.opaque()),
+                bondDayId = day.id,
+                bondId = bondId,
+                authorMemberId = membership.memberId,
+                text = text,
+                intendedAt = resolution.resolvedAt,
+                now = now,
+            )
+        // The flush BR-2's index lives on. See EntryStore.insert's own KDoc:
+        // the constraint is what refuses a second entry, raised here rather
+        // than deferred to a commit this catch could no longer be on the
+        // stack for.
+        entries.insert(entry)
+        val updated = day.withEntry()
+        days.update(updated)
+        return EntryView(entry, updated)
     }
 }

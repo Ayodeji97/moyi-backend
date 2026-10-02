@@ -4,6 +4,7 @@ import com.moyi.common.testing.DeterministicIdGenerator
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.BondDayStatus
+import com.moyi.gratitude.domain.DayWindow
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryText
@@ -12,6 +13,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -64,6 +66,9 @@ internal class BondDayPersistenceTest(
     private val lagos = ZoneId.of("Africa/Lagos")
     private val now = Instant.parse("2026-09-28T20:00:00Z")
 
+    // Lagos's 28th, UTC+1 all year: 27T23:00Z to 28T23:00Z.
+    private val window = DayWindow(date, Instant.parse("2026-09-27T23:00:00Z"), Instant.parse("2026-09-28T23:00:00Z"))
+
     @AfterEach
     fun clear() {
         jdbc.execute("TRUNCATE TABLE entries, bond_days CASCADE")
@@ -75,7 +80,7 @@ internal class BondDayPersistenceTest(
         // invite-creation shape (ADR-0027) and not a check-then-insert. Each
         // call below runs in its own real transaction, as InviteRaceTest's
         // HTTP version does.
-        val results = inParallel(listOf({ openOrGet(bondId, date, lagos, now) }, { openOrGet(bondId, date, lagos, now) }))
+        val results = inParallel(listOf({ openOrGet(bondId, window, lagos, now) }, { openOrGet(bondId, window, lagos, now) }))
 
         results.map { it.id }.toSet().size shouldBe 1
         jdbc.queryForObject("SELECT count(*) FROM bond_days", Int::class.java) shouldBe 1
@@ -90,7 +95,7 @@ internal class BondDayPersistenceTest(
         // Two threads can agree by luck — InviteRaceTest's own reason for
         // an eight-way case: eight contending on one row is where a lock
         // that is merely *usually* taken stops looking correct.
-        val results = inParallel(List(8) { { openOrGet(bondId, date, lagos, now) } })
+        val results = inParallel(List(8) { { openOrGet(bondId, window, lagos, now) } })
 
         results.map { it.id }.toSet().size shouldBe 1
         jdbc.queryForObject("SELECT count(*) FROM bond_days", Int::class.java) shouldBe 1
@@ -98,7 +103,7 @@ internal class BondDayPersistenceTest(
 
     @Test
     fun `a second entry by the same member is refused by the index, not by a check`() {
-        val day = openOrGet(bondId, date, lagos, now)
+        val day = openOrGet(bondId, window, lagos, now)
         val first = entry(day.id, ada)
         insert(first)
 
@@ -113,11 +118,46 @@ internal class BondDayPersistenceTest(
 
     @Test
     fun `the day keeps the zone it was opened in even after the bond's anchor moves`() {
-        val day = openOrGet(bondId, date, ZoneId.of("Africa/Lagos"), now)
+        val day = openOrGet(bondId, window, ZoneId.of("Africa/Lagos"), now)
 
         // Nothing in this module reads the bond's current zone for an existing day.
         statusOf(bondId, date).shouldNotBeNull()
         find(day.id).shouldNotBeNull().anchorTimezone shouldBe ZoneId.of("Africa/Lagos")
+    }
+
+    @Test
+    fun `the day's span is persisted exactly as given, and is not derived from its zone`() {
+        // A merged westward day (plan R3): 48 hours, labelled the 28th, with a
+        // Lagos snapshot. Deriving the span from `anchor_timezone` — Lagos
+        // midnight to midnight — would store 27T23:00Z..28T23:00Z instead.
+        val merged = DayWindow(date, Instant.parse("2026-09-27T10:00:00Z"), Instant.parse("2026-09-29T10:00:00Z"))
+
+        val day = openOrGet(bondId, merged, lagos, now)
+
+        day.startsAt shouldBe merged.startsAt
+        day.endsAt shouldBe merged.endsAt
+        val stored = "SELECT starts_at = '2026-09-27T10:00:00Z' AND ends_at = '2026-09-29T10:00:00Z' FROM bond_days"
+        jdbc.queryForObject(stored, Boolean::class.java) shouldBe true
+        find(day.id).shouldNotBeNull().endsAt shouldBe merged.endsAt
+    }
+
+    @Test
+    fun `the loser of an open race gets the winner's span, not its own`() {
+        // An existing day is never recomputed (BR-6): a second open with a
+        // different window finds the row, it does not rewrite it.
+        openOrGet(bondId, window, lagos, now)
+        val other = DayWindow(date, Instant.parse("2026-09-27T10:00:00Z"), Instant.parse("2026-09-28T10:00:00Z"))
+
+        openOrGet(bondId, other, lagos, now).startsAt shouldBe window.startsAt
+    }
+
+    @Test
+    fun `V12 admits an empty span and refuses an inverted one`() {
+        val at = "2026-09-28T23:00:00Z"
+        rawInsert(UUID.randomUUID(), at, at) shouldBe 1
+
+        shouldThrow<DataIntegrityViolationException> { rawInsert(UUID.randomUUID(), at, "2026-09-28T22:59:59Z") }
+            .message shouldContain "bond_days_span_check"
     }
 
     @Test
@@ -126,7 +166,7 @@ internal class BondDayPersistenceTest(
         // creator may write before their partner joins, and the row opens
         // excluded from evaluation from the first write rather than
         // becoming so later.
-        val day = openOrGet(bondId, date, lagos, now, status = BondDayStatus.SUSPENDED)
+        val day = openOrGet(bondId, window, lagos, now, status = BondDayStatus.SUSPENDED)
 
         day.status shouldBe BondDayStatus.SUSPENDED
         jdbc.queryForObject("SELECT status FROM bond_days", String::class.java) shouldBe "SUSPENDED"
@@ -134,8 +174,8 @@ internal class BondDayPersistenceTest(
 
     @Test
     fun `findForDay returns every entry filed against the day, and nothing else`() {
-        val day = openOrGet(bondId, date, lagos, now)
-        val otherDay = openOrGet(UUID.randomUUID(), date, lagos, now)
+        val day = openOrGet(bondId, window, lagos, now)
+        val otherDay = openOrGet(UUID.randomUUID(), window, lagos, now)
         insert(entry(day.id, ada))
         insert(entry(day.id, bea))
         insert(entry(otherDay.id, ada))
@@ -145,7 +185,7 @@ internal class BondDayPersistenceTest(
 
     @Test
     fun `update writes a changed bond-day and moves the version`() {
-        val day = openOrGet(bondId, date, lagos, now)
+        val day = openOrGet(bondId, window, lagos, now)
 
         transactions.executeWithoutResult { days.update(day.withEntry()) }
 
@@ -165,11 +205,11 @@ internal class BondDayPersistenceTest(
 
     private fun openOrGet(
         bondId: UUID,
-        date: LocalDate,
+        window: DayWindow,
         zone: ZoneId,
         now: Instant,
         status: BondDayStatus = BondDayStatus.OPEN,
-    ) = transactions.execute { days.openOrGet(bondId, date, zone, now, status) }.shouldNotBeNull()
+    ) = transactions.execute { days.openOrGet(bondId, window, zone, now, status) }.shouldNotBeNull()
 
     private fun find(id: BondDayId) = transactions.execute { days.find(id) }
 
@@ -183,6 +223,24 @@ internal class BondDayPersistenceTest(
     private fun findForDay(bondDayId: BondDayId) = transactions.execute { entries.findForDay(bondDayId) }.shouldNotBeNull()
 
     // ---- fixtures ---------------------------------------------------------
+
+    /** Below the domain, so the schema's own CHECK is what answers — BondDay's `init` would refuse first. */
+    private fun rawInsert(
+        bondId: UUID,
+        startsAt: String,
+        endsAt: String,
+    ): Int =
+        jdbc.update(
+            """
+            INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, entry_count, created_at, version)
+            VALUES (?, ?, ?, 'OPEN', 'Africa/Lagos', ?::timestamptz, ?::timestamptz, 0, now(), 0)
+            """.trimIndent(),
+            UUID.randomUUID(),
+            bondId,
+            date,
+            startsAt,
+            endsAt,
+        )
 
     private fun entry(
         bondDayId: BondDayId,

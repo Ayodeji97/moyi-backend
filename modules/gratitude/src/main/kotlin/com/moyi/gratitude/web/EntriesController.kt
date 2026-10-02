@@ -28,8 +28,11 @@ import java.util.UUID
  * sets the precedent this follows: one controller per path prefix, not one
  * per HTTP verb or per use case.
  *
- * **The guard is this method's first statement**, before `@Valid` would
- * otherwise be the first thing a reader notices — `BondsController`'s own
+ * **The guard is each method's first step**, before `@Valid` would
+ * otherwise be the first thing a reader notices — [today] calls
+ * `BondAccess.membershipOf` itself; [submitEntry] hands the ids to
+ * `SubmitEntry`, whose first act is `BondAccess.lockMembershipOf`, the same
+ * guard and the same `404`, taken under the bond lock — `BondsController`'s own
  * precedent, and the same reasoning: a non-member must never see a `409` or
  * `422` a member would, because either would say the bond is real. What
  * `@Valid`/`@Idempotent` run *before* the method body at all — Spring's own
@@ -71,8 +74,11 @@ internal class EntriesController(
         @PathVariable bondId: String,
         @Valid @RequestBody request: SubmitEntryRequest,
     ): ResponseEntity<EntryResponse> {
-        val membership = access.membershipOf(caller.id, bondIdOrNotFound(bondId))
-        val view = submitEntry.submit(membership, request.toDraft())
+        // No membership read here: SubmitEntry takes it itself, under the
+        // bond's row lock and inside its own transaction (spec §2.1). A copy
+        // read here, outside that transaction, is exactly the stale answer
+        // the lock exists to refuse.
+        val view = submitEntry.submit(caller.id, bondIdOrNotFound(bondId), request.toDraft())
         return ResponseEntity.status(HttpStatus.CREATED).body(EntryResponse.from(view))
     }
 

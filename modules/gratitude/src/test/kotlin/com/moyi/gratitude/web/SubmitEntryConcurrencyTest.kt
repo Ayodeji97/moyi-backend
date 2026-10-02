@@ -135,12 +135,14 @@ internal class SubmitEntryConcurrencyTest(
         val today = clock.instant().atZone(LAGOS).toLocalDate()
         jdbc.update(
             """
-            INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, entry_count, created_at, version)
-            VALUES (?, ?::uuid, ?, 'OPEN', 'Africa/Lagos', 0, now(), 0)
+            INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, entry_count, created_at, version)
+            VALUES (?, ?::uuid, ?, 'OPEN', 'Africa/Lagos', ?, ?, 0, now(), 0)
             """.trimIndent(),
             UUID.randomUUID(),
             bondId,
             today,
+            java.sql.Timestamp.from(today.atStartOfDay(LAGOS).toInstant()),
+            java.sql.Timestamp.from(today.plusDays(1).atStartOfDay(LAGOS).toInstant()),
         )
     }
 

@@ -4,11 +4,13 @@ import com.moyi.common.core.IdGenerator
 import com.moyi.gratitude.domain.BondDay
 import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.BondDayStatus
+import com.moyi.gratitude.domain.DayWindow
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -46,18 +48,36 @@ internal class BondDayStore(
      * is what lets [insertIfAbsent] stay a single native statement rather
      * than a round trip through a domain object it would immediately discard
      * for the loser of the race.
+     *
+     * **[window] is the day, as the bond's calendar resolved it** — the label
+     * and the UTC span `[startsAt, endsAt)` both, persisted as given (spec
+     * §3.1). Nothing here derives a span from [zone]; [zone] is only the
+     * snapshot `anchor_timezone` keeps. The loser of the race gets the row the
+     * winner wrote, span included, which is what an existing day must be:
+     * opened once, never recomputed (BR-6). Instants are truncated to
+     * microseconds, Postgres's own `timestamptz` resolution, so the row read
+     * back is the row written.
      */
     fun openOrGet(
         bondId: UUID,
-        date: LocalDate,
+        window: DayWindow,
         zone: ZoneId,
         now: Instant,
         status: BondDayStatus = BondDayStatus.OPEN,
     ): BondDay {
         val id = BondDayId(ids.timeOrdered())
-        days.insertIfAbsent(id = id.value, bondId = bondId, date = date, status = status.name, anchorTimezone = zone.id, createdAt = now)
-        return checkNotNull(days.findByBondIdAndDate(bondId, date)?.toDomain()) {
-            "a bond-day for $bondId on $date must exist immediately after openOrGet"
+        days.insertIfAbsent(
+            id = id.value,
+            bondId = bondId,
+            date = window.date,
+            status = status.name,
+            anchorTimezone = zone.id,
+            startsAt = window.startsAt.truncatedTo(ChronoUnit.MICROS),
+            endsAt = window.endsAt.truncatedTo(ChronoUnit.MICROS),
+            createdAt = now.truncatedTo(ChronoUnit.MICROS),
+        )
+        return checkNotNull(days.findByBondIdAndDate(bondId, window.date)?.toDomain()) {
+            "a bond-day for $bondId on ${window.date} must exist immediately after openOrGet"
         }
     }
 

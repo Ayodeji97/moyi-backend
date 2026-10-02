@@ -51,6 +51,10 @@ internal class BondDayEntity(
     var status: BondDayStatus,
     @Column(nullable = false, updatable = false)
     var anchorTimezone: String,
+    @Column(nullable = false, updatable = false)
+    var startsAt: Instant,
+    @Column(nullable = false, updatable = false)
+    var endsAt: Instant,
     @Column(nullable = false)
     var entryCount: Short,
     var revealedAt: Instant?,

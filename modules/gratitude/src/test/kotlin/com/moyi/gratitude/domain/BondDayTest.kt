@@ -1,5 +1,6 @@
 package com.moyi.gratitude.domain
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -14,6 +15,9 @@ internal class BondDayTest {
     private val dayId = BondDayId(UUID.randomUUID())
     private val bondId = UUID.randomUUID()
     private val date = LocalDate.of(2026, 9, 15)
+
+    // Lagos's 15th, UTC+1 all year: 14T23:00Z to 15T23:00Z.
+    private val window = DayWindow(date, Instant.parse("2026-09-14T23:00:00Z"), Instant.parse("2026-09-15T23:00:00Z"))
     private val lagos = ZoneId.of("Africa/Lagos")
     private val now = Instant.parse("2026-09-15T08:00:00Z")
     private val ada = UUID.randomUUID()
@@ -22,19 +26,34 @@ internal class BondDayTest {
 
     @Test
     fun `a day opens with no entries, in the zone it was opened in`() {
-        val day = BondDay.open(dayId, bondId, LocalDate.of(2026, 9, 15), ZoneId.of("Africa/Lagos"), now)
+        val day = BondDay.open(dayId, bondId, window, ZoneId.of("Africa/Lagos"), now)
 
         day.status shouldBe BondDayStatus.OPEN
         day.entryCount shouldBe 0
         day.anchorTimezone shouldBe ZoneId.of("Africa/Lagos")
+        day.date shouldBe date
+        day.startsAt shouldBe window.startsAt
+        day.endsAt shouldBe window.endsAt
         day.isClosed shouldBe false
+    }
+
+    @Test
+    fun `a skipped date's empty day can exist, and an inverted one cannot`() {
+        // An eastward handoff skips a label (doc 04 §8.5); its day is the
+        // empty span startsAt == endsAt. `startsAt < endsAt` would be the
+        // reflexive invariant, and it would refuse the first one it met.
+        val handoff = Instant.parse("2026-09-15T23:00:00Z")
+        val skipped = BondDay.open(dayId, bondId, DayWindow(date, handoff, handoff), lagos, now)
+        skipped.startsAt shouldBe skipped.endsAt
+
+        shouldThrow<IllegalArgumentException> { skipped.copy(endsAt = handoff.minusSeconds(1)) }
     }
 
     @Test
     fun `the first entry makes it partial and the second does not reveal it yet`() {
         // C1 has no reveal — that is C2, with the row lock and the race test.
         // The day is left honest about its count and wrong about nothing else.
-        val partial = BondDay.open(dayId, bondId, date, lagos, now).withEntry()
+        val partial = BondDay.open(dayId, bondId, window, lagos, now).withEntry()
         partial.status shouldBe BondDayStatus.PARTIAL
         partial.entryCount shouldBe 1
 
@@ -49,7 +68,7 @@ internal class BondDayTest {
         // exist because the entry hangs off it, and J1 guarantees the creator
         // writes before the invitee joins. SUSPENDED is §8.1's own mechanism —
         // the close job leaves it alone and the streak walk skips it.
-        val day = BondDay.openSuspended(dayId, bondId, date, lagos, now)
+        val day = BondDay.openSuspended(dayId, bondId, window, lagos, now)
 
         day.status shouldBe BondDayStatus.SUSPENDED
         day.withEntry().status shouldBe BondDayStatus.SUSPENDED
@@ -58,7 +77,7 @@ internal class BondDayTest {
     @Test
     fun `an author always reads their own entry, and nobody reads a locked one`() {
         // BR-1's three clauses. In C1 only the first can be true.
-        val day = BondDay.open(dayId, bondId, date, lagos, now).withEntry()
+        val day = BondDay.open(dayId, bondId, window, lagos, now).withEntry()
         val mine = Entry.submit(EntryId(UUID.randomUUID()), day.id, bondId, ada, text, now, now)
 
         mine.canBeReadBy(ada, day) shouldBe true
@@ -78,7 +97,7 @@ internal class BondDayTest {
         // `toString` statically even boxed inside Entry's generated one — but
         // that holds only because no *other* field on Entry is personal data.
         // This is the tripwire for the day somebody adds one.
-        val day = BondDay.open(dayId, bondId, date, lagos, now).withEntry()
+        val day = BondDay.open(dayId, bondId, window, lagos, now).withEntry()
         val mine = Entry.submit(EntryId(UUID.randomUUID()), day.id, bondId, ada, text, now, now)
 
         "$mine" shouldNotContain "thank you for the coffee"

@@ -75,6 +75,8 @@ internal class EntityIdentityTest {
             date = LocalDate.of(2026, 9, 28),
             status = BondDayStatus.OPEN,
             anchorTimezone = "Africa/Lagos",
+            startsAt = Instant.parse("2026-09-27T23:00:00Z"),
+            endsAt = Instant.parse("2026-09-28T23:00:00Z"),
             entryCount = entryCount,
             revealedAt = null,
             closedAt = null,

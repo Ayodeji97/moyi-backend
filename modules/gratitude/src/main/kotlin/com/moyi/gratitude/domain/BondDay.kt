@@ -61,14 +61,17 @@ internal enum class BondDayStatus(
  * returning a new [BondDay], and the invariants this row carries are
  * `require`d in the constructor so an object that breaks one cannot exist.
  *
- * **[anchorTimezone] is copied onto the row, not read live off the bond.**
+ * **[startsAt]/[endsAt] are the day; [anchorTimezone] only remembers it.**
  * BR-6 and ADR-0030 require a zone change to never recompute an existing
- * day — [DayAssignment] already filed every day that came before a move
- * under whatever zone was current when it was filed, and reading the bond's
- * *current* zone from here would retroactively move all of them the moment
- * the anchor changes. [open] and [openSuspended] both stamp the zone they
- * were called with; nothing on this aggregate ever reads it back off the
- * bond.
+ * day, and spec §3.1 goes further: the span is resolved once, against the
+ * bond's effective-zone timeline, and *persisted*. A zone id alone cannot
+ * describe a day an anchor change clipped, merged (~48h westward, plan R3)
+ * or skipped (an empty span, eastward) — so [DayWindow]'s `[startsAt,
+ * endsAt)` is the authority on which instants belong here, and
+ * [anchorTimezone] is the snapshot of the zone in force when the day began,
+ * kept for display and audit. [open] and [openSuspended] both stamp exactly
+ * what they were called with; nothing on this aggregate ever reads either
+ * back off the bond.
  *
  * **This slice deliberately produces no reveal.** A day with two entries
  * stays [BondDayStatus.PARTIAL] — see [withEntry] — and the transition to
@@ -84,6 +87,10 @@ internal data class BondDay(
     val date: LocalDate,
     val status: BondDayStatus,
     val anchorTimezone: ZoneId,
+    /** The first instant of this day, inclusive — see the class KDoc. */
+    val startsAt: Instant,
+    /** The first instant after this day, exclusive. Equal to [startsAt] for a label an eastward change skipped. */
+    val endsAt: Instant,
     val entryCount: Int,
     val revealedAt: Instant?,
     val closedAt: Instant?,
@@ -96,6 +103,9 @@ internal data class BondDay(
         // own mirrors give: the database constraint cannot be bypassed, this
         // one can explain itself.
         require(entryCount in 0..MAX_ENTRIES) { "a bond-day holds at most $MAX_ENTRIES entries" }
+        // V12's bond_days_span_check. `!isAfter`, not `isBefore`: a skipped
+        // date's day is empty, and must still be representable (DayWindow).
+        require(!startsAt.isAfter(endsAt)) { "a bond-day's span may be empty but never inverted" }
     }
 
     /** [BondDayStatus.isClosed], on the aggregate for a caller who has already loaded the whole thing. */
@@ -172,16 +182,18 @@ internal data class BondDay(
         fun open(
             id: BondDayId,
             bondId: UUID,
-            date: LocalDate,
+            window: DayWindow,
             zone: ZoneId,
             now: Instant,
         ): BondDay =
             BondDay(
                 id = id,
                 bondId = bondId,
-                date = date,
+                date = window.date,
                 status = BondDayStatus.OPEN,
                 anchorTimezone = zone,
+                startsAt = window.startsAt,
+                endsAt = window.endsAt,
                 entryCount = 0,
                 revealedAt = null,
                 closedAt = null,
@@ -198,7 +210,7 @@ internal data class BondDay(
          * from the first write rather than becoming so later.
          *
          * [id], as [open]'s own doc explains, is the caller's to mint. The
-         * five-line body below duplicates [open]'s rather than sharing a
+         * body below duplicates [open]'s rather than sharing a
          * private helper: a shared six-parameter factory tripped detekt's
          * `LongParameterList` on a function that would have existed for no
          * reason but to avoid this duplication, which is the worse trade.
@@ -206,16 +218,18 @@ internal data class BondDay(
         fun openSuspended(
             id: BondDayId,
             bondId: UUID,
-            date: LocalDate,
+            window: DayWindow,
             zone: ZoneId,
             now: Instant,
         ): BondDay =
             BondDay(
                 id = id,
                 bondId = bondId,
-                date = date,
+                date = window.date,
                 status = BondDayStatus.SUSPENDED,
                 anchorTimezone = zone,
+                startsAt = window.startsAt,
+                endsAt = window.endsAt,
                 entryCount = 0,
                 revealedAt = null,
                 closedAt = null,

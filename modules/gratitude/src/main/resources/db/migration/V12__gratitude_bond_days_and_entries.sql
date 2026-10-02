@@ -7,26 +7,20 @@
 -- its dependency on the module.
 --
 -- Versions are one global sequence across modules: V1 is `app`'s extensions,
--- V2-V8 are identity's, V9 is bond's, V11 is common:web's idempotency table
--- (V10 is reserved elsewhere and simply is not on this worktree's classpath
--- yet — Flyway tolerates the gap). Forward-only (doc 07 §1) — a mistake here
--- is corrected by a later version, never by editing this file.
+-- V2-V8 are identity's, V9-V10 are bond's (V10 is `bond_proposals`, B5),
+-- V11 is common:web's idempotency table, this is V12, and V13 is bond's
+-- `bond_anchor_intervals`. Forward-only (doc 07 §1) once merged — this file
+-- is still unmerged on `feat/gratitude-day`, which is the one exception that
+-- lets the C1 rework edit it in place rather than stack a corrective version.
 --
--- **F11 (whole-branch review): this branch must never be applied to a
--- database that has already run a V10 from other, unmerged work.** V10 is a
--- gap on this worktree's own classpath, reserved but not present — Flyway
--- tolerates that. It does NOT tolerate a schema where a *different* V10 has
--- already run: `validate-on-migrate` (the default, and this project never
--- turns it off) fails at boot with "Detected applied migration not resolved
--- locally: 10" the moment this V12 — which that other V10's own author does
--- not know about — is added to the classpath. Whoever merges this branch and
--- whoever owns V10 elsewhere have to land in an order neither's own tests
--- can catch: this is a merge-sequencing fact to hand-carry, not something
--- `FlywayMigrationTest` (which only proves the versions actually on this
--- worktree's classpath are contiguous and ascending) can verify by itself.
+-- (An earlier header carried F11's merge-sequencing warning about a V10 that
+-- was reserved elsewhere but absent from this worktree's classpath. Both
+-- halves are discharged: V10 arrived with B5, and `main` was merged into this
+-- branch at `ed0e9f2`, so the versions this branch applies are the versions
+-- `main` has.)
 --
--- Three deltas from doc 07 §2's own DDL, each recorded in the Phase 3
--- design §12:
+-- Four deltas from doc 07 §2's own DDL, each recorded in the Phase 3
+-- design §12 or the C1 rework plan:
 --
 --   * `status` carries all EIGHT of doc 04 §3's values. Doc 07's own DDL
 --     lists five and is stale: it is missing PENDING_REVEAL (FR-062, the
@@ -34,8 +28,13 @@
 --     SUSPENDED (doc 04 §8.1-8.3a, a PENDING_MEMBER bond's own day) and
 --     FROZEN (BR-5, doc 04 §8.5, a streak-preserving freeze token).
 --   * `bond_days.anchor_timezone` is new. BR-6 and ADR-0030 require an
---     anchor change never to recompute an existing day; the row carries the
---     zone it was opened in so that is structural rather than remembered.
+--     anchor change never to recompute an existing day. It is a *snapshot*
+--     of the zone in force when the day began, kept for display and audit —
+--     it is NOT what decides which instants belong to the day.
+--   * `bond_days.starts_at`/`ends_at` are new (spec §3.1), and they are that
+--     authority: the UTC span the bond's anchor timeline gave this day when
+--     the row was opened. A zone id alone cannot express a day an anchor
+--     change merged (~48h westward, plan R3) or skipped (empty, eastward).
 --   * `entries.text`'s bound is an octet cap, not doc 07's `char_length(text)
 --     <= 4000`. FR-041 names that number as its own first draft's error:
 --     4,000 code points allows 8 per grapheme and one ZWJ family emoji is
@@ -55,10 +54,19 @@ CREATE TABLE bond_days (
     bond_id         uuid        NOT NULL,
     date            date        NOT NULL,
     status          text        NOT NULL,
-    -- The IANA zone id this day was opened under — never re-read from the
-    -- bond's current anchor. See the class delta above and BondDay's own
-    -- KDoc: BR-6/ADR-0030 forbid an anchor move from recomputing this row.
+    -- The IANA zone id in force when this day began — a snapshot, never
+    -- re-read from the bond's current anchor, and never the authority on
+    -- the day's span: `starts_at`/`ends_at` are. See the header and BondDay's
+    -- own KDoc: BR-6/ADR-0030 forbid an anchor move from recomputing this row.
     anchor_timezone text        NOT NULL,
+    -- The UTC span this day occupies, `[starts_at, ends_at)`, resolved
+    -- against the bond's effective-zone timeline when the row was opened.
+    -- A zone id alone cannot express a day that a mid-day anchor change
+    -- clipped, nor a calendar label an eastward change skipped entirely —
+    -- the latter is a day whose span is EMPTY (starts_at = ends_at), which
+    -- is why the CHECK below is `>=` and not `>`.
+    starts_at       timestamptz NOT NULL,
+    ends_at         timestamptz NOT NULL,
     entry_count     smallint    NOT NULL DEFAULT 0,
     revealed_at     timestamptz,
     closed_at       timestamptz,
@@ -73,7 +81,8 @@ CREATE TABLE bond_days (
         status IN ('OPEN', 'PARTIAL', 'PENDING_REVEAL', 'REVEALED', 'SOLO', 'EMPTY', 'SUSPENDED', 'FROZEN')
     ),
     CONSTRAINT bond_days_entry_count_check CHECK (entry_count BETWEEN 0 AND 2),
-    CONSTRAINT bond_days_timezone_length_check CHECK (char_length(anchor_timezone) BETWEEN 1 AND 64)
+    CONSTRAINT bond_days_timezone_length_check CHECK (char_length(anchor_timezone) BETWEEN 1 AND 64),
+    CONSTRAINT bond_days_span_check CHECK (ends_at >= starts_at)
 );
 
 -- The constraint the whole phase rests on: one row per bond per date. Also
