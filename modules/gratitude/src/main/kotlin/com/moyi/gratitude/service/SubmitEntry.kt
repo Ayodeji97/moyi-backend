@@ -345,7 +345,9 @@ internal class SubmitEntry(
      * instant instead — resolved through the same [calendar], never a computed
      * midnight. `null` when there is nowhere to redirect to: the entry was
      * never placed by its `intendedAt` (it is *on* the submission-time day
-     * already), the claim named that same day, or that day is settled too.
+     * already), or that day is settled too — which includes a claim that
+     * named the submission-time day itself: locking it again is harmless, and
+     * it is as settled the second time.
      * Not recursive, by construction: it resolves with no claim, and asks once.
      */
     private fun redirectOnce(
@@ -356,7 +358,6 @@ internal class SubmitEntry(
     ): Pair<DayAssignment.Resolution, BondDay>? {
         if (!claimed.usedIntendedAt) return null
         val fallback = DayAssignment.resolve(now, null, calendar) { false }
-        if (fallback.date == claimed.date) return null
         return (fallback to openAndLock(membership, fallback.bounds, now)).takeUnless { (_, day) -> day.isSettled }
     }
 
