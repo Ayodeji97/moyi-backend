@@ -321,7 +321,10 @@ internal class RevealGateTest(
 
     /** C2's reveal, by hand: the entry's own timestamp and status, nothing else. */
     private fun revealByHand(author: UUID) {
-        jdbc.update("UPDATE entries SET revealed_at = now(), status = 'REVEALED' WHERE author_member_id = ?::uuid", memberIdOf(author)) shouldBe 1
+        jdbc.update(
+            "UPDATE entries SET revealed_at = now(), status = 'REVEALED' WHERE author_member_id = ?::uuid",
+            memberIdOf(author),
+        ) shouldBe 1
     }
 
     /** C2's and C3's day transitions, by hand: the status, and `closed_at` exactly where that status is a closed one. */

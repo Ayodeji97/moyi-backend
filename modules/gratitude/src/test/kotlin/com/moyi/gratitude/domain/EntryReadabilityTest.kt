@@ -92,8 +92,16 @@ internal class EntryReadabilityTest {
         unrevealed.readBy(partner).text.shouldBeNull()
         unrevealed.readBy(stranger).text.shouldBeNull()
         // The row still holds its words; the reading does not hand them on.
-        unrevealed.copy(deletedAt = now).readBy(author).text.shouldBeNull()
-        revealed.copy(deletedAt = now).readBy(partner).text.shouldBeNull()
+        unrevealed
+            .copy(deletedAt = now)
+            .readBy(author)
+            .text
+            .shouldBeNull()
+        revealed
+            .copy(deletedAt = now)
+            .readBy(partner)
+            .text
+            .shouldBeNull()
     }
 
     @Test

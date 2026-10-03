@@ -177,7 +177,11 @@ internal class SubmitEntrySettledDayTest(
         // status alone (§6.4), so a check on the status would file the draft
         // on a closed day. No race needed: the day is settled before the
         // submission looks.
-        jdbc.update("UPDATE bond_days SET status = 'SUSPENDED', closed_at = now() WHERE bond_id = ?::uuid AND date = ?::date", bondId, YESTERDAY)
+        jdbc.update(
+            "UPDATE bond_days SET status = 'SUSPENDED', closed_at = now() WHERE bond_id = ?::uuid AND date = ?::date",
+            bondId,
+            YESTERDAY,
+        )
 
         val response = submit(ada, """{"text":"written on the flight","intendedAt":"$YESTERDAY_EVENING"}""")
 
@@ -206,27 +210,39 @@ internal class SubmitEntrySettledDayTest(
         dataSource.connection.use { connection ->
             connection.autoCommit = false
             try {
-                connection.prepareStatement("SELECT 1 FROM bond_days WHERE bond_id = ?::uuid AND date = ?::date FOR UPDATE").use {
-                    it.setString(1, bondId)
-                    it.setString(2, date)
-                    it.executeQuery().use { rows -> rows.next() shouldBe true }
-                }
+                lockDayRow(connection, date)
                 block(backendPidOf(connection)) { status ->
-                    connection
-                        .prepareStatement(
-                            "UPDATE bond_days SET status = ?, closed_at = now() WHERE bond_id = ?::uuid AND date = ?::date",
-                        ).use {
-                            it.setString(1, status)
-                            it.setString(2, bondId)
-                            it.setString(3, date)
-                            it.executeUpdate() shouldBe 1
-                        }
+                    closeDay(connection, date, status)
                     connection.commit()
                 }
             } finally {
                 connection.rollback()
                 connection.autoCommit = true
             }
+        }
+    }
+
+    private fun lockDayRow(
+        connection: Connection,
+        date: String,
+    ) {
+        connection.prepareStatement("SELECT 1 FROM bond_days WHERE bond_id = ?::uuid AND date = ?::date FOR UPDATE").use {
+            it.setString(1, bondId)
+            it.setString(2, date)
+            it.executeQuery().use { rows -> rows.next() shouldBe true }
+        }
+    }
+
+    private fun closeDay(
+        connection: Connection,
+        date: String,
+        status: String,
+    ) {
+        connection.prepareStatement("UPDATE bond_days SET status = ?, closed_at = now() WHERE bond_id = ?::uuid AND date = ?::date").use {
+            it.setString(1, status)
+            it.setString(2, bondId)
+            it.setString(3, date)
+            it.executeUpdate() shouldBe 1
         }
     }
 

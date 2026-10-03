@@ -21,7 +21,6 @@ internal class BondDayTest {
     private val lagos = ZoneId.of("Africa/Lagos")
     private val now = Instant.parse("2026-09-15T08:00:00Z")
     private val ada = UUID.randomUUID()
-    private val bea = UUID.randomUUID()
     private val text = EntryText.of("thank you for the coffee")
 
     @Test

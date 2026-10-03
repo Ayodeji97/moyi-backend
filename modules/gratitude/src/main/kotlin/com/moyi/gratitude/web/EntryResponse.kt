@@ -74,7 +74,7 @@ internal data class EntryResponse(
             date: LocalDate,
         ): EntryResponse? =
             when (reading.readability) {
-                Readability.FULL, Readability.TOMBSTONE ->
+                Readability.FULL, Readability.TOMBSTONE -> {
                     EntryResponse(
                         id = reading.id.value,
                         bondId = reading.bondId,
@@ -85,7 +85,11 @@ internal data class EntryResponse(
                         createdAt = reading.createdAt,
                         intendedAt = reading.intendedAt,
                     )
-                Readability.LOCKED, Readability.NOT_A_MEMBER -> null
+                }
+
+                Readability.LOCKED, Readability.NOT_A_MEMBER -> {
+                    null
+                }
             }
     }
 }
