@@ -134,7 +134,12 @@ class IdempotentOutcome<out T : Any> internal constructor(
  * Why no unique-violation catch: a failed `INSERT` aborts a Postgres
  * transaction, so inside one the old insert-and-catch reservation cannot
  * recover. The advisory lock makes lookup-then-insert safe instead — every
- * writer of a key's row holds it.
+ * writer of a key's row holds it. That relies on the caller's transaction
+ * being `READ COMMITTED` (Postgres's and this application's default), so the
+ * lookup, a statement of its own, sees a row the previous holder committed
+ * just before releasing the lock; under a snapshot fixed earlier it could
+ * miss it, and the insert would then fail at `idempotency_keys_unique` — a
+ * `500`, never a second execution.
  *
  * A plain class, wired by [IdempotencyConfiguration] — see that class for
  * why nothing in this package is `@Component`.
