@@ -12,6 +12,11 @@ dependencies {
     // Phase 2: bonds, members, invites and blocks (ADR-0026). Here for the
     // same reason identity is — beans, entities and V9 on the classpath.
     implementation(projects.modules.bond)
+    // Phase 3 slice C1: bond-days and entries. Task 7 is this module's
+    // first controller (`POST /bonds/{bondId}/entries`), so this is the
+    // same moment `bond` was added above, in its own slice B1 — beans,
+    // entities and V12 on the classpath.
+    implementation(projects.modules.gratitude)
     // The email port and its Resend adapter. Wired here so the composition
     // root sees the EmailSender bean; identity depends on the module for the
     // `api` package only.

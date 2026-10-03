@@ -1,0 +1,44 @@
+spring:
+  datasource:
+    hikari:
+      # A test context needs two or three connections, not the default ten.
+      # Spring caches one context per distinct configuration and every one of
+      # them holds a pool for the whole run, so the default multiplied by the
+      # number of contexts in this JVM exhausts the Testcontainers Postgres
+      # ("FATAL: sorry, too many clients already") — which is what adding one
+      # more test class did, with nothing wrong in the code it tested. Same
+      # note as `modules/bond`'s own test `application.yml`.
+      maximum-pool-size: 4
+  data:
+    redis:
+      # No @RedisHash entities; scanning for them costs a startup.
+      repositories:
+        enabled: false
+  jpa:
+    hibernate:
+      # The guard that makes the entities and V12 one thing rather than two:
+      # Hibernate checks every mapped column against the schema Flyway just
+      # built and refuses to start on a mismatch. Without it, a renamed
+      # column is discovered by the first query that needs it.
+      ddl-auto: validate
+    open-in-view: false
+
+moyi:
+  bond:
+    invite:
+      # Task 7: this context now scans `com.moyi.bond` too (real `bond`
+      # endpoints, for `EntriesEndpointTest`/`GratitudeCrossTenantTest` to
+      # drive), which pulls in `InviteProperties` — required, no default,
+      # same value `modules/bond`'s own test `application.yml` uses.
+      link-base-url: https://moyi.test/i
+  security:
+    jwt:
+      # A fresh RSA pair per test context; the default source refuses to
+      # start without configured PEMs (ADR-0019).
+      key-source: ephemeral
+    hashing:
+      secret-source: ephemeral
+    rate-limit:
+      # Off for this shared context — this module's tests are about
+      # bond-days and entries, not the limiter.
+      enabled: false

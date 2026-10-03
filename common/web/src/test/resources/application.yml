@@ -1,0 +1,12 @@
+spring:
+  datasource:
+    hikari:
+      # This module has one test context needing Postgres; a small pool is
+      # enough and keeps this consistent with every other module's test
+      # application.yml (see modules/bond's, which explains why).
+      maximum-pool-size: 4
+      # Every lock wait in this module's tests is bounded: a test that ends
+      # up queued on a row or index lock it did not expect fails with a
+      # lock-timeout error instead of hanging the run. Longer than any wait a
+      # test here stages on purpose (those are 10s at most).
+      connection-init-sql: SET lock_timeout = '15s'

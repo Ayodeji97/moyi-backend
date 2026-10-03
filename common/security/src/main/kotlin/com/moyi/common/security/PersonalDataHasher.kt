@@ -24,9 +24,15 @@ import javax.crypto.spec.SecretKeySpec
 class PersonalDataHasher private constructor(
     private val key: SecretKeySpec,
 ) {
-    fun hash(value: String): String {
+    fun hash(value: String): String = hash(value.toByteArray(Charsets.UTF_8))
+
+    /**
+     * The same MAC over raw bytes — for a value that is not text, or must not
+     * be decoded as text on the way in (a request body: [HmacRequestFingerprint]).
+     */
+    fun hash(value: ByteArray): String {
         val mac = Mac.getInstance(ALGORITHM).apply { init(key) }
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(value.toByteArray(Charsets.UTF_8)))
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(value))
     }
 
     companion object {
@@ -57,8 +63,9 @@ class PersonalDataHasher private constructor(
             val bytes = ByteArray(HashingProperties.MIN_SECRET_LENGTH).also(SecureRandom()::nextBytes)
             log.warn(
                 "The personal-data hashing secret is EPHEMERAL: generated at startup, so address and user-agent " +
-                    "hashes written by this process cannot be matched by the next one. Correct for local development; " +
-                    "wrong anywhere else.",
+                    "hashes written by this process cannot be matched by the next one, and a retry under an " +
+                    "Idempotency-Key recorded before a restart is refused as reused (its request fingerprint is keyed " +
+                    "by this secret). Correct for local development; wrong anywhere else.",
             )
             return PersonalDataHasher(SecretKeySpec(bytes, ALGORITHM))
         }

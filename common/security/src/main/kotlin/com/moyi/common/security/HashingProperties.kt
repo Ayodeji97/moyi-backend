@@ -15,6 +15,13 @@ import org.springframework.validation.annotation.Validated
  * matched by the next, and rate-limit buckets restart empty — but it is
  * still a silent loss of an audit property that a deploy should not be able
  * to cause by forgetting a variable.
+ *
+ * **The same secret also keys `idempotency_keys.request_hash`** (ADR-0031
+ * decision 8, ruling P8; `HmacRequestFingerprint`). So a retry under an
+ * `Idempotency-Key` matches its first attempt only while the secret is
+ * unchanged: across a restart on an ephemeral secret, or after a rotation,
+ * a retry of a request already recorded is `422 IDEMPOTENCY_KEY_REUSED` for
+ * up to the key's 24 hours. A rotation plan has to count that.
  */
 @Validated
 @ConfigurationProperties(prefix = "moyi.security.hashing")

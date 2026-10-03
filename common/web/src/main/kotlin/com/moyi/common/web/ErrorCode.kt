@@ -18,10 +18,16 @@ package com.moyi.common.web
  * client handling a case the server never produces.
  */
 enum class ErrorCode {
-    /** The body could not be parsed at all — not JSON, or not the right shape. */
+    /**
+     * The body could not be taken in at all — not JSON, not the right shape,
+     * or (`413`) longer than an `@Idempotent` route will buffer.
+     */
     MALFORMED_REQUEST,
 
-    /** The body parsed but a field is not acceptable. Always accompanied by `errors`. */
+    /**
+     * The request parsed but a field — or a required header, `Idempotency-Key`
+     * — is not acceptable. Always accompanied by `errors`.
+     */
     VALIDATION_FAILED,
 
     /**
@@ -185,6 +191,56 @@ enum class ErrorCode {
      * names the date it becomes allowed.
      */
     TIMEZONE_CHANGE_TOO_SOON,
+
+    /**
+     * `Idempotency-Key` (doc 06 §1) was reused for a different request: the
+     * method, the concrete path (the raw request URI) or the keyed
+     * fingerprint of the body differs from what the key first recorded.
+     * 422: the caller picked a key that means one specific request, and this
+     * one is not it — the fix is a fresh key, not a retry.
+     */
+    IDEMPOTENCY_KEY_REUSED,
+
+    /**
+     * A second request carrying an `Idempotency-Key` (doc 06 §1) while the
+     * first is still running. 409, not the 422 [IDEMPOTENCY_KEY_REUSED] gets:
+     * nothing here is invalid, the caller's own first attempt just has not
+     * returned yet — the fix is to wait, not to change the request.
+     *
+     * "Still running" is the key's advisory lock being held, tried and not
+     * waited for (spec §5.4, ADR-0031 decision 8) — not a half-written row:
+     * a reservation and its result commit together, so no other transaction
+     * ever sees one without the other. Spec §5.3's list omitted this code;
+     * it is amended. A separate code because reusing
+     * [IDEMPOTENCY_KEY_REUSED] for a fact about *timing* would make one code
+     * answer two questions a client needs to tell apart.
+     */
+    IDEMPOTENCY_KEY_IN_FLIGHT,
+
+    /**
+     * `POST /bonds/{bondId}/entries` by a member who already wrote today's
+     * entry (BR-2). 409: enforced by `entries_one_per_member_per_day`
+     * (V12) and raised from that constraint being violated, never from a
+     * read-before-write check — a caller races the index, not this code.
+     */
+    ENTRY_ALREADY_EXISTS,
+
+    /**
+     * `POST /bonds/{bondId}/entries` for a day that has already closed
+     * (BR-10). 409: the day this entry would have landed on is no longer
+     * open to writes — a fact about the day's own state, the same shape of
+     * refusal [BOND_ARCHIVED] is for the bond's.
+     */
+    DAY_CLOSED,
+
+    /**
+     * `POST /bonds/{bondId}/entries` naming `imageMediaId` or
+     * `voiceMediaId` (spec §1): refused outright rather than stored and
+     * silently ignored, because Phase 4 has not built anywhere for either
+     * to go yet. 422 — the request is well-formed, the media reference is
+     * simply not one this deployment can honour today.
+     */
+    MEDIA_NOT_YET_SUPPORTED,
 
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,

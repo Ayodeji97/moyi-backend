@@ -106,6 +106,16 @@ class ArchitectureTest {
          */
         private const val BOND_ACCESS_GUARD = "BondAccessGuard"
 
+        /**
+         * `Reader(` as a call, not its own `class Reader(` declaration. The
+         * type is a plain class, not a `data class`, so there is no generated
+         * `copy` for this text match to miss (`EntryReadabilityTest` pins that).
+         */
+        private val READER_CONSTRUCTION = Regex("""(?<!class )\bReader\(""")
+
+        /** The file `BondMembership.asReader()` lives in (`gratitude.service`). */
+        private const val READER_FACTORY_FILE = "BondCalendars"
+
         private data class Location(
             val module: String,
             val layer: String,
@@ -339,6 +349,27 @@ class ArchitectureTest {
             violations.isEmpty(),
             "Constructor injection only (doc 18 §4) — @Autowired field found on: " +
                 violations.joinToString { it.name },
+        )
+    }
+
+    @Test
+    fun `a gratitude Reader is only ever constructed by asReader, from a resolved BondMembership`() {
+        // BR-1's first clause is "membership first", and the gate checks it
+        // against the Reader it is handed. A Reader built from two ids a
+        // request supplied would make that clause a check against nothing.
+        // `gratitude.domain` cannot see `bond.api`, so the type cannot
+        // restrict its own construction; this pins the one site instead.
+        // Text-matched, as the Membership rule below is and for its reason.
+        val violations =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/modules/gratitude/src/main/") }
+                .filter { it.name != READER_FACTORY_FILE && READER_CONSTRUCTION.containsMatchIn(it.text) }
+                .map { it.name }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Only `BondMembership.asReader()` ($READER_FACTORY_FILE) may construct a gratitude Reader: it is the " +
+                "evidence that the member id and the bond id came from one checked membership. Found in: $violations",
         )
     }
 

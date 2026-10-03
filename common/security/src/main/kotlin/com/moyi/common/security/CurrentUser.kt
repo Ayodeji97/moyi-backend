@@ -77,7 +77,32 @@ class SecurityWebMvcConfigurer(
         resolvers.add(clientContext)
     }
 
+    /**
+     * Fix round 1, I4: an explicit order, not the registration order two
+     * unrelated `WebMvcConfigurer` beans across two modules happen to run
+     * in. [RateLimitInterceptor] must run before `common.web.idempotency.IdempotencyInterceptor`:
+     * a caller with no tokens left must never have its body buffered and
+     * fingerprinted for a request that was never going to run. (This note
+     * once gave a second reason — a reservation made before the limiter
+     * refused could be stored and replayed. That cannot happen any more:
+     * since the C1 rework the interceptor writes nothing, and the key is
+     * reserved inside the handler's own transaction, ADR-0031 decision 8.)
+     *
+     * `common.web.idempotency.IdempotencyConfiguration.ORDER` is a fixed,
+     * generously late value (`1000`), not an offset from [RATE_LIMIT_ORDER]
+     * — `common:web` cannot import this class (`common:security` depends on
+     * `common:web`, not the other way round; see `IdempotencyInterceptor.callerId`'s
+     * own KDoc for the same reason), so that file states its own reasoning
+     * rather than referencing this constant. [RATE_LIMIT_ORDER] only needs
+     * to stay well below `1000` for the two to agree; it is not read by
+     * that other module.
+     */
     override fun addInterceptors(registry: InterceptorRegistry) {
-        registry.addInterceptor(rateLimits)
+        registry.addInterceptor(rateLimits).order(RATE_LIMIT_ORDER)
+    }
+
+    companion object {
+        /** See [addInterceptors]'s own KDoc for why every `@Idempotent`-registering site must use a later order than this. */
+        const val RATE_LIMIT_ORDER = 0
     }
 }
