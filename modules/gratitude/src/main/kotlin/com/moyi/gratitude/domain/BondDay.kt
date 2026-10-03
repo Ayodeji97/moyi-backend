@@ -72,7 +72,7 @@ internal enum class BondDayStatus(
  * make an unsettled day run on to its successor's start (plan R3), and
  * [extendedTo] moves [endsAt] later to match (ruling P10). [startsAt] and
  * [anchorTimezone] never change, and a settled day's span never does. A zone id alone cannot
- * describe a day an anchor change clipped, merged (~48h westward, plan R3)
+ * describe a day an anchor change clipped, merged (westward, plan R3: its length depends on the zone pair)
  * or skipped (an empty span, eastward) — so [DayWindow]'s `[startsAt,
  * endsAt)` is the authority on which instants belong here, and
  * [anchorTimezone] is the snapshot of the zone in force when the day began,
@@ -186,7 +186,7 @@ internal data class BondDay(
      *
      * A westward anchor change agreed after this day's row was opened merges
      * the day into its successor's start (plan R3): the label is kept and the
-     * day runs on, up to ~49 hours. The row was written with the span the
+     * day runs on: 25 hours for a one-hour move, 49 for Kiritimati to Pago Pago. The row was written with the span the
      * calendar gave *then*; [window] is what the calendar gives *now*. Without
      * this, an entry could be filed on a row whose stored span does not
      * contain it, and the stored days would leave a hole before the next one

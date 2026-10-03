@@ -8,8 +8,8 @@ import java.time.LocalDate
  * and the UTC span `[startsAt, endsAt)` that belongs to it (spec §3.1).
  *
  * **Not always midnight to midnight, and not always non-empty.** A westward
- * anchor change merges two calendar dates into one day of up to ~48 hours
- * (plan R3); an eastward change can skip a label entirely, and that label's
+ * anchor change merges two calendar dates into one long day (plan R3: 25
+ * hours for a one-hour move, 49 for Kiritimati to Pago Pago); an eastward change can skip a label entirely, and that label's
  * day is the empty span `startsAt == endsAt` (doc 04 §8.5). That is why the
  * invariant below is `!startsAt.isAfter(endsAt)` and not `startsAt < endsAt`
  * — the stricter one would refuse the first skipped date it ever met. V12's

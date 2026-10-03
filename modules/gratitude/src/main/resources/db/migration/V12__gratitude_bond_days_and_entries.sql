@@ -35,7 +35,8 @@
 --     authority: the UTC span the bond's anchor timeline gives this day —
 --     `starts_at` fixed when the row was opened, `ends_at` extendable while
 --     the day is unsettled (see the column comment). A zone id alone cannot express a day an anchor
---     change merged (~48h westward, plan R3) or skipped (empty, eastward).
+--     change merged (westward, plan R3: 25h for a one-hour move, 49h for
+--     Kiritimati to Pago_Pago) or skipped (empty, eastward).
 --   * `entries.text`'s bound is an octet cap, not doc 07's `char_length(text)
 --     <= 4000`. FR-041 names that number as its own first draft's error:
 --     4,000 code points allows 8 per grapheme and one ZWJ family emoji is

@@ -18,12 +18,16 @@
 #
 # If the application refuses to start on a Flyway checksum mismatch: V11, V12
 # and V13 were edited in place while unmerged (ADR-0031), so a database that
-# applied an earlier copy of them no longer matches. The repair is deliberate
-# and is the human's to run, never this script's:
-#   docker compose exec -T postgres psql -U moyi -d moyi \
-#     -c "UPDATE flyway_schema_history SET checksum = NULL WHERE version IN ('11','12','13');"
-# That only stops Flyway refusing. It re-runs nothing, so tables created by an
-# earlier copy of those migrations keep their earlier columns.
+# applied an earlier copy of them no longer matches. Resetting the checksums
+# is NOT the repair: it only stops Flyway refusing and re-runs nothing, and V11
+# and V12 changed table shape, so the app would then fail on missing columns.
+# The repair is for the DEV database only, is the human's to run, never this
+# script's, and has not been executed by anyone yet (untested):
+#   DROP TABLE IF EXISTS entries, bond_days, idempotency_keys, bond_anchor_intervals CASCADE;
+#   DELETE FROM flyway_schema_history WHERE version IN ('11','12','13');
+# then start the application so Flyway re-applies V11-V13 (V13 backfills the
+# timeline for existing bonds). It destroys that database's entries, days and
+# idempotency keys; users, bonds and invites are untouched.
 #
 # What it does not prove: anything the unit and integration tests already
 # prove. This is the "run it, do not read it" check (docs/learning-log.md,
@@ -818,7 +822,16 @@ expect "GET /bonds/{id} reports the new zone at once" 200 "\"anchorTimezone\":\"
 # …and decides nothing yet: today is still the old zone's day, for a read and
 # for a write, on a day that had no row when the change was confirmed. That
 # last part is what a zone string copied at row creation could not do.
-expect "today is still the Lagos date, before anyone has written" 200 "\"bondDay\":{\"date\":\"$LAGOS_DATE\"" -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $MOVER_ACCESS"
+expect "today is 200 before anyone has written" 200 '"bondDay"' -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $MOVER_ACCESS"
+HANDOFF_TODAY_BODY="$LAST_BODY"
+# Re-planned after the read, for the reason given below the write: the date
+# is only asserted if Lagos midnight did not pass between the plan and the GET.
+read -r _ LAGOS_DATE_AT_READ _ <<<"$(zone_plan)"
+if [ "$LAGOS_DATE_AT_READ" != "$LAGOS_DATE" ]; then
+  echo "  skip the pre-write date check (Lagos midnight passed mid-section)"
+else
+  [[ "$HANDOFF_TODAY_BODY" == *"\"bondDay\":{\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it is still the Lagos date, $LAGOS_DATE" || fail "today's date" "expected bondDay.date $LAGOS_DATE: ${HANDOFF_TODAY_BODY:0:250}"
+fi
 expect "an entry written straight after the change is 201" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$HANDOFF_BOND/entries" -H "Authorization: Bearer $MOVER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"written the minute we agreed to move"}'
 HANDOFF_ENTRY_BODY="$LAST_BODY"
 # Re-planned after the write: if Lagos midnight passed between the plan and the

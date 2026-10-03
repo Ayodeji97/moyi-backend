@@ -17,7 +17,7 @@ import java.time.LocalDate
  * the fallback every path below either returns or falls back to.
  *
  * **The calendar's day is taken whole, never recomputed.** [Resolution.bounds]
- * is exactly the [DayWindow] the calendar returned — the ~48-hour day a
+ * is exactly the [DayWindow] the calendar returned — the 49-hour day a
  * westward anchor change merges (plan R3), the 11-hour one an eastward change
  * clips, the empty one it skips. Nothing here takes a midnight in some zone;
  * a `ZoneId` alone cannot express any of those days, which is why this takes

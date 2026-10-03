@@ -129,9 +129,10 @@ back in a walk that is built to skip it.
 of `SUSPENDED`, and that is an explicit obligation this ADR hands to whichever slice adds the
 reveal, not a gap this decision leaves unnoticed.** Walk it through: Ada creates a bond and
 writes on day D — the row opens `SUSPENDED`. Bea accepts the invite at 14:00 the same day and
-writes too; `GetToday` still reports `SUSPENDED` to her (`membership.awaitingSecondMember`
-governs that response, and it is still true the instant before her own write completes), and
-her write runs `withEntry()` against the same row a second time, which — correctly, per the
+writes too; `GetToday` still reports `SUSPENDED` to her, because the row exists and its stored
+status is what `GetToday` returns. `membership.awaitingSecondMember` is already false by then
+(the bond became `ACTIVE` when she accepted) and is only consulted for a day that has no row.
+Her write runs `withEntry()` against the same row a second time, which — correctly, per the
 decision above — keeps it `SUSPENDED` rather than promoting it to `PARTIAL`. The day now carries
 `entry_count = 2` and `status = SUSPENDED`, both members' words present, and the bond itself no
 longer awaiting anyone. Nothing in this branch, or in the state machine C2's reveal will read,
@@ -186,8 +187,8 @@ for Phase 5. Both are gone.
 - **`IdempotentExecution.once(request) { … }` runs inside the caller's transaction** and refuses
   to run without one. In order: a transaction-scoped **nonblocking** advisory lock on
   `(user_id, key)` (`pg_try_advisory_xact_lock`, namespace 3, so it cannot collide with `bond`'s
-  own per-user advisory lock in namespace 2), where `false` is `409 IDEMPOTENCY_KEY_IN_FLIGHT` at once;
-  the lookup; then the reservation insert, the caller's block, and the completion. They commit
+  own per-user advisory lock in namespace 2), where `false` is
+  `409 IDEMPOTENCY_KEY_IN_FLIGHT` at once; the lookup; then the reservation insert, the caller's block, and the completion. They commit
   or roll back as one. The three-transaction shape could crash between the first and the third
   and leave a committed reservation with no result (a `409` for 24 hours, for a request that
   never happened), or between the second and third and leave a committed entry under a key that
@@ -204,8 +205,9 @@ for Phase 5. Both are gone.
   `wasReplayed`, and the stored `etag`/`location`. The plan named two incompatible return
   shapes; this is the ruling, with three deviations accepted in review: `ResultKind` is an enum
   rather than a string, the outcome carries the two headers, and `once` takes an
-  `IdempotentRequest` that only the interceptor can construct. The block must return an
-  `IdempotentResult`, whose `resultId` and `kind` are required, so an idempotent endpoint that
+  `IdempotentRequest`. Its constructor is `internal` to `common:web`, so a handler in another
+  module cannot build one; inside `common:web` the interceptor is the only code that does.
+  The block must return an `IdempotentResult`, whose `resultId` and `kind` are required, so an idempotent endpoint that
   forgets to name what it produced does not compile. The controller sets
   `Idempotency-Replayed: true` from `wasReplayed`.
 - **On a replay `value` is null and the caller re-reads the result. A replay is authorised as a
@@ -446,8 +448,12 @@ on return, which looks like working and protects nothing.
 
 **18. The close job takes no bond lock, so `bond_days`'s unique index stays load-bearing (R1,
 ruled by Daniel).** C3's sweep handles many bonds per run and would serialise behind each bond's
-row. That makes it the one case spec §2.1's "bond, then bond-day, then entry … on closing" does
-not describe: the closer starts at the bond-day. The consequence lands in C1. With every
+row. **This contradicts spec §2.1 as written.** §2.1 says the lock order is "bond, then
+bond-day, then entry on submission, editing, closing and lifecycle reconciliation", and
+`BondAccess.lockMembershipOf`'s KDoc repeats that sentence. Under R1 the closer starts at the
+bond-day and never holds the bond. R1 is the later ruling and it stands; the spec sentence and
+the KDoc are both to be amended when C3 is planned (Owed), and neither is edited here. The
+consequence lands in C1. With every
 submitter queued on the bond lock, two first entries no longer race for the day's row, and the
 test named for that race passed with the day lock deleted. A live submission and the sweep can
 still collide, so that is the race now tested: a lock-free opener holds a new day's row
@@ -534,7 +540,7 @@ step was the mutation that showed it.
   timeline, one extra query on every `GET /today` and `POST /entries`. It is not an N+1 today;
   it becomes one if a list endpoint ever calls it per bond.
 - **A zone change costs the couple something, and which thing depends on the direction.**
-  Westward: one day up to 49 hours long, and so one fewer chance to write. Eastward: a calendar
+  Westward: one long day (49 hours at the date line), and so one fewer chance to write. Eastward: a calendar
   label that never happens, which has no row until C3 writes it.
 - **A stored `ends_at` can be stale.** A row opened before a westward change and never written
   to again keeps its shorter span (decision 13). An extending write issues two `UPDATE`s and
@@ -548,8 +554,10 @@ step was the mutation that showed it.
   `Idempotency-Replayed` is a declared response header. None of it is breaking against `main`
   beyond the error codes above, because none of C1 has merged.
 - **V11 and V12 were edited in place, more than once, and V13 is new.** Any database that
-  applied an earlier shape of them refuses to start on a checksum mismatch. The shared
-  development database is one, for versions 11, 12 and 13, and its repair is the human's.
+  applied an earlier copy of them refuses to start on a checksum mismatch, and resetting the
+  checksums does not fix it: the tables themselves have the earlier shape. The shared
+  development database is one such. Its repair drops and re-applies the three migrations, is
+  the human's to run, and is under Owed.
 - **`GET /bonds/{bondId}/today` reports `OPEN` for an archived bond's no-row day** (whole-branch
   review; `GetToday.today`'s own no-row branch derives the reported status from
   `membership.awaitingSecondMember` alone — never from whether the bond itself has ended). Ruled a
@@ -572,10 +580,11 @@ step was the mutation that showed it.
   `INSERT ... ON CONFLICT DO NOTHING`, so a `toEntity` would be dead code nothing calls —
   the two aggregates are persisted differently because they are written differently, not by
   oversight.
-- **Recomputing a Bond-day's `anchorTimezone` from the bond's current row on every read**,
-  rather than storing a copy. Rejected: a day already opened must never be silently redated by a
-  later timezone change (decision 3) — the copy is what makes "the zone this day opened under"
-  a fact the row itself carries, rather than a join that can answer differently tomorrow.
+- **Reading a Bond-day's zone from the bond's current row on every read**, rather than storing
+  anything on the day. Rejected: the bond's row holds the zone it *requests*, which can change
+  tomorrow, so the answer to "which zone did this day begin under" would change with it. The
+  stored copy keeps that fact on the row, for display and audit. It is not what stops a day
+  being redated: the persisted `starts_at`/`ends_at` are (decision 3).
 - **The copied zone string alone, as the whole deferral mechanism.** Built, defended by the
   first version of decision 3, and replaced: it cannot defer a change on a day that has no row.
 - **Reading `bond_days` from `bond` to learn which labels are used.** Rejected (P6): a
@@ -614,10 +623,11 @@ step was the mutation that showed it.
   headers any endpoint in this codebase sets that a client cannot rebuild from the body, so
   there is nothing generic to gain and a fixed pair reads back without a parser.
 - **Hard-coding `partnerEntry` to always serialise as `LockedEntryResponse`**, since C1 can
-  never produce anything else. Rejected (decision 10): it would leave C2's reveal and C3's
-  `SOLO` to discover, on their own, that this response type never actually reveals anything —
-  asking `Entry.canBeReadBy` the real question now is what lets `RevealGateTest`'s own mutation
-  proof mean something.
+  never produce anything else. Rejected (decision 10): C2's reveal and C3's solo-day unlock
+  both work by setting `revealed_at`, and each would have had to discover that the response
+  ignores it. Asking `Entry.canBeReadBy` the real question now means setting the timestamp is
+  all either slice has to do, and it is what lets `RevealGateTest`'s mutation proof mean
+  something.
 
 ## Owed
 
@@ -655,6 +665,9 @@ on. None of them is built here.
 
 - **Take no bond lock** (decision 18), and therefore treat the unique `(bond_id, date)` index
   and the day's row lock as the only things between the sweep and a live submission.
+- **Amend spec §2.1's lock-order sentence and `BondAccess.lockMembershipOf`'s KDoc when C3 is
+  planned.** Both say the order is bond, then bond-day, then entry "on … closing". R1
+  contradicts that (decision 18), and neither text was changed in C1.
 - **Take every day's window from the timeline, never from a zone's natural midnight.** A row
   opened with a `starts_at` the timeline disagrees with makes every later `POST /entries` for
   that day a `500` (`BondDay.extendedTo`'s `require`; the same note is on its KDoc). The first
@@ -688,12 +701,19 @@ on. None of them is built here.
   migration for the `CHECK`, together.
 - **`GET /today` reports `OPEN` for an archived bond's no-row day**, and has no `partner` field
   (both under Consequences).
-- **The shared development database.** It holds stale Flyway checksums for versions 11, 12 and
-  13. The repair is the human's to run:
-  `UPDATE flyway_schema_history SET checksum = NULL WHERE version IN ('11','12','13');`
-  A checksum reset stops Flyway refusing to start; it does not re-run a migration, so a
-  database that applied an earlier shape of those tables keeps that shape. `scripts/smoke.sh`'s
-  deferred-handoff section was written against the code and has not been run.
+- **The shared development database must be repaired by the human, and a checksum reset is not
+  the repair.** It applied earlier copies of V11, V12 and V13. Setting their checksums to `NULL`
+  only stops Flyway refusing to start; it re-runs nothing. V11 and V12 changed table *shape* in
+  place (the response body column went and `result_id`/`result_kind` arrived; `bond_days` gained
+  `starts_at`/`ends_at`), so the application would start and then fail on columns that are not
+  there. The procedure, for the development database only:
+  `DROP TABLE IF EXISTS entries, bond_days, idempotency_keys, bond_anchor_intervals CASCADE;`
+  `DELETE FROM flyway_schema_history WHERE version IN ('11','12','13');`
+  then start the application so Flyway re-applies V11 to V13 (V13 backfills the timeline for
+  the bonds that exist). It destroys that database's entries, days and idempotency keys; users,
+  bonds and invites are untouched. **Nobody has executed it yet, so it is untested.**
+  `scripts/smoke.sh`'s deferred-handoff section was written against the code and has not been
+  run either.
 
 ## Revisit when
 
