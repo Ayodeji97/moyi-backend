@@ -15,7 +15,6 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.maps.shouldContainKey
-import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
@@ -294,39 +293,62 @@ class OpenApiContractTest(
     }
 
     @Test
-    fun `partnerEntry is one of three branches a generated client can tell apart by shape`() {
+    fun `partnerEntry is one of three branches, discriminated on status with no value naming two`() {
         // springdoc resolves the sealed interface to a `oneOf` of its
-        // branches. There is deliberately NO discriminator: `"DELETED"` is
-        // both EntryResponse's tombstone and ErasedEntryResponse's only
-        // value (a partner's entry erased before it was ever revealed, which
-        // BR-8 keeps to author-and-status), and a discriminator maps a value
-        // to exactly one schema. So the shapes themselves must be decidable
-        // from the document: only EntryResponse has (and requires) an `id`,
-        // and the two narrow branches' `status` enums are disjoint.
+        // branches; OpenApiConfiguration adds the `discriminator`, which is
+        // what a generated client builds its sealed types from (doc 06 §2).
+        // A discriminator maps a value to exactly one schema, so the three
+        // branches' `status` enums must be disjoint — which is why a
+        // partner's never-revealed erased entry says `REMOVED`, not the wide
+        // tombstone's `DELETED`.
         val today = api.components.schemas["TodayResponse"]!!
         val partnerEntry = today.properties["partnerEntry"]!!
+        val branches = listOf("EntryResponse", "LockedEntryResponse", "ErasedEntryResponse")
 
-        partnerEntry.oneOf.map { it.`$ref` } shouldContainExactlyInAnyOrder
-            listOf(
-                "#/components/schemas/EntryResponse",
-                "#/components/schemas/LockedEntryResponse",
-                "#/components/schemas/ErasedEntryResponse",
+        partnerEntry.oneOf.map { it.`$ref` } shouldContainExactlyInAnyOrder branches.map { "#/components/schemas/$it" }
+        partnerEntry.discriminator.shouldNotBeNull()
+        partnerEntry.discriminator.propertyName shouldBe "status"
+        partnerEntry.discriminator.mapping shouldBe
+            mapOf(
+                "SUBMITTED" to "#/components/schemas/EntryResponse",
+                "REVEALED" to "#/components/schemas/EntryResponse",
+                "DELETED" to "#/components/schemas/EntryResponse",
+                "LOCKED" to "#/components/schemas/LockedEntryResponse",
+                "REMOVED" to "#/components/schemas/ErasedEntryResponse",
             )
-        partnerEntry.discriminator.shouldBeNull()
 
-        val narrow =
-            listOf("LockedEntryResponse" to "LOCKED", "ErasedEntryResponse" to "DELETED").map { (name, status) ->
+        // The mapping is the document's claim; each branch's own `status`
+        // enum is what the server can actually send. Every value a branch
+        // can send maps to that branch, so no value names two schemas and
+        // none is left to the OpenAPI default.
+        val statusesByBranch =
+            branches.associateWith { name ->
                 val fields =
                     api.components.schemas[name]!!
                         .allOf
                         .last()
-                // BR-8: the type has nowhere to put anything else.
-                fields.properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-                fields.required shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-                fields.properties["status"]!!.enum shouldBe listOf(status)
-                fields
+                fields.required shouldContain "status"
+                fields.properties["status"]!!.enum.map { it.toString() }
             }
-        narrow.forEach { it.properties.keys shouldNotContain "id" }
+        statusesByBranch.values.flatten().let { all -> all.toSet().size shouldBe all.size }
+        statusesByBranch.forEach { (branch, statuses) ->
+            statuses.forEach { partnerEntry.discriminator.mapping[it] shouldBe "#/components/schemas/$branch" }
+        }
+        statusesByBranch.values.flatten().toSet() shouldBe partnerEntry.discriminator.mapping.keys
+    }
+
+    @Test
+    fun `the two narrow partnerEntry branches carry an author and a status, both required, and nothing else`() {
+        // BR-8: the type has nowhere to put anything else.
+        listOf("LockedEntryResponse" to "LOCKED", "ErasedEntryResponse" to "REMOVED").forEach { (name, status) ->
+            val fields =
+                api.components.schemas[name]!!
+                    .allOf
+                    .last()
+            fields.properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+            fields.required shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+            fields.properties["status"]!!.enum shouldBe listOf(status)
+        }
     }
 
     @Test

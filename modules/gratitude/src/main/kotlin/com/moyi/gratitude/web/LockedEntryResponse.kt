@@ -55,10 +55,19 @@ internal enum class LockedEntryStatus {
  */
 internal data class ErasedEntryResponse(
     val authorMemberId: UUID,
-    val status: ErasedEntryStatus = ErasedEntryStatus.DELETED,
+    val status: ErasedEntryStatus = ErasedEntryStatus.REMOVED,
 ) : PartnerEntryResponse
 
-/** One value, for the reason [LockedEntryStatus] is: the wire says `"DELETED"`, and this type can say nothing else. */
+/**
+ * One value, for the reason [LockedEntryStatus] is — and **`REMOVED`, not
+ * `DELETED`, on purpose.** This is a view literal, as `LOCKED` is; the domain
+ * still says [com.moyi.gratitude.domain.EntryStatus.DELETED]. `DELETED` on
+ * the wire is already [EntryResponse]'s wide tombstone, and
+ * `TodayResponse.partnerEntry` is discriminated on `status` — one value, one
+ * schema — which is what a generated client builds its sealed types from
+ * (doc 06 §2). `REMOVED` tells this reader nothing they lacked, and does not
+ * distinguish a delete from a withdrawal.
+ */
 internal enum class ErasedEntryStatus {
-    DELETED,
+    REMOVED,
 }

@@ -2775,7 +2775,7 @@
             },
             "status" : {
               "type" : "string",
-              "enum" : [ "DELETED" ]
+              "enum" : [ "REMOVED" ]
             }
           },
           "required" : [ "authorMemberId", "status" ]
@@ -3261,6 +3261,16 @@
             } ]
           },
           "partnerEntry" : {
+            "discriminator" : {
+              "mapping" : {
+                "DELETED" : "#/components/schemas/EntryResponse",
+                "LOCKED" : "#/components/schemas/LockedEntryResponse",
+                "REMOVED" : "#/components/schemas/ErasedEntryResponse",
+                "REVEALED" : "#/components/schemas/EntryResponse",
+                "SUBMITTED" : "#/components/schemas/EntryResponse"
+              },
+              "propertyName" : "status"
+            },
             "oneOf" : [ {
               "$ref" : "#/components/schemas/EntryResponse"
             }, {

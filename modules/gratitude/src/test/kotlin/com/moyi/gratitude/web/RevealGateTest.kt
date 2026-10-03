@@ -332,7 +332,7 @@ internal class RevealGateTest(
                 val asPartner = getToday(bea, bondId).contentAsString
 
                 withClue("$state, beaHasWritten=$beaHasWritten") {
-                    partnerEntryJson(asPartner) shouldBe """{"authorMemberId":"$adaMemberId","status":"DELETED"}"""
+                    partnerEntryJson(asPartner) shouldBe """{"authorMemberId":"$adaMemberId","status":"REMOVED"}"""
                     asPartner shouldNotContain "words I took back"
                 }
             }

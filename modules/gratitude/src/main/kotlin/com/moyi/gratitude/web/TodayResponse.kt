@@ -97,14 +97,13 @@ internal data class TodayResponse(
  * needing `@JsonTypeInfo` here — this type is only ever written to the
  * wire, never read back off it.
  *
- * **In the generated OpenAPI document this is a `oneOf` of the three, with
- * no `discriminator`.** springdoc resolves a sealed interface to its
- * branches by itself. `status` cannot discriminate them: `"DELETED"` is both
- * [EntryResponse]'s tombstone and [ErasedEntryResponse]'s only value, and a
- * discriminator maps one value to one schema. A client tells them apart by
- * shape — [EntryResponse] alone has an `id` — which
- * `contracts.OpenApiConfiguration` makes decidable by marking each branch's
- * fields `required`.
+ * **In the generated OpenAPI document this is a `oneOf` of the three,
+ * discriminated on `status`.** springdoc resolves a sealed interface to its
+ * branches by itself; `contracts.OpenApiConfiguration` adds the
+ * discriminator. Each wire value names exactly one branch: `LOCKED` is
+ * [LockedEntryResponse], `REMOVED` is [ErasedEntryResponse], and the entry's
+ * own statuses — `DELETED` included, the wide tombstone — are
+ * [EntryResponse]. That is why [ErasedEntryStatus] is not `DELETED`.
  */
 internal sealed interface PartnerEntryResponse {
     companion object {
