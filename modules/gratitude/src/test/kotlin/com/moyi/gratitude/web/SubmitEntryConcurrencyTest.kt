@@ -45,27 +45,27 @@ import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
- * **What this test is for, and what it deliberately no longer claims.**
+ * **What this class proves.**
  *
- * It used to fire two members' first submissions at once and assert one day
- * row. That is now true for the wrong reason: `SubmitEntry` takes the bond's
- * row lock before resolving a day (spec 2.1), so the two members serialise and
- * no insert ever conflicts. Deleting `bond_days_bond_date_key` would not turn
- * that case red. The fix is not a better assertion but a race the lock does
- * not cover.
- *
- * The close job is that race. It takes no bond lock (plan R1), so a sweep
- * opening a missing date can collide with a member writing that same date.
- * The unique `(bond_id, date)` index is what makes that safe, and
- * [a lock-free opener holding a new day makes a submission queue on the index]
- * drives exactly it.
+ * `SubmitEntry` takes the bond's row lock before resolving a day (spec 2.1),
+ * so two *members* never race to create a day: they queue on the bonds row.
+ * The old two-members-at-once case therefore stopped being a race over the
+ * index. The index is still load-bearing, because the close job takes no bond
+ * lock (plan R1): a sweep opening a missing date can collide with a member
+ * writing that same date. The first test drives exactly that.
  *
  * **Deterministic, not a barrier race.** The sweep's transaction inserts the
  * day and holds it uncommitted; the submission is then started and observed,
  * through `pg_blocking_pids`, queued behind the sweep on the index entry.
- * Only then does the sweep commit. Without the index there is nothing to wait
- * on, the submission is never blocked, and the test fails on its first
- * assertion instead of passing by timing.
+ * Only then does the sweep commit. Two ways it goes red without the index:
+ * (i) index removed - `ON CONFLICT (bond_id, date)` has no matching
+ * constraint, so `openOrGet` errors; the sweep fails and the test fails at
+ * `opened.get` with the SQL cause. (ii) index removed and a bare
+ * `ON CONFLICT DO NOTHING` - the insert silently duplicates, the submission is
+ * never blocked and finishes, so the test fails at `isDone`, and the row count
+ * and id assertions would catch it too.
+ *
+ * The second test pins an outcome, not a mechanism; see its own comment.
  *
  * The clock is pinned (fix round 2, N3) so the submission's date is the one
  * the sweep opens, far from any midnight.
@@ -89,8 +89,14 @@ internal class SubmitEntryConcurrencyTest(
         clock.set(NOW)
     }
 
+    private val pool = Executors.newCachedThreadPool()
+
     @AfterEach
     fun clear() {
+        // The pool first, and awaited: a submission still queued after a
+        // failed assertion must not commit after the truncate.
+        pool.shutdownNow()
+        check(pool.awaitTermination(10, TimeUnit.SECONDS)) { "a worker thread outlived the test" }
         jdbc.execute("TRUNCATE TABLE entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
@@ -112,7 +118,6 @@ internal class SubmitEntryConcurrencyTest(
             )
         val opened = CompletableFuture<Int>() // the sweep's pid, completed only after its INSERT ran
         val commit = CountDownLatch(1)
-        val pool = Executors.newCachedThreadPool()
         try {
             // The close job's shape: open the day directly, no bond lock, and
             // stay in the transaction.
@@ -135,9 +140,10 @@ internal class SubmitEntryConcurrencyTest(
 
             val submission = pool.submit<MockHttpServletResponse> { submit(ada, bondId, """{"text":"thank you"}""") }
             awaitBlockedOrDone(sweepPid, submission)
-            // Drop `bond_days_bond_date_key` and the submission's ON CONFLICT
-            // has no conflict to wait on: it writes a second row, finishes,
-            // and this is where the test goes red.
+            // Remove `bond_days_bond_date_key` and the conflict target breaks,
+            // failing earlier at `opened.get`. Remove it and also bare the
+            // ON CONFLICT, and the submission has nothing to wait on: it writes
+            // a second row, finishes, and this is where the test goes red.
             submission.isDone shouldBe false
 
             commit.countDown()
@@ -154,18 +160,21 @@ internal class SubmitEntryConcurrencyTest(
             jdbc.queryForObject("SELECT id FROM bond_days WHERE bond_id = ?::uuid", UUID::class.java, bondId) shouldBe sweptId
             jdbc.queryForObject("SELECT entry_count FROM bond_days", Int::class.java) shouldBe 1
             jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 1
+            jdbc.queryForObject("SELECT bond_day_id FROM entries", UUID::class.java) shouldBe sweptId
         } finally {
             commit.countDown()
-            pool.shutdownNow()
         }
     }
 
     @Test
-    fun `two members submitting a first entry at once - both 201, one day, entry_count 2 (the bond lock, not the index)`() {
-        // This case now proves the LOCK: both first submissions queue on the
-        // bonds row (spec 2.1), so no insert conflicts and the index is never
-        // consulted. It is kept for the read-modify-write on entry_count, and
-        // named so nobody reads it as proof of the constraint again.
+    fun `two members' simultaneous first entries - both 201, one day at entry_count 2`() {
+        // An outcome test, not a proof of any one mechanism. It pins the
+        // entry_count read-modify-write and the PARTIAL status when two members
+        // write the day's first entries together. It survives removing the bond
+        // lock or the day lock alone (the other lock plus the index still
+        // serialise the writers), and it goes red without the index, because
+        // the second writer's ON CONFLICT relies on it. The proof of the bond
+        // lock is SubmitEntryBondLockTest.
         val ada = users.verified("Ada")
         val bea = users.verified("Bea")
         val created = createBond(ada)
@@ -188,9 +197,8 @@ internal class SubmitEntryConcurrencyTest(
     }
 
     /** Runs every call on its own thread and releases them together — `InviteRaceTest`'s own helper. */
-    private fun <T> inParallel(calls: List<() -> T>): List<T> {
-        val pool = Executors.newFixedThreadPool(calls.size)
-        return try {
+    private fun <T> inParallel(calls: List<() -> T>): List<T> =
+        run {
             val ready = CountDownLatch(calls.size)
             val go = CountDownLatch(1)
             val futures =
@@ -206,10 +214,7 @@ internal class SubmitEntryConcurrencyTest(
             ready.await(10, TimeUnit.SECONDS)
             go.countDown()
             futures.map { it.get(30, TimeUnit.SECONDS) }
-        } finally {
-            pool.shutdownNow()
         }
-    }
 
     /** Until [waiter] is either finished or genuinely queued behind [holderPid] — `SubmitEntryBondLockTest`'s own wait. */
     private fun awaitBlockedOrDone(
