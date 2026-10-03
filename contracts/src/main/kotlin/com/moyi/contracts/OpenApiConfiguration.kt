@@ -236,6 +236,12 @@ class OpenApiConfiguration {
             if (operation.operationId in CONDITIONAL_OPERATIONS) {
                 addAll(listOf(HttpStatus.PRECONDITION_FAILED, HttpStatus.PRECONDITION_REQUIRED))
             }
+            // An @Idempotent body is buffered to be fingerprinted, up to a
+            // bound (413 past it), and must be one a @RequestBody can read
+            // (a multipart one is 415). Final whole-branch review, A5.
+            if (operation.operationId in IDEMPOTENT_OPERATIONS) {
+                addAll(listOf(HttpStatus.CONTENT_TOO_LARGE, HttpStatus.UNSUPPORTED_MEDIA_TYPE))
+            }
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER && it.name == "code" }) {
                 add(HttpStatus.UNPROCESSABLE_ENTITY)
             }

@@ -283,6 +283,25 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `an idempotent operation documents its key's bound, and the 413 and 415 its body can earn`() {
+        // Final whole-branch review, A5 and A6. The key is 1 to 255 visible
+        // ASCII characters (V11's CHECK and the interceptor say the same), a
+        // body past the interceptor's bound is 413, and a multipart one is
+        // Spring's own 415 — each of which used to be an undocumented 500.
+        val submit = api.paths["/api/v1/bonds/{bondId}/entries"]!!.post
+
+        val key = submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.schema
+        key.minLength shouldBe 1
+        key.maxLength shouldBe IdempotencyInterceptor.MAX_KEY_LENGTH
+        Regex(key.pattern).matches("0f8fad5b-d9cb-469f-a165-70867728950e") shouldBe true
+        Regex(key.pattern).matches("two words") shouldBe false
+        submit.responses.keys shouldContainAll listOf("413", "415")
+        // Not on a route that buffers nothing: `today` takes no body at all.
+        val today = api.paths["/api/v1/bonds/{bondId}/today"]!!.get
+        today.responses.keys shouldNotContain "413"
+    }
+
+    @Test
     fun `the entry endpoints document their conflicts, and today its 404`() {
         val entries = api.paths["/api/v1/bonds/{bondId}/entries"]!!.post
         entries.responses.keys shouldContainAll listOf("201", "404", "409", "422")
