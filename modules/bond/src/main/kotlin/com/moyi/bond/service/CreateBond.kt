@@ -2,6 +2,7 @@ package com.moyi.bond.service
 
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.BondDraft
+import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.InviteStore
 import com.moyi.identity.api.UserDirectory
@@ -24,6 +25,7 @@ internal class CreateBond(
     private val users: UserDirectory,
     private val bonds: BondStore,
     private val invites: InviteStore,
+    private val anchorIntervals: AnchorIntervalStore,
     private val factory: BondFactory,
     private val views: BondViews,
 ) {
@@ -47,6 +49,10 @@ internal class CreateBond(
         // it is this boundary that makes that atomic rather than a shared class.
         bonds.insert(bond)
         invites.insert(invite)
+        // BR-6's timeline starts here: the bond's first interval, in the zone
+        // it was created with. The bond lock is not needed — nothing else can
+        // reference a bond that does not yet exist.
+        anchorIntervals.seed(bond.id, bond.anchorTimezone.zone, bond.createdAt)
         // Ids only. The name is the couple's words and the code is a
         // credential until it is spent (doc 18 §9).
         log.info("Bond {} created by user {}", bond.id.value, draft.creator.value)

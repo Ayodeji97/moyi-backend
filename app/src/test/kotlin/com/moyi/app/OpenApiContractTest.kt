@@ -4,12 +4,14 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.security.SecurityConfiguration
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.ErrorCode
+import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.contracts.OpenApiConfiguration
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.maps.shouldContainKey
@@ -118,13 +120,14 @@ class OpenApiContractTest(
         // and has to appear, or a generated client cannot send it. The list is
         // exhaustive on purpose: a *new* header parameter should have to be
         // justified here, which is what this assertion makes someone do.
+        // `Idempotency-Key` joined it in fix round 1, C2 (`submitEntry`).
         operations()
             .flatMap { (_, op) ->
                 op.parameters
                     .orEmpty()
                     .filter { it.`in` == "header" }
                     .map { it.name }
-            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH)
+            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH, IdempotencyInterceptor.HEADER)
         api.components.schemas.keys
             .filter { it in setOf("CurrentUser", "ClientContext") }
             .shouldBeEmpty()
@@ -257,6 +260,148 @@ class OpenApiContractTest(
             .enum
             .map { it.toString() } shouldContainAll
             listOf("PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON")
+    }
+
+    @Test
+    fun `submitting an entry documents its Idempotency-Key, and every 409 it can give`() {
+        // Fix round 1, C2: two things a generated client had no way to model.
+        // (a) The header doc 06 §1 requires — `@Idempotent` is invisible to
+        // springdoc, so without OpenApiConfiguration adding it explicitly a
+        // generated client would call this endpoint with no way to send it
+        // at all, and every call would be refused as 422. (b) The 409 this
+        // operation's own headline behaviour (BR-2, ENTRY_ALREADY_EXISTS)
+        // needs, alongside BOND_ARCHIVED, DAY_CLOSED and
+        // IDEMPOTENCY_KEY_IN_FLIGHT — all four are 409s the same ProblemDetail
+        // schema carries, so this asserts the status is offered at all, not
+        // one code at a time.
+        val submit = api.paths["/api/v1/bonds/{bondId}/entries"]!!.post
+
+        submit.responses.keys shouldContainAll listOf("201", "404", "409", "422")
+        submit.parameters.map { it.name } shouldContain IdempotencyInterceptor.HEADER
+        submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.`in` shouldBe "header"
+        submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.required shouldBe true
+    }
+
+    @Test
+    fun `an idempotent operation documents its key's bound, and the 413 and 415 its body can earn`() {
+        // Final whole-branch review, A5 and A6. The key is 1 to 255 visible
+        // ASCII characters (V11's CHECK and the interceptor say the same), a
+        // body past the interceptor's bound is 413, and a multipart one is
+        // Spring's own 415 — each of which used to be an undocumented 500.
+        val submit = api.paths["/api/v1/bonds/{bondId}/entries"]!!.post
+
+        val key = submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.schema
+        key.minLength shouldBe 1
+        key.maxLength shouldBe IdempotencyInterceptor.MAX_KEY_LENGTH
+        Regex(key.pattern).matches("0f8fad5b-d9cb-469f-a165-70867728950e") shouldBe true
+        Regex(key.pattern).matches("two words") shouldBe false
+        submit.responses.keys shouldContainAll listOf("413", "415")
+        // Not on a route that buffers nothing: `today` takes no body at all.
+        val today = api.paths["/api/v1/bonds/{bondId}/today"]!!.get
+        today.responses.keys shouldNotContain "413"
+    }
+
+    @Test
+    fun `the entry endpoints document their conflicts, and today its 404`() {
+        val entries = api.paths["/api/v1/bonds/{bondId}/entries"]!!.post
+        entries.responses.keys shouldContainAll listOf("201", "404", "409", "422")
+        entries.parameters.map { it.name } shouldContain "Idempotency-Key"
+        entries.parameters.first { it.name == "Idempotency-Key" }.required shouldBe true
+
+        api.paths["/api/v1/bonds/{bondId}/today"]!!.get.responses shouldContainKey "404"
+    }
+
+    @Test
+    fun `partnerEntry is one of three branches, discriminated on status with no value naming two`() {
+        // springdoc resolves the sealed interface to a `oneOf` of its
+        // branches; OpenApiConfiguration adds the `discriminator`, which is
+        // what a generated client builds its sealed types from (doc 06 §2).
+        // A discriminator maps a value to exactly one schema, so the three
+        // branches' `status` enums must be disjoint — which is why a
+        // partner's never-revealed erased entry says `REMOVED`, not the wide
+        // tombstone's `DELETED`.
+        val today = api.components.schemas["TodayResponse"]!!
+        val partnerEntry = today.properties["partnerEntry"]!!
+        val branches = listOf("EntryResponse", "LockedEntryResponse", "ErasedEntryResponse")
+
+        partnerEntry.oneOf.mapNotNull { it.`$ref` } shouldContainExactlyInAnyOrder branches.map { "#/components/schemas/$it" }
+        partnerEntry.discriminator.shouldNotBeNull()
+        partnerEntry.discriminator.propertyName shouldBe "status"
+        partnerEntry.discriminator.mapping shouldBe
+            mapOf(
+                "SUBMITTED" to "#/components/schemas/EntryResponse",
+                "REVEALED" to "#/components/schemas/EntryResponse",
+                "DELETED" to "#/components/schemas/EntryResponse",
+                "LOCKED" to "#/components/schemas/LockedEntryResponse",
+                "REMOVED" to "#/components/schemas/ErasedEntryResponse",
+            )
+
+        // The mapping is the document's claim; each branch's own `status`
+        // enum is what the server can actually send. Every value a branch
+        // can send maps to that branch, so no value names two schemas and
+        // none is left to the OpenAPI default.
+        val statusesByBranch =
+            branches.associateWith { name ->
+                val fields =
+                    api.components.schemas[name]!!
+                        .allOf
+                        .last()
+                fields.required shouldContain "status"
+                fields.properties["status"]!!.enum.map { it.toString() }
+            }
+        statusesByBranch.values.flatten().let { all -> all.toSet().size shouldBe all.size }
+        statusesByBranch.forEach { (branch, statuses) ->
+            statuses.forEach { partnerEntry.discriminator.mapping[it] shouldBe "#/components/schemas/$branch" }
+        }
+        statusesByBranch.values.flatten().toSet() shouldBe partnerEntry.discriminator.mapping.keys
+    }
+
+    @Test
+    fun `partnerEntry may be null, as myEntry may - the day before the partner has written`() {
+        // `GET /today` answers `"partnerEntry": null` until the partner
+        // writes. springdoc says so for a nullable `$ref` (myEntry) and not
+        // for a nullable sealed interface's `oneOf`; OpenApiConfiguration adds
+        // the branch. Without it the contract claims the field is always one
+        // of the three objects, and a strict client rejects the ordinary
+        // first response of every day.
+        val today = api.components.schemas["TodayResponse"]!!
+
+        listOf("myEntry", "partnerEntry").forEach { name ->
+            withClue(name) {
+                val branches = today.properties[name]!!.oneOf.shouldNotBeNull()
+                branches.filter { it.`$ref` == null }.map { it.types } shouldBe listOf(setOf("null"))
+            }
+        }
+        // Exactly the three objects and the null: nothing else was admitted.
+        today.properties["partnerEntry"]!!.oneOf.size shouldBe 4
+    }
+
+    @Test
+    fun `the two narrow partnerEntry branches carry an author and a status, both required, and nothing else`() {
+        // BR-8: the type has nowhere to put anything else.
+        listOf("LockedEntryResponse" to "LOCKED", "ErasedEntryResponse" to "REMOVED").forEach { (name, status) ->
+            val fields =
+                api.components.schemas[name]!!
+                    .allOf
+                    .last()
+            fields.properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+            fields.required shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+            fields.properties["status"]!!.enum shouldBe listOf(status)
+        }
+    }
+
+    @Test
+    fun `an entry's text is required though nullable, so a tombstone is not an absent field`() {
+        // `"text": null` is how an erased entry is rendered (an Idempotency-Key
+        // replay re-reads it). Optional as well as nullable, a generated
+        // client could not tell that from a field the server never sent.
+        val fields =
+            api.components.schemas["EntryResponse"]!!
+                .allOf
+                .last()
+
+        fields.required shouldContainAll
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt")
     }
 
     @Test

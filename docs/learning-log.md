@@ -1619,3 +1619,173 @@ Wrong about: what "already reviewed" covers. I treated the first review as a
          the `blocks` check in B2. The tell is the same every time. Nothing reads
          it. `grep` for the readers of a flag before believing the sentence that
          says it is enforced.
+
+## 2026-09-29 · Phase 3 · Closing C1 — a deferral that was half wrong, and a false failure the volume had to be empty to find
+Expected: the closing task to be paperwork against work already done — regenerate the
+         contract, write the smoke section, write the ADR. The one piece of code left,
+         `TodayResponse.partnerEntry`'s empty OpenAPI schema, had its own fix already
+         named in Task 8's KDoc: add an `OpenApiCustomizer`, the same shape as the
+         `ETag` and `Idempotency-Key` ones, so springdoc can express the `oneOf`.
+Reality: **springdoc had already fixed half of it, and the KDoc's fear was stale by
+         the time I ran the generator.** `PartnerEntryResponse` is a Kotlin `sealed
+         interface`, which compiles to a JVM sealed type with `permittedSubclasses`,
+         and this swagger-core version reads that on its own — `partnerEntry` came
+         out of the generator as `oneOf: [EntryResponse, LockedEntryResponse]`
+         already, no customizer involved. What actually stayed missing was narrower
+         and easy to miss precisely because the `oneOf` looked complete: no
+         `discriminator`, so a generated client would still have to try both shapes
+         structurally to learn which one it got. The customizer I wrote adds one,
+         keyed on `status`, mapped explicitly for every value either branch's enum
+         can hold — `SUBMITTED`/`REVEALED`/`DELETED` to `EntryResponse`, `LOCKED` to
+         `LockedEntryResponse` — because an unmapped discriminator value falls back
+         to naming a schema directly, and none of those four names one.
+         Then the smoke run found a false failure that had nothing to do with the
+         slice: "the log never says who blocked whom" failed on a database I had
+         just reset with `docker compose down -v` to clear an unrelated stale-migration
+         error, and passed again on the very next run against the same, by-then-
+         migrated volume. Flyway logs its own migration description on a genuinely
+         fresh boot, and V9's filename is `bond_bonds_members_invites_blocks` — the
+         word the check was grepping the *entire* log for is also half of a
+         migration's own name. Nobody had hit it before because nobody had run this
+         script against a truly empty Postgres since that migration was written;
+         every ordinary run reuses a volume already past that log line. Scoped the
+         check to lines written after its own section starts, the same idiom the
+         email-polling checks already use, rather than the whole log from boot.
+         Separately, re-ran the mutation the fix reports for Tasks 7/8 claimed:
+         flipping `Entry.canBeReadBy` to `= true` fails exactly two `RevealGateTest`
+         cases, both through the same mechanism (one member submits, the other reads
+         `partnerEntry`) — confirming an earlier fix report's claim that the second
+         failure came from `myEntry`'s own routing was wrong, and both tests exercise
+         `partnerEntry`, not `myEntry`, either way.
+Wrong about: trusting a KDoc's stated risk as still current just because it was
+         reasoned carefully when it was written. It was right about the *symptom*
+         (a generated client gets neither branch's shape) and wrong about the
+         *cause* by the time this task ran the actual generator — the shape was
+         already there, the discriminator was not. The general form, twice in one
+         task: a deferral note and a stale-log grep both describe a failure mode
+         that was true once, under conditions that had since changed underneath
+         them, and the only way to find out which parts still held was to run the
+         generator and the script rather than read what somebody expected them to
+         say.
+
+## 2026-10-03 · Phase 3 · Rebuilding C1 — the lock that retired a test, and the day I opened in the wrong order
+Expected: a rework with a known shape. The spec had been revised under a draft PR and I
+         had five deltas written down: a timeline instead of a copied zone string, the
+         bond lock taken inside the write, idempotency in one transaction, BR-1 on the
+         entry's own timestamp, BR-3a rechecked under the day lock. Ten tasks, each with a
+         brief, each reviewed. I expected the corrections to come from the reviewers and
+         to be about the code.
+Reality: **most of what was wrong was in what I told the implementers, and in tests that
+         were green.** In the order they surfaced:
+         The concurrency test. `SubmitEntryConcurrencyTest` proved that two first entries
+         racing produce one `bond_days` row. Task 4 put the bond's row lock in front of
+         the submit path, and from that commit both members queue on the bond before
+         either reaches the day. The test stayed green with the day lock deleted. It had
+         not been broken; it had been retired, by a lock added somewhere else, and nothing
+         about a green run says so. The race that still exists is a submission against a
+         writer that takes no bond lock, which is what C3's close job will be, and Task 5
+         rewrote the test to stage that one.
+         Then the rewrite repeated the mistake at a smaller scale. Its two-member case was
+         named and commented as proving "the bond lock, not the index". The implementer's
+         own mutations said otherwise: remove the bond lock and it passes, remove the index
+         and it fails. A test named for a mechanism it survives the removal of. The
+         mutation was in the report; the name was in the code; only one of them was true.
+         The re-read. `lockMembershipOf` runs the guard, takes `FOR UPDATE` on the bond,
+         and reads the membership again under the lock. The second read is the whole
+         point, and Hibernate answered it from the persistence context: the guard had
+         already loaded the bond and its members, and a query for rows already in the
+         identity map hands back the same instances with their old state. An entry
+         committed onto a bond that had been archived while the submission waited.
+         `BondDayStore.lockAndFind` had the same defect in the first build and ADR-0031
+         decision 9 was already about it. I had written that decision and did not carry it
+         to the next lock.
+         The hash. Task 6 removed `idempotency_keys.response_body` because it was a
+         plaintext copy of an entry for 24 hours, and left `request_hash` as a plain
+         SHA-256 of the request body. For `POST /entries` the body is the entry. A short
+         one is recoverable from that column by hashing guesses. The task closed the
+         hazard through one column and left it open through the one beside it, and the
+         reviewer raised it as an out-of-scope minor. It is an HMAC now.
+         My amendment to Task 3 said: lock before any read, as `ChangeTimezone`, `EndBond`
+         and `RequestDeletion` do. They do not. They guard first and then lock, and the
+         reviewer found it by opening `EndBond.kt`. I had described the existing code from
+         what I believed its discipline to be. Locking first would also have let any
+         caller take a row lock on a bond that is not theirs.
+         Spec §2.1 lists `BondMembership`'s fields and omits `hasLeft`. Followed as
+         written, the rework would have deleted the check the second review of PR #41 had
+         added two days before the plan was written, the one from the entry two above
+         this, about a flag nobody read. The spec revision simply predates that review
+         landing. The plan caught it (R2) by reading `SubmitEntry` against the list.
+         And the defect that mattered most came last. Task 9's timezone matrix was the
+         first test to open a day and *then* change the zone. No unit or slice test
+         before it, across eight tasks, had done those two things in that order.
+         `openOrGet` is `ON CONFLICT DO NOTHING`, so the row kept the `ends_at` it was
+         opened with while the timeline ran the day on for another 25 hours: an entry
+         filed on a row whose span did not contain it, and a hole in the stored calendar.
+         The timeline was right, the row was right when written, and the two were never
+         compared in that order. In the same task, my amendment's eastward
+         example was Lagos to Kiritimati, which skips no label at all: the handoff is 13:00
+         on the next day. The implementer computed it, said so, and used Pago Pago.
+Wrong about: where the risk in a rework sits. I treated the briefs as the fixed part and
+         the code as the part under review. Two of the findings above are errors in an
+         amendment of mine (the lock order, the eastward example), and a third is not
+         above because it was caught on day one: Task 1's brief gave a westward test
+         expected values that contradicted each other. Each was caught because an
+         implementer or reviewer recomputed instead of trusting me. The instruction that
+         paid for itself was "recompute every number yourself".
+         And, again, what a green test is evidence of. A test proves the mechanism it would
+         fail without, and that changes when other code changes. Adding a lock can retire
+         a test three files away. The only check that found it, both times, was deleting
+         the mechanism and running the suite. This log already counts three mechanisms
+         that were present and not load-bearing; the difference this time is that the
+         deletion was planned as a step (Task 5's mutation) rather than stumbled on.
+         Smaller: order is an input. "Open, then change" and "change, then open" are
+         different tests, and I had written one of them eight times.
+
+## 2026-10-03 · Phase 3 · Reading C1 whole — three right answers that made a 500
+Expected: a formality. Every rework task had been reviewed on its own, most of them twice,
+         with mutations. Three reviewers reading the whole branch at the end were there
+         to confirm it.
+Reality: **no critical defect, and several real ones, none of which was inside a task.**
+         The first is three tasks, each correct. Task 1's timeline assumes no label past
+         today's is in use. The first build's day assignment lets a claim up to five
+         minutes ahead be the candidate, so a fast phone is not refused. Task 9's
+         extension assumes a row starts where the timeline says its label starts. Put
+         them in order: at 23:57 a phone reading 00:01 opens tomorrow's row; a westward
+         zone change confirmed in the next three minutes moves tomorrow's start; and from
+         then on every write to that day finds a row whose start disagrees with the
+         timeline and fails a `require`. A `500` for both people, for a whole day. Each
+         task's tests passed because each task's tests held the other two still. The
+         reviewer of the extension had asked the right question, "can a row exist ahead of
+         now?", and accepted "rows open only for now or the past". That was false, and it
+         was false in a file that task never touched.
+         The second is not an interaction at all. `EntryText.of` stored
+         `NFKC(raw).trim()`. The spec says normalise to count and store raw; the KDoc said
+         normalising "changes nothing a person wrote to mean". It turns an ellipsis into
+         three full stops and a trade mark sign into `TM`. No test exercised it: delete
+         the normaliser and the suite stayed green. It was written in the first build, it
+         was not on any rework task's file list, and so ten reviews of the rework read
+         around it. The plan even said "do not touch EntryText", meaning its limits.
+         The rest were the same kind of thing at smaller size. A chunked `POST` was a
+         `500`, reasoned from reading by a reviewer and then reproduced, all four ways,
+         before any fix: the bound I had added to stop an unbounded read refused every
+         body whose length was not declared, and the interceptor called that a wiring
+         bug. V13's backfill had never run against a row, because every test database is
+         empty when it runs. That one turned out correct. It was still untested.
+         Then it was run. The development database had the old table shapes and had
+         never applied V10; the repair dropped three tables of smoke data and two
+         history rows, Flyway applied V10 to V13, the backfill ran over 26 real bonds
+         with nothing to correct, and `scripts/smoke.sh` on the jar built from
+         `b08b385` came back 350 passed, 0 failed, the handoff section included. The
+         repair I had first handed over, a checksum reset, would have left the
+         application starting and then failing on columns that were not there.
+Wrong about: what a per-task review can see. I had been treating ten clean reviews as
+         ten independent confirmations of the branch. They were ten confirmations of ten
+         diffs. A defect that needs two tasks' assumptions to collide is in nobody's
+         diff, and code nobody changed is in nobody's diff either. The whole-branch read
+         is not a second look at the same thing; it is the only look at those two.
+         Also: a reviewer's accepted answer is a claim, and it goes stale like a KDoc
+         does. "Rows open only for now or the past" was written down as a finding and I
+         carried it forward as a fact.
+         And the one I should have known by now: "stored raw" was a sentence in the spec
+         with no test under it. A sentence the suite survives the negation of is not
+         implemented, it is believed.

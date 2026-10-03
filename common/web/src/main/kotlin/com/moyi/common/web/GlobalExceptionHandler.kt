@@ -95,7 +95,7 @@ class GlobalExceptionHandler(
         // that alerts on a user typing a short password is a dashboard
         // people learn to ignore.
         log.warn("{} -> {} {}", ex.errorCode, ex.status.value(), ex.detail)
-        return respond(ex.status, ex.errorCode, ex.detail, request)
+        return respond(ex.status, ex.errorCode, ex.detail, request, ex.errors)
     }
 
     @ExceptionHandler(Exception::class)

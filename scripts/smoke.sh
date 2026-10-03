@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
-# What it proves: the packaged application boots against the compose Postgres,
+# What it is written to check (a run is the proof, not this header): the
+# packaged application boots against the compose Postgres,
 # and every identity endpoint that exists so far — registration, verification,
 # sign-in, refresh rotation, logout, password reset — answers with the status
 # and the error code the API contract (doc 06) promises — on the happy path AND on
@@ -13,6 +14,23 @@
 # and the same ETag (doc 26 §2.1, T-09). Since slice F it drives
 # every rate limit in doc 06 §4 to its 429 (FR-012, ADR-0023) and checks the
 # X-RateLimit-* headers and Retry-After on the way, against the compose Valkey.
+# Since the C1 rework it is written to check that a confirmed zone change is
+# reported at once and decides no date until the current Bond-day ends (BR-6,
+# ADR-0031). Last run against the rework on 2026-10-03, on the jar built from
+# b08b385: 350 passed, 0 failed. A later commit is unproven until it is run again.
+#
+# If the application refuses to start on a Flyway checksum mismatch: V11, V12
+# and V13 were edited in place while unmerged (ADR-0031), so a database that
+# applied an earlier copy of them no longer matches. Resetting the checksums
+# is NOT the repair: it only stops Flyway refusing and re-runs nothing, and V11
+# and V12 changed table shape, so the app would then fail on missing columns.
+# The repair is for the DEV database only and is never this script's to run.
+# It was executed once, on 2026-10-03 (ADR-0031, Owed, records what it found):
+#   DROP TABLE IF EXISTS entries, bond_days, idempotency_keys, bond_anchor_intervals CASCADE;
+#   DELETE FROM flyway_schema_history WHERE version IN ('11','12','13');
+# then start the application so Flyway re-applies V11-V13 (V13 backfills the
+# timeline for existing bonds). It destroys that database's entries, days and
+# idempotency keys; users, bonds and invites are untouched.
 #
 # What it does not prove: anything the unit and integration tests already
 # prove. This is the "run it, do not read it" check (docs/learning-log.md,
@@ -448,6 +466,13 @@ if grep -qF -- "$CODE" "$MOYI_LOG" || grep -qF -- "$THIRD_CODE" "$MOYI_LOG"; the
 
 echo; echo "ending — leave and block (FR-026, FR-029, T-09, doc 26 §2.1, ADR-0028)"
 flush_buckets
+# V9's own migration filename is "bond_bonds_members_invites_blocks", and
+# Flyway logs that description verbatim on a genuinely fresh database — a
+# grep of the WHOLE log for the word below is a false FAIL on the very first
+# boot against an empty volume, found running this section against one after
+# `docker compose down -v`. The check below is scoped to what this section
+# itself wrote, the same way the email-polling checks scope to "since before".
+LOG_LINES_BEFORE_ENDING="$(wc -l < "$MOYI_LOG" | tr -d ' ')"
 
 # Registers, verifies and signs in one account, leaving its token in
 # ACCOUNT_ACCESS. Factored out because this section needs four accounts and the
@@ -553,7 +578,7 @@ expect "and another" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $L
 expect "a third open one is 201, because the bond they left frees its slot" 201 "" -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Four")"
 expect "…and a fourth is 409 BOND_LIMIT_REACHED" 409 '"code":"BOND_LIMIT_REACHED"' -- -X POST "$API/bonds" -H "Authorization: Bearer $LEAVER_ACCESS" -d "$(bond_body "Five")"
 
-if grep -qiE '\bblock' "$MOYI_LOG"; then fail "block in log" "the log says block"; else pass "the log never says who blocked whom"; fi
+if tail -n "+$((LOG_LINES_BEFORE_ENDING + 1))" "$MOYI_LOG" | grep -qiE '\bblock'; then fail "block in log" "the log says block"; else pass "the log never says who blocked whom"; fi
 
 echo; echo "settings — the conditional update (FR-027, doc 06 §1, ADR-0029)"
 flush_buckets
@@ -717,6 +742,117 @@ expect "…the bond is still counting down for the member who is in it" 200 '"st
 expect "…whose own cancel still works: 204" 204 "" -- -X DELETE "$API/bonds/$WALK_BOND/deletion-request" -H "Authorization: Bearer $HOLDER_ACCESS"
 expect "…leaving an archived bond that knows when it ended" 200 '"status":"ARCHIVED"' -- "$API/bonds/$WALK_BOND" -H "Authorization: Bearer $HOLDER_ACCESS"
 [[ "$LAST_BODY" != *'"archivedAt":null'* ]] && pass "…with archivedAt set, like every other archived bond" || fail "null archivedAt" "${LAST_BODY:0:250}"
+
+echo; echo "gratitude — the bond-day and the first entry (FR-041, BR-1, BR-2, BR-10, C1, ADR-0031)"
+flush_buckets
+verified_account "author" "203.0.113.70"; AUTHOR_ACCESS="$ACCOUNT_ACCESS"
+verified_account "partner" "203.0.113.71"; PARTNER_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond to write into is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $AUTHOR_ACCESS" -d "$(bond_body "Us")"
+GRAT_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+GRAT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "the partner joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$GRAT_CODE/accept" -H "Authorization: Bearer $PARTNER_ACCESS"
+
+# The whole slice on the wire, one round trip per fact: a first entry, the
+# same member's second, the same key replayed, and the same key reused with a
+# different body.
+AUTHOR_KEY="$(python3 -c 'import uuid; print(uuid.uuid4())')"
+ENTRY_TEXT="grateful for the light this morning"
+expect "the first entry is 201, SUBMITTED" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d "{\"text\":\"$ENTRY_TEXT\"}"
+ENTRY_ID="$(printf '%s' "$LAST_BODY" | jget id)"
+
+expect "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS" 409 '"code":"ENTRY_ALREADY_EXISTS"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"a second entry, same day"}'
+
+expect "replaying the same key with the same body is 201 again" 201 "\"id\":\"$ENTRY_ID\"" -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d "{\"text\":\"$ENTRY_TEXT\"}"
+header_is "…and says it was replayed" Idempotency-Replayed true
+ENTRY_ROWS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) FROM entries WHERE id='$ENTRY_ID'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+case "$ENTRY_ROWS" in psql-unavailable) echo "  skip entry row count";; 1) pass "…and exactly one row landed in entries";; *) fail "entry rows" "expected 1, got '$ENTRY_ROWS'";; esac
+
+expect "the same key with a different body is 422 IDEMPOTENCY_KEY_REUSED" 422 '"code":"IDEMPOTENCY_KEY_REUSED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d '{"text":"this is not the body that key reserved"}'
+
+# BR-1/BR-8: the partner's own read of the day sees PARTIAL and a locked
+# entry — the author and the status, nothing else, on the wire and in the log.
+expect "the partner's today is PARTIAL, with the entry locked" 200 '"status":"PARTIAL"' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $PARTNER_ACCESS"
+[[ "$LAST_BODY" == *'"partnerEntry":{"authorMemberId"'*'"status":"LOCKED"'* ]] && pass "…partnerEntry is exactly an author and a status" || fail "locked shape" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" != *"$ENTRY_TEXT"* ]] && pass "…and the text never appears in the response" || fail "text leaked in response" "${LAST_BODY:0:250}"
+if grep -qF "$ENTRY_TEXT" "$MOYI_LOG"; then fail "text in log" "the entry text appears in the log"; else pass "…nor anywhere in the log"; fi
+
+# FR-041, ADR-0029 §13's own edge, restated for an entry's text: a lone
+# non-breaking space is blank by the domain's definition and must be a 422 on
+# the field, not a 500 from an uncaught IllegalArgumentException.
+expect "an entry of one non-breaking space is 422 on text, not 500" 422 '"field":"text"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"\u00a0"}'
+
+# Doc 04 §8.3a: the creator may write before their partner joins, and the day
+# that write lands on opens SUSPENDED, not OPEN, so neither the close job nor
+# the streak walk (neither built yet) mistake it for an ordinary day.
+expect "a lone creator's bond is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $AUTHOR_ACCESS" -d "$(bond_body "Solo for now")"
+SOLO_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+expect "writing before a partner has joined is still 201" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$SOLO_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"writing alone, for now"}'
+expect "…and the day it landed on opens SUSPENDED, not OPEN" 200 '"status":"SUSPENDED"' -- "$API/bonds/$SOLO_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
+
+echo; echo "gratitude — a confirmed zone change decides no date until tomorrow (BR-6, ADR-0031 §3)"
+flush_buckets
+verified_account "mover" "203.0.113.72";  MOVER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "stayer" "203.0.113.73"; STAYER_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond anchored on Africa/Lagos is 201" 201 '"anchorTimezone":"Africa/Lagos"' -- -X POST "$API/bonds" -H "Authorization: Bearer $MOVER_ACCESS" -d "$(bond_body "Us")"
+HANDOFF_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+HANDOFF_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "the other member joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$HANDOFF_CODE/accept" -H "Authorization: Bearer $STAYER_ACCESS"
+
+# The check is only worth making if the two zones disagree about today's date
+# right now, so the new zone is chosen by the clock: Kiritimati (+14) is already
+# on tomorrow from 11:00 in Lagos (+1); before that, Pago Pago (-11) is still on
+# yesterday. Either way the Lagos date and the new zone's date differ, and an
+# implementation that let the confirmed zone decide today's date would file the
+# entry below on the wrong one. Prints "<new zone> <Lagos date> <new zone's date>".
+zone_plan() {
+  python3 - <<'PY'
+from datetime import datetime
+from zoneinfo import ZoneInfo
+lagos = datetime.now(ZoneInfo("Africa/Lagos"))
+zone = "Pacific/Kiritimati" if lagos.hour >= 11 else "Pacific/Pago_Pago"
+print(zone, lagos.date().isoformat(), datetime.now(ZoneInfo(zone)).date().isoformat())
+PY
+}
+read -r NEW_ZONE LAGOS_DATE NEW_ZONE_DATE <<<"$(zone_plan)"
+[ "$LAGOS_DATE" != "$NEW_ZONE_DATE" ] && pass "the zones disagree about today: Lagos $LAGOS_DATE, $NEW_ZONE $NEW_ZONE_DATE" || fail "zone plan" "Lagos and $NEW_ZONE agree on $LAGOS_DATE, so this section would prove nothing"
+
+expect "proposing $NEW_ZONE is 200" 200 "\"proposedTimezone\":\"$NEW_ZONE\"" -- -X PATCH "$API/bonds/$HANDOFF_BOND/timezone" -H "Authorization: Bearer $MOVER_ACCESS" -d "{\"anchorTimezone\":\"$NEW_ZONE\"}"
+HANDOFF_PROPOSAL_ID="$(python3 -c "import json,sys; print(json.load(sys.stdin)['pendingTimezoneChange']['id'])" <<<"$LAST_BODY")"
+expect "the other member confirms: 200" 200 "\"anchorTimezone\":\"$NEW_ZONE\"" -- -X POST "$API/bonds/$HANDOFF_BOND/timezone/confirm" -H "Authorization: Bearer $STAYER_ACCESS" -d "{\"proposalId\":\"$HANDOFF_PROPOSAL_ID\"}"
+
+# The request is recorded the instant consent completes (B5, unchanged)…
+expect "GET /bonds/{id} reports the new zone at once" 200 "\"anchorTimezone\":\"$NEW_ZONE\"" -- "$API/bonds/$HANDOFF_BOND" -H "Authorization: Bearer $MOVER_ACCESS"
+# …and decides nothing yet: today is still the old zone's day, for a read and
+# for a write, on a day that had no row when the change was confirmed. That
+# last part is what a zone string copied at row creation could not do.
+expect "today is 200 before anyone has written" 200 '"bondDay"' -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $MOVER_ACCESS"
+HANDOFF_TODAY_BODY="$LAST_BODY"
+# Re-planned after the read, for the reason given below the write: the date
+# is only asserted if Lagos midnight did not pass between the plan and the GET.
+read -r _ LAGOS_DATE_AT_READ _ <<<"$(zone_plan)"
+if [ "$LAGOS_DATE_AT_READ" != "$LAGOS_DATE" ]; then
+  echo "  skip the pre-write date check (Lagos midnight passed mid-section)"
+else
+  [[ "$HANDOFF_TODAY_BODY" == *"\"bondDay\":{\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it is still the Lagos date, $LAGOS_DATE" || fail "today's date" "expected bondDay.date $LAGOS_DATE: ${HANDOFF_TODAY_BODY:0:250}"
+fi
+expect "an entry written straight after the change is 201" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$HANDOFF_BOND/entries" -H "Authorization: Bearer $MOVER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"written the minute we agreed to move"}'
+HANDOFF_ENTRY_BODY="$LAST_BODY"
+# Re-planned after the write: if Lagos midnight passed between the plan and the
+# entry, the date this section expects is no longer the one the server used.
+read -r _ LAGOS_DATE_AFTER _ <<<"$(zone_plan)"
+if [ "$LAGOS_DATE_AFTER" != "$LAGOS_DATE" ]; then
+  echo "  skip the landing-date checks (Lagos midnight passed mid-section)"
+else
+  [[ "$HANDOFF_ENTRY_BODY" == *"\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it lands on the old zone's date, $LAGOS_DATE" || fail "entry date" "expected date $LAGOS_DATE: ${HANDOFF_ENTRY_BODY:0:250}"
+  [[ "$HANDOFF_ENTRY_BODY" != *"\"date\":\"$NEW_ZONE_DATE\""* ]] && pass "…not on $NEW_ZONE's, $NEW_ZONE_DATE" || fail "entry redated" "the entry was filed under the new zone: ${HANDOFF_ENTRY_BODY:0:250}"
+  expect "the partner's today is that same day, PARTIAL" 200 "\"bondDay\":{\"date\":\"$LAGOS_DATE\",\"status\":\"PARTIAL\"}" -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $STAYER_ACCESS"
+  # The rows behind it: the day keeps the zone it began under, and the timeline
+  # holds a closed Lagos interval followed by an open one that starts later.
+  DAY_ZONE="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT anchor_timezone FROM bond_days WHERE bond_id='$HANDOFF_BOND' AND date='$LAGOS_DATE'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+  case "$DAY_ZONE" in psql-unavailable) echo "  skip the bond_days check";; Africa/Lagos) pass "…the day's row keeps Africa/Lagos";; *) fail "day zone" "expected Africa/Lagos, got '$DAY_ZONE'";; esac
+  INTERVALS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT string_agg(zone || CASE WHEN effective_to IS NULL THEN ':open' ELSE ':closed' END || CASE WHEN effective_from > now() THEN ':future' ELSE ':past' END, ',' ORDER BY effective_from) FROM bond_anchor_intervals WHERE bond_id='$HANDOFF_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+  case "$INTERVALS" in psql-unavailable) echo "  skip the timeline check";; "Africa/Lagos:closed:past,$NEW_ZONE:open:future") pass "…and the timeline hands over later: $INTERVALS";; *) fail "timeline" "expected Africa/Lagos:closed:past,$NEW_ZONE:open:future, got '$INTERVALS'";; esac
+fi
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

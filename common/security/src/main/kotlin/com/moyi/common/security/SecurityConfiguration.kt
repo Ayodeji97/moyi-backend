@@ -1,5 +1,6 @@
 package com.moyi.common.security
 
+import com.moyi.common.web.idempotency.RequestFingerprint
 import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet
 import com.nimbusds.jose.proc.SecurityContext
@@ -93,6 +94,13 @@ class SecurityConfiguration {
 
     @Bean
     fun personalDataHasher(properties: HashingProperties): PersonalDataHasher = PersonalDataHasher.from(properties)
+
+    /**
+     * `common:web`'s [RequestFingerprint] port (ruling P8), provided here
+     * because the secret is here and the dependency runs this way only.
+     */
+    @Bean
+    fun requestFingerprint(hasher: PersonalDataHasher): RequestFingerprint = HmacRequestFingerprint(hasher)
 
     @Bean
     fun jwtEncoder(keys: SigningKeys): JwtEncoder = NimbusJwtEncoder(ImmutableJWKSet<SecurityContext>(JWKSet(keys.rsaKey)))
