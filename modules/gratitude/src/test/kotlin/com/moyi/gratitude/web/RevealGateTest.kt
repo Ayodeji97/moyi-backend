@@ -6,6 +6,7 @@ import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
+import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -175,17 +176,178 @@ internal class RevealGateTest(
         getToday(cara, soloBondId).contentAsString shouldContain "\"status\":\"SUSPENDED\""
     }
 
+    // ---- BR-1 keyed on the entry's own reveal (spec §4, as revised) ------
+    //
+    // C1 has no reveal and no close: C2 sets `entries.revealed_at`, C3 closes
+    // a day. Every test below therefore puts the row into the state under
+    // test BY HAND, with `UPDATE`, and says so — standing in for the slice
+    // that will produce it. What is under test is the gate, not the
+    // transition.
+    //
+    // Each test states what a broken gate would answer. The partner's entry
+    // is always PRESENT in these responses — locked or in full, never
+    // absent — so a gate that fails open shows the words rather than dropping
+    // the field (the way the earlier C1 build's test passed for the wrong
+    // reason).
+
+    @Test
+    fun `no day status reveals an unrevealed entry - not FROZEN, not REVEALED, not SOLO`() {
+        // The gate keys on the entry's `revealedAt`, never on the day's
+        // status. A gate keyed on status (the one this replaces) answers the
+        // REVEALED and SOLO rows here in full; a gate that always answers
+        // FULL answers every row in full. Either way `a secret kindness`
+        // appears in the body and the exact-shape assertion fails.
+        val beaMemberId = authorMemberIdOf(submit(bea, bondId, """{"text":"a secret kindness"}""").also { it.status shouldBe 201 })
+
+        for (status in DAY_STATUSES) {
+            setDayByHand(status)
+
+            val today = getToday(ada, bondId)
+
+            withClue(status) {
+                today.status shouldBe 200
+                today.contentAsString shouldContain "\"status\":\"$status\""
+                partnerEntryJson(today.contentAsString) shouldBe """{"authorMemberId":"$beaMemberId","status":"LOCKED"}"""
+                today.contentAsString shouldNotContain "a secret kindness"
+            }
+        }
+    }
+
+    @Test
+    fun `a revealed entry stays readable whatever the day becomes - frozen, suspended, anything`() {
+        // `revealedAt` is monotonic: applying a freeze to a solo day, or
+        // suspending the bond later, must not hide words the partner has
+        // already read (spec §4). The status-keyed gate this replaces locks
+        // the entry again on FROZEN, SUSPENDED, EMPTY, OPEN, PARTIAL and
+        // PENDING_REVEAL; a gate that always answers LOCKED locks it on all
+        // eight. Both fail the `text` assertion.
+        submit(bea, bondId, """{"text":"a kindness you have read"}""").status shouldBe 201
+        revealByHand(bea)
+
+        for (status in DAY_STATUSES) {
+            setDayByHand(status)
+
+            val today = getToday(ada, bondId)
+
+            withClue(status) {
+                partnerEntryJson(today.contentAsString) shouldContain "\"text\":\"a kindness you have read\""
+            }
+        }
+    }
+
+    @Test
+    fun `an author reads their own live entry whatever the day's status, SUSPENDED included`() {
+        // Spec §4: "An author can still read their own live entry on a
+        // SUSPENDED day." A gate that always answers LOCKED drops `myEntry`.
+        submit(ada, bondId, """{"text":"my own words"}""").status shouldBe 201
+
+        for (status in DAY_STATUSES) {
+            setDayByHand(status)
+
+            withClue(status) {
+                myEntryJson(getToday(ada, bondId).contentAsString) shouldContain "\"text\":\"my own words\""
+            }
+        }
+    }
+
+    @Test
+    fun `a withdrawn entry is a tombstone for everyone, its author included`() {
+        // Erasure beats both of BR-1's grants: authorship and a reveal. The
+        // row's text is deliberately LEFT IN PLACE in every state below, so
+        // the only thing between the words and the wire is the gate — a gate
+        // without the tombstone clause hands them to the author (always) and
+        // to the partner (once revealed), and `shouldNotContain` fails.
+        submit(ada, bondId, """{"text":"words I took back"}""").status shouldBe 201
+        submit(bea, bondId, """{"text":"bea's own"}""").status shouldBe 201
+
+        val erasedStates =
+            listOf(
+                "status = 'DELETED', deleted_at = now(), revealed_at = NULL",
+                "status = 'SUBMITTED', deleted_at = now(), revealed_at = NULL",
+                "status = 'DELETED', deleted_at = NULL, revealed_at = NULL",
+                "status = 'REVEALED', deleted_at = now(), revealed_at = now()",
+            )
+        for (state in erasedStates) {
+            jdbc.update("UPDATE entries SET $state WHERE author_member_id = ?::uuid", memberIdOf(ada))
+
+            val asAuthor = getToday(ada, bondId).contentAsString
+            val asPartner = getToday(bea, bondId).contentAsString
+
+            withClue(state) {
+                myEntryJson(asAuthor) shouldContain "\"text\":null"
+                myEntryJson(asAuthor) shouldContain "\"status\":\"DELETED\""
+                asAuthor shouldNotContain "words I took back"
+                partnerEntryJson(asPartner) shouldContain "\"text\":null"
+                partnerEntryJson(asPartner) shouldContain "\"status\":\"DELETED\""
+                asPartner shouldNotContain "words I took back"
+            }
+        }
+    }
+
+    @Test
+    fun `a non-member reads nothing, regardless of reveal state`() {
+        // Membership is checked FIRST: a revealed entry is not public.
+        submit(bea, bondId, """{"text":"revealed, not published"}""").status shouldBe 201
+        revealByHand(bea)
+        setDayByHand("REVEALED")
+        val stranger = users.verified("Eve")
+
+        val today = getToday(stranger, bondId)
+
+        today.status shouldBe 404
+        today.contentAsString shouldNotContain "revealed, not published"
+    }
+
+    @Test
+    fun `a replayed response goes through the same gate as today`() {
+        // Spec §4: "The same gate applies to ... replayed responses, not just
+        // today." The row is erased with only `deleted_at` set and its text
+        // left in place: a replay that renders the entry without asking BR-1
+        // (the shape this replaces looked at `status` alone) returns the words.
+        val key = UUID.randomUUID().toString()
+        submit(ada, bondId, """{"text":"said once"}""", key).status shouldBe 201
+        jdbc.update("UPDATE entries SET deleted_at = now()")
+
+        val replay = submit(ada, bondId, """{"text":"said once"}""", key)
+
+        replay.status shouldBe 201
+        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
+        replay.contentAsString shouldContain "\"text\":null"
+        replay.contentAsString shouldContain "\"status\":\"DELETED\""
+        replay.contentAsString shouldNotContain "said once"
+    }
+
     // ---- helpers --------------------------------------------------------
+
+    /** C2's reveal, by hand: the entry's own timestamp and status, nothing else. */
+    private fun revealByHand(author: UUID) {
+        jdbc.update("UPDATE entries SET revealed_at = now(), status = 'REVEALED' WHERE author_member_id = ?::uuid", memberIdOf(author)) shouldBe 1
+    }
+
+    /** C2's and C3's day transitions, by hand: the status, and `closed_at` exactly where that status is a closed one. */
+    private fun setDayByHand(status: String) {
+        val closed = status in setOf("REVEALED", "SOLO", "EMPTY", "FROZEN")
+        jdbc.update(
+            "UPDATE bond_days SET status = ?, closed_at = CASE WHEN ? THEN now() ELSE NULL END WHERE bond_id = ?::uuid",
+            status,
+            closed,
+            bondId,
+        ) shouldBe 1
+    }
+
+    private fun memberIdOf(user: UUID): String =
+        jdbc.queryForObject("SELECT id::text FROM bond_members WHERE bond_id = ?::uuid AND user_id = ?", String::class.java, bondId, user)!!
 
     private fun submit(
         caller: UUID,
         bondId: String,
         body: String,
+        key: String = UUID.randomUUID().toString(),
     ): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/bonds/$bondId/entries") {
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(caller).token}")
-                header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                header(IdempotencyInterceptor.HEADER, key)
                 contentType = MediaType.APPLICATION_JSON
                 content = body
             }.andReturn()
@@ -231,7 +393,14 @@ internal class RevealGateTest(
     /** `partnerEntry`'s own JSON object, scoped out of the whole response body — fix round 1, M2. */
     private fun partnerEntryJson(body: String): String = PARTNER_ENTRY.find(body)!!.groupValues[1]
 
+    /** `myEntry`'s own JSON object, scoped the same way. */
+    private fun myEntryJson(body: String): String = MY_ENTRY.find(body)!!.groupValues[1]
+
     private companion object {
         val PARTNER_ENTRY = Regex(""""partnerEntry":(\{[^}]*})""")
+        val MY_ENTRY = Regex(""""myEntry":(\{[^}]*})""")
+
+        /** Doc 04 §3's eight, as V12's CHECK spells them. */
+        val DAY_STATUSES = listOf("OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN")
     }
 }

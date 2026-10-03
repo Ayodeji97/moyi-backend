@@ -1,8 +1,10 @@
 package com.moyi.gratitude.service
 
 import com.moyi.bond.api.BondAnchorTimeline
+import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.BondCalendar
 import com.moyi.gratitude.domain.DayWindow
+import com.moyi.gratitude.domain.Reader
 
 /**
  * The bond's anchor timeline, as the [BondCalendar] `gratitude.domain` asks
@@ -21,3 +23,12 @@ internal fun BondAnchorTimeline.asCalendar(): BondCalendar =
     BondCalendar { at ->
         if (at.isBefore(beginsAt)) null else dayBoundsAt(at).let { DayWindow(it.date, it.startsAt, it.endsAt) }
     }
+
+/**
+ * The caller, as BR-1's gate wants them: their member id together with the
+ * bond that membership is of. Both come from the one [BondMembership]
+ * `bond.api.BondAccess` resolved — which is what makes the gate's
+ * "membership first" a check against a membership somebody actually verified,
+ * not against a bond id a request named.
+ */
+internal fun BondMembership.asReader(): Reader = Reader(memberId = memberId, bondId = bondId)

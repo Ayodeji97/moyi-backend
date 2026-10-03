@@ -75,13 +75,20 @@ internal class BondDayTest {
     }
 
     @Test
-    fun `an author always reads their own entry, and nobody reads a locked one`() {
-        // BR-1's three clauses. In C1 only the first can be true.
-        val day = BondDay.open(dayId, bondId, window, lagos, now).withEntry()
-        val mine = Entry.submit(EntryId(UUID.randomUUID()), day.id, bondId, ada, text, now, now)
+    fun `a day is settled once it is stamped closed, whatever its status says`() {
+        // Spec §6.1.2: "already settled (closedAt != null, including FROZEN and
+        // elapsed SUSPENDED), or already REVEALED before midnight". The
+        // elapsed SUSPENDED day is the one a status-only test misses: the
+        // close stamps it and leaves its status alone (§6.4).
+        val open = BondDay.open(dayId, bondId, window, lagos, now)
+        val suspended = BondDay.openSuspended(dayId, bondId, window, lagos, now)
 
-        mine.canBeReadBy(ada, day) shouldBe true
-        mine.canBeReadBy(bea, day) shouldBe false
+        open.isSettled shouldBe false
+        suspended.isSettled shouldBe false
+        suspended.copy(closedAt = now).isSettled shouldBe true
+        open.copy(status = BondDayStatus.FROZEN, closedAt = now).isSettled shouldBe true
+        // Revealed by the second submission, before any close has stamped it.
+        open.copy(status = BondDayStatus.REVEALED).isSettled shouldBe true
     }
 
     @Test

@@ -90,7 +90,12 @@ internal class EntriesController(
             submitEntry.submit(caller.id, bondIdOrNotFound(bondId), request.toDraft(), IdempotencyInterceptor.requestOf(http))
         val response = ResponseEntity.status(submission.status)
         if (submission.replayed) response.header(IdempotencyInterceptor.REPLAYED_HEADER, "true")
-        return response.body(EntryResponse.from(submission.view))
+        // The body is BR-1's answer for this caller (spec §4: a replayed
+        // response is under the same gate as `today`). An author's own entry
+        // is always this shape — in full, or its tombstone — so the 404 is
+        // unreachable today, and is what answers if BR-1 ever stops saying so.
+        val body = EntryResponse.from(submission.view) ?: throw NotFoundException("That entry was not found.")
+        return response.body(body)
     }
 
     /**

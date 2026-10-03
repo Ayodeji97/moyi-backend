@@ -8,12 +8,16 @@ import com.moyi.common.web.idempotency.IdempotentExecution
 import com.moyi.common.web.idempotency.IdempotentRequest
 import com.moyi.common.web.idempotency.IdempotentResult
 import com.moyi.common.web.idempotency.ResultKind
+import com.moyi.gratitude.domain.BondCalendar
 import com.moyi.gratitude.domain.BondDay
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.DayAssignment
+import com.moyi.gratitude.domain.DayWindow
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
+import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryText
+import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.GratitudeConstraints
@@ -51,9 +55,14 @@ internal data class EntryDraft(
     val intendedAt: Instant?,
 )
 
-/** An entry and the day it is filed on — what the web layer renders. */
+/**
+ * An entry **as BR-1 answered for the caller**, and the day it is filed on —
+ * what the web layer renders. An [EntryReading], not an [Entry]: a fresh
+ * write and a replay both leave this class through [Entry.readBy], so the
+ * response is built from the gate's answer on either path.
+ */
 internal data class EntryView(
-    val entry: Entry,
+    val entry: EntryReading,
     val day: BondDay,
 )
 
@@ -99,7 +108,10 @@ internal data class Submission(
  * Those two are *write* guards; the write already happened. Then the entry
  * *as it is now*: one erased since comes back as its tombstone, with no
  * text, because there is no second copy of the words to answer from (V11
- * stores identity only). The unlocked `membershipOf`, not
+ * stores identity only). **What is rendered is BR-1's answer, not this
+ * class's**: the replay asks [Entry.readBy] exactly as `GetToday` does (spec
+ * §4 names "replayed responses" as under the same gate), so a tombstone is a
+ * tombstone here for the reason it is one there. The unlocked `membershipOf`, not
  * `lockMembershipOf`: a read never queues behind the bond lock.
  *
  * **Then bond, then bond-day, then entry, held to commit (spec §2.1).** The
@@ -135,6 +147,19 @@ internal data class Submission(
  *    gave — `SUSPENDED` rather than `OPEN` while
  *    [BondMembership.awaitingSecondMember] (doc 04 §8.3a, `02` J1: the
  *    creator may write before their partner joins).
+ *    **Then BR-3a is asked again, under the day's own lock** (spec §6.1.3).
+ *    The settled-day check inside [DayAssignment.resolve] reads the day
+ *    before any lock on it is held, and the close job takes no bond lock
+ *    (plan R1), so a close can land between that read and
+ *    [BondDayStore.lockAndFind]. If the day is settled once locked: an entry
+ *    that was placed there by its `intendedAt` is **redirected once** to the
+ *    day containing the submission instant — the words are kept, on a day
+ *    that can still hold them — and anything else is `409 DAY_CLOSED`. The
+ *    redirect does not recurse: a submission-time day that is itself settled
+ *    is `409 DAY_CLOSED` too. It takes a second bond-day lock while holding
+ *    the first; that is safe because every submitter of this bond is already
+ *    serialised on the bond lock, and it obliges a lock-free writer (C3)
+ *    never to hold two days of one bond at once.
  * 5. The insert. `entries_one_per_member_per_day` (V12/BR-2) is what
  *    refuses a second entry from the same member on the same day — this
  *    method attempts the write and catches the conflict, it does not read
@@ -244,7 +269,8 @@ internal class SubmitEntry(
      * those refuse writes, and this writes nothing. The mismatches below
      * cannot happen for a key this class wrote (the path it was stored under
      * names [bondId], and its caller wrote the entry), so each answers as "no
-     * such thing" rather than trusting a row that does not fit.
+     * such thing" rather than trusting a row that does not fit. The entry is
+     * handed on as BR-1 answers for this caller ([Entry.readBy]), never raw.
      */
     private fun replay(
         userId: UUID,
@@ -252,10 +278,19 @@ internal class SubmitEntry(
         entryId: EntryId,
     ): EntryView {
         val membership = access.membershipOf(userId, bondId)
-        val entry = entries.find(entryId)?.takeIf { it.bondId == bondId && it.authorMemberId == membership.memberId }
-        val day = entry?.let { days.find(it.bondDayId) }
-        if (entry == null || day == null) throw NotFoundException("That entry was not found.")
-        return EntryView(entry, day)
+        // The author guard is the replay's own: a key answers only the member
+        // whose request it recorded. What that member may then SEE is BR-1's
+        // question, asked of the same gate `GetToday` asks — an entry of some
+        // other bond is NOT_A_MEMBER there, and is not rendered here.
+        val reading =
+            entries
+                .find(entryId)
+                ?.takeIf { it.authorMemberId == membership.memberId }
+                ?.readBy(membership.asReader())
+                ?.takeUnless { it.readability == Readability.NOT_A_MEMBER }
+        val day = reading?.let { days.find(it.bondDayId) }
+        if (reading == null || day == null) throw NotFoundException("That entry was not found.")
+        return EntryView(reading, day)
     }
 
     /** Steps 4 and 5 of the class KDoc, under the bond lock [submit] already holds. */
@@ -267,23 +302,22 @@ internal class SubmitEntry(
     ): EntryView {
         val bondId = membership.bondId
         val timeline = membership.anchorTimeline
-        val resolution =
-            DayAssignment.resolve(now, draft.intendedAt, timeline.asCalendar()) { candidate ->
-                days.statusOf(bondId, candidate)?.isClosed == true
+        val calendar = timeline.asCalendar()
+        val claimed =
+            DayAssignment.resolve(now, draft.intendedAt, calendar) { candidate ->
+                days.findByBondAndDate(bondId, candidate)?.isSettled == true
             }
-        val window = resolution.bounds
-        // The snapshot `anchor_timezone` keeps: the zone in force when this
-        // day began. Taken at `startsAt`, not at `now` or `resolvedAt`, so
-        // whichever writer opens the row stamps the same zone. Relies on
-        // `dayAt` never returning an empty window: an instant always lies in one.
-        val zone = ZoneId.of(timeline.zoneIdAt(window.startsAt))
-        val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
-        val opened = days.openOrGet(bondId, window, zone, now, openStatus)
-        // Locked, then re-read fresh under that lock — see the class KDoc's
-        // own note on I3. `opened`'s own entryCount/status is not used past
-        // this point; `day` is.
-        val day = days.lockAndFind(opened.id)
-        if (day.isClosed) throw DayClosedException()
+        val claimedDay = openAndLock(membership, claimed.bounds, now)
+        // BR-3a, rechecked under the day's own lock (spec §6.1.3). The check
+        // inside `resolve` read the day before this lock was held, and the
+        // close job takes no bond lock (plan R1), so a close can land in
+        // between. See step 4 of the class KDoc.
+        val (resolution, day) =
+            if (!claimedDay.isSettled) {
+                claimed to claimedDay
+            } else {
+                redirectOnce(membership, claimed, calendar, now) ?: throw DayClosedException()
+            }
 
         val entry =
             Entry.submit(
@@ -302,7 +336,49 @@ internal class SubmitEntry(
         entries.insert(entry)
         val updated = day.withEntry()
         days.update(updated)
-        return EntryView(entry, updated)
+        return EntryView(entry.readBy(membership.asReader()), updated)
+    }
+
+    /**
+     * BR-3a's one redirect (spec §6.1.3): [claimed]'s day turned out settled
+     * once locked, so the entry goes to the day containing the submission
+     * instant instead — resolved through the same [calendar], never a computed
+     * midnight. `null` when there is nowhere to redirect to: the entry was
+     * never placed by its `intendedAt` (it is *on* the submission-time day
+     * already), the claim named that same day, or that day is settled too.
+     * Not recursive, by construction: it resolves with no claim, and asks once.
+     */
+    private fun redirectOnce(
+        membership: BondMembership,
+        claimed: DayAssignment.Resolution,
+        calendar: BondCalendar,
+        now: Instant,
+    ): Pair<DayAssignment.Resolution, BondDay>? {
+        if (!claimed.usedIntendedAt) return null
+        val fallback = DayAssignment.resolve(now, null, calendar) { false }
+        if (fallback.date == claimed.date) return null
+        return (fallback to openAndLock(membership, fallback.bounds, now)).takeUnless { (_, day) -> day.isSettled }
+    }
+
+    /**
+     * Opens (or finds) the day for [window] and returns it **locked and
+     * re-read under that lock** — the class KDoc's note on I3. What
+     * [BondDayStore.openOrGet] itself returned is not used: its
+     * `entryCount`/`status`/`closedAt` predate the lock.
+     */
+    private fun openAndLock(
+        membership: BondMembership,
+        window: DayWindow,
+        now: Instant,
+    ): BondDay {
+        // The snapshot `anchor_timezone` keeps: the zone in force when this
+        // day began. Taken at `startsAt`, not at `now` or `resolvedAt`, so
+        // whichever writer opens the row stamps the same zone. Relies on
+        // `dayAt` never returning an empty window: an instant always lies in one.
+        val zone = ZoneId.of(membership.anchorTimeline.zoneIdAt(window.startsAt))
+        val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
+        val opened = days.openOrGet(membership.bondId, window, zone, now, openStatus)
+        return days.lockAndFind(opened.id)
     }
 
     private companion object {

@@ -4,6 +4,7 @@ import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.DayAssignment
 import com.moyi.gratitude.domain.Entry
+import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import org.springframework.stereotype.Service
@@ -13,24 +14,21 @@ import java.time.LocalDate
 
 /**
  * What [GetToday.today] hands the web layer: the date "today" resolves to in
- * the bond's own calendar, the status that date's row carries (or [BondDayStatus.OPEN]
- * when no row exists yet — see [GetToday]'s own KDoc), the caller's own entry
- * in full, and their partner's entry exactly as BR-1 says the caller may see
- * it.
+ * the bond's own calendar, the status that date's row carries (or the status
+ * it would open under when no row exists yet — see [GetToday]'s own KDoc),
+ * and each side's entry **as BR-1 answered for this caller**.
  *
- * [partnerEntry] and [partnerEntryVisible] travel separately rather than as
- * one nullable-or-not field, because "absent" and "present but locked" are
- * different facts the web layer has to tell apart to choose between
- * [com.moyi.gratitude.web.LockedEntryResponse] and nothing at all —
- * collapsing them here would make the controller re-derive [Entry.canBeReadBy]
- * a second time, or trust a `null` that could mean either.
+ * Both entries are [EntryReading]s, never [Entry]s: the gate has already run
+ * by the time this object exists, and its answer travels with the entry it
+ * was given for. The web layer chooses a shape from
+ * [EntryReading.readability]; it has no entry to ask about, and no words to
+ * render that the gate did not grant.
  */
 internal data class TodayView(
     val date: LocalDate,
     val status: BondDayStatus,
-    val myEntry: Entry?,
-    val partnerEntry: Entry?,
-    val partnerEntryVisible: Boolean,
+    val myEntry: EntryReading?,
+    val partnerEntry: EntryReading?,
 )
 
 /**
@@ -59,17 +57,12 @@ internal data class TodayView(
  * put — fix round 1, C1.
  *
  * **BR-1 is asked, never restated, for *both* entries — including the
- * caller's own.** [Entry.canBeReadBy]'s own first clause
- * (`memberId == authorMemberId`) already makes [myEntry] readable without
- * this method special-casing it — but [today] still calls [Entry.canBeReadBy]
- * on it rather than assuming that clause is checked elsewhere, so a caller's
- * own entry stays exempt only because BR-1 currently exempts it. If that
- * clause is ever narrowed (a blocked partner, an archived bond), this method
- * follows without needing to change — fix round 1, I1: an earlier version of
- * this KDoc claimed this already and the code did not yet do it; asserted
- * now by `authorMemberId` selecting *which* entry is "mine" (a routing
- * decision, not a security one) and [Entry.canBeReadBy] alone deciding
- * whether it is rendered.
+ * caller's own.** `authorMemberId` selects *which* entry is "mine" (a routing
+ * decision, not a security one); [Entry.readBy] alone decides what of either
+ * is rendered. So the caller's own entry is exempt only because BR-1 exempts
+ * it, and is a tombstone the moment BR-1 says an erased entry is one for its
+ * author too. **The day's status plays no part**: BR-1 keys on the entry's
+ * own `revealedAt` (spec §4), so [today] hands the gate no day to consult.
  *
  * **Nothing here is cached.** Every call re-reads the row and the entries
  * fresh; the day this returns is only ever as current as the transaction
@@ -106,23 +99,16 @@ internal class GetToday(
 
         if (day == null) {
             val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
-            return TodayView(date = date, status = status, myEntry = null, partnerEntry = null, partnerEntryVisible = false)
+            return TodayView(date = date, status = status, myEntry = null, partnerEntry = null)
         }
 
+        val reader = membership.asReader()
         val entryList = entries.findForDay(day.id)
-        val myEntry =
-            entryList
-                .firstOrNull { it.authorMemberId == membership.memberId }
-                ?.takeIf { it.canBeReadBy(membership.memberId, day) }
-        val partnerEntry = entryList.firstOrNull { it.authorMemberId != membership.memberId }
-        val partnerEntryVisible = partnerEntry != null && partnerEntry.canBeReadBy(membership.memberId, day)
-
         return TodayView(
             date = date,
             status = day.status,
-            myEntry = myEntry,
-            partnerEntry = partnerEntry,
-            partnerEntryVisible = partnerEntryVisible,
+            myEntry = entryList.firstOrNull { it.authorMemberId == membership.memberId }?.readBy(reader),
+            partnerEntry = entryList.firstOrNull { it.authorMemberId != membership.memberId }?.readBy(reader),
         )
     }
 }

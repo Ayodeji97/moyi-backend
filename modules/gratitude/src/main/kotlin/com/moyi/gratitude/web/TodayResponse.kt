@@ -1,6 +1,8 @@
 package com.moyi.gratitude.web
 
 import com.moyi.gratitude.domain.BondDayStatus
+import com.moyi.gratitude.domain.EntryReading
+import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.service.TodayView
 import java.time.LocalDate
 
@@ -16,25 +18,22 @@ import java.time.LocalDate
  * only two places any content can appear, and BR-1 gates both.
  *
  * [myEntry] is the caller's own entry, in the same shape [EntryResponse]
- * already gives a fresh submission — `null` until they have written today,
- * or (never reachable today, but not assumed impossible — see `GetToday`'s
- * own KDoc, fix round 1, I1) if BR-1 is ever narrowed to stop exempting an
- * author from their own gate.
+ * already gives a fresh submission — `null` until they have written today.
+ * It is rendered from BR-1's answer like any other entry (`GetToday`'s own
+ * KDoc), so an entry the caller withdrew is its tombstone here too.
  *
- * [partnerEntry] is [PartnerEntryResponse]`?` — [EntryResponse] (in full,
- * when [com.moyi.gratitude.domain.Entry.canBeReadBy] grants it) or
- * [LockedEntryResponse] (when it does not), or `null` when there is no
- * partner entry to report at all. **C1 itself only ever produces the last
- * two** — no status C1 assigns (`OPEN`, `PARTIAL`, `SUSPENDED`) ever satisfies
- * BR-1's reveal clauses, so a partner's entry is always locked here, never
- * revealed — but [TodayResponse.from] asks [com.moyi.gratitude.domain.Entry.canBeReadBy]
- * the same question C2's `REVEALED` and C3's `SOLO` will answer differently,
- * rather than hard-coding "always locked" and leaving a later slice to
- * discover that this response type never actually reveals anything. Doc 12's
- * reveal-gate test proves exactly this: flip [com.moyi.gratitude.domain.Entry.canBeReadBy]
- * to always `true` and a partner's entry stops being a [LockedEntryResponse]
- * and becomes a full [EntryResponse] instead — the failure the gate's own
- * test is written to catch.
+ * [partnerEntry] is [PartnerEntryResponse]`?` — [EntryResponse] (in full once
+ * the entry has been revealed, or its tombstone once withdrawn),
+ * [LockedEntryResponse] (not yet revealed), or `null` when there is no
+ * partner entry to report at all. **C1's own writes only ever produce the
+ * locked one and the absent one** — C1 sets `revealedAt` nowhere — but
+ * [PartnerEntryResponse.of] renders whatever
+ * [com.moyi.gratitude.domain.Entry.canBeReadBy] answered rather than
+ * hard-coding "always locked", so C2's reveal needs no change here. Doc 12's
+ * reveal-gate test proves exactly this: make the gate answer `FULL` always
+ * and a partner's entry stops being a [LockedEntryResponse] and becomes a
+ * full [EntryResponse] instead — the failure the gate's own test is written
+ * to catch.
  *
  * **`streak` and `prompt` are absent, not `null` placeholders.** They arrive
  * in C4 and C6 respectively (doc 06 §3.3's own promise for `BondResponse`
@@ -69,10 +68,7 @@ internal data class TodayResponse(
             TodayResponse(
                 bondDay = BondDayResponse(date = view.date, status = view.status),
                 myEntry = view.myEntry?.let { EntryResponse.of(it, view.date) },
-                partnerEntry =
-                    view.partnerEntry?.let { entry ->
-                        if (view.partnerEntryVisible) EntryResponse.of(entry, view.date) else LockedEntryResponse(entry.authorMemberId)
-                    },
+                partnerEntry = view.partnerEntry?.let { PartnerEntryResponse.of(it, view.date) },
             )
     }
 }
@@ -112,7 +108,26 @@ internal data class TodayResponse(
  * `Idempotency-Key`) is the fix that keeps this module's own dependencies
  * as they are.
  */
-internal sealed interface PartnerEntryResponse
+internal sealed interface PartnerEntryResponse {
+    companion object {
+        /**
+         * BR-1's answer, as a wire shape — exhaustive over [Readability], so a
+         * fifth answer is a compile error here rather than a default nobody
+         * chose. Full or tombstone: [EntryResponse]. Locked: BR-8's
+         * [LockedEntryResponse], which is given the author and nothing else.
+         * A non-member: nothing.
+         */
+        fun of(
+            reading: EntryReading,
+            date: LocalDate,
+        ): PartnerEntryResponse? =
+            when (reading.readability) {
+                Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date)
+                Readability.LOCKED -> LockedEntryResponse(reading.authorMemberId)
+                Readability.NOT_A_MEMBER -> null
+            }
+    }
+}
 
 /**
  * The Bond-day itself, as much of it as any caller in this bond may see:

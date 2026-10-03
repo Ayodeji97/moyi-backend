@@ -83,28 +83,43 @@ internal data class Entry(
     }
 
     /**
-     * BR-1 — and in this slice only its first clause can ever be `true`: no
-     * [BondDay] this module produces yet is [BondDayStatus.REVEALED], and
-     * nothing produces [BondDayStatus.SOLO] either. Both arrive with later
-     * slices; this method is written for the rule BR-1 states, not for the
-     * subset of it C1 can reach, so it needs no change when they do.
+     * BR-1, in the order the spec states it (§4, as revised):
      *
-     * `day.status == SOLO && day.isClosed` restates BR-1's own conjunction
-     * rather than collapsing it to `day.status == SOLO` — every
-     * [BondDayStatus.SOLO] day is [BondDay.isClosed] by definition today, so
-     * the second half is redundant as written. It stays spelled out on
-     * purpose: BR-1 is stated as two conditions, and a status added to the
-     * closed set later without BR-1's wording being revisited should fail
-     * this comment's premise loudly rather than have this check silently
-     * stop matching the rule it claims to implement.
+     * 1. **Membership first.** A revealed entry is not public: a [reader]
+     *    whose membership is of another bond gets [Readability.NOT_A_MEMBER]
+     *    before any question about content is asked.
+     * 2. **Erasure beats everything.** A deleted or withdrawn entry is a
+     *    [Readability.TOMBSTONE] for both people, its author included — there
+     *    is one copy of the text and BR-10a makes the erasure total. Either
+     *    mark of an erasure counts, [deletedAt] or [EntryStatus.DELETED]: an
+     *    erasure that has set one and not yet the other is already an erasure.
+     * 3. **Otherwise: your own words, or a revealed entry.** Keyed on
+     *    [revealedAt], **not** on the day's status — which is why this takes
+     *    no `BondDay` at all. A solo day that reveals and is then frozen still
+     *    has `revealedAt` set, and words the partner has already read must not
+     *    become unreadable because a later transition rewrote the day; nor
+     *    does a `FROZEN`, `REVEALED` or `SOLO` status reveal an entry whose
+     *    own timestamp was never set. The timestamp is monotonic — nothing in
+     *    this phase clears it.
+     *
+     * C1 sets [revealedAt] nowhere (C2's reveal does), so only [Readability.FULL]
+     * for an author and [Readability.LOCKED] for a partner are reachable
+     * through this slice's own writes. The rule is written whole regardless.
+     *
+     * Callers that render want [readBy], which returns the answer bound to
+     * the entry it was given for.
      */
-    fun canBeReadBy(
-        memberId: UUID,
-        day: BondDay,
-    ): Boolean =
-        memberId == authorMemberId ||
-            day.status == BondDayStatus.REVEALED ||
-            (day.status == BondDayStatus.SOLO && day.isClosed)
+    fun canBeReadBy(reader: Reader): Readability =
+        when {
+            reader.bondId != bondId -> Readability.NOT_A_MEMBER
+            deletedAt != null || status == EntryStatus.DELETED -> Readability.TOMBSTONE
+            authorMemberId == reader.memberId -> Readability.FULL
+            revealedAt != null -> Readability.FULL
+            else -> Readability.LOCKED
+        }
+
+    /** This entry as [reader] may see it — the only form an entry is rendered from ([EntryReading]). */
+    fun readBy(reader: Reader): EntryReading = EntryReading.of(this, reader)
 
     companion object {
         /**

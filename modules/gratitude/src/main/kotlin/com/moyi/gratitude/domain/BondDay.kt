@@ -112,6 +112,17 @@ internal data class BondDay(
     val isClosed: Boolean get() = status.isClosed
 
     /**
+     * BR-3a's "already settled" (spec §6.1.2): nothing may be filed on this
+     * day any more. `closedAt != null` is the spec's own test and covers what
+     * the status cannot — an **elapsed `SUSPENDED`** day keeps its status when
+     * the close job stamps it (§6.4), and [BondDayStatus.SUSPENDED] is not a
+     * closed status. `status.isClosed` covers the other half of that
+     * sentence, a day "already `REVEALED` before midnight": revealed by the
+     * second submission, and not yet stamped by a close.
+     */
+    val isSettled: Boolean get() = closedAt != null || status.isClosed
+
+    /**
      * One more entry has arrived (doc 04 §3) — the day row's own reaction to
      * what BR-2's unique index on `entries` just allowed through.
      *
