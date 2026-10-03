@@ -2,11 +2,14 @@ package com.moyi.gratitude.web
 
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.withClue
+import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -16,6 +19,7 @@ import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.context.annotation.Import
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
@@ -23,25 +27,38 @@ import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
 /**
- * FR-060's acceptance clause, parameterised. A failure here is a P0 (doc 11).
- * C1 covers the statuses C1 can produce; C2 extends the matrix to REVEALED
- * and C3 to SOLO, and neither may narrow what is asserted here.
+ * FR-060's acceptance clause. A failure here is a P0 (doc 11).
+ *
+ * **The whole of BR-1 is asserted here, not only what C1's own writes can
+ * produce.** C1 opens days `OPEN` or `SUSPENDED`, moves them to `PARTIAL`,
+ * and sets `revealed_at` and `deleted_at` nowhere — C2 reveals, C3 closes,
+ * a later slice erases. The gate is nonetheless written for the rule as the
+ * spec states it (§4), so the states those slices will produce are put in
+ * place **by hand, with `UPDATE`**, and each test that does so says so: all
+ * eight day statuses, a revealed entry, and an erased one in each order of
+ * revealing and erasing. C2 and C3 replace the hand-made states with their
+ * own transitions; neither may narrow what is asserted.
  *
  * `EntriesEndpointTest`'s own harness — a paired bond (`ada` and `bea`)
  * through the real `bond` endpoints [GratitudeTestApplication] scans for,
- * against a real Postgres, truncated between tests.
+ * against a real Postgres, truncated between tests. The clock is pinned to
+ * the middle of a Lagos day, so "today" is one fixed Bond-day for the whole
+ * of every test and never the far side of a midnight.
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
+@Import(SubmitEntryBondLockTest.TimeConfiguration::class)
 internal class RevealGateTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
+    @Autowired private val clock: MutableClock,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -52,6 +69,7 @@ internal class RevealGateTest(
 
     @BeforeEach
     fun setUp() {
+        clock.set(NOW)
         ada = users.verified("Ada")
         bea = users.verified("Bea")
 
@@ -214,6 +232,28 @@ internal class RevealGateTest(
     }
 
     @Test
+    fun `the caller having written too does not reveal the partner's entry, under any day status`() {
+        // The ordinary C1 state: both have written, nothing has been revealed
+        // (C2 owns the reveal). A gate that reveals once both entries exist —
+        // keyed on the day's entry count, say — answers Bea's entry in full
+        // here, and both the exact-shape and the body-wide assertion see it.
+        val beaMemberId = authorMemberIdOf(submit(bea, bondId, """{"text":"a secret kindness"}""").also { it.status shouldBe 201 })
+        submit(ada, bondId, """{"text":"my own words"}""").status shouldBe 201
+
+        for (status in DAY_STATUSES) {
+            setDayByHand(status)
+
+            val today = getToday(ada, bondId).contentAsString
+
+            withClue(status) {
+                partnerEntryJson(today) shouldBe """{"authorMemberId":"$beaMemberId","status":"LOCKED"}"""
+                myEntryJson(today) shouldContain "\"text\":\"my own words\""
+                today shouldNotContain "a secret kindness"
+            }
+        }
+    }
+
+    @Test
     fun `a revealed entry stays readable whatever the day becomes - frozen, suspended, anything`() {
         // `revealedAt` is monotonic: applying a freeze to a solo day, or
         // suspending the bond later, must not hide words the partner has
@@ -251,32 +291,68 @@ internal class RevealGateTest(
     }
 
     @Test
-    fun `a withdrawn entry is a tombstone for everyone, its author included`() {
-        // Erasure beats both of BR-1's grants: authorship and a reveal. The
-        // row's text is deliberately LEFT IN PLACE in every state below, so
-        // the only thing between the words and the wire is the gate — a gate
-        // without the tombstone clause hands them to the author (always) and
-        // to the partner (once revealed), and `shouldNotContain` fails.
-        submit(ada, bondId, """{"text":"words I took back"}""").status shouldBe 201
-        submit(bea, bondId, """{"text":"bea's own"}""").status shouldBe 201
+    fun `an author's withdrawn entry is the wide tombstone for them, whatever the erasure left behind`() {
+        // Erasure beats authorship. The row's text is deliberately LEFT IN
+        // PLACE in every state below, so the only thing between the words and
+        // the wire is the gate — a gate without the tombstone clause hands
+        // them back to their author and `shouldNotContain` fails.
+        val submitted = submit(ada, bondId, """{"text":"words I took back"}""")
+        submitted.status shouldBe 201
 
-        val erasedStates =
-            listOf(
-                "status = 'DELETED', deleted_at = now(), revealed_at = NULL",
-                "status = 'SUBMITTED', deleted_at = now(), revealed_at = NULL",
-                "status = 'DELETED', deleted_at = NULL, revealed_at = NULL",
-                "status = 'REVEALED', deleted_at = now(), revealed_at = now()",
-            )
-        for (state in erasedStates) {
-            jdbc.update("UPDATE entries SET $state WHERE author_member_id = ?::uuid", memberIdOf(ada))
+        for (state in ERASED_STATES) {
+            jdbc.update("UPDATE entries SET $state WHERE author_member_id = ?::uuid", memberIdOf(ada)) shouldBe 1
 
             val asAuthor = getToday(ada, bondId).contentAsString
-            val asPartner = getToday(bea, bondId).contentAsString
 
             withClue(state) {
+                myEntryJson(asAuthor) shouldContain "\"id\":\"${idOf(submitted)}\""
                 myEntryJson(asAuthor) shouldContain "\"text\":null"
                 myEntryJson(asAuthor) shouldContain "\"status\":\"DELETED\""
                 asAuthor shouldNotContain "words I took back"
+            }
+        }
+    }
+
+    @Test
+    fun `a partner who never could read a withdrawn entry sees its author and that it is gone, and nothing else`() {
+        // BR-8: while the entry was live this reader was entitled to author
+        // and status. An erasure does not entitle them to more — not the id,
+        // not when it was written. A gate that answers the wide tombstone
+        // here fails the exact-equality assertion: the wide shape carries
+        // `id`, `date`, `createdAt`, `intendedAt` and a `text` key.
+        val adaMemberId = authorMemberIdOf(submit(ada, bondId, """{"text":"words I took back"}""").also { it.status shouldBe 201 })
+
+        for (state in ERASED_STATES.filter { "revealed_at = NULL" in it }) {
+            jdbc.update("UPDATE entries SET $state WHERE author_member_id = ?::uuid", memberIdOf(ada)) shouldBe 1
+
+            // Before Bea has written, and after: her own entry changes nothing.
+            for (beaHasWritten in listOf(false, true)) {
+                if (beaHasWritten) submit(bea, bondId, """{"text":"bea's own"}""")
+
+                val asPartner = getToday(bea, bondId).contentAsString
+
+                withClue("$state, beaHasWritten=$beaHasWritten") {
+                    partnerEntryJson(asPartner) shouldBe """{"authorMemberId":"$adaMemberId","status":"DELETED"}"""
+                    asPartner shouldNotContain "words I took back"
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a partner who had read a withdrawn entry gets the wide tombstone, without its words`() {
+        // Revealed, then erased: this reader already knows the entry and
+        // when it was written. Only the words go.
+        val submitted = submit(ada, bondId, """{"text":"words I took back"}""")
+        submitted.status shouldBe 201
+
+        for (state in ERASED_STATES.filter { "revealed_at = now()" in it }) {
+            jdbc.update("UPDATE entries SET $state WHERE author_member_id = ?::uuid", memberIdOf(ada)) shouldBe 1
+
+            val asPartner = getToday(bea, bondId).contentAsString
+
+            withClue(state) {
+                partnerEntryJson(asPartner) shouldContain "\"id\":\"${idOf(submitted)}\""
                 partnerEntryJson(asPartner) shouldContain "\"text\":null"
                 partnerEntryJson(asPartner) shouldContain "\"status\":\"DELETED\""
                 asPartner shouldNotContain "words I took back"
@@ -285,17 +361,26 @@ internal class RevealGateTest(
     }
 
     @Test
-    fun `a non-member reads nothing, regardless of reveal state`() {
-        // Membership is checked FIRST: a revealed entry is not public.
+    fun `a non-member gets the one 404, whether or not the entry has been revealed`() {
+        // Membership is checked FIRST: a revealed entry is not public. The
+        // answer is the same 404 an unknown bond gets, before and after the
+        // reveal — nothing about the entry's state reaches a non-member.
         submit(bea, bondId, """{"text":"revealed, not published"}""").status shouldBe 201
-        revealByHand(bea)
-        setDayByHand("REVEALED")
         val stranger = users.verified("Eve")
 
-        val today = getToday(stranger, bondId)
+        for (revealed in listOf(false, true)) {
+            if (revealed) {
+                revealByHand(bea)
+                setDayByHand("REVEALED")
+            }
 
-        today.status shouldBe 404
-        today.contentAsString shouldNotContain "revealed, not published"
+            val today = getToday(stranger, bondId)
+
+            withClue("revealed=$revealed") {
+                today.status shouldBe 404
+                today.contentAsString shouldContain "\"code\":\"NOT_FOUND\""
+            }
+        }
     }
 
     @Test
@@ -315,6 +400,28 @@ internal class RevealGateTest(
         replay.contentAsString shouldContain "\"text\":null"
         replay.contentAsString shouldContain "\"status\":\"DELETED\""
         replay.contentAsString shouldNotContain "said once"
+    }
+
+    @Test
+    fun `a key answers only for the entry its own caller wrote, even one they could read`() {
+        // The replay's author guard. Ada's key is pointed, by hand, at Bea's
+        // entry — which has been revealed, so BR-1 alone would let Ada read
+        // it. A replay is "what did MY request produce", and this is not it:
+        // without the guard the gate answers FULL and the response is a 201
+        // carrying Bea's words under Ada's key.
+        val key = UUID.randomUUID().toString()
+        submit(ada, bondId, """{"text":"said once"}""", key).status shouldBe 201
+        val beas = submit(bea, bondId, """{"text":"bea's revealed words"}""")
+        beas.status shouldBe 201
+        revealByHand(bea)
+        jdbc.update("UPDATE idempotency_keys SET result_id = ?::uuid WHERE user_id = ?", idOf(beas), ada) shouldBe 1
+
+        val replay = submit(ada, bondId, """{"text":"said once"}""", key)
+
+        replay.status shouldBe 404
+        replay.contentAsString shouldContain "\"code\":\"NOT_FOUND\""
+        replay.contentAsString shouldNotContain "bea's revealed words"
+        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER).shouldBeNull()
     }
 
     // ---- helpers --------------------------------------------------------
@@ -393,11 +500,20 @@ internal class RevealGateTest(
     private fun authorMemberIdOf(response: MockHttpServletResponse): String =
         Regex(""""authorMemberId":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
 
-    /** `partnerEntry`'s own JSON object, scoped out of the whole response body — fix round 1, M2. */
-    private fun partnerEntryJson(body: String): String = PARTNER_ENTRY.find(body)!!.groupValues[1]
+    /**
+     * `partnerEntry`'s own JSON object, scoped out of the whole response body —
+     * fix round 1, M2. Asserted present, with the body as the clue: a gate
+     * that drops the field must fail as an assertion, not as an NPE.
+     */
+    private fun partnerEntryJson(body: String): String =
+        withClue("partnerEntry is not an object in: $body") { PARTNER_ENTRY.find(body).shouldNotBeNull() }.groupValues[1]
 
     /** `myEntry`'s own JSON object, scoped the same way. */
-    private fun myEntryJson(body: String): String = MY_ENTRY.find(body)!!.groupValues[1]
+    private fun myEntryJson(body: String): String =
+        withClue("myEntry is not an object in: $body") { MY_ENTRY.find(body).shouldNotBeNull() }.groupValues[1]
+
+    private fun idOf(response: MockHttpServletResponse): String =
+        Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
 
     private companion object {
         val PARTNER_ENTRY = Regex(""""partnerEntry":(\{[^}]*})""")
@@ -405,5 +521,23 @@ internal class RevealGateTest(
 
         /** Doc 04 §3's eight, as V12's CHECK spells them. */
         val DAY_STATUSES = listOf("OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN")
+
+        /**
+         * Every way a row can say it was erased, by hand (nothing in C1
+         * erases). The text is left in place in each, so only the gate
+         * stands between it and the wire. The first three were never
+         * revealed; the last two were revealed first.
+         */
+        val ERASED_STATES =
+            listOf(
+                "status = 'DELETED', deleted_at = now(), revealed_at = NULL",
+                "status = 'SUBMITTED', deleted_at = now(), revealed_at = NULL",
+                "status = 'DELETED', deleted_at = NULL, revealed_at = NULL",
+                "status = 'REVEALED', deleted_at = now(), revealed_at = now()",
+                "status = 'DELETED', deleted_at = now(), revealed_at = now()",
+            )
+
+        /** 11:00 in Africa/Lagos on the 15th — nowhere near a day boundary. */
+        val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
     }
 }

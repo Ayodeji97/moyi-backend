@@ -11,9 +11,11 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainAll
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.maps.shouldContainKey
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
@@ -292,28 +294,39 @@ class OpenApiContractTest(
     }
 
     @Test
-    fun `a locked partner entry is a distinct branch a generated client can tell apart, not an empty schema`() {
-        // Task 8 deliberately left this open (TodayResponse.PartnerEntryResponse's
-        // own KDoc): the sealed interface carries nothing springdoc can
-        // introspect on its own, so `partnerEntry` risked describing as an
-        // empty object with neither branch's shape. springdoc's own support
-        // for a Kotlin sealed interface already resolves the property to a
-        // `oneOf` of the two branches — asserted below — but the `oneOf`
-        // itself had no `discriminator`, which is what lets a generated
-        // client actually pick a branch at runtime instead of structurally
-        // guessing. OpenApiConfiguration adds one, keyed on `status`, which
-        // both branches already carry.
+    fun `partnerEntry is one of three branches a generated client can tell apart by shape`() {
+        // springdoc resolves the sealed interface to a `oneOf` of its
+        // branches. There is deliberately NO discriminator: `"DELETED"` is
+        // both EntryResponse's tombstone and ErasedEntryResponse's only
+        // value (a partner's entry erased before it was ever revealed, which
+        // BR-8 keeps to author-and-status), and a discriminator maps a value
+        // to exactly one schema. So the shapes themselves must be decidable
+        // from the document: only EntryResponse has (and requires) an `id`,
+        // and the two narrow branches' `status` enums are disjoint.
         val today = api.components.schemas["TodayResponse"]!!
         val partnerEntry = today.properties["partnerEntry"]!!
-        val refs = partnerEntry.oneOf.map { it.`$ref` }
 
-        refs shouldContainAll listOf("#/components/schemas/EntryResponse", "#/components/schemas/LockedEntryResponse")
-        partnerEntry.discriminator.shouldNotBeNull()
-        partnerEntry.discriminator.propertyName shouldBe "status"
-        partnerEntry.discriminator.mapping["LOCKED"] shouldBe "#/components/schemas/LockedEntryResponse"
-        listOf("SUBMITTED", "REVEALED", "DELETED").forEach { status ->
-            partnerEntry.discriminator.mapping[status] shouldBe "#/components/schemas/EntryResponse"
-        }
+        partnerEntry.oneOf.map { it.`$ref` } shouldContainExactlyInAnyOrder
+            listOf(
+                "#/components/schemas/EntryResponse",
+                "#/components/schemas/LockedEntryResponse",
+                "#/components/schemas/ErasedEntryResponse",
+            )
+        partnerEntry.discriminator.shouldBeNull()
+
+        val narrow =
+            listOf("LockedEntryResponse" to "LOCKED", "ErasedEntryResponse" to "DELETED").map { (name, status) ->
+                val fields =
+                    api.components.schemas[name]!!
+                        .allOf
+                        .last()
+                // BR-8: the type has nowhere to put anything else.
+                fields.properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+                fields.required shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+                fields.properties["status"]!!.enum shouldBe listOf(status)
+                fields
+            }
+        narrow.forEach { it.properties.keys shouldNotContain "id" }
     }
 
     @Test

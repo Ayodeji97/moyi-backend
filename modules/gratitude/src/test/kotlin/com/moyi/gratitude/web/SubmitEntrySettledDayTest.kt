@@ -13,6 +13,8 @@ import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
@@ -104,7 +106,9 @@ internal class SubmitEntrySettledDayTest(
     @Test
     fun `an offline draft whose day closes while it waits for the day lock lands on today instead`() {
         withDayLockHeld(YESTERDAY) { holderPid, closeAndCommit ->
-            val submission = async { submit(ada, """{"text":"written on the flight","intendedAt":"$YESTERDAY_EVENING"}""") }
+            val key = UUID.randomUUID().toString()
+            val body = """{"text":"written on the flight","intendedAt":"$YESTERDAY_EVENING"}"""
+            val submission = async { submit(ada, body, key) }
             awaitBlockedOrDone(holderPid, submission)
             // It resolved to the 14th (open when it looked) and is queued on
             // that day's row. Done already means it never took the day lock.
@@ -123,6 +127,29 @@ internal class SubmitEntrySettledDayTest(
             statusOf(YESTERDAY) shouldBe "SOLO"
             entriesOn(TODAY) shouldBe 1
             entryCountOf(TODAY) shouldBe 1
+
+            // The key recorded what the request PRODUCED — the entry on the
+            // redirected day — once, and a replay answers from that entry.
+            val redirectedId = idOf(response)
+            jdbc.queryForObject("SELECT count(*) FROM idempotency_keys WHERE user_id = ?", Int::class.java, ada) shouldBe 1
+            jdbc.queryForObject("SELECT result_id::text FROM idempotency_keys WHERE user_id = ?", String::class.java, ada) shouldBe
+                redirectedId
+            jdbc.queryForObject(
+                "SELECT d.date::text FROM entries e JOIN bond_days d ON d.id = e.bond_day_id WHERE e.id = ?::uuid",
+                String::class.java,
+                redirectedId,
+            ) shouldBe TODAY
+
+            val replay = submit(ada, body, key)
+
+            replay.status shouldBe 201
+            replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
+            idOf(replay) shouldBe redirectedId
+            replay.contentAsString shouldContain "\"date\":\"$TODAY\""
+            intendedAtOf(replay) shouldBe NOW
+            entriesOn(TODAY) shouldBe 1
+            entriesOn(YESTERDAY) shouldBe 1
+            jdbc.queryForObject("SELECT count(*) FROM idempotency_keys WHERE user_id = ?", Int::class.java, ada) shouldBe 1
         }
     }
 
@@ -170,18 +197,21 @@ internal class SubmitEntrySettledDayTest(
         }
     }
 
-    @Test
-    fun `an elapsed suspended day stamped closed is settled, though its status never changed`() {
+    @ParameterizedTest
+    @ValueSource(strings = ["EMPTY", "FROZEN", "SUSPENDED"])
+    fun `a claimed day that is already stamped closed sends the draft to today, whatever its status`(status: String) {
         // Spec §6.1.2: settled is `closedAt != null`, "including FROZEN and
-        // elapsed SUSPENDED" — the close stamps a SUSPENDED day and leaves its
-        // status alone (§6.4), so a check on the status would file the draft
-        // on a closed day. No race needed: the day is settled before the
-        // submission looks.
+        // elapsed SUSPENDED" — and §6.1's own note on why EMPTY is in the
+        // list. SUSPENDED is the one a status-only check misses: the close
+        // stamps the day and leaves its status alone (§6.4), so the draft
+        // would be filed on a closed day. No race needed here: the day is
+        // settled before the submission looks.
         jdbc.update(
-            "UPDATE bond_days SET status = 'SUSPENDED', closed_at = now() WHERE bond_id = ?::uuid AND date = ?::date",
+            "UPDATE bond_days SET status = ?, closed_at = now() WHERE bond_id = ?::uuid AND date = ?::date",
+            status,
             bondId,
             YESTERDAY,
-        )
+        ) shouldBe 1
 
         val response = submit(ada, """{"text":"written on the flight","intendedAt":"$YESTERDAY_EVENING"}""")
 
@@ -189,6 +219,7 @@ internal class SubmitEntrySettledDayTest(
         response.contentAsString shouldContain "\"date\":\"$TODAY\""
         intendedAtOf(response) shouldBe NOW
         entriesOn(YESTERDAY) shouldBe 1
+        entriesOn(TODAY) shouldBe 1
     }
 
     // ---- the close, standing in for C3 ----------------------------------
@@ -288,14 +319,18 @@ internal class SubmitEntrySettledDayTest(
     private fun intendedAtOf(response: MockHttpServletResponse): Instant =
         Instant.parse(Regex(""""intendedAt":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1])
 
+    private fun idOf(response: MockHttpServletResponse): String =
+        Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
+
     private fun submit(
         caller: UUID,
         body: String,
+        key: String = UUID.randomUUID().toString(),
     ): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/bonds/$bondId/entries") {
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(caller).token}")
-                header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                header(IdempotencyInterceptor.HEADER, key)
                 contentType = MediaType.APPLICATION_JSON
                 content = body
             }.andReturn()

@@ -23,9 +23,10 @@ import java.time.LocalDate
  * KDoc), so an entry the caller withdrew is its tombstone here too.
  *
  * [partnerEntry] is [PartnerEntryResponse]`?` — [EntryResponse] (in full once
- * the entry has been revealed, or its tombstone once withdrawn),
- * [LockedEntryResponse] (not yet revealed), or `null` when there is no
- * partner entry to report at all. **C1's own writes only ever produce the
+ * the entry has been revealed, or its tombstone if withdrawn after that),
+ * [LockedEntryResponse] (not yet revealed), [ErasedEntryResponse] (withdrawn
+ * without ever having been revealed), or `null` when there is no partner
+ * entry to report at all. **C1's own writes only ever produce the
  * locked one and the absent one** — C1 sets `revealedAt` nowhere — but
  * [PartnerEntryResponse.of] renders whatever
  * [com.moyi.gratitude.domain.Entry.canBeReadBy] answered rather than
@@ -78,15 +79,17 @@ internal data class TodayResponse(
  * plain [EntryResponse]`?` because BR-1's first clause makes the locked
  * shape unreachable for a caller's own entry (fix round 1, M1: an earlier
  * version of this KDoc said "shared" between the two fields, which was
- * never true of the code). Either [EntryResponse] (BR-1 granted the read)
- * or [LockedEntryResponse] (it did not).
+ * never true of the code). One of three: [EntryResponse] (BR-1 granted the
+ * read, or the reader could read it before it was erased),
+ * [LockedEntryResponse] (not yet revealed) or [ErasedEntryResponse] (erased
+ * without ever having been revealed).
  *
  * **`sealed`, not merely an interface, and that is load-bearing.** A plain
  * `interface` could be implemented from outside this module by anything —
  * some future type nobody here reviewed, rendered into this exact field
  * with no compiler check on its shape. `sealed` confines every
  * implementation to this module (in fact, this file), so "either revealed
- * in full or locked to exactly BR-8's shape, nothing else" is a closed set
+ * in full, locked or erased to exactly BR-8's shape, nothing else" is a closed set
  * the compiler enforces, not a convention a reviewer has to keep re-checking
  * (fix round 1).
  *
@@ -94,28 +97,25 @@ internal data class TodayResponse(
  * needing `@JsonTypeInfo` here — this type is only ever written to the
  * wire, never read back off it.
  *
- * **The generated OpenAPI document cannot currently express this.** No
- * `@Schema(oneOf = …)` is applied — `gratitude` has no compile-time
- * dependency on springdoc's annotation package, and `contracts` is this
- * codebase's one place springdoc concerns are meant to be configured
- * (`OpenApiConfiguration`'s own KDoc). Without it, springdoc will describe
- * [TodayResponse.partnerEntry] as an empty object, and a client generated
- * from the document gets neither branch's shape for the one field carrying
- * BR-8's own distinction — flagged prominently here, and in fix round 1's
- * report, for whichever task next regenerates `contracts/openapi.json` to
- * see and decide: an `OpenApiCustomizer` in `contracts` (the same pattern
- * [com.moyi.contracts.OpenApiConfiguration] already uses for `ETag` and
- * `Idempotency-Key`) is the fix that keeps this module's own dependencies
- * as they are.
+ * **In the generated OpenAPI document this is a `oneOf` of the three, with
+ * no `discriminator`.** springdoc resolves a sealed interface to its
+ * branches by itself. `status` cannot discriminate them: `"DELETED"` is both
+ * [EntryResponse]'s tombstone and [ErasedEntryResponse]'s only value, and a
+ * discriminator maps one value to one schema. A client tells them apart by
+ * shape — [EntryResponse] alone has an `id` — which
+ * `contracts.OpenApiConfiguration` makes decidable by marking each branch's
+ * fields `required`.
  */
 internal sealed interface PartnerEntryResponse {
     companion object {
         /**
-         * BR-1's answer, as a wire shape — exhaustive over [Readability], so a
-         * fifth answer is a compile error here rather than a default nobody
-         * chose. Full or tombstone: [EntryResponse]. Locked: BR-8's
-         * [LockedEntryResponse], which is given the author and nothing else.
-         * A non-member: nothing.
+         * BR-1's answer, as a wire shape — exhaustive over [Readability], so
+         * another answer is a compile error here rather than a default nobody
+         * chose. Full, or a tombstone the reader could once read:
+         * [EntryResponse]. Locked: BR-8's [LockedEntryResponse]. Erased
+         * before it was ever revealed: [ErasedEntryResponse]. Both of those
+         * are given the author and nothing else — the reading has nothing
+         * else to give them. A non-member: nothing.
          */
         fun of(
             reading: EntryReading,
@@ -123,7 +123,8 @@ internal sealed interface PartnerEntryResponse {
         ): PartnerEntryResponse? =
             when (reading.readability) {
                 Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date)
-                Readability.LOCKED -> LockedEntryResponse(reading.authorMemberId)
+                Readability.LOCKED -> reading.authorMemberId?.let { LockedEntryResponse(it) }
+                Readability.TOMBSTONE_UNSEEN -> reading.authorMemberId?.let { ErasedEntryResponse(it) }
                 Readability.NOT_A_MEMBER -> null
             }
     }

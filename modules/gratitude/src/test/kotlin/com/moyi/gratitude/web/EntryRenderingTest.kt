@@ -71,14 +71,34 @@ internal class EntryRenderingTest {
     }
 
     @Test
-    fun `a tombstone renders as the one tombstone shape - no text, DELETED - while the row still holds its words`() {
-        val erased = entry.copy(deletedAt = now)
+    fun `the author's tombstone is the wide shape - no text, DELETED - while the row still holds its words`() {
+        val rendered = PartnerEntryResponse.of(entry.copy(deletedAt = now).readBy(author), date) as EntryResponse
 
-        for (reader in listOf(author, partner)) {
-            val rendered = PartnerEntryResponse.of(erased.readBy(reader), date) as EntryResponse
-            rendered.text.shouldBeNull()
-            rendered.status shouldBe EntryStatus.DELETED
-            rendered.id shouldBe entry.id.value
-        }
+        rendered.text.shouldBeNull()
+        rendered.status shouldBe EntryStatus.DELETED
+        rendered.id shouldBe entry.id.value
+    }
+
+    @Test
+    fun `a partner who had read the entry gets the wide tombstone too`() {
+        val revealedThenErased = entry.copy(status = EntryStatus.REVEALED, revealedAt = now, deletedAt = now)
+
+        val rendered = PartnerEntryResponse.of(revealedThenErased.readBy(partner), date) as EntryResponse
+
+        rendered.text.shouldBeNull()
+        rendered.status shouldBe EntryStatus.DELETED
+        rendered.id shouldBe entry.id.value
+        rendered.createdAt shouldBe entry.createdAt
+    }
+
+    @Test
+    fun `a partner who never could read the entry gets author and DELETED, and no wide shape exists for them`() {
+        // BR-8: the wide tombstone carries an id and two timestamps this
+        // reader was never entitled to. The narrow type has nowhere to put
+        // them, and the wide one refuses to be built.
+        val unseen = entry.copy(deletedAt = now).readBy(partner)
+
+        PartnerEntryResponse.of(unseen, date) shouldBe ErasedEntryResponse(author.memberId)
+        EntryResponse.of(unseen, date).shouldBeNull()
     }
 }

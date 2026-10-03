@@ -2,7 +2,6 @@ package com.moyi.gratitude.web
 
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryStatus
-import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.service.EntryView
 import java.time.Instant
 import java.time.LocalDate
@@ -27,7 +26,10 @@ import java.util.UUID
  * `DELETED`: the entry was deleted or withdrawn (BR-10/BR-10a) and the row
  * kept. BR-1 makes it a tombstone for everyone, its author included, and
  * [of] renders what the gate answered — so the text is absent even while the
- * row still holds some. Nothing in this slice erases an entry, but a response
+ * row still holds some. **This wide tombstone is only for a reader who could
+ * read the entry before it was erased** — its author, or a partner it had
+ * been revealed to. A partner it was never revealed to gets
+ * [ErasedEntryResponse], which has no id and no timestamps to give. Nothing in this slice erases an entry, but a response
  * must already be able to say so: an `Idempotency-Key` replay of
  * `POST /entries` re-reads the entry as it is *now* (spec §5.4), and after an
  * erasure there are no words to return — never the ones the first response
@@ -41,7 +43,8 @@ import java.util.UUID
  * either this or [LockedEntryResponse] behind one field — BR-1's own
  * decision is what picks which, in [PartnerEntryResponse.of].
  */
-internal data class EntryResponse(
+@ConsistentCopyVisibility
+internal data class EntryResponse private constructor(
     val id: UUID,
     val bondId: UUID,
     val date: LocalDate,
@@ -56,40 +59,35 @@ internal data class EntryResponse(
         fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date)
 
         /**
-         * The one mapping from an entry to this shape, and it takes an
-         * [EntryReading] — an entry BR-1 has already been asked about
-         * ([com.moyi.gratitude.domain.Entry.readBy]) — never an
-         * [com.moyi.gratitude.domain.Entry]. There is no way to build this
-         * response from an entry the gate has not seen.
+         * **The only way to build this response** — the constructor is
+         * private, and this takes an [EntryReading]: an entry BR-1 has
+         * already been asked about ([com.moyi.gratitude.domain.Entry.readBy]).
+         * (`@ConsistentCopyVisibility` makes the data class's `copy` private
+         * with it; otherwise `copy` is a second, public constructor.)
          *
-         * `FULL` carries the words; `TOMBSTONE` is this same shape with
-         * `text = null` and `status = DELETED` ([EntryReading] answers both,
-         * whatever the row still holds — one tombstone, not a second type).
-         * `LOCKED` and `NOT_A_MEMBER` are **not this shape at all** and
-         * answer `null`: a locked entry is [LockedEntryResponse]'s to render
-         * ([PartnerEntryResponse.of]), and a non-member is shown nothing.
+         * It renders [EntryReading.disclosed] and nothing else, so it is
+         * non-null exactly when the gate answered `FULL` (with the words) or
+         * `TOMBSTONE` (`text = null`, `status = DELETED`). `LOCKED`,
+         * `TOMBSTONE_UNSEEN` and `NOT_A_MEMBER` disclose nothing and are
+         * **not this shape at all**: [PartnerEntryResponse.of] gives the
+         * first two their own minimal types, and a non-member is shown
+         * nothing.
          */
         fun of(
             reading: EntryReading,
             date: LocalDate,
         ): EntryResponse? =
-            when (reading.readability) {
-                Readability.FULL, Readability.TOMBSTONE -> {
-                    EntryResponse(
-                        id = reading.id.value,
-                        bondId = reading.bondId,
-                        date = date,
-                        authorMemberId = reading.authorMemberId,
-                        text = reading.text?.value,
-                        status = reading.status,
-                        createdAt = reading.createdAt,
-                        intendedAt = reading.intendedAt,
-                    )
-                }
-
-                Readability.LOCKED, Readability.NOT_A_MEMBER -> {
-                    null
-                }
+            reading.disclosed?.let { entry ->
+                EntryResponse(
+                    id = entry.id.value,
+                    bondId = entry.bondId,
+                    date = date,
+                    authorMemberId = entry.authorMemberId,
+                    text = entry.text?.value,
+                    status = entry.status,
+                    createdAt = entry.createdAt,
+                    intendedAt = entry.intendedAt,
+                )
             }
     }
 }

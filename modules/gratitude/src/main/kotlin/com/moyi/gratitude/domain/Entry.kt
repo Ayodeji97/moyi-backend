@@ -79,7 +79,13 @@ internal data class Entry(
     val deletedAt: Instant?,
 ) {
     init {
-        require(text != null || status == EntryStatus.DELETED) { "only an erased entry has no text in this slice" }
+        // Either mark of an erasure admits a missing text — the same two
+        // `canBeReadBy` counts as one. A row whose erasure nulled the text
+        // and stamped `deleted_at` before it flipped the status must load,
+        // and render as its tombstone, not fail in the mapper.
+        require(text != null || status == EntryStatus.DELETED || deletedAt != null) {
+            "only an erased entry has no text in this slice"
+        }
     }
 
     /**
@@ -89,10 +95,15 @@ internal data class Entry(
      *    whose membership is of another bond gets [Readability.NOT_A_MEMBER]
      *    before any question about content is asked.
      * 2. **Erasure beats everything.** A deleted or withdrawn entry is a
-     *    [Readability.TOMBSTONE] for both people, its author included — there
-     *    is one copy of the text and BR-10a makes the erasure total. Either
-     *    mark of an erasure counts, [deletedAt] or [EntryStatus.DELETED]: an
-     *    erasure that has set one and not yet the other is already an erasure.
+     *    tombstone for both people, its author included — there is one copy
+     *    of the text and BR-10a makes the erasure total. Either mark of an
+     *    erasure counts, [deletedAt] or [EntryStatus.DELETED]: an erasure
+     *    that has set one and not yet the other is already an erasure.
+     *    **Which tombstone depends on what the reader could see before**:
+     *    [Readability.TOMBSTONE] for a reader the entry was ever readable to
+     *    (clause 3), [Readability.TOMBSTONE_UNSEEN] for a partner it was
+     *    never revealed to — an erasure must not hand that reader the id and
+     *    timestamps BR-8 withheld while the entry was live.
      * 3. **Otherwise: your own words, or a revealed entry.** Keyed on
      *    [revealedAt], **not** on the day's status — which is why this takes
      *    no `BondDay` at all. A solo day that reveals and is then frozen still
@@ -109,14 +120,17 @@ internal data class Entry(
      * Callers that render want [readBy], which returns the answer bound to
      * the entry it was given for.
      */
-    fun canBeReadBy(reader: Reader): Readability =
-        when {
+    fun canBeReadBy(reader: Reader): Readability {
+        val erased = deletedAt != null || status == EntryStatus.DELETED
+        val everReadable = authorMemberId == reader.memberId || revealedAt != null
+        return when {
             reader.bondId != bondId -> Readability.NOT_A_MEMBER
-            deletedAt != null || status == EntryStatus.DELETED -> Readability.TOMBSTONE
-            authorMemberId == reader.memberId -> Readability.FULL
-            revealedAt != null -> Readability.FULL
+            erased && everReadable -> Readability.TOMBSTONE
+            erased -> Readability.TOMBSTONE_UNSEEN
+            everReadable -> Readability.FULL
             else -> Readability.LOCKED
         }
+    }
 
     /** This entry as [reader] may see it — the only form an entry is rendered from ([EntryReading]). */
     fun readBy(reader: Reader): EntryReading = EntryReading.of(this, reader)

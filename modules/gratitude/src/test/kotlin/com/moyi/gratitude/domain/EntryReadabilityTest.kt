@@ -1,6 +1,8 @@
 package com.moyi.gratitude.domain
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
@@ -57,7 +59,7 @@ internal class EntryReadabilityTest {
     }
 
     @Test
-    fun `an erased entry is a tombstone for its author and its partner, revealed or not`() {
+    fun `an erased entry is a tombstone for its author always, and for a partner it had been revealed to`() {
         // Either mark of an erasure is one: `deletedAt`, or the status.
         val erasures =
             listOf(
@@ -69,8 +71,30 @@ internal class EntryReadabilityTest {
 
         for (erased in erasures) {
             erased.canBeReadBy(author) shouldBe Readability.TOMBSTONE
-            erased.canBeReadBy(partner) shouldBe Readability.TOMBSTONE
         }
+        revealed.copy(deletedAt = now).canBeReadBy(partner) shouldBe Readability.TOMBSTONE
+        revealed.copy(status = EntryStatus.DELETED, deletedAt = now, text = null).canBeReadBy(partner) shouldBe Readability.TOMBSTONE
+    }
+
+    @Test
+    fun `an entry erased before it was ever revealed is an unseen tombstone for the partner`() {
+        // The partner was only ever entitled to BR-8's locked shape; the
+        // erasure must not widen that. Decided here, in the gate.
+        unrevealed.copy(deletedAt = now).canBeReadBy(partner) shouldBe Readability.TOMBSTONE_UNSEEN
+        unrevealed.copy(status = EntryStatus.DELETED).canBeReadBy(partner) shouldBe Readability.TOMBSTONE_UNSEEN
+        unrevealed.copy(status = EntryStatus.DELETED, deletedAt = now, text = null).canBeReadBy(partner) shouldBe
+            Readability.TOMBSTONE_UNSEEN
+    }
+
+    @Test
+    fun `an erased row whose status was never flipped still loads, and is a tombstone`() {
+        // `deleted_at` set and the text nulled, status still SUBMITTED: the
+        // constructor must admit it, or the mapper answers a 500.
+        val halfErased = unrevealed.copy(deletedAt = now, text = null)
+
+        halfErased.canBeReadBy(author) shouldBe Readability.TOMBSTONE
+        halfErased.canBeReadBy(partner) shouldBe Readability.TOMBSTONE_UNSEEN
+        shouldThrow<IllegalArgumentException> { unrevealed.copy(text = null) }
     }
 
     @Test
@@ -85,35 +109,77 @@ internal class EntryReadabilityTest {
     }
 
     @Test
-    fun `a reading carries the words only when the gate answered FULL`() {
-        unrevealed.readBy(author).text shouldBe unrevealed.text
-        revealed.readBy(partner).text shouldBe unrevealed.text
-
-        unrevealed.readBy(partner).text.shouldBeNull()
-        unrevealed.readBy(stranger).text.shouldBeNull()
-        // The row still holds its words; the reading does not hand them on.
+    fun `a reading discloses the words only when the gate answered FULL`() {
         unrevealed
-            .copy(deletedAt = now)
             .readBy(author)
-            .text
-            .shouldBeNull()
+            .disclosed
+            .shouldNotBeNull()
+            .text shouldBe unrevealed.text
         revealed
-            .copy(deletedAt = now)
             .readBy(partner)
-            .text
-            .shouldBeNull()
+            .disclosed
+            .shouldNotBeNull()
+            .text shouldBe unrevealed.text
+
+        // The row still holds its words; a tombstone does not hand them on.
+        val authorsTombstone =
+            unrevealed
+                .copy(deletedAt = now)
+                .readBy(author)
+                .disclosed
+                .shouldNotBeNull()
+        authorsTombstone.text.shouldBeNull()
+        val partnersTombstone =
+            revealed
+                .copy(deletedAt = now)
+                .readBy(partner)
+                .disclosed
+                .shouldNotBeNull()
+        partnersTombstone.text.shouldBeNull()
     }
 
     @Test
-    fun `a tombstone reads as DELETED whichever mark the erasure left`() {
-        unrevealed.copy(deletedAt = now).readBy(author).status shouldBe EntryStatus.DELETED
-        revealed.copy(deletedAt = now).readBy(partner).status shouldBe EntryStatus.DELETED
-        unrevealed.readBy(author).status shouldBe EntryStatus.SUBMITTED
+    fun `a wide tombstone reads as DELETED whichever mark the erasure left`() {
+        val byTimestamp =
+            unrevealed
+                .copy(deletedAt = now)
+                .readBy(author)
+                .disclosed
+                .shouldNotBeNull()
+        byTimestamp.status shouldBe EntryStatus.DELETED
+        byTimestamp.id shouldBe unrevealed.id
+        unrevealed
+            .readBy(author)
+            .disclosed
+            .shouldNotBeNull()
+            .status shouldBe EntryStatus.SUBMITTED
+    }
+
+    @Test
+    fun `a locked, unseen-erased or non-member reading discloses nothing but, at most, the author`() {
+        // BR-8, held by the reading itself rather than by each renderer
+        // remembering: there is no id, timestamp or text to reach for.
+        val locked = unrevealed.readBy(partner)
+        locked.readability shouldBe Readability.LOCKED
+        locked.disclosed.shouldBeNull()
+        locked.authorMemberId shouldBe author.memberId
+
+        val unseen = unrevealed.copy(deletedAt = now).readBy(partner)
+        unseen.readability shouldBe Readability.TOMBSTONE_UNSEEN
+        unseen.disclosed.shouldBeNull()
+        unseen.authorMemberId shouldBe author.memberId
+
+        val outsider = revealed.readBy(stranger)
+        outsider.disclosed.shouldBeNull()
+        outsider.authorMemberId.shouldBeNull()
     }
 
     @Test
     fun `a reading never prints the entry it wraps`() {
-        "${unrevealed.readBy(author)}" shouldNotContain "thank you for the coffee"
-        "${unrevealed.readBy(author)}" shouldNotContain "EntryText"
+        val printed = "${unrevealed.readBy(author)}"
+
+        printed shouldNotContain "thank you for the coffee"
+        printed shouldNotContain "EntryText"
+        printed shouldNotContain unrevealed.id.value.toString()
     }
 }

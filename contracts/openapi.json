@@ -2763,6 +2763,24 @@
           "required" : [ "authorMemberId", "bondId", "createdAt", "date", "id", "intendedAt", "status", "text" ]
         } ]
       },
+      "ErasedEntryResponse" : {
+        "allOf" : [ {
+          "$ref" : "#/components/schemas/PartnerEntryResponse"
+        }, {
+          "type" : "object",
+          "properties" : {
+            "authorMemberId" : {
+              "type" : "string",
+              "format" : "uuid"
+            },
+            "status" : {
+              "type" : "string",
+              "enum" : [ "DELETED" ]
+            }
+          },
+          "required" : [ "authorMemberId", "status" ]
+        } ]
+      },
       "FieldViolation" : {
         "type" : "object",
         "description" : "One rejected field. Never carries the rejected value.",
@@ -2859,7 +2877,7 @@
               "enum" : [ "LOCKED" ]
             }
           },
-          "required" : [ "status" ]
+          "required" : [ "authorMemberId", "status" ]
         } ]
       },
       "LoginRequest" : {
@@ -3243,17 +3261,10 @@
             } ]
           },
           "partnerEntry" : {
-            "discriminator" : {
-              "mapping" : {
-                "DELETED" : "#/components/schemas/EntryResponse",
-                "LOCKED" : "#/components/schemas/LockedEntryResponse",
-                "REVEALED" : "#/components/schemas/EntryResponse",
-                "SUBMITTED" : "#/components/schemas/EntryResponse"
-              },
-              "propertyName" : "status"
-            },
             "oneOf" : [ {
               "$ref" : "#/components/schemas/EntryResponse"
+            }, {
+              "$ref" : "#/components/schemas/ErasedEntryResponse"
             }, {
               "$ref" : "#/components/schemas/LockedEntryResponse"
             } ]

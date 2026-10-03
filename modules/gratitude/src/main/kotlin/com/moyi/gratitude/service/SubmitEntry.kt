@@ -17,7 +17,6 @@ import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryText
-import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.GratitudeConstraints
@@ -28,6 +27,7 @@ import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -230,7 +230,10 @@ internal class SubmitEntry(
         // has already run this same factory at the web edge, so it cannot fail
         // here for a request that reached this method.
         val text = EntryText.of(draft.text)
-        val now = clock.instant()
+        // Truncated once, here, to what `timestamptz` keeps: a fresh `201`
+        // renders these instants from memory and a replay from the row, and
+        // the two must not differ below the microsecond.
+        val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
 
         val submission =
             try {
@@ -248,9 +251,9 @@ internal class SubmitEntry(
                             val membership = access.lockMembershipOf(userId, bondId)
                             if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
                             if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()
-                            val written = write(membership, text, draft, now)
+                            val (view, entryId) = write(membership, text, draft, now)
                             // The key records what this produced by identity, never the words.
-                            IdempotentResult(written, written.entry.id.value, ResultKind.ENTRY, CREATED)
+                            IdempotentResult(view, entryId.value, ResultKind.ENTRY, CREATED)
                         }
                     val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))
                     Submission(view, outcome.status, outcome.wasReplayed)
@@ -280,26 +283,31 @@ internal class SubmitEntry(
         val membership = access.membershipOf(userId, bondId)
         // The author guard is the replay's own: a key answers only the member
         // whose request it recorded. What that member may then SEE is BR-1's
-        // question, asked of the same gate `GetToday` asks — an entry of some
-        // other bond is NOT_A_MEMBER there, and is not rendered here.
+        // question, asked of the same gate `GetToday` asks.
         val reading =
             entries
                 .find(entryId)
                 ?.takeIf { it.authorMemberId == membership.memberId }
                 ?.readBy(membership.asReader())
-                ?.takeUnless { it.readability == Readability.NOT_A_MEMBER }
-        val day = reading?.let { days.find(it.bondDayId) }
+        // The day is found only for a reading that discloses which day it is
+        // on: the author's own entry, in full or as its tombstone. Anything
+        // else — an entry of another bond, above all — has none to give.
+        val day = reading?.disclosed?.let { days.find(it.bondDayId) }
         if (reading == null || day == null) throw NotFoundException("That entry was not found.")
         return EntryView(reading, day)
     }
 
-    /** Steps 4 and 5 of the class KDoc, under the bond lock [submit] already holds. */
+    /**
+     * Steps 4 and 5 of the class KDoc, under the bond lock [submit] already
+     * holds. Returns the entry's id beside its view: the key records the id,
+     * and a reading only discloses one to a reader BR-1 grants it to.
+     */
     private fun write(
         membership: BondMembership,
         text: EntryText,
         draft: EntryDraft,
         now: Instant,
-    ): EntryView {
+    ): Pair<EntryView, EntryId> {
         val bondId = membership.bondId
         val timeline = membership.anchorTimeline
         val calendar = timeline.asCalendar()
@@ -336,7 +344,7 @@ internal class SubmitEntry(
         entries.insert(entry)
         val updated = day.withEntry()
         days.update(updated)
-        return EntryView(entry.readBy(membership.asReader()), updated)
+        return EntryView(entry.readBy(membership.asReader()), updated) to entry.id
     }
 
     /**

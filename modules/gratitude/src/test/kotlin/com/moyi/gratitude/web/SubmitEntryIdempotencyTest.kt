@@ -206,6 +206,23 @@ internal class SubmitEntryIdempotencyTest(
     }
 
     @Test
+    fun `a replay matches the first response to the last digit, on a clock finer than the database keeps`() {
+        // The first 201 is rendered from memory, a replay from the row, and
+        // `timestamptz` keeps microseconds. Unless the submission instant is
+        // truncated before either uses it, the two differ in `createdAt` and
+        // `intendedAt` below the microsecond — on any real clock.
+        clock.set(NOW.plusNanos(123_456_789))
+        val key = UUID.randomUUID().toString()
+        val first = submit(ada, """{"text":"thank you for the coffee"}""", key)
+        first.status shouldBe 201
+
+        val replay = submit(ada, """{"text":"thank you for the coffee"}""", key)
+
+        replay.contentAsString shouldBe first.contentAsString
+        first.contentAsString shouldContain "\"createdAt\":\"2026-09-15T10:00:00.123456Z\""
+    }
+
+    @Test
     fun `a replay after the entry was erased renders its tombstone, never the original words`() {
         // Simulated at the row level — see the class KDoc. Answer the replay
         // from anything but a re-read of the row and the words come back.
