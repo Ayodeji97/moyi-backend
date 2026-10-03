@@ -10,6 +10,7 @@ import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -81,7 +82,7 @@ internal class EntriesEndpointTest(
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
+        jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
 
@@ -316,7 +317,8 @@ internal class EntriesEndpointTest(
 
         val replay = submit(ada, bondId, """{"text":"only once"}""", key)
         replay.status shouldBe 201
-        replay.contentAsString shouldBe first.contentAsString
+        // V11 stores no response text, so until plan task 7 a replay has no body.
+        replay.contentAsString shouldBe ""
         replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
         jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 1
 
@@ -324,6 +326,31 @@ internal class EntriesEndpointTest(
         beasTurn.status shouldBe 201
         beasTurn.getHeader(IdempotencyInterceptor.REPLAYED_HEADER).shouldBeNull()
         jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 2
+    }
+
+    @Test
+    fun `the idempotency row names the entry and holds none of its words in any column`() {
+        val key = UUID.randomUUID().toString()
+        submit(ada, bondId, """{"text":"a very particular gratitude xyzzy"}""", key).status shouldBe 201
+
+        val row = jdbc.queryForMap("SELECT * FROM idempotency_keys")
+        row.values.forEach { (it?.toString() ?: "") shouldNotContain "xyzzy" }
+        row["result_kind"] shouldBe "ENTRY"
+        row["result_id"].toString() shouldBe jdbc.queryForObject("SELECT id::text FROM entries", String::class.java)
+        row["path"] shouldBe "/api/v1/bonds/$bondId/entries"
+        row["method"] shouldBe "POST"
+    }
+
+    @Test
+    fun `one key against a second bond's entries is refused, not answered from the first bond`() {
+        val key = UUID.randomUUID().toString()
+        val other = bondIdOf(createBond(ada))
+        submit(ada, bondId, """{"text":"here"}""", key).status shouldBe 201
+
+        val reused = submit(ada, other, """{"text":"here"}""", key)
+
+        reused.status shouldBe 422
+        reused.contentAsString shouldContain "\"code\":\"IDEMPOTENCY_KEY_REUSED\""
     }
 
     // ---- helpers --------------------------------------------------------

@@ -8,10 +8,10 @@
 -- ShedLock.
 --
 -- Versions are one global sequence across modules, because they are one
--- schema: V1 is app's, V2-V8 are identity's, V9 is bond's, this is
+-- schema: V1 is app's, V2-V8 are identity's, V9 and V10 are bond's, this is
 -- common:web's first — the first migration owned by a module nothing else in
--- the schema references. V10 is reserved by other work not yet merged into
--- this branch; Flyway tolerates the gap (see FlywayMigrationTest). Versions
+-- the schema references. V10 has since arrived (bond's proposals), so there
+-- is no gap here any more. Versions
 -- are forward-only (doc 07 §1) — a mistake here is corrected by a later
 -- migration in this slice, never by editing this file, unless the review
 -- that catches the mistake lands before this one merges (as the review that
@@ -21,14 +21,19 @@
 -- read and written through plain JDBC, so `ddl-auto: validate` never touches
 -- it and no module's own `@EntityScan` needs to widen to see it.
 --
--- Ruling A (review round 1): doc 06 §1 contradicts itself — "keyed on userId
--- + endpoint + key" and "the same key against a different endpoint is 422"
--- cannot both hold, because a key that includes the endpoint makes a
--- different endpoint a different row, which never conflicts with anything.
--- Decided in favour of the observable contract: the UNIQUE constraint below
--- is `(user_id, idempotency_key)` only, `endpoint` is a stored column
--- compared in code (see IdempotencyInterceptor.replay), and a mismatch on
--- either `endpoint` or `request_hash` is `422 IDEMPOTENCY_KEY_REUSED`.
+-- Ruling A (review round 1, restated for `method`/`path`): doc 06 §1
+-- contradicts itself — "keyed on userId + endpoint + key" and "the same key
+-- against a different endpoint is 422" cannot both hold, because a key that
+-- includes the endpoint makes a different endpoint a different row, which
+-- never conflicts with anything. Decided in favour of the observable
+-- contract: the UNIQUE constraint below is `(user_id, idempotency_key)` only,
+-- `method` and `path` are stored columns compared in code (see
+-- IdempotencyInterceptor.replay), and a mismatch on `method`, `path` or
+-- `request_hash` is `422 IDEMPOTENCY_KEY_REUSED`. `path` is the request's
+-- CONCRETE path, never a route template: `/api/v1/bonds/{bondId}/entries`
+-- would make two bonds one target, and a key replayed against a different
+-- bond must be refused, not answered from the first bond's result (spec
+-- §5.4).
 --
 -- Ruling B (review round 1): the 24h window was written nowhere and enforced
 -- nowhere. It is enforced at read — IdempotencyKeyStore adds
@@ -42,10 +47,12 @@
 CREATE TABLE idempotency_keys (
     id               uuid        PRIMARY KEY,
     user_id          uuid        NOT NULL,
-    -- `METHOD path`, e.g. `POST /api/v1/entries` — stored, not part of the
-    -- key (Ruling A above), and compared against the endpoint of a second
-    -- request under the same key.
-    endpoint         text        NOT NULL,
+    -- The request's own method and **concrete** path, e.g. `POST` and
+    -- `/api/v1/bonds/3f2a.../entries` — stored, not part of the key (Ruling A
+    -- above), and compared against a second request under the same key. A
+    -- route template is not sufficient: two bonds are two different targets.
+    method           text        NOT NULL,
+    path             text        NOT NULL,
     idempotency_key  text        NOT NULL,
     -- SHA-256 of the raw request body. The body itself is never stored: an
     -- entry's text is the thing this system exists not to leak (doc 18 §9).
@@ -54,16 +61,14 @@ CREATE TABLE idempotency_keys (
     -- a request in flight, which is what makes the second one a 409 rather
     -- than a second execution.
     response_status  smallint,
-    -- The whole response body, so a replay can return exactly what the first
-    -- attempt did. This is a bounded-lifetime DUPLICATE of data that lives
-    -- elsewhere already — for `POST /entries`, the entry's own text — never
-    -- the row of record: Ruling B's expires_at > :now bounds how long a copy
-    -- sits here to 24 hours, and slice C3's reaper clears it once it lands.
-    -- Written in the clear, on purpose, for now: **Phase 5 encrypts
-    -- entries.text at rest, and this column would still hold that same text
-    -- in plain text unless Phase 5 also touches this table** — flagged here
-    -- so that work finds it by reading this comment, not by an audit.
-    response_body    text,
+    -- What the first attempt produced, by IDENTITY — never a second copy of
+    -- what it produced. An earlier shape of this table stored the whole
+    -- response body here, a plaintext duplicate of the couple's words for 24
+    -- hours; this shape retires that hazard, and there is no body column to
+    -- encrypt, clear or forget in Phase 5 or in slice C3's reaper.
+    result_id        uuid,
+    -- Which resource `result_id` names, so a replay knows what to re-read.
+    result_kind      text,
     -- Doc 06 §1's replay allowlist (review round 1, Important #2): a stored
     -- response is useless without the headers a client needs back —
     -- `ETag` for a resource this project puts optimistic concurrency on
@@ -79,7 +84,8 @@ CREATE TABLE idempotency_keys (
     expires_at       timestamptz NOT NULL,
 
     CONSTRAINT idempotency_keys_unique UNIQUE (user_id, idempotency_key),
-    CONSTRAINT idempotency_keys_expiry_check CHECK (expires_at > created_at)
+    CONSTRAINT idempotency_keys_expiry_check CHECK (expires_at > created_at),
+    CONSTRAINT idempotency_keys_result_kind_check CHECK (result_kind IS NULL OR result_kind IN ('ENTRY'))
 );
 
 -- The reaper's index (slice C3, not built here): a plain index, not

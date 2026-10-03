@@ -76,21 +76,24 @@ class IdempotencyInterceptorTest(
             .response
 
     @Test
-    fun `a replay returns the first response and does not run the handler twice`() {
+    fun `a replay returns the first status without running the handler twice, and with no stored body`() {
         val key = UUID.randomUUID().toString()
         val first = post(ada, key, """{"text":"thank you"}""")
         first.status shouldBe 201
         val second = post(ada, key, """{"text":"thank you"}""")
 
         second.status shouldBe 201
-        second.contentAsString shouldBe first.contentAsString
+        // Known gap until plan task 7: V11 stores no response text, so a
+        // replay is status and headers with an empty body.
+        first.contentAsString shouldContain "thank you"
+        second.contentAsString shouldBe ""
         second.getHeader("Idempotency-Replayed") shouldBe "true"
         first.getHeader("Idempotency-Replayed").shouldBeNull()
         handlerRuns shouldBe 1
     }
 
     @Test
-    fun `a replay carries back ETag and Location, not just the body`() {
+    fun `a replay carries back ETag and Location`() {
         val key = UUID.randomUUID().toString()
         val first = post(ada, key, """{"text":"thank you"}""")
         first.status shouldBe 201
@@ -115,15 +118,10 @@ class IdempotencyInterceptorTest(
     }
 
     @Test
-    fun `the same key against a different endpoint is 422, not a fresh reservation`() {
-        // Ruling A, review round 1: V11's unique constraint is `(user_id,
-        // idempotency_key)` alone, so a different endpoint under the same
-        // key reads back as the same reserved row rather than colliding at
-        // the database — the constraint cannot enforce "different endpoint"
-        // itself, only this comparison in IdempotencyInterceptor.replay can
-        // (F6, whole-branch review corrected this comment's own
-        // `userId + endpoint + key` description of the key, which is not
-        // what V11 declares).
+    fun `the same key against a different path is 422, not a fresh reservation`() {
+        // Ruling A: V11's unique constraint is `(user_id, idempotency_key)`
+        // alone, so only the comparison in IdempotencyInterceptor.replay can
+        // refuse a different method or concrete path.
         val key = UUID.randomUUID().toString()
         post(ada, key, """{"text":"thank you"}""").status shouldBe 201
 
@@ -131,6 +129,20 @@ class IdempotencyInterceptorTest(
 
         reused.status shouldBe 422
         reused.contentAsString shouldContain "\"code\":\"IDEMPOTENCY_KEY_REUSED\""
+    }
+
+    @Test
+    fun `the same key on another concrete path of the same route is 422, not a replay`() {
+        // The path is compared concretely: a route template would make two
+        // bonds one target. Both paths below match the one mapping.
+        val key = UUID.randomUUID().toString()
+        post(ada, key, """{"text":"thank you"}""", path = "/api/v1/probe/bonds/a/entries").status shouldBe 201
+
+        val reused = post(ada, key, """{"text":"thank you"}""", path = "/api/v1/probe/bonds/b/entries")
+
+        reused.status shouldBe 422
+        reused.contentAsString shouldContain "\"code\":\"IDEMPOTENCY_KEY_REUSED\""
+        handlerRuns shouldBe 1
     }
 
     @Test
@@ -283,6 +295,16 @@ final class IdempotencyProbeController {
             .created(URI.create("/api/v1/probe/entries/7"))
             .eTag("\"7\"")
             .body(body)
+    }
+
+    @PostMapping("/api/v1/probe/bonds/{bond}/entries")
+    @Idempotent
+    @ResponseStatus(HttpStatus.CREATED)
+    fun createUnderBond(
+        @RequestBody body: Map<String, String>,
+    ): Map<String, String> {
+        handlerRuns.incrementAndGet()
+        return body
     }
 
     @PostMapping("/api/v1/probe/other-entries")

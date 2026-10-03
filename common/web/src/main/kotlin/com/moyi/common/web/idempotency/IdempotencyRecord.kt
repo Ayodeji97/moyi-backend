@@ -5,24 +5,29 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
  * The `idempotency_keys` row (V11). See [IdempotencyKeyStore] for why this
- * is a plain class and not a JPA `@Entity`, and V11's own comment for why
- * [responseBody] is a bounded-lifetime duplicate of data that lives
- * elsewhere, never the row of record.
+ * is a plain class and not a JPA `@Entity`, and why the row
+ * holds result *identity* ([IdempotencyRecord.resultId]), never the response
+ * body: V11 has no column for the couple's words.
  */
 data class IdempotencyRecord(
     val id: UUID,
     val userId: UUID,
-    /** `METHOD path` — stored, not part of the unique key (Ruling A, V11's header comment). */
-    val endpoint: String,
+    /** The request's HTTP method — stored, not part of the unique key (Ruling A, V11's header comment). */
+    val method: String,
+    /** The request's concrete path, never a route template: two bonds are two targets. */
+    val path: String,
     val idempotencyKey: String,
     val requestHash: String,
     /** Null while the handler this row reserved is still running. */
     val responseStatus: Short?,
-    val responseBody: String?,
+    /** What the first attempt produced, by identity; null until it completes, or when the handler named no result. */
+    val resultId: UUID?,
+    val resultKind: String?,
     /** Doc 06 §1's replay allowlist — see V11's comment on why only these two. */
     val responseEtag: String?,
     val responseLocation: String?,
@@ -33,7 +38,8 @@ data class IdempotencyRecord(
 /** What [IdempotencyKeyStore.complete] needs from the response the handler produced, bundled to keep that call to three parameters. */
 data class CapturedResponse(
     val status: Int,
-    val body: String,
+    val resultId: UUID?,
+    val resultKind: String?,
     val etag: String?,
     val location: String?,
 )
@@ -124,9 +130,11 @@ class IdempotencyKeyStore(
             return
         }
         jdbc.update(
-            "UPDATE idempotency_keys SET response_status = ?, response_body = ?, response_etag = ?, response_location = ? WHERE id = ?",
+            "UPDATE idempotency_keys SET response_status = ?, result_id = ?, result_kind = ?, " +
+                "response_etag = ?, response_location = ? WHERE id = ?",
             captured.status,
-            captured.body,
+            captured.resultId,
+            captured.resultKind,
             captured.etag,
             captured.location,
             id,
@@ -138,20 +146,48 @@ class IdempotencyKeyStore(
         jdbc.update("DELETE FROM idempotency_keys WHERE id = ?", id)
     }
 
+    /**
+     * A transaction-scoped, **nonblocking** advisory lock for this
+     * `(user_id, key)`. `pg_try_advisory_xact_lock`, not the blocking variant:
+     * a second request under a key whose first attempt is still running is
+     * `409 IDEMPOTENCY_KEY_IN_FLIGHT`, a fact about timing the client can act
+     * on, rather than a request thread parked for the duration of somebody
+     * else's transaction.
+     *
+     * Two-integer form, in namespace `2`, so it cannot collide with
+     * `identity`'s session lock (`pg_advisory_xact_lock(1, hashtext(user_id))`,
+     * ADR-0021 §1a). Held until the *calling transaction* ends, so it is
+     * meaningful only inside one; outside a transaction it is released
+     * at once.
+     */
+    fun lockFor(
+        userId: UUID,
+        key: String,
+    ): Boolean =
+        jdbc.queryForObject(
+            "SELECT pg_try_advisory_xact_lock(2, hashtext(?))",
+            Boolean::class.java,
+            "$userId:$key",
+        ) == true
+
+    /** Postgres `timestamptz` keeps microseconds; a nanosecond `Instant` would not round-trip equal. */
+    private fun micros(instant: Instant): Timestamp = Timestamp.from(instant.truncatedTo(ChronoUnit.MICROS))
+
     private fun insert(record: IdempotencyRecord) {
         jdbc.update(
             """
             INSERT INTO idempotency_keys
-                (id, user_id, endpoint, idempotency_key, request_hash, created_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, user_id, method, path, idempotency_key, request_hash, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
             record.id,
             record.userId,
-            record.endpoint,
+            record.method,
+            record.path,
             record.idempotencyKey,
             record.requestHash,
-            Timestamp.from(record.createdAt),
-            Timestamp.from(record.expiresAt),
+            micros(record.createdAt),
+            micros(record.expiresAt),
         )
     }
 
@@ -184,7 +220,7 @@ class IdempotencyKeyStore(
             "DELETE FROM idempotency_keys WHERE user_id = ? AND idempotency_key = ? AND expires_at <= ?",
             record.userId,
             record.idempotencyKey,
-            Timestamp.from(record.createdAt),
+            micros(record.createdAt),
         )
         return try {
             insert(record)
@@ -202,8 +238,8 @@ class IdempotencyKeyStore(
         jdbc
             .query(
                 """
-                SELECT id, user_id, endpoint, idempotency_key, request_hash,
-                       response_status, response_body, response_etag, response_location,
+                SELECT id, user_id, method, path, idempotency_key, request_hash,
+                       response_status, result_id, result_kind, response_etag, response_location,
                        created_at, expires_at
                 FROM idempotency_keys
                 WHERE user_id = ? AND idempotency_key = ? AND expires_at > ?
@@ -211,7 +247,7 @@ class IdempotencyKeyStore(
                 ROW_MAPPER,
                 userId,
                 idempotencyKey,
-                Timestamp.from(now),
+                micros(now),
             ).firstOrNull()
 
     private companion object {
@@ -222,11 +258,13 @@ class IdempotencyKeyStore(
                 IdempotencyRecord(
                     id = rs.getObject("id", UUID::class.java),
                     userId = rs.getObject("user_id", UUID::class.java),
-                    endpoint = rs.getString("endpoint"),
+                    method = rs.getString("method"),
+                    path = rs.getString("path"),
                     idempotencyKey = rs.getString("idempotency_key"),
                     requestHash = rs.getString("request_hash"),
                     responseStatus = rs.getObject("response_status", Short::class.javaObjectType),
-                    responseBody = rs.getString("response_body"),
+                    resultId = rs.getObject("result_id", UUID::class.java),
+                    resultKind = rs.getString("result_kind"),
                     responseEtag = rs.getString("response_etag"),
                     responseLocation = rs.getString("response_location"),
                     createdAt = rs.getTimestamp("created_at").toInstant(),

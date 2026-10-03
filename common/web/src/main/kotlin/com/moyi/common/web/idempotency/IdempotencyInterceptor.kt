@@ -42,9 +42,15 @@ import java.util.UUID
  * this suite.
  *
  * The body is hashed, never stored: doc 18 §9, and an entry's text is the one
- * thing this system exists not to leak. (V11's `response_body` column does
- * hold the rendered response verbatim, bounded to the 24h window and
- * cleared once slice C3's reaper lands — see that migration's comment.)
+ * thing this system exists not to leak. Neither is the *response* stored: V11
+ * keeps the result's identity (`result_id`, `result_kind`), status, ETag and
+ * Location, and nothing of the couple's words.
+ *
+ * **Known gap, until the reserve-mutate-complete rework (plan task 7): a
+ * replay answers with the stored status and headers and an EMPTY body.**
+ * Re-reading the resource by `result_id` needs the owning module (`gratitude`
+ * for `ENTRY`), which `common:web` cannot depend on, so the interceptor cannot
+ * do it itself. A handler names its result with [recordResult].
  *
  * **Requires the request's body to be re-readable and the response to be
  * buffered.** [preHandle] reads the body to hash it, before the handler's
@@ -83,18 +89,22 @@ class IdempotencyInterceptor(
         val key = request.getHeader(HEADER)?.trim()
         if (key.isNullOrBlank()) throw IdempotencyKeyRequiredException()
 
-        val endpoint = "${request.method} ${request.requestURI}"
+        val method = request.method
+        // The concrete path, never the route template: two bonds are two targets.
+        val path = request.requestURI
         val requestHash = sha256(request.inputStream.readBytes())
         val now = clock.instant()
         val reservation =
             IdempotencyRecord(
                 id = ids.timeOrdered(),
                 userId = callerId(request),
-                endpoint = endpoint,
+                method = method,
+                path = path,
                 idempotencyKey = key,
                 requestHash = requestHash,
                 responseStatus = null,
-                responseBody = null,
+                resultId = null,
+                resultKind = null,
                 responseEtag = null,
                 responseLocation = null,
                 createdAt = now,
@@ -106,17 +116,17 @@ class IdempotencyInterceptor(
             request.setAttribute(RECORD_ID_ATTRIBUTE, reservation.id)
             true
         } else {
-            replay(existing, endpoint, requestHash, response)
+            replay(existing, method, path, requestHash, response)
         }
     }
 
     /**
      * The three ways an already-reserved key can answer a second request —
-     * see the class KDoc. A mismatch on *either* [endpoint] or [requestHash]
+     * see the class KDoc. A mismatch on [method], [path] or [requestHash]
      * is [IdempotencyKeyReusedException] (Ruling A, review round 1): the
      * unique key V11 enforces is `(user_id, idempotency_key)` only —
-     * `endpoint` is a stored column, not part of the constraint — so the
-     * same key against a different endpoint would otherwise read back as the
+     * `method` and `path` are stored columns, not part of the constraint — so the
+     * same key against a different method or path would otherwise read back as the
      * same row rather than colliding at the database. This comparison is
      * what makes that a `422`: it is the whole of what stops a key reused
      * across two different requests, not a restatement of something the
@@ -126,12 +136,13 @@ class IdempotencyInterceptor(
      */
     private fun replay(
         existing: IdempotencyRecord,
-        endpoint: String,
+        method: String,
+        path: String,
         requestHash: String,
         response: HttpServletResponse,
     ): Boolean =
         when {
-            existing.endpoint != endpoint || existing.requestHash != requestHash -> {
+            existing.method != method || existing.path != path || existing.requestHash != requestHash -> {
                 throw IdempotencyKeyReusedException()
             }
 
@@ -141,25 +152,11 @@ class IdempotencyInterceptor(
 
             else -> {
                 response.status = existing.responseStatus.toInt()
-                response.contentType = MediaType.APPLICATION_JSON_VALUE
                 response.setHeader(REPLAYED_HEADER, "true")
                 existing.responseEtag?.let { response.setHeader(HttpHeaders.ETAG, it) }
                 existing.responseLocation?.let { response.setHeader(HttpHeaders.LOCATION, it) }
-                // F10 (whole-branch review): written as UTF-8 bytes to the
-                // output stream, not through response.writer with no charset
-                // set. Every other response in this app is Jackson's own
-                // bytes, written UTF-8; response.writer resolves its charset
-                // from response.characterEncoding, which nothing here sets —
-                // MockMvc happens to default that to UTF-8, so the suite
-                // could not have caught a divergence, but a packaged jar on
-                // Tomcat defaults an unset response encoding to ISO-8859-1
-                // (server.servlet.encoding.force-response is not set), which
-                // would have corrupted every replayed body containing a
-                // non-ASCII character — an entry's own gratitude text among
-                // them. Writing the same bytes Jackson would have produced
-                // removes the question rather than fixing the servlet
-                // default by configuration.
-                existing.responseBody?.let { response.outputStream.write(it.toByteArray(Charsets.UTF_8)) }
+                // No body: V11 stores no response text. See the class KDoc's
+                // "Known gap" — plan task 7 re-reads the resource by result_id.
                 false
             }
         }
@@ -192,7 +189,8 @@ class IdempotencyInterceptor(
             captured =
                 CapturedResponse(
                     status = cached.status,
-                    body = String(cached.contentAsByteArray, Charsets.UTF_8),
+                    resultId = request.getAttribute(RESULT_ID_ATTRIBUTE) as? UUID,
+                    resultKind = request.getAttribute(RESULT_KIND_ATTRIBUTE) as? String,
                     etag = cached.getHeader(HttpHeaders.ETAG),
                     location = cached.getHeader(HttpHeaders.LOCATION),
                 ),
@@ -228,6 +226,22 @@ class IdempotencyInterceptor(
         /** Doc 06 §1. */
         private val TTL = Duration.ofHours(24)
         private const val RECORD_ID_ATTRIBUTE = "com.moyi.common.web.idempotency.recordId"
+        private const val RESULT_ID_ATTRIBUTE = "com.moyi.common.web.idempotency.resultId"
+        private const val RESULT_KIND_ATTRIBUTE = "com.moyi.common.web.idempotency.resultKind"
+
+        /**
+         * A handler's way of naming what it produced, by identity, so the
+         * reservation can record it (`result_id`, `result_kind`). Nothing
+         * reads the attributes unless a reservation exists for the request.
+         */
+        fun recordResult(
+            request: HttpServletRequest,
+            id: UUID,
+            kind: String,
+        ) {
+            request.setAttribute(RESULT_ID_ATTRIBUTE, id)
+            request.setAttribute(RESULT_KIND_ATTRIBUTE, kind)
+        }
     }
 }
 
@@ -367,7 +381,7 @@ class IdempotencyKeyRequiredException :
         "A required header, Idempotency-Key, was not sent.",
     )
 
-/** 422: the same key was already sent against a different endpoint, or with a body that hashes differently. */
+/** 422: the same key was already sent against a different method or path, or with a body that hashes differently. */
 class IdempotencyKeyReusedException :
     ApiException(
         HttpStatus.UNPROCESSABLE_ENTITY,

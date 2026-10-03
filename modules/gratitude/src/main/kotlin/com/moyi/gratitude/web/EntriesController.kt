@@ -3,9 +3,11 @@ package com.moyi.gratitude.web
 import com.moyi.bond.api.BondAccess
 import com.moyi.common.security.CurrentUser
 import com.moyi.common.web.NotFoundException
+import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.common.web.idempotency.Idempotent
 import com.moyi.gratitude.service.GetToday
 import com.moyi.gratitude.service.SubmitEntry
+import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
@@ -73,12 +75,15 @@ internal class EntriesController(
         caller: CurrentUser,
         @PathVariable bondId: String,
         @Valid @RequestBody request: SubmitEntryRequest,
+        http: HttpServletRequest,
     ): ResponseEntity<EntryResponse> {
         // No membership read here: SubmitEntry takes it itself, under the
         // bond's row lock and inside its own transaction (spec §2.1). A copy
         // read here, outside that transaction, is exactly the stale answer
         // the lock exists to refuse.
         val view = submitEntry.submit(caller.id, bondIdOrNotFound(bondId), request.toDraft())
+        // The key records what this produced by identity, never the words.
+        IdempotencyInterceptor.recordResult(http, view.entry.id.value, "ENTRY")
         return ResponseEntity.status(HttpStatus.CREATED).body(EntryResponse.from(view))
     }
 
