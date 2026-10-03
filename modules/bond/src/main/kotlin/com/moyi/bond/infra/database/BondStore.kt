@@ -128,6 +128,10 @@ internal class BondStore(
      * all *write* the bond afterwards, so a stale read meets `@Version` as a
      * conflict rather than passing silently; whether they should refresh too
      * is a question for those callers, not settled here.
+     *
+     * `refresh` also **discards unflushed changes** to the instances it
+     * refreshes, so a caller opts in before it mutates the bond or its
+     * members, never after.
      */
     fun lockBond(
         bondId: BondId,

@@ -224,7 +224,9 @@ internal class DayAssignmentTest {
     fun `a degenerate window from the calendar is carried through, not rejected or widened`() {
         // An eastward handoff can skip a label entirely; its day is the empty
         // span startsAt == endsAt. DayAssignment has no business second-guessing
-        // what the calendar says a day is.
+        // what the calendar says a day is. No real calendar returns an empty
+        // window for an instant (a half-open empty span contains none), so this
+        // only pins pass-through; the end-to-end degenerate case is Task 9's.
         val at = Instant.parse("2026-09-15T23:00:00Z")
         val skipped = DayWindow(LocalDate.of(2026, 9, 16), at, at)
 

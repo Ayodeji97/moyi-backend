@@ -187,7 +187,8 @@ internal class SubmitEntry(
         val window = resolution.bounds
         // The snapshot `anchor_timezone` keeps: the zone in force when this
         // day began. Taken at `startsAt`, not at `now` or `resolvedAt`, so
-        // whichever writer opens the row stamps the same zone.
+        // whichever writer opens the row stamps the same zone. Relies on
+        // `dayAt` never returning an empty window: an instant always lies in one.
         val zone = ZoneId.of(timeline.zoneIdAt(window.startsAt))
         val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
         val opened = days.openOrGet(bondId, window, zone, now, openStatus)

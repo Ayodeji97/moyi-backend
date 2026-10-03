@@ -142,7 +142,7 @@ internal class BondDayPersistenceTest(
     }
 
     @Test
-    fun `the loser of an open race gets the winner's span, not its own`() {
+    fun `a second open with a different window finds the existing row unchanged`() {
         // An existing day is never recomputed (BR-6): a second open with a
         // different window finds the row, it does not rewrite it.
         openOrGet(bondId, window, lagos, now)

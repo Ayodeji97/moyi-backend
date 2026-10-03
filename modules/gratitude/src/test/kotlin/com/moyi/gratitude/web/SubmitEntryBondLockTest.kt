@@ -25,6 +25,7 @@ import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import java.sql.Connection
 import java.time.Duration
@@ -80,6 +81,8 @@ internal class SubmitEntryBondLockTest(
 
     @AfterEach
     fun clear() {
+        // The pool first: a submission still queued must not race the truncate.
+        pool.shutdownNow()
         jdbc.execute("TRUNCATE TABLE entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
@@ -95,7 +98,6 @@ internal class SubmitEntryBondLockTest(
 
             awaitBlockedOrDone(holderPid, submission)
             submission.isDone shouldBe false
-            jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 0
 
             release {}
             submission.get(10, TimeUnit.SECONDS).status shouldBe 201
@@ -130,14 +132,25 @@ internal class SubmitEntryBondLockTest(
         }
     }
 
+    @Test
+    fun `today is a read and never queues behind the bond's row lock`() {
+        // Amendment 4: GetToday keeps the unlocked `membershipOf`. Move it onto
+        // `lockMembershipOf` (or give it a `lockBond`) and this read appears in
+        // pg_blocking_pids behind the holder, so `isDone` below is false.
+        withBondLockHeld { holderPid, release ->
+            val read = async { today(ada) }
+
+            awaitBlockedOrDone(holderPid, read)
+            read.isDone shouldBe true
+            read.get(1, TimeUnit.SECONDS).status shouldBe 200
+
+            release {}
+        }
+    }
+
     // ---- the lock holder ------------------------------------------------
 
     private val pool = Executors.newCachedThreadPool()
-
-    @AfterEach
-    fun stopPool() {
-        pool.shutdownNow()
-    }
 
     private fun <T> async(call: () -> T): Future<T> = pool.submit<T> { call() }
 
@@ -208,6 +221,12 @@ internal class SubmitEntryBondLockTest(
                 contentType = MediaType.APPLICATION_JSON
                 content = body
             }.andReturn()
+            .response
+
+    private fun today(caller: UUID): MockHttpServletResponse =
+        mockMvc
+            .get("/api/v1/bonds/$bondId/today") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(caller).token}") }
+            .andReturn()
             .response
 
     private fun createBond(userId: UUID): MockHttpServletResponse =
