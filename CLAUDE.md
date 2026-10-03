@@ -59,8 +59,10 @@ the way the rule would have judged it.
   solo project, so review and CI are the only second pair of eyes there is.
 - **Do not merge unless the owner says so.** The owner merges; an instruction to merge
   covers the pull requests it names, not the ones after them.
-- **Commits follow Conventional Commits, subject at most 88 characters.** A hook enforces
-  it, so a message that breaks it never lands.
+- **Commits follow Conventional Commits, subject at most 88 characters.** The hook at
+  `.githooks/commit-msg` checks it, but only once it is switched on
+  (`git config core.hooksPath .githooks`), and CI does not check it at all. So check the
+  subject yourself; on a fresh clone nothing will stop a bad one.
 - **A breaking API change carries the `breaking-api-change` label.** The client is
   generated from the contract, so the contract check fails without it, deliberately.
 
@@ -110,3 +112,7 @@ the way the rule would have judged it.
 
 This file is loaded into every session, so a stale line here is followed as faithfully as
 a correct one. Change it in the same PR that changes the rule it describes.
+
+`AGENTS.md` repeats four of these rules, word for word, for tools that read only that
+file. That is a second copy, which this file warns against, so it is kept deliberately
+small: when one of those four changes here, change it there in the same commit.
