@@ -1719,8 +1719,8 @@ Reality: **most of what was wrong was in what I told the implementers, and in te
          first test to open a day and *then* change the zone. No unit or slice test
          before it, across eight tasks, had done those two things in that order.
          `openOrGet` is `ON CONFLICT DO NOTHING`, so the row kept the `ends_at` it was
-         opened with while the timeline ran the day on for another 25 hours: an entry filed on a row whose span did not contain it, and a hole in the
-         stored calendar. The timeline was right, the row was right when written, and the
+         opened with while the timeline ran the day on for another 25 hours: an entry
+         filed on a row whose span did not contain it, and a hole in the stored calendar. The timeline was right, the row was right when written, and the
          two were never compared in that order. In the same task, my amendment's eastward
          example was Lagos to Kiritimati, which skips no label at all: the handoff is 13:00
          on the next day. The implementer computed it, said so, and used Pago Pago.
@@ -1739,3 +1739,45 @@ Wrong about: where the risk in a rework sits. I treated the briefs as the fixed 
          deletion was planned as a step (Task 5's mutation) rather than stumbled on.
          Smaller: order is an input. "Open, then change" and "change, then open" are
          different tests, and I had written one of them eight times.
+
+## 2026-10-03 · Phase 3 · Reading C1 whole — three right answers that made a 500
+Expected: a formality. Every rework task had been reviewed on its own, most of them twice,
+         with mutations. Three reviewers reading the whole branch at the end were there
+         to confirm it.
+Reality: **no critical defect, and several real ones, none of which was inside a task.**
+         The first is three tasks, each correct. Task 1's timeline assumes no label past
+         today's is in use. The first build's day assignment lets a claim up to five
+         minutes ahead be the candidate, so a fast phone is not refused. Task 9's
+         extension assumes a row starts where the timeline says its label starts. Put
+         them in order: at 23:57 a phone reading 00:01 opens tomorrow's row; a westward
+         zone change confirmed in the next three minutes moves tomorrow's start; and from
+         then on every write to that day finds a row whose start disagrees with the
+         timeline and fails a `require`. A `500` for both people, for a whole day. Each
+         task's tests passed because each task's tests held the other two still. The
+         reviewer of the extension had asked the right question, "can a row exist ahead of
+         now?", and accepted "rows open only for now or the past". That was false, and it
+         was false in a file that task never touched.
+         The second is not an interaction at all. `EntryText.of` stored
+         `NFKC(raw).trim()`. The spec says normalise to count and store raw; the KDoc said
+         normalising "changes nothing a person wrote to mean". It turns an ellipsis into
+         three full stops and a trade mark sign into `TM`. No test exercised it: delete
+         the normaliser and the suite stayed green. It was written in the first build, it
+         was not on any rework task's file list, and so ten reviews of the rework read
+         around it. The plan even said "do not touch EntryText", meaning its limits.
+         The rest were the same kind of thing at smaller size. A chunked `POST` was a
+         `500`, reasoned from reading by a reviewer and then reproduced, all four ways,
+         before any fix: the bound I had added to stop an unbounded read refused every
+         body whose length was not declared, and the interceptor called that a wiring
+         bug. V13's backfill had never run against a row, because every test database is
+         empty when it runs. That one turned out correct. It was still untested.
+Wrong about: what a per-task review can see. I had been treating ten clean reviews as
+         ten independent confirmations of the branch. They were ten confirmations of ten
+         diffs. A defect that needs two tasks' assumptions to collide is in nobody's
+         diff, and code nobody changed is in nobody's diff either. The whole-branch read
+         is not a second look at the same thing; it is the only look at those two.
+         Also: a reviewer's accepted answer is a claim, and it goes stale like a KDoc
+         does. "Rows open only for now or the past" was written down as a finding and I
+         carried it forward as a fact.
+         And the one I should have known by now: "stored raw" was a sentence in the spec
+         with no test under it. A sentence the suite survives the negation of is not
+         implemented, it is believed.

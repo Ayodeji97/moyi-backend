@@ -117,6 +117,29 @@ separate day lock would allow a write to commit after the bond ended. The port a
 activation/end intervals and the effective anchor timeline to the closer through public DTOs,
 so gratitude does not query bond's private tables.
 
+**Amended 2026-10-03 — three things C1 built differently (ADR-0031 decisions 18, 19 and 16).**
+
+- **The close job takes no bond lock (ruling R1, ADR-0031 decision 18).** The lock-order
+  sentence above holds for submission, editing and lifecycle reconciliation. It does **not**
+  hold for closing: C3's sweep handles many bonds per run and would serialise behind each
+  bond's row, so the closer starts at the bond-day and never holds the bond. Against the
+  closer, what stands between a sweep and a live submission is the day's own row lock and
+  `bond_days`'s unique `(bond_id, date)`. The closer must also never hold two days of one
+  bond at once. `BondAccess.lockMembershipOf`'s KDoc now says the same.
+- **The field list above is additive, not exhaustive (ruling R2, ADR-0031 decision 19).** As
+  built, `BondMembership` also carries **`hasLeft`** (checked explicitly by every write;
+  `isOpen` does not cover it — the second review of PR #41), names the pending flag
+  **`awaitingSecondMember`** rather than `isAwaitingPartner`, and carries
+  **`anchorTimeline`**, a `BondAnchorTimeline` (ADR-0031 decision 16): the effective-zone
+  timeline of §3.1, which `gratitude` can hold and ask and cannot construct. `anchorTimezone`
+  remains, and is the zone the bond *requests*, not the one that decides dates.
+- **C3 needs a closer-facing accessor that takes no `userId`.** Both methods above answer for
+  a *caller*: they run the membership guard. The close job has no caller. To take a day's
+  window from the timeline (§6.4 step 2, as amended) and to generate missing days from
+  `activeSince` through `endedAt`, C3 must add a method to this port that returns the
+  timeline and the lifecycle instants for a bond id alone — read-only, and for the closer
+  only. It does not exist yet; it is recorded in ADR-0031 under Owed.
+
 ### 2.2 Why `scheduling` does not own the transitions
 
 The close job is two different things wearing one name. Deciding *which Bonds have crossed
@@ -167,6 +190,36 @@ Intervals remain contiguous and non-overlapping. Historical/offline instants use
 recorded interval, never the bond's latest requested zone. This requires extending B5's
 confirmation path and the public timeline port in C1; copying a string at lazy row creation
 is insufficient. Tests cover both forward and backward date-line changes mid-day.
+
+**Amended 2026-10-03 — what C1 built, and three things the paragraph above does not say
+(ADR-0031 decisions 3, 12, 13 and 14).**
+
+- **`anchorTimezone` on the row is a snapshot for display and audit; it is not the
+  authority (decision 3).** The paragraph before the last one calls the copied string "what
+  makes 'never recomputed' true by construction". It is not: `[startsAt, endsAt)`, taken
+  from the timeline, is what a day *is*, and nothing decides a date from the string.
+- **A skipped label is settled `FROZEN` by C3's close job, not "at the handoff" (ruling P9,
+  decision 14).** No instant belongs to a skipped label, so no entry can open its row, and
+  `bond` cannot write `bond_days`. C1 writes no row for it. C3 derives the skipped labels
+  from the timeline — the labels between the last one an interval issues and its successor's
+  `first_label` — and settles each `FROZEN` without consuming a freeze.
+- **"Never recomputed" has one exception, and it only extends (ruling P10, decision 13).**
+  A day's `startsAt` and zone snapshot never change, and a settled day's span never changes.
+  An **unsettled** day's `endsAt` may be moved **later**, never earlier, when a westward
+  change (below) runs the day on: the next write that touches the row, under its lock,
+  brings `endsAt` up to what the timeline now says. `GET /today` is a read and extends
+  nothing, so a row opened before a change and never written to again keeps a stale
+  `endsAt` until the close job reconciles it (§6.4 step 2).
+- **The westward merge (ruling R3, decision 12) — this section had no text for it.**
+  "Extend the handoff to the next unused date boundary" says where the handoff goes. What
+  happens to the day that spans it: it **keeps the label it opened with and runs on to the
+  successor interval's start**, as one long day. **Any westward move merges the current
+  day**, not only one across the date line: one hour west makes a 25-hour day; Kiritimati
+  to Pago Pago makes one of 49 hours. The couple gets one fewer opportunity to write; no
+  label is used twice and no day is missed, so BR-4's run is not broken and no compensating
+  `FROZEN` day is created. Rejected: labelling the new zone's first day `lastOldLabel + 1`,
+  which leaves every later label a day ahead of the wall calendar for good.
+- **No row is opened for a day that has not begun (ruling P11, decision 22).** See §6.1.
 
 **Eight statuses, not five** (doc 04 §3; see §12.1 — doc 07's DDL lists five and is stale):
 
@@ -219,6 +272,26 @@ value class EntryText private constructor(val value: String) {
 Text is NFKC-normalised before counting, as passwords are (FR-001), and stored raw and
 unmodified thereafter (doc 04 §7: no lossy preprocessing at write time).
 
+**Amended 2026-10-03 (ADR-0031 decision 23, ruling P12).** The code matches the paragraph
+above only since the final review of C1: the first build stored `NFKC(raw).trim()`, and NFKC
+is lossy (`…` → `...`, `²` → `2`, `™` → `TM`). As built now: the text is stored **exactly as
+sent**, untrimmed; blank is judged, and the 500 counted, on the NFKC-normalised, trimmed
+form; the 8192 octets are measured on the stored bytes, which is what the database CHECK
+measures; and a text containing U+0000 is refused (`422`), because a Postgres `text` column
+cannot hold it. The sketch's `/* NFKC, trim, count … */` describes how the limits are
+*decided*, not what is kept.
+
+Two notes on the numbered list:
+
+- **Item 3's code-point CHECK is deliberately not in V12.** UTF-8 spends at least one octet
+  per code point, so `octet_length(text) <= 8192` already implies at most 8,192 code points
+  — above any reachable grapheme expansion of 500. A second CHECK would be the same bound
+  written twice. §12.2's "plus a code-point bound" is superseded the same way.
+- **An open product question, flagged to the owner and not decided here.** Counting on the
+  NFKC form means a typographic ellipsis counts as three of the 500. A client's character
+  counter must normalise the same way, or it will show "fits" for a text the server answers
+  `422`. This section chose "normalised before counting"; the code keeps it.
+
 ### 3.3 `StreakState` and `StreakEvent`
 
 `StreakState` is a projection, one row per Bond, and `streak_events` is an append-only log of
@@ -265,6 +338,12 @@ Doc 06 §3.4 fixes the shape and calls it the most carefully designed response i
 the home screen in one call: `bondDay`, `myEntry`, `partnerEntry` (locked or not), `partner`,
 `streak`, `prompt`. C1 ships it with `streak` and `prompt` absent; C4 and C6 fill them in.
 
+**Amended 2026-10-03 (ADR-0031, Consequences).** C1 also ships it **without `partner`**.
+`BondMembership` carries only the caller's own facts and names nothing about the other
+member, so `gratitude` has no id to resolve a display name for. It is a recorded gap against
+doc 06 §3.4, to be closed when `bond.api.BondAccess` gains a way to name the other member —
+not a field to be guessed at in the meantime.
+
 ### 5.2 Endpoints
 
 | Slice | Method | Path | Notes |
@@ -296,6 +375,13 @@ for agreement, which is a second way to be wrong.
 `DAY_CLOSED` (409) · `IDEMPOTENCY_KEY_REUSED` (422) · `MEDIA_NOT_YET_SUPPORTED` (422, C1 only,
 removed by Phase 4).
 
+**Amended 2026-10-03 (ADR-0031 decision 8).** The list omitted
+**`IDEMPOTENCY_KEY_IN_FLIGHT` (409)**, which §5.4's "a request that is in flight under the
+same key gets `409`" needs a code for. C1 adds five codes in all: `ENTRY_ALREADY_EXISTS`,
+`DAY_CLOSED`, `MEDIA_NOT_YET_SUPPORTED`, `IDEMPOTENCY_KEY_REUSED` and
+`IDEMPOTENCY_KEY_IN_FLIGHT`. `ENTRY_IMMUTABLE` and `ENTRY_NOT_REVEALED` arrive with the
+slices that can return them.
+
 Every one of these makes its slice a **breaking API change** under ADR-0024's 2026-09-24
 amendment — doc 06 §2 generates the codes into the client as an exhaustive sealed class, so an
 addition is source-breaking there. Each slice carries the `breaking-api-change` label.
@@ -325,11 +411,38 @@ now because `POST /entries` is the first endpoint that *requires* it.
   permanently stuck reservation. The unique constraint is `(user_id, key)`; fingerprint
   comparison includes method, concrete path and body. Expired-key replacement uses the same lock.
 
+**Amended 2026-10-03 (ADR-0031 decisions 8, 24 and 25).**
+
+- **The path is the raw request URI, not a canonical form (decision 8).** The first bullet
+  says "canonical concrete path". As built it is concrete — never the route template — and
+  **not canonicalised**: a retry is byte-identical to what it retries, so two spellings of
+  one path only come from two requests, and a mismatch fails toward `422`. The query string
+  is not bound; no idempotent endpoint takes one.
+- **"Request-body hash" is a keyed fingerprint (ruling P8, decision 8)** — HMAC-SHA256 under
+  the server's personal-data secret over method, path and body. A plain hash of a short
+  entry is recoverable by guessing.
+- **Refusals are not recorded**, only successes; a refused request may be corrected and
+  retried under the same key.
+- **The key itself is bounded (decision 25): 1 to 255 characters of visible ASCII**
+  (0x21–0x7E). Anything else, or no key, is `422 VALIDATION_FAILED` with an `errors` entry
+  naming `Idempotency-Key`. V11 carries the same bound as a CHECK and the contract as
+  `maxLength`/`pattern`.
+- **The body of an idempotent request is at most 1 MiB (decision 24).** It is buffered to be
+  fingerprinted, only on an idempotent route, and only up to that bound: longer is `413`. A
+  body with no declared length (chunked transfer) is accepted and read to the bound; a
+  multipart body is `415`.
+
 ### 5.5 Rate limiting (doc 06 §4)
 
 `entries:create` — a per-user bucket. The global per-user bucket already applies to everything;
 this adds a write-shaped one. Nothing here is per-IP: every one of these endpoints is behind the
 bearer, and an attacker with a token is rate-limited as a user.
+
+**Amended 2026-10-03 (ADR-0031, Owed).** The `entries:create` bucket is **not built in C1;
+it is owed to C2.** Both C1 routes sit under the global authenticated per-user bucket
+(120/min). BR-2 already caps real writes at one per member per day, so the missing bucket
+bounds only *refused* attempts: until C2, a member can make 120 refused submissions a
+minute.
 
 ## 6. Rules, stated so they can be tested
 
@@ -344,6 +457,22 @@ bearer, and an attacker with a token is rate-limited as a user.
    or create its day under the bond lock. This avoids needing a `bondDay` before choosing one.
    The client never names the date. Recheck closed/revealed state under the day lock; if a
    close raced with offline assignment, redirect once to the submission-time day.
+
+**Amended 2026-10-03 (ADR-0031 decision 22, ruling P11) — rule 2's "5 minutes in the
+future".** A claim ahead of the server's clock is **never the candidate, by any amount**.
+Within five minutes it is ordinary clock drift and the request is not refused; beyond it the
+clock is not to be trusted; either way the day is resolved at the **submission instant**, and
+that instant is what is stored as `intendedAt`. As first written, rule 2 let a claim up to
+five minutes ahead *be* the candidate, so a phone reading 00:01 at 23:57 opened tomorrow's
+row before tomorrow began. A westward zone change confirmed in those minutes then moved
+tomorrow's start (§3.1), the stored row disagreed with the timeline, and every later
+submission for that day failed. The invariant the amendment restores, and which §3.1's
+timeline and the close job both rely on: **no `bond_days` row exists for a day that has not
+begun.** The cost: an entry sent at 23:57 from a phone that reads 00:01 is filed on today —
+where the server says it was written.
+
+The client's `intendedAt` is truncated to microseconds, as the server's own clock reading
+is, before anything is decided from it.
 
 **Why `EMPTY` is in that list**, spelled out because it was missing from the corpus's first
 draft and the reason is not obvious: BR-10 makes a closed day's status authoritative and BR-1
@@ -410,7 +539,19 @@ unsettled days**, regardless of the bond's current status or current requested z
    from the remaining gaps on the next run. Alert on a large backlog but keep draining it.
    Never manufacture `EMPTY` dates in pending-member, suspension, deletion or archived
    intervals; gaps before an interval ended still need closure.
-2. **Transition existing elapsed days using their stored `endsAt`.** `OPEN → EMPTY`,
+2. **Transition existing elapsed days — elapsed by the timeline, not by their stored
+   `endsAt` alone (amended 2026-10-03; ADR-0031 decision 13, ruling P10; Owed, C3).** This
+   step first read "using their stored `endsAt`". **Do not build that.** A row opened
+   before a westward zone change and not written to since still carries the `endsAt` it
+   was opened with, while the timeline now runs that day on to its successor's start
+   (§3.1). Closing on the stored value closes a merged day early — 25 hours early for
+   Kiritimati to Pago Pago — and every write in those hours becomes `409 DAY_CLOSED`. The
+   closer therefore **derives each day's end from the bond's effective-zone timeline and
+   reconciles a stale stored `endsAt` first**, under the day's lock and extend-only (later,
+   never earlier; `startsAt` never moves), and only then decides whether the day has
+   elapsed. A row it opens itself (step 1) takes its whole window from the timeline, never
+   from a zone's natural midnight; a bond's first day starts at its creation.
+   Then: `OPEN → EMPTY`,
    `PARTIAL → SOLO` with the live entry revealed, and `PENDING_REVEAL → REVEALED`.
    Set `closedAt` idempotently, including on elapsed `SUSPENDED` rows without revealing
    previously private suspended entries. Already revealed content remains readable.
@@ -598,7 +739,7 @@ the load-bearing assertions:
 | **Close-job idempotency** | Run twice; test interior missing dates before a newer lazy row, backlog over 400 dates, and ended bonds with pending reveal. |
 | **Consent and lifecycle races** | Submit versus leave/block/deletion/zone confirmation; lock order prevents post-end writes or duplicate date labels. |
 | **Idempotency recovery** | Same key across bonds/routes is 422; concurrent requests execute once; crash before commit rolls back both entry and key; replay after erasure contains no old text. |
-| **Reveal persistence** | A revealed solo entry stays readable after freezing; joining on the current suspended day resumes it; prior suspended days stay private. |
+| **Reveal persistence** | A revealed solo entry stays readable after freezing; joining on the current suspended day resumes it; prior suspended days stay private. *(Amended 2026-10-03, ADR-0031 decision 4: "joining … resumes it" is **C2's** to build and test — see §12.4. C1 leaves the day `SUSPENDED`.)* |
 | **Withdrawal and outbox** | With poller stopped, committed withdrawal immediately hides content; independent consumers and crash retries do not lose events. |
 | **Streak properties** | Randomised timelines; the four invariants in §6.5. |
 | **Cross-tenant** | The existing route-driven suite picks up every new endpoint automatically (ADR-0026), and a route added without a fixture fails the build. |
@@ -655,6 +796,10 @@ exact number as the first draft's error: 4,000 code points allows only 8 per gra
 ZWJ family emoji is 10, so 500 legitimately typed characters can trip it. **The CHECK is
 `octet_length(text) <= 8192` plus a code-point bound set above any reachable expansion.**
 
+**Amended 2026-10-03 (ADR-0031 decision 23).** V12 carries the octet CHECK only. The octet
+bound already implies no more than 8,192 code points, so the second CHECK was omitted on
+purpose (§3.2).
+
 ### 12.3 Doc 05 contradicts itself about where ShedLock lives
 
 §5.2 says "ShedLock over Redis ensures only one instance runs the job during a rolling deploy".
@@ -685,6 +830,16 @@ extend nor break anything. On the joining day, the first gratitude operation or 
 and two follow the reveal rule. Use the recorded activation instant to distinguish this day
 from earlier suspended days, which remain private and excluded. The streak begins on the
 first day both members exist, which is what §8.3a was protecting. Doc 04 §8.3a is amended to say so.
+
+**Amended 2026-10-03 (ADR-0031 decision 4 and its amendment; Owed, C2).** **The joining-day
+reconcile is C2's, not C1's.** C1 creates the `SUSPENDED` row and keeps it `SUSPENDED` on
+every later write, including the second member's on the joining day. Nothing in C1 moves a
+day out of `SUSPENDED`. C2, which builds the reveal, owes the reconcile exactly as stated
+above — zero entries becomes `OPEN`, one becomes `PARTIAL`, two follow the reveal rule,
+decided by the recorded activation instant (`BondMembership.activeSince`) — **and it owes
+it for joining-day rows that have already elapsed before C2 ships**, which would otherwise
+stay `SUSPENDED` with both members' first entries locked to each other for good. The
+reconcile lives in `gratitude`: `bond` cannot write `bond_days`.
 
 ### 12.5 `bond_days` needs a column doc 07 does not give it
 
@@ -738,7 +893,11 @@ document, and so that a reviewer can check the list rather than reconstruct it.
 3. The job's **orchestration is in `scheduling` and its transitions are in `gratitude`**, so the
    synchronous path and the job cannot state the same rule twice (§2.2).
 4. `bond_days` **copies the anchor zone onto the row**, which is what makes BR-6's "never
-   recomputed" structural (§3.1).
+   recomputed" structural (§3.1). *(Amended 2026-10-03, ADR-0031 decision 3: the copied zone
+   string is a snapshot for display and audit, **not the authority**. What makes "never
+   recomputed" structural is the persisted `[startsAt, endsAt)` and the bond-owned
+   effective-zone timeline; a copied string cannot defer a change on a day that has no
+   row.)*
 5. `PENDING_REVEAL` is a real status with a **second sweep in the same fifteen-minute job**,
    because nothing else exists between submit and midnight (§6.3).
 6. **Idempotency and ShedLock are Postgres-backed**, keeping Redis removable (§5.4, §12.3).

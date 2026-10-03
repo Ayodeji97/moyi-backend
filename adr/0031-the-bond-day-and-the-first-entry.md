@@ -1,6 +1,7 @@
 # ADR-0031 — The Bond-day, and the first entry
 
-**Status:** Accepted · **Date:** 2026-09-29 · **Amended:** 2026-10-03 (the C1 rework) · **Deciders:** Daniel
+**Status:** Accepted · **Date:** 2026-09-29 · **Deciders:** Daniel
+**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review)
 
 ## Context
 
@@ -33,6 +34,13 @@ Ten more tasks rebuilt them. Decisions 3, 8, 10 and 11 below are rewritten to sa
 not what the first build shipped; decisions 12 to 21 are new; the last section says, decision by
 decision, what changed and why. Where a decision below names a ruling (P1 to P10, R1 to R3), it
 is one made during that rework: R1 to R3 by the plan, the rest by the build's own ledger.
+
+**And then it was read whole.** Ten per-task reviews had passed the rework. Three reviewers
+then read the entire branch at once and found no critical defect and several real ones, each
+of which either crossed task boundaries or sat in first-build code no rework task had
+reopened. Decisions 22 to 25 are what that review ruled (P11, P12 and two more), and the
+spec was amended in the same change so that it and this ADR tell one story: every departure
+from the spec recorded here is now marked in the spec, dated, citing the decision.
 
 ## Decision
 
@@ -188,12 +196,14 @@ for Phase 5. Both are gone.
   to run without one. In order: a transaction-scoped **nonblocking** advisory lock on
   `(user_id, key)` (`pg_try_advisory_xact_lock`, namespace 3, so it cannot collide with `bond`'s
   own per-user advisory lock in namespace 2), where `false` is
-  `409 IDEMPOTENCY_KEY_IN_FLIGHT` at once; the lookup; then the reservation insert, the caller's block, and the completion. They commit
-  or roll back as one. The three-transaction shape could crash between the first and the third
+  `409 IDEMPOTENCY_KEY_IN_FLIGHT` at once; the lookup; then the reservation insert, the
+  caller's block, and the completion. They commit or roll back as one. The
+  three-transaction shape could crash between the first and the third
   and leave a committed reservation with no result (a `409` for 24 hours, for a request that
   never happened), or between the second and third and leave a committed entry under a key that
   would run it again. `IdempotencyInterceptor` keeps only the header contract: it refuses a
-  missing key, fingerprints the request, and hands the handler an `IdempotentRequest`.
+  missing or malformed key (decision 25), buffers and fingerprints the request (decision 24),
+  and hands the handler an `IdempotentRequest`.
 - **The record stores `result_id` and `result_kind`, plus the status and the two replay
   headers.** There is no body column, so there is no second copy of anybody's words to encrypt,
   clear or forget. `result_kind` is `CHECK (… IN ('ENTRY'))` and is kept as a schema enumeration
@@ -207,8 +217,8 @@ for Phase 5. Both are gone.
   rather than a string, the outcome carries the two headers, and `once` takes an
   `IdempotentRequest`. Its constructor is `internal` to `common:web`, so a handler in another
   module cannot build one; inside `common:web` the interceptor is the only code that does.
-  The block must return an `IdempotentResult`, whose `resultId` and `kind` are required, so an idempotent endpoint that
-  forgets to name what it produced does not compile. The controller sets
+  The block must return an `IdempotentResult`, whose `resultId` and `kind` are required, so an
+  idempotent endpoint that forgets to name what it produced does not compile. The controller sets
   `Idempotency-Replayed: true` from `wasReplayed`.
 - **On a replay `value` is null and the caller re-reads the result. A replay is authorised as a
   read, not as the original write** (spec §5.4: "after current authorization and
@@ -381,7 +391,10 @@ its shorter `ends_at`. Until C3 reconciles it, the timeline, not the column, say
 day ends. Nothing reads the column before C3. A window whose `starts_at` or label disagrees with
 the row is refused with a `require`; neither can fire for a real user in C1, because the
 timeline is append-only, handoffs are deferred to the end of the current day or later, changes
-are at least 30 days apart, and both sides are truncated to microseconds.
+are at least 30 days apart, both sides are truncated to microseconds — **and no row is ever
+opened for a day that has not begun (decision 22)**. That last clause was missing, and
+without it this sentence was false: the reviewer who passed this decision accepted "rows
+open only for now or the past", and the five-minute skew tolerance opened one ahead of now.
 
 **14. An eastward change can skip a label, and C1 writes no row for it (P9).** Pago Pago to
 Kiritimati, agreed mid-day: the handoff instant is already on the 17th in the new zone, so the
@@ -451,9 +464,9 @@ ruled by Daniel).** C3's sweep handles many bonds per run and would serialise be
 row. **This contradicts spec §2.1 as written.** §2.1 says the lock order is "bond, then
 bond-day, then entry on submission, editing, closing and lifecycle reconciliation", and
 `BondAccess.lockMembershipOf`'s KDoc repeats that sentence. Under R1 the closer starts at the
-bond-day and never holds the bond. R1 is the later ruling and it stands; the spec sentence and
-the KDoc are both to be amended when C3 is planned (Owed), and neither is edited here. The
-consequence lands in C1. With every
+bond-day and never holds the bond. R1 is the later ruling and it stands. Both texts were
+amended on 2026-10-03, with the final review: §2.1 now says the closer is the exception, and
+so does the KDoc. The consequence lands in C1. With every
 submitter queued on the bond lock, two first entries no longer race for the day's row, and the
 test named for that race passed with the day lock deleted. A live submission and the sweep can
 still collide, so that is the race now tested: a lock-free opener holds a new day's row
@@ -491,13 +504,102 @@ among submitters, who are serialised on the bond lock, and it puts an obligation
 left that test passing for the wrong reason, on purpose and written down, and Task 5's first
 step was the mutation that showed it.
 
+**22. A claim ahead of the server's clock is accepted and resolved at the submission instant
+(P11).** Spec §6.1 let an `intendedAt` up to five minutes in the future be the candidate, to
+absorb clock drift. Three tasks were each right under their own assumption and wrong
+together. Task 1's `usedLabelsUpTo(now)` assumed no label beyond today's is in use. The skew
+tolerance let a phone reading 00:01 at 23:57 open **tomorrow's** row, three minutes early.
+Decision 13's extension assumed a row's `starts_at` always equals the timeline's. Confirm a
+westward change in those three minutes and tomorrow's start moves (decision 12): the stored
+row now disagrees with the timeline, and `BondDay.extendedTo` refuses every later
+`POST /entries` for that day — a `500` for both members, all day. Reproduced in
+`TimezoneMatrixTest` before the fix. The ruling keeps the tolerance for what it was for: a
+slightly fast phone is not refused. But when `intendedAt` is after the submission instant,
+the day and the stored instant come from the submission instant, and `usedIntendedAt` is
+false. Both sides of five minutes now get the same answer, so `DayAssignment` draws no line
+there at all. What this buys is an invariant: **no `bond_days` row exists for a day that has
+not begun.** It also makes the BR-3a redirect's two day locks strictly older then newer
+(decision 20). The cost: an entry sent at 23:57 from a phone that reads 00:01 is filed on
+today, which is where the server says it was written. The client's `intendedAt` is also
+truncated to microseconds, as the server's clock already was: a fresh `201` and its replay
+must not differ, and pgjdbc *rounds*, so the last half-microsecond of a day would have been
+stored as the first instant of the next.
+
+**23. An entry's text is stored exactly as sent; NFKC and trimming only decide (P12).**
+Spec §3.2 and doc 04 §7 say "NFKC-normalised before counting … stored raw and unmodified".
+`EntryText.of` stored `NFKC(raw).trim()`, and its KDoc said normalisation "changes nothing a
+person wrote to mean". NFKC is a lossy, one-way mapping: `…` becomes `...`, `²` becomes `2`,
+`™` becomes `TM`, `ﬁ` becomes `fi`. The couple's words were being rewritten for good. No
+test exercised it — deleting the `Normalizer` call left the suite green — and the file was
+first-build code that no rework task reopened, which is why ten reviews did not see it. As
+built now:
+
+- **Stored: the raw string**, not normalised and not trimmed. Conservative by construction:
+  raw text can be normalised later, normalised text can never be restored.
+- **Blank** is judged on the NFKC-normalised, trimmed form.
+- **The 500 graphemes** are counted on that same form, which is the spec's rule.
+- **The 8192 octets** are measured on the stored bytes, because that is what V12's
+  `entries_text_octets_check` measures, and the two must agree or an accepted text is a
+  `500` at the insert. The NFKC form can be larger than the raw; it is never stored, so
+  that does not matter.
+- **U+0000 is refused.** Postgres `text` cannot hold it, so such a text passed every check
+  and failed at the insert. The slice's bar is "FR-041 input is a `422`, never a `500`".
+- **No code-point CHECK.** Spec §3.2 lists a third limit, a code-point bound above any
+  reachable grapheme expansion. V12 omits it on purpose: UTF-8 spends at least one octet per
+  code point, so the octet cap already implies it.
+
+Costs: entries keep leading and trailing whitespace a client did not strip (a later slice
+can trim on read). Rows a development database wrote before this hold the normalised form
+and stay that way. **One product question is open, flagged to Daniel and not ruled:**
+counting on the NFKC form means an iOS typographic ellipsis counts as three of the 500, so a
+client's counter must normalise the same way or a member sees "fits" and gets a `422`. The
+spec chose this; a test (`the 500 is counted on the NFKC form`) pins it and is the one to
+change if he decides otherwise.
+
+**24. An `@Idempotent` request's body is buffered by the interceptor, bounded, and a body
+it cannot take is a `4xx`.** The caching filter used to read every `POST`/`PUT`/`PATCH` body
+eagerly, on every path, and — to bound that — declined any request without a
+`Content-Length`, over 1 MiB, or multipart. `IdempotencyInterceptor` then treated an
+unwrapped request as a wiring bug and threw: a `500`. The reviewers reasoned this from
+reading; all four triggers were reproduced with a failing test before anything changed (no
+body, chunked transfer against a real Tomcat, over 1 MiB, multipart). Chunked is not exotic:
+it is what a streaming HTTP client sends, and the KMP client's engines do. As built:
+
+- **The filter reads nothing.** It wraps the request and marks it seen. The interceptor
+  buffers the body itself: only once handler mapping says the route is `@Idempotent`, only
+  after the caller is known, and never past 1 MiB.
+- **No declared length works.** The body is read to the bound and one byte past it, which is
+  how "too long" is known. Preferred over answering `411`, because a legitimate chunked
+  `POST` should succeed, and the read is bounded whatever the client sends.
+- **Over 1 MiB is `413`**, declared or discovered, with code `MALFORMED_REQUEST` — the code
+  every other unreadable body carries. No new `ErrorCode`.
+- **Multipart is Spring's own `415`.** Nothing is prepared, and `@RequestBody` has no
+  converter for it.
+- **A filter that never ran is still a loud failure**: the mark is how "declined" is told
+  from "not registered".
+
+A side effect worth having: a route that is not `@Idempotent` is no longer buffered at all,
+so the unauthenticated-body concern the size bound was added for is gone rather than capped.
+The contract documents `413` and `415` on `submitEntry`.
+
+**25. An `Idempotency-Key` is 1 to 255 visible ASCII characters, and its `422` carries
+`errors`.** The key was an unbounded `text` column, stored for 24 hours per request. It is
+now bounded at the edge (`422 VALIDATION_FAILED`, with an `errors` entry naming
+`Idempotency-Key`), in V11 (`idempotency_keys_key_check`) and in the contract
+(`maxLength`, `pattern`). Fixed now because V11 is editable only while unmerged; afterwards
+the same bound costs a migration. A missing key is the same `422` and now carries its
+`errors` entry too: `ErrorCode` says `VALIDATION_FAILED` is always accompanied by one, and
+this was the one place it was not. `ApiException` gained an optional `errors` list to carry
+it. The cost: a client sending an exotic key gets a `422`; a UUID or a ULID is well inside.
+
 ## Consequences
 
 - **Five new `ErrorCode` values, so this is a breaking change**: `ENTRY_ALREADY_EXISTS`,
   `DAY_CLOSED`, `MEDIA_NOT_YET_SUPPORTED`, `IDEMPOTENCY_KEY_IN_FLIGHT`, and
-  `IDEMPOTENCY_KEY_REUSED` — checked against `git diff cdd7ac8 HEAD --
-  common/web/.../ErrorCode.kt` (`cdd7ac8` is this branch's merge-base with `main`) rather
-  than assumed; an earlier count in this slice's own planning said four and missed
+  `IDEMPOTENCY_KEY_REUSED` — checked against `git diff c12f91b HEAD --
+  common/web/.../ErrorCode.kt` (`c12f91b` is this branch's merge-base with `main`; an
+  earlier version of this line said `cdd7ac8`, which is where a stale local `main` pointed)
+  rather than assumed; an earlier count in this slice's own planning said four and missed
   `IDEMPOTENCY_KEY_REUSED`, which `git log -S` traces to the same commit as
   `IDEMPOTENCY_KEY_IN_FLIGHT` (Task 2, `209c799`). Doc 06 §2 makes the codes an exhaustive
   sealed class on the client, so a new value is a compile error there — the PR carries
@@ -540,8 +642,8 @@ step was the mutation that showed it.
   timeline, one extra query on every `GET /today` and `POST /entries`. It is not an N+1 today;
   it becomes one if a list endpoint ever calls it per bond.
 - **A zone change costs the couple something, and which thing depends on the direction.**
-  Westward: one long day (49 hours at the date line), and so one fewer chance to write. Eastward: a calendar
-  label that never happens, which has no row until C3 writes it.
+  Westward: one long day (49 hours at the date line), and so one fewer chance to write.
+  Eastward: a calendar label that never happens, which has no row until C3 writes it.
 - **A stored `ends_at` can be stale.** A row opened before a westward change and never written
   to again keeps its shorter span (decision 13). An extending write issues two `UPDATE`s and
   bumps the row's version twice; no `ETag` is exposed on a Bond-day, so nothing observes it.
@@ -553,6 +655,14 @@ step was the mutation that showed it.
   `ErasedEntryResponse` exists; `partnerEntry` is nullable and has three object branches;
   `Idempotency-Replayed` is a declared response header. None of it is breaking against `main`
   beyond the error codes above, because none of C1 has merged.
+- **Two more things in V11 and V12 since the rework:** the key's CHECK (decision 25), and a
+  plain index `entries_bond_day_idx` on `entries (bond_day_id)`. `GET /today` reads every
+  entry of a day, tombstones included, and BR-2's partial unique index
+  (`WHERE deleted_at IS NULL`) cannot serve that read.
+- **Nothing that holds an entry's words prints them.** `SubmitEntryRequest`, `EntryDraft`
+  and `EntryResponse` were data classes carrying the text as a plain `String`; each now
+  prints `text=(redacted)`. One `INFO` line, bond id and date only, records a BR-3a
+  fallback or redirect, so a member's "why is my entry on that day" is answerable.
 - **V11 and V12 were edited in place, more than once, and V13 is new.** Any database that
   applied an earlier copy of them refuses to start on a checksum mismatch, and resetting the
   checksums does not fix it: the tables themselves have the earlier shape. The shared
@@ -647,9 +757,23 @@ on. None of them is built here.
 
 **C2, the reveal.**
 
-- **Un-suspend a paired bond's day** (decision 4's amendment). A day opened `SUSPENDED` stays
-  `SUSPENDED` after the second member joins and writes. Without the transition, the couple's
-  first shared day never reveals.
+- **Un-suspend a paired bond's day** (decision 4's amendment), by spec §12.4's actual rule:
+  on the joining day, the first gratitude operation or close sweep reconciles the
+  `SUSPENDED` row under the bond and day locks — **zero entries becomes `OPEN`, one becomes
+  `PARTIAL`**, two follow the reveal rule — using `activeSince` to tell the joining day from
+  earlier suspended days, which stay private. **This includes joining-day rows that elapse
+  before C2 ships**: they are already `SUSPENDED` with entries on them, and a reconcile that
+  only looks at today would leave them locked for good. It lives in `gratitude`; `bond`
+  cannot write `bond_days`, so it cannot happen "when the membership is created".
+- **The `entries:create` per-user bucket** (spec §5.5). Not built in C1: both routes sit
+  under the global authenticated bucket (120/min), and BR-2 caps real writes at one per
+  member per day, so the bucket would bound only refused attempts. If that is wrong, a
+  member can make 120 refused submissions a minute until C2.
+- **Rethrow a non-BR-2 constraint violation carrying only the constraint's name.** C2 adds
+  the first `UPDATE` of `entries`. Postgres reports a CHECK violation on an update as
+  "Failing row contains (…)", with the row's text in it; `SubmitEntry`'s catch rethrows
+  anything that is not BR-2 unchanged, and `handleUnexpected` logs it at `ERROR` with its
+  message. From C2 on that path can put an entry's words in a log.
 - **`DELETE /entries/{id}` must set both `status = DELETED` and `deleted_at`.** The BR-2 index is
   partial on `deleted_at IS NULL`; a status-only erasure still occupies the slot and its author
   can never write that day again.
@@ -665,9 +789,11 @@ on. None of them is built here.
 
 - **Take no bond lock** (decision 18), and therefore treat the unique `(bond_id, date)` index
   and the day's row lock as the only things between the sweep and a live submission.
-- **Amend spec §2.1's lock-order sentence and `BondAccess.lockMembershipOf`'s KDoc when C3 is
-  planned.** Both say the order is bond, then bond-day, then entry "on … closing". R1
-  contradicts that (decision 18), and neither text was changed in C1.
+- **Add a closer-facing accessor to `bond.api.BondAccess`.** `membershipOf` and
+  `lockMembershipOf` both take a `userId` and run the membership guard; the close job has no
+  caller. It needs the timeline and the lifecycle instants (`activeSince`, `endedAt`) for a
+  bond id alone, read-only. Spec §2.1 is amended to say so. (The lock-order sentence there,
+  and `lockMembershipOf`'s KDoc, were amended on 2026-10-03 and are no longer owed.)
 - **Take every day's window from the timeline, never from a zone's natural midnight.** A row
   opened with a `starts_at` the timeline disagrees with makes every later `POST /entries` for
   that day a `500` (`BondDay.extendedTo`'s `require`; the same note is on its KDoc). The first
@@ -678,13 +804,19 @@ on. None of them is built here.
 - **Settle a skipped label `FROZEN` without consuming a freeze** (decision 14), deriving the
   skipped labels from the timeline. Nothing stores them.
 - **Never hold two days of one bond at once, or take them older first.** The BR-3a redirect
-  holds the settled day's lock and then today's (decision 20). One known wrinkle: when an
-  `intendedAt` up to five minutes ahead crosses midnight, the redirect's second lock is the
-  older day. That is safe among submitters, under the bond lock, and is a reason for the closer
-  to hold one day at a time.
+  holds the settled day's lock and then today's (decision 20). Since decision 22 a claim is
+  never ahead of the submission instant, so those two locks are always older then newer;
+  the wrinkle an earlier version of this bullet recorded, a redirect onto the older day, is
+  gone.
 - **Generate missing days from `activeSince`, not from `created_at`** (decision 19).
 - **The reaper for `idempotency_keys`** (ShedLock). Until then an expired row is only removed
   when its key is used again.
+
+**The deploy slice.**
+
+- **A `lock_timeout` outside test configuration.** Only the test `application.yml` files set
+  one. In production a stuck bond write parks every submission for that bond with no bound.
+  Not a correctness defect; a thing to decide before real traffic.
 
 **C5, withdrawal on block.**
 
@@ -712,8 +844,12 @@ on. None of them is built here.
   then start the application so Flyway re-applies V11 to V13 (V13 backfills the timeline for
   the bonds that exist). It destroys that database's entries, days and idempotency keys; users,
   bonds and invites are untouched. **Nobody has executed it yet, so it is untested.**
-  `scripts/smoke.sh`'s deferred-handoff section was written against the code and has not been
-  run either.
+- **`scripts/smoke.sh` has not been run against the rework**, nor against the final review's
+  fixes. Its deferred-handoff section was written against the code. It needs the repair
+  above first, and it gates "ready". What *is* now covered is V13's backfill itself:
+  `AnchorIntervalBackfillTest` migrates a database to just before V13, inserts bonds in every
+  state and in the zones where a date is easiest to get wrong, runs V13, and loads each
+  timeline through the application's own loader. The backfill was correct for every case.
 
 ## Revisit when
 
@@ -726,6 +862,8 @@ on. None of them is built here.
   reader, and `ResultKind` its second value.
 - Somebody proposes a second zone change inside one logical day, or drops FR-027's thirty days —
   decision 13's argument that the `require`s cannot fire rests on changes being far apart.
+- Daniel answers decision 23's open question — whether the 500 are counted on the NFKC form
+  or on the text as typed. One test pins the current answer.
 - Phase 4 builds somewhere for `imageMediaId`/`voiceMediaId` to go, and `422
   MEDIA_NOT_YET_SUPPORTED` needs to become an actual write path rather than a refusal.
 - Phase 5 encrypts `entries.text` — `idempotency_keys` no longer holds a copy to encrypt
@@ -746,9 +884,15 @@ who knew the 2026-09-29 version.
 | 10 | The gate reads the day's status; one tombstone | The gate reads the entry's `revealedAt`; `EntryReading`; two tombstones |
 | 11 | `oneOf` of two, discriminated | Three object branches and `null`, discriminated |
 | 12–21 | — | New: the westward merge, the span extension, the skipped label, the pending bond's change, the port, the lock, the close job's lock, the membership's fields, the BR-3a recheck, the green build |
+| 22–25 | — | New, from the final whole-branch review: a future claim resolves at submission; text stored raw; a bounded body and no `500` for an unbuffered one; a bounded key |
 
 Decisions 1, 2, 4, 5, 6, 7 and 9 are unchanged except for a pointer to the decision that
 extends them. The numbers were kept because KDocs across the branch cite them.
+
+**What the whole-branch review found that ten per-task reviews did not** is in decisions 22
+and 23, and both have the same shape: nothing was wrong inside any one task. Decision 22 is
+three tasks each correct under an assumption another task broke. Decision 23 is a file the
+rework never opened, with a KDoc that said the opposite of what the code did.
 
 **Three mechanisms stopped being what they were named for, and each was found by removing it.**
 The concurrency test that proved "two first entries produce one row" passed with the day lock
