@@ -160,13 +160,27 @@ jobs:
           show_full_output: true
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
-          # The plugin's command takes a PR target and nothing else — it
-          # has no `--comment` flag (that belongs to the built-in
-          # /code-review skill, which is a different command). Passing one
-          # only muddies the argument string, so the target is passed
-          # alone, as a full URL so `gh pr view` can't misread it.
+          # **`--comment` is what makes the review post, and it is not
+          # optional.** Step 7 of the plugin's command reads: "If `--comment`
+          # argument was NOT provided, stop here. Do not post any GitHub
+          # comments." Without the flag the review runs in full, concludes,
+          # and ends by saying so in a transcript nobody reads — which the
+          # guard below then fails, correctly. Verified on three runs: PR #46
+          # (2026-10-03: five minutes, seven agents, "no issues found", and the
+          # transcript's closing line, "No `--comment` flag was supplied with
+          # this invocation, so no GitHub comments were posted") and the two
+          # of 2026-09-28 after #42, which both ended `success` having never
+          # called `gh pr comment`. The red runs before #42 had their own
+          # causes on top (the Skill allowlist, background agents); whether
+          # this one was underneath them too was not checked.
+          #
+          # An earlier version of this comment said the plugin "has no
+          # `--comment` flag". It has had one since 2026-02-11 (upstream
+          # 6dcc7d8); the mistake was reading the flag as belonging only to the
+          # built-in /code-review skill. The target stays a full URL so
+          # `gh pr view` can't misread it.
           prompt: >-
-            /code-review:code-review
+            /code-review:code-review --comment
             ${{ github.event.pull_request.html_url }}
 
             Complete this review within this invocation and post its result before ending.
@@ -232,9 +246,11 @@ jobs:
       # review nobody can read is indistinguishable from no review, and worse
       # than none, because the green tick says otherwise.
       #
-      # The assumption, stated so it can be argued with: the plugin's last step
-      # posts a summary comment whether or not it found anything, so zero new
-      # comments means broken rather than clean. If a genuinely clean PR is
+      # The assumption, stated so it can be argued with: given `--comment`, the
+      # plugin posts a summary comment whether or not it found anything (its
+      # step 7), so zero new comments means broken rather than clean. The
+      # assumption is only as good as that flag — see the prompt above for the
+      # ten days it was missing. If a genuinely clean PR is
       # ever seen to post nothing, this guard is wrong and should become a
       # warning — but a false red is cheap and today's false green was not.
       # Not when this PR edits this workflow. In that case claude-code-action
