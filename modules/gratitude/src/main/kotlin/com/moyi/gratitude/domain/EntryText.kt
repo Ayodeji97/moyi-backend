@@ -8,39 +8,58 @@ import java.util.Locale
  * An entry's body, validated once at the boundary so every later reader
  * trusts it without re-checking (FR-041).
  *
- * FR-041 asks for three limits, and each exists for a different failure:
+ * **Stored exactly as sent** (ruling P12; spec §3.2 and doc 04 §7: "stored
+ * raw and unmodified"). [value] is the string the member's client sent — not
+ * normalised, not trimmed, nothing folded, collapsed or stripped. NFKC and
+ * `trim` are used below only to **decide** whether the text is acceptable,
+ * on a copy that is then thrown away.
  *
- * - **Blank.** `require(text.isNotBlank())` rather than Java's own
- *   `String.isBlank`, because ADR-0029 §13 found the two disagree: `U+00A0`
- *   (a non-breaking space) is not blank to `String.isBlank` and Kotlin's
- *   `isBlank` — which delegates to `Character.isWhitespace` — agrees it is.
- *   An entry that is one non-breaking space would otherwise slip past a
- *   naive check and read as nothing at all.
+ * An earlier version stored `NFKC(raw).trim()` and said normalisation
+ * "changes nothing a person wrote to mean". That was false. NFKC is a lossy,
+ * one-way compatibility mapping: `…` becomes `...`, `²` becomes `2`, `™`
+ * becomes `TM`, `½` becomes `1⁄2`, `ﬁ` becomes `fi`. Raw text can always be
+ * normalised later; normalised text can never be restored — so the couple's
+ * words are kept, and anything that wants a normal form derives one.
  *
- * - **Grapheme count.** `500` is what a person means by "characters" — a
- *   family emoji built from a Zero-Width Joiner sequence is one grapheme and
- *   as many as ten Java `char`s, and a limit on `String.length` would refuse
- *   legitimately typed text while a code-point count would let ten times the
- *   intended amount through. [graphemes] walks the text with a
- *   `BreakIterator` so the count matches what was typed rather than how it
- *   is encoded.
+ * FR-041's limits, and what each is measured on:
  *
- * - **Octet cap.** A grapheme has no upper bound on its byte length, so the
- *   grapheme limit alone caps *count*, not *size* — a small number of
- *   pathological graphemes could still reach megabytes. That is what flows
- *   into `text_search`, the stored `tsvector`, the outbox payload and the
- *   256 KB response cap, so [MAX_OCTETS] is the backstop that keeps all four
- *   bounded regardless of what the grapheme count alone would allow.
+ * - **No U+0000.** Postgres `text` cannot hold it, so such a text could never
+ *   be stored; refused here it is a `422`, where at the insert it was a `500`.
  *
- * **Order matters.** The octet check runs before [graphemes] walks the
- * string with a `BreakIterator`, so a megabyte of text is refused in one
- * cheap `String.toByteArray` call rather than after an expensive walk of
- * every grapheme boundary in it.
+ * - **Octet cap, on the stored bytes.** A grapheme has no upper bound on its
+ *   byte length, so the grapheme limit alone caps *count*, not *size*.
+ *   [MAX_OCTETS] bounds what flows into the row, the future search column,
+ *   the outbox payload and the 256 KB response cap. It is measured on [value]
+ *   — the raw UTF-8 — because that is what V12's `entries_text_octets_check`
+ *   measures: the two must agree, or a text this accepts is a `500` at the
+ *   insert. The NFKC form can be *larger* than the raw (`ﷺ`, three octets,
+ *   expands to eighteen characters); that does not matter to storage, since
+ *   the NFKC form is never stored.
  *
- * Stored raw once accepted — doc 04 §7. Normalisation to NFKC and trimming
- * happen here because they change nothing a person wrote to mean, but no
- * further rewriting does: no case folding, no collapsing of internal
- * whitespace, no stripping of emoji. What is typed is what is kept.
+ * - **Blank, on the normalised and trimmed form.** `isNotBlank()` rather
+ *   than Java's `String.isBlank`, because ADR-0029 §13 found the two
+ *   disagree: `U+00A0` (a non-breaking space) is not blank to Java and is to
+ *   Kotlin. An entry that is one non-breaking space reads as nothing at all.
+ *
+ * - **Grapheme count, on the NFKC form, trimmed** — spec §3.2's rule:
+ *   "NFKC-normalised before counting". `500` is what a person means by
+ *   "characters": a ZWJ family emoji, a flag (two regional indicators) and a
+ *   base letter with combining marks are each one. [graphemes] walks the text
+ *   with a `BreakIterator` so the count is of what was typed, not of how it
+ *   is encoded. **Counting on the NFKC form has a cost the spec accepted and
+ *   the owner has been asked about** (ADR-0031, P12): a typographic ellipsis
+ *   counts as three, so a client's own counter must normalise the same way
+ *   or it will show "fits" for a text this refuses.
+ *
+ * **Order matters.** The two cheap checks on the raw string run first, so a
+ * megabyte of text is refused by one `String.toByteArray` call rather than
+ * after being normalised and walked boundary by boundary.
+ *
+ * **Reading a row back goes through [of] too** (`GratitudeMappers.toDomain`).
+ * Every check is a function of the raw string alone, so a text that was
+ * accepted is accepted again, unchanged. Rows written before P12 hold the
+ * NFKC-trimmed form; they pass for the same reason and are returned as they
+ * were stored — what NFKC removed from them cannot be put back.
  */
 @JvmInline
 internal value class EntryText private constructor(
@@ -59,16 +78,24 @@ internal value class EntryText private constructor(
         const val MAX_GRAPHEMES = 500
         const val MAX_OCTETS = 8192
 
+        /** U+0000 — the one code point a Postgres `text` column cannot store. */
+        private const val NUL = '\u0000'
+
         /**
+         * [raw], kept as it is, if it passes — see the class KDoc for what
+         * each limit is measured on.
+         *
          * @throws IllegalArgumentException naming whichever limit was crossed
-         *   first — blank, octets, then graphemes, in that order.
+         *   first — NUL, octets, blank, then graphemes, in that order.
          */
         fun of(raw: String): EntryText {
-            val text = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
-            require(text.isNotBlank()) { "an entry must say something" }
-            require(text.toByteArray(Charsets.UTF_8).size <= MAX_OCTETS) { "an entry is at most $MAX_OCTETS bytes" }
-            require(graphemes(text) <= MAX_GRAPHEMES) { "an entry is at most $MAX_GRAPHEMES characters" }
-            return EntryText(text)
+            require(NUL !in raw) { "an entry cannot contain the NUL character" }
+            require(raw.toByteArray(Charsets.UTF_8).size <= MAX_OCTETS) { "an entry is at most $MAX_OCTETS bytes" }
+            // Only to decide. What is returned, and stored, is `raw`.
+            val counted = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
+            require(counted.isNotBlank()) { "an entry must say something" }
+            require(graphemes(counted) <= MAX_GRAPHEMES) { "an entry is at most $MAX_GRAPHEMES characters" }
+            return EntryText(raw)
         }
 
         /**

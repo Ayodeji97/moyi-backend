@@ -26,6 +26,7 @@ import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import java.time.Duration
 import java.time.Instant
@@ -304,6 +305,48 @@ internal class EntriesEndpointTest(
             response.status shouldBe 422
             response.contentAsString shouldContain "\"field\":\"text\""
         }
+    }
+
+    /**
+     * FR-041 input is a `422`, never a `500`: Postgres `text` cannot hold
+     * U+0000, so a body carrying one used to pass every check and fail at the
+     * insert. The JSON below spells it as the six-character escape, which is
+     * how a well-formed client would send it.
+     */
+    @Test
+    fun `an entry containing the NUL character is 422 naming the field, and never a 500`() {
+        val response = submit(ada, bondId, """{"text":"thank you\u0000"}""")
+
+        response.status shouldBe 422
+        response.contentAsString shouldContain "\"field\":\"text\""
+        jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 0
+    }
+
+    /**
+     * Ruling P12 (spec §3.2, doc 04 §7): an entry is stored exactly as its
+     * author sent it. NFKC rewrites every one of these — `…` to three full
+     * stops, `²` to `2`, `™` to `TM`, `ﬁ` to `fi` — and a trim would take the
+     * spaces either side. Followed through the whole path: the `201`, the
+     * row, and `GET /today`.
+     */
+    @Test
+    fun `an entry's words survive POST, the row and GET today byte for byte`() {
+        val written = "  wait\u2026 x\u00b2, Moyi\u2122, \ufb01ne  "
+
+        val created = submit(ada, bondId, """{"text":"$written"}""")
+
+        created.status shouldBe 201
+        created.getContentAsString(Charsets.UTF_8) shouldContain "\"text\":\"$written\""
+        jdbc.queryForObject("SELECT text FROM entries", String::class.java) shouldBe written
+        jdbc.queryForObject("SELECT encode(convert_to(text, 'UTF8'), 'hex') FROM entries", String::class.java) shouldBe
+            written.toByteArray(Charsets.UTF_8).joinToString("") { "%02x".format(it) }
+        val today =
+            mockMvc
+                .get("/api/v1/bonds/$bondId/today") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(ada).token}") }
+                .andReturn()
+                .response
+        today.status shouldBe 200
+        today.getContentAsString(Charsets.UTF_8) shouldContain "\"text\":\"$written\""
     }
 
     /**

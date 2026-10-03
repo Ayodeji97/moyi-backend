@@ -16,8 +16,9 @@ import java.util.UUID
  *
  * [text] carries exactly one edge check: [com.moyi.gratitude.web.ValidEntryText],
  * which runs [EntryText.of] itself and reports whatever it complains about —
- * blank (including a non-breaking space, ADR-0029 §13), over the 8192-octet
- * cap, or over the 500-grapheme cap, in that factory's own order. Fix round
+ * a NUL character, over the 8192-octet cap, blank (including a non-breaking
+ * space, ADR-0029 §13), or over the 500-grapheme cap, in that factory's own
+ * order. The text is stored exactly as sent (ruling P12). Fix round
  * 1 found the previous version of this field — `@Pattern(NOT_ONLY_SPACE)`
  * plus `@Size(max = EntryText.MAX_OCTETS)` — restating FR-041 at the edge
  * and getting it wrong (`@Size` counts UTF-16 characters, not UTF-8 octets,

@@ -35,9 +35,9 @@ import java.util.UUID
  * split `bond.web.CreateBondRequest.toDraft()` draws between a contract with
  * clients and a contract with this service.
  *
- * [text] is the raw, untrimmed string; [EntryText.of] does the one
- * normalisation and the three FR-041 limits, so this carries nothing that
- * could disagree with the domain about what "valid" means.
+ * [text] is the raw string exactly as sent, and it is what is stored (ruling
+ * P12); [EntryText.of] applies FR-041's limits to it, so this carries
+ * nothing that could disagree with the domain about what "valid" means.
  *
  * [imageMediaId] and [voiceMediaId] exist so [SubmitEntry] can refuse them
  * (`422 MEDIA_NOT_YET_SUPPORTED`) rather than the web layer silently

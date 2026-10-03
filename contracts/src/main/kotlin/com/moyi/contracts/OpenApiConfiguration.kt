@@ -219,7 +219,9 @@ class OpenApiConfiguration {
             "cap in UTF-16 characters, which is not the same unit as either real limit and both are wider " +
             "than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a " +
             "guarantee. The server enforces both limits exactly and is the only authority on whether a " +
-            "given body is accepted."
+            "given body is accepted. The text is stored and returned exactly as sent — not normalised, " +
+            "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted on its NFKC-normalised, trimmed form " +
+            "(so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused."
     }
 
     private fun statusesFor(

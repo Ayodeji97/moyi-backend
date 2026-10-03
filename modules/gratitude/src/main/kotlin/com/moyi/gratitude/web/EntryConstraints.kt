@@ -24,10 +24,11 @@ import kotlin.reflect.KClass
 // both pass it and then blow up inside `EntryText.of` as an uncaught
 // `IllegalArgumentException`, which the catch-all turns into a `500` on a
 // well-formed request: FR-041's own limits, unreachable as the `422` they
-// are supposed to be. And `EntryText.of` runs NFKC normalisation before its
-// own checks, so even a *correct* restatement at the edge would be judging
-// a different string from the one the domain — and the response — end up
-// with. `@ValidEntryText` below removes the whole class of bug rather than
+// are supposed to be. And `EntryText.of` judges each limit on a different
+// form of the string — blank and the grapheme count on the NFKC-normalised,
+// trimmed form, the octet cap on the raw bytes it stores (ruling P12) — so
+// even a *correct* restatement at the edge would have to repeat all of that
+// and stay in step with it. `@ValidEntryText` below removes the whole class of bug rather than
 // patching an instance of it: it runs [EntryText.of] itself and reports
 // whatever it complains about, so there is exactly one statement of FR-041,
 // in the domain, and the edge only ever asks it.
@@ -35,8 +36,11 @@ import kotlin.reflect.KClass
 /**
  * FR-041, asked of the domain rather than restated: [EntryText.of] is run
  * against the field's value, and any [IllegalArgumentException] it throws —
- * blank, over the octet cap, over the grapheme cap, in the order that
- * factory checks them — becomes this constraint's violation message.
+ * a NUL character, over the octet cap, blank, over the grapheme cap, in the
+ * order that factory checks them — becomes this constraint's violation
+ * message. Nothing the factory returns is kept here: the request carries the
+ * raw string on to the service, which runs the same factory and stores that
+ * string exactly as sent.
  *
  * Null passes, as every Bean Validation constraint but `@NotNull` does;
  * `text` still carries `@field:NotNull` so an absent field is a `422`
@@ -58,10 +62,9 @@ internal class EntryTextConstraintValidator : ConstraintValidator<ValidEntryText
         context: ConstraintValidatorContext,
     ): Boolean {
         if (value == null) return true
-        // Not pre-trimmed, unlike ValidRegionZone's own validator: EntryText.of
-        // does its own NFKC normalisation and trim, and running it against
-        // anything other than the raw field value would validate a string the
-        // domain never actually sees.
+        // Not pre-trimmed, unlike ValidRegionZone's own validator: the raw
+        // field value is what is stored (ruling P12), so it is what is judged.
+        // EntryText.of normalises and trims a copy of its own to decide.
         return validate(context) { EntryText.of(value) }
     }
 }
