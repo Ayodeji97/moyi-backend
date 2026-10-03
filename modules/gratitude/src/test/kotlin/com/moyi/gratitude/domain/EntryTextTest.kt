@@ -118,7 +118,8 @@ internal class EntryTextTest {
         text.toByteArray(Charsets.UTF_8).size shouldBe 8200
 
         shouldThrow<IllegalArgumentException> { EntryText.of(text) }.message shouldBe "an entry is at most 8192 bytes"
-        EntryText.of(" ".repeat(92) + family.repeat(324)).value.toByteArray(Charsets.UTF_8).size shouldBe 8192
+        val atTheCap = EntryText.of(" ".repeat(92) + family.repeat(324)).value
+        atTheCap.toByteArray(Charsets.UTF_8).size shouldBe 8192
     }
 
     @Test
