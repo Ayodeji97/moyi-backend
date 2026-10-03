@@ -531,11 +531,14 @@ slice order. `V10` is the last one Phase 2 uses.
 |---|---|---|---|
 | C1 | `V11__common_idempotency_keys.sql` | `common:web` | `idempotency_keys` |
 | C1 | `V12__gratitude_bond_days_and_entries.sql` | `modules:gratitude` | `bond_days`, `entries` |
-| C2 | `V13__common_outbox_events.sql` | `common:events` | `outbox_events`, `outbox_deliveries` |
-| C3 | `V14__scheduling_shedlock.sql` | `modules:scheduling` | `shedlock` |
-| C4 | `V15__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events` |
-| C5 | `V16__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
-| C6 | `V17__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
+| C1 | `V13__bond_anchor_intervals.sql` | `modules:bond` | `bond_anchor_intervals` (§3.1's effective-zone timeline) |
+| C2 | `V14__common_outbox_events.sql` | `common:events` | `outbox_events`, `outbox_deliveries` |
+| C3 | `V15__scheduling_shedlock.sql` | `modules:scheduling` | `shedlock` |
+| C4 | `V16__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events` |
+| C5 | `V17__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
+| C6 | `V18__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
+
+C1 owns V11–V13. The first draft of this table gave C1 two versions and C2 `V13`; see §12.5.
 
 Doc 07 §2 carries the column lists and this document does not restate them, with four
 exceptions recorded in §12 because doc 07 is wrong about them.
@@ -605,7 +608,7 @@ the load-bearing assertions:
 
 | Slice | What | Ends at |
 |---|---|---|
-| **C1** | `modules/gratitude`, `bond.api.BondAccess`, `Idempotency-Key` in `common:web`, V11+V12, the `BondDay` aggregate, `POST /entries` with BR-3/BR-3a and BR-2, `GET /today` without streak or prompt | One person can write, and reads only their own |
+| **C1** | `modules/gratitude`, `bond.api.BondAccess`, `Idempotency-Key` in `common:web`, V11–V13, the `BondDay` aggregate, `POST /entries` with BR-3/BR-3a and BR-2, `GET /today` without streak or prompt | One person can write, and reads only their own |
 | **C2** | The reveal under the row lock, `PENDING_REVEAL`, BR-7 immutability, `PATCH`/`DELETE /entries/{id}`, the reveal-gate matrix, the outbox table and its writes | **Two people see each other's words** |
 | **C3** | `modules/scheduling`, the fifteen-minute job, ShedLock, `DayCloser`, `SOLO`/`EMPTY`/second sweep, the timezone matrix, the two counters | The loop runs without anyone submitting |
 | **C4** | Streaks, freezes, Strict mode, `FROZEN`, `recalculate`, `GET /streak`, property tests | **M3** — the loop is complete |
@@ -693,6 +696,14 @@ place: a rule that is true only while nobody exercises the path that breaks it. 
 added, `NOT NULL`, with the same 64-character bound `bonds.anchor_timezone` carries. V12 also
 records `starts_at`/`ends_at`; C1 adds the bond-owned effective-zone timeline described in §3.1
 with its own coordinated global migration version before allocating later slices.
+
+**§7's version table was stale, and is corrected (2026-10-03).** The paragraph above says the
+timeline takes "its own coordinated global migration version before allocating later slices",
+and §7 went on allocating `V13` to C2's outbox as though it did not. The timeline is
+`V13__bond_anchor_intervals.sql`, owned by `modules:bond` and built in C1, so C1 owns V11–V13
+and every later slice moves up one: C2 `V14`, C3 `V15`, C4 `V16`, C5 `V17`, C6 `V18`. Nothing
+had been built against the old numbers. ADR-0031 records what the timeline is and why a column
+could not do its job.
 
 ### 12.6 FR-074's "from the entry log" means the Bond-day timeline
 

@@ -1667,3 +1667,74 @@ Wrong about: trusting a KDoc's stated risk as still current just because it was
          them, and the only way to find out which parts still held was to run the
          generator and the script rather than read what somebody expected them to
          say.
+
+## 2026-10-03 · Phase 3 · Rebuilding C1 — the lock that retired a test, and the day I opened in the wrong order
+Expected: a rework with a known shape. The spec had been revised under a draft PR and I
+         had five deltas written down: a timeline instead of a copied zone string, the
+         bond lock taken inside the write, idempotency in one transaction, BR-1 on the
+         entry's own timestamp, BR-3a rechecked under the day lock. Ten tasks, each with a
+         brief, each reviewed. I expected the corrections to come from the reviewers and
+         to be about the code.
+Reality: **most of what was wrong was in what I told the implementers, and in tests that
+         were green.** In the order they surfaced:
+         The concurrency test. `SubmitEntryConcurrencyTest` proved that two first entries
+         racing produce one `bond_days` row. Task 4 put the bond's row lock in front of
+         the submit path, and from that commit both members queue on the bond before
+         either reaches the day. The test stayed green with the day lock deleted. It had
+         not been broken; it had been retired, by a lock added somewhere else, and nothing
+         about a green run says so. The race that still exists is a submission against a
+         writer that takes no bond lock, which is what C3's close job will be, and Task 5
+         rewrote the test to stage that one.
+         Then the rewrite repeated the mistake at a smaller scale. Its two-member case was
+         named and commented as proving "the bond lock, not the index". The implementer's
+         own mutations said otherwise: remove the bond lock and it passes, remove the index
+         and it fails. A test named for a mechanism it survives the removal of. The
+         mutation was in the report; the name was in the code; only one of them was true.
+         The re-read. `lockMembershipOf` runs the guard, takes `FOR UPDATE` on the bond,
+         and reads the membership again under the lock. The second read is the whole
+         point, and Hibernate answered it from the persistence context: the guard had
+         already loaded the bond and its members, and a query for rows already in the
+         identity map hands back the same instances with their old state. An entry
+         committed onto a bond that had been archived while the submission waited.
+         `BondDayStore.lockAndFind` had the same defect in the first build and ADR-0031
+         decision 9 was already about it. I had written that decision and did not carry it
+         to the next lock.
+         The hash. Task 6 removed `idempotency_keys.response_body` because it was a
+         plaintext copy of an entry for 24 hours, and left `request_hash` as a plain
+         SHA-256 of the request body. For `POST /entries` the body is the entry. A short
+         one is recoverable from that column by hashing guesses. The task closed the
+         hazard through one column and left it open through the one beside it, and the
+         reviewer raised it as an out-of-scope minor. It is an HMAC now.
+         My amendment to Task 3 said: lock before any read, as `ChangeTimezone`, `EndBond`
+         and `RequestDeletion` do. They do not. They guard first and then lock, and the
+         reviewer found it by opening `EndBond.kt`. I had described the existing code from
+         what I believed its discipline to be. Locking first would also have let any
+         caller take a row lock on a bond that is not theirs.
+         Spec §2.1 lists `BondMembership`'s fields and omits `hasLeft`. Followed as
+         written, the rework would have deleted the check the second review of PR #41 had
+         added two days before the plan was written, the one from the entry two above
+         this, about a flag nobody read. The spec revision simply predates that review
+         landing. The plan caught it (R2) by reading `SubmitEntry` against the list.
+         And the defect that mattered most came last. Task 9's timezone matrix was the
+         first test to open a day and *then* change the zone. No unit or slice test
+         before it, across eight tasks, had done those two things in that order. `openOrGet` is `ON CONFLICT DO NOTHING`, so the row kept the
+         `ends_at` it was opened with while the timeline ran the day on for another 25
+         hours: an entry filed on a row whose span did not contain it, and a hole in the
+         stored calendar. The timeline was right, the row was right when written, and the
+         two were never compared in that order. In the same task, my amendment's eastward
+         example was Lagos to Kiritimati, which skips no label at all: the handoff is 13:00
+         on the next day. The implementer computed it, said so, and used Pago Pago.
+Wrong about: where the risk in a rework sits. I treated the briefs as the fixed part and
+         the code as the part under review. Three of the findings above are errors in a
+         brief or an amendment (the lock order, the eastward example, a westward test whose
+         expected values contradicted each other in Task 1), and each was caught because an
+         implementer or reviewer recomputed instead of trusting me. The instruction that
+         paid for itself was "recompute every number yourself".
+         And, again, what a green test is evidence of. A test proves the mechanism it would
+         fail without, and that changes when other code changes. Adding a lock can retire
+         a test three files away. The only check that found it, both times, was deleting
+         the mechanism and running the suite. This log already counts three mechanisms
+         that were present and not load-bearing; the difference this time is that the
+         deletion was planned as a step (Task 5's mutation) rather than stumbled on.
+         Smaller: order is an input. "Open, then change" and "change, then open" are
+         different tests, and I had written one of them eight times.
