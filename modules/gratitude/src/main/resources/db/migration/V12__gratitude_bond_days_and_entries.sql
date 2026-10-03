@@ -79,9 +79,9 @@ CREATE TABLE bond_days (
     closed_at       timestamptz,
     created_at      timestamptz NOT NULL,
     -- The row version behind the `ETag` (doc 06 §1), as `bonds.version` is.
-    -- Unused by this slice's own writes — C1 has no reveal, no close — but
-    -- present from the first row so a later slice's `@Version` needs no
-    -- migration of its own.
+    -- Hibernate's `@Version`: `days.update` bumps it on every change this
+    -- slice makes to a row — an entry arriving, an extended `ends_at`. No
+    -- endpoint exposes it as an `ETag` yet; that is a later slice's.
     version         integer     NOT NULL DEFAULT 0,
 
     CONSTRAINT bond_days_status_check CHECK (
@@ -149,4 +149,11 @@ CREATE TABLE entries (
 -- alone". Partial, so a deleted entry does not hold the slot: an author who
 -- deletes before reveal may write again that day.
 CREATE UNIQUE INDEX entries_one_per_member_per_day ON entries (bond_day_id, author_member_id) WHERE deleted_at IS NULL;
+-- Every entry of one day, tombstones included: `findAllByBondDayId`, on every
+-- `GET /today`. The unique index above cannot serve it — its predicate is
+-- `deleted_at IS NULL`, and this read has none — so without this the read is
+-- a scan of the whole table. Plain, and beside the partial index, not instead
+-- of it: that one is BR-2, this one is a lookup. Added while V12 was still
+-- unmerged (final whole-branch review, A7).
+CREATE INDEX entries_bond_day_idx ON entries (bond_day_id);
 CREATE INDEX entries_bond_recent_idx ON entries (bond_id, created_at DESC);

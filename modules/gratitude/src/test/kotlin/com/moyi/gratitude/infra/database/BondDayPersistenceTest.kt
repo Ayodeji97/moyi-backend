@@ -195,6 +195,53 @@ internal class BondDayPersistenceTest(
             .message shouldContain "bond_days_span_check"
     }
 
+    /**
+     * A7. `findAllByBondDayId` runs on every `GET /today` and asks for every
+     * entry of a day, tombstones included — so it cannot use BR-2's partial
+     * unique index, whose predicate is `deleted_at IS NULL`. Asked of the
+     * planner rather than of the catalogue alone: with sequential scans
+     * priced out, the plan names the index only if one can serve the query.
+     */
+    @Test
+    fun `a day's entries are found through a plain index on bond_day_id, and BR-2's partial index is still there`() {
+        val plan =
+            transactions
+                .execute {
+                    jdbc.execute("SET LOCAL enable_seqscan = off")
+                    jdbc.queryForList("EXPLAIN SELECT * FROM entries WHERE bond_day_id = '${UUID.randomUUID()}'", String::class.java)
+                }.shouldNotBeNull()
+                .joinToString("\n")
+
+        plan shouldContain "entries_bond_day_idx"
+        jdbc.queryForObject(
+            "SELECT indexdef FROM pg_indexes WHERE tablename = 'entries' AND indexname = 'entries_bond_day_idx'",
+            String::class.java,
+        ) shouldBe "CREATE INDEX entries_bond_day_idx ON public.entries USING btree (bond_day_id)"
+        jdbc.queryForObject(
+            "SELECT indexdef FROM pg_indexes WHERE tablename = 'entries' AND indexname = 'entries_one_per_member_per_day'",
+            String::class.java,
+        ) shouldBe
+            "CREATE UNIQUE INDEX entries_one_per_member_per_day ON public.entries USING btree " +
+            "(bond_day_id, author_member_id) WHERE (deleted_at IS NULL)"
+    }
+
+    /**
+     * B4. FR-041's octet cap at the row, below `EntryText.of`: the backstop
+     * for a writer that does not come through the domain. The text is plain
+     * ASCII, so its octets are its length and nothing else is in question.
+     */
+    @Test
+    fun `V12 refuses a text over 8192 octets, and admits one of exactly 8192`() {
+        val day = openOrGet(bondId, window, lagos, now)
+
+        rawInsertEntry(day.id, ada, "a".repeat(8192)) shouldBe 1
+        shouldThrow<DataIntegrityViolationException> { rawInsertEntry(day.id, bea, "a".repeat(8193)) }
+            .message shouldContain "entries_text_octets_check"
+        // Octets, not characters: 2,731 three-octet characters are 8,193 octets.
+        shouldThrow<DataIntegrityViolationException> { rawInsertEntry(day.id, bea, "\u20ac".repeat(2731)) }
+            .message shouldContain "entries_text_octets_check"
+    }
+
     @Test
     fun `openOrGet can open a day already suspended, for a bond still waiting on its second member`() {
         // Doc 04 §8.3a, as the Phase 3 design §12.4 resolves it (02 J1): the
@@ -275,6 +322,24 @@ internal class BondDayPersistenceTest(
             date,
             startsAt,
             endsAt,
+        )
+
+    /** Below the domain, so `entries_text_octets_check` is what answers — `EntryText.of` would refuse first. */
+    private fun rawInsertEntry(
+        bondDayId: BondDayId,
+        authorMemberId: UUID,
+        text: String,
+    ): Int =
+        jdbc.update(
+            """
+            INSERT INTO entries (id, bond_day_id, bond_id, author_member_id, text, status, created_at, intended_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'SUBMITTED', now(), now(), now())
+            """.trimIndent(),
+            UUID.randomUUID(),
+            bondDayId.value,
+            bondId,
+            authorMemberId,
+            text,
         )
 
     private fun entry(
