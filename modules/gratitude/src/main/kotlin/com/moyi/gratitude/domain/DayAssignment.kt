@@ -57,10 +57,11 @@ import java.time.LocalDate
  * everything BR-3 and BR-3a say, and it has no dependency of its own on a
  * database — so it stays a pure function a unit test can drive through every
  * branch with nothing but values. The service is what has a day store, and
- * it supplies the lookup: `{ date -> days.statusOf(bondId, date)?.isClosed
- * == true }`. "Settled" is spec §6.1.2's word: `closedAt != null`, including
- * `FROZEN` and an elapsed `SUSPENDED` — Task 8 makes the service's lookup
- * mean exactly that.
+ * it supplies the lookup: `{ date -> days.findByBondAndDate(bondId,
+ * date)?.isSettled == true }`. "Settled" is spec §6.1.2's word:
+ * `closedAt != null`, including `FROZEN` and an elapsed `SUSPENDED` — and
+ * [BondDay.isSettled] is the one place that says so, asked here before the
+ * day is locked and by `SubmitEntry` again once it is (§6.1.3).
  *
  * **F1 (whole-branch review): [resolve] is what [Entry.submit] must take its
  * `intendedAt` from, never the raw client claim.** `entries.intended_at`'s

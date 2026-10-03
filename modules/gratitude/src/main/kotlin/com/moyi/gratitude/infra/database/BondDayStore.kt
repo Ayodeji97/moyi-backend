@@ -139,16 +139,6 @@ internal class BondDayStore(
     }
 
     /**
-     * Just the status, without loading the whole aggregate — see
-     * [BondDayRepository.findStatusByBondIdAndDate]'s own KDoc for who this
-     * is for.
-     */
-    fun statusOf(
-        bondId: UUID,
-        date: LocalDate,
-    ): BondDayStatus? = days.findStatusByBondIdAndDate(bondId, date)
-
-    /**
      * Writes a changed [BondDay] — the reveal and close transitions later
      * slices add. [day] is the aggregate *after* its own transition, as
      * `BondStore.update`'s own KDoc describes; the same warning applies:

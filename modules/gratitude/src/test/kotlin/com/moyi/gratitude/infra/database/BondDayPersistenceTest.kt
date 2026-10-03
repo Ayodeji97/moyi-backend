@@ -121,7 +121,7 @@ internal class BondDayPersistenceTest(
         val day = openOrGet(bondId, window, ZoneId.of("Africa/Lagos"), now)
 
         // Nothing in this module reads the bond's current zone for an existing day.
-        statusOf(bondId, date).shouldNotBeNull()
+        findByBondAndDate(bondId, date).shouldNotBeNull()
         find(day.id).shouldNotBeNull().anchorTimezone shouldBe ZoneId.of("Africa/Lagos")
     }
 
@@ -213,10 +213,10 @@ internal class BondDayPersistenceTest(
 
     private fun find(id: BondDayId) = transactions.execute { days.find(id) }
 
-    private fun statusOf(
+    private fun findByBondAndDate(
         bondId: UUID,
         date: LocalDate,
-    ) = transactions.execute { days.statusOf(bondId, date) }
+    ) = transactions.execute { days.findByBondAndDate(bondId, date) }
 
     private fun insert(entry: Entry) = transactions.executeWithoutResult { entries.insert(entry) }
 

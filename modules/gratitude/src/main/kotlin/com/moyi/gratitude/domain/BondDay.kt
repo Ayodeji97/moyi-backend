@@ -19,12 +19,14 @@ import java.util.UUID
  * own status column.
  *
  * **[isClosed] lives here, not on [BondDay] alone; [BondDay.isClosed]
- * delegates to it.** A later slice has to ask this question of a status it
- * read straight off a row — `BondDayStore.statusOf(bondId, date):
- * BondDayStatus?` (Task 6) — without paying for the whole aggregate. Putting
- * the answer only on [BondDay] would have given that caller nothing to ask,
- * and putting it in two places would have given the codebase two chances to
- * disagree with itself about what "closed" means.
+ * delegates to it.** A caller holding only a status — one read straight off
+ * a row, without the aggregate — can still ask. Putting the answer only on
+ * [BondDay] would have given that caller nothing to ask, and putting it in
+ * two places would have given the codebase two chances to disagree with
+ * itself about what "closed" means.
+ *
+ * **"Closed" is a fact about the status; BR-3a's "settled" is not**, and is
+ * [BondDay.isSettled]: it needs `closedAt`, which no status carries.
  */
 internal enum class BondDayStatus(
     val isClosed: Boolean,

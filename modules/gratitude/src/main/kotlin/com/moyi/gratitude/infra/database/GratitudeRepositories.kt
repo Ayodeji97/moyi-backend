@@ -1,6 +1,5 @@
 package com.moyi.gratitude.infra.database
 
-import com.moyi.gratitude.domain.BondDayStatus
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
@@ -52,18 +51,6 @@ internal interface BondDayRepository : Repository<BondDayEntity, UUID> {
      */
     @Query(nativeQuery = true, value = "SELECT 1 FROM bond_days WHERE id = :id FOR UPDATE")
     fun lockRow(id: UUID): Int?
-
-    /**
-     * Just the status, for [BondDayStore.statusOf] — the question
-     * `DayAssignment.dateFor` asks on every offline-draft write (its own
-     * KDoc: `{ date -> days.statusOf(bondId, date)?.isClosed == true }`), so
-     * it stays a projection rather than loading the whole row.
-     */
-    @Query("SELECT d.status FROM BondDayEntity d WHERE d.bondId = :bondId AND d.date = :date")
-    fun findStatusByBondIdAndDate(
-        bondId: UUID,
-        date: LocalDate,
-    ): BondDayStatus?
 
     /**
      * The lazy open (doc 04 §3): a compare-and-set against
