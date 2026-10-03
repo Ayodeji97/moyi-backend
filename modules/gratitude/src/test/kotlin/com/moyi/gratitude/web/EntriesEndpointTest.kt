@@ -133,6 +133,28 @@ internal class EntriesEndpointTest(
         beasAttempt.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
     }
 
+    /**
+     * Spec §6.2 and BR-9: `PENDING_DELETION` is not `ARCHIVED`, but it takes
+     * no writes either — both members agreed to delete the bond and its
+     * cooling-off is running. Reached through the real endpoint, by both of
+     * them asking (FR-028); the answer is the same `409 BOND_ARCHIVED` an
+     * ended bond gives, for both members, and nothing is stored.
+     */
+    @Test
+    fun `a bond in its deletion cooling-off takes no entries - 409 BOND_ARCHIVED for either member`() {
+        requestDeletion(ada, bondId).status shouldBe 202
+        requestDeletion(bea, bondId).status shouldBe 202
+        jdbc.queryForObject("SELECT status FROM bonds WHERE id = ?::uuid", String::class.java, bondId) shouldBe "PENDING_DELETION"
+
+        for (member in listOf(ada, bea)) {
+            val attempt = submit(member, bondId, """{"text":"one more"}""")
+            attempt.status shouldBe 409
+            attempt.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        }
+        jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM bond_days", Int::class.java) shouldBe 0
+    }
+
     @Test
     fun `a media id is refused rather than ignored, until Phase 4 can honour it`() {
         val response = submit(ada, bondId, """{"text":"look","imageMediaId":"${UUID.randomUUID()}"}""")
@@ -451,6 +473,16 @@ internal class EntriesEndpointTest(
     ): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/bonds/$bondId/leave") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(caller).token}")
+            }.andReturn()
+            .response
+
+    private fun requestDeletion(
+        caller: UUID,
+        bondId: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/deletion-request") {
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(caller).token}")
             }.andReturn()
             .response

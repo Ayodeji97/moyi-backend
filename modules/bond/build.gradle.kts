@@ -47,4 +47,8 @@ dependencies {
     testRuntimeOnly("org.springframework.boot:spring-boot-starter-flyway")
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     testRuntimeOnly("org.postgresql:postgresql")
+    // Flyway's own API, at compile time, for one test: AnchorIntervalBackfillTest
+    // stops the schema before V13, inserts bonds, and then migrates on — the
+    // only way to run V13's backfill against rows that exist.
+    testImplementation("org.flywaydb:flyway-core")
 }
