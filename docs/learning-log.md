@@ -1771,6 +1771,13 @@ Reality: **no critical defect, and several real ones, none of which was inside a
          body whose length was not declared, and the interceptor called that a wiring
          bug. V13's backfill had never run against a row, because every test database is
          empty when it runs. That one turned out correct. It was still untested.
+         Then it was run. The development database had the old table shapes and had
+         never applied V10; the repair dropped three tables of smoke data and two
+         history rows, Flyway applied V10 to V13, the backfill ran over 26 real bonds
+         with nothing to correct, and `scripts/smoke.sh` on the jar built from
+         `b08b385` came back 350 passed, 0 failed, the handoff section included. The
+         repair I had first handed over, a checksum reset, would have left the
+         application starting and then failing on columns that were not there.
 Wrong about: what a per-task review can see. I had been treating ten clean reviews as
          ten independent confirmations of the branch. They were ten confirmations of ten
          diffs. A defect that needs two tasks' assumptions to collide is in nobody's

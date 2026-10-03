@@ -833,7 +833,7 @@ on. None of them is built here.
   migration for the `CHECK`, together.
 - **`GET /today` reports `OPEN` for an archived bond's no-row day**, and has no `partner` field
   (both under Consequences).
-- **The shared development database must be repaired by the human, and a checksum reset is not
+- **The shared development database must be repaired by hand, and a checksum reset is not
   the repair.** It applied earlier copies of V11, V12 and V13. Setting their checksums to `NULL`
   only stops Flyway refusing to start; it re-runs nothing. V11 and V12 changed table *shape* in
   place (the response body column went and `result_id`/`result_kind` arrived; `bond_days` gained
@@ -843,13 +843,22 @@ on. None of them is built here.
   `DELETE FROM flyway_schema_history WHERE version IN ('11','12','13');`
   then start the application so Flyway re-applies V11 to V13 (V13 backfills the timeline for
   the bonds that exist). It destroys that database's entries, days and idempotency keys; users,
-  bonds and invites are untouched. **Nobody has executed it yet, so it is untested.**
-- **`scripts/smoke.sh` has not been run against the rework**, nor against the final review's
-  fixes. Its deferred-handoff section was written against the code. It needs the repair
-  above first, and it gates "ready". What *is* now covered is V13's backfill itself:
-  `AnchorIntervalBackfillTest` migrates a database to just before V13, inserts bonds in every
-  state and in the zones where a date is easiest to get wrong, runs V13, and loads each
-  timeline through the application's own loader. The backfill was correct for every case.
+  bonds and invites are untouched. **It was executed once, on 2026-10-03**, against a
+  development database whose history read 1 to 9, 11, 12 (V10 had never been applied there,
+  and V13 never had, so the `DELETE` removed two rows). It dropped 4 days, 4 entries and 8
+  idempotency keys of smoke data and left 24 users and 26 bonds. On the next start Flyway
+  applied V10, V11, V12 and V13 in order. One run on one database is what that proves.
+- **`scripts/smoke.sh` was run against the rework on 2026-10-03**, on the jar built from
+  `b08b385` (the final review's fixes included), after the repair above: **350 probes passed,
+  0 failed**, the gratitude section and the deferred-handoff section among them. Anything
+  committed after `b08b385` has not been smoke-tested until the script is run again.
+- **V13's backfill is covered twice.** `AnchorIntervalBackfillTest` migrates a database to
+  just before V13, inserts bonds in every state and in the zones where a date is easiest to
+  get wrong, runs V13, and loads each timeline through the application's own loader; the
+  backfill was correct for every case. And on 2026-10-03 it ran for real over the 26 bonds in
+  the development database (16 `PENDING_MEMBER`, 6 `ARCHIVED`, 4 `ACTIVE`; `Africa/Lagos` and
+  `Europe/London`): every bond got one open interval starting at its `created_at`, and no
+  `first_label` disagreed with its zone.
 
 ## Revisit when
 

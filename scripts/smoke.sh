@@ -16,16 +16,16 @@
 # X-RateLimit-* headers and Retry-After on the way, against the compose Valkey.
 # Since the C1 rework it is written to check that a confirmed zone change is
 # reported at once and decides no date until the current Bond-day ends (BR-6,
-# ADR-0031). THAT SECTION HAS NOT BEEN RUN: nobody has executed this script
-# against the rework, because it needs the dev-database repair below first.
+# ADR-0031). Last run against the rework on 2026-10-03, on the jar built from
+# b08b385: 350 passed, 0 failed. A later commit is unproven until it is run again.
 #
 # If the application refuses to start on a Flyway checksum mismatch: V11, V12
 # and V13 were edited in place while unmerged (ADR-0031), so a database that
 # applied an earlier copy of them no longer matches. Resetting the checksums
 # is NOT the repair: it only stops Flyway refusing and re-runs nothing, and V11
 # and V12 changed table shape, so the app would then fail on missing columns.
-# The repair is for the DEV database only, is the human's to run, never this
-# script's, and has not been executed by anyone yet (untested):
+# The repair is for the DEV database only and is never this script's to run.
+# It was executed once, on 2026-10-03 (ADR-0031, Owed, records what it found):
 #   DROP TABLE IF EXISTS entries, bond_days, idempotency_keys, bond_anchor_intervals CASCADE;
 #   DELETE FROM flyway_schema_history WHERE version IN ('11','12','13');
 # then start the application so Flyway re-applies V11-V13 (V13 backfills the
