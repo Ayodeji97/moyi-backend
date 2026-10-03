@@ -18,10 +18,16 @@ package com.moyi.common.web
  * client handling a case the server never produces.
  */
 enum class ErrorCode {
-    /** The body could not be parsed at all — not JSON, or not the right shape. */
+    /**
+     * The body could not be taken in at all — not JSON, not the right shape,
+     * or (`413`) longer than an `@Idempotent` route will buffer.
+     */
     MALFORMED_REQUEST,
 
-    /** The body parsed but a field is not acceptable. Always accompanied by `errors`. */
+    /**
+     * The request parsed but a field — or a required header, `Idempotency-Key`
+     * — is not acceptable. Always accompanied by `errors`.
+     */
     VALIDATION_FAILED,
 
     /**
@@ -187,25 +193,27 @@ enum class ErrorCode {
     TIMEZONE_CHANGE_TOO_SOON,
 
     /**
-     * `Idempotency-Key` (doc 06 §1) was reused with a request whose body
-     * hashes differently from the one it was first sent with. 422: the caller
-     * picked a key that means one specific request, and this one is not it —
-     * the fix is a fresh key, not a retry.
+     * `Idempotency-Key` (doc 06 §1) was reused for a different request: the
+     * method, the concrete path (the raw request URI) or the keyed
+     * fingerprint of the body differs from what the key first recorded.
+     * 422: the caller picked a key that means one specific request, and this
+     * one is not it — the fix is a fresh key, not a retry.
      */
     IDEMPOTENCY_KEY_REUSED,
 
     /**
-     * A second request carrying an `Idempotency-Key` (doc 06 §1) whose first
-     * attempt has reserved the row but not yet finished. 409, not the 422
-     * [IDEMPOTENCY_KEY_REUSED] gets: the body matches, nothing here is
-     * invalid, the caller's own first attempt just has not returned yet — the
-     * fix is to wait, not to change anything about the request.
+     * A second request carrying an `Idempotency-Key` (doc 06 §1) while the
+     * first is still running. 409, not the 422 [IDEMPOTENCY_KEY_REUSED] gets:
+     * nothing here is invalid, the caller's own first attempt just has not
+     * returned yet — the fix is to wait, not to change the request.
      *
-     * Not in the brief's own file list for this slice, added because doc
-     * 06 §1's behaviour — "response_status null -> 409" — has no other code
-     * to return under this contract, and reusing [IDEMPOTENCY_KEY_REUSED]
-     * for a fact about *timing* rather than the request itself would make one
-     * code answer two different questions a client needs to tell apart.
+     * "Still running" is the key's advisory lock being held, tried and not
+     * waited for (spec §5.4, ADR-0031 decision 8) — not a half-written row:
+     * a reservation and its result commit together, so no other transaction
+     * ever sees one without the other. Spec §5.3's list omitted this code;
+     * it is amended. A separate code because reusing
+     * [IDEMPOTENCY_KEY_REUSED] for a fact about *timing* would make one code
+     * answer two questions a client needs to tell apart.
      */
     IDEMPOTENCY_KEY_IN_FLIGHT,
 

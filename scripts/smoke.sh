@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
-# What it proves: the packaged application boots against the compose Postgres,
+# What it is written to check (a run is the proof, not this header): the
+# packaged application boots against the compose Postgres,
 # and every identity endpoint that exists so far — registration, verification,
 # sign-in, refresh rotation, logout, password reset — answers with the status
 # and the error code the API contract (doc 06) promises — on the happy path AND on
@@ -13,8 +14,10 @@
 # and the same ETag (doc 26 §2.1, T-09). Since slice F it drives
 # every rate limit in doc 06 §4 to its 429 (FR-012, ADR-0023) and checks the
 # X-RateLimit-* headers and Retry-After on the way, against the compose Valkey.
-# Since the C1 rework it proves that a confirmed zone change is reported at once
-# and decides no date until the current Bond-day ends (BR-6, ADR-0031).
+# Since the C1 rework it is written to check that a confirmed zone change is
+# reported at once and decides no date until the current Bond-day ends (BR-6,
+# ADR-0031). THAT SECTION HAS NOT BEEN RUN: nobody has executed this script
+# against the rework, because it needs the dev-database repair below first.
 #
 # If the application refuses to start on a Flyway checksum mismatch: V11, V12
 # and V13 were edited in place while unmerged (ADR-0031), so a database that

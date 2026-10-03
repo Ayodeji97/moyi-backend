@@ -102,7 +102,11 @@ internal data class BondDay(
     val revealedAt: Instant?,
     val closedAt: Instant?,
     val createdAt: Instant,
-    /** The row version behind the `ETag` (doc 06 §1), as [com.moyi.bond.domain.Bond.version] is. `0` until a later slice updates it. */
+    /**
+     * The row version behind the `ETag` (doc 06 §1), as [com.moyi.bond.domain.Bond.version] is. Hibernate's
+     * `@Version`: `BondDayStore.update` bumps it on every change — an entry arriving, an extended [endsAt].
+     * No endpoint exposes it as an `ETag` yet.
+     */
     val version: Int,
 ) {
     init {
@@ -159,9 +163,17 @@ internal data class BondDay(
      * V12) by design, precisely because a genuinely-still-suspended day must
      * not be swept into a close it does not qualify for. **Whichever slice
      * next reads or writes this status has to add the transition that
-     * un-suspends a day once its bond stops awaiting a second member** — most
-     * naturally, the moment the second member's own membership is created,
-     * not buried in this method or in a later entry's own [withEntry] call.
+     * un-suspends a day once its bond stops awaiting a second member.**
+     * It cannot happen "the moment the second member's membership is
+     * created", as this note once suggested: that moment is in `bond`, and
+     * `bond` cannot write `bond_days` — `gratitude` depends on `bond`, never
+     * the reverse. Spec §12.4 says where it does happen: **the first
+     * gratitude operation or close sweep on the joining day reconciles the
+     * row** under the bond and day locks — zero entries becomes
+     * [BondDayStatus.OPEN], one [BondDayStatus.PARTIAL], two follow the
+     * reveal rule — using the bond's activation instant
+     * (`BondMembership.activeSince`) to tell the joining day from earlier
+     * suspended days, which stay private. That is C2's (ADR-0031, Owed).
      * Miss it, and the couple's first shared day — the one this whole slice
      * exists to let them write on together — never reveals, and both of
      * their first entries stay locked to each other permanently. This method

@@ -49,9 +49,9 @@ import javax.sql.DataSource
  * call regardless of route: harmless for a route `@Idempotent` does not
  * mark, and necessary for `POST /bonds/{bondId}/entries` — the reservation
  * is keyed on `(user_id, idempotency_key)` alone (V11's own unique
- * constraint), with `endpoint` stored alongside it and compared in code
- * (F6, whole-branch review — this KDoc previously described the key itself
- * as `userId + endpoint + key`, which V11 does not declare). `endpoint` is
+ * constraint), with `method` and `path` stored alongside it and compared in
+ * code (F6, whole-branch review — this KDoc previously described the key
+ * itself as `userId + endpoint + key`, which V11 does not declare). `path` is
  * the literal request URI, so reusing one key across this test's three
  * distinct URIs for the same caller (`ada`, against a random id and then a
  * non-`UUID`) would still collide as a reused key (`422

@@ -32,7 +32,7 @@ internal data class TodayView(
 )
 
 /**
- * `GET /bonds/{bondId}/today` (spec §6.1): today's Bond-day, and each side's
+ * `GET /bonds/{bondId}/today` (spec §5.1): today's Bond-day, and each side's
  * entry, exactly as BR-1 gates it.
  *
  * **A read never writes.** [DayAssignment.dateFor] resolves which date

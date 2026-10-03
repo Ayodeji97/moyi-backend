@@ -63,8 +63,9 @@ class PersonalDataHasher private constructor(
             val bytes = ByteArray(HashingProperties.MIN_SECRET_LENGTH).also(SecureRandom()::nextBytes)
             log.warn(
                 "The personal-data hashing secret is EPHEMERAL: generated at startup, so address and user-agent " +
-                    "hashes written by this process cannot be matched by the next one. Correct for local development; " +
-                    "wrong anywhere else.",
+                    "hashes written by this process cannot be matched by the next one, and a retry under an " +
+                    "Idempotency-Key recorded before a restart is refused as reused (its request fingerprint is keyed " +
+                    "by this secret). Correct for local development; wrong anywhere else.",
             )
             return PersonalDataHasher(SecretKeySpec(bytes, ALGORITHM))
         }

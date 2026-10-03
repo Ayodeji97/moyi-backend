@@ -17,9 +17,10 @@ import java.time.LocalDate
  * the fallback every path below either returns or falls back to.
  *
  * **The calendar's day is taken whole, never recomputed.** [Resolution.bounds]
- * is exactly the [DayWindow] the calendar returned — the 49-hour day a
- * westward anchor change merges (plan R3), the 11-hour one an eastward change
- * clips, the empty one it skips. Nothing here takes a midnight in some zone;
+ * is exactly the [DayWindow] the calendar returned — the long day a westward
+ * anchor change merges (plan R3; its length depends on the zone pair, 25
+ * hours for one hour west, 49 for Kiritimati to Pago Pago), the short one an
+ * eastward change clips, the empty one it skips. Nothing here takes a midnight in some zone;
  * a `ZoneId` alone cannot express any of those days, which is why this takes
  * a [BondCalendar] rather than one.
  *
@@ -47,9 +48,10 @@ import java.time.LocalDate
  *   without opening a window wide enough to rewrite last month's streak.
  * - **Landing on a day [isSettled] reports true for** falls back rather than
  *   writing into a day that cannot be revisited. BR-10 makes a closed day's
- *   status authoritative, and BR-1 grants read access only on `REVEALED` or
- *   a closed `SOLO` day — an entry back-filled onto a closed `EMPTY` day
- *   would be readable by neither member and releasable by no transition.
+ *   status authoritative, and BR-1 lets a partner read an entry only once
+ *   its own `revealedAt` is set, which only a reveal transition does — an
+ *   entry back-filled onto a closed `EMPTY` day would never pass through
+ *   one: unreadable by the partner for good, releasable by no transition.
  *   Falling back to today is BR-3a's answer to "what happens to the words":
  *   they are kept, on a day that can still hold them, rather than silently
  *   dropped.

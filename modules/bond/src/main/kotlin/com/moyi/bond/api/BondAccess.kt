@@ -40,7 +40,11 @@ interface BondAccess {
      * the only honest option (spec §2.1).
      *
      * **The lock order across this application is bond, then bond-day, then
-     * entry**, on submission, editing, closing and lifecycle reconciliation.
+     * entry**, on submission, editing and lifecycle reconciliation. **The
+     * close job is the exception** (ruling R1, ADR-0031 decision 18): it
+     * takes no bond lock and starts at the bond-day, so against the closer
+     * it is the day's own row lock and `bond_days`'s unique `(bond_id, date)`
+     * that hold, not this one.
      * `ChangeTimezone`, `EndBond`, `RequestDeletion`, `UpdateBond`,
      * `CreateInvite`, `RevokeInvite`, `AcceptInvite` and `MemberSettingsService`
      * already take this same lock first, which is what makes a gratitude write

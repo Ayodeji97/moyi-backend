@@ -22,7 +22,7 @@ import java.util.UUID
 
 /**
  * `/api/v1/bonds/{bondId}/entries` and `/api/v1/bonds/{bondId}/today` (spec
- * §6.2, §6.1). Behind the bearer, as every bond-scoped path is — nothing
+ * §6.2, §5.1). Behind the bearer, as every bond-scoped path is — nothing
  * here is in `SecurityConfiguration`'s public list.
  *
  * **One controller for both, not two.** Both are reads and writes of the
@@ -99,7 +99,7 @@ internal class EntriesController(
     }
 
     /**
-     * `GET /bonds/{bondId}/today` (spec §6.1). Named `today`, not `get` —
+     * `GET /bonds/{bondId}/today` (spec §5.1). Named `today`, not `get` —
      * see this class's own KDoc on why the method name is the API's
      * `operationId` and not a Kotlin implementation detail.
      *

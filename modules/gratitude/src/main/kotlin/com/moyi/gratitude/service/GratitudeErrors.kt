@@ -65,7 +65,7 @@ internal class EntryAlreadyExistsException :
  * may already exist and already be closed by the time a later slice's close
  * job (C3) runs alongside this one. This is that guard, in place before the
  * day that needs it exists, so a race with C3 is a `409` rather than a
- * silent third entry past BR-1's own two-entry cap.
+ * silent entry on a settled day, past BR-2's one per member per day.
  */
 internal class DayClosedException :
     ApiException(

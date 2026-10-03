@@ -99,8 +99,10 @@ moyi:
 # arrive from the environment. Only the `local` profile says `ephemeral`.
 #
 # The same posture for `moyi.security.hashing.secret` (ADR-0023): the HMAC
-# key behind `consent_records.ip_hash` and the rate-limit keys, required from
-# the environment, ephemeral only in `local`.
+# key behind `consent_records.ip_hash`, the rate-limit keys and — since
+# ADR-0031 — `idempotency_keys.request_hash`, required from the environment,
+# ephemeral only in `local`. Changing it makes a retry of an already-recorded
+# Idempotency-Key a 422 for up to 24 hours.
 #
 # `moyi.security.client-address.trusted-proxies` is EMPTY here on purpose:
 # with no ranges configured no `X-Forwarded-For` is believed and the socket

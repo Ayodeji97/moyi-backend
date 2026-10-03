@@ -1573,9 +1573,9 @@ Spec §9 names this and calls it not a suggestion. One test per row, each drivin
 
 ```bash
 ./gradlew build
-# Needs the human-run Flyway checksum reset first — see .claude/HANDOVER.md:
-#   docker exec moyi-backend-postgres-1 psql -U moyi -d moyi \
-#     -c "UPDATE flyway_schema_history SET checksum = NULL WHERE version IN ('11','12');"
+# Needs the human-run dev-database repair first. A checksum reset is NOT the
+# repair (an earlier version of this plan said it was): V11 and V12 changed
+# table shape in place. The procedure is in ADR-0031, under Owed.
 ./scripts/smoke.sh
 ```
 

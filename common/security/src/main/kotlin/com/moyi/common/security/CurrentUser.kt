@@ -81,13 +81,12 @@ class SecurityWebMvcConfigurer(
      * Fix round 1, I4: an explicit order, not the registration order two
      * unrelated `WebMvcConfigurer` beans across two modules happen to run
      * in. [RateLimitInterceptor] must run before `common.web.idempotency.IdempotencyInterceptor`:
-     * a caller with no tokens left must never reach the point of reserving
-     * an `Idempotency-Key`, because a `429` is neither `ex != null` nor
-     * `>= 500` — the two conditions `IdempotencyKeyStore.complete` discards
-     * a reservation under — so a reservation made before the limiter
-     * refuses the request risks being stored as "the response" and
-     * replayed to the caller's own correctly-behaved retry for the rest of
-     * the 24h window.
+     * a caller with no tokens left must never have its body buffered and
+     * fingerprinted for a request that was never going to run. (This note
+     * once gave a second reason — a reservation made before the limiter
+     * refused could be stored and replayed. That cannot happen any more:
+     * since the C1 rework the interceptor writes nothing, and the key is
+     * reserved inside the handler's own transaction, ADR-0031 decision 8.)
      *
      * `common.web.idempotency.IdempotencyConfiguration.ORDER` is a fixed,
      * generously late value (`1000`), not an offset from [RATE_LIMIT_ORDER]

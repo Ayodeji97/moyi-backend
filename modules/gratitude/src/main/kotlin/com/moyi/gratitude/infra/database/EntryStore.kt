@@ -38,15 +38,14 @@ internal class EntryStore(
      * Every entry filed against one day — BR-2 caps this at two, but nothing
      * here assumes it.
      *
-     * **Returns a [com.moyi.gratitude.domain.EntryStatus.DELETED] row too**
-     * (whole-branch review, F5). Harmless today — nothing in this slice ever
-     * produces one — but wrong the day `delete()` lands: a caller that reads
-     * this list expecting "the entries still standing for this day" will get
-     * a deleted one back unless it filters `status`/`deletedAt` itself.
-     * [Entry.canBeReadBy] does not filter it out either. Whichever slice adds
-     * `delete()` needs to either filter here or make every caller responsible
-     * for it — this comment is so that decision is made on purpose, not found
-     * as a leak later.
+     * **Returns an erased row too** (whole-branch review, F5), and that is
+     * no longer a leak waiting to happen: every entry leaves the service
+     * layer through [Entry.readBy], and BR-1 answers an erased entry as a
+     * tombstone for everyone (ADR-0031 decision 10). What is still owed is
+     * *which* row a caller picks once one author can have two on a day — an
+     * erased one and its replacement. `GetToday` takes the first it finds;
+     * the slice that first sets `deleted_at` must make that choice
+     * deterministic (ADR-0031, Owed, C2).
      */
     fun findForDay(bondDayId: BondDayId): List<Entry> = entries.findAllByBondDayId(bondDayId.value).map { it.toDomain() }
 

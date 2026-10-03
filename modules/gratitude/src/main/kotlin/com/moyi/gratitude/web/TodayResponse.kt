@@ -7,7 +7,7 @@ import com.moyi.gratitude.service.TodayView
 import java.time.LocalDate
 
 /**
- * `200` from `GET /bonds/{bondId}/today` (spec §6.1).
+ * `200` from `GET /bonds/{bondId}/today` (spec §5.1).
  *
  * **[bondDay]'s [BondDayResponse.status] is returned deliberately, not
  * withheld out of caution.** Doc 04 §6.1: a member who has not written yet
