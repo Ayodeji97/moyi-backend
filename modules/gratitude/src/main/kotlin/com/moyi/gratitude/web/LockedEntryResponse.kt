@@ -22,8 +22,12 @@ import java.util.UUID
  * [authorMemberId] alone, not the text, not `createdAt`, not `intendedAt`,
  * not a length or a media flag — `RevealGateTest`'s first test is the proof,
  * and doc 12 calls it the single most important test file in the
- * repository. [status] is [LockedEntryStatus.LOCKED] and nothing else can
- * ever construct one: this type exists for exactly one case.
+ * repository. [status] is always [LockedEntryStatus.LOCKED] — the enum has
+ * no other value — and this type exists for exactly one case: BR-1 answered
+ * `LOCKED`. Its constructor is not private, so that is a convention held by
+ * its one call site ([PartnerEntryResponse.of], which builds it from a
+ * reading that has only the author to give), not something the type
+ * enforces; what the type does enforce is that it has nowhere to put more.
  */
 internal data class LockedEntryResponse(
     val authorMemberId: UUID,

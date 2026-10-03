@@ -75,13 +75,21 @@ import org.springframework.http.HttpStatus
  *   it made would have been refused as `422 VALIDATION_FAILED`.
  * - **The `partnerEntry` discriminator.** `gratitude.web.TodayResponse.partnerEntry`
  *   is a Kotlin sealed interface's `oneOf` — springdoc already splits it into
- *   [EntryResponse][com.moyi.gratitude.web.EntryResponse] and
- *   [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse] on its
- *   own, but adds no `discriminator`, so a generated client has to try both
- *   shapes structurally to learn which one it received rather than read one
- *   field. [discriminatePartnerEntry] adds one, keyed on `status`, which both
- *   branches already carry. Deferred by Task 8 (`PartnerEntryResponse`'s own
- *   KDoc) to whichever task next regenerated the document.
+ *   its three branches,
+ *   [EntryResponse][com.moyi.gratitude.web.EntryResponse],
+ *   [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse] and
+ *   [ErasedEntryResponse][com.moyi.gratitude.web.ErasedEntryResponse], on its
+ *   own, but adds no `discriminator`, so a generated client has to try each
+ *   shape structurally to learn which one it received rather than read one
+ *   field. [discriminatePartnerEntry] adds one, keyed on `status`, which
+ *   every branch already carries. Deferred by Task 8 (`PartnerEntryResponse`'s
+ *   own KDoc) to whichever task next regenerated the document.
+ * - **`partnerEntry` is nullable, and says so.** The field is `null` until
+ *   the partner has written. springdoc gives a nullable `$ref` its
+ *   `{"type": "null"}` branch (it does for `myEntry`) but not a nullable
+ *   sealed interface's `oneOf`, which left the document claiming the field is
+ *   always one of the three objects. [admitAbsentPartnerEntry] adds the
+ *   missing branch.
  *
  * **F9 (whole-branch review) — three things a generated client could not
  * previously do at all:**
@@ -98,12 +106,14 @@ import org.springframework.http.HttpStatus
  *   equivalence.
  * - **The `partnerEntry` discriminator property is now `required`.**
  *   [discriminatePartnerEntry] used to add a `discriminator` keyed on
- *   `status` without ever marking `status` required on either branch's own
+ *   `status` without ever marking `status` required on any branch's own
  *   schema — legal JSON Schema, but OpenAPI requires a discriminator's own
  *   property to be `required`, and several generators (and every strict
  *   validator) drop a discriminator that is not. [requireDiscriminatorProperty]
- *   closes that on both [EntryResponse][com.moyi.gratitude.web.EntryResponse]
- *   and [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse].
+ *   closes that on every branch:
+ *   [EntryResponse][com.moyi.gratitude.web.EntryResponse],
+ *   [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse] and
+ *   [ErasedEntryResponse][com.moyi.gratitude.web.ErasedEntryResponse].
  * - **`Idempotency-Replayed` is now a declared response header.**
  *   The handler sets it on every replay (from
  *   [IdempotentOutcome][com.moyi.common.web.idempotency.IdempotentOutcome]'s
@@ -157,6 +167,7 @@ class OpenApiConfiguration {
             documentEntryTextLimits(api)
             documentBondNamePattern(api)
             discriminatePartnerEntry(api)
+            admitAbsentPartnerEntry(api)
             requireDiscriminatorProperty(api)
         }
 
@@ -523,7 +534,7 @@ private const val ERASED_ENTRY_RESPONSE_REF = "#/components/schemas/$ERASED_ENTR
  * (`Class.permittedSubclasses`), and swagger-core reads that to split the
  * property into `oneOf: [EntryResponse, ErasedEntryResponse,
  * LockedEntryResponse]` without an
- * annotation on either side — the KDoc's fear of an *empty* `partnerEntry`
+ * annotation on any of them — the KDoc's fear of an *empty* `partnerEntry`
  * schema does not hold against this springdoc version. What springdoc does
  * not add is a `discriminator`: a `oneOf` without one is a set of shapes a
  * generated client must try structurally, one at a time, to find out which
@@ -531,10 +542,10 @@ private const val ERASED_ENTRY_RESPONSE_REF = "#/components/schemas/$ERASED_ENTR
  * gap a `sealed class` closes on the Kotlin side that this document was
  * leaving open on the wire side.
  *
- * `status` is the discriminator, because both branches already carry a
- * field of that name and nothing was added to either type to support this:
+ * `status` is the discriminator, because all three branches already carry a
+ * field of that name and nothing was added to any type to support this:
  * [com.moyi.gratitude.domain.EntryStatus] (`SUBMITTED`, `REVEALED`,
- * `DELETED`) on [com.moyi.gratitude.web.EntryResponse]'s branch and the
+ * `DELETED`) on [com.moyi.gratitude.web.EntryResponse]'s branch, the
  * one-value `LockedEntryStatus.LOCKED` on
  * [com.moyi.gratitude.web.LockedEntryResponse]'s, and the one-value
  * `ErasedEntryStatus.REMOVED` on
@@ -551,7 +562,7 @@ private const val ERASED_ENTRY_RESPONSE_REF = "#/components/schemas/$ERASED_ENTR
  * The named `PartnerEntryResponse` schema in `components.schemas` itself
  * stays the empty object springdoc produces for the interface — it is
  * referenced only as each branch's own `allOf` marker, asserts nothing on
- * its own, and rewriting it to a `oneOf` of the two types that already
+ * its own, and rewriting it to a `oneOf` of the three types that already
  * `allOf` it would be a schema that describes itself. Harmless, and left
  * alone.
  */
@@ -575,13 +586,43 @@ private fun discriminatePartnerEntry(api: OpenAPI) {
 }
 
 /**
+ * Says `partnerEntry` may be `null` — it is `PartnerEntryResponse?`, absent
+ * until the partner has written, and `GET /today` serialises that as
+ * `"partnerEntry": null` (`RevealGateTest`). springdoc adds the
+ * `{"type": "null"}` branch to a nullable property that is a single `$ref`
+ * (`myEntry` has one) but not to a nullable sealed interface's `oneOf`, so
+ * without this a strict generated client would reject the most common
+ * response there is: the one before the partner writes.
+ *
+ * The branch is added to the existing `oneOf`, the same shape `myEntry`
+ * already has, rather than wrapping the three in an outer `anyOf`. The
+ * discriminator still describes every object the field can hold; `null` has
+ * no `status` to discriminate on and matches only the null branch.
+ * Idempotent, so a second pass over the same document adds nothing.
+ */
+private fun admitAbsentPartnerEntry(api: OpenAPI) {
+    val partnerEntry =
+        api.components.schemas[TODAY_RESPONSE]
+            ?.properties
+            ?.get(PARTNER_ENTRY_PROPERTY)
+            ?.takeIf { it.oneOf.orEmpty().isNotEmpty() } ?: return
+    if (partnerEntry.oneOf.none { NULL_TYPE in it.types.orEmpty() }) {
+        partnerEntry.addOneOfItem(Schema<Any>().apply { types = setOf(NULL_TYPE) })
+    }
+}
+
+/** JSON Schema's `"type": "null"` (OpenAPI 3.1) — see [admitAbsentPartnerEntry]. */
+private const val NULL_TYPE = "null"
+
+/**
  * Marks [DISCRIMINATOR_PROPERTY] — and every other field — `required` on each of
  * [discriminatePartnerEntry]'s branches — F9, whole-branch review.
  * [discriminatePartnerEntry] gives `partnerEntry`'s `oneOf` a `discriminator`
- * keyed on `status`, but neither
- * [com.moyi.gratitude.web.EntryResponse] nor
- * [com.moyi.gratitude.web.LockedEntryResponse] declared a `required` array of
- * its own, which left the discriminator property optional in both branches —
+ * keyed on `status`, but none of its three branches
+ * ([com.moyi.gratitude.web.EntryResponse],
+ * [com.moyi.gratitude.web.LockedEntryResponse],
+ * [com.moyi.gratitude.web.ErasedEntryResponse]) declared a `required` array of
+ * its own, which left the discriminator property optional in every branch —
  * legal JSON Schema, but the OpenAPI spec requires a discriminator's own
  * property to be `required`, and several generators (and every strict
  * validator) drop a discriminator that is not, which would have silently

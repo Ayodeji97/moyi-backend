@@ -40,8 +40,8 @@ import java.util.UUID
  * side of midnight in the bond's zone (BR-3).
  *
  * Implements [PartnerEntryResponse] so `TodayResponse.partnerEntry` can carry
- * either this or [LockedEntryResponse] behind one field — BR-1's own
- * decision is what picks which, in [PartnerEntryResponse.of].
+ * this, [LockedEntryResponse] or [ErasedEntryResponse] behind one field —
+ * BR-1's own decision is what picks which, in [PartnerEntryResponse.of].
  */
 @ConsistentCopyVisibility
 internal data class EntryResponse private constructor(

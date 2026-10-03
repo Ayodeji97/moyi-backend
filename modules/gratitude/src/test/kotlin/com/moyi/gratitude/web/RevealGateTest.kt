@@ -323,20 +323,52 @@ internal class RevealGateTest(
         val adaMemberId = authorMemberIdOf(submit(ada, bondId, """{"text":"words I took back"}""").also { it.status shouldBe 201 })
 
         for (state in ERASED_STATES.filter { "revealed_at = NULL" in it }) {
+            // Each state starts from a day only Ada has written on. Bea's
+            // entry from the previous state would otherwise still be there,
+            // and "before Bea has written" would be true for the first state
+            // alone.
+            removeEntryByHand(bea)
             jdbc.update("UPDATE entries SET $state WHERE author_member_id = ?::uuid", memberIdOf(ada)) shouldBe 1
 
             // Before Bea has written, and after: her own entry changes nothing.
             for (beaHasWritten in listOf(false, true)) {
-                if (beaHasWritten) submit(bea, bondId, """{"text":"bea's own"}""")
+                if (beaHasWritten) submit(bea, bondId, """{"text":"bea's own"}""").status shouldBe 201
 
                 val asPartner = getToday(bea, bondId).contentAsString
 
                 withClue("$state, beaHasWritten=$beaHasWritten") {
+                    // The arm is what it says it is: Bea's own entry is there
+                    // exactly when she has written.
+                    asPartner.contains("\"myEntry\":null") shouldBe !beaHasWritten
                     partnerEntryJson(asPartner) shouldBe """{"authorMemberId":"$adaMemberId","status":"REMOVED"}"""
                     asPartner shouldNotContain "words I took back"
                 }
             }
         }
+    }
+
+    @Test
+    fun `a row erased with its text gone and its status never flipped loads, and is a tombstone`() {
+        // The row an erasure leaves half-way: `text` NULL and `deleted_at`
+        // set, `status` still SUBMITTED. It has to come back through the
+        // mapper — `Entry`'s constructor admits a missing text on either mark
+        // of an erasure — and render as a tombstone to both people. A
+        // constructor that looked at the status alone answers 500 here.
+        val submitted = submit(ada, bondId, """{"text":"words I took back"}""")
+        submitted.status shouldBe 201
+        val adaMemberId = authorMemberIdOf(submitted)
+        jdbc.update("UPDATE entries SET text = NULL, deleted_at = now() WHERE author_member_id = ?::uuid", memberIdOf(ada)) shouldBe 1
+        jdbc.queryForObject("SELECT status FROM entries", String::class.java) shouldBe "SUBMITTED"
+
+        val asAuthor = getToday(ada, bondId)
+        val asPartner = getToday(bea, bondId)
+
+        asAuthor.status shouldBe 200
+        myEntryJson(asAuthor.contentAsString) shouldContain "\"id\":\"${idOf(submitted)}\""
+        myEntryJson(asAuthor.contentAsString) shouldContain "\"text\":null"
+        myEntryJson(asAuthor.contentAsString) shouldContain "\"status\":\"DELETED\""
+        asPartner.status shouldBe 200
+        partnerEntryJson(asPartner.contentAsString) shouldBe """{"authorMemberId":"$adaMemberId","status":"REMOVED"}"""
     }
 
     @Test
@@ -432,6 +464,17 @@ internal class RevealGateTest(
             "UPDATE entries SET revealed_at = now(), status = 'REVEALED' WHERE author_member_id = ?::uuid",
             memberIdOf(author),
         ) shouldBe 1
+    }
+
+    /**
+     * Takes [author]'s entry off today's row altogether, by hand, so a loop
+     * can start each pass from a day they have not written on: the row is
+     * deleted (not erased — an erased row is the state under test) and the
+     * day's count put back to what is left. A no-op when they have none.
+     */
+    private fun removeEntryByHand(author: UUID) {
+        val removed = jdbc.update("DELETE FROM entries WHERE author_member_id = ?::uuid", memberIdOf(author))
+        jdbc.update("UPDATE bond_days SET entry_count = entry_count - ? WHERE bond_id = ?::uuid", removed, bondId)
     }
 
     /** C2's and C3's day transitions, by hand: the status, and `closed_at` exactly where that status is a closed one. */

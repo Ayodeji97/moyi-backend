@@ -3277,6 +3277,8 @@
               "$ref" : "#/components/schemas/ErasedEntryResponse"
             }, {
               "$ref" : "#/components/schemas/LockedEntryResponse"
+            }, {
+              "type" : "null"
             } ]
           }
         }

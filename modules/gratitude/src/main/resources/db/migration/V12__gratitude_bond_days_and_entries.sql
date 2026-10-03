@@ -32,8 +32,9 @@
 --     of the zone in force when the day began, kept for display and audit —
 --     it is NOT what decides which instants belong to the day.
 --   * `bond_days.starts_at`/`ends_at` are new (spec §3.1), and they are that
---     authority: the UTC span the bond's anchor timeline gave this day when
---     the row was opened. A zone id alone cannot express a day an anchor
+--     authority: the UTC span the bond's anchor timeline gives this day —
+--     `starts_at` fixed when the row was opened, `ends_at` extendable while
+--     the day is unsettled (see the column comment). A zone id alone cannot express a day an anchor
 --     change merged (~48h westward, plan R3) or skipped (empty, eastward).
 --   * `entries.text`'s bound is an octet cap, not doc 07's `char_length(text)
 --     <= 4000`. FR-041 names that number as its own first draft's error:
@@ -59,8 +60,13 @@ CREATE TABLE bond_days (
     -- the day's span: `starts_at`/`ends_at` are. See the header and BondDay's
     -- own KDoc: BR-6/ADR-0030 forbid an anchor move from recomputing this row.
     anchor_timezone text        NOT NULL,
-    -- The UTC span this day occupies, `[starts_at, ends_at)`, resolved
-    -- against the bond's effective-zone timeline when the row was opened.
+    -- The UTC span this day occupies, `[starts_at, ends_at)`, taken from the
+    -- bond's effective-zone timeline. `starts_at` is fixed when the row is
+    -- opened and never moves. `ends_at` is what the timeline said then, and
+    -- may be EXTENDED afterwards — only later, only while the day is
+    -- unsettled — when a westward anchor change merges the day into its
+    -- successor's start (ADR-0031, ruling P10; `BondDay.extendedTo`). It is
+    -- never shortened, and a settled day's span never changes.
     -- A zone id alone cannot express a day that a mid-day anchor change
     -- clipped, nor a calendar label an eastward change skipped entirely —
     -- the latter is a day whose span is EMPTY (starts_at = ends_at), which

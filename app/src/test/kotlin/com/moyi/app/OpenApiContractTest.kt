@@ -305,7 +305,7 @@ class OpenApiContractTest(
         val partnerEntry = today.properties["partnerEntry"]!!
         val branches = listOf("EntryResponse", "LockedEntryResponse", "ErasedEntryResponse")
 
-        partnerEntry.oneOf.map { it.`$ref` } shouldContainExactlyInAnyOrder branches.map { "#/components/schemas/$it" }
+        partnerEntry.oneOf.mapNotNull { it.`$ref` } shouldContainExactlyInAnyOrder branches.map { "#/components/schemas/$it" }
         partnerEntry.discriminator.shouldNotBeNull()
         partnerEntry.discriminator.propertyName shouldBe "status"
         partnerEntry.discriminator.mapping shouldBe
@@ -335,6 +335,26 @@ class OpenApiContractTest(
             statuses.forEach { partnerEntry.discriminator.mapping[it] shouldBe "#/components/schemas/$branch" }
         }
         statusesByBranch.values.flatten().toSet() shouldBe partnerEntry.discriminator.mapping.keys
+    }
+
+    @Test
+    fun `partnerEntry may be null, as myEntry may - the day before the partner has written`() {
+        // `GET /today` answers `"partnerEntry": null` until the partner
+        // writes. springdoc says so for a nullable `$ref` (myEntry) and not
+        // for a nullable sealed interface's `oneOf`; OpenApiConfiguration adds
+        // the branch. Without it the contract claims the field is always one
+        // of the three objects, and a strict client rejects the ordinary
+        // first response of every day.
+        val today = api.components.schemas["TodayResponse"]!!
+
+        listOf("myEntry", "partnerEntry").forEach { name ->
+            withClue(name) {
+                val branches = today.properties[name]!!.oneOf.shouldNotBeNull()
+                branches.filter { it.`$ref` == null }.map { it.types } shouldBe listOf(setOf("null"))
+            }
+        }
+        // Exactly the three objects and the null: nothing else was admitted.
+        today.properties["partnerEntry"]!!.oneOf.size shouldBe 4
     }
 
     @Test

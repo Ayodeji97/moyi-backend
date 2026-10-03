@@ -13,8 +13,15 @@ import java.util.UUID
  * cannot enforce that itself (`gratitude.domain` imports nothing from `bond`,
  * so the factory has to live a layer out), so `ArchitectureTest` does: a
  * second construction site in this module's main code fails the build.
+ *
+ * **A plain class, not a `data class`, and that is part of the same rule.** A
+ * data class's generated `copy` is a second constructor the architecture
+ * test cannot see: `membership.asReader().copy(bondId = …)` would mint a
+ * Reader for a bond nobody checked, from inside the one file allowed to build
+ * one or from any holder of one. Nothing compares or destructures a Reader,
+ * so it needs none of what `data` would add.
  */
-internal data class Reader(
+internal class Reader(
     val memberId: UUID,
     val bondId: UUID,
 )

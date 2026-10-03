@@ -106,7 +106,11 @@ class ArchitectureTest {
          */
         private const val BOND_ACCESS_GUARD = "BondAccessGuard"
 
-        /** `Reader(` as a call, not its own `data class Reader(` declaration. */
+        /**
+         * `Reader(` as a call, not its own `class Reader(` declaration. The
+         * type is a plain class, not a `data class`, so there is no generated
+         * `copy` for this text match to miss (`EntryReadabilityTest` pins that).
+         */
         private val READER_CONSTRUCTION = Regex("""(?<!class )\bReader\(""")
 
         /** The file `BondMembership.asReader()` lives in (`gratitude.service`). */

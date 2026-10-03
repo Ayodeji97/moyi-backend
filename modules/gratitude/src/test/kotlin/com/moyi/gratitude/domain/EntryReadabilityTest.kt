@@ -105,7 +105,20 @@ internal class EntryReadabilityTest {
         revealed.canBeReadBy(stranger) shouldBe Readability.NOT_A_MEMBER
         revealed.copy(deletedAt = now).canBeReadBy(stranger) shouldBe Readability.NOT_A_MEMBER
         // Even with the author's own member id, if the membership is of another bond.
-        revealed.canBeReadBy(author.copy(bondId = stranger.bondId)) shouldBe Readability.NOT_A_MEMBER
+        revealed.canBeReadBy(Reader(memberId = author.memberId, bondId = stranger.bondId)) shouldBe Readability.NOT_A_MEMBER
+    }
+
+    @Test
+    fun `a Reader cannot be copied into another bond's`() {
+        // `ArchitectureTest` pins the one place a Reader is constructed. A
+        // `data class` would hand every holder a second constructor the rule
+        // cannot see: `asReader().copy(bondId = …)`. A plain class has none.
+        val generated =
+            Reader::class.java.declaredMethods
+                .map { it.name }
+                .filter { it.startsWith("copy") || it.startsWith("component") }
+
+        generated shouldBe emptyList()
     }
 
     @Test

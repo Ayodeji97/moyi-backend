@@ -210,6 +210,13 @@ internal data class BondDay(
      * span until C3's close job reconciles it from the timeline. That is the
      * accepted limit: until then the timeline, not this column, says when
      * such a day ends.
+     *
+     * **An obligation on every writer that opens a row without going through
+     * `SubmitEntry`** — C3's close job above all (ADR-0031, Owed): take the
+     * row's window from the bond's timeline, never from a zone's natural
+     * midnight. A row whose `starts_at` disagrees with the timeline fails the
+     * second `require` below on every later `POST /entries` for that day,
+     * which is a `500` for both members until the row is repaired.
      */
     fun extendedTo(window: DayWindow): BondDay {
         require(window.date == date) { "a bond-day is only extended by its own label's window: $date, not ${window.date}" }
