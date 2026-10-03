@@ -107,18 +107,26 @@ jobs:
           # and conclude nothing was posted — a check silently capped at 30 is
           # the same kind of bug it exists to catch. `--slurp` cannot be
           # combined with `--jq`, hence awk.
-          # Only what the review itself posts. It delivers through GITHUB_TOKEN,
-          # so its comments are authored by github-actions[bot] — and counting
-          # *everything* would let an unrelated bot rescue a silent no-op.
-          # That is not hypothetical: CodeQL posts a review and an inline
-          # comment when it finds an alert, which on a real PR would have
-          # pushed the total up while the review posted nothing at all.
+          # Only what the review itself posts — counting *everything* would let
+          # an unrelated bot rescue a silent no-op. That is not hypothetical:
+          # CodeQL posts a review and an inline comment when it finds an alert,
+          # and the Codex connector reviews every PR, either of which would
+          # push the total up while this review posted nothing at all.
           #
-          # If the review ever posts under a different identity this filter
-          # goes stale and the guard fails on a good review. That is the
-          # failure direction worth having, and the error message says where
-          # to look.
-          count() { gh api --paginate "$1?per_page=100" --jq '[.[] | select(.user.login == "github-actions[bot]")] | length' | awk '{s+=$1} END {print s+0}'; }
+          # **The review posts as `claude[bot]`.** claude-code-action exchanges
+          # its OIDC token for the Claude GitHub App's ("Using GITHUB_TOKEN from
+          # OIDC" in its log), so what it writes is authored by that app, not by
+          # github-actions[bot]. This filter said github-actions[bot] alone until
+          # 2026-10-03, and so failed the first review that ever posted: PR #46,
+          # run 37139387478, a real comment and "0 before, 0 after". The filter
+          # had been written before any review had posted, from what the token
+          # was assumed to be. github-actions[bot] is kept because that is what
+          # the action falls back to when the app is not installed.
+          #
+          # If the review ever posts under yet another identity this filter goes
+          # stale again and the guard fails on a good review. That is the failure
+          # direction worth having, and the error message says where to look.
+          count() { gh api --paginate "$1?per_page=100" --jq '[.[] | select(.user.login == "claude[bot]" or .user.login == "github-actions[bot]")] | length' | awk '{s+=$1} END {print s+0}'; }
           issue=$(count "repos/$REPO/issues/$PR/comments")
           inline=$(count "repos/$REPO/pulls/$PR/comments")
           reviews=$(count "repos/$REPO/pulls/$PR/reviews")
@@ -271,25 +279,44 @@ jobs:
           BEFORE: ${{ steps.before.outputs.count }}
         run: |
           set -euo pipefail
-          # Only what the review itself posts. It delivers through GITHUB_TOKEN,
-          # so its comments are authored by github-actions[bot] — and counting
-          # *everything* would let an unrelated bot rescue a silent no-op.
-          # That is not hypothetical: CodeQL posts a review and an inline
-          # comment when it finds an alert, which on a real PR would have
-          # pushed the total up while the review posted nothing at all.
+          # Only what the review itself posts — counting *everything* would let
+          # an unrelated bot rescue a silent no-op. That is not hypothetical:
+          # CodeQL posts a review and an inline comment when it finds an alert,
+          # and the Codex connector reviews every PR, either of which would
+          # push the total up while this review posted nothing at all.
           #
-          # If the review ever posts under a different identity this filter
-          # goes stale and the guard fails on a good review. That is the
-          # failure direction worth having, and the error message says where
-          # to look.
-          count() { gh api --paginate "$1?per_page=100" --jq '[.[] | select(.user.login == "github-actions[bot]")] | length' | awk '{s+=$1} END {print s+0}'; }
+          # **The review posts as `claude[bot]`.** claude-code-action exchanges
+          # its OIDC token for the Claude GitHub App's ("Using GITHUB_TOKEN from
+          # OIDC" in its log), so what it writes is authored by that app, not by
+          # github-actions[bot]. This filter said github-actions[bot] alone until
+          # 2026-10-03, and so failed the first review that ever posted: PR #46,
+          # run 37139387478, a real comment and "0 before, 0 after". The filter
+          # had been written before any review had posted, from what the token
+          # was assumed to be. github-actions[bot] is kept because that is what
+          # the action falls back to when the app is not installed.
+          #
+          # If the review ever posts under yet another identity this filter goes
+          # stale again and the guard fails on a good review. That is the failure
+          # direction worth having, and the error message says where to look.
+          count() { gh api --paginate "$1?per_page=100" --jq '[.[] | select(.user.login == "claude[bot]" or .user.login == "github-actions[bot]")] | length' | awk '{s+=$1} END {print s+0}'; }
           issue=$(count "repos/$REPO/issues/$PR/comments")
           inline=$(count "repos/$REPO/pulls/$PR/comments")
           reviews=$(count "repos/$REPO/pulls/$PR/reviews")
           after=$(( issue + inline + reviews ))
 
+          # A PR the review has already commented on is skipped by the plugin
+          # on purpose (its step 1: "Claude has already commented on this PR"),
+          # so a second trigger — a draft/ready toggle, a reopen — posts nothing
+          # and is not broken. Said out loud rather than failed: this run did
+          # NOT review the PR's current state, and the summary must not read as
+          # though it had.
+          if [ "$after" -le "$BEFORE" ] && [ "$BEFORE" -gt 0 ]; then
+            echo "::notice::This PR already carries a review from an earlier run ($BEFORE item(s)), so the plugin skipped it and posted nothing new. The PR's current state has NOT been re-reviewed. To force a fresh review, delete the earlier review comment and trigger this workflow again."
+            echo "Skipped: already reviewed ($BEFORE item(s) from an earlier run). Not re-reviewed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$after" -le "$BEFORE" ]; then
-            echo "::error::The review ran but posted nothing as github-actions[bot] ($BEFORE before, $after after). It has spent the whole review and delivered none of it, and without this step the check would be green. Two things to check, in order. First the run log — show_full_output is on — for permission denials: the allowlist in claude_args is the usual cause, and it must cover the tools the review's SUBAGENTS use, not only the top-level session's. Second, whether the review now posts under a different identity, in which case the filter in this job is what is stale, not the review."
+            echo "::error::The review ran but posted nothing as claude[bot] or github-actions[bot] ($BEFORE before, $after after). It has spent the whole review and delivered none of it, and without this step the check would be green. Two things to check, in order. First the run log — show_full_output is on — for permission denials: the allowlist in claude_args is the usual cause, and it must cover the tools the review's SUBAGENTS use, not only the top-level session's. Second, whether the review now posts under a different identity, in which case the filter in this job is what is stale, not the review."
             exit 1
           fi
           echo "The review posted $(( after - BEFORE )) item(s)." >> "$GITHUB_STEP_SUMMARY"
