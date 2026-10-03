@@ -1720,8 +1720,9 @@ Reality: **most of what was wrong was in what I told the implementers, and in te
          before it, across eight tasks, had done those two things in that order.
          `openOrGet` is `ON CONFLICT DO NOTHING`, so the row kept the `ends_at` it was
          opened with while the timeline ran the day on for another 25 hours: an entry
-         filed on a row whose span did not contain it, and a hole in the stored calendar. The timeline was right, the row was right when written, and the
-         two were never compared in that order. In the same task, my amendment's eastward
+         filed on a row whose span did not contain it, and a hole in the stored calendar.
+         The timeline was right, the row was right when written, and the two were never
+         compared in that order. In the same task, my amendment's eastward
          example was Lagos to Kiritimati, which skips no label at all: the handoff is 13:00
          on the next day. The implementer computed it, said so, and used Pago Pago.
 Wrong about: where the risk in a rework sits. I treated the briefs as the fixed part and
