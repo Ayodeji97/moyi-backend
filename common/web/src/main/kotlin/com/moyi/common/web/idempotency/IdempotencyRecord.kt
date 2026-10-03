@@ -165,18 +165,21 @@ class IdempotencyKeyStore(
      * on, rather than a request thread parked for the duration of somebody
      * else's transaction.
      *
-     * Two-integer form, in namespace `2`, so it cannot collide with
-     * `identity`'s session lock (`pg_advisory_xact_lock(1, hashtext(user_id))`,
-     * ADR-0021 §1a). Held until the *calling transaction* ends, so it is
-     * meaningful only inside one; outside a transaction it is released
-     * at once.
+     * Two-integer form, in namespace `3`. The namespaces taken so far, so
+     * the next lock picks a free one: `1` is `identity`'s per-user session
+     * lock (`IdentityRepositories`, ADR-0021 §1a), `2` is `bond`'s per-user
+     * lock (`BondRepositories`), `3` is this. Sharing one would only ever
+     * cost a spurious wait or `409`, never correctness, but there is no
+     * reason to pay it. Held until the *calling transaction* ends, so it is
+     * meaningful only inside one; outside a transaction it is released at
+     * once.
      */
     fun lockFor(
         userId: UUID,
         key: String,
     ): Boolean =
         jdbc.queryForObject(
-            "SELECT pg_try_advisory_xact_lock(2, hashtext(?))",
+            "SELECT pg_try_advisory_xact_lock(3, hashtext(?))",
             Boolean::class.java,
             "$userId:$key",
         ) == true

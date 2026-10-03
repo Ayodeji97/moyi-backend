@@ -24,7 +24,9 @@ import java.util.UUID
  * its own KDoc for why that has to be a different type rather than this one
  * with fields nulled out.
  *
- * **[text] is `null` exactly when [status] is `DELETED`** — a tombstone: the
+ * **[text] is `null` exactly when [status] is `DELETED`** — enforced in
+ * [of], which drops the text of a `DELETED` entry even if the row still has
+ * some — a tombstone: the
  * entry was content-erased (BR-10/BR-10a) and the row kept. Nothing in this
  * slice erases one, but a response must already be able to say so: an
  * `Idempotency-Key` replay of `POST /entries` re-reads the entry as it is
@@ -68,7 +70,10 @@ internal data class EntryResponse(
                 bondId = entry.bondId,
                 date = date,
                 authorMemberId = entry.authorMemberId,
-                text = entry.text?.value,
+                // A tombstone carries no words, whatever the row still holds: an
+                // erasure that flips the status before it nulls the text must
+                // not be readable in between.
+                text = entry.text?.value?.takeUnless { entry.status == EntryStatus.DELETED },
                 status = entry.status,
                 createdAt = entry.createdAt,
                 intendedAt = entry.intendedAt,

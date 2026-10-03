@@ -27,6 +27,10 @@ enum class ResultKind { ENTRY, }
  * so two spellings of one path only ever come from two different requests,
  * and a mismatch fails in the safe direction — `422`, never somebody else's
  * replay.
+ *
+ * **The query string is not bound**: `requestURI` excludes it, and so does
+ * the fingerprint. No idempotent endpoint takes one today; the first that
+ * does must decide whether it is part of the target, and bind it if so.
  */
 class IdempotentRequest internal constructor(
     val userId: UUID,
@@ -67,10 +71,13 @@ class IdempotentResult<out T : Any>(
 /**
  * Ruling P5's shape. On a fresh run [value] is the block's own; on a replay
  * it is `null` and [wasReplayed] is `true`, and **the caller re-reads the
- * resource by [resultId] through its ordinary authorisation path** — that is
- * what makes erasure and lost access beat a replay (spec §5.4): an entry
- * withdrawn since renders as its tombstone, and a caller who lost access gets
- * the refusal a fresh request would get now, not the cached `201`.
+ * resource by [resultId] through its ordinary *read* authorisation** — a
+ * replay is authorised as a read of the result, not as a second write. That
+ * is what makes erasure and lost access beat a replay (spec §5.4): an entry
+ * withdrawn since renders as its tombstone, and a caller who may no longer
+ * read the resource gets the read's own refusal, not the cached `201`. A
+ * caller who may still read it gets it back even where a new write would
+ * now be refused.
  *
  * [etag] and [location] are V11's replay allowlist, carried beside P5's five
  * fields so a replay can reproduce the headers the first response carried; a

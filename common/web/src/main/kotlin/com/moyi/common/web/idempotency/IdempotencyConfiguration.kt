@@ -18,27 +18,21 @@ import java.time.Clock
  * startup naming that type, rather than quietly fingerprinting with a plain
  * hash.
  *
- * Fix round 1, I7: three contexts (`IdempotencyTestApplication`, `app.MoyiApplication`,
- * `gratitude.infra.GratitudeTestApplication`) had each hand-copied this exact
- * wiring, and nothing failed loudly when one of them drifted — [IdempotencyInterceptor.preHandle]'s
- * own `check(request is ReplayableHttpServletRequest)` catches a missing
- * *filter* loudly, but a missing *interceptor* is silent: `@Idempotent`
- * simply does nothing, which is how this was found — a replay test quietly
- * running the handler twice rather than replaying the first response. A
- * fourth context copying the same four methods by hand was only ever going
- * to repeat that discovery.
+ * **Why one place.** Three contexts (`IdempotencyTestApplication`,
+ * `app.MoyiApplication`, `gratitude.infra.GratitudeTestApplication`) once
+ * hand-copied this wiring, and nothing caught one of them drifting. With
+ * the wiring here, they cannot drift from each other.
  *
- * **Correction (fix round 2, N4): forgetting `@Import(IdempotencyConfiguration::class)`
- * is still a silent no-op, not a compile-time failure.** Nothing requires
- * these beans to exist — a context that omits the import simply has no
- * `IdempotencyInterceptor` registered, and `@Idempotent` on a handler in it
- * does exactly what it did before this class existed: nothing, quietly. An
- * earlier version of this KDoc claimed otherwise; it was wrong. What this
- * class actually buys is that the wiring exists in exactly one place, so
- * three copies cannot drift from each other into three different bugs —
- * not that a missing import is caught. Catching that would need something
- * else (a test asserting the bean exists in every context that declares an
- * `@Idempotent` handler, say), which nothing here does yet.
+ * **Forgetting `@Import(IdempotencyConfiguration::class)` is no longer
+ * silent.** It used to be: with no interceptor registered, `@Idempotent`
+ * did nothing and the handler ran unprotected (found by a replay test that
+ * quietly ran the handler twice). Since plan task 7 an idempotent handler
+ * needs two things from here before it can run at all — an
+ * [IdempotentExecution] to inject, so its context fails to start without
+ * this import, and the [IdempotentRequest] the interceptor prepares, which
+ * [IdempotencyInterceptor.requestOf] refuses to do without. What is still
+ * unguarded is a handler annotated `@Idempotent` that never calls
+ * [IdempotentExecution.once]: the annotation alone records nothing.
  *
  * Deliberately **not** `@Component`-scanned into every module that merely
  * depends on `common:web` — see [IdempotencyKeyStore]'s own KDoc: several

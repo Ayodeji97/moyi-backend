@@ -49,7 +49,7 @@ class IdempotentExecutionTest(
     fun clear() {
         // The pool first, bounded: a call still parked must not race the truncate.
         pool.shutdownNow()
-        pool.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        check(pool.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)) { "a worker thread outlived the test" }
         jdbc.execute("TRUNCATE TABLE idempotency_keys, probe_results")
     }
 
@@ -158,20 +158,6 @@ class IdempotentExecutionTest(
         replayed.resultId shouldBe created.resultId
         replayed.resultKind shouldBe ResultKind.ENTRY
         replayed.status shouldBe CREATED
-    }
-
-    @Test
-    fun `a replay after the result was erased still names it, and the caller's re-read sees the erasure`() {
-        // common:web cannot render a domain tombstone — gratitude's own
-        // replay test does that. What this layer owes is that a replay hands
-        // back identity only, so the re-read, not a stored copy, decides.
-        val created = once(request("erased-key")) { insertProbe("words") }
-        jdbc.update("UPDATE probe_results SET label = NULL WHERE id = ?", created.resultId)
-
-        val replayed = once(request("erased-key")) { error("must not re-run") }
-
-        replayed.value.shouldBeNull()
-        jdbc.queryForObject("SELECT label FROM probe_results WHERE id = ?", String::class.java, replayed.resultId).shouldBeNull()
     }
 
     @Test

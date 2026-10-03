@@ -90,14 +90,17 @@ internal data class Submission(
  *
  * **A replay re-reads; it never re-runs and never repeats a stored copy.**
  * When the key has already produced an entry, `once` returns its id and
- * [replay] reads it back through the same guard a fresh request meets:
- * [BondAccess.membershipOf] (`404` for a non-member), then `hasLeft`/`isOpen`
- * (`409 BOND_ARCHIVED`) — so a caller who has lost access gets today's
- * refusal, not the cached `201` — and then the entry *as it is now*: one
- * erased since comes back as its tombstone, with no text, because there is
- * no second copy of the words to answer from (V11 stores identity only).
- * The unlocked `membershipOf`, not `lockMembershipOf`: a replay is a read,
- * and a read never queues behind the bond lock (as `GetToday`).
+ * [replay] reads it back. **A replay is authorised as a read of the result**,
+ * by exactly the rule `GetToday` applies: [BondAccess.membershipOf] must
+ * succeed (`404` for a caller who holds no membership), and neither
+ * `hasLeft` nor `isOpen` refuses — `states.md` §9 keeps an ended bond a
+ * readable archive for both former members, so a client whose `201` was
+ * lost just before the bond ended still learns what its request produced.
+ * Those two are *write* guards; the write already happened. Then the entry
+ * *as it is now*: one erased since comes back as its tombstone, with no
+ * text, because there is no second copy of the words to answer from (V11
+ * stores identity only). The unlocked `membershipOf`, not
+ * `lockMembershipOf`: a read never queues behind the bond lock.
  *
  * **Then bond, then bond-day, then entry, held to commit (spec §2.1).** The
  * first thing a fresh submission does inside the transaction — before
@@ -236,8 +239,9 @@ internal class SubmitEntry(
     }
 
     /**
-     * The entry a key already produced, **read as it stands now** through the
-     * guard a fresh request meets — see the class KDoc. The mismatches below
+     * The entry a key already produced, **read as it stands now** and
+     * authorised as a read — see the class KDoc. No `hasLeft`/`isOpen` check:
+     * those refuse writes, and this writes nothing. The mismatches below
      * cannot happen for a key this class wrote (the path it was stored under
      * names [bondId], and its caller wrote the entry), so each answers as "no
      * such thing" rather than trusting a row that does not fit.
@@ -248,7 +252,6 @@ internal class SubmitEntry(
         entryId: EntryId,
     ): EntryView {
         val membership = access.membershipOf(userId, bondId)
-        if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
         val entry = entries.find(entryId)?.takeIf { it.bondId == bondId && it.authorMemberId == membership.memberId }
         val day = entry?.let { days.find(it.bondDayId) }
         if (entry == null || day == null) throw NotFoundException("That entry was not found.")

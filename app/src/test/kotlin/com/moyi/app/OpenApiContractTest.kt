@@ -317,6 +317,20 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `an entry's text is required though nullable, so a tombstone is not an absent field`() {
+        // `"text": null` is how an erased entry is rendered (an Idempotency-Key
+        // replay re-reads it). Optional as well as nullable, a generated
+        // client could not tell that from a field the server never sent.
+        val fields =
+            api.components.schemas["EntryResponse"]!!
+                .allOf
+                .last()
+
+        fields.required shouldContainAll
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt")
+    }
+
+    @Test
     fun `a response carrying a versioned resource declares its ETag`() {
         // The header is set on the ResponseEntity, so springdoc cannot see it
         // and an OpenApiCustomizer adds it by rule. Without it a generated

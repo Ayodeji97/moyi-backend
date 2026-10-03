@@ -4,6 +4,7 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
+import com.moyi.common.web.idempotency.RequestFingerprint
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
@@ -64,6 +65,7 @@ internal class SubmitEntryIdempotencyTest(
     @Autowired directory: UserDirectory,
     @Autowired private val dataSource: DataSource,
     @Autowired private val clock: MutableClock,
+    @Autowired private val fingerprint: RequestFingerprint,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -89,7 +91,7 @@ internal class SubmitEntryIdempotencyTest(
     fun clear() {
         // The pool first, bounded: a submission still queued must not race the truncate.
         pool.shutdownNow()
-        pool.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        check(pool.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)) { "a worker thread outlived the test" }
         jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
@@ -210,7 +212,7 @@ internal class SubmitEntryIdempotencyTest(
         val key = UUID.randomUUID().toString()
         val first = submit(ada, """{"text":"words since withdrawn xyzzy"}""", key)
         first.status shouldBe 201
-        jdbc.update("UPDATE entries SET text = NULL, status = 'DELETED', deleted_at = now()")
+        jdbc.update("UPDATE entries SET text = NULL, status = 'DELETED', deleted_at = ?", java.sql.Timestamp.from(NOW))
 
         val replay = submit(ada, """{"text":"words since withdrawn xyzzy"}""", key)
 
@@ -223,27 +225,52 @@ internal class SubmitEntryIdempotencyTest(
     }
 
     @Test
-    fun `a replay by a caller who has since left the bond gets today's refusal, not the cached 201`() {
-        // Skip the membership guard on the replay path and this is a 201
-        // carrying the entry of a bond the caller walked out of.
+    fun `a replay by a caller who has since left the bond is a read of their entry, so it is still answered`() {
+        // A replay is authorised as a read (states.md §9: the archive stays
+        // readable), not as a second write. Put the write guard —
+        // hasLeft / !isOpen → 409 BOND_ARCHIVED — on the replay path and a
+        // client whose 201 was lost just before leaving never learns what
+        // its request produced.
         val key = UUID.randomUUID().toString()
-        submit(ada, """{"text":"before I left"}""", key).status shouldBe 201
+        val first = submit(ada, """{"text":"before I left"}""", key)
+        first.status shouldBe 201
         leave(ada).status shouldBe 204
-        val fresh = submit(ada, """{"text":"a new request now"}""")
 
         val replay = submit(ada, """{"text":"before I left"}""", key)
 
-        replay.status shouldBe fresh.status
-        replay.status shouldBe 409
-        replay.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
-        replay.contentAsString shouldNotContain "before I left"
-        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER).shouldBeNull()
+        replay.status shouldBe 201
+        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
+        replay.contentAsString shouldContain "\"id\":\"${idOf(first)}\""
+        replay.contentAsString shouldContain "\"text\":\"before I left\""
+        count("SELECT count(*) FROM entries") shouldBe 1
+    }
+
+    @Test
+    fun `a replay by the member who stayed, after the bond was archived under them, is still answered`() {
+        // Bea did nothing: Ada left and the bond ended. Bea's retry is a read
+        // of what she already wrote. A new write from her is refused now —
+        // asserted below, so the two are seen to differ.
+        val key = UUID.randomUUID().toString()
+        val first = submit(bea, """{"text":"written while we were two"}""", key)
+        first.status shouldBe 201
+        leave(ada).status shouldBe 204
+        jdbc.queryForObject("SELECT status FROM bonds WHERE id = ?::uuid", String::class.java, bondId) shouldBe "ARCHIVED"
+
+        val replay = submit(bea, """{"text":"written while we were two"}""", key)
+
+        replay.status shouldBe 201
+        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
+        replay.contentAsString shouldContain "\"id\":\"${idOf(first)}\""
+        replay.contentAsString shouldContain "\"text\":\"written while we were two\""
+        count("SELECT count(*) FROM entries") shouldBe 1
+        submit(bea, """{"text":"a new write now"}""").status shouldBe 409
     }
 
     @Test
     fun `a replay by a caller who is no longer a member at all gets the same 404 as a stranger`() {
-        // Membership removed at the row level: no C1 path deletes a member
-        // row, but the guard must not depend on that staying true.
+        // The "can no longer read" proof. Membership removed at the row
+        // level: no C1 path deletes a member row, but the guard must not
+        // depend on that staying true.
         val key = UUID.randomUUID().toString()
         submit(ada, """{"text":"while I was here"}""", key).status shouldBe 201
         jdbc.update("DELETE FROM bond_members WHERE user_id = ?", ada)
@@ -251,7 +278,26 @@ internal class SubmitEntryIdempotencyTest(
         val replay = submit(ada, """{"text":"while I was here"}""", key)
 
         replay.status shouldBe 404
+        replay.contentAsString shouldContain "\"code\":\"NOT_FOUND\""
         replay.contentAsString shouldNotContain "while I was here"
+        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER).shouldBeNull()
+    }
+
+    @Test
+    fun `a replay of an entry marked deleted carries no words even while the row still holds them`() {
+        // An erasure that flips the status before it nulls the text (a
+        // two-step withdrawal, say) must not be readable in between. Render
+        // text from the row whatever the status and the words come back.
+        val key = UUID.randomUUID().toString()
+        submit(ada, """{"text":"not yet scrubbed plugh"}""", key).status shouldBe 201
+        jdbc.update("UPDATE entries SET status = 'DELETED', deleted_at = ?", java.sql.Timestamp.from(NOW))
+
+        val replay = submit(ada, """{"text":"not yet scrubbed plugh"}""", key)
+
+        replay.status shouldBe 201
+        replay.contentAsString shouldNotContain "plugh"
+        replay.contentAsString shouldContain "\"status\":\"DELETED\""
+        replay.contentAsString shouldContain "\"text\":null"
     }
 
     // ---- the fingerprint is keyed ---------------------------------------
@@ -277,6 +323,9 @@ internal class SubmitEntryIdempotencyTest(
             )
         inputs.flatMap(::plainSha256Encodings).forEach { stored shouldNotBe it }
         stored shouldNotContain "thank"
+        // And positively: it is exactly what the wired (keyed) port gives for
+        // this method, path and body — so the three are what is bound.
+        stored shouldBe fingerprint.of("POST", path, body.toByteArray())
     }
 
     // ---- the lock holder ------------------------------------------------

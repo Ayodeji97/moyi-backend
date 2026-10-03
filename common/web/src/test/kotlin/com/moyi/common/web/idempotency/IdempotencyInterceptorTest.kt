@@ -64,7 +64,7 @@ class IdempotencyInterceptorTest(
     fun reset() {
         // The pool first, bounded: a request still parked must not race the truncate.
         pool.shutdownNow()
-        pool.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        check(pool.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)) { "a worker thread outlived the test" }
         controller.reset()
         jdbc.execute("TRUNCATE TABLE idempotency_keys, probe_results")
     }

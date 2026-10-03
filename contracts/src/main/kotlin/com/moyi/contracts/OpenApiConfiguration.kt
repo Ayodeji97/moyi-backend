@@ -300,8 +300,10 @@ class OpenApiConfiguration {
                 .description(
                     "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the " +
                         "same request returns the first attempt's status and the same resource, re-read and rendered " +
-                        "from its current state — never a stored copy: a resource erased since is returned as its " +
-                        "tombstone, and a caller who has since lost access gets the refusal a new request would. " +
+                        "from its current state — never a stored copy. A replay is authorised as a read of the " +
+                        "result: a caller who may still read it gets it back even if a new write would now be " +
+                        "refused, a caller who may no longer read it gets the read's refusal, and a resource " +
+                        "erased since is returned as its tombstone. " +
                         "Only a success is recorded; a request that was refused may be corrected and retried under " +
                         "the same key. The same key with a different method, path or body is 422; the same key " +
                         "while the first attempt is still in flight is 409.",
@@ -589,6 +591,16 @@ private fun requireDiscriminatorProperty(api: OpenAPI) {
                 ?.lastOrNull() ?: return@forEach
         if (DISCRIMINATOR_PROPERTY !in fields.required.orEmpty()) {
             fields.addRequiredItem(DISCRIMINATOR_PROPERTY)
+        }
+        // Every field of EntryResponse is always present. `text` above all:
+        // it is nullable, and only `required` lets a client tell a tombstone
+        // (`"text": null`) from a field that was never sent.
+        if (name == ENTRY_RESPONSE) {
+            fields.properties
+                .orEmpty()
+                .keys
+                .filter { it !in fields.required.orEmpty() }
+                .forEach(fields::addRequiredItem)
         }
     }
 }
