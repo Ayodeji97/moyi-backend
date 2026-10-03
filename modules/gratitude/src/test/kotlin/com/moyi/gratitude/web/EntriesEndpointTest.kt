@@ -164,8 +164,8 @@ internal class EntriesEndpointTest(
      */
     @Test
     fun `an offline draft's intendedAt files the entry against that earlier day`() {
-        // 20 hours before NOW: inside the 36h offline window, not after
-        // NOW plus the 5-minute clock-skew allowance — trusted. NOW is
+        // 20 hours before NOW: inside the 36h offline window and not ahead
+        // of NOW (ruling P11) — trusted. NOW is
         // 2026-09-15T10:00:00Z (2026-09-15 11:00 Lagos); 20 hours earlier is
         // 2026-09-14T14:00:00Z (2026-09-14 15:00 Lagos) — a day *before* the
         // one `submittedAt` alone would have filed this under.
@@ -210,8 +210,8 @@ internal class EntriesEndpointTest(
      * never a raw client claim — three places said it already did
      * (`Entry.submit`'s own KDoc, V12's column comment, this method's own
      * behaviour before the fix) and only the third was false. `2099-01-01`
-     * is far enough ahead of `NOW` (2026-09-15) to fail the five-minute
-     * clock-skew check by a wide margin, so [DayAssignment.resolve] falls
+     * is ahead of `NOW` (2026-09-15), and a claim ahead of the server's
+     * clock is never the candidate (ruling P11), so [DayAssignment.resolve] falls
      * back to `submittedAt` for *both* the date and the resolved instant —
      * before this fix, the raw claim was stored and echoed back regardless.
      */

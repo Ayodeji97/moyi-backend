@@ -141,7 +141,7 @@ internal data class Entry(
          *
          * [intendedAt] is [DayAssignment.Resolution.resolvedAt], already
          * resolved by the caller before this is reached — [submit] does not
-         * repeat BR-3/BR-3a's clock-skew or offline-window checks, it only
+         * repeat BR-3/BR-3a's ahead-of-now or offline-window checks, it only
          * records the instant [DayAssignment.resolve] decided the day should
          * be filed against. **This is not the same value as the client's raw
          * `intendedAt` claim** (whole-branch review, F1): `SubmitEntry` must

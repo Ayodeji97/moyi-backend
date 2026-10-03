@@ -569,6 +569,64 @@ internal class TimezoneMatrixTest(
         ) shouldBe "SOLO"
     }
 
+    // ---- 6e. A fast phone at 23:57, then the crossing (ruling P11) --------
+
+    /**
+     * **No row is ever opened for a day that has not begun** (ruling P11) —
+     * shown where it used to break: the five-minute skew tolerance, a
+     * westward handoff, and P10's extension, each right on its own.
+     *
+     * Kiritimati's 16th is [09-15T10:00Z, 09-16T10:00Z). At 09-16T09:57Z it
+     * is 23:57 on the 16th; Ada's phone runs four minutes fast and sends
+     * `intendedAt` 09-16T10:01Z — 00:01 on the 17th. Taken at its word, that
+     * claim opens the **17th**'s row three minutes before the 17th begins,
+     * starting 09-16T10:00Z.
+     *
+     * At 09-16T09:58Z the westward change of 6b is confirmed. The bond is on
+     * the 16th, so the 16th becomes the merged day and the 17th now starts at
+     * Pago Pago's midnight, **09-17T11:00Z** — 25 hours after the row that
+     * was opened for it says. From then on every `POST /entries` on the 17th
+     * finds that row, asks `BondDay.extendedTo` to bring it up to the
+     * timeline's window, and fails its `starts_at` check: a `500` for both
+     * members, all day.
+     *
+     * Under P11 the claim is accepted (nothing is refused, `201`) but resolved
+     * at the submission instant: the entry is on the 16th, where the server
+     * says it was written, and the 17th's row is first opened on the 17th.
+     */
+    @Test
+    fun `a claim four minutes ahead across midnight is filed today, and a westward change cannot strand tomorrow's row`() {
+        pairedBond("Pacific/Kiritimati", createdAt = "2026-09-10T00:00:00Z")
+
+        clock.set(Instant.parse("2026-09-16T09:57:00Z")) // 23:57 on the 16th, Kiritimati
+        val early = submit(ada, intendedAt = "2026-09-16T10:01:00Z") // 00:01 on the 17th, by the phone
+        early.contentAsString shouldContain "\"date\":\"2026-09-16\""
+        // Resolved at the submission instant: that, not the claim, is what is stored.
+        intendedAtOf(early) shouldBe "2026-09-16T09:57:00Z"
+        dayRows().map { it.date } shouldContainExactly listOf("2026-09-16")
+
+        clock.set(Instant.parse("2026-09-16T09:58:00Z"))
+        changeZone(proposer = ada, confirmer = bea, zone = "Pacific/Pago_Pago")
+
+        clock.set(Instant.parse("2026-09-16T20:00:00Z")) // still the merged 16th
+        submit(bea).contentAsString shouldContain "\"date\":\"2026-09-16\""
+        clock.set(Instant.parse("2026-09-17T12:00:00Z")) // 01:00 on Pago Pago's 17th
+        submit(ada).contentAsString shouldContain "\"date\":\"2026-09-17\""
+
+        val rows = dayRows()
+        rows.shouldContainExactly(
+            DayRow("2026-09-16", "Pacific/Kiritimati", "2026-09-15T10:00:00Z", HANDOFF_WEST, entries = 2),
+            DayRow("2026-09-17", "Pacific/Pago_Pago", HANDOFF_WEST, "2026-09-18T11:00:00Z", entries = 1),
+        )
+        // Every stored row starts where the timeline says its label starts.
+        val timeline = access.membershipOf(ada, UUID.fromString(bondId)).anchorTimeline
+        rows.forEach { row ->
+            val window = timeline.dayBoundsAt(Instant.parse(row.startsAt))
+            window.date shouldBe LocalDate.parse(row.date)
+            window.startsAt shouldBe Instant.parse(row.startsAt)
+        }
+    }
+
     // ---- the close, standing in for C3 ----------------------------------
 
     /**

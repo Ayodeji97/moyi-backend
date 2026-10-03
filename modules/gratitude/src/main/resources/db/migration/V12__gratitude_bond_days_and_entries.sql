@@ -130,7 +130,7 @@ CREATE TABLE entries (
     -- draft back-files (DayAssignment.resolve). Always the instant the day
     -- assignment actually accepted, never the raw client claim (F1,
     -- whole-branch review): when the caller's intendedAt fails BR-3a's
-    -- clock-skew/offline-window/closed-day checks, this column holds
+    -- ahead-of-now/offline-window/settled-day checks, this column holds
     -- submittedAt, the same as if none had been sent — an out-of-window
     -- claim is never persisted here.
     intended_at            timestamptz NOT NULL,

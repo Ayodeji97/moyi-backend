@@ -63,13 +63,43 @@ internal class DayAssignmentTest {
     fun `intendedAt more than five minutes ahead is ignored`() {
         val now = Instant.parse("2026-09-15T08:00:00Z")
 
-        DayAssignment.resolve(now, now.plusSeconds(299), fixed(lagos), never).usedIntendedAt shouldBe true
         DayAssignment.resolve(now, now.plusSeconds(301), fixed(lagos), never).usedIntendedAt shouldBe false
+        // Six minutes ahead across a midnight: Lagos's 14th ends at 14T23:00Z.
+        val sixAhead = Instant.parse("2026-09-14T22:57:00Z").let { DayAssignment.resolve(it, it.plusSeconds(360), fixed(lagos), never) }
+        sixAhead.date shouldBe LocalDate.of(2026, 9, 14)
+        sixAhead.resolvedAt shouldBe Instant.parse("2026-09-14T22:57:00Z")
+        sixAhead.usedIntendedAt shouldBe false
         // Two days ahead fell back rather than filing a date in the future:
         val farAhead = DayAssignment.resolve(now, now.plus(Duration.ofDays(2)), fixed(lagos), never)
         farAhead.date shouldBe LocalDate.of(2026, 9, 15)
         farAhead.resolvedAt shouldBe now
         farAhead.usedIntendedAt shouldBe false
+    }
+
+    /**
+     * Ruling P11. 23:57 in Lagos on the 14th (14T22:57Z); the phone's clock is
+     * four minutes fast and reads 00:01 on the 15th. The claim is inside the
+     * five-minute tolerance, so nothing about the request is refused — but
+     * the 15th has not begun, and a day that has not begun is never opened:
+     * the entry is filed where the server says it was written.
+     */
+    @Test
+    fun `a claim ahead of the server clock, inside the tolerance, resolves at the submission instant`() {
+        val now = Instant.parse("2026-09-14T22:57:00Z")
+        val phone = now.plusSeconds(240)
+        // The claim, taken at its word, would be the 15th.
+        fixed(lagos).dayAt(phone)!!.date shouldBe LocalDate.of(2026, 9, 15)
+
+        val resolution = DayAssignment.resolve(now, phone, fixed(lagos), never)
+
+        resolution.date shouldBe LocalDate.of(2026, 9, 14)
+        resolution.resolvedAt shouldBe now
+        resolution.usedIntendedAt shouldBe false
+        resolution.bounds shouldBe
+            DayWindow(LocalDate.of(2026, 9, 14), Instant.parse("2026-09-13T23:00:00Z"), Instant.parse("2026-09-14T23:00:00Z"))
+        // One nanosecond ahead is ahead; the submission instant itself is not.
+        DayAssignment.resolve(now, now.plusNanos(1), fixed(lagos), never).usedIntendedAt shouldBe false
+        DayAssignment.resolve(now, now, fixed(lagos), never).usedIntendedAt shouldBe true
     }
 
     @Test

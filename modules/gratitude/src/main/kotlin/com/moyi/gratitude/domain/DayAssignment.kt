@@ -28,10 +28,20 @@ import java.time.LocalDate
  * sending [intendedAt] alongside [submittedAt]. That claim is trusted only
  * within limits, each guarding a different way it could be wrong:
  *
- * - **Ahead of now by more than [CLOCK_SKEW] (five minutes)** is treated as
- *   a clock that cannot be trusted rather than a real future date — there is
- *   no such thing as tomorrow's gratitude, and the margin exists only to
- *   absorb ordinary clock drift between a client and this service.
+ * - **Ahead of now, by any amount** resolves at the submission instant
+ *   (ruling P11). There is no such thing as tomorrow's gratitude. A phone
+ *   whose clock runs a little fast — up to five minutes is ordinary drift,
+ *   and spec §6.1 tolerates it — is **not refused**: the request succeeds,
+ *   but the day, and the instant stored as intended, are the server's. A
+ *   claim further ahead than that is a clock that cannot be trusted, and gets
+ *   exactly the same answer, so this function no longer draws a line at five
+ *   minutes: either side of it the candidate is [submittedAt]. What the rule
+ *   protects is the invariant everything downstream leans on — **no
+ *   `bond_days` row is ever opened for a day that has not begun.** Before
+ *   P11 a claim of 00:01 sent at 23:57 opened tomorrow's row early; a
+ *   westward anchor change confirmed in those minutes then moved tomorrow's
+ *   start, and the stored row disagreed with the timeline for good
+ *   ([BondDay.extendedTo] refuses such a row, a `500` on every later write).
  * - **Older than [OFFLINE_WINDOW] (thirty-six hours)** is treated as too
  *   stale to back-file — chosen to comfortably cover a day spent offline
  *   without opening a window wide enough to rewrite last month's streak.
@@ -50,8 +60,8 @@ import java.time.LocalDate
  *   used-label run, the close job, the streak walk — can account for.
  *
  * Any one of those four sends the claim back to the [submittedAt] fallback;
- * none of them is an error the caller has to handle; a rejected `intendedAt`
- * degrades to "filed today" rather than refusing the write.
+ * none of them is an error the caller has to handle; an `intendedAt` that
+ * is not used degrades to "filed today" rather than refusing the write.
  *
  * **[isSettled] is a lambda, not a store, on purpose.** The rule above is
  * everything BR-3 and BR-3a say, and it has no dependency of its own on a
@@ -69,7 +79,7 @@ import java.time.LocalDate
  * as "BR-3/BR-3a's resolved day" — a claim that was false before this fix:
  * `SubmitEntry` persisted `draft.intendedAt ?: now` verbatim, so a client
  * could send `intendedAt: 2099-01-01` and have it stored and echoed back
- * even though [dateFor] rejected it for *date* purposes and fell back to
+ * even though [dateFor] did not use it for *date* purposes and fell back to
  * today. [Resolution.resolvedAt] is the instant the trust checks actually
  * accepted — [intendedAt] itself when every check in [dateFor] passed,
  * [submittedAt] otherwise — so a rejected claim can never reach the archive.
@@ -77,9 +87,7 @@ import java.time.LocalDate
  * back-fill and a live write are different facts to the caller (spec §6.1.3).
  */
 internal object DayAssignment {
-    private const val CLOCK_SKEW_MINUTES = 5L
     private const val OFFLINE_WINDOW_HOURS = 36L
-    private val CLOCK_SKEW: Duration = Duration.ofMinutes(CLOCK_SKEW_MINUTES)
     private val OFFLINE_WINDOW: Duration = Duration.ofHours(OFFLINE_WINDOW_HOURS)
 
     /**
@@ -110,7 +118,8 @@ internal object DayAssignment {
     ): Resolution {
         val accepted =
             intendedAt
-                ?.takeIf { !it.isAfter(submittedAt.plus(CLOCK_SKEW)) }
+                // P11: a claim ahead of the server's clock is never the candidate.
+                ?.takeIf { !it.isAfter(submittedAt) }
                 ?.takeIf { !it.isBefore(submittedAt.minus(OFFLINE_WINDOW)) }
                 ?.let(calendar::dayAt)
                 ?.takeUnless { isSettled(it.date) }
