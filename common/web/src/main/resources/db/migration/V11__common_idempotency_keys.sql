@@ -95,6 +95,11 @@ CREATE TABLE idempotency_keys (
 
     CONSTRAINT idempotency_keys_unique UNIQUE (user_id, idempotency_key),
     CONSTRAINT idempotency_keys_expiry_check CHECK (expires_at > created_at),
+    -- A key is 1 to 255 characters of visible ASCII (0x21-0x7E) — the bound
+    -- IdempotencyInterceptor enforces at the edge (422), restated here for
+    -- any writer that does not come through it. Added while this file was
+    -- still unmerged; afterwards the same bound costs a migration.
+    CONSTRAINT idempotency_keys_key_check CHECK (idempotency_key ~ '^[\x21-\x7E]{1,255}$'),
     CONSTRAINT idempotency_keys_result_kind_check CHECK (result_kind IS NULL OR result_kind IN ('ENTRY')),
     -- A result is named by both halves or by neither: an id with no kind
     -- cannot be routed to a re-read, and a kind with no id names nothing.

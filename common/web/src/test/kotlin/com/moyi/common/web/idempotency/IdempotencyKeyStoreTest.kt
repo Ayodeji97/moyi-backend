@@ -8,6 +8,7 @@ import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -69,6 +70,23 @@ class IdempotencyKeyStoreTest(
         createdAt = createdAt,
         expiresAt = createdAt.plus(Duration.ofHours(24)),
     )
+
+    /**
+     * A6, at the row: `idempotency_keys_key_check` is the same bound the
+     * interceptor enforces, for a writer that does not come through it.
+     */
+    @Test
+    fun `the table itself refuses a key that is empty, over 255 characters, or not visible ASCII`() {
+        val user = UUID.randomUUID()
+        val now = Instant.now()
+
+        for (key in listOf("", "k".repeat(256), "two words", "cl\u00e9", "tab\t")) {
+            val refused = shouldThrow<DataIntegrityViolationException> { store.insert(record(user, key, now)) }
+            refused.mostSpecificCause.message.orEmpty() shouldContain "idempotency_keys_key_check"
+        }
+        store.insert(record(user, "k".repeat(255), now))
+        store.insert(record(user, "!~", now))
+    }
 
     @Test
     fun `a live row is found whatever path asks, so the caller can refuse a different target`() {

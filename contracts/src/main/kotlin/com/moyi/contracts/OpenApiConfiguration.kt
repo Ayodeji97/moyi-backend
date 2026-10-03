@@ -319,8 +319,10 @@ class OpenApiConfiguration {
                         "erased since is returned as its tombstone. " +
                         "Only a success is recorded; a request that was refused may be corrected and retried under " +
                         "the same key. The same key with a different method, path or body is 422; the same key " +
-                        "while the first attempt is still in flight is 409.",
-                ).schema(StringSchema()),
+                        "while the first attempt is still in flight is 409. The key itself is 1 to " +
+                        "$IDEMPOTENCY_KEY_MAX_LENGTH visible ASCII characters (a UUID is the usual choice); a " +
+                        "missing or malformed one is 422 VALIDATION_FAILED with an `errors` entry naming this header.",
+                ).schema(StringSchema().minLength(1).maxLength(IDEMPOTENCY_KEY_MAX_LENGTH).pattern(IDEMPOTENCY_KEY_PATTERN)),
         )
         operation.responses
             .filterKeys { it.startsWith("2") }
@@ -438,6 +440,12 @@ class OpenApiConfiguration {
         private val IDEMPOTENT_OPERATIONS = setOf("submitEntry")
 
         private const val IDEMPOTENCY_KEY = "Idempotency-Key"
+
+        /** Mirrors `common.web.idempotency.IdempotencyInterceptor.MAX_KEY_LENGTH` and V11's `idempotency_keys_key_check`. */
+        private const val IDEMPOTENCY_KEY_MAX_LENGTH = 255
+
+        /** Visible ASCII, `!` to `~` — the same set the interceptor and V11 allow. */
+        private const val IDEMPOTENCY_KEY_PATTERN = "^[\\x21-\\x7E]+$"
         private const val IDEMPOTENCY_REPLAYED_HEADER = "Idempotency-Replayed"
 
         /**

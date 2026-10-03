@@ -193,9 +193,52 @@ class IdempotencyInterceptorTest(
         handlerRuns shouldBe 2
     }
 
+    /**
+     * `VALIDATION_FAILED` is "always accompanied by `errors`" (`ErrorCode`),
+     * and this one was not: a bare `422` with the header named only in prose.
+     */
     @Test
-    fun `a missing key on a required endpoint is 422 naming the header`() {
-        post(ada, key = null, body = """{"text":"thank you"}""").status shouldBe 422
+    fun `a missing key on a required endpoint is 422 with an errors entry naming the header`() {
+        for (absent in listOf(null, "", "   ")) {
+            val response = post(ada, key = absent, body = """{"text":"thank you"}""")
+
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+            response.contentAsString shouldContain "\"errors\":[{\"field\":\"Idempotency-Key\",\"code\":\"NOT_BLANK\""
+        }
+        handlerRuns shouldBe 0
+    }
+
+    /**
+     * A6: 1 to 255 characters. V11's column is unbounded `text` otherwise,
+     * and a key is stored for 24 hours per request — the bound is the
+     * difference between a key and a place to park a megabyte.
+     */
+    @Test
+    fun `a key of 255 characters is accepted, and one of 256 is 422 naming the header`() {
+        post(ada, "k".repeat(255), """{"text":"thank you"}""").status shouldBe 201
+
+        val tooLong = post(ada, "k".repeat(256), """{"text":"thank you"}""")
+
+        tooLong.status shouldBe 422
+        tooLong.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+        tooLong.contentAsString shouldContain "\"errors\":[{\"field\":\"Idempotency-Key\",\"code\":\"SIZE\""
+        handlerRuns shouldBe 1
+        jdbc.queryForObject("SELECT count(*) FROM idempotency_keys", Int::class.java) shouldBe 1
+    }
+
+    @Test
+    fun `a key with anything but visible ASCII in it is 422 naming the header`() {
+        // A space inside, a control character, a non-ASCII letter, DEL.
+        for (key in listOf("two words", "bell\u0007", "cl\u00e9", "del\u007f")) {
+            val response = post(ada, key, """{"text":"thank you"}""")
+
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"errors\":[{\"field\":\"Idempotency-Key\",\"code\":\"PATTERN\""
+        }
+        // Every visible ASCII character is allowed, the punctuation included.
+        post(ada, "!\"#$%&'()*+,-./09:;<=>?@AZ[\\]^_`az{|}~", """{"text":"thank you"}""").status shouldBe 201
+        handlerRuns shouldBe 1
     }
 
     @Test

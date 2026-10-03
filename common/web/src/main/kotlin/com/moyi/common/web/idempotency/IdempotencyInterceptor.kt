@@ -2,6 +2,7 @@ package com.moyi.common.web.idempotency
 
 import com.moyi.common.web.ApiException
 import com.moyi.common.web.ErrorCode
+import com.moyi.common.web.FieldViolation
 import jakarta.servlet.FilterChain
 import jakarta.servlet.ReadListener
 import jakarta.servlet.ServletInputStream
@@ -26,7 +27,7 @@ import java.util.UUID
  * itself is [IdempotentExecution]'s, inside the handler's own transaction.
  *
  * **What this does, before the handler runs:** for an `@Idempotent` handler,
- * refuses a missing key (`422`), resolves the verified caller (`401` if
+ * refuses a missing or malformed key (`422`), resolves the verified caller (`401` if
  * there is none), fingerprints the request through [RequestFingerprint] —
  * method, raw path and body — and leaves the result on the request as an
  * [IdempotentRequest], which the handler fetches with [requestOf] and hands to
@@ -114,8 +115,8 @@ class IdempotencyInterceptor(
         replayable: ReplayableHttpServletRequest,
         request: HttpServletRequest,
     ) {
-        val key = request.getHeader(HEADER)?.trim()
-        if (key.isNullOrBlank()) throw IdempotencyKeyRequiredException()
+        val key = request.getHeader(HEADER)?.trim().orEmpty()
+        violationOf(key)?.let { throw IdempotencyKeyNotValidException(it) }
 
         val method = request.method
         // The raw, concrete path — never the route template (two bonds are
@@ -136,6 +137,22 @@ class IdempotencyInterceptor(
     }
 
     /**
+     * What is wrong with [key] as an `Idempotency-Key`, or `null` (A6): it
+     * must be 1 to [MAX_KEY_LENGTH] characters of visible ASCII (`!` to `~`).
+     * V11's `idempotency_keys_key_check` states the same bound for the row.
+     * A UUID or a ULID is well inside it. The codes are the ones Bean
+     * Validation's constraints of the same meaning produce, so a client sees
+     * one vocabulary.
+     */
+    private fun violationOf(key: String): FieldViolation? =
+        when {
+            key.isEmpty() -> FieldViolation(HEADER, "NOT_BLANK", "is required")
+            key.length > MAX_KEY_LENGTH -> FieldViolation(HEADER, "SIZE", "must be at most $MAX_KEY_LENGTH characters")
+            !key.all { it in VISIBLE_ASCII } -> FieldViolation(HEADER, "PATTERN", "must contain only visible ASCII characters")
+            else -> null
+        }
+
+    /**
      * The verified caller, read from [HttpServletRequest.getUserPrincipal]
      * rather than `common:security`'s `CurrentUser` — `common:security`
      * depends on `common:web`, not the other way round, so this module
@@ -153,6 +170,12 @@ class IdempotencyInterceptor(
     companion object {
         const val HEADER = "Idempotency-Key"
         const val REPLAYED_HEADER = "Idempotency-Replayed"
+
+        /** The longest an `Idempotency-Key` may be — V11's `idempotency_keys_key_check`, and the contract's `maxLength`. */
+        const val MAX_KEY_LENGTH = 255
+
+        /** `!` (0x21) to `~` (0x7E): printable, no space, nothing a log line or a header could mangle. */
+        private val VISIBLE_ASCII = '!'..'~'
 
         private const val REQUEST_ATTRIBUTE = "com.moyi.common.web.idempotency.request"
 
@@ -306,12 +329,19 @@ private class ReplayableServletInputStream(
     }
 }
 
-/** 422: doc 06 §1 requires `Idempotency-Key` on this endpoint, and it was not sent. */
-class IdempotencyKeyRequiredException :
-    ApiException(
+/**
+ * 422: doc 06 §1 requires `Idempotency-Key` on this endpoint, and it was not
+ * sent, or what was sent is not a key — longer than 255 characters, or not
+ * visible ASCII (A6). `VALIDATION_FAILED`, with the `errors` entry that code
+ * is always accompanied by: [violation] names the header, never its value.
+ */
+class IdempotencyKeyNotValidException(
+    violation: FieldViolation,
+) : ApiException(
         HttpStatus.UNPROCESSABLE_ENTITY,
         ErrorCode.VALIDATION_FAILED,
-        "A required header, Idempotency-Key, was not sent.",
+        "The Idempotency-Key header is missing or not valid.",
+        errors = listOf(violation),
     )
 
 /**

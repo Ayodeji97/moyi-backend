@@ -17,10 +17,17 @@ import org.springframework.http.HttpStatus
  *
  * [detail] is shown to a user. It must never echo request input (doc 18 §5)
  * and must never quote an underlying exception (§9).
+ *
+ * [errors] is the `errors` array of doc 06 §2 — which part of the request was
+ * not acceptable — for a refusal raised outside Bean Validation, which builds
+ * its own. [ErrorCode.VALIDATION_FAILED] is "always accompanied by `errors`",
+ * so an exception carrying that code supplies them. A [FieldViolation] holds
+ * no rejected value, for the reason its own KDoc gives.
  */
 abstract class ApiException(
     val status: HttpStatus,
     val errorCode: ErrorCode,
     val detail: String,
     cause: Throwable? = null,
+    val errors: List<FieldViolation>? = null,
 ) : RuntimeException("$errorCode: $detail", cause)
