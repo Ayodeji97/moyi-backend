@@ -1,0 +1,87 @@
+name: Commit format
+
+# Conventional Commits (doc 18 §2), enforced where it cannot be skipped.
+#
+# The rule lives in one place: `.githooks/commit-msg`. That hook is opt-in
+# (`git config core.hooksPath .githooks`), so on its own it holds only for a
+# contributor who switched it on — a fresh clone, an agent in a new sandbox or
+# a commit made in the GitHub UI all pass straight by it. This workflow runs
+# that same script, rather than a second copy of its pattern, against the two
+# things a pull request can put on `main`.
+#
+# 1. **The title, as it will land.** This repository squash-merges, so the
+#    subject on `main` is the PR title followed by " (#<number>)". The title is
+#    therefore checked with that suffix attached: a title that fits on its own
+#    and overflows once GitHub appends the number is exactly the case a check
+#    of the bare title would miss. Two subjects on `main` from September are
+#    over the limit for this reason.
+# 2. **Every commit on the branch.** They are squashed away, but the hook holds
+#    them to the rule locally and a rule that binds only some contributors is
+#    not one. Merge commits pass, as they do in the hook.
+#
+# `edited` is in the trigger list because the title is the thing most often
+# fixed, and fixing it must be able to turn the check green without a push.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commit-format-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  commit-format:
+    runs-on: ubuntu-latest
+    steps:
+      # The PR's own head, with history: the default checkout is a synthetic
+      # merge commit whose subject is GitHub's, not the author's, and a
+      # shallow one cannot list the branch's commits against the base.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Check the title and every commit against .githooks/commit-msg
+        env:
+          # Passed through the environment, never interpolated into the
+          # script: a PR title is attacker-controlled text.
+          TITLE: ${{ github.event.pull_request.title }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          hook=.githooks/commit-msg
+          [ -f "$hook" ] || { echo "::error::$hook is missing, so there is no rule to check against."; exit 1; }
+
+          message=$(mktemp)
+          failures=0
+
+          check() { # $1 = what it is, $2 = the subject line
+            printf '%s\n' "$2" > "$message"
+            if ! bash "$hook" "$message" 2> /dev/null; then
+              echo "::error::$1 does not follow Conventional Commits: \"$2\" (${#2} characters). Expected type(scope): subject, with the subject at most 88 characters. Allowed types: feat fix chore docs refactor test build ci perf revert."
+              failures=$(( failures + 1 ))
+            fi
+          }
+
+          check "The pull request title, as it will land on main after a squash merge," "$TITLE (#$NUMBER)"
+
+          # Subjects only, oldest first. `git log` on a range is empty for a
+          # branch with no commits of its own, which is a pass, not an error.
+          count=0
+          while IFS= read -r line; do
+            [ -n "$line" ] || continue
+            sha=${line%% *}
+            subject=${line#* }
+            check "Commit $sha" "$subject"
+            count=$(( count + 1 ))
+          done < <(git log --reverse --format='%h %s' "$BASE_SHA..HEAD")
+
+          if [ "$failures" -gt 0 ]; then
+            echo "::error::$failures subject(s) failed. Fix a title by editing it (this check re-runs); fix a commit with 'git commit --amend' or an interactive rebase, then push. To catch it before pushing: git config core.hooksPath .githooks"
+            exit 1
+          fi
+          echo "The title and $count commit(s) follow Conventional Commits." >> "$GITHUB_STEP_SUMMARY"

@@ -59,10 +59,11 @@ the way the rule would have judged it.
   solo project, so review and CI are the only second pair of eyes there is.
 - **Do not merge unless the owner says so.** The owner merges; an instruction to merge
   covers the pull requests it names, not the ones after them.
-- **Commits follow Conventional Commits, subject at most 88 characters.** The hook at
-  `.githooks/commit-msg` checks it, but only once it is switched on
-  (`git config core.hooksPath .githooks`), and CI does not check it at all. So check the
-  subject yourself; on a fresh clone nothing will stop a bad one.
+- **Commits follow Conventional Commits, subject at most 88 characters.** CI checks every
+  commit on a pull request and its title, with the ` (#N)` a squash merge appends, because
+  the title is what lands on `main`. The same script runs locally as a hook once it is
+  switched on (`git config core.hooksPath .githooks`); switch it on, so a bad subject
+  fails before the push rather than after.
 - **A breaking API change carries the `breaking-api-change` label.** The client is
   generated from the contract, so the contract check fails without it, deliberately.
 
@@ -83,8 +84,12 @@ the way the rule would have judged it.
 - **Authorisation comes before any read, and a non-member gets `404`, never `403`.** A
   `403` would confirm the bond exists. A new bond-scoped route needs a cross-tenant test,
   and the suite fails if it has none.
-- **Timestamps are truncated to microseconds before they are stored.** That is what
-  Postgres keeps; a finer value compares unequal to itself after a round trip.
+- **Truncate a timestamp to microseconds before storing it, wherever it will be compared
+  with what comes back.** Postgres keeps microseconds and *rounds* to them, so a finer
+  value can come back different, even a second later. `gratitude`'s write path and
+  parts of `bond` truncate for this reason; `identity` and the rest of `bond` do not, so
+  do not assume round-trip equality where you have not checked. In tests the shared
+  `MutableClock` truncates at the source.
 - **JPA entities are not `data class`es, and ids are assigned in application code.**
   Generated `equals`/`hashCode`/`copy` break Hibernate's identity, and an id known before
   the insert spares a round trip.
