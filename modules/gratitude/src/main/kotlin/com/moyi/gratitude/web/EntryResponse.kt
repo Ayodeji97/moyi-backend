@@ -54,6 +54,17 @@ internal data class EntryResponse private constructor(
     val createdAt: Instant,
     val intendedAt: Instant,
 ) : PartnerEntryResponse {
+    /**
+     * Never the words (doc 18 §5/§9): this is the one object in the module
+     * that holds an entry's text as a plain `String` on its way *out*, and a
+     * data class would print it. `TodayResponse` prints its entries through
+     * this, so it is covered too. A tombstone prints `text=null` — there is
+     * nothing to hide, and saying "redacted" would claim there was.
+     */
+    override fun toString(): String =
+        "EntryResponse(id=$id, bondId=$bondId, date=$date, authorMemberId=$authorMemberId, " +
+            "text=${if (text == null) "null" else "(redacted)"}, status=$status, createdAt=$createdAt, intendedAt=$intendedAt)"
+
     companion object {
         /** `null` exactly when [of] is: BR-1 did not grant the caller this shape. */
         fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date)

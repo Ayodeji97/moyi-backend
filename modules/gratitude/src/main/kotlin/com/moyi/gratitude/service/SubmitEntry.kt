@@ -21,6 +21,7 @@ import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.GratitudeConstraints
 import com.moyi.gratitude.infra.database.violates
+import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -53,7 +54,11 @@ internal data class EntryDraft(
     val imageMediaId: UUID?,
     val voiceMediaId: UUID?,
     val intendedAt: Instant?,
-)
+) {
+    /** Never the words — `SubmitEntryRequest.toString`'s own reason: [text] is still a plain `String` here. */
+    override fun toString(): String =
+        "EntryDraft(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, intendedAt=$intendedAt)"
+}
 
 /**
  * An entry **as BR-1 answered for the caller**, and the day it is filed on —
@@ -208,6 +213,8 @@ internal class SubmitEntry(
     private val transactions: TransactionTemplate,
     private val execution: IdempotentExecution,
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     /**
      * @param idempotency the request's `Idempotency-Key`, as `IdempotencyInterceptor` prepared it
      * @throws com.moyi.common.web.NotFoundException the caller is not a member of [bondId], or there is no such bond
@@ -320,6 +327,12 @@ internal class SubmitEntry(
             DayAssignment.resolve(now, intendedAt, calendar) { candidate ->
                 days.findByBondAndDate(bondId, candidate)?.isSettled == true
             }
+        // BR-3a decided against the client's claim. Traceable, because the
+        // member sees an entry on a day they did not expect: the bond and the
+        // date it was filed on — never the words, and not the member.
+        if (intendedAt != null && !claimed.usedIntendedAt) {
+            log.info("BR-3a: an intendedAt was not used for bond {}; the entry is filed by submission time, on {}", bondId, claimed.date)
+        }
         val claimedDay = openAndLock(membership, claimed.bounds, now)
         // BR-3a, rechecked under the day's own lock (spec §6.1.3). The check
         // inside `resolve` read the day before this lock was held, and the
@@ -371,6 +384,13 @@ internal class SubmitEntry(
     ): Pair<DayAssignment.Resolution, BondDay>? {
         if (!claimed.usedIntendedAt) return null
         val fallback = DayAssignment.resolve(now, null, calendar) { false }
+        // The rare one: a close landed between the unlocked check and the lock.
+        log.info(
+            "BR-3a: bond {} day {} was settled once locked; an offline entry is redirected to {}",
+            membership.bondId,
+            claimed.date,
+            fallback.date,
+        )
         return (fallback to openAndLock(membership, fallback.bounds, now)).takeUnless { (_, day) -> day.isSettled }
     }
 

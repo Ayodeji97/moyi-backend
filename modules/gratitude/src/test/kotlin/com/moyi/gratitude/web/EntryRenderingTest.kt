@@ -9,6 +9,8 @@ import com.moyi.gratitude.domain.Reader
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.time.LocalDate
@@ -102,5 +104,29 @@ internal class EntryRenderingTest {
         // A view literal: distinct from the wide tombstone's DELETED, so `status` discriminates.
         ErasedEntryStatus.entries.map { it.name } shouldBe listOf("REMOVED")
         EntryResponse.of(unseen, date).shouldBeNull()
+    }
+
+    /**
+     * C1 (final whole-branch review). Doc 18 §5/§9: an entry's words never
+     * reach a log. `EntryText` and `EntryReading` already refuse to print
+     * themselves; these three carried the same words as a plain `String` in a
+     * data class, whose generated `toString` prints every property — one
+     * `log.debug("{}", request)` or one exception message away from a leak.
+     */
+    @Test
+    fun `the request, the draft and the response never print an entry's words`() {
+        val words = "a secret between two people"
+        val request = SubmitEntryRequest(text = words, intendedAt = now)
+        val response = EntryResponse.of(entry.copy(text = EntryText.of(words)).readBy(author), date).shouldNotBeNull()
+        val printed = listOf(request, request.toDraft(), response).map { it.toString() }
+
+        printed.forEach { it shouldNotContain words }
+        // What is useful in a log is still there: which entry, and when.
+        printed[0] shouldBe "SubmitEntryRequest(text=(redacted), imageMediaId=null, voiceMediaId=null, intendedAt=$now)"
+        printed[1] shouldBe "EntryDraft(text=(redacted), imageMediaId=null, voiceMediaId=null, intendedAt=$now)"
+        printed[2] shouldContain "id=${entry.id.value}"
+        printed[2] shouldContain "text=(redacted)"
+        // A tombstone has no words, and says so rather than claiming to hide some.
+        EntryResponse.of(entry.copy(deletedAt = now).readBy(author), date).toString() shouldContain "text=null"
     }
 }

@@ -35,7 +35,8 @@ import java.util.UUID
  * [intendedAt] is BR-3a's offline-draft claim: a client that composed an
  * entry before it could send it may say when. Optional, and trusted only
  * within [com.moyi.gratitude.domain.DayAssignment]'s own limits — absent,
- * it resolves to now, in the bond's zone.
+ * it resolves to now, in the bond's zone. A claim ahead of the server's
+ * clock is accepted and resolved at the submission instant (ruling P11).
  */
 internal data class SubmitEntryRequest(
     @field:NotNull
@@ -52,4 +53,12 @@ internal data class SubmitEntryRequest(
             voiceMediaId = voiceMediaId,
             intendedAt = intendedAt,
         )
+
+    /**
+     * Never the words (doc 18 §5/§9). A data class prints every property, and
+     * this one holds an entry's text as a plain `String` — before
+     * [EntryText] has wrapped it in something that refuses to print itself.
+     */
+    override fun toString(): String =
+        "SubmitEntryRequest(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, intendedAt=$intendedAt)"
 }
