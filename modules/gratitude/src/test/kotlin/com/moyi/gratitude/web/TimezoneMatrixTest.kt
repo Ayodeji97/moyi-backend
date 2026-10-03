@@ -11,9 +11,9 @@ import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
-import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -30,11 +30,16 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import java.sql.Connection
+import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
@@ -47,21 +52,30 @@ import javax.sql.DataSource
  * the zone facts it rests on (offsets, transition instants) are asserted
  * against `java.time` in the test itself rather than trusted from memory.
  *
- * Each case is built so that the two obvious wrong implementations fail it:
+ * Two obvious wrong implementations, and which cases each one fails
+ * (mutation-checked against `AnchorTimeline.dayBoundsAt`):
  *
- * - **fixed 24 h** — `date.atStartOfDay(zone)` to `+24h`;
- * - **UTC midnight** — the day is the UTC calendar date.
- *
- * Where the day's own span cannot tell fixed-24h from the truth (Kathmandu
- * and Chatham in standard time are honest 24-hour days), the case is told
- * apart from UTC-midnight and from a whole-hour offset instead, by a write
- * one second either side of the :15 boundary.
+ * - **UTC midnight** — the day is the UTC calendar date. Fails every case.
+ * - **fixed 24 h** — `date.atStartOfDay(zone)` to `+24h`. Fails the three
+ *   DST cases (1, 2 and Chatham's transition day) and no other: Kathmandu,
+ *   Chatham in standard time and the two members' day (5) are honest
+ *   24-hour days, and the date-line spans (6a, 6b) come from clipping and
+ *   merging at the handoff, not from a zone's natural day length. Those
+ *   cases are told apart from a whole-hour offset or a writer's own zone
+ *   instead — a write one second either side of the :15 boundary, two
+ *   writers whose own calendars disagree.
  *
  * **The eastward date-line case asserts what C1 guarantees, not a `FROZEN`
  * row** (ruling P9): nothing in C1 writes a row for a skipped label, because
  * no instant belongs to it and `gratitude` only opens a day an entry lands
  * on. **C3's close job settles the skipped label FROZEN (spec §13,
- * BR-6/§8.5).**
+ * BR-6/§8.5).** An `intendedAt` aimed at the skipped label is not refused
+ * and does not fall back: it is an *accepted* claim, resolved through the
+ * timeline onto the neighbouring label that instant really belongs to.
+ *
+ * **The westward cases also pin ruling P10**: a row opened before the change
+ * has its `ends_at` extended, under the day lock, by the next write that
+ * touches it — unless the day is settled, which is never extended.
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
@@ -71,11 +85,12 @@ internal class TimezoneMatrixTest(
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired private val access: BondAccess,
     @Autowired directory: UserDirectory,
-    @Autowired dataSource: DataSource,
+    @Autowired private val dataSource: DataSource,
     @Autowired private val clock: MutableClock,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
+    private val pool = Executors.newCachedThreadPool()
 
     private lateinit var ada: UUID
     private lateinit var bea: UUID
@@ -89,6 +104,10 @@ internal class TimezoneMatrixTest(
 
     @AfterEach
     fun clear() {
+        // The pool first, and awaited: a submission still queued after a
+        // failed assertion must not commit after the truncate.
+        pool.shutdownNow()
+        check(pool.awaitTermination(10, TimeUnit.SECONDS)) { "a worker thread outlived the test" }
         jdbc.execute(
             "TRUNCATE TABLE idempotency_keys, entries, bond_days, bond_anchor_intervals, bond_proposals, " +
                 "blocks, bond_invites, bond_members, bonds CASCADE",
@@ -111,7 +130,7 @@ internal class TimezoneMatrixTest(
      * 8th at 03-08T00:00Z.
      */
     @Test
-    fun `a spring-forward day is 23 hours long, and the hour it lost belongs to nobody`() {
+    fun `a spring-forward day is 23 hours long, and the next day starts an hour early in UTC`() {
         val newYork = ZoneId.of("America/New_York")
         val transition = newYork.rules.nextTransition(Instant.parse("2026-01-01T00:00:00Z"))
         transition.instant shouldBe Instant.parse("2026-03-08T07:00:00Z")
@@ -308,6 +327,12 @@ internal class TimezoneMatrixTest(
         dayRows().shouldContainExactly(
             DayRow("2026-06-10", "Africa/Lagos", "2026-06-09T23:00:00Z", "2026-06-10T23:00:00Z", entries = 2),
         )
+        // The entries themselves, not only the row's own count of them.
+        jdbc.queryForObject(
+            "SELECT count(DISTINCT bond_day_id) || ',' || count(*) FROM entries WHERE bond_id = ?::uuid",
+            String::class.java,
+            bondId,
+        ) shouldBe "1,2"
     }
 
     // ---- 6a. The date line, eastward: a label is skipped ----------------
@@ -328,9 +353,16 @@ internal class TimezoneMatrixTest(
      *
      * What C1 guarantees (ruling P9), each asserted below: the days either
      * side are the 15th and the 17th; **no row exists for the 16th**; an
-     * `intendedAt` aimed at either zone's idea of the 16th lands on a
-     * neighbour instead of opening it; and the two persisted spans meet at
+     * `intendedAt` aimed at either zone's idea of the 16th is **accepted**
+     * (stored as claimed — not a fallback, not a refusal) and resolved
+     * through the timeline onto the neighbouring label that instant belongs
+     * to, instead of opening the 16th; and the two persisted spans meet at
      * the handoff — the 15th's `ends_at` is the 17th's `starts_at`.
+     *
+     * The back-fill onto the 15th is accepted only because C1 has no close
+     * job: the 15th is still unsettled at 09-16T20:00Z. Once C3 settles it at
+     * the handoff, that same claim falls back to the submission-time day (the
+     * 17th) under BR-3a, and this test's first `intendedAt` probe changes.
      *
      * C3's close job settles the skipped label FROZEN (spec §13, BR-6/§8.5).
      */
@@ -355,10 +387,17 @@ internal class TimezoneMatrixTest(
         clock.set(Instant.parse("2026-09-16T20:00:00Z")) // 10:00 on the 17th, Kiritimati
         // 09-16T09:00Z is 23:00 on the 16th by Kiritimati's clock — but Pago
         // Pago decided dates then, and there it was 22:00 on the 15th.
-        submit(bea, intendedAt = "2026-09-16T09:00:00Z").contentAsString shouldContain "\"date\":\"2026-09-15\""
+        val backFilled = submit(bea, intendedAt = "2026-09-16T09:00:00Z")
+        backFilled.contentAsString shouldContain "\"date\":\"2026-09-15\""
+        intendedAtOf(backFilled) shouldBe "2026-09-16T09:00:00Z"
         // 09-16T12:00Z is 01:00 on the 16th by Pago Pago's clock — but
         // Kiritimati decided dates by then, and there it was 02:00 on the 17th.
-        submit(ada, intendedAt = "2026-09-16T12:00:00Z").contentAsString shouldContain "\"date\":\"2026-09-17\""
+        // The 17th is also where a fallback would land, so the date cannot
+        // tell accepted from fallen-back; the stored `intended_at` can — a
+        // fallback stores the submission instant, 20:00Z.
+        val claimed = submit(ada, intendedAt = "2026-09-16T12:00:00Z")
+        claimed.contentAsString shouldContain "\"date\":\"2026-09-17\""
+        intendedAtOf(claimed) shouldBe "2026-09-16T12:00:00Z"
         submit(bea).contentAsString shouldContain "\"date\":\"2026-09-17\""
 
         val rows = dayRows()
@@ -417,6 +456,11 @@ internal class TimezoneMatrixTest(
         clock.set(Instant.parse("2026-09-17T10:30:00Z"))
         today(bea).contentAsString shouldContain "\"date\":\"2026-09-16\""
         submit(bea).contentAsString shouldContain "\"date\":\"2026-09-16\""
+        // The pushed handoff, to the second: still the 16th, then the 17th.
+        clock.set(Instant.parse(HANDOFF_WEST).minusSeconds(1))
+        today(ada).contentAsString shouldContain "\"date\":\"2026-09-16\""
+        clock.set(Instant.parse(HANDOFF_WEST))
+        today(ada).contentAsString shouldContain "\"date\":\"2026-09-17\""
         clock.set(Instant.parse("2026-09-17T12:00:00Z"))
         submit(ada).contentAsString shouldContain "\"date\":\"2026-09-17\""
 
@@ -441,16 +485,15 @@ internal class TimezoneMatrixTest(
      * at 09-17T11:00Z, so anything shorter leaves a hole in the bond's
      * calendar that C3's close job (which reads these columns) would act on.
      *
-     * **Disabled because it fails against production, and the expectation is
-     * not to be bent (Task 9's rule).** Actual: the 16th's row keeps
-     * `ends_at = 2026-09-16T10:00:00Z` — `BondDayStore.openOrGet` inserts if
-     * absent and nothing ever updates a span — while holding an entry written
-     * at 09-16T20:00Z, ten hours past it, and the 17th's row starts at
-     * 09-17T11:00Z: a 25-hour hole between two persisted days. Whether the
-     * fix is to extend the open row or to stop reading `ends_at` as the
-     * truth for an open day is a ruling this test waits on; enable it then.
+     * **Ruling P10 is what makes this hold.** `SubmitEntry` extends the row
+     * under the day's lock, before the entry is inserted: the write at
+     * 09-16T20:00Z finds the row ending 09-16T10:00Z, the calendar says the
+     * 16th now ends 09-17T11:00Z, and `BondDay.extendedTo` moves `ends_at`
+     * there — later only; `starts_at` and the Kiritimati snapshot stay. With
+     * the extension removed, the row keeps `ends_at = 2026-09-16T10:00:00Z`
+     * while holding an entry written ten hours past it, 25 hours short of
+     * the 17th's start.
      */
-    @Disabled("Finding (Task 9): a row opened before a westward change keeps its pre-merge ends_at")
     @Test
     fun `a westward crossing extends the spanning day even when its row was already open`() {
         pairedBond("Pacific/Kiritimati", createdAt = "2026-09-10T00:00:00Z")
@@ -471,6 +514,118 @@ internal class TimezoneMatrixTest(
         )
         rows[0].endsAt shouldBe rows[1].startsAt
     }
+
+    /**
+     * **A settled day is never extended** (ruling P10, rule 2) — shown where
+     * it could actually go wrong: a write that reaches the pre-change row
+     * *under its lock* and finds it settled.
+     *
+     * The crossing is 6c's. The 16th's row was opened before the change, so
+     * it ends 09-16T10:00Z while the calendar's 16th now runs to 09-17T11:00Z.
+     * At 09-17T12:00Z (01:00 on Pago Pago's 17th) Bea sends a draft with
+     * `intendedAt` 09-16T20:00Z — on the merged 16th, 16 hours back, inside
+     * BR-3a's window. The 16th is unsettled when the submission looks, so it
+     * resolves there and queues on the row's lock, which this test holds on
+     * its own connection, standing in for C3's close. The close stamps the
+     * day `SOLO` and commits. The submission then holds a settled day whose
+     * window ends later than its row: it must leave the row alone and
+     * redirect once to the submission-time day (spec §6.1.3).
+     *
+     * The redirect commits, so an extension wrongly applied to the settled
+     * row would commit with it and show here as a changed `ends_at`.
+     */
+    @Test
+    fun `a settled day is not extended - a draft that finds it closed under the lock moves on and leaves its span alone`() {
+        pairedBond("Pacific/Kiritimati", createdAt = "2026-09-10T00:00:00Z")
+        clock.set(Instant.parse("2026-09-15T19:00:00Z"))
+        submit(ada).contentAsString shouldContain "\"date\":\"2026-09-16\""
+        clock.set(Instant.parse("2026-09-15T20:00:00Z"))
+        changeZone(proposer = ada, confirmer = bea, zone = "Pacific/Pago_Pago")
+        clock.set(Instant.parse("2026-09-17T12:00:00Z"))
+
+        withDayLockHeld("2026-09-16") { holderPid, closeAndCommit ->
+            val submission = pool.submit<MockHttpServletResponse> { submit(bea, intendedAt = "2026-09-16T20:00:00Z") }
+            await().atMost(Duration.ofSeconds(10)).until { submission.isDone || blockedBehind(holderPid) > 0 }
+            // Done already would mean it never queued on the 16th's row.
+            submission.isDone shouldBe false
+
+            closeAndCommit("SOLO")
+
+            val response = submission.get(10, TimeUnit.SECONDS)
+            response.contentAsString shouldContain "\"date\":\"2026-09-17\""
+            // Redirected, so the rejected claim is not what is stored.
+            intendedAtOf(response) shouldBe "2026-09-17T12:00:00Z"
+        }
+
+        dayRows().shouldContainExactly(
+            // Untouched: still the span it was opened with, one entry, Ada's.
+            DayRow("2026-09-16", "Pacific/Kiritimati", "2026-09-15T10:00:00Z", "2026-09-16T10:00:00Z", entries = 1),
+            DayRow("2026-09-17", "Pacific/Pago_Pago", HANDOFF_WEST, "2026-09-18T11:00:00Z", entries = 1),
+        )
+        jdbc.queryForObject(
+            "SELECT status FROM bond_days WHERE bond_id = ?::uuid AND date = '2026-09-16'",
+            String::class.java,
+            bondId,
+        ) shouldBe "SOLO"
+    }
+
+    // ---- the close, standing in for C3 ----------------------------------
+
+    /**
+     * Holds the day row's `FOR UPDATE` on its own connection and hands [block]
+     * the holder's backend pid and a `closeAndCommit(status)` that stamps the
+     * day closed under that lock and commits — `SubmitEntrySettledDayTest`'s
+     * harness. Rolled back if [block] never closed it, which frees a
+     * submission still queued behind a failed assertion.
+     */
+    private fun withDayLockHeld(
+        date: String,
+        block: (holderPid: Int, closeAndCommit: (String) -> Unit) -> Unit,
+    ) {
+        val day = "bond_id = '$bondId'::uuid AND date = '$date'"
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                block(lockDayRow(connection, day)) { status ->
+                    closeDay(connection, day, status)
+                    connection.commit()
+                }
+            } finally {
+                connection.rollback()
+                connection.autoCommit = true
+            }
+        }
+    }
+
+    /** Takes the row lock and answers the backend pid that now holds it. */
+    private fun lockDayRow(
+        connection: Connection,
+        day: String,
+    ): Int =
+        connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT pg_backend_pid() FROM bond_days WHERE $day FOR UPDATE").use {
+                it.next() shouldBe true
+                it.getInt(1)
+            }
+        }
+
+    private fun closeDay(
+        connection: Connection,
+        day: String,
+        status: String,
+    ) {
+        connection.createStatement().use {
+            it.executeUpdate("UPDATE bond_days SET status = '$status', closed_at = now() WHERE $day") shouldBe 1
+        }
+    }
+
+    /** How many backends are genuinely queued behind [holderPid] — never inferred from a sleep. */
+    private fun blockedBehind(holderPid: Int): Int =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))",
+            Int::class.java,
+            holderPid,
+        )!!
 
     // ---- helpers --------------------------------------------------------
 
@@ -586,11 +741,24 @@ internal class TimezoneMatrixTest(
         return response
     }
 
-    private fun today(caller: UUID): MockHttpServletResponse =
-        mockMvc
-            .get("/api/v1/bonds/$bondId/today") { header(HttpHeaders.AUTHORIZATION, bearer(caller)) }
-            .andReturn()
-            .response
+    private fun today(caller: UUID): MockHttpServletResponse {
+        val response =
+            mockMvc
+                .get("/api/v1/bonds/$bondId/today") { header(HttpHeaders.AUTHORIZATION, bearer(caller)) }
+                .andReturn()
+                .response
+        response.status shouldBe 200
+        return response
+    }
+
+    /** The entry's persisted `intended_at` — the claim if it was accepted, the submission instant if it fell back. */
+    private fun intendedAtOf(response: MockHttpServletResponse): String {
+        val entryId = Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
+        return jdbc
+            .queryForObject("SELECT intended_at FROM entries WHERE id = ?::uuid", Timestamp::class.java, entryId)!!
+            .toInstant()
+            .toString()
+    }
 
     @TestConfiguration
     class TimeConfiguration {

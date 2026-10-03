@@ -3,6 +3,7 @@ package com.moyi.gratitude.domain
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -65,8 +66,12 @@ internal enum class BondDayStatus(
  *
  * **[startsAt]/[endsAt] are the day; [anchorTimezone] only remembers it.**
  * BR-6 and ADR-0030 require a zone change to never recompute an existing
- * day, and spec §3.1 goes further: the span is resolved once, against the
- * bond's effective-zone timeline, and *persisted*. A zone id alone cannot
+ * day, and spec §3.1 goes further: the span is resolved against the bond's
+ * effective-zone timeline when the day opens, and *persisted*. One thing
+ * about it may change afterwards, and only one: a westward anchor change can
+ * make an unsettled day run on to its successor's start (plan R3), and
+ * [extendedTo] moves [endsAt] later to match (ruling P10). [startsAt] and
+ * [anchorTimezone] never change, and a settled day's span never does. A zone id alone cannot
  * describe a day an anchor change clipped, merged (~48h westward, plan R3)
  * or skipped (an empty span, eastward) — so [DayWindow]'s `[startsAt,
  * endsAt)` is the authority on which instants belong here, and
@@ -174,6 +179,46 @@ internal data class BondDay(
             entryCount = entryCount + 1,
             status = if (status == BondDayStatus.SUSPENDED) BondDayStatus.SUSPENDED else BondDayStatus.PARTIAL,
         )
+
+    /**
+     * This day with its span brought up to what the bond's calendar now says
+     * about it (ruling P10) — which can only mean **ending later**.
+     *
+     * A westward anchor change agreed after this day's row was opened merges
+     * the day into its successor's start (plan R3): the label is kept and the
+     * day runs on, up to ~49 hours. The row was written with the span the
+     * calendar gave *then*; [window] is what the calendar gives *now*. Without
+     * this, an entry could be filed on a row whose stored span does not
+     * contain it, and the stored days would leave a hole before the next one
+     * (spec §3.1: "intervals remain contiguous and non-overlapping").
+     *
+     * - **Extend-only.** [endsAt] moves later or not at all; a [window] that
+     *   ends at or before the stored end returns this same instance.
+     * - **Unsettled days only.** A day that [isSettled] is a record (BR-10,
+     *   BR-6's "never recomputed") and comes back untouched.
+     * - **[startsAt] and [anchorTimezone] are never touched.**
+     * - **A [window] for another label, or one that starts elsewhere, is
+     *   refused**, loudly: it would mean the label had been reassigned to a
+     *   different stretch of time, which the timeline must never do.
+     *
+     * Instants are compared and kept at microsecond precision, `timestamptz`'s
+     * own, so a row read back equals the one written.
+     *
+     * **Called under the day's lock, by a write** (`SubmitEntry`), before the
+     * entry is inserted. `GET /today` is a read and extends nothing, so a row
+     * opened before a change and never written to again keeps its shorter
+     * span until C3's close job reconciles it from the timeline. That is the
+     * accepted limit: until then the timeline, not this column, says when
+     * such a day ends.
+     */
+    fun extendedTo(window: DayWindow): BondDay {
+        require(window.date == date) { "a bond-day is only extended by its own label's window: $date, not ${window.date}" }
+        require(window.startsAt.truncatedTo(ChronoUnit.MICROS) == startsAt.truncatedTo(ChronoUnit.MICROS)) {
+            "a bond-day's start never moves: $startsAt, not ${window.startsAt}"
+        }
+        val end = window.endsAt.truncatedTo(ChronoUnit.MICROS)
+        return if (isSettled || !end.isAfter(endsAt)) this else copy(endsAt = end)
+    }
 
     companion object {
         /** V12's `bond_days_entry_count_check`, restated here so the schema and the domain agree by reading. */

@@ -152,6 +152,41 @@ internal class BondDayPersistenceTest(
     }
 
     @Test
+    fun `an extended end survives a reload, and the start and the zone snapshot do not move`() {
+        // Ruling P10: the one change a day's span may undergo. Kiritimati's
+        // 16th, opened [15T10:00Z, 16T10:00Z), merged by a westward change
+        // into its successor's start, 17T11:00Z (plan R3).
+        val kiritimati = ZoneId.of("Pacific/Kiritimati")
+        val sixteenth = LocalDate.of(2026, 9, 16)
+        val opened = DayWindow(sixteenth, Instant.parse("2026-09-15T10:00:00Z"), Instant.parse("2026-09-16T10:00:00Z"))
+        val merged = opened.copy(endsAt = Instant.parse("2026-09-17T11:00:00Z"))
+        val day = openOrGet(bondId, opened, kiritimati, now)
+
+        transactions.executeWithoutResult { days.update(days.lockAndFind(day.id).extendedTo(merged)) }
+
+        val reloaded = find(day.id).shouldNotBeNull()
+        reloaded.endsAt shouldBe merged.endsAt
+        reloaded.startsAt shouldBe opened.startsAt
+        reloaded.anchorTimezone shouldBe kiritimati
+        val stored =
+            "SELECT starts_at = '2026-09-15T10:00:00Z' AND ends_at = '2026-09-17T11:00:00Z' " +
+                "AND anchor_timezone = 'Pacific/Kiritimati' FROM bond_days"
+        jdbc.queryForObject(stored, Boolean::class.java) shouldBe true
+    }
+
+    @Test
+    fun `the update path refuses to shorten a day`() {
+        // `applyTo`'s own guard: `extendedTo` never produces a shorter day,
+        // and no other path to the row may either.
+        val day = openOrGet(bondId, window, lagos, now)
+
+        shouldThrow<IllegalArgumentException> {
+            transactions.executeWithoutResult { days.update(day.copy(endsAt = day.endsAt.minusSeconds(1))) }
+        }
+        find(day.id).shouldNotBeNull().endsAt shouldBe window.endsAt
+    }
+
+    @Test
     fun `V12 admits an empty span and refuses an inverted one`() {
         val at = "2026-09-28T23:00:00Z"
         rawInsert(UUID.randomUUID(), at, at) shouldBe 1

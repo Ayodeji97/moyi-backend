@@ -53,7 +53,11 @@ internal class BondDayEntity(
     var anchorTimezone: String,
     @Column(nullable = false, updatable = false)
     var startsAt: Instant,
-    @Column(nullable = false, updatable = false)
+    // Updatable, alone among the three columns that describe the day: an
+    // unsettled day's end may move later when a westward anchor change merges
+    // it into its successor's start (ruling P10, `BondDay.extendedTo`).
+    // `startsAt` and `anchorTimezone` above stay `updatable = false`.
+    @Column(nullable = false)
     var endsAt: Instant,
     @Column(nullable = false)
     var entryCount: Short,

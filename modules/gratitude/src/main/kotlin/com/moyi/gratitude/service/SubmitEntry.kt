@@ -374,6 +374,15 @@ internal class SubmitEntry(
      * re-read under that lock** — the class KDoc's note on I3. What
      * [BondDayStore.openOrGet] itself returned is not used: its
      * `entryCount`/`status`/`closedAt` predate the lock.
+     *
+     * **Then the row's span is brought up to [window]** (ruling P10): a row
+     * opened before a westward anchor change still ends where the calendar
+     * said then, and the calendar now runs the day on to its successor's
+     * start (plan R3). [BondDay.extendedTo] moves `ends_at` later — only
+     * later, and only on an unsettled day — here, under the day's lock and
+     * before any entry is inserted, so no entry is ever filed on a row whose
+     * span does not contain it. Both callers come through here, the BR-3a
+     * redirect included.
      */
     private fun openAndLock(
         membership: BondMembership,
@@ -387,7 +396,10 @@ internal class SubmitEntry(
         val zone = ZoneId.of(membership.anchorTimeline.zoneIdAt(window.startsAt))
         val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
         val opened = days.openOrGet(membership.bondId, window, zone, now, openStatus)
-        return days.lockAndFind(opened.id)
+        val locked = days.lockAndFind(opened.id)
+        val extended = locked.extendedTo(window)
+        if (extended != locked) days.update(extended)
+        return extended
     }
 
     private companion object {

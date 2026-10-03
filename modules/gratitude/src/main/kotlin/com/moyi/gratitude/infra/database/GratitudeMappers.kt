@@ -51,15 +51,22 @@ internal fun BondDayEntity.toDomain(): BondDay =
  * Carries a changed [BondDay] onto the managed entity it came from — the
  * update path, for [BondDayStore.update].
  *
- * `id`, `bondId`, `date`, `anchorTimezone`, `startsAt`, `endsAt` and
- * `createdAt` are not copied: none of them is a bond-day's to change after it
- * opens — the span above all, per [BondDay]'s own KDoc on why the interval it
- * was resolved against never moves. Neither is `version`, which is Hibernate's to increment — assigning
- * it here would fight the optimistic lock rather than use it.
+ * `id`, `bondId`, `date`, `anchorTimezone`, `startsAt` and `createdAt` are not
+ * copied: none of them is a bond-day's to change after it opens. Neither is
+ * `version`, which is Hibernate's to increment — assigning it here would
+ * fight the optimistic lock rather than use it.
+ *
+ * **`endsAt` is copied, and may only move later** (ruling P10): the one
+ * change to a day's span is [BondDay.extendedTo]'s, for the day a westward
+ * anchor change merged into its successor's start. The `require` below is the
+ * same extend-only rule, restated at the last point before the row is
+ * written, so no other path to this function can shorten a day.
  */
 internal fun BondDay.applyTo(entity: BondDayEntity) {
     require(entity.getId() == id.value) { "cannot apply a bond-day onto a different bond-day's row" }
+    require(!endsAt.isBefore(entity.endsAt)) { "a bond-day's end only ever moves later: ${entity.endsAt}, not $endsAt" }
     entity.status = status
+    entity.endsAt = endsAt
     entity.entryCount = entryCount.toShort()
     entity.revealedAt = revealedAt
     entity.closedAt = closedAt

@@ -54,7 +54,13 @@ internal class BondDayStore(
      * §3.1). Nothing here derives a span from [zone]; [zone] is only the
      * snapshot `anchor_timezone` keeps. The loser of the race gets the row the
      * winner wrote, span included, which is what an existing day must be:
-     * opened once, never recomputed (BR-6). Instants are truncated to
+     * opened once, never recomputed (BR-6). **An existing row is returned as
+     * it stands, even when [window] now ends later than it does** — a
+     * westward anchor change agreed since the row was opened (plan R3). This
+     * method does not reconcile that; a writer does, under the day's lock,
+     * with [BondDay.extendedTo] and [update] (ruling P10). A row nobody
+     * writes to again keeps its shorter `ends_at` until C3's close job
+     * reconciles it from the timeline. Instants are truncated to
      * microseconds, Postgres's own `timestamptz` resolution, so the row read
      * back is the row written.
      */
@@ -139,7 +145,8 @@ internal class BondDayStore(
     }
 
     /**
-     * Writes a changed [BondDay] — the reveal and close transitions later
+     * Writes a changed [BondDay] — an entry counted, a span extended
+     * ([BondDay.extendedTo]), and the reveal and close transitions later
      * slices add. [day] is the aggregate *after* its own transition, as
      * `BondStore.update`'s own KDoc describes; the same warning applies:
      * this is not the layer that prevents a lost update.

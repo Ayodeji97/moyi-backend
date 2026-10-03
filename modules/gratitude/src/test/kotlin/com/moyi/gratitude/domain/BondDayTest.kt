@@ -90,6 +90,63 @@ internal class BondDayTest {
         open.copy(status = BondDayStatus.REVEALED).isSettled shouldBe true
     }
 
+    // ---- extendedTo (ruling P10) -----------------------------------------
+    // Kiritimati's 16th, opened with its natural span [15T10:00Z, 16T10:00Z).
+    // A westward change to Pago Pago then merges it into the successor's
+    // start, 17T11:00Z (plan R3) — a 49-hour day with the same label and start.
+    private val sixteenth = LocalDate.of(2026, 9, 16)
+    private val opensAt = Instant.parse("2026-09-15T10:00:00Z")
+    private val naturalEnd = Instant.parse("2026-09-16T10:00:00Z")
+    private val mergedEnd = Instant.parse("2026-09-17T11:00:00Z")
+    private val kiritimati = ZoneId.of("Pacific/Kiritimati")
+    private val preChange = BondDay.open(dayId, bondId, DayWindow(sixteenth, opensAt, naturalEnd), kiritimati, now).withEntry()
+
+    @Test
+    fun `an unsettled day is extended when its window now ends later, and nothing else about it moves`() {
+        val extended = preChange.extendedTo(DayWindow(sixteenth, opensAt, mergedEnd))
+
+        extended shouldBe preChange.copy(endsAt = mergedEnd)
+        extended.startsAt shouldBe opensAt
+        extended.anchorTimezone shouldBe kiritimati
+    }
+
+    @Test
+    fun `a window ending when the day does, or earlier, changes nothing`() {
+        preChange.extendedTo(DayWindow(sixteenth, opensAt, naturalEnd)) shouldBe preChange
+        preChange.extendedTo(DayWindow(sixteenth, opensAt, naturalEnd.minusSeconds(3600))) shouldBe preChange
+        // Extend-only holds from an already-extended day too.
+        val extended = preChange.extendedTo(DayWindow(sixteenth, opensAt, mergedEnd))
+        extended.extendedTo(DayWindow(sixteenth, opensAt, naturalEnd)) shouldBe extended
+    }
+
+    @Test
+    fun `a settled day is never extended - stamped closed, or closed by its status`() {
+        val merged = DayWindow(sixteenth, opensAt, mergedEnd)
+        // An elapsed SUSPENDED day: stamped, status left alone (spec §6.4).
+        val stamped = preChange.copy(status = BondDayStatus.SUSPENDED, closedAt = now)
+        // Revealed before midnight: a closed status, no stamp yet.
+        val revealed = preChange.copy(status = BondDayStatus.REVEALED)
+        val frozen = preChange.copy(status = BondDayStatus.FROZEN, closedAt = now)
+
+        stamped.extendedTo(merged) shouldBe stamped
+        revealed.extendedTo(merged) shouldBe revealed
+        frozen.extendedTo(merged) shouldBe frozen
+    }
+
+    @Test
+    fun `a window for another label is refused, settled day or not`() {
+        val seventeenth = DayWindow(sixteenth.plusDays(1), opensAt, mergedEnd)
+
+        shouldThrow<IllegalArgumentException> { preChange.extendedTo(seventeenth) }
+        shouldThrow<IllegalArgumentException> { preChange.copy(closedAt = now).extendedTo(seventeenth) }
+    }
+
+    @Test
+    fun `a window that starts anywhere else is refused - a day's start never moves`() {
+        shouldThrow<IllegalArgumentException> { preChange.extendedTo(DayWindow(sixteenth, opensAt.minusSeconds(1), mergedEnd)) }
+        shouldThrow<IllegalArgumentException> { preChange.extendedTo(DayWindow(sixteenth, opensAt.plusSeconds(1), mergedEnd)) }
+    }
+
     @Test
     fun `the eight statuses doc 04 defines all exist, whatever this slice produces`() {
         BondDayStatus.entries.map { it.name } shouldContainExactlyInAnyOrder
