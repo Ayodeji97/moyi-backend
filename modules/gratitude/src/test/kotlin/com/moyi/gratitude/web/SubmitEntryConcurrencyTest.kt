@@ -4,11 +4,15 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
+import com.moyi.gratitude.domain.BondDayStatus
+import com.moyi.gratitude.domain.DayWindow
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
+import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -25,39 +29,46 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.Callable
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
- * Fix round 1, I3: two members writing on the same Bond-day at the same
- * moment is not a race to guard against, it is the ordinary case this
- * product exists for — a couple opening the app together in the evening.
- * `SubmitEntry.submit` locks the day's row before reading `entryCount`/
- * `status` for the update (`BondDayStore.lockAndFind`); this is the proof
- * `bond.web.InviteRaceTest` gives for its own row lock, aimed at this one.
+ * **What this test is for, and what it deliberately no longer claims.**
  *
- * Real threads through the real HTTP stack, released together by a latch —
- * `InviteRaceTest`'s own `inParallel`, copied for the reason `FakeUserDirectory`'s
- * own KDoc gives across this module boundary.
+ * It used to fire two members' first submissions at once and assert one day
+ * row. That is now true for the wrong reason: `SubmitEntry` takes the bond's
+ * row lock before resolving a day (spec 2.1), so the two members serialise and
+ * no insert ever conflicts. Deleting `bond_days_bond_date_key` would not turn
+ * that case red. The fix is not a better assertion but a race the lock does
+ * not cover.
  *
- * **The clock is pinned** (fix round 2, N3): without [TimeConfiguration],
- * [openDay] computes `LocalDate.now(Africa/Lagos)` against the real system
- * clock and the server computes its own, independently, at whatever instant
- * `SubmitEntry` actually runs — two separate reads of "now" that agree every
- * day except the one day a year this test would run within a few
- * milliseconds of Lagos midnight, where they could disagree and
- * `count(*) FROM bond_days shouldBe 1` would fail for a reason that has
- * nothing to do with the lock this test exists to prove. Pinning [NOW] well
- * away from any midnight and deriving [openDay]'s date from the same
- * [MutableClock] the server reads removes the second source of truth
- * entirely, rather than narrowing the window it could disagree in.
+ * The close job is that race. It takes no bond lock (plan R1), so a sweep
+ * opening a missing date can collide with a member writing that same date.
+ * The unique `(bond_id, date)` index is what makes that safe, and
+ * [a lock-free opener holding a new day makes a submission queue on the index]
+ * drives exactly it.
+ *
+ * **Deterministic, not a barrier race.** The sweep's transaction inserts the
+ * day and holds it uncommitted; the submission is then started and observed,
+ * through `pg_blocking_pids`, queued behind the sweep on the index entry.
+ * Only then does the sweep commit. Without the index there is nothing to wait
+ * on, the submission is never blocked, and the test fails on its first
+ * assertion instead of passing by timing.
+ *
+ * The clock is pinned (fix round 2, N3) so the submission's date is the one
+ * the sweep opens, far from any midnight.
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
@@ -68,6 +79,7 @@ internal class SubmitEntryConcurrencyTest(
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
     @Autowired private val clock: MutableClock,
+    @Autowired private val sweepRunner: SweepRunner,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -84,25 +96,81 @@ internal class SubmitEntryConcurrencyTest(
     }
 
     @Test
-    fun `two members submitting on the same day at the same moment - both 201, one day at entry_count 2`() {
+    fun `a lock-free opener holding a new day makes a submission queue on the index, then share its row`() {
         val ada = users.verified("Ada")
         val bea = users.verified("Bea")
         val created = createBond(ada)
         val bondId = bondIdOf(created)
         accept(bea, codeOf(created)).status shouldBe 200
 
-        // The day is pre-created, committed, before either submission starts.
-        // This is deliberate, not incidental: `openOrGet`'s own native
-        // `INSERT ... ON CONFLICT DO NOTHING` already serialises two
-        // concurrent *first* writes to a brand-new day (the second blocks on
-        // the first transaction's row-level lock until it commits, then reads
-        // the committed state) — so a race against a day that does not exist
-        // yet never actually reaches the read-modify-write this test is
-        // about. The exposure is a day that already exists when both
-        // transactions start: an ordinary evening where the day opened
-        // hours ago and both members happen to write within the same
-        // instant.
-        openDay(bondId)
+        val date = NOW.atZone(LAGOS).toLocalDate()
+        val window =
+            DayWindow(
+                date = date,
+                startsAt = date.atStartOfDay(LAGOS).toInstant(),
+                endsAt = date.plusDays(1).atStartOfDay(LAGOS).toInstant(),
+            )
+        val opened = CompletableFuture<Int>() // the sweep's pid, completed only after its INSERT ran
+        val commit = CountDownLatch(1)
+        val pool = Executors.newCachedThreadPool()
+        try {
+            // The close job's shape: open the day directly, no bond lock, and
+            // stay in the transaction.
+            val sweep: Future<UUID> =
+                pool.submit<UUID> {
+                    try {
+                        sweepRunner.inTransaction { days ->
+                            val day = days.openOrGet(UUID.fromString(bondId), window, LAGOS, NOW, BondDayStatus.OPEN)
+                            opened.complete(jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!)
+                            check(commit.await(20, TimeUnit.SECONDS)) { "the sweep was never told to commit" }
+                            day.id.value
+                        }
+                    } catch (e: Throwable) {
+                        // A sweep that dies before holding the day must fail the test now, with its cause, not as a timeout.
+                        opened.completeExceptionally(e)
+                        throw e
+                    }
+                }
+            val sweepPid = opened.get(10, TimeUnit.SECONDS)
+
+            val submission = pool.submit<MockHttpServletResponse> { submit(ada, bondId, """{"text":"thank you"}""") }
+            awaitBlockedOrDone(sweepPid, submission)
+            // Drop `bond_days_bond_date_key` and the submission's ON CONFLICT
+            // has no conflict to wait on: it writes a second row, finishes,
+            // and this is where the test goes red.
+            submission.isDone shouldBe false
+
+            commit.countDown()
+            val sweptId = sweep.get(10, TimeUnit.SECONDS)
+            submission.get(10, TimeUnit.SECONDS).status shouldBe 201
+
+            jdbc.queryForObject(
+                "SELECT count(*) FROM bond_days WHERE bond_id = ?::uuid AND date = ?",
+                Int::class.java,
+                bondId,
+                date,
+            ) shouldBe
+                1
+            jdbc.queryForObject("SELECT id FROM bond_days WHERE bond_id = ?::uuid", UUID::class.java, bondId) shouldBe sweptId
+            jdbc.queryForObject("SELECT entry_count FROM bond_days", Int::class.java) shouldBe 1
+            jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 1
+        } finally {
+            commit.countDown()
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `two members submitting a first entry at once - both 201, one day, entry_count 2 (the bond lock, not the index)`() {
+        // This case now proves the LOCK: both first submissions queue on the
+        // bonds row (spec 2.1), so no insert conflicts and the index is never
+        // consulted. It is kept for the read-modify-write on entry_count, and
+        // named so nobody reads it as proof of the constraint again.
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        accept(bea, codeOf(created)).status shouldBe 200
 
         val statuses =
             inParallel(
@@ -112,38 +180,11 @@ internal class SubmitEntryConcurrencyTest(
                 ),
             ).map { it.status }
 
-        // Without the row lock this is where it fails: one 201 and one 500
-        // (ObjectOptimisticLockingFailureException, uncaught), because both
-        // transactions read entryCount = 0 and both computed 1. Proven by
-        // temporarily reverting SubmitEntry.kt's lockAndFind call — see the
-        // fix report.
         statuses shouldContainExactlyInAnyOrder listOf(201, 201)
         jdbc.queryForObject("SELECT count(*) FROM bond_days", Int::class.java) shouldBe 1
         jdbc.queryForObject("SELECT entry_count FROM bond_days", Int::class.java) shouldBe 2
         jdbc.queryForObject("SELECT status FROM bond_days", String::class.java) shouldBe "PARTIAL"
         jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 2
-    }
-
-    /**
-     * Opens today's Bond-day for [bondId] directly, committed before the
-     * race starts — see the test's own comment. "Today" is read off [clock],
-     * the same [MutableClock] `SubmitEntry` reads through this context's
-     * `@Primary` bean, not a second, independent `LocalDate.now()` — see
-     * the class KDoc's own note on N3.
-     */
-    private fun openDay(bondId: String) {
-        val today = clock.instant().atZone(LAGOS).toLocalDate()
-        jdbc.update(
-            """
-            INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, entry_count, created_at, version)
-            VALUES (?, ?::uuid, ?, 'OPEN', 'Africa/Lagos', ?, ?, 0, now(), 0)
-            """.trimIndent(),
-            UUID.randomUUID(),
-            bondId,
-            today,
-            java.sql.Timestamp.from(today.atStartOfDay(LAGOS).toInstant()),
-            java.sql.Timestamp.from(today.plusDays(1).atStartOfDay(LAGOS).toInstant()),
-        )
     }
 
     /** Runs every call on its own thread and releases them together — `InviteRaceTest`'s own helper. */
@@ -167,6 +208,21 @@ internal class SubmitEntryConcurrencyTest(
             futures.map { it.get(30, TimeUnit.SECONDS) }
         } finally {
             pool.shutdownNow()
+        }
+    }
+
+    /** Until [waiter] is either finished or genuinely queued behind [holderPid] — `SubmitEntryBondLockTest`'s own wait. */
+    private fun awaitBlockedOrDone(
+        holderPid: Int,
+        waiter: Future<*>,
+    ) {
+        await().atMost(Duration.ofSeconds(10)).until {
+            waiter.isDone ||
+                jdbc.queryForObject(
+                    "SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))",
+                    Int::class.java,
+                    holderPid,
+                )!! > 0
         }
     }
 
@@ -210,8 +266,27 @@ internal class SubmitEntryConcurrencyTest(
     private fun bondIdOf(response: MockHttpServletResponse): String =
         Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
 
+    /**
+     * The close job's seat, as the test needs it: a [BondDayStore] and a
+     * transaction boundary of the test's own choosing, bundled so the test
+     * constructor stays under detekt's parameter ceiling (field injection is
+     * banned by `ArchitectureTest`).
+     */
+    class SweepRunner(
+        private val days: BondDayStore,
+        private val transactions: PlatformTransactionManager,
+    ) {
+        fun <T : Any> inTransaction(block: (BondDayStore) -> T): T = TransactionTemplate(transactions).execute { block(days) }
+    }
+
     @TestConfiguration
     class TimeConfiguration {
+        @Bean
+        fun sweepRunner(
+            days: BondDayStore,
+            transactions: PlatformTransactionManager,
+        ): SweepRunner = SweepRunner(days, transactions)
+
         @Bean
         @Primary
         fun mutableClock(): MutableClock = MutableClock(start = NOW)
