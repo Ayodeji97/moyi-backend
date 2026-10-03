@@ -32,4 +32,5 @@ having a teammate review the PR:
 - [ ] OpenAPI spec regenerated if the API changed
 - [ ] Docs updated in this PR if `06`/`07`/other docs are now wrong
 - [ ] ADR written if an architectural choice was made
+- [ ] `CLAUDE.md` updated if a rule it states has changed (and `AGENTS.md`, if it is one of the four repeated there)
 - [ ] A line added to `docs/learning-log.md`
