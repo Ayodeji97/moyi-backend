@@ -105,9 +105,16 @@ internal class SubmitEntryConcurrencyTest(
     fun `a lock-free opener holding a new day makes a submission queue on the index, then share its row`() {
         val ada = users.verified("Ada")
         val bea = users.verified("Bea")
+        // Created the day before, so that today is a whole Lagos day on the
+        // bond's calendar. A bond's first day is clipped to its creation, and
+        // the window the sweep opens below must be the calendar's own: a
+        // submission that finds a row starting anywhere else refuses it
+        // (`BondDay.extendedTo`, ruling P10).
+        clock.set(NOW.minusSeconds(SECONDS_PER_DAY))
         val created = createBond(ada)
         val bondId = bondIdOf(created)
         accept(bea, codeOf(created)).status shouldBe 200
+        clock.set(NOW)
 
         val date = NOW.atZone(LAGOS).toLocalDate()
         val window =
@@ -299,6 +306,7 @@ internal class SubmitEntryConcurrencyTest(
 
     private companion object {
         private val LAGOS: ZoneId = ZoneId.of("Africa/Lagos")
+        private const val SECONDS_PER_DAY = 86_400L
 
         /** Midday UTC — midday-plus-one in Africa/Lagos, nowhere near a midnight boundary either side (fix round 2, N3). */
         val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
