@@ -227,6 +227,38 @@ internal class EntriesEndpointTest(
         jdbc.queryForObject("SELECT intended_at FROM entries", java.sql.Timestamp::class.java)!!.toInstant() shouldBe NOW
     }
 
+    /**
+     * `timestamptz` keeps microseconds; a client may send nanoseconds. The
+     * claim is truncated where the server's own `now` is, before anything is
+     * decided or stored, for two reasons this test holds one each:
+     *
+     * - a fresh `201` renders the instant from memory and a replay from the
+     *   row, and the two must be the same bytes;
+     * - pgjdbc *rounds* what it is handed, so the last half-microsecond of a
+     *   day would be stored as the first instant of the next one — outside
+     *   the span of the day the entry is filed on.
+     *
+     * Lagos's 14th ends at 14T23:00:00Z; the claim is 400 ns before that.
+     */
+    @Test
+    fun `an intendedAt finer than a microsecond is truncated, so the row stays inside its day and a replay matches`() {
+        val key = UUID.randomUUID().toString()
+        val body = """{"text":"just before midnight","intendedAt":"2026-09-14T22:59:59.9999996Z"}"""
+
+        val first = submit(ada, bondId, body, key)
+
+        first.status shouldBe 201
+        first.contentAsString shouldContain "\"date\":\"2026-09-14\""
+        intendedAtOf(first) shouldBe Instant.parse("2026-09-14T22:59:59.999999Z")
+        jdbc.queryForObject(
+            "SELECT e.intended_at >= d.starts_at AND e.intended_at < d.ends_at FROM entries e JOIN bond_days d ON d.id = e.bond_day_id",
+            Boolean::class.java,
+        ) shouldBe true
+        val replay = submit(ada, bondId, body, key)
+        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
+        replay.contentAsString shouldBe first.contentAsString
+    }
+
     @Test
     fun `the creator may write before anybody joins, and that day is suspended`() {
         // 02 J1: never gate the creator on the invitee. Doc 04 §8.3a as the

@@ -234,6 +234,11 @@ internal class SubmitEntry(
         // renders these instants from memory and a replay from the row, and
         // the two must not differ below the microsecond.
         val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
+        // The client's claim likewise, and before anything is decided from it.
+        // Truncated, not left to the driver: pgjdbc rounds, and the last
+        // half-microsecond of a day would round up into the next one —
+        // stored outside the span of the day it was filed on.
+        val intendedAt = draft.intendedAt?.truncatedTo(ChronoUnit.MICROS)
 
         val submission =
             try {
@@ -251,7 +256,7 @@ internal class SubmitEntry(
                             val membership = access.lockMembershipOf(userId, bondId)
                             if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
                             if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()
-                            val (view, entryId) = write(membership, text, draft, now)
+                            val (view, entryId) = write(membership, text, intendedAt, now)
                             // The key records what this produced by identity, never the words.
                             IdempotentResult(view, entryId.value, ResultKind.ENTRY, CREATED)
                         }
@@ -305,14 +310,14 @@ internal class SubmitEntry(
     private fun write(
         membership: BondMembership,
         text: EntryText,
-        draft: EntryDraft,
+        intendedAt: Instant?,
         now: Instant,
     ): Pair<EntryView, EntryId> {
         val bondId = membership.bondId
         val timeline = membership.anchorTimeline
         val calendar = timeline.asCalendar()
         val claimed =
-            DayAssignment.resolve(now, draft.intendedAt, calendar) { candidate ->
+            DayAssignment.resolve(now, intendedAt, calendar) { candidate ->
                 days.findByBondAndDate(bondId, candidate)?.isSettled == true
             }
         val claimedDay = openAndLock(membership, claimed.bounds, now)
