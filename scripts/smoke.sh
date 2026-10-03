@@ -13,6 +13,17 @@
 # and the same ETag (doc 26 §2.1, T-09). Since slice F it drives
 # every rate limit in doc 06 §4 to its 429 (FR-012, ADR-0023) and checks the
 # X-RateLimit-* headers and Retry-After on the way, against the compose Valkey.
+# Since the C1 rework it proves that a confirmed zone change is reported at once
+# and decides no date until the current Bond-day ends (BR-6, ADR-0031).
+#
+# If the application refuses to start on a Flyway checksum mismatch: V11, V12
+# and V13 were edited in place while unmerged (ADR-0031), so a database that
+# applied an earlier copy of them no longer matches. The repair is deliberate
+# and is the human's to run, never this script's:
+#   docker compose exec -T postgres psql -U moyi -d moyi \
+#     -c "UPDATE flyway_schema_history SET checksum = NULL WHERE version IN ('11','12','13');"
+# That only stops Flyway refusing. It re-runs nothing, so tables created by an
+# earlier copy of those migrations keep their earlier columns.
 #
 # What it does not prove: anything the unit and integration tests already
 # prove. This is the "run it, do not read it" check (docs/learning-log.md,
@@ -770,6 +781,62 @@ expect "a lone creator's bond is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST
 SOLO_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
 expect "writing before a partner has joined is still 201" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$SOLO_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"writing alone, for now"}'
 expect "…and the day it landed on opens SUSPENDED, not OPEN" 200 '"status":"SUSPENDED"' -- "$API/bonds/$SOLO_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
+
+echo; echo "gratitude — a confirmed zone change decides no date until tomorrow (BR-6, ADR-0031 §3)"
+flush_buckets
+verified_account "mover" "203.0.113.72";  MOVER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "stayer" "203.0.113.73"; STAYER_ACCESS="$ACCOUNT_ACCESS"
+expect "a bond anchored on Africa/Lagos is 201" 201 '"anchorTimezone":"Africa/Lagos"' -- -X POST "$API/bonds" -H "Authorization: Bearer $MOVER_ACCESS" -d "$(bond_body "Us")"
+HANDOFF_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+HANDOFF_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "the other member joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$HANDOFF_CODE/accept" -H "Authorization: Bearer $STAYER_ACCESS"
+
+# The check is only worth making if the two zones disagree about today's date
+# right now, so the new zone is chosen by the clock: Kiritimati (+14) is already
+# on tomorrow from 11:00 in Lagos (+1); before that, Pago Pago (-11) is still on
+# yesterday. Either way the Lagos date and the new zone's date differ, and an
+# implementation that let the confirmed zone decide today's date would file the
+# entry below on the wrong one. Prints "<new zone> <Lagos date> <new zone's date>".
+zone_plan() {
+  python3 - <<'PY'
+from datetime import datetime
+from zoneinfo import ZoneInfo
+lagos = datetime.now(ZoneInfo("Africa/Lagos"))
+zone = "Pacific/Kiritimati" if lagos.hour >= 11 else "Pacific/Pago_Pago"
+print(zone, lagos.date().isoformat(), datetime.now(ZoneInfo(zone)).date().isoformat())
+PY
+}
+read -r NEW_ZONE LAGOS_DATE NEW_ZONE_DATE <<<"$(zone_plan)"
+[ "$LAGOS_DATE" != "$NEW_ZONE_DATE" ] && pass "the zones disagree about today: Lagos $LAGOS_DATE, $NEW_ZONE $NEW_ZONE_DATE" || fail "zone plan" "Lagos and $NEW_ZONE agree on $LAGOS_DATE, so this section would prove nothing"
+
+expect "proposing $NEW_ZONE is 200" 200 "\"proposedTimezone\":\"$NEW_ZONE\"" -- -X PATCH "$API/bonds/$HANDOFF_BOND/timezone" -H "Authorization: Bearer $MOVER_ACCESS" -d "{\"anchorTimezone\":\"$NEW_ZONE\"}"
+HANDOFF_PROPOSAL_ID="$(python3 -c "import json,sys; print(json.load(sys.stdin)['pendingTimezoneChange']['id'])" <<<"$LAST_BODY")"
+expect "the other member confirms: 200" 200 "\"anchorTimezone\":\"$NEW_ZONE\"" -- -X POST "$API/bonds/$HANDOFF_BOND/timezone/confirm" -H "Authorization: Bearer $STAYER_ACCESS" -d "{\"proposalId\":\"$HANDOFF_PROPOSAL_ID\"}"
+
+# The request is recorded the instant consent completes (B5, unchanged)…
+expect "GET /bonds/{id} reports the new zone at once" 200 "\"anchorTimezone\":\"$NEW_ZONE\"" -- "$API/bonds/$HANDOFF_BOND" -H "Authorization: Bearer $MOVER_ACCESS"
+# …and decides nothing yet: today is still the old zone's day, for a read and
+# for a write, on a day that had no row when the change was confirmed. That
+# last part is what a zone string copied at row creation could not do.
+expect "today is still the Lagos date, before anyone has written" 200 "\"bondDay\":{\"date\":\"$LAGOS_DATE\"" -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $MOVER_ACCESS"
+expect "an entry written straight after the change is 201" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$HANDOFF_BOND/entries" -H "Authorization: Bearer $MOVER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"written the minute we agreed to move"}'
+HANDOFF_ENTRY_BODY="$LAST_BODY"
+# Re-planned after the write: if Lagos midnight passed between the plan and the
+# entry, the date this section expects is no longer the one the server used.
+read -r _ LAGOS_DATE_AFTER _ <<<"$(zone_plan)"
+if [ "$LAGOS_DATE_AFTER" != "$LAGOS_DATE" ]; then
+  echo "  skip the landing-date checks (Lagos midnight passed mid-section)"
+else
+  [[ "$HANDOFF_ENTRY_BODY" == *"\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it lands on the old zone's date, $LAGOS_DATE" || fail "entry date" "expected date $LAGOS_DATE: ${HANDOFF_ENTRY_BODY:0:250}"
+  [[ "$HANDOFF_ENTRY_BODY" != *"\"date\":\"$NEW_ZONE_DATE\""* ]] && pass "…not on $NEW_ZONE's, $NEW_ZONE_DATE" || fail "entry redated" "the entry was filed under the new zone: ${HANDOFF_ENTRY_BODY:0:250}"
+  expect "the partner's today is that same day, PARTIAL" 200 "\"bondDay\":{\"date\":\"$LAGOS_DATE\",\"status\":\"PARTIAL\"}" -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $STAYER_ACCESS"
+  # The rows behind it: the day keeps the zone it began under, and the timeline
+  # holds a closed Lagos interval followed by an open one that starts later.
+  DAY_ZONE="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT anchor_timezone FROM bond_days WHERE bond_id='$HANDOFF_BOND' AND date='$LAGOS_DATE'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+  case "$DAY_ZONE" in psql-unavailable) echo "  skip the bond_days check";; Africa/Lagos) pass "…the day's row keeps Africa/Lagos";; *) fail "day zone" "expected Africa/Lagos, got '$DAY_ZONE'";; esac
+  INTERVALS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT string_agg(zone || CASE WHEN effective_to IS NULL THEN ':open' ELSE ':closed' END || CASE WHEN effective_from > now() THEN ':future' ELSE ':past' END, ',' ORDER BY effective_from) FROM bond_anchor_intervals WHERE bond_id='$HANDOFF_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+  case "$INTERVALS" in psql-unavailable) echo "  skip the timeline check";; "Africa/Lagos:closed:past,$NEW_ZONE:open:future") pass "…and the timeline hands over later: $INTERVALS";; *) fail "timeline" "expected Africa/Lagos:closed:past,$NEW_ZONE:open:future, got '$INTERVALS'";; esac
+fi
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
