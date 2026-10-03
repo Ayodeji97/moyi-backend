@@ -14,6 +14,7 @@ import org.springframework.http.MediaType
 import org.springframework.web.filter.OncePerRequestFilter
 import org.springframework.web.method.HandlerMethod
 import org.springframework.web.servlet.HandlerInterceptor
+import org.springframework.web.util.WebUtils
 import java.io.BufferedReader
 import java.io.ByteArrayInputStream
 import java.io.InputStreamReader
@@ -52,12 +53,28 @@ import java.util.UUID
  *
  * **Requires the request's body to be re-readable.** [preHandle] reads it to
  * fingerprint it before the handler's own `@RequestBody` reads it again,
- * which an ordinary `HttpServletRequest` does not support, so a request must
- * already be wrapped by [IdempotencyRequestCachingFilter]. Checked rather
- * than assumed: an unwrapped request fails loudly in [preHandle], before
- * anything is written. And a handler whose request never passed through
- * this interceptor at all — the import forgotten — fails loudly in
- * [requestOf] rather than running unprotected.
+ * which an ordinary `HttpServletRequest` does not support, so
+ * [IdempotencyRequestCachingFilter] wraps the request and [preHandle] asks
+ * that wrapper to buffer the body — **here, and only for an `@Idempotent`
+ * handler**, bounded by [MAX_BODY_BYTES].
+ *
+ * **What a request the body cannot be taken from is answered with** (A5,
+ * whole-branch review — every one of these used to be a `500`, because an
+ * unwrapped request was treated as a wiring bug whatever the reason):
+ *
+ * - **No declared length — `Transfer-Encoding: chunked`** — works. It is what
+ *   a streaming client sends when it does not know the size up front, and the
+ *   KMP client's engines do. The body is read up to the bound and no further.
+ * - **Longer than [MAX_BODY_BYTES]** — `413`, whether the length was declared
+ *   (refused unread) or discovered while reading a chunked body.
+ * - **Multipart** — not wrapped, not prepared; the handler's `@RequestBody`
+ *   has no converter for it and Spring answers `415` itself.
+ * - **The filter never ran at all** — the one case that *is* a wiring bug,
+ *   and still fails loudly: [IdempotencyRequestCachingFilter] marks every
+ *   request it sees, so its absence is told apart from its declining.
+ *
+ * A handler whose request never passed through this interceptor — the import
+ * forgotten — fails loudly in [requestOf] rather than running unprotected.
  */
 class IdempotencyInterceptor(
     private val fingerprint: RequestFingerprint,
@@ -67,13 +84,36 @@ class IdempotencyInterceptor(
         response: HttpServletResponse,
         handler: Any,
     ): Boolean {
-        (handler as? HandlerMethod)?.getMethodAnnotation(Idempotent::class.java) ?: return true
-        check(request is ReplayableHttpServletRequest) {
+        val isIdempotent = (handler as? HandlerMethod)?.getMethodAnnotation(Idempotent::class.java) != null
+        // `null` for a request the filter declined — a multipart body. Nothing
+        // is prepared for it; the handler's @RequestBody cannot read
+        // multipart, and Spring's own 415 is the answer.
+        val replayable = if (isIdempotent) replayableOf(request) else null
+        if (replayable != null) prepare(replayable, request)
+        return true
+    }
+
+    /**
+     * The wrapper [IdempotencyRequestCachingFilter] put on [request], found
+     * through any wrapper another filter put around it since (Spring
+     * Security's, for one) rather than by the request's own type. `null`
+     * when the filter saw the request and declined it; a loud failure when
+     * the filter never saw it at all, which is the wiring bug.
+     */
+    private fun replayableOf(request: HttpServletRequest): ReplayableHttpServletRequest? {
+        val replayable = WebUtils.getNativeRequest(request, ReplayableHttpServletRequest::class.java)
+        check(replayable != null || request.getAttribute(IdempotencyRequestCachingFilter.SEEN_ATTRIBUTE) != null) {
             "@Idempotent on ${request.method} ${request.requestURI}, but IdempotencyRequestCachingFilter is not " +
                 "registered for this request. Without it the body can be read only once, and the handler's own " +
                 "@RequestBody would read an exhausted stream. Register the filter wherever this interceptor is wired."
         }
+        return replayable
+    }
 
+    private fun prepare(
+        replayable: ReplayableHttpServletRequest,
+        request: HttpServletRequest,
+    ) {
         val key = request.getHeader(HEADER)?.trim()
         if (key.isNullOrBlank()) throw IdempotencyKeyRequiredException()
 
@@ -88,10 +128,11 @@ class IdempotencyInterceptor(
                 key = key,
                 method = method,
                 path = path,
-                fingerprint = fingerprint.of(method, path, request.inputStream.readBytes()),
+                // After the caller is known (`userId` above is evaluated first):
+                // an unauthenticated request's body is never read. 413 from here.
+                fingerprint = fingerprint.of(method, path, replayable.buffered(MAX_BODY_BYTES)),
             ),
         )
-        return true
     }
 
     /**
@@ -116,6 +157,15 @@ class IdempotencyInterceptor(
         private const val REQUEST_ATTRIBUTE = "com.moyi.common.web.idempotency.request"
 
         /**
+         * 1 MiB: the most an `@Idempotent` request's body may be. Every body
+         * such a route takes today is small — `EntryText.MAX_OCTETS` bounds
+         * an entry's text at 8,192 octets (FR-041) — so this is generous
+         * headroom, not a tuned limit. Past it the request is `413`. Raise
+         * it only alongside a concrete need for a larger `@Idempotent` body.
+         */
+        const val MAX_BODY_BYTES = 1024 * 1024
+
+        /**
          * The [IdempotentRequest] [preHandle] prepared for this request. Fails
          * loudly when there is none — the handler is not `@Idempotent`, or no
          * context imported [IdempotencyConfiguration] — because the
@@ -130,109 +180,113 @@ class IdempotencyInterceptor(
 }
 
 /**
- * Wraps every request so its body can be read twice: once by
- * [IdempotencyInterceptor], to fingerprint it before the handler runs, and
- * once by the handler's own `@RequestBody`. The response is no longer
- * wrapped: nothing reads it back since the record moved into the handler's
- * transaction ([IdempotentExecution]).
+ * Makes a request's body readable twice: once by [IdempotencyInterceptor], to
+ * fingerprint it before the handler runs, and once by the handler's own
+ * `@RequestBody`. The response is not wrapped: nothing reads it back since
+ * the record moved into the handler's transaction ([IdempotentExecution]).
  *
- * **Not `org.springframework.web.util.ContentCachingRequestWrapper`,
- * despite the brief naming it.** That class only *records* what something
- * else reads through it — its own `getInputStream()` is created once and
- * memoised, so a second caller reading from it (the handler, after the
- * interceptor already read to hash the body) gets an exhausted stream and an
- * empty body, which breaks `@RequestBody` on every `@Idempotent` endpoint.
- * [ReplayableHttpServletRequest] instead drains the body once, eagerly, in
- * its constructor, and serves every subsequent [getInputStream] call from
- * that in-memory copy — genuinely repeatable, not merely recorded. Found by
- * reasoning through Spring's own source before writing a test that would
- * have failed opaquely on every `@Idempotent` `POST`.
+ * **This filter reads nothing.** It only puts a [ReplayableHttpServletRequest]
+ * around the request. The body is buffered later, by [IdempotencyInterceptor]
+ * — once handler mapping has said the route is `@Idempotent`, once the caller
+ * is known, and never past [IdempotencyInterceptor.MAX_BODY_BYTES]. Until
+ * then, and on every route that is not `@Idempotent`, the wrapper passes the
+ * container's own stream straight through.
  *
- * **Only applies to `POST`/`PUT`/`PATCH`, never to a multipart body, and
- * never above [MAX_CACHEABLE_BYTES]** (review round 1, Important #3; the
- * size bound added by the whole-branch review, F3). A bare `Filter` bean is
- * registered by Spring Boot for every path, in every module that depends on
- * `common:web` — and draining every body eagerly is wrong for a `GET`
- * (idempotency is meaningless on a method HTTP already defines as
- * idempotent, so `@Idempotent` is never put on one)
- * and wasteful for `actuator`/the OpenAPI document. Scoped by method and
- * content type instead of a `FilterRegistrationBean` with a URL allowlist:
- * `common:web` cannot know in advance which path in which module ends up
- * `@Idempotent`, so a path-based allowlist here would have to be guessed and
- * kept in sync by hand; a rule about *what kind of request this filter's
- * work could ever be needed for* does not.
+ * It used to buffer eagerly, here: every `POST`/`PUT`/`PATCH` body, on every
+ * path, before anything knew whether the route needed it. That had to be
+ * bounded by the declared `Content-Length` (whole-branch review, F3: this
+ * filter runs on public paths too, and an unauthenticated multi-megabyte
+ * `POST /auth/login` was read into memory whole) — and the bound in turn
+ * refused every request with *no* declared length, which is what a chunked
+ * body is. Those then reached an `@Idempotent` handler unwrapped and were a
+ * `500` (A5). Buffering where the need is known removes both problems: a
+ * route that is not `@Idempotent` is never buffered at all, and one that is
+ * can take a chunked body, read no further than the bound.
  *
- * **Size is the half that argument does not consider, and it matters for a
- * reason method/content-type scoping does not touch: this filter runs
- * before Spring Security and before handler mapping, on every path,
- * authenticated or not.** [ReplayableHttpServletRequest]'s constructor calls
- * `request.inputStream.readBytes()` eagerly — the whole body, materialised
- * in memory, before `@Idempotent` is even known to apply, before Jackson
- * could stream-fail on a malformed body, and before `RateLimitInterceptor`
- * (an MVC interceptor, which runs *after* every servlet filter) ever sees
- * the request. `/api/v1/auth/login`, `/auth/register` and `/auth/refresh`
- * are `POST`, public, and JSON — exactly the shape this filter buffers — so
- * an unauthenticated multi-gigabyte `POST` to any of them is read fully into
- * memory by this constructor with no `RateLimitInterceptor` or
- * `server.tomcat.*` body-size limit (none is configured) having had a chance
- * to refuse it first. [shouldNotFilter] adding a `Content-Length` cap closes
- * that: a request whose declared length is missing or exceeds
- * [MAX_CACHEABLE_BYTES] is not wrapped at all, so `@Idempotent` on an
- * endpoint that legitimately needs a larger body is the signal to raise the
- * bound deliberately, not a gap to be found by an oversized request first.
+ * **Not `org.springframework.web.util.ContentCachingRequestWrapper`.** That
+ * class only *records* what something else reads through it — its own
+ * `getInputStream()` is created once and memoised, so a second reader (the
+ * handler, after the interceptor read to hash the body) gets an exhausted
+ * stream and an empty body, which breaks `@RequestBody` on every
+ * `@Idempotent` endpoint. [ReplayableHttpServletRequest] serves every
+ * [HttpServletRequest.getInputStream] call after buffering from its own
+ * in-memory copy — genuinely repeatable, not merely recorded.
+ *
+ * **Wraps `POST`/`PUT`/`PATCH`, never a multipart body.** Scoped by what kind
+ * of request this could ever be needed for, not by a URL allowlist:
+ * `common:web` cannot know which path in which module ends up `@Idempotent`.
+ * A `GET` is not wrapped (HTTP already defines it idempotent, so
+ * `@Idempotent` is never put on one). A multipart body is not wrapped
+ * because it is not read through the input stream by anything this
+ * interceptor could fingerprint — see [IdempotencyInterceptor] for what an
+ * `@Idempotent` route answers one with.
+ *
+ * **Every request it sees is marked** ([SEEN_ATTRIBUTE]), wrapped or not, so
+ * the interceptor can tell "declined" from "not registered" — only the
+ * second is a wiring bug.
+ *
+ * **Where it runs.** A plain `Filter` bean, registered by Spring Boot at the
+ * lowest precedence — so *after* the Spring Security chain (order `-100`)
+ * in the real application, not before it as this KDoc once said. Nothing
+ * here depends on which: the interceptor finds the wrapper through whatever
+ * else wraps the request.
  */
 class IdempotencyRequestCachingFilter : OncePerRequestFilter() {
-    /**
-     * `public`, widened from `OncePerRequestFilter`'s own `protected` — so
-     * [IdempotencyRequestCachingFilterTest] can drive this pure decision
-     * directly, without a full Spring context to prove F3's size bound.
-     */
-    public override fun shouldNotFilter(request: HttpServletRequest): Boolean {
-        val isMultipart = request.contentType?.startsWith(MediaType.MULTIPART_FORM_DATA_VALUE) == true
-        val contentLength = request.contentLengthLong
-        val isOversized = contentLength < 0 || contentLength > MAX_CACHEABLE_BYTES
-        return runCatching { HttpMethod.valueOf(request.method) }.getOrNull() !in APPLICABLE_METHODS || isMultipart || isOversized
-    }
-
     override fun doFilterInternal(
         request: HttpServletRequest,
         response: HttpServletResponse,
         filterChain: FilterChain,
     ) {
-        filterChain.doFilter(ReplayableHttpServletRequest(request), response)
+        request.setAttribute(SEEN_ATTRIBUTE, true)
+        filterChain.doFilter(if (wraps(request)) ReplayableHttpServletRequest(request) else request, response)
     }
 
-    private companion object {
-        val APPLICABLE_METHODS = setOf(HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH)
+    /** Whether [request] is one whose body an `@Idempotent` handler could need twice — a pure function of method and type. */
+    fun wraps(request: HttpServletRequest): Boolean {
+        val isMultipart = request.contentType?.startsWith(MediaType.MULTIPART_FORM_DATA_VALUE) == true
+        return runCatching { HttpMethod.valueOf(request.method) }.getOrNull() in APPLICABLE_METHODS && !isMultipart
+    }
 
-        /**
-         * 1 MiB (whole-branch review, F3): every body this filter's own
-         * callers actually send is small — `EntryText.MAX_OCTETS` bounds an
-         * entry's text at 8,192 octets (FR-041), and every other
-         * `@Idempotent`/write body in this codebase is a handful of fields —
-         * so this is generous headroom over the largest legitimate request
-         * today, not a tuned-to-the-byte limit. A request with no declared
-         * `Content-Length` (chunked transfer, or a client that simply omits
-         * it) is treated as oversized too, deliberately: the attack this
-         * bound exists to stop is exactly a body whose size is not known in
-         * advance, so trusting an absent header would leave the same
-         * unbounded read this fix closes, just reachable by omitting the
-         * header instead of inflating it. Raise this only alongside a
-         * concrete need for a larger `@Idempotent` body, not preemptively.
-         */
-        const val MAX_CACHEABLE_BYTES = 1024L * 1024L
+    companion object {
+        /** Set on every request this filter has seen, wrapped or not. */
+        const val SEEN_ATTRIBUTE = "com.moyi.common.web.idempotency.filter-seen"
+
+        private val APPLICABLE_METHODS = setOf(HttpMethod.POST, HttpMethod.PUT, HttpMethod.PATCH)
     }
 }
 
-private class ReplayableHttpServletRequest(
+/**
+ * A request whose body can be read again **once [buffered] has been called**;
+ * until then it is the request it wraps, stream and all.
+ */
+internal class ReplayableHttpServletRequest(
     request: HttpServletRequest,
 ) : HttpServletRequestWrapper(request) {
-    private val body: ByteArray = request.inputStream.readBytes()
+    private var body: ByteArray? = null
 
-    override fun getInputStream(): ServletInputStream = ReplayableServletInputStream(body)
+    /**
+     * The whole body, read once and kept, or [RequestBodyTooLargeException]
+     * if it is longer than [maxBytes].
+     *
+     * A declared length over the bound is refused without reading a byte. An
+     * undeclared one (chunked) is read to at most one byte past the bound —
+     * that byte is how "too long" is known — so what this holds in memory is
+     * bounded whatever the client sends and however it frames it.
+     */
+    fun buffered(maxBytes: Int): ByteArray {
+        body?.let { return it }
+        if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()
+        val read = request.inputStream.readNBytes(maxBytes + 1)
+        if (read.size > maxBytes) throw RequestBodyTooLargeException()
+        body = read
+        return read
+    }
+
+    override fun getInputStream(): ServletInputStream = body?.let(::ReplayableServletInputStream) ?: super.getInputStream()
 
     override fun getReader(): BufferedReader =
-        BufferedReader(InputStreamReader(ByteArrayInputStream(body), Charset.forName(characterEncoding ?: "UTF-8")))
+        body?.let { BufferedReader(InputStreamReader(ByteArrayInputStream(it), Charset.forName(characterEncoding ?: "UTF-8"))) }
+            ?: super.getReader()
 }
 
 private class ReplayableServletInputStream(
@@ -258,6 +312,19 @@ class IdempotencyKeyRequiredException :
         HttpStatus.UNPROCESSABLE_ENTITY,
         ErrorCode.VALIDATION_FAILED,
         "A required header, Idempotency-Key, was not sent.",
+    )
+
+/**
+ * 413: an `@Idempotent` request's body is longer than
+ * [IdempotencyInterceptor.MAX_BODY_BYTES]. `MALFORMED_REQUEST`, the code
+ * every other body this application cannot take in carries: a client has
+ * nothing more specific to do with it than not to send it.
+ */
+class RequestBodyTooLargeException :
+    ApiException(
+        HttpStatus.CONTENT_TOO_LARGE,
+        ErrorCode.MALFORMED_REQUEST,
+        "The request body is too large.",
     )
 
 /** 422: the same key was already sent against a different method or path, or with a body that hashes differently. */

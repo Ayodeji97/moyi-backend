@@ -280,6 +280,59 @@ class IdempotencyInterceptorTest(
         handlerRuns shouldBe 0
     }
 
+    // ---- a body the caching filter does not hand over ready-made (A5) ------
+
+    /**
+     * MockMvc gives a request with no content a declared length of `-1` — the
+     * same thing a chunked request reports. With nothing to read the body is
+     * empty, and an empty body is what Spring already answers for a required
+     * `@RequestBody`: `400 MALFORMED_REQUEST`. It used to be a `500`, raised
+     * before the handler was reached. (The chunked request *with* a body is
+     * `IdempotencyRealServerTest`'s: MockMvc cannot send one.)
+     */
+    @Test
+    fun `a POST with no body and no declared length is 400, not a 500`() {
+        val response =
+            mockMvc
+                .post(ENTRIES_PATH) {
+                    with { request -> request.apply { userPrincipal = Principal { ada.toString() } } }
+                    header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                    contentType = MediaType.APPLICATION_JSON
+                }.andReturn()
+                .response
+
+        response.status shouldBe 400
+        response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+        handlerRuns shouldBe 0
+    }
+
+    @Test
+    fun `a body over one mebibyte is 413, not a 500, and is never run`() {
+        val response = post(ada, UUID.randomUUID().toString(), """{"text":"${"a".repeat(1024 * 1024)}"}""")
+
+        response.status shouldBe 413
+        response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+        handlerRuns shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM idempotency_keys", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `a multipart body is Spring's own 415, not a 500`() {
+        val response =
+            mockMvc
+                .post(ENTRIES_PATH) {
+                    with { request -> request.apply { userPrincipal = Principal { ada.toString() } } }
+                    header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                    contentType = MediaType.parseMediaType("multipart/form-data; boundary=x")
+                    content = "--x\r\nContent-Disposition: form-data; name=\"text\"\r\n\r\nthank you\r\n--x--\r\n"
+                }.andReturn()
+                .response
+
+        response.status shouldBe 415
+        response.contentAsString shouldContain "\"code\":\"UNSUPPORTED_MEDIA_TYPE\""
+        handlerRuns shouldBe 0
+    }
+
     @TestConfiguration
     class TimeConfiguration {
         @Bean
