@@ -2,6 +2,7 @@ package com.moyi.gratitude.infra.database
 
 import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.Entry
+import com.moyi.gratitude.domain.EntryId
 import org.springframework.stereotype.Component
 
 /**
@@ -48,4 +49,11 @@ internal class EntryStore(
      * as a leak later.
      */
     fun findForDay(bondDayId: BondDayId): List<Entry> = entries.findAllByBondDayId(bondDayId.value).map { it.toDomain() }
+
+    /**
+     * One entry by id, **as it stands now** — a tombstone included (its
+     * `text` is `null`). No authorisation here: the caller checks the bond
+     * and the author before trusting what this returns.
+     */
+    fun find(id: EntryId): Entry? = entries.findById(id.value)?.toDomain()
 }

@@ -1337,7 +1337,7 @@
             "type" : "string"
           }
         }, {
-          "description" : "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the same body returns the first attempt's stored response; the same key with a different body is 422; the same key while the first attempt is still in flight is 409.",
+          "description" : "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the same request returns the first attempt's status and the same resource, re-read and rendered from its current state — never a stored copy: a resource erased since is returned as its tombstone, and a caller who has since lost access gets the refusal a new request would. Only a success is recorded; a request that was refused may be corrected and retried under the same key. The same key with a different method, path or body is 422; the same key while the first attempt is still in flight is 409.",
           "in" : "header",
           "name" : "Idempotency-Key",
           "required" : true,
@@ -1367,7 +1367,7 @@
             "description" : "Created",
             "headers" : {
               "Idempotency-Replayed" : {
-                "description" : "`true` when this response is a stored replay of an earlier request under the same Idempotency-Key (doc 06 §1); absent on a fresh response.",
+                "description" : "`true` when this response answers a replay of an earlier request under the same Idempotency-Key (doc 06 §1): nothing was written again, and the body is the resource as it stands now. Absent on a fresh response.",
                 "schema" : {
                   "type" : "string"
                 }
@@ -2757,7 +2757,7 @@
               "enum" : [ "SUBMITTED", "REVEALED", "DELETED" ]
             },
             "text" : {
-              "type" : "string"
+              "type" : [ "string", "null" ]
             }
           },
           "required" : [ "status" ]

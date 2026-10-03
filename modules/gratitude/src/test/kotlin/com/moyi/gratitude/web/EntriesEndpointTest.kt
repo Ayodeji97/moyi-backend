@@ -317,8 +317,8 @@ internal class EntriesEndpointTest(
 
         val replay = submit(ada, bondId, """{"text":"only once"}""", key)
         replay.status shouldBe 201
-        // V11 stores no response text, so until plan task 7 a replay has no body.
-        replay.contentAsString shouldBe ""
+        // The entry re-read by the id the key recorded — V11 stores no text.
+        replay.contentAsString shouldBe first.contentAsString
         replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
         jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 1
 

@@ -8,8 +8,15 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 import java.time.Clock
 
 /**
- * `@Idempotent`'s three beans (doc 06 §1), wired once here — `@Import` this
- * rather than restating the four `@Bean` methods it replaces.
+ * `@Idempotent`'s beans (doc 06 §1), wired once here — `@Import` this
+ * rather than restating the `@Bean` methods below.
+ *
+ * **One bean it needs and does not define: a [RequestFingerprint]** (ruling
+ * P8). `common:security` provides it (`HmacRequestFingerprint`, keyed by the
+ * personal-data secret) — this module cannot, because it cannot depend on
+ * `common:security`. A context that imports this without one fails at
+ * startup naming that type, rather than quietly fingerprinting with a plain
+ * hash.
  *
  * Fix round 1, I7: three contexts (`IdempotencyTestApplication`, `app.MoyiApplication`,
  * `gratitude.infra.GratitudeTestApplication`) had each hand-copied this exact
@@ -71,11 +78,14 @@ class IdempotencyConfiguration {
     fun idempotencyKeyStore(jdbc: JdbcTemplate): IdempotencyKeyStore = IdempotencyKeyStore(jdbc)
 
     @Bean
-    fun idempotencyInterceptor(
+    fun idempotentExecution(
         store: IdempotencyKeyStore,
         clock: Clock,
         ids: IdGenerator,
-    ): IdempotencyInterceptor = IdempotencyInterceptor(store, clock, ids)
+    ): IdempotentExecution = IdempotentExecution(store, clock, ids)
+
+    @Bean
+    fun idempotencyInterceptor(fingerprint: RequestFingerprint): IdempotencyInterceptor = IdempotencyInterceptor(fingerprint)
 
     @Bean
     fun idempotencyRequestCachingFilter(): IdempotencyRequestCachingFilter = IdempotencyRequestCachingFilter()
@@ -90,9 +100,9 @@ class IdempotencyConfiguration {
      * same reason), so [ORDER] is a fixed, generously late value rather than
      * an arithmetic offset from a constant only the other module owns. A
      * caller a rate limiter would refuse must never reach this interceptor
-     * and reserve an `Idempotency-Key` that a `429` — neither `ex != null`
-     * nor `>= 500`, the two conditions [IdempotencyKeyStore.complete]
-     * discards a reservation under — could then get stored against.
+     * and have its body read and fingerprinted for a request that was never
+     * going to run. (The reservation itself is no longer at stake here: it
+     * lives in the handler's transaction now — [IdempotentExecution].)
      */
     @Bean
     fun idempotencyWebMvcConfigurer(interceptor: IdempotencyInterceptor): WebMvcConfigurer =

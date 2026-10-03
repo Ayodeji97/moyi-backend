@@ -113,7 +113,7 @@ internal class GratitudeCrossTenantTest(
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
+        jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
 

@@ -3,6 +3,11 @@ package com.moyi.gratitude.service
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.common.core.IdGenerator
+import com.moyi.common.web.NotFoundException
+import com.moyi.common.web.idempotency.IdempotentExecution
+import com.moyi.common.web.idempotency.IdempotentRequest
+import com.moyi.common.web.idempotency.IdempotentResult
+import com.moyi.common.web.idempotency.ResultKind
 import com.moyi.gratitude.domain.BondDay
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.DayAssignment
@@ -46,19 +51,57 @@ internal data class EntryDraft(
     val intendedAt: Instant?,
 )
 
-/** What [SubmitEntry.submit] hands back to the web layer: the row it wrote and the day it landed on. */
+/** An entry and the day it is filed on — what the web layer renders. */
 internal data class EntryView(
     val entry: Entry,
     val day: BondDay,
 )
 
 /**
+ * What [SubmitEntry.submit] hands back to the web layer. [view] is the entry
+ * **as it stands now** — on a replay, re-read, so possibly a tombstone.
+ * [status] is the HTTP status the first attempt recorded under its
+ * `Idempotency-Key`, and [replayed] is what `Idempotency-Replayed` reports.
+ */
+internal data class Submission(
+    val view: EntryView,
+    val status: Int,
+    val replayed: Boolean,
+)
+
+/**
  * `POST /bonds/{bondId}/entries` (spec §6.2): a member's words for the
  * Bond-day their own submission resolves to.
  *
- * **The lock order is bond, then bond-day, then entry, held to commit (spec
- * §2.1).** [submit] opens its own transaction and the first thing it does
- * inside it — before reading anything — is [BondAccess.lockMembershipOf],
+ * **One transaction holds the key and the write (spec §5.4).** [submit]
+ * opens its transaction and runs everything inside [IdempotentExecution.once]:
+ * the `Idempotency-Key`'s advisory lock, its reservation, the entry and the
+ * key's completion commit together or not at all. A refusal below — any of
+ * them — or a crash rolls the reservation back with the entry it never
+ * produced, so the same key is free for a corrected retry at once rather
+ * than stuck `409 IDEMPOTENCY_KEY_IN_FLIGHT` for 24 hours.
+ *
+ * **The full lock order is key, then bond, then bond-day, then entry.** The
+ * key's lock is *tried*, never waited for ([IdempotentExecution]'s KDoc), so
+ * it cannot close a wait cycle wherever it sits; it goes **first** so that a
+ * second request under the same key is refused at once. The bond lock is
+ * blocking: taken first, that second request would queue behind the first
+ * one's bond lock before it could be told anything.
+ *
+ * **A replay re-reads; it never re-runs and never repeats a stored copy.**
+ * When the key has already produced an entry, `once` returns its id and
+ * [replay] reads it back through the same guard a fresh request meets:
+ * [BondAccess.membershipOf] (`404` for a non-member), then `hasLeft`/`isOpen`
+ * (`409 BOND_ARCHIVED`) — so a caller who has lost access gets today's
+ * refusal, not the cached `201` — and then the entry *as it is now*: one
+ * erased since comes back as its tombstone, with no text, because there is
+ * no second copy of the words to answer from (V11 stores identity only).
+ * The unlocked `membershipOf`, not `lockMembershipOf`: a replay is a read,
+ * and a read never queues behind the bond lock (as `GetToday`).
+ *
+ * **Then bond, then bond-day, then entry, held to commit (spec §2.1).** The
+ * first thing a fresh submission does inside the transaction — before
+ * reading anything of the bond — is [BondAccess.lockMembershipOf],
  * which guards, takes the `bonds` row's `FOR UPDATE` and re-reads the
  * membership under it. A leave, block, deletion or zone confirmation (every
  * one of which takes that same lock first) therefore either commits before
@@ -120,8 +163,14 @@ internal data class EntryView(
  * It is also what [BondAccess.lockMembershipOf]'s `MANDATORY` propagation
  * requires: the lock is only worth taking inside the transaction that does
  * the write.
+ *
+ * `LongParameterList` is suppressed on the constructor: seven collaborators
+ * is what one transaction spanning the key, the bond, the day and the entry
+ * takes, and bundling two of them to get under the threshold would hide
+ * which of them this class actually uses.
  */
 @Service
+@Suppress("LongParameterList")
 internal class SubmitEntry(
     private val access: BondAccess,
     private val days: BondDayStore,
@@ -129,46 +178,81 @@ internal class SubmitEntry(
     private val ids: IdGenerator,
     private val clock: Clock,
     private val transactions: TransactionTemplate,
+    private val execution: IdempotentExecution,
 ) {
     /**
+     * @param idempotency the request's `Idempotency-Key`, as `IdempotencyInterceptor` prepared it
      * @throws com.moyi.common.web.NotFoundException the caller is not a member of [bondId], or there is no such bond
      * @throws BondArchivedException `membership.hasLeft`, or the bond has ended (BR-9)
      * @throws MediaNotYetSupportedException either media id is present (spec §1)
      * @throws DayClosedException the Bond-day this entry resolves to has already closed
      * @throws EntryAlreadyExistsException a second entry from this member on this day (BR-2)
+     * @throws com.moyi.common.web.idempotency.IdempotencyKeyInFlightException the key's first request has not finished
+     * @throws com.moyi.common.web.idempotency.IdempotencyKeyReusedException the key was first used for a different request
      */
     @Suppress("ThrowsCount")
     fun submit(
         userId: UUID,
         bondId: UUID,
         draft: EntryDraft,
-    ): EntryView {
+        idempotency: IdempotentRequest,
+    ): Submission {
+        require(idempotency.userId == userId) { "the Idempotency-Key was prepared for a different caller than the one submitting" }
         // Pure validation of the caller's own request, no read: `@ValidEntryText`
         // has already run this same factory at the web edge, so it cannot fail
         // here for a request that reached this method.
         val text = EntryText.of(draft.text)
         val now = clock.instant()
 
-        val view =
+        val submission =
             try {
                 transactions.execute {
-                    // Bond, then bond-day, then entry — spec §2.1. The lock is
-                    // taken INSIDE the transaction and before anything is read,
-                    // so a leave, block, deletion or zone confirmation either
-                    // completes before this write begins or waits behind it.
-                    // Reading membership outside the transaction and checking
-                    // `isOpen` would let this commit after the bond ended.
-                    val membership = access.lockMembershipOf(userId, bondId)
-                    if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
-                    if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()
-                    write(membership, text, draft, now)
+                    // Key first (tried, never waited for), then bond, then
+                    // bond-day, then entry — see the class KDoc.
+                    val outcome =
+                        execution.once(idempotency) {
+                            // Spec §2.1. The lock is taken INSIDE the transaction
+                            // and before anything of the bond is read, so a leave,
+                            // block, deletion or zone confirmation either completes
+                            // before this write begins or waits behind it. Reading
+                            // membership outside the transaction and checking
+                            // `isOpen` would let this commit after the bond ended.
+                            val membership = access.lockMembershipOf(userId, bondId)
+                            if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
+                            if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()
+                            val written = write(membership, text, draft, now)
+                            // The key records what this produced by identity, never the words.
+                            IdempotentResult(written, written.entry.id.value, ResultKind.ENTRY, CREATED)
+                        }
+                    val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))
+                    Submission(view, outcome.status, outcome.wasReplayed)
                 }
             } catch (violation: DataIntegrityViolationException) {
                 if (!violation.violates(GratitudeConstraints.ENTRY_ONE_PER_MEMBER_PER_DAY)) throw violation
                 throw EntryAlreadyExistsException()
             }
 
-        return checkNotNull(view) { "submit's transaction produces an EntryView unless it threw" }
+        return checkNotNull(submission) { "submit's transaction produces a Submission unless it threw" }
+    }
+
+    /**
+     * The entry a key already produced, **read as it stands now** through the
+     * guard a fresh request meets — see the class KDoc. The mismatches below
+     * cannot happen for a key this class wrote (the path it was stored under
+     * names [bondId], and its caller wrote the entry), so each answers as "no
+     * such thing" rather than trusting a row that does not fit.
+     */
+    private fun replay(
+        userId: UUID,
+        bondId: UUID,
+        entryId: EntryId,
+    ): EntryView {
+        val membership = access.membershipOf(userId, bondId)
+        if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
+        val entry = entries.find(entryId)?.takeIf { it.bondId == bondId && it.authorMemberId == membership.memberId }
+        val day = entry?.let { days.find(it.bondDayId) }
+        if (entry == null || day == null) throw NotFoundException("That entry was not found.")
+        return EntryView(entry, day)
     }
 
     /** Steps 4 and 5 of the class KDoc, under the bond lock [submit] already holds. */
@@ -216,5 +300,10 @@ internal class SubmitEntry(
         val updated = day.withEntry()
         days.update(updated)
         return EntryView(entry, updated)
+    }
+
+    private companion object {
+        /** `201` — what a fresh submission answers, and so what its key replays. */
+        const val CREATED = 201
     }
 }

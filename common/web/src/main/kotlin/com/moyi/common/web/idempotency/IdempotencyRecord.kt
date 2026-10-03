@@ -1,6 +1,5 @@
 package com.moyi.common.web.idempotency
 
-import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import java.sql.Timestamp
@@ -23,9 +22,9 @@ data class IdempotencyRecord(
     val path: String,
     val idempotencyKey: String,
     val requestHash: String,
-    /** Null while the handler this row reserved is still running. */
+    /** Null only between the reservation and its completion, inside the one transaction that wrote both. */
     val responseStatus: Short?,
-    /** What the first attempt produced, by identity; null until it completes, or when the handler named no result. */
+    /** What the first attempt produced, by identity; null only while it is still being reserved (V11 pairs it with [resultKind]). */
     val resultId: UUID?,
     val resultKind: String?,
     /** Doc 06 §1's replay allowlist — see V11's comment on why only these two. */
@@ -33,15 +32,6 @@ data class IdempotencyRecord(
     val responseLocation: String?,
     val createdAt: Instant,
     val expiresAt: Instant,
-)
-
-/** What [IdempotencyKeyStore.complete] needs from the response the handler produced, bundled to keep that call to three parameters. */
-data class CapturedResponse(
-    val status: Int,
-    val resultId: UUID?,
-    val resultKind: String?,
-    val etag: String?,
-    val location: String?,
 )
 
 /**
@@ -56,94 +46,115 @@ data class CapturedResponse(
  * **no database configured at all**. A `@Component`-scanned repository
  * needing a `JdbcTemplate`, or worse a `JpaRepository`, would fail every one
  * of those contexts at startup the moment this package is on the classpath.
- * `./gradlew build` was the check that proved it: even with these classes
- * left as plain, un-scanned beans, merely making `spring-boot-starter-jdbc`
- * an ordinary `implementation` dependency of `common:web` was enough to make
- * Spring Boot build a `DataSource` eagerly on every context that inherited
- * it, which broke `SecurityTestApplication`'s suite outright — see this
- * module's `build.gradle.kts` for the fix (the plain `spring-jdbc` artifact
- * instead of the starter, not `compileOnly`, as of review round 1's
- * optional follow-up). [IdempotencyKeyStore] and [IdempotencyInterceptor]
- * are therefore plain classes, wired by an explicit `@Bean` wherever the
- * feature is actually used (this module's own test context, and eventually
- * `app`), and `IdempotencyRecord` carries no JPA annotation for the same
- * reason: nothing here needs any module's `@EntityScan` to widen.
+ * See this module's `build.gradle.kts` for the dependency half of the same
+ * reasoning (the plain `spring-jdbc` artifact, not the starter).
+ * [IdempotencyKeyStore], [IdempotentExecution] and [IdempotencyInterceptor]
+ * are therefore plain classes, wired by [IdempotencyConfiguration] wherever
+ * the feature is actually used, and `IdempotencyRecord` carries no JPA
+ * annotation for the same reason.
  *
- * **The reservation is one `INSERT`, not read-then-write.** [reserve] relies
- * on V11's `idempotency_keys_unique` constraint — `(userId, idempotencyKey)`
- * — to make a concurrent second reservation for the same key fail rather
- * than race — see [IdempotencyInterceptor]'s KDoc for why that ordering is
- * load-bearing.
+ * **Not safe on its own: every method but [lockFor] assumes the caller holds
+ * [lockFor]'s lock, in the transaction it is running in.** [IdempotentExecution]
+ * is the one caller and does exactly that (spec §5.4: lock, then look up,
+ * then reserve). Under that lock, [find]-then-[insert] cannot race a second
+ * writer of the same key, which is what lets this be a plain lookup and
+ * insert — the old insert-and-catch-the-unique-violation reservation cannot
+ * run inside a transaction at all, because a failed `INSERT` aborts it.
+ * `idempotency_keys_unique` stays as the backstop the lock makes unreachable.
  *
  * **The 24h window is enforced here, at read** (Ruling B, review round 1):
  * [find] filters `expires_at > :now`, the same shape `verification_tokens`,
  * `refresh_tokens` and `bond_invites` already use, so an expired row is
  * never handed back as something a retry can replay. No reaper exists yet —
  * that is slice C3 — so the physical row can still be sitting there under
- * the unique constraint when the *next* legitimate use of the same key
- * arrives, 24 hours or more later; [reserve] reclaims it in that one case,
- * because a client picking the same key twice, a day apart, is not a
- * conflict doc 06 §1 asks this to detect.
+ * the unique constraint when the next use of the same key arrives;
+ * [deleteExpired] clears it, under the same lock (spec §5.4: "expired-key
+ * replacement uses the same lock").
  */
 class IdempotencyKeyStore(
     private val jdbc: JdbcTemplate,
 ) {
-    /**
-     * Inserts [record] and returns `null` — this caller is first. On a
-     * unique violation, looks up the current, non-expired row under the same
-     * key: if one exists, it is returned for [IdempotencyInterceptor] to
-     * decide between a replay, a 409 for a request still in flight, or a 422
-     * for a reused key; if the only row under that key has expired, it is
-     * reclaimed (see the class KDoc) and this reservation proceeds as if it
-     * had been first, returning `null`.
-     *
-     * The unique violation itself is the signal this catch block acts on —
-     * a fresh reservation losing the race to an existing row, not an error
-     * being hidden — so there is nothing further to do with the caught
-     * exception; `@Suppress` below is for that.
-     */
-    @Suppress("SwallowedException")
-    fun reserve(record: IdempotencyRecord): IdempotencyRecord? =
-        try {
-            insert(record)
-            null
-        } catch (violation: DataIntegrityViolationException) {
-            find(record.userId, record.idempotencyKey, record.createdAt) ?: reclaimExpired(record)
-        }
+    /** The live (unexpired) row under this key, if there is one. */
+    fun find(
+        userId: UUID,
+        idempotencyKey: String,
+        now: Instant,
+    ): IdempotencyRecord? =
+        jdbc
+            .query(
+                """
+                SELECT id, user_id, method, path, idempotency_key, request_hash,
+                       response_status, result_id, result_kind, response_etag, response_location,
+                       created_at, expires_at
+                FROM idempotency_keys
+                WHERE user_id = ? AND idempotency_key = ? AND expires_at > ?
+                """.trimIndent(),
+                ROW_MAPPER,
+                userId,
+                idempotencyKey,
+                micros(now),
+            ).firstOrNull()
 
-    /**
-     * Fills in the response the reserved handler produced — or, when
-     * [captured]'s status is a server error, discards the reservation
-     * instead (Important #1, review round 1): a transient 500 cached as "the
-     * response" would be replayed to every retry for the rest of the 24h
-     * window, which defeats the entire point of retrying. Also discarded
-     * when [ex] is non-null: the handler threw, and whatever the advice
-     * chain rendered from that is not "the response" either.
-     */
-    fun complete(
-        id: UUID,
-        captured: CapturedResponse,
-        ex: Throwable?,
-    ) {
-        if (ex != null || captured.status >= SERVER_ERROR_THRESHOLD) {
-            discard(id)
-            return
-        }
+    /** The reservation: a row with no status, visible to nobody until the transaction that wrote it commits. */
+    fun insert(record: IdempotencyRecord) {
         jdbc.update(
-            "UPDATE idempotency_keys SET response_status = ?, result_id = ?, result_kind = ?, " +
-                "response_etag = ?, response_location = ? WHERE id = ?",
-            captured.status,
-            captured.resultId,
-            captured.resultKind,
-            captured.etag,
-            captured.location,
-            id,
+            """
+            INSERT INTO idempotency_keys
+                (id, user_id, method, path, idempotency_key, request_hash, created_at, expires_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """.trimIndent(),
+            record.id,
+            record.userId,
+            record.method,
+            record.path,
+            record.idempotencyKey,
+            record.requestHash,
+            micros(record.createdAt),
+            micros(record.expiresAt),
         )
     }
 
-    /** Removes a reservation outright — a discarded server-error attempt, or a wiring failure that cannot be completed. */
-    fun discard(id: UUID) {
-        jdbc.update("DELETE FROM idempotency_keys WHERE id = ?", id)
+    /**
+     * Clears an expired row under this key, so the [insert] that follows does
+     * not meet it at the unique constraint. Scoped to `expires_at <= :now`,
+     * so it can never remove a live row.
+     */
+    fun deleteExpired(
+        userId: UUID,
+        idempotencyKey: String,
+        now: Instant,
+    ) {
+        jdbc.update(
+            "DELETE FROM idempotency_keys WHERE user_id = ? AND idempotency_key = ? AND expires_at <= ?",
+            userId,
+            idempotencyKey,
+            micros(now),
+        )
+    }
+
+    /**
+     * Fills in what the reserved request produced — in the same transaction
+     * as the reservation and the write, so a row is either absent or
+     * complete to every other transaction. Only a success reaches here
+     * ([IdempotentResult]'s own `init`); a refusal or a crash rolled the
+     * reservation back instead of being stored.
+     */
+    fun complete(
+        id: UUID,
+        result: IdempotentResult<*>,
+    ) {
+        val updated =
+            jdbc.update(
+                "UPDATE idempotency_keys SET response_status = ?, result_id = ?, result_kind = ?, " +
+                    "response_etag = ?, response_location = ? WHERE id = ?",
+                result.status,
+                result.resultId,
+                result.kind.name,
+                result.etag,
+                result.location,
+                id,
+            )
+        check(updated == 1) { "the reservation this transaction inserted is gone before it completed" }
     }
 
     /**
@@ -173,86 +184,7 @@ class IdempotencyKeyStore(
     /** Postgres `timestamptz` keeps microseconds; a nanosecond `Instant` would not round-trip equal. */
     private fun micros(instant: Instant): Timestamp = Timestamp.from(instant.truncatedTo(ChronoUnit.MICROS))
 
-    private fun insert(record: IdempotencyRecord) {
-        jdbc.update(
-            """
-            INSERT INTO idempotency_keys
-                (id, user_id, method, path, idempotency_key, request_hash, created_at, expires_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """.trimIndent(),
-            record.id,
-            record.userId,
-            record.method,
-            record.path,
-            record.idempotencyKey,
-            record.requestHash,
-            micros(record.createdAt),
-            micros(record.expiresAt),
-        )
-    }
-
-    /**
-     * See the class KDoc: the row under this key has expired, and there is
-     * no reaper yet to have cleared it.
-     *
-     * **Race-safe against a second caller reclaiming the same key**
-     * (Important #N1, review round 2): the `DELETE` is scoped to
-     * `expires_at <= :now` so it can only ever remove a row that is
-     * genuinely expired — never a live reservation a concurrent caller just
-     * inserted, which is what an unconditional `DELETE FROM ... WHERE
-     * user_id = ? AND idempotency_key = ?` would otherwise have been free to
-     * wipe out from under them. Two callers can still both see the row as
-     * expired and both attempt to reclaim it: both `DELETE`s are then
-     * idempotent (the second matches nothing), but only one `INSERT` wins —
-     * the loser's re-collides with the winner's fresh row. That collision is
-     * caught here and resolved by looping back through [reserve] rather than
-     * surfacing a second, uncaught `DataIntegrityViolationException`: by
-     * then the winner's row is live, not expired, so the retry finds it
-     * through the ordinary `find` path and this caller becomes an ordinary
-     * second reservation against it (409 in flight, from
-     * [IdempotencyInterceptor]'s side) instead of a 500. The caught exception
-     * itself is, again, the signal this branch acts on rather than an error
-     * being hidden — same reasoning as [reserve]'s own `@Suppress`.
-     */
-    @Suppress("SwallowedException")
-    private fun reclaimExpired(record: IdempotencyRecord): IdempotencyRecord? {
-        jdbc.update(
-            "DELETE FROM idempotency_keys WHERE user_id = ? AND idempotency_key = ? AND expires_at <= ?",
-            record.userId,
-            record.idempotencyKey,
-            micros(record.createdAt),
-        )
-        return try {
-            insert(record)
-            null
-        } catch (violation: DataIntegrityViolationException) {
-            reserve(record)
-        }
-    }
-
-    private fun find(
-        userId: UUID,
-        idempotencyKey: String,
-        now: Instant,
-    ): IdempotencyRecord? =
-        jdbc
-            .query(
-                """
-                SELECT id, user_id, method, path, idempotency_key, request_hash,
-                       response_status, result_id, result_kind, response_etag, response_location,
-                       created_at, expires_at
-                FROM idempotency_keys
-                WHERE user_id = ? AND idempotency_key = ? AND expires_at > ?
-                """.trimIndent(),
-                ROW_MAPPER,
-                userId,
-                idempotencyKey,
-                micros(now),
-            ).firstOrNull()
-
     private companion object {
-        const val SERVER_ERROR_THRESHOLD = 500
-
         val ROW_MAPPER =
             RowMapper { rs, _ ->
                 IdempotencyRecord(

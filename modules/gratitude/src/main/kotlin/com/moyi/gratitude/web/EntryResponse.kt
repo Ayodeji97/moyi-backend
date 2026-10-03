@@ -24,6 +24,13 @@ import java.util.UUID
  * its own KDoc for why that has to be a different type rather than this one
  * with fields nulled out.
  *
+ * **[text] is `null` exactly when [status] is `DELETED`** — a tombstone: the
+ * entry was content-erased (BR-10/BR-10a) and the row kept. Nothing in this
+ * slice erases one, but a response must already be able to say so: an
+ * `Idempotency-Key` replay of `POST /entries` re-reads the entry as it is
+ * *now* (spec §5.4), and after an erasure there are no words to return —
+ * never the ones the first response carried.
+ *
  * [date] is the Bond-day's own date — the one [com.moyi.gratitude.domain.DayAssignment]
  * resolved, which may differ from a UTC reading of [createdAt] on either
  * side of midnight in the bond's zone (BR-3).
@@ -37,7 +44,7 @@ internal data class EntryResponse(
     val bondId: UUID,
     val date: LocalDate,
     val authorMemberId: UUID,
-    val text: String,
+    val text: String?,
     val status: EntryStatus,
     val createdAt: Instant,
     val intendedAt: Instant,
@@ -61,7 +68,7 @@ internal data class EntryResponse(
                 bondId = entry.bondId,
                 date = date,
                 authorMemberId = entry.authorMemberId,
-                text = entry.text.value,
+                text = entry.text?.value,
                 status = entry.status,
                 createdAt = entry.createdAt,
                 intendedAt = entry.intendedAt,

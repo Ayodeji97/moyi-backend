@@ -120,9 +120,8 @@ internal interface BondDayRepository : Repository<BondDayEntity, UUID> {
 /**
  * Entries.
  *
- * No `findById` beyond what [Repository] would already require declaring —
- * nothing in this task reads a single entry by its own id; [findAllByBondDayId]
- * is what `EntryStore.findForDay` needs, and BR-2's uniqueness is the
+ * [findAllByBondDayId] is what `EntryStore.findForDay` needs; [findById] is
+ * the re-read an `Idempotency-Key` replay makes. BR-2's uniqueness is the
  * database's job (`entries_one_per_member_per_day`), not a query here.
  */
 internal interface EntryRepository : Repository<EntryEntity, UUID> {
@@ -140,4 +139,7 @@ internal interface EntryRepository : Repository<EntryEntity, UUID> {
     fun saveAndFlush(entry: EntryEntity): EntryEntity
 
     fun findAllByBondDayId(bondDayId: UUID): List<EntryEntity>
+
+    /** One entry by id — the re-read behind an `Idempotency-Key` replay (`SubmitEntry`). */
+    fun findById(id: UUID): EntryEntity?
 }

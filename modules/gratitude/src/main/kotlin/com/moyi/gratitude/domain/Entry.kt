@@ -29,12 +29,17 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  * nothing here is walked from the other (ADR-0026, V12's own comment on why
  * `bond_day_id` is a plain column).
  *
- * **[text] is required, though `entries.text` allows `NULL`.** The column is
- * nullable for the media-only entry a later Phase 4 slice adds; this slice
- * refuses every media id at the edge (`422 MEDIA_NOT_YET_SUPPORTED`, Task 7),
- * so every [Entry] [submit] can produce already has words. Loosening this to
- * `EntryText?` is that later slice's change to make, not this one's to
- * pre-empt.
+ * **[text] is `null` exactly on a tombstone** — an entry content-erased by
+ * BR-10/BR-10a (text and media references nulled, `status = DELETED`, the
+ * row kept). No path in this slice erases one; the type admits it because a
+ * *read* must already be able to render it: an `Idempotency-Key` replay
+ * re-reads the entry from its current state (spec §5.4), and a row erased
+ * since has no words to hand back, by design. Every entry [submit] produces
+ * has words — `entries.text` is also nullable for the media-only entry a
+ * later Phase 4 slice adds, which this slice refuses at the edge
+ * (`422 MEDIA_NOT_YET_SUPPORTED`) — so the `init` below admits a missing
+ * text only where the status says why. Loosening it for media-only entries
+ * is that later slice's change to make.
  *
  * [imageMediaId], [voiceMediaId], [voiceDurationMs] and [promptId] are
  * carried anyway, always `null` for now, so a row [submit] builds already
@@ -60,7 +65,7 @@ internal data class Entry(
     val bondDayId: BondDayId,
     val bondId: UUID,
     val authorMemberId: UUID,
-    val text: EntryText,
+    val text: EntryText?,
     val imageMediaId: UUID?,
     val voiceMediaId: UUID?,
     val voiceDurationMs: Int?,
@@ -73,6 +78,10 @@ internal data class Entry(
     val revealedAt: Instant?,
     val deletedAt: Instant?,
 ) {
+    init {
+        require(text != null || status == EntryStatus.DELETED) { "only an erased entry has no text in this slice" }
+    }
+
     /**
      * BR-1 — and in this slice only its first clause can ever be `true`: no
      * [BondDay] this module produces yet is [BondDayStatus.REVEALED], and

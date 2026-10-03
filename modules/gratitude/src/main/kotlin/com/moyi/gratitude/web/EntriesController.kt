@@ -81,10 +81,16 @@ internal class EntriesController(
         // bond's row lock and inside its own transaction (spec §2.1). A copy
         // read here, outside that transaction, is exactly the stale answer
         // the lock exists to refuse.
-        val view = submitEntry.submit(caller.id, bondIdOrNotFound(bondId), request.toDraft())
-        // The key records what this produced by identity, never the words.
-        IdempotencyInterceptor.recordResult(http, view.entry.id.value, "ENTRY")
-        return ResponseEntity.status(HttpStatus.CREATED).body(EntryResponse.from(view))
+        //
+        // The Idempotency-Key goes in with it: SubmitEntry reserves, writes
+        // and completes it in that same transaction (spec §5.4). On a replay
+        // what comes back is the entry re-read as it stands now — a tombstone
+        // if it was erased since — or the refusal a fresh request would get.
+        val submission =
+            submitEntry.submit(caller.id, bondIdOrNotFound(bondId), request.toDraft(), IdempotencyInterceptor.requestOf(http))
+        val response = ResponseEntity.status(submission.status)
+        if (submission.replayed) response.header(IdempotencyInterceptor.REPLAYED_HEADER, "true")
+        return response.body(EntryResponse.from(submission.view))
     }
 
     /**

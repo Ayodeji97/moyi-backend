@@ -105,9 +105,12 @@ import org.springframework.http.HttpStatus
  *   closes that on both [EntryResponse][com.moyi.gratitude.web.EntryResponse]
  *   and [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse].
  * - **`Idempotency-Replayed` is now a declared response header.**
- *   [IdempotencyInterceptor][com.moyi.common.web.idempotency.IdempotencyInterceptor]
- *   sets it on every replay, but nothing in this document said so, so a
- *   generated client had no typed way to tell a replay from a fresh success.
+ *   The handler sets it on every replay (from
+ *   [IdempotentOutcome][com.moyi.common.web.idempotency.IdempotentOutcome]'s
+ *   `wasReplayed`), but nothing in this document said so, so a generated
+ *   client had no typed way to tell a replay from a fresh success. A replay
+ *   is **not** a stored response: the resource is re-read and rendered from
+ *   its current state (spec §5.4), which the header descriptions below say.
  *   [requireIdempotencyKey] adds it to every success response of
  *   [IDEMPOTENT_OPERATIONS], mirroring how [documentETags] adds `ETag`.
  *
@@ -280,8 +283,7 @@ class OpenApiConfiguration {
      * under detekt's `TooManyFunctions` threshold the way
      * [discriminatePartnerEntry]'s own KDoc explains for its sibling
      * functions).
-     * [IdempotencyInterceptor][com.moyi.common.web.idempotency.IdempotencyInterceptor]
-     * sets that header on every replay and never on a fresh response, but
+     * The handler sets that header on every replay and never on a fresh response, but
      * nothing before this declared it anywhere in the document, so a
      * generated client had no typed field to read it from — the same gap
      * [documentETags] closes for `ETag`, and added the same way: the header
@@ -297,8 +299,12 @@ class OpenApiConfiguration {
                 .required(true)
                 .description(
                     "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the " +
-                        "same body returns the first attempt's stored response; the same key with a different body is " +
-                        "422; the same key while the first attempt is still in flight is 409.",
+                        "same request returns the first attempt's status and the same resource, re-read and rendered " +
+                        "from its current state — never a stored copy: a resource erased since is returned as its " +
+                        "tombstone, and a caller who has since lost access gets the refusal a new request would. " +
+                        "Only a success is recorded; a request that was refused may be corrected and retried under " +
+                        "the same key. The same key with a different method, path or body is 422; the same key " +
+                        "while the first attempt is still in flight is 409.",
                 ).schema(StringSchema()),
         )
         operation.responses
@@ -309,8 +315,9 @@ class OpenApiConfiguration {
                     IDEMPOTENCY_REPLAYED_HEADER,
                     Header()
                         .description(
-                            "`true` when this response is a stored replay of an earlier request under the same " +
-                                "Idempotency-Key (doc 06 §1); absent on a fresh response.",
+                            "`true` when this response answers a replay of an earlier request under the same " +
+                                "Idempotency-Key (doc 06 §1): nothing was written again, and the body is the resource " +
+                                "as it stands now. Absent on a fresh response.",
                         ).schema(StringSchema()),
                 )
             }

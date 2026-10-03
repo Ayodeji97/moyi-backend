@@ -1,6 +1,5 @@
 package com.moyi.common.web.idempotency
 
-import com.moyi.common.core.IdGenerator
 import com.moyi.common.web.ApiException
 import com.moyi.common.web.ErrorCode
 import jakarta.servlet.FilterChain
@@ -9,71 +8,60 @@ import jakarta.servlet.ServletInputStream
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletRequestWrapper
 import jakarta.servlet.http.HttpServletResponse
-import org.slf4j.LoggerFactory
-import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.web.filter.OncePerRequestFilter
 import org.springframework.web.method.HandlerMethod
 import org.springframework.web.servlet.HandlerInterceptor
-import org.springframework.web.util.ContentCachingResponseWrapper
 import java.io.BufferedReader
 import java.io.ByteArrayInputStream
 import java.io.InputStreamReader
 import java.nio.charset.Charset
-import java.security.MessageDigest
-import java.time.Clock
-import java.time.Duration
 import java.util.UUID
 
 /**
- * Doc 06 §1's `Idempotency-Key`, built when `POST /entries` made it required.
+ * Doc 06 §1's `Idempotency-Key` — the **header contract** only. The record
+ * itself is [IdempotentExecution]'s, inside the handler's own transaction.
  *
- * **The record is written before the handler runs, not after.** A row
- * inserted on the way in, under [IdempotencyKeyStore.reserve]'s unique
- * constraint, is what makes a concurrent retry a `409` rather than a second
- * execution — the reserve-then-complete shape. Writing it afterwards would
- * leave the window the header exists to close: two identical requests would
- * both find nothing reserved, both run the handler, and the second `INSERT`
- * would only ever race the *first request's own write of its result*, which
- * is too late to stop anything. Deliberately proved rather than assumed —
- * see the PR body for what moving the reservation after the handler does to
- * this suite.
+ * **What this does, before the handler runs:** for an `@Idempotent` handler,
+ * refuses a missing key (`422`), resolves the verified caller (`401` if
+ * there is none), fingerprints the request through [RequestFingerprint] —
+ * method, raw path and body — and leaves the result on the request as an
+ * [IdempotentRequest], which the handler fetches with [requestOf] and hands to
+ * [IdempotentExecution.once] together with its own transaction.
  *
- * The body is hashed, never stored: doc 18 §9, and an entry's text is the one
- * thing this system exists not to leak. Neither is the *response* stored: V11
- * keeps the result's identity (`result_id`, `result_kind`), status, ETag and
- * Location, and nothing of the couple's words.
+ * **What it no longer does, and why (plan task 7, spec §5.4):** it does not
+ * touch `idempotency_keys`. It used to reserve the row in [preHandle] and
+ * complete it in `afterCompletion` — three transactions where the spec asks
+ * for one — so a crash between them left either a committed reservation with
+ * no result (a permanent `409` for a request that never happened) or a
+ * committed result under a key that would run it again. Lock, reserve,
+ * mutate and complete now share the handler's transaction; this class keeps
+ * only what has to happen at the HTTP edge.
  *
- * **Known gap, until the reserve-mutate-complete rework (plan task 7): a
- * replay answers with the stored status and headers and an EMPTY body.**
- * Re-reading the resource by `result_id` needs the owning module (`gratitude`
- * for `ENTRY`), which `common:web` cannot depend on, so the interceptor cannot
- * do it itself. A handler names its result with [recordResult].
+ * **Who sets `Idempotency-Replayed: true`.** The handler does, from
+ * [IdempotentOutcome.wasReplayed]: whether a request is a replay is decided
+ * inside the handler's transaction, after this interceptor has already
+ * returned, and by the time `postHandle` runs a `@ResponseBody` handler's
+ * headers are written.
  *
- * **Requires the request's body to be re-readable and the response to be
- * buffered.** [preHandle] reads the body to hash it, before the handler's
- * own `@RequestBody` reads it again, and `afterCompletion` reads back what
- * the handler wrote to store as the stored response — an ordinary
- * `HttpServletRequest`/`HttpServletResponse` supports neither, so a request
- * must already be wrapped by [IdempotencyRequestCachingFilter] before it
- * reaches this interceptor. Both halves of that requirement are checked
- * rather than assumed (review round 1, Important #4): an unwrapped request
- * fails loudly in [preHandle], before anything is written; an unwrapped
- * response is logged loudly and the reservation is discarded in
- * [afterCompletion], rather than left permanently "in flight" for every
- * later request under the same key. See [IdempotencyKeyStore]'s KDoc for
- * why neither this class nor that filter is `@Component`-scanned, so the
- * filter has to be registered by hand in the first place.
+ * The body is fingerprinted, never stored: doc 18 §9, and an entry's text is
+ * the one thing this system exists not to leak. The fingerprint is keyed
+ * (ruling P8) — see [RequestFingerprint] for why a plain hash would not do.
+ *
+ * **Requires the request's body to be re-readable.** [preHandle] reads it to
+ * fingerprint it before the handler's own `@RequestBody` reads it again,
+ * which an ordinary `HttpServletRequest` does not support, so a request must
+ * already be wrapped by [IdempotencyRequestCachingFilter]. Checked rather
+ * than assumed: an unwrapped request fails loudly in [preHandle], before
+ * anything is written. And a handler whose request never passed through
+ * this interceptor at all — the import forgotten — fails loudly in
+ * [requestOf] rather than running unprotected.
  */
 class IdempotencyInterceptor(
-    private val store: IdempotencyKeyStore,
-    private val clock: Clock,
-    private val ids: IdGenerator,
+    private val fingerprint: RequestFingerprint,
 ) : HandlerInterceptor {
-    private val log = LoggerFactory.getLogger(javaClass)
-
     override fun preHandle(
         request: HttpServletRequest,
         response: HttpServletResponse,
@@ -90,112 +78,20 @@ class IdempotencyInterceptor(
         if (key.isNullOrBlank()) throw IdempotencyKeyRequiredException()
 
         val method = request.method
-        // The concrete path, never the route template: two bonds are two targets.
+        // The raw, concrete path — never the route template (two bonds are
+        // two targets), and never canonicalised: see IdempotentRequest.path.
         val path = request.requestURI
-        val requestHash = sha256(request.inputStream.readBytes())
-        val now = clock.instant()
-        val reservation =
-            IdempotencyRecord(
-                id = ids.timeOrdered(),
+        request.setAttribute(
+            REQUEST_ATTRIBUTE,
+            IdempotentRequest(
                 userId = callerId(request),
+                key = key,
                 method = method,
                 path = path,
-                idempotencyKey = key,
-                requestHash = requestHash,
-                responseStatus = null,
-                resultId = null,
-                resultKind = null,
-                responseEtag = null,
-                responseLocation = null,
-                createdAt = now,
-                expiresAt = now.plus(TTL),
-            )
-
-        val existing = store.reserve(reservation)
-        return if (existing == null) {
-            request.setAttribute(RECORD_ID_ATTRIBUTE, reservation.id)
-            true
-        } else {
-            replay(existing, method, path, requestHash, response)
-        }
-    }
-
-    /**
-     * The three ways an already-reserved key can answer a second request —
-     * see the class KDoc. A mismatch on [method], [path] or [requestHash]
-     * is [IdempotencyKeyReusedException] (Ruling A, review round 1): the
-     * unique key V11 enforces is `(user_id, idempotency_key)` only —
-     * `method` and `path` are stored columns, not part of the constraint — so the
-     * same key against a different method or path would otherwise read back as the
-     * same row rather than colliding at the database. This comparison is
-     * what makes that a `422`: it is the whole of what stops a key reused
-     * across two different requests, not a restatement of something the
-     * unique constraint already refuses on its own (F6, whole-branch review
-     * — this KDoc previously said the reservation was itself keyed on
-     * `userId + endpoint + key`, which is not what V11 declares).
-     */
-    private fun replay(
-        existing: IdempotencyRecord,
-        method: String,
-        path: String,
-        requestHash: String,
-        response: HttpServletResponse,
-    ): Boolean =
-        when {
-            existing.method != method || existing.path != path || existing.requestHash != requestHash -> {
-                throw IdempotencyKeyReusedException()
-            }
-
-            existing.responseStatus == null -> {
-                throw IdempotencyKeyInFlightException()
-            }
-
-            else -> {
-                response.status = existing.responseStatus.toInt()
-                response.setHeader(REPLAYED_HEADER, "true")
-                existing.responseEtag?.let { response.setHeader(HttpHeaders.ETAG, it) }
-                existing.responseLocation?.let { response.setHeader(HttpHeaders.LOCATION, it) }
-                // No body: V11 stores no response text. See the class KDoc's
-                // "Known gap" — plan task 7 re-reads the resource by result_id.
-                false
-            }
-        }
-
-    /**
-     * Not called for a replay: [preHandle] returning `false` stops the chain
-     * before Spring MVC would call this for the interceptor that stopped it.
-     */
-    override fun afterCompletion(
-        request: HttpServletRequest,
-        response: HttpServletResponse,
-        handler: Any,
-        ex: Exception?,
-    ) {
-        val recordId = request.getAttribute(RECORD_ID_ATTRIBUTE) as? UUID ?: return
-        val cached = response as? ContentCachingResponseWrapper
-        if (cached == null) {
-            log.error(
-                "IdempotencyRequestCachingFilter is not registered for {} {} — the reservation for this " +
-                    "Idempotency-Key cannot be completed and would otherwise stay 'in flight' forever. " +
-                    "Discarding it instead of leaving every later request under this key a permanent 409.",
-                request.method,
-                request.requestURI,
-            )
-            store.discard(recordId)
-            return
-        }
-        store.complete(
-            id = recordId,
-            captured =
-                CapturedResponse(
-                    status = cached.status,
-                    resultId = request.getAttribute(RESULT_ID_ATTRIBUTE) as? UUID,
-                    resultKind = request.getAttribute(RESULT_KIND_ATTRIBUTE) as? String,
-                    etag = cached.getHeader(HttpHeaders.ETAG),
-                    location = cached.getHeader(HttpHeaders.LOCATION),
-                ),
-            ex = ex,
+                fingerprint = fingerprint.of(method, path, request.inputStream.readBytes()),
+            ),
         )
+        return true
     }
 
     /**
@@ -213,44 +109,32 @@ class IdempotencyInterceptor(
     private fun callerId(request: HttpServletRequest): UUID =
         request.userPrincipal?.name?.let(UUID::fromString) ?: throw IdempotencyRequiresCallerException()
 
-    private fun sha256(bytes: ByteArray): String =
-        MessageDigest
-            .getInstance("SHA-256")
-            .digest(bytes)
-            .joinToString("") { "%02x".format(it) }
-
     companion object {
         const val HEADER = "Idempotency-Key"
         const val REPLAYED_HEADER = "Idempotency-Replayed"
 
-        /** Doc 06 §1. */
-        private val TTL = Duration.ofHours(24)
-        private const val RECORD_ID_ATTRIBUTE = "com.moyi.common.web.idempotency.recordId"
-        private const val RESULT_ID_ATTRIBUTE = "com.moyi.common.web.idempotency.resultId"
-        private const val RESULT_KIND_ATTRIBUTE = "com.moyi.common.web.idempotency.resultKind"
+        private const val REQUEST_ATTRIBUTE = "com.moyi.common.web.idempotency.request"
 
         /**
-         * A handler's way of naming what it produced, by identity, so the
-         * reservation can record it (`result_id`, `result_kind`). Nothing
-         * reads the attributes unless a reservation exists for the request.
+         * The [IdempotentRequest] [preHandle] prepared for this request. Fails
+         * loudly when there is none — the handler is not `@Idempotent`, or no
+         * context imported [IdempotencyConfiguration] — because the
+         * alternative is a handler that believes it is protected and is not.
          */
-        fun recordResult(
-            request: HttpServletRequest,
-            id: UUID,
-            kind: String,
-        ) {
-            request.setAttribute(RESULT_ID_ATTRIBUTE, id)
-            request.setAttribute(RESULT_KIND_ATTRIBUTE, kind)
-        }
+        fun requestOf(request: HttpServletRequest): IdempotentRequest =
+            checkNotNull(request.getAttribute(REQUEST_ATTRIBUTE) as? IdempotentRequest) {
+                "No Idempotency-Key was prepared for ${request.method} ${request.requestURI}: the handler is not " +
+                    "@Idempotent, or IdempotencyInterceptor is not registered (@Import(IdempotencyConfiguration::class))."
+            }
     }
 }
 
 /**
  * Wraps every request so its body can be read twice: once by
- * [IdempotencyInterceptor], to hash it and reserve a row before the handler
- * runs, and once by the handler's own `@RequestBody`. Also wraps the
- * response in a [ContentCachingResponseWrapper], so `afterCompletion` can
- * read back what the handler wrote.
+ * [IdempotencyInterceptor], to fingerprint it before the handler runs, and
+ * once by the handler's own `@RequestBody`. The response is no longer
+ * wrapped: nothing reads it back since the record moved into the handler's
+ * transaction ([IdempotentExecution]).
  *
  * **Not `org.springframework.web.util.ContentCachingRequestWrapper`,
  * despite the brief naming it.** That class only *records* what something
@@ -268,9 +152,9 @@ class IdempotencyInterceptor(
  * never above [MAX_CACHEABLE_BYTES]** (review round 1, Important #3; the
  * size bound added by the whole-branch review, F3). A bare `Filter` bean is
  * registered by Spring Boot for every path, in every module that depends on
- * `common:web` — and draining every body eagerly and buffering every
- * response is wrong for a `GET` (idempotency is meaningless on a method
- * HTTP already defines as idempotent, so `@Idempotent` is never put on one)
+ * `common:web` — and draining every body eagerly is wrong for a `GET`
+ * (idempotency is meaningless on a method HTTP already defines as
+ * idempotent, so `@Idempotent` is never put on one)
  * and wasteful for `actuator`/the OpenAPI document. Scoped by method and
  * content type instead of a `FilterRegistrationBean` with a URL allowlist:
  * `common:web` cannot know in advance which path in which module ends up
@@ -315,12 +199,7 @@ class IdempotencyRequestCachingFilter : OncePerRequestFilter() {
         response: HttpServletResponse,
         filterChain: FilterChain,
     ) {
-        val cachedResponse = ContentCachingResponseWrapper(response)
-        try {
-            filterChain.doFilter(ReplayableHttpServletRequest(request), cachedResponse)
-        } finally {
-            cachedResponse.copyBodyToResponse()
-        }
+        filterChain.doFilter(ReplayableHttpServletRequest(request), response)
     }
 
     private companion object {

@@ -97,7 +97,7 @@ internal class SubmitEntryConcurrencyTest(
         // failed assertion must not commit after the truncate.
         pool.shutdownNow()
         check(pool.awaitTermination(10, TimeUnit.SECONDS)) { "a worker thread outlived the test" }
-        jdbc.execute("TRUNCATE TABLE entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
+        jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
 

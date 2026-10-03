@@ -104,9 +104,10 @@ CREATE TABLE entries (
     bond_id                uuid        NOT NULL,
     -- The member who wrote it. Bond's id too, and for the same reason.
     author_member_id       uuid        NOT NULL,
-    -- Nullable in the schema for the media-only entry a later Phase 4 slice
-    -- adds; this slice's domain (`Entry.text: EntryText`, not `EntryText?`)
-    -- never produces a NULL here. See `Entry`'s own KDoc.
+    -- Nullable for a tombstone (BR-10: text nulled, status DELETED, row kept)
+    -- and for the media-only entry a later Phase 4 slice adds. This slice
+    -- never WRITES a NULL here, but it must already READ one: an
+    -- Idempotency-Key replay re-reads the entry. See `Entry`'s own KDoc.
     text                   text,
     -- Postgres's own derived search artifact (C6's `tsvector`). No entity in
     -- this task maps it; it has nothing to be written from yet.

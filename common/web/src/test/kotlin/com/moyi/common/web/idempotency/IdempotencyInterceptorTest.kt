@@ -2,9 +2,13 @@ package com.moyi.common.web.idempotency
 
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.common.web.ApiException
+import com.moyi.common.web.ErrorCode
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import jakarta.servlet.http.HttpServletRequest
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -17,12 +21,13 @@ import org.springframework.context.annotation.Primary
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
+import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
-import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.net.URI
 import java.security.Principal
@@ -49,13 +54,19 @@ class IdempotencyInterceptorTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val controller: IdempotencyProbeController,
     @Autowired private val clock: MutableClock,
+    @Autowired private val jdbc: JdbcTemplate,
 ) : PostgresIntegrationTest() {
     private val ada = UUID.randomUUID()
     private val bea = UUID.randomUUID()
+    private val pool = Executors.newFixedThreadPool(2)
 
     @AfterEach
     fun reset() {
+        // The pool first, bounded: a request still parked must not race the truncate.
+        pool.shutdownNow()
+        pool.awaitTermination(TIMEOUT_SECONDS, TimeUnit.SECONDS)
         controller.reset()
+        jdbc.execute("TRUNCATE TABLE idempotency_keys, probe_results")
     }
 
     private val handlerRuns get() = controller.handlerRuns.get()
@@ -76,20 +87,49 @@ class IdempotencyInterceptorTest(
             .response
 
     @Test
-    fun `a replay returns the first status without running the handler twice, and with no stored body`() {
+    fun `a replay returns the first status and the re-read resource, without running the write twice`() {
         val key = UUID.randomUUID().toString()
         val first = post(ada, key, """{"text":"thank you"}""")
         first.status shouldBe 201
         val second = post(ada, key, """{"text":"thank you"}""")
 
         second.status shouldBe 201
-        // Known gap until plan task 7: V11 stores no response text, so a
-        // replay is status and headers with an empty body.
         first.contentAsString shouldContain "thank you"
-        second.contentAsString shouldBe ""
+        // Re-read by result id from the probe's own table: V11 holds no copy.
+        second.contentAsString shouldContain "thank you"
         second.getHeader("Idempotency-Replayed") shouldBe "true"
         first.getHeader("Idempotency-Replayed").shouldBeNull()
         handlerRuns shouldBe 1
+    }
+
+    @Test
+    fun `a replay after the resource was erased renders what is there now, never the first response`() {
+        val key = UUID.randomUUID().toString()
+        post(ada, key, """{"text":"words that were erased"}""").status shouldBe 201
+        jdbc.update("UPDATE probe_results SET label = NULL")
+
+        val replay = post(ada, key, """{"text":"words that were erased"}""")
+
+        replay.status shouldBe 201
+        replay.contentAsString shouldNotContain "erased"
+        handlerRuns shouldBe 1
+    }
+
+    @Test
+    fun `a refused request leaves no key, so the corrected retry under the same key runs`() {
+        // The probe refuses after its write, inside the transaction — a 4xx
+        // thrown from the block. Keep the reservation in a transaction of its
+        // own and the retry below is 422 IDEMPOTENCY_KEY_REUSED (the body
+        // differs) for a request the server never accepted.
+        val key = UUID.randomUUID().toString()
+        controller.refuseNext = true
+        post(ada, key, """{"text":"first try"}""").status shouldBe 422
+
+        val corrected = post(ada, key, """{"text":"second try"}""")
+
+        corrected.status shouldBe 201
+        corrected.getHeader("Idempotency-Replayed").shouldBeNull()
+        jdbc.queryForObject("SELECT count(*) FROM idempotency_keys", Int::class.java) shouldBe 1
     }
 
     @Test
@@ -120,7 +160,7 @@ class IdempotencyInterceptorTest(
     @Test
     fun `the same key against a different path is 422, not a fresh reservation`() {
         // Ruling A: V11's unique constraint is `(user_id, idempotency_key)`
-        // alone, so only the comparison in IdempotencyInterceptor.replay can
+        // alone, so only the comparison in IdempotentExecution.replay can
         // refuse a different method or concrete path.
         val key = UUID.randomUUID().toString()
         post(ada, key, """{"text":"thank you"}""").status shouldBe 201
@@ -202,20 +242,19 @@ class IdempotencyInterceptorTest(
         controller.enteredGate = entered
         controller.releaseGate = release
 
-        val pool = Executors.newFixedThreadPool(2)
         val firstCall = pool.submit<Int> { post(ada, key, """{"text":"thank you"}""").status }
         entered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS) shouldBe true
 
-        // The first request has reserved the key and is now blocked inside
-        // the handler (response_status still null): the second is expected
-        // to be answered — 409, without ever entering the handler — well
-        // before the first is let go.
+        // The first request holds the key's advisory lock and is parked
+        // inside its own transaction: the second is expected to be answered
+        // — 409, without ever running the write — well before the first is
+        // let go. (IdempotentExecutionTest proves the same thing through
+        // pg_blocking_pids, without a timeout standing in for "queued".)
         val secondCall = pool.submit<Int> { post(ada, key, """{"text":"thank you"}""").status }
         val secondStatus = secondCall.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
 
         release.countDown()
         val statuses = listOf(firstCall.get(TIMEOUT_SECONDS, TimeUnit.SECONDS), secondStatus)
-        pool.shutdown()
 
         statuses shouldBe listOf(201, 409)
         handlerRuns shouldBe 1
@@ -258,17 +297,27 @@ class IdempotencyInterceptorTest(
 }
 
 /**
- * Counts its own invocations so a test can assert the handler ran once, not
- * "the response looked like a replay" — a fact the interceptor's own headers
- * could in principle get wrong.
+ * Counts its own invocations so a test can assert the handler's write ran
+ * once, not "the response looked like a replay" — a fact the headers could
+ * in principle get wrong.
+ *
+ * Shaped like a real idempotent handler (`EntriesController`/`SubmitEntry`):
+ * its write runs through [IdempotentExecution.once] inside its own
+ * transaction, into `probe_results` (test-only, `V11_1`), and a replay is
+ * answered by **re-reading** that row by the returned id — never from a
+ * stored copy. A `NULL` label is this probe's tombstone.
  *
  * [enteredGate] and [releaseGate] exist only for the concurrency test: when
- * set, the handler signals the first and waits on the second, so a test can
- * hold a winning request inside the handler for exactly as long as it needs
- * to. `null` by default, so every other test runs unblocked.
+ * set, the write signals the first (after the key's lock and reservation are
+ * taken) and waits on the second, so a test can hold a winning request
+ * inside its transaction for exactly as long as it needs to.
  */
 @RestController
-final class IdempotencyProbeController {
+class IdempotencyProbeController(
+    private val execution: IdempotentExecution,
+    private val transactions: TransactionTemplate,
+    private val jdbc: JdbcTemplate,
+) {
     val handlerRuns = AtomicInteger(0)
 
     @Volatile
@@ -277,43 +326,76 @@ final class IdempotencyProbeController {
     @Volatile
     var releaseGate: CountDownLatch? = null
 
+    /** When set, the next write throws a `422` after inserting its row, and clears this. */
+    @Volatile
+    var refuseNext: Boolean = false
+
     fun reset() {
         handlerRuns.set(0)
         enteredGate = null
         releaseGate = null
+        refuseNext = false
     }
 
     @PostMapping("/api/v1/probe/entries")
     @Idempotent
     fun create(
         @RequestBody body: Map<String, String>,
-    ): ResponseEntity<Map<String, String>> {
-        handlerRuns.incrementAndGet()
-        enteredGate?.countDown()
-        releaseGate?.await()
-        return ResponseEntity
-            .created(URI.create("/api/v1/probe/entries/7"))
-            .eTag("\"7\"")
-            .body(body)
-    }
+        http: HttpServletRequest,
+    ): ResponseEntity<Map<String, String?>> = respond(http, body, etag = "\"7\"", location = "/api/v1/probe/entries/7")
 
     @PostMapping("/api/v1/probe/bonds/{bond}/entries")
     @Idempotent
-    @ResponseStatus(HttpStatus.CREATED)
     fun createUnderBond(
         @RequestBody body: Map<String, String>,
-    ): Map<String, String> {
-        handlerRuns.incrementAndGet()
-        return body
-    }
+        http: HttpServletRequest,
+    ): ResponseEntity<Map<String, String?>> = respond(http, body)
 
     @PostMapping("/api/v1/probe/other-entries")
     @Idempotent
-    @ResponseStatus(HttpStatus.CREATED)
     fun createOther(
         @RequestBody body: Map<String, String>,
-    ): Map<String, String> {
-        handlerRuns.incrementAndGet()
-        return body
+        http: HttpServletRequest,
+    ): ResponseEntity<Map<String, String?>> = respond(http, body)
+
+    private fun respond(
+        http: HttpServletRequest,
+        body: Map<String, String>,
+        etag: String? = null,
+        location: String? = null,
+    ): ResponseEntity<Map<String, String?>> {
+        val outcome =
+            checkNotNull(
+                transactions.execute {
+                    execution.once(IdempotencyInterceptor.requestOf(http)) {
+                        handlerRuns.incrementAndGet()
+                        enteredGate?.countDown()
+                        releaseGate?.await(GATE_SECONDS, TimeUnit.SECONDS)
+                        val id = UUID.randomUUID()
+                        jdbc.update("INSERT INTO probe_results (id, label) VALUES (?, ?)", id, body["text"])
+                        if (refuseNext) {
+                            refuseNext = false
+                            throw ProbeRefusedException()
+                        }
+                        IdempotentResult(body, id, ResultKind.ENTRY, HttpStatus.CREATED.value(), etag, location)
+                    }
+                },
+            )
+        val rendered: Map<String, String?> =
+            outcome.value ?: mapOf(
+                "text" to jdbc.queryForObject("SELECT label FROM probe_results WHERE id = ?", String::class.java, outcome.resultId),
+            )
+        val response = ResponseEntity.status(outcome.status)
+        outcome.etag?.let { response.eTag(it) }
+        outcome.location?.let { response.location(URI.create(it)) }
+        if (outcome.wasReplayed) response.header(IdempotencyInterceptor.REPLAYED_HEADER, "true")
+        return response.body(rendered)
+    }
+
+    private companion object {
+        const val GATE_SECONDS = 10L
     }
 }
+
+/** A refusal thrown from inside the probe's write — any `ApiException` a real handler's block might throw. */
+class ProbeRefusedException : ApiException(HttpStatus.UNPROCESSABLE_ENTITY, ErrorCode.VALIDATION_FAILED, "The probe refused this request.")

@@ -74,6 +74,10 @@ internal fun BondDay.applyTo(entity: BondDayEntity) {
  * so the two bounds never actually diverge — but they are two separate
  * statements of the limit, not one, and only the schema's is enforced at
  * the boundary a second writer could someday bypass.
+ *
+ * A `NULL` text maps to `null`, not to a failure: that is a tombstone (see
+ * [Entry]'s own KDoc), and [Entry]'s `init` is what refuses a missing text
+ * on a row that is not one.
  */
 internal fun EntryEntity.toDomain(): Entry =
     Entry(
@@ -81,7 +85,7 @@ internal fun EntryEntity.toDomain(): Entry =
         bondDayId = BondDayId(bondDayId),
         bondId = bondId,
         authorMemberId = authorMemberId,
-        text = requireNotNull(text?.let(EntryText::of)) { "a stored entry always has text in this slice" },
+        text = text?.let(EntryText::of),
         imageMediaId = imageMediaId,
         voiceMediaId = voiceMediaId,
         voiceDurationMs = voiceDurationMs,
@@ -102,7 +106,7 @@ internal fun Entry.toEntity(): EntryEntity =
         bondDayId = bondDayId.value,
         bondId = bondId,
         authorMemberId = authorMemberId,
-        text = text.value,
+        text = text?.value,
         imageMediaId = imageMediaId,
         voiceMediaId = voiceMediaId,
         voiceDurationMs = voiceDurationMs,

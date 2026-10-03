@@ -28,7 +28,7 @@
 -- never conflicts with anything. Decided in favour of the observable
 -- contract: the UNIQUE constraint below is `(user_id, idempotency_key)` only,
 -- `method` and `path` are stored columns compared in code (see
--- IdempotencyInterceptor.replay), and a mismatch on `method`, `path` or
+-- IdempotentExecution.replay), and a mismatch on `method`, `path` or
 -- `request_hash` is `422 IDEMPOTENCY_KEY_REUSED`. `path` is the request's
 -- CONCRETE path, never a route template: `/api/v1/bonds/{bondId}/entries`
 -- would make two bonds one target, and a key replayed against a different
@@ -41,9 +41,15 @@
 -- verification_tokens, V6's refresh_tokens and V9's bond_invites already
 -- use — rather than by a scheduled reaper, which belongs to slice C3
 -- (ShedLock) and does not exist yet. Until it does, an expired row can still
--- physically block a fresh reservation under the UNIQUE constraint above;
--- IdempotencyKeyStore.reserve reclaims it in that one case rather than
--- letting a legitimate 24-hours-later reuse of the same key become a 500.
+-- physically occupy the UNIQUE constraint below; IdempotentExecution deletes
+-- it before reserving the key again, under the same advisory lock (spec §5.4).
+--
+-- Spec §5.4's one transaction (plan task 7): a row is written and completed
+-- inside the SAME transaction as the write it guards, under a nonblocking
+-- advisory lock on (user_id, key) taken before the lookup. So to every other
+-- transaction a row is either absent or complete, and a request that fails —
+-- a refusal or a crash — rolls its reservation back with its write, leaving
+-- nothing to block a corrected retry. Only successes are ever recorded.
 CREATE TABLE idempotency_keys (
     id               uuid        PRIMARY KEY,
     user_id          uuid        NOT NULL,
@@ -54,12 +60,16 @@ CREATE TABLE idempotency_keys (
     method           text        NOT NULL,
     path             text        NOT NULL,
     idempotency_key  text        NOT NULL,
-    -- SHA-256 of the raw request body. The body itself is never stored: an
-    -- entry's text is the thing this system exists not to leak (doc 18 §9).
+    -- A KEYED fingerprint (HMAC-SHA256 under the server's personal-data
+    -- secret, ruling P8) of method, path and raw body together — never a
+    -- plain hash. The body itself is never stored: an entry's text is the
+    -- thing this system exists not to leak (doc 18 §9), and an unkeyed
+    -- SHA-256 of a short entry would be recoverable from this column by
+    -- hashing guesses for the row's whole 24 hours. See RequestFingerprint.
     request_hash     text        NOT NULL,
-    -- Null until the handler returns. A row that exists with a null status is
-    -- a request in flight, which is what makes the second one a 409 rather
-    -- than a second execution.
+    -- Null only between the reservation and its completion, which happen in
+    -- one transaction, so no other transaction ever sees it null. "In flight"
+    -- is the advisory lock's answer (409), not this column's.
     response_status  smallint,
     -- What the first attempt produced, by IDENTITY — never a second copy of
     -- what it produced. An earlier shape of this table stored the whole
@@ -85,7 +95,10 @@ CREATE TABLE idempotency_keys (
 
     CONSTRAINT idempotency_keys_unique UNIQUE (user_id, idempotency_key),
     CONSTRAINT idempotency_keys_expiry_check CHECK (expires_at > created_at),
-    CONSTRAINT idempotency_keys_result_kind_check CHECK (result_kind IS NULL OR result_kind IN ('ENTRY'))
+    CONSTRAINT idempotency_keys_result_kind_check CHECK (result_kind IS NULL OR result_kind IN ('ENTRY')),
+    -- A result is named by both halves or by neither: an id with no kind
+    -- cannot be routed to a re-read, and a kind with no id names nothing.
+    CONSTRAINT idempotency_keys_result_pair_check CHECK ((result_id IS NULL) = (result_kind IS NULL))
 );
 
 -- The reaper's index (slice C3, not built here): a plain index, not

@@ -86,7 +86,8 @@ internal class BondDayIntervalTest(
     @AfterEach
     fun clear() {
         jdbc.execute(
-            "TRUNCATE TABLE entries, bond_days, bond_anchor_intervals, bond_proposals, blocks, bond_invites, bond_members, bonds CASCADE",
+            "TRUNCATE TABLE idempotency_keys, entries, bond_days, bond_anchor_intervals, bond_proposals, " +
+                "blocks, bond_invites, bond_members, bonds CASCADE",
         )
         users.clear()
     }
