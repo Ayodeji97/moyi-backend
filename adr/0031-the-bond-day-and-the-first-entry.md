@@ -592,6 +592,35 @@ the same bound costs a migration. A missing key is the same `422` and now carrie
 this was the one place it was not. `ApiException` gained an optional `errors` list to carry
 it. The cost: a client sending an exotic key gets a `422`; a UUID or a ULID is well inside.
 
+**26. An unpaired UTF-16 surrogate in an entry's text is refused (added 2026-10-04, the C1
+follow-up).** Decision 23 says the text is stored exactly as sent. A surrogate without its
+partner (JSON `"\ud800"`) cannot be: it is not a character and has no UTF-8 form. Nobody
+had run it. Run, it was not a `500`: the request was a `201` whose body echoed the surrogate
+from memory, while the driver had written `?` (0x3F) in its place. The response and the row
+disagreed, and a replay or `GET /today` would have returned the `?`. `EntryText.of` now
+refuses it beside the NUL check, a `422` on `text` like the other limits. A well-formed
+*pair* is one code point (any emoji outside the BMP) and is untouched; a test stores one
+sent as JSON escapes and reads back its four UTF-8 bytes. No migration: a row already
+written this way holds `?`, which is valid text and reads back as it is stored.
+
+**27. A body that stops arriving on an `@Idempotent` route is a `400`, logged as a client
+error (added 2026-10-04, the C1 follow-up).** Decision 24 moved the read of the body into
+`IdempotencyInterceptor.preHandle`, so a client that disconnects or stalls part-way now
+raises its `IOException` inside MVC. Reasoned from reading to be a `500`; run, it was half
+that. Under MockMvc it was a `500 INTERNAL_ERROR`. Against a real Tomcat the exception
+(`ClientAbortException`) reached `handleUnexpected` and was logged at `ERROR` with a stack
+trace, but the status on the wire was already `400`: Tomcat marks the response itself when
+the read fails and answers through its own error dispatch. `ReplayableHttpServletRequest`
+now catches the `IOException` where it reads and throws `RequestBodyUnreadableException`
+(`400 MALFORMED_REQUEST`, the code and sentence an unparseable body gets), which is logged
+at `WARN` with no stack trace. Caught at the read rather than by a handler for
+`IOException`, which would also have swallowed the server's own I/O faults. **Not changed:**
+on a real server the body of that `400` is Boot's default error document, not this
+application's problem details, because Tomcat has already put the response in its error
+state. A client that aborted is no longer there to read it. A client that only stalled (a
+socket timeout) is still connected and does receive that document, so this is a real hole
+in the error contract, recorded under Owed.
+
 ## Consequences
 
 - **Five new `ErrorCode` values, so this is a breaking change**: `ENTRY_ALREADY_EXISTS`,
@@ -850,8 +879,22 @@ on. None of them is built here.
   applied V10, V11, V12 and V13 in order. One run on one database is what that proves.
 - **`scripts/smoke.sh` was run against the rework on 2026-10-03**, on the jar built from
   `b08b385` (the final review's fixes included), after the repair above: **350 probes passed,
-  0 failed**, the gratitude section and the deferred-handoff section among them. Anything
-  committed after `b08b385` has not been smoke-tested until the script is run again.
+  0 failed**, the gratitude section and the deferred-handoff section among them. **Run again
+  on 2026-10-04 for the C1 follow-up**, on the jar built from `0397200`, with eleven probes
+  added (the `Idempotency-Key` contract, the media refusal, the author's own `today`,
+  `ALREADY_MEMBER`, an unpaired surrogate, typographic text stored as sent): **361 passed,
+  0 failed.** Anything committed after `0397200` that is not documentation has not been
+  smoke-tested until the script is run again.
+- **A read failure on an `@Idempotent` route answers `400` with the framework's default error
+  body, not RFC 9457** (decision 27). Tomcat error-dispatches once the read of the body
+  fails, so on a real server the response is Boot's default error document. It is the one
+  known hole in "every error is problem details". Observed by hand on 2026-10-04, not
+  asserted by a test: `IdempotencyRealServerTest` asserts the status only. Not assigned to
+  a slice, and not ruled on.
+- **Two product questions about `EntryText` are open and not ruled** (decision 23 has the
+  first): whether the 500 should be counted on the raw text rather than the NFKC form, and
+  whether an entry made only of zero-width characters should be refused. The C1 follow-up
+  left both alone on purpose.
 - **V13's backfill is covered twice.** `AnchorIntervalBackfillTest` migrates a database to
   just before V13, inserts bonds in every state and in the zones where a date is easiest to
   get wrong, runs V13, and loads each timeline through the application's own loader; the

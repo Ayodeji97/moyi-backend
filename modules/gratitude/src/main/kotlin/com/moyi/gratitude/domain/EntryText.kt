@@ -26,6 +26,13 @@ import java.util.Locale
  * - **No U+0000.** Postgres `text` cannot hold it, so such a text could never
  *   be stored; refused here it is a `422`, where at the insert it was a `500`.
  *
+ * - **No unpaired surrogate.** A UTF-16 surrogate without its partner (JSON
+ *   `"\ud800"`) is not a character and has no UTF-8 form, so it cannot be
+ *   stored as sent. It did not fail: the driver wrote `?` in its place and
+ *   the `201` echoed the surrogate from memory, so the response and the row
+ *   disagreed about what had been kept. Refused here it is a `422`. A
+ *   well-formed *pair* is one code point — any emoji — and is untouched.
+ *
  * - **Octet cap, on the stored bytes.** A grapheme has no upper bound on its
  *   byte length, so the grapheme limit alone caps *count*, not *size*.
  *   [MAX_OCTETS] bounds what flows into the row, the future search column,
@@ -51,7 +58,7 @@ import java.util.Locale
  *   counts as three, so a client's own counter must normalise the same way
  *   or it will show "fits" for a text this refuses.
  *
- * **Order matters.** The two cheap checks on the raw string run first, so a
+ * **Order matters.** The cheap checks on the raw string run first, so a
  * megabyte of text is refused by one `String.toByteArray` call rather than
  * after being normalised and walked boundary by boundary.
  *
@@ -86,10 +93,12 @@ internal value class EntryText private constructor(
          * each limit is measured on.
          *
          * @throws IllegalArgumentException naming whichever limit was crossed
-         *   first — NUL, octets, blank, then graphemes, in that order.
+         *   first — NUL, an unpaired surrogate, octets, blank, then
+         *   graphemes, in that order.
          */
         fun of(raw: String): EntryText {
             require(NUL !in raw) { "an entry cannot contain the NUL character" }
+            require(!hasUnpairedSurrogate(raw)) { "an entry cannot contain an unpaired surrogate" }
             require(raw.toByteArray(Charsets.UTF_8).size <= MAX_OCTETS) { "an entry is at most $MAX_OCTETS bytes" }
             // Only to decide. What is returned, and stored, is `raw`.
             val counted = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
@@ -97,6 +106,20 @@ internal value class EntryText private constructor(
             require(graphemes(counted) <= MAX_GRAPHEMES) { "an entry is at most $MAX_GRAPHEMES characters" }
             return EntryText(raw)
         }
+
+        /**
+         * Whether [text] is not well-formed UTF-16: a high surrogate that no
+         * low one follows, or a low surrogate that no high one precedes.
+         * Checking each unit against its neighbour is enough — in a string
+         * where every high is followed by a low and every low preceded by a
+         * high, the surrogates pair off exactly.
+         */
+        private fun hasUnpairedSurrogate(text: String): Boolean =
+            text.indices.any { i ->
+                val unit = text[i]
+                (unit.isHighSurrogate() && text.getOrNull(i + 1)?.isLowSurrogate() != true) ||
+                    (unit.isLowSurrogate() && text.getOrNull(i - 1)?.isHighSurrogate() != true)
+            }
 
         /**
          * User-perceived characters, per Unicode text segmentation

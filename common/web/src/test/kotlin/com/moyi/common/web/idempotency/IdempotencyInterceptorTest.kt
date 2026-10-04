@@ -8,16 +8,26 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import jakarta.servlet.FilterChain
+import jakarta.servlet.ReadListener
+import jakarta.servlet.ServletInputStream
 import jakarta.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletRequestWrapper
+import jakarta.servlet.http.HttpServletResponse
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import org.springframework.core.Ordered
+import org.springframework.core.annotation.Order
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
@@ -29,6 +39,10 @@ import org.springframework.transaction.support.TransactionTemplate
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RestController
+import org.springframework.web.filter.OncePerRequestFilter
+import java.io.EOFException
+import java.io.IOException
+import java.io.InputStream
 import java.net.URI
 import java.security.Principal
 import java.time.Duration
@@ -49,7 +63,8 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 @SpringBootTest(classes = [IdempotencyTestApplication::class])
 @AutoConfigureMockMvc
-@Import(IdempotencyInterceptorTest.TimeConfiguration::class)
+@ExtendWith(OutputCaptureExtension::class)
+@Import(IdempotencyInterceptorTest.TimeConfiguration::class, IdempotencyInterceptorTest.BrokenBodyConfiguration::class)
 class IdempotencyInterceptorTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val controller: IdempotencyProbeController,
@@ -376,6 +391,88 @@ class IdempotencyInterceptorTest(
         handlerRuns shouldBe 0
     }
 
+    /**
+     * A client that disconnects part-way through its body. The body is read
+     * in `preHandle` now, so the container's `IOException` is raised inside
+     * MVC — and, until it was caught where it is read, reached
+     * `handleUnexpected`: an ERROR-logged `500` with a stack trace, for
+     * something no server did wrong. Observed 2026-10-04, here and against a
+     * real Tomcat (`IdempotencyRealServerTest`). There is no client left to
+     * read the answer; the point is what the server counts and logs it as.
+     */
+    @Test
+    fun `a body whose stream fails part-way is 400, logged as a client error and never run`(output: CapturedOutput) {
+        for (failure in listOf("io", "eof")) {
+            val response =
+                mockMvc
+                    .post(ENTRIES_PATH) {
+                        with { request -> request.apply { userPrincipal = Principal { ada.toString() } } }
+                        header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                        header(BREAK_HEADER, failure)
+                        contentType = MediaType.APPLICATION_JSON
+                        content = """{"text":"thank you"}"""
+                    }.andReturn()
+                    .response
+
+            response.status shouldBe 400
+            response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+        }
+        handlerRuns shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM idempotency_keys", Int::class.java) shouldBe 0
+        output.all shouldNotContain "Unhandled exception"
+        output.all shouldNotContain "Exception:" // no stack trace, and no exception's own message
+        output.all shouldContain "MALFORMED_REQUEST -> 400"
+    }
+
+    /**
+     * Stands in for a client that goes away mid-body: with [BREAK_HEADER] set,
+     * the request's stream yields [BREAK_AFTER] bytes and then throws — an
+     * `IOException` (what Tomcat's `ClientAbortException` and a socket
+     * timeout are) or an `EOFException` (a body shorter than it declared).
+     * Outermost, so it sits *inside* [ReplayableHttpServletRequest] and is
+     * what `buffered` reads from.
+     */
+    @TestConfiguration
+    class BrokenBodyConfiguration {
+        @Bean
+        @Order(Ordered.HIGHEST_PRECEDENCE)
+        fun brokenBodyFilter(): OncePerRequestFilter =
+            object : OncePerRequestFilter() {
+                override fun doFilterInternal(
+                    request: HttpServletRequest,
+                    response: HttpServletResponse,
+                    filterChain: FilterChain,
+                ) {
+                    val failure = request.getHeader(BREAK_HEADER)
+                    filterChain.doFilter(if (failure == null) request else BrokenBodyRequest(request, failure), response)
+                }
+            }
+    }
+
+    private class BrokenBodyRequest(
+        request: HttpServletRequest,
+        private val failure: String,
+    ) : HttpServletRequestWrapper(request) {
+        override fun getInputStream(): ServletInputStream {
+            val real: InputStream = super.getInputStream()
+            return object : ServletInputStream() {
+                private var served = 0
+
+                override fun read(): Int {
+                    if (served++ < BREAK_AFTER) return real.read()
+                    if (failure == "eof") throw EOFException("Unexpected EOF read on the socket")
+                    throw IOException("Connection reset by peer")
+                }
+
+                override fun isFinished(): Boolean = false
+
+                override fun isReady(): Boolean = true
+
+                override fun setReadListener(listener: ReadListener?) = Unit
+            }
+        }
+    }
+
     @TestConfiguration
     class TimeConfiguration {
         @Bean
@@ -389,6 +486,8 @@ class IdempotencyInterceptorTest(
         const val CREATED_ETAG = "\"7\""
         const val CREATED_LOCATION = "/api/v1/probe/entries/7"
         const val TIMEOUT_SECONDS = 10L
+        const val BREAK_HEADER = "X-Probe-Break-Body"
+        const val BREAK_AFTER = 8
     }
 }
 

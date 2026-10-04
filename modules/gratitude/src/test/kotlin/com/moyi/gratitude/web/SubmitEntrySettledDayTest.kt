@@ -9,14 +9,18 @@ import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Import
 import org.springframework.http.HttpHeaders
@@ -62,6 +66,7 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
+@ExtendWith(OutputCaptureExtension::class)
 @Import(SubmitEntryBondLockTest.TimeConfiguration::class)
 internal class SubmitEntrySettledDayTest(
     @Autowired private val mockMvc: MockMvc,
@@ -104,7 +109,7 @@ internal class SubmitEntrySettledDayTest(
     }
 
     @Test
-    fun `an offline draft whose day closes while it waits for the day lock lands on today instead`() {
+    fun `an offline draft whose day closes while it waits for the day lock lands on today instead`(output: CapturedOutput) {
         withDayLockHeld(YESTERDAY) { holderPid, closeAndCommit ->
             val key = UUID.randomUUID().toString()
             val body = """{"text":"written on the flight","intendedAt":"$YESTERDAY_EVENING"}"""
@@ -122,6 +127,9 @@ internal class SubmitEntrySettledDayTest(
             // the submission instant — the rejected claim is never stored (F1).
             response.contentAsString shouldContain "\"date\":\"$TODAY\""
             intendedAtOf(response) shouldBe NOW
+            // The redirect is traceable: the bond and both dates, never the words.
+            output.all shouldContain "an offline entry is redirected to $TODAY"
+            output.all shouldNotContain "written on the flight"
             entriesOn(YESTERDAY) shouldBe 1 // Bea's, and only Bea's
             entryCountOf(YESTERDAY) shouldBe 1
             statusOf(YESTERDAY) shouldBe "SOLO"
@@ -176,7 +184,7 @@ internal class SubmitEntrySettledDayTest(
     }
 
     @Test
-    fun `the redirect happens once - a settled submission-time day refuses the entry`() {
+    fun `the redirect happens once - a settled submission-time day refuses the entry`(output: CapturedOutput) {
         // Today is already settled when the race begins; yesterday closes
         // during it. The redirect lands on a settled day and stops there.
         submit(bea, """{"text":"bea, on the 15th"}""").status shouldBe 201
@@ -192,6 +200,12 @@ internal class SubmitEntrySettledDayTest(
             val response = submission.get(10, TimeUnit.SECONDS)
             response.status shouldBe 409
             response.contentAsString shouldContain "\"code\":\"DAY_CLOSED\""
+            // The log must not claim a redirect that did not happen: it used
+            // to say "is redirected to" before the fallback day's own settled
+            // check, and this request was then a 409.
+            output.all shouldNotContain "is redirected to"
+            output.all shouldContain "and $TODAY is settled too; the entry is refused"
+            output.all shouldNotContain "nowhere to go"
             jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 2 // Bea's two
             jdbc.queryForObject("SELECT count(*) FROM bond_days", Int::class.java) shouldBe 2
         }
@@ -199,7 +213,10 @@ internal class SubmitEntrySettledDayTest(
 
     @ParameterizedTest
     @ValueSource(strings = ["EMPTY", "FROZEN", "SUSPENDED"])
-    fun `a claimed day that is already stamped closed sends the draft to today, whatever its status`(status: String) {
+    fun `a claimed day that is already stamped closed sends the draft to today, whatever its status`(
+        status: String,
+        output: CapturedOutput,
+    ) {
         // Spec §6.1.2: settled is `closedAt != null`, "including FROZEN and
         // elapsed SUSPENDED" — and §6.1's own note on why EMPTY is in the
         // list. SUSPENDED is the one a status-only check misses: the close
@@ -220,6 +237,10 @@ internal class SubmitEntrySettledDayTest(
         intendedAtOf(response) shouldBe NOW
         entriesOn(YESTERDAY) shouldBe 1
         entriesOn(TODAY) shouldBe 1
+        // The claim was refused by the unlocked check, so the fallback line
+        // was written — at DEBUG. At the default level it must not appear: a
+        // client whose clock runs fast would write it on every submission.
+        output.all shouldNotContain "an intendedAt was not used"
     }
 
     // ---- the close, standing in for C3 ----------------------------------

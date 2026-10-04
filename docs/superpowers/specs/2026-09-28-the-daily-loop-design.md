@@ -111,7 +111,9 @@ depends on `identity`. No foreign key crosses the boundary: `entries.bond_id` an
 Writes use `lockMembershipOf` with transaction propagation `MANDATORY` in the same
 transaction as the gratitude mutation, and keep the lock until commit. A membership value is
 a snapshot, not a durable authorization grant. The lock order is **bond, then bond-day, then
-entry** on submission, editing, closing and lifecycle reconciliation. This serializes writes
+entry** on submission, editing, closing and lifecycle reconciliation *(not for closing: the
+close job takes no bond lock — see the amendment below this paragraph, ADR-0031 decision 18)*.
+This serializes writes
 with leave, block, deletion and timezone confirmation; checking `isOpen` before taking a
 separate day lock would allow a write to commit after the bond ended. The port also exposes
 activation/end intervals and the effective anchor timeline to the closer through public DTOs,
@@ -450,7 +452,9 @@ minute.
 
 1. The candidate instant is `intendedAt` when the client sent one, else the submission instant.
 2. `intendedAt` is **refused as the candidate** — and the submission instant used instead — if
-   it is more than **5 minutes in the future**, more than **36 hours in the past**, or falls on
+   it is more than **5 minutes in the future** *(superseded: ahead of the server's clock **by
+   any amount** — see the amendment below this list, ADR-0031 decision 22)*, more than
+   **36 hours in the past**, or falls on
    a Bond-day that is **already settled** (`closedAt != null`, including `FROZEN` and
    elapsed `SUSPENDED`), or already `REVEALED` before midnight.
 3. Resolve the candidate against the persisted effective anchor intervals (§3.1), then find

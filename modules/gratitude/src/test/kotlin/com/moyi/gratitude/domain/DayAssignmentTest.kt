@@ -59,10 +59,17 @@ internal class DayAssignmentTest {
         resolution.usedIntendedAt shouldBe false
     }
 
+    /**
+     * Ruling P11: the rule is "ahead of the server's clock", with no
+     * tolerance to be inside or outside of. This test was named for the
+     * five-minute line the rule used to draw; one second ahead is ignored
+     * exactly as 301 are.
+     */
     @Test
-    fun `intendedAt more than five minutes ahead is ignored`() {
+    fun `intendedAt ahead of the server clock is ignored, by however much`() {
         val now = Instant.parse("2026-09-15T08:00:00Z")
 
+        DayAssignment.resolve(now, now.plusSeconds(1), fixed(lagos), never).usedIntendedAt shouldBe false
         DayAssignment.resolve(now, now.plusSeconds(301), fixed(lagos), never).usedIntendedAt shouldBe false
         // Six minutes ahead across a midnight: Lagos's 14th ends at 14T23:00Z.
         val sixAhead = Instant.parse("2026-09-14T22:57:00Z").let { DayAssignment.resolve(it, it.plusSeconds(360), fixed(lagos), never) }
@@ -78,13 +85,13 @@ internal class DayAssignmentTest {
 
     /**
      * Ruling P11. 23:57 in Lagos on the 14th (14T22:57Z); the phone's clock is
-     * four minutes fast and reads 00:01 on the 15th. The claim is inside the
-     * five-minute tolerance, so nothing about the request is refused — but
+     * four minutes fast and reads 00:01 on the 15th. That is ordinary drift,
+     * so nothing about the request is refused — but
      * the 15th has not begun, and a day that has not begun is never opened:
      * the entry is filed where the server says it was written.
      */
     @Test
-    fun `a claim ahead of the server clock, inside the tolerance, resolves at the submission instant`() {
+    fun `a claim a few minutes ahead of the server clock resolves at the submission instant`() {
         val now = Instant.parse("2026-09-14T22:57:00Z")
         val phone = now.plusSeconds(240)
         // The claim, taken at its word, would be the 15th.
