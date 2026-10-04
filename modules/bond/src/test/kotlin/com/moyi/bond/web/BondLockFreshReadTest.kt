@@ -198,7 +198,8 @@ internal class BondLockFreshReadTest(
         // The one thing this service reads *before* the lock is the invite,
         // so its copy is as old as the wait. It is safe because spending the
         // code is a compare-and-set that asks "still live?" in the UPDATE
-        // itself, not because anything re-reads it.
+        // itself, not because anything re-reads it. Loading the bond early
+        // leaves this green; ignoring `consume`'s answer turns it into a `200`.
         val bond = pendingBond()
 
         val response =
@@ -280,7 +281,10 @@ internal class BondLockFreshReadTest(
     @Test
     fun `a zone cancellation queued behind the confirmation finds nothing left to cancel`() {
         // This path never reads the bond. What it decides on is the proposal,
-        // twice over: a query after the lock, then a compare-and-set.
+        // twice over: a query after the lock, then a compare-and-set. It took
+        // both mutations together to turn this red — `findLive` moved above
+        // the lock *and* `confirmedAt IS NULL` dropped from the UPDATE; either
+        // alone and it stays green, which is the two layers each working.
         val bond = pairedBond()
         proposeZone(bond.ada, bond.id, "Europe/London").status shouldBe 200
 
@@ -296,7 +300,8 @@ internal class BondLockFreshReadTest(
                         bond.bea,
                     ) shouldBe 1
                     holder.run(
-                        "UPDATE bonds SET anchor_timezone = 'Europe/London', timezone_changed_at = now(), version = version + 1 WHERE id = ?",
+                        "UPDATE bonds SET anchor_timezone = 'Europe/London', timezone_changed_at = now(), " +
+                            "version = version + 1 WHERE id = ?",
                         UUID.fromString(bond.id),
                     )
                 },
@@ -447,11 +452,7 @@ internal class BondLockFreshReadTest(
         dataSource.connection.use { holder ->
             holder.autoCommit = false
             try {
-                // `BondRepository.lockRow`'s own statement.
-                holder.prepareStatement("SELECT 1 FROM bonds WHERE id = ? FOR UPDATE").use {
-                    it.setObject(1, UUID.fromString(bondId))
-                    it.executeQuery().use { rows -> rows.next() shouldBe true }
-                }
+                holder.lockBondRow(bondId)
                 val holderPid = backendPidOf(holder)
                 val waiting = pool.submit<MockHttpServletResponse> { request() }
                 awaitBlockedOrDone(holderPid, waiting)
@@ -467,6 +468,14 @@ internal class BondLockFreshReadTest(
                 holder.autoCommit = true
             }
         }
+
+    /** `BondRepository.lockRow`'s own statement, on a connection the test controls. */
+    private fun Connection.lockBondRow(bondId: String) {
+        prepareStatement("SELECT 1 FROM bonds WHERE id = ? FOR UPDATE").use {
+            it.setObject(1, UUID.fromString(bondId))
+            it.executeQuery().use { rows -> rows.next() shouldBe true }
+        }
+    }
 
     private fun backendPidOf(connection: Connection): Int =
         connection.createStatement().use { statement ->

@@ -108,6 +108,73 @@ window between the read and the update is tiny. The fix rests on the ordering an
 than on a reproduction, and `EndBondRaceTest` says so where somebody might otherwise read it as
 a proof.
 
+**6b. Why the read under the lock is fresh, per caller (the audit ADR-0031 owed; added
+2026-10-04).** Slice C1 found that `BondAccess.lockMembershipOf` took this lock and then
+"re-read" a bond Hibernate still had in its persistence context, because the guard had loaded it
+earlier in the same transaction (ADR-0031 decision 17). It was fixed there with
+`lockBond(refreshReads = true)`, and the eleven other `lockBond` call sites were left with a
+reason: *they all write the bond afterwards, so a stale read meets `@Version`.* That reason is
+false, and the callers are correct anyway, for a different one.
+
+| Call site | In the persistence context before the lock | Decides, after the lock, on | Writes `bonds`? |
+|---|---|---|---|
+| `AcceptInvite.accept` | the invite (and the caller's account); not the bond, not a member | already a member, `hasRoom`, blocks; then spends the code by compare-and-set | yes |
+| `UpdateBond.patch` | nothing | `isOpen`, `If-Match` | yes |
+| `EndBond.leave` | nothing | `canBeEnded` | yes; **not** during a cooling-off, where only `left_at` moves |
+| `EndBond.block` (same `lockAndLoad`) | nothing | the member rows, one `blocks` row per other member | as `leave` |
+| `ChangeTimezone.propose` | nothing | `isOpen`, the 30-day rule, `PENDING_MEMBER`, a live proposal | **only** with one member |
+| `ChangeTimezone.confirm` | nothing | `isOpen`, the proposal, the 30-day rule | yes |
+| `ChangeTimezone.cancel` | nothing | the proposal (a query, then a compare-and-set); never the bond | **no** |
+| `MemberSettingsService.replace` | nothing | `isOpen`, the caller's member row | **no** |
+| `RevokeInvite.revoke` | nothing | `isOpen` | **no** |
+| `CreateInvite.forBond` | nothing | `isOpen`, `hasRoom` | **no** |
+| `RequestDeletion.request` | nothing | status, `isOpen`, a live proposal, how many active members | **only** when the cooling-off starts |
+| `RequestDeletion.cancel` | nothing | the caller still active, the proposal, status | only when already counting down |
+
+Nine of the twelve rows do not write the bond row on at least one path, so `@Version` has
+nothing to compare; and a leave during a cooling-off does not move the version at all, so
+`RequestDeletion.cancel` would not be caught even where it does write. What keeps the ten
+member-scoped call sites correct is that **`lockBond` is the first statement of a transaction
+that starts with an empty persistence context**: the controller's guard read ran in its own
+`readOnly` transaction, which is over, and the service receives a `Membership` value and no
+entity. `AcceptInvite` has no guard and does load something first, the invite, and is correct
+because the only decision taken on that copy is a compare-and-set that asks "still live?" in the
+`UPDATE` itself.
+
+So none of them takes `refreshReads = true`, and none should: there is nothing in the context to
+refresh. `BondLockFreshReadTest` holds it — one request per call site, sent through its
+controller, observed queued behind a transaction that holds the bond's row lock and then commits
+what a real leave, accept, revoke or confirmation would. What each failure looked like with the
+bond loaded one line above `lockBond`:
+
+- **Wrong answer, nothing failing** (the bond row is not written): on a bond that had ended,
+  propose answered `200`, create-invite `201`, a first deletion request `202` and member
+  settings `200`; deletion-cancel answered `204` to a member who had left. Revoke and confirm
+  answered the `404` neither serial ordering gives. (The statuses are what was observed; each
+  test stops at its first failed assertion, so the rows behind them were not inspected.)
+- **`500`** (the bond row is written and `@Version` objects): patch, leave, block, the
+  one-member propose. `@Version` did catch these, as an optimistic-lock failure the client is
+  shown as a server error — a backstop, not an answer.
+- **`AcceptInvite`** answered `200` for an archived bond, in the test that leaves the code
+  live; and `200` for a revoked code once the compare-and-set's result was ignored.
+- **`ChangeTimezone.cancel`** needed two mutations at once — the proposal read before the lock
+  *and* the compare-and-set weakened. Either alone stays green: that path is safe twice over.
+
+Two tests were written and not kept: a new invite, and a deletion request, each queued behind an
+*accept*. Both stayed green with the bond stale. They decide on how many member rows there are,
+and a row another transaction **inserted** is new to the persistence context, so a query returns
+it fresh; only rows that were *updated* hide behind the identity map.
+
+The property is now held on purpose rather than by default. `open-in-view` is `false` and
+`JpaTransactionScopeTest` holds that (decision 6); `ArchitectureTest` now refuses any import of a
+transaction API in a module's `web` layer; and `BondLockFreshReadTest` goes red when either is
+undone — eleven of its fourteen tests with `open-in-view` on, and both of
+`BondInvitesController`'s when that controller was made `@Transactional`, the one controller
+tried. **A new caller that runs the guard and takes the lock in one transaction is not covered
+by any of this** and must pass `refreshReads = true`, as `lockMembershipOf` does; a `gratitude`
+service calling `BondAccess.membershipOf` before `lockMembershipOf` is that shape, and is why
+the port refreshes.
+
 **7. A bond already in `PENDING_DELETION` keeps its status.** `Bond.end` leaves the status
 alone there, so a block during B5's deletion cooling-off writes its `blocks` rows and the
 deletion job still finds what it expects.

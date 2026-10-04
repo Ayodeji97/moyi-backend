@@ -1789,3 +1789,48 @@ Wrong about: what a per-task review can see. I had been treating ten clean revie
          And the one I should have known by now: "stored raw" was a sentence in the spec
          with no test under it. A sentence the suite survives the negation of is not
          implemented, it is believed.
+
+## 2026-10-04 · Phase 3 · Auditing the other lock callers — a right conclusion I had filed under a wrong reason
+Expected: to find at least one. C1 had found a "re-read under the lock" that read nothing,
+         and eleven other call sites take the same lock and then read. I had left them
+         with a sentence: they all write the bond afterwards, so a stale read meets
+         `@Version`. I expected the audit to find the caller that does not write the bond
+         and to fix it with `refreshReads = true`.
+Reality: **none of the eleven was wrong, and the sentence was.** Eight of them do not
+         write the bond row on at least one path: a new invite, a revoke, a proposal, a
+         cancel, a first deletion request, a member's settings. `@Version` was never
+         going to see those. And a leave during a cooling-off moves `left_at` and not the
+         bond's version, so the one caller I would have called covered, cancelling a
+         deletion, was not covered either.
+         What keeps them right is smaller and was already written down, in ADR-0028 and in
+         a comment in `application.yml`: the controller's guard reads in its own
+         transaction, that transaction is over before the service's begins, and the lock
+         is the first statement of an empty one. A reviewer had said so from reading. It
+         had not been run. Fourteen tests now run it, each a request sent through its
+         controller, seen queued in `pg_blocking_pids` behind a transaction that holds
+         the bond's row and then commits a leave or an accept.
+         The mutations were the informative part. With the bond loaded one line above the
+         lock, the callers that write the bond answered `500`: `@Version` did catch them,
+         as a server error. The ones that do not answered `200`, `201`, `202` and `204`
+         for a bond that had ended. With `open-in-view` switched on in the test
+         configuration and no source line changed, eleven of the fourteen went red.
+         Two tests I wrote did not survive their own mutation. A new invite behind an
+         accept, and a deletion request behind an accept, both stayed green with the bond
+         stale, because both count member rows and an inserted row is new to the
+         persistence context, so the query returns it. Only updated rows hide. I deleted
+         both. And one test needed two mutations at once to fail: cancelling a zone
+         proposal reads it after the lock and then cancels by compare-and-set, and each
+         of those is enough alone.
+Wrong about: what the earlier note was. "They all write the bond afterwards" read like a
+         finding and was a guess about eleven files I had not opened, made at the end of a
+         long slice, to justify not opening them. It was recorded in an ADR and in a KDoc,
+         and a reviewer and a brief both repeated it. The conclusion it supported was
+         true, which is why nothing contradicted it.
+         Also where a property like this lives. No line in any of the eight services says
+         "my transaction starts empty". It is true because of an annotation that is absent
+         from six controllers and one line of YAML, and it would have stopped being true
+         with a single `@Transactional` added somewhere reasonable-looking. There is an
+         architecture rule for that now, and it was watched failing on a real controller.
+         What is still not covered: a service that calls the guard itself and then locks,
+         in one transaction. That is exactly what `lockMembershipOf` is, and why it
+         refreshes. Nothing stops the next one being written without it.

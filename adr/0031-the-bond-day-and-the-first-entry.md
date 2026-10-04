@@ -451,7 +451,13 @@ on return, which looks like working and protects nothing.
   same instances, old state and all. An entry was committed onto a bond that had been archived
   while the submission waited for the lock. `BondStore.lockBond(refreshReads = true)` refreshes
   those instances from the row now held. It is opt-in, and only `lockMembershipOf` opts in; the
-  other eleven `lockBond` call sites, in merged B2 to B5 code, are not changed here (Owed).
+  other eleven `lockBond` call sites, in merged B2 to B5 code, are not changed here.
+  **Amended 2026-10-04: audited, and none of them needed it.** Each runs in a transaction that
+  starts empty, because its controller's guard read is a separate, finished one; this method is
+  the only caller that guards and locks in the same transaction. The per-caller table, the
+  tests and the rule that now holds the property are in ADR-0028 §6b, which is where the lock
+  rule for bond writes lives. The reason first recorded here for leaving them — that they all
+  write the bond row, so `@Version` would catch a stale read — was wrong for eight of them.
 - **The full order on a submission is key, bond, bond-day, entry.** The idempotency key's lock is
   only ever tried, never waited for, so it cannot close a wait cycle; it goes first so a second
   request under the same key is refused at once and does not queue behind the first one's bond
@@ -743,17 +749,6 @@ it. The cost: a client sending an exotic key gets a `422`; a UUID or a ULID is w
 
 What this slice knowingly leaves for a later one. Each is an obligation, with the slice it falls
 on. None of them is built here.
-
-**A separate PR off `main`, independent of C1.**
-
-- **Audit every `lockBond` caller.** Eleven call sites in eight services (`UpdateBond`,
-  `AcceptInvite`, `ChangeTimezone` ×3, `EndBond`, `MemberSettingsService`, `RevokeInvite`,
-  `RequestDeletion` ×2, `CreateInvite`) lock and then read without `refreshReads`. They all
-  write the bond afterwards, so `@Version` should turn a stale read into a conflict; any that
-  decides on member rows without writing the bond row would not be caught. The PR's claim to
-  prove is "every `lockBond` caller re-reads fresh or is caught by `@Version`", with a test per
-  caller that ends the bond while it waits. Until it lands there is a latent wrong-state
-  decision in a bond write path.
 
 **C2, the reveal.**
 
