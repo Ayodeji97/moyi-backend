@@ -135,8 +135,9 @@ internal class BondStore(
      * transaction opened in a `web` layer, and no `open-in-view`.
      *
      * **It is not `@Version` that protects them.** Creating or revoking an
-     * invite, proposing, cancelling and a member's settings never write the
-     * bond row, so a stale read there would pass silently. A new caller that
+     * invite, proposing, cancelling, requesting a deletion and a member's
+     * settings do not write the bond row on at least one path, so a stale
+     * read there would pass silently. A new caller that
      * reads the bond, or lets the guard read it, before this lock in the same
      * transaction must pass `true`.
      *

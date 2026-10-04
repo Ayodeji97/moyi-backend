@@ -175,6 +175,31 @@ by any of this** and must pass `refreshReads = true`, as `lockMembershipOf` does
 service calling `BondAccess.membershipOf` before `lockMembershipOf` is that shape, and is why
 the port refreshes.
 
+Three more ways to join the guard's transaction to the service's are **not** held by anything:
+
+- **A transaction opened around the handler from outside a domain module** — a filter or an
+  interceptor in `common:web`, `common:security` or `app`. The architecture rule is scoped to
+  the domain modules' `web` layers and would not see it.
+- **A transactional base class or meta-annotation declared in another layer** and used by a
+  controller. The rule reads the imports of files in `web`, and the import would be elsewhere.
+- **A hand-registered `OpenEntityManagerInViewFilter`.** `JpaTransactionScopeTest` asserts that
+  no `OpenEntityManagerInViewInterceptor` bean exists; the filter is a different class and
+  would pass it.
+
+By reasoning, not by a run: `BondLockFreshReadTest` should go red for any of them that reached
+the bond controllers in the bond test context, and would not for one wired only in `app`.
+
+**An option, not built.** `lockBond` could refuse at runtime when the bond is already managed in
+the persistence context and `refreshReads` is false, which would close every gap above at the
+one place they all pass through. It is a production behaviour change — a new way for a bond
+write to fail — so it was not built here, and it is the owner's decision.
+
+**Found by the audit and not changed.** `AcceptInvite.accept` reads `now` before it waits for
+the lock, so an invite that expires while the accept is queued is still accepted: `consume`
+compares `expires_at` with that earlier instant. It predates this audit, the window is the
+length of the wait, and it is not a stale persistence context; it is written here so that it is
+not rediscovered as new.
+
 **7. A bond already in `PENDING_DELETION` keeps its status.** `Bond.end` leaves the status
 alone there, so a block during B5's deletion cooling-off writes its `blocks` rows and the
 deletion job still finds what it expects.

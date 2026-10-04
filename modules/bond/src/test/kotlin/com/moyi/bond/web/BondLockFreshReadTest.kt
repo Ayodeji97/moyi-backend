@@ -41,8 +41,9 @@ import javax.sql.DataSource
  * other call sites were left alone on the argument that they all write the
  * bond row afterwards, so `@Version` would catch a stale read. That argument
  * is wrong for most of them — creating or revoking an invite, proposing,
- * cancelling, a first deletion request and a member's settings never touch
- * the `bonds` row — and what actually keeps them correct is narrower: the
+ * cancelling, requesting a deletion and a member's settings do not write
+ * the `bonds` row on at least one path — and what actually keeps them
+ * correct is narrower: the
  * controller's guard read runs in its own finished transaction, so the
  * service's transaction starts with an empty persistence context and its
  * first statement is the lock.
@@ -139,9 +140,12 @@ internal class BondLockFreshReadTest(
     @Test
     fun `a block queued behind an accept blocks the member who joined while it waited`() {
         // The decision `block` makes on the member rows: one `blocks` row per
-        // *other* member. Read from before the accept there is no other
-        // member, the bond is archived with Bea inside it and nothing stops
-        // the two accounts being paired again — FR-029 undone, silently.
+        // *other* member. The row Bea's accept inserted is fresh to the query
+        // whatever else is stale, so it is not the member list that turns
+        // this red under the mutation: it is the stale *bond* row, whose old
+        // version `@Version` refuses on the archive, as a `500`. The
+        // `blocks` assertion holds the outcome — FR-029's row against the
+        // member who joined while this waited.
         val bond = pendingBond()
 
         val response =
