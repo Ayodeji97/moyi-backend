@@ -104,6 +104,53 @@ internal class BondLockFreshReadTest(
         bondColumn(bond.id, "status") shouldBe "ARCHIVED"
     }
 
+    // ---- EndBond.leave and EndBond.block (one `lockAndLoad`, two decisions) ----
+
+    @Test
+    fun `a leave queued behind the other member's leave finds the bond already ended`() {
+        val bond = pairedBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/leave") },
+                committedMeanwhile = { holder -> holder.memberLeaves(bond.id, bond.bea) },
+            )
+
+        response.status shouldBe 409
+        response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        // Ada did not leave: the bond ended under her, and her row says so.
+        leftAt(bond.id, bond.ada) shouldBe null
+        // 0 created, 1 accepted, 2 Bea's leave — and nothing from this one.
+        bondColumn(bond.id, "version") shouldBe "2"
+    }
+
+    @Test
+    fun `a block queued behind an accept blocks the member who joined while it waited`() {
+        // The decision `block` makes on the member rows: one `blocks` row per
+        // *other* member. Read from before the accept there is no other
+        // member, the bond is archived with Bea inside it and nothing stops
+        // the two accounts being paired again — FR-029 undone, silently.
+        val bond = pendingBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/block") },
+                committedMeanwhile = { holder -> holder.partnerJoins(bond.id, bond.bea) },
+            )
+
+        response.status shouldBe 204
+        jdbc.queryForObject(
+            "SELECT count(*) FROM blocks WHERE blocker_user_id = ? AND blocked_user_id = ?",
+            Int::class.java,
+            bond.ada,
+            bond.bea,
+        ) shouldBe 1
+        bondColumn(bond.id, "status") shouldBe "ARCHIVED"
+        (leftAt(bond.id, bond.ada) != null) shouldBe true
+    }
+
     // ---- the harness --------------------------------------------------------
 
     /**
@@ -191,6 +238,28 @@ internal class BondLockFreshReadTest(
         )
     }
 
+    /**
+     * What `AcceptInvite.accept` commits: the second member's row, the bond
+     * `ACTIVE` with its version moved, and the code spent.
+     */
+    private fun Connection.partnerJoins(
+        bondId: String,
+        userId: UUID,
+    ) {
+        run(
+            "INSERT INTO bond_members (id, bond_id, user_id, role, joined_at, reminder_timezone) " +
+                "SELECT gen_random_uuid(), bond_id, ?, 'MEMBER', now(), reminder_timezone FROM bond_members WHERE bond_id = ?",
+            userId,
+            UUID.fromString(bondId),
+        ) shouldBe 1
+        run("UPDATE bonds SET status = 'ACTIVE', version = version + 1 WHERE id = ?", UUID.fromString(bondId))
+        run(
+            "UPDATE bond_invites SET used_at = now(), used_by_user_id = ? WHERE bond_id = ? AND used_at IS NULL AND revoked_at IS NULL",
+            userId,
+            UUID.fromString(bondId),
+        )
+    }
+
     private fun Connection.run(
         sql: String,
         vararg arguments: Any,
@@ -259,6 +328,22 @@ internal class BondLockFreshReadTest(
                 content = body
             }.andReturn()
             .response
+
+    private fun post(
+        userId: UUID,
+        path: String,
+    ): MockHttpServletResponse = mockMvc.post(path) { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+
+    private fun leftAt(
+        bondId: String,
+        userId: UUID,
+    ): String? =
+        jdbc.queryForObject(
+            "SELECT left_at::text FROM bond_members WHERE bond_id = ? AND user_id = ?",
+            String::class.java,
+            UUID.fromString(bondId),
+            userId,
+        )
 
     private fun bearer(userId: UUID): String = "Bearer ${tokens.issue(userId).token}"
 
