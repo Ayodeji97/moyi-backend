@@ -329,9 +329,12 @@ internal class SubmitEntry(
             }
         // BR-3a decided against the client's claim. Traceable, because the
         // member sees an entry on a day they did not expect: the bond and the
-        // date it was filed on — never the words, and not the member.
+        // date it was filed on — never the words, and not the member. DEBUG,
+        // not INFO: a claim ahead of the server's clock is one of the reasons
+        // (ruling P11), so a client whose clock runs a little fast would
+        // write this line on every submission it ever makes.
         if (intendedAt != null && !claimed.usedIntendedAt) {
-            log.info("BR-3a: an intendedAt was not used for bond {}; the entry is filed by submission time, on {}", bondId, claimed.date)
+            log.debug("BR-3a: an intendedAt was not used for bond {}; the entry is filed by submission time, on {}", bondId, claimed.date)
         }
         val claimedDay = openAndLock(membership, claimed.bounds, now)
         // BR-3a, rechecked under the day's own lock (spec §6.1.3). The check
@@ -384,14 +387,15 @@ internal class SubmitEntry(
     ): Pair<DayAssignment.Resolution, BondDay>? {
         if (!claimed.usedIntendedAt) return null
         val fallback = DayAssignment.resolve(now, null, calendar) { false }
-        // The rare one: a close landed between the unlocked check and the lock.
-        log.info(
-            "BR-3a: bond {} day {} was settled once locked; an offline entry is redirected to {}",
-            membership.bondId,
-            claimed.date,
-            fallback.date,
-        )
-        return (fallback to openAndLock(membership, fallback.bounds, now)).takeUnless { (_, day) -> day.isSettled }
+        val fallbackDay = openAndLock(membership, fallback.bounds, now)
+        // The rare one: a close landed between the unlocked check and the
+        // lock. Logged only once the fallback day's own settled check has
+        // answered — said before it, this line claimed a redirect for a
+        // request that was then a 409. Ids and dates, never the words.
+        val outcome =
+            if (fallbackDay.isSettled) "and {} is settled too; the entry is refused" else "an offline entry is redirected to {}"
+        log.info("BR-3a: bond {} day {} was settled once locked; $outcome", membership.bondId, claimed.date, fallback.date)
+        return (fallback to fallbackDay).takeUnless { fallbackDay.isSettled }
     }
 
     /**
