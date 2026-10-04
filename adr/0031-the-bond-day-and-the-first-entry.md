@@ -451,7 +451,13 @@ on return, which looks like working and protects nothing.
   same instances, old state and all. An entry was committed onto a bond that had been archived
   while the submission waited for the lock. `BondStore.lockBond(refreshReads = true)` refreshes
   those instances from the row now held. It is opt-in, and only `lockMembershipOf` opts in; the
-  other eleven `lockBond` call sites, in merged B2 to B5 code, are not changed here (Owed).
+  other eleven `lockBond` call sites, in merged B2 to B5 code, are not changed here.
+  **Amended 2026-10-04: audited, and none of them needed it.** Each runs in a transaction that
+  starts empty, because its controller's guard read is a separate, finished one; this method is
+  the only caller that guards and locks in the same transaction. The per-caller table, the
+  tests and the rule that now holds the property are in ADR-0028 §6b, which is where the lock
+  rule for bond writes lives. The reason first recorded here for leaving them — that they all
+  write the bond row, so `@Version` would catch a stale read — was wrong for eight of them.
 - **The full order on a submission is key, bond, bond-day, entry.** The idempotency key's lock is
   only ever tried, never waited for, so it cannot close a wait cycle; it goes first so a second
   request under the same key is refused at once and does not queue behind the first one's bond
@@ -690,8 +696,14 @@ in the error contract, recorded under Owed.
   (`WHERE deleted_at IS NULL`) cannot serve that read.
 - **Nothing that holds an entry's words prints them.** `SubmitEntryRequest`, `EntryDraft`
   and `EntryResponse` were data classes carrying the text as a plain `String`; each now
-  prints `text=(redacted)`. One `INFO` line, bond id and date only, records a BR-3a
-  fallback or redirect, so a member's "why is my entry on that day" is answerable.
+  prints `text=(redacted)`. One `INFO` line — bond id, a reason and a date only — records a
+  BR-3a redirect, and a BR-3a fallback whose claim was too old, predates the bond or names a
+  settled day, so a member's "why is my entry on that day" is answerable. *(Amended
+  2026-10-04.)* A fallback whose claim was only **ahead of the server's clock** is `DEBUG`:
+  that entry lands on today, where its author expects it, and a client whose clock runs fast
+  would write the line on every submission. `DayAssignment.resolve` reports which of the
+  four it was (`Resolution.claim`); `SubmitEntry` chooses the level from that and does not
+  restate the rule.
 - **V11 and V12 were edited in place, more than once, and V13 is new.** Any database that
   applied an earlier copy of them refuses to start on a checksum mismatch, and resetting the
   checksums does not fix it: the tables themselves have the earlier shape. The shared
@@ -772,17 +784,6 @@ in the error contract, recorded under Owed.
 
 What this slice knowingly leaves for a later one. Each is an obligation, with the slice it falls
 on. None of them is built here.
-
-**A separate PR off `main`, independent of C1.**
-
-- **Audit every `lockBond` caller.** Eleven call sites in eight services (`UpdateBond`,
-  `AcceptInvite`, `ChangeTimezone` ×3, `EndBond`, `MemberSettingsService`, `RevokeInvite`,
-  `RequestDeletion` ×2, `CreateInvite`) lock and then read without `refreshReads`. They all
-  write the bond afterwards, so `@Version` should turn a stale read into a conflict; any that
-  decides on member rows without writing the bond row would not be caught. The PR's claim to
-  prove is "every `lockBond` caller re-reads fresh or is caught by `@Version`", with a test per
-  caller that ends the bond while it waits. Until it lands there is a latent wrong-state
-  decision in a bond write path.
 
 **C2, the reveal.**
 

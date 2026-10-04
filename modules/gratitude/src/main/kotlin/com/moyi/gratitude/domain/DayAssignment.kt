@@ -87,23 +87,58 @@ import java.time.LocalDate
  * [submittedAt] otherwise — so a rejected claim can never reach the archive.
  * [Resolution.usedIntendedAt] says which of the two it was (ruling P4): a
  * back-fill and a live write are different facts to the caller (spec §6.1.3).
+ *
+ * **[Resolution.claim] says why.** The four refusals above are not one fact
+ * to a caller: a claim ahead of the clock leaves the entry on today, where
+ * its author expects it, and the other three put it on a day they did not
+ * name. This function is the only place that knows which it was, so it says —
+ * a caller that worked it out again from the instants would be a second copy
+ * of BR-3a, and the two would drift.
  */
 internal object DayAssignment {
     private const val OFFLINE_WINDOW_HOURS = 36L
     private val OFFLINE_WINDOW: Duration = Duration.ofHours(OFFLINE_WINDOW_HOURS)
 
     /**
+     * What became of the client's `intendedAt`: it was the instant used, there
+     * was none, or which of BR-3a's four limits refused it — in the order
+     * [resolve] asks them, so a claim that fails two is named for the first.
+     */
+    enum class Claim {
+        /** The claim passed every limit; the entry is filed where it says. */
+        USED,
+
+        /** No `intendedAt` was sent. Nothing was refused. */
+        ABSENT,
+
+        /** Ahead of the submission instant, by any amount (ruling P11). The entry is on today — where a live write would be. */
+        AHEAD_OF_CLOCK,
+
+        /** Older than the thirty-six hour offline window. */
+        TOO_OLD,
+
+        /** From before the bond's calendar begins. */
+        BEFORE_THE_BOND,
+
+        /** On a day that was already settled when it was looked at. */
+        DAY_SETTLED,
+    }
+
+    /**
      * [resolve]'s answer: the day an entry lands on, the instant trusted as
      * when it was intended, the span of that day exactly as the calendar drew
-     * it, and whether the client's `intendedAt` was the instant used. See
+     * it, and what became of the client's `intendedAt` ([claim]). See
      * [resolve]'s own KDoc.
      */
     data class Resolution(
         val date: LocalDate,
         val resolvedAt: Instant,
         val bounds: DayWindow,
-        val usedIntendedAt: Boolean,
-    )
+        val claim: Claim,
+    ) {
+        /** Whether the client's `intendedAt` was the instant used — [claim], asked as a yes or no. */
+        val usedIntendedAt: Boolean get() = claim == Claim.USED
+    }
 
     /**
      * [dateFor]'s own answer, plus the instant and the window that produced
@@ -118,20 +153,31 @@ internal object DayAssignment {
         calendar: BondCalendar,
         isSettled: (LocalDate) -> Boolean,
     ): Resolution {
-        val accepted =
-            intendedAt
-                // P11: a claim ahead of the server's clock is never the candidate.
-                ?.takeIf { !it.isAfter(submittedAt) }
-                ?.takeIf { !it.isBefore(submittedAt.minus(OFFLINE_WINDOW)) }
-                ?.let(calendar::dayAt)
-                ?.takeUnless { isSettled(it.date) }
-        return if (accepted != null) {
-            Resolution(date = accepted.date, resolvedAt = checkNotNull(intendedAt), bounds = accepted, usedIntendedAt = true)
+        val claimedDay = intendedAt?.takeIf { withinTheWindow(it, submittedAt) }?.let(calendar::dayAt)
+        // In BR-3a's own order. P11: a claim ahead of the server's clock is never the candidate.
+        val claim =
+            when {
+                intendedAt == null -> Claim.ABSENT
+                intendedAt.isAfter(submittedAt) -> Claim.AHEAD_OF_CLOCK
+                !withinTheWindow(intendedAt, submittedAt) -> Claim.TOO_OLD
+                claimedDay == null -> Claim.BEFORE_THE_BOND
+                isSettled(claimedDay.date) -> Claim.DAY_SETTLED
+                else -> Claim.USED
+            }
+        return if (claim == Claim.USED) {
+            val day = checkNotNull(claimedDay)
+            Resolution(date = day.date, resolvedAt = checkNotNull(intendedAt), bounds = day, claim = claim)
         } else {
             val today = checkNotNull(calendar.dayAt(submittedAt)) { "a bond's calendar covers every submission instant: $submittedAt" }
-            Resolution(date = today.date, resolvedAt = submittedAt, bounds = today, usedIntendedAt = false)
+            Resolution(date = today.date, resolvedAt = submittedAt, bounds = today, claim = claim)
         }
     }
+
+    /** Not ahead of [submittedAt], and no more than [OFFLINE_WINDOW] behind it: the only claims the calendar is asked about. */
+    private fun withinTheWindow(
+        intendedAt: Instant,
+        submittedAt: Instant,
+    ): Boolean = !intendedAt.isAfter(submittedAt) && !intendedAt.isBefore(submittedAt.minus(OFFLINE_WINDOW))
 
     fun dateFor(
         submittedAt: Instant,

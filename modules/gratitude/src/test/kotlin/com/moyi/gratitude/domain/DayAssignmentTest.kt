@@ -173,6 +173,42 @@ internal class DayAssignmentTest {
         resolution.usedIntendedAt shouldBe false
     }
 
+    /**
+     * `resolve` says *why* a claim was not used, so the caller never has to
+     * work it out again from the instants — that would be a second copy of
+     * BR-3a. The four refusals are different facts: one leaves the entry
+     * where the member expects it (ahead of the clock: today), the other
+     * three put it on a day they did not name.
+     */
+    @Test
+    fun `a resolution says what became of the claim - used, absent, or which of four reasons refused it`() {
+        // Created 25 hours before now: twelve hours back the bond exists,
+        // thirty-five hours back (inside the offline window) it does not.
+        val created = Instant.parse("2026-09-14T07:00:00Z")
+        val now = Instant.parse("2026-09-15T08:00:00Z")
+        val sinceCreation = BondCalendar { at -> if (at.isBefore(created)) null else fixed(lagos).dayAt(at) }
+        val the14thIsSettled: (LocalDate) -> Boolean = { it == LocalDate.of(2026, 9, 14) }
+
+        fun claim(
+            intendedAt: Instant?,
+            isSettled: (LocalDate) -> Boolean = never,
+        ) = DayAssignment.resolve(now, intendedAt, sinceCreation, isSettled)
+
+        claim(null).claim shouldBe DayAssignment.Claim.ABSENT
+        claim(now.minus(Duration.ofHours(12))).claim shouldBe DayAssignment.Claim.USED
+        claim(now.plusSeconds(240)).claim shouldBe DayAssignment.Claim.AHEAD_OF_CLOCK
+        claim(now.minus(Duration.ofHours(37))).claim shouldBe DayAssignment.Claim.TOO_OLD
+        // 35 hours back is inside the window, and before the bond was created.
+        claim(now.minus(Duration.ofHours(35))).claim shouldBe DayAssignment.Claim.BEFORE_THE_BOND
+        claim(now.minus(Duration.ofHours(12)), the14thIsSettled).claim shouldBe DayAssignment.Claim.DAY_SETTLED
+
+        // `usedIntendedAt` is the same fact, asked as a yes or no.
+        for (intendedAt in listOf(null, now, now.plusSeconds(1), now.minus(Duration.ofHours(37)), now.minus(Duration.ofHours(35)))) {
+            val resolution = claim(intendedAt)
+            resolution.usedIntendedAt shouldBe (resolution.claim == DayAssignment.Claim.USED)
+        }
+    }
+
     // ---- the calendar's bounds are carried, never recomputed ------------------
 
     @Test
