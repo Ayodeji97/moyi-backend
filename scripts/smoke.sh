@@ -750,6 +750,9 @@ verified_account "partner" "203.0.113.71"; PARTNER_ACCESS="$ACCOUNT_ACCESS"
 expect "a bond to write into is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $AUTHOR_ACCESS" -d "$(bond_body "Us")"
 GRAT_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
 GRAT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+# The creator trying their own code — usually by scanning it. Refused before
+# the code is consumed, which the partner's join on the next line then proves.
+expect "the creator accepting their own code is 409 ALREADY_MEMBER" 409 '"code":"ALREADY_MEMBER"' -- -X POST "$API/invites/$GRAT_CODE/accept" -H "Authorization: Bearer $AUTHOR_ACCESS"
 expect "the partner joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$GRAT_CODE/accept" -H "Authorization: Bearer $PARTNER_ACCESS"
 
 # The whole slice on the wire, one round trip per fact: a first entry, the
@@ -769,6 +772,20 @@ case "$ENTRY_ROWS" in psql-unavailable) echo "  skip entry row count";; 1) pass 
 
 expect "the same key with a different body is 422 IDEMPOTENCY_KEY_REUSED" 422 '"code":"IDEMPOTENCY_KEY_REUSED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d '{"text":"this is not the body that key reserved"}'
 
+# The author's own read of the day: their entry in full, as they wrote it.
+expect "the author's today carries their own entry" 200 "\"text\":\"$ENTRY_TEXT\"" -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
+[[ "$LAST_BODY" == *'"myEntry":{'*"\"text\":\"$ENTRY_TEXT\""*'"status":"SUBMITTED"'* ]] && pass "…as myEntry, SUBMITTED" || fail "myEntry shape" "${LAST_BODY:0:300}"
+
+# The Idempotency-Key contract (doc 06 §1): required, and at most 255
+# characters. Both are refused before the body is read or anything is written.
+expect "an entry with no Idempotency-Key is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -d '{"text":"no key was sent with this"}'
+[[ "$LAST_BODY" == *'"field":"Idempotency-Key"'* ]] && pass "…and the errors entry names the header" || fail "missing-key body" "${LAST_BODY:0:250}"
+LONG_KEY="$(python3 -c 'print("k" * 256)')"
+expect "a key of 256 characters is 422 on the header" 422 '"field":"Idempotency-Key","code":"SIZE"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $LONG_KEY" -d '{"text":"the key is too long"}'
+
+# Spec §1: media is refused, never stored and quietly ignored, until Phase 4.
+expect "an entry carrying a media id is 422 MEDIA_NOT_YET_SUPPORTED" 422 '"code":"MEDIA_NOT_YET_SUPPORTED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"look at this\",\"imageMediaId\":\"$(python3 -c 'import uuid; print(uuid.uuid4())')\"}"
+
 # BR-1/BR-8: the partner's own read of the day sees PARTIAL and a locked
 # entry — the author and the status, nothing else, on the wire and in the log.
 expect "the partner's today is PARTIAL, with the entry locked" 200 '"status":"PARTIAL"' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $PARTNER_ACCESS"
@@ -780,6 +797,18 @@ if grep -qF "$ENTRY_TEXT" "$MOYI_LOG"; then fail "text in log" "the entry text a
 # non-breaking space is blank by the domain's definition and must be a 422 on
 # the field, not a 500 from an uncaught IllegalArgumentException.
 expect "an entry of one non-breaking space is 422 on text, not 500" 422 '"field":"text"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"\u00a0"}'
+
+# An unpaired UTF-16 surrogate has no UTF-8 form: it used to be a 201 whose row
+# held '?' in its place (found 2026-10-04). It is a 422 on the field now.
+expect "an entry with an unpaired surrogate is 422 on text" 422 '"field":"text"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"thank you\ud800"}'
+
+# Ruling P12: an entry is stored exactly as sent. Each of these characters is
+# one NFKC would rewrite (… to three full stops, ™ to TM, ﬁ to fi). The partner
+# writes last in this section: the probes above need them not to have written.
+TYPOGRAPHIC_TEXT="wait… thank you™ — ﬁne"
+expect "an entry with typographic characters is 201, and echoes them" 201 "\"text\":\"$TYPOGRAPHIC_TEXT\"" -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"$TYPOGRAPHIC_TEXT\"}"
+expect "…and its author's today shows the same characters, stored as sent" 200 "\"text\":\"$TYPOGRAPHIC_TEXT\"" -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $PARTNER_ACCESS"
+if grep -qF "$TYPOGRAPHIC_TEXT" "$MOYI_LOG"; then fail "text in log" "the typographic entry's text appears in the log"; else pass "…and it is not in the log either"; fi
 
 # Doc 04 §8.3a: the creator may write before their partner joins, and the day
 # that write lands on opens SUSPENDED, not OPEN, so neither the close job nor
