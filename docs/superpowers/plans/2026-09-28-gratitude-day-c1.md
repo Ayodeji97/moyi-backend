@@ -1,5 +1,7 @@
 # Slice C1 — the day and the first entry
 
+> **Superseded.** This is the first C1 plan. It was replaced by the rework plan, `2026-09-30-gratitude-day-c1-rework.md`, and what was actually built is recorded in ADR-0031. Kept for the record; do not implement from it.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A verified member of an open bond can write one entry a day, the server decides which Bond-day it belongs to, and `GET /today` shows them their own words and nothing of their partner's.

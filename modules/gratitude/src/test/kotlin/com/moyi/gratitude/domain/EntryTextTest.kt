@@ -129,6 +129,38 @@ internal class EntryTextTest {
         }
     }
 
+    /**
+     * A surrogate with no partner is not a character: it has no UTF-8 form,
+     * so it cannot be "stored exactly as sent". The driver stored `?` for it
+     * while the `201` echoed it back — a silent rewrite of somebody's words.
+     */
+    @Test
+    fun `an unpaired surrogate is refused - it has no UTF-8 form to store`() {
+        val unpaired =
+            listOf(
+                "thank you\uD800", // a high surrogate at the end
+                "\uDC00 thank you", // a low surrogate at the start
+                "thank\uD83Dyou", // a high surrogate followed by a letter
+                "thank you \uDE4F\uD83D", // a pair the wrong way round
+                "\uD83D\uD83D\uDE4F", // a high surrogate before a good pair
+                "\uD83D\uDE4F\uDE4F", // a low surrogate after a good pair
+            )
+        for (text in unpaired) {
+            shouldThrow<IllegalArgumentException> { EntryText.of(text) }.message shouldBe
+                "an entry cannot contain an unpaired surrogate"
+        }
+    }
+
+    @Test
+    fun `a well-formed surrogate pair is kept exactly - every emoji outside the BMP is one`() {
+        // The last is a ZWJ sequence, the four-person family: four pairs joined by U+200D.
+        val family = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66"
+        for (text in listOf("\uD83D\uDE4F", "thank you \uD83D\uDE4F", "\uD83D\uDE4F\uD83D\uDE4F", "a\uD83C\uDDF3\uD83C\uDDECb", family)) {
+            EntryText.of(text).value shouldBe text
+            EntryText.of(text).value.toByteArray(Charsets.UTF_8) shouldBe text.toByteArray(Charsets.UTF_8)
+        }
+    }
+
     @Test
     fun `an entry never prints itself`() {
         // Doc 18 §5/§9. Mirrors PasswordTest's `a password never prints

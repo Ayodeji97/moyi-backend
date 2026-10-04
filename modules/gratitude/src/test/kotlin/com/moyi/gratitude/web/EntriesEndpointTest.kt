@@ -345,6 +345,49 @@ internal class EntriesEndpointTest(
     }
 
     /**
+     * An unpaired UTF-16 surrogate is not a character and has no UTF-8 form.
+     * Before it was refused this was a `201` that **lied**: the response
+     * echoed the surrogate from memory, and the driver had stored `?` (0x3F)
+     * in its place — observed, 2026-10-04 — so the row, `GET /today` and any
+     * replay disagreed with what the author was told had been kept. The JSON
+     * spells it as the six-character escape, the only way it can arrive:
+     * raw UTF-8 cannot carry one.
+     */
+    @Test
+    fun `an entry containing an unpaired surrogate is 422 naming the field, and nothing is stored`() {
+        val bodies =
+            listOf(
+                """{"text":"thank you\ud800"}""",
+                """{"text":"\udc00 thank you"}""",
+                """{"text":"thank\ud800you"}""",
+                """{"text":"thank you\ude4f\ud83d"}""",
+            )
+        for (body in bodies) {
+            val response = submit(ada, bondId, body)
+
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"text\""
+            jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 0
+        }
+    }
+
+    /**
+     * The other half of the same rule: a well-formed surrogate **pair** is
+     * one code point — every emoji outside the BMP is sent this way when a
+     * client escapes it — and must be accepted and kept byte for byte.
+     * U+1F64F is `\ud83d\ude4f` in JSON and `f0 9f 99 8f` in UTF-8.
+     */
+    @Test
+    fun `a surrogate pair sent as JSON escapes is accepted and stored as its four UTF-8 bytes`() {
+        val created = submit(ada, bondId, """{"text":"thank you \ud83d\ude4f"}""")
+
+        created.status shouldBe 201
+        created.getContentAsString(Charsets.UTF_8) shouldContain "\"text\":\"thank you \uD83D\uDE4F\""
+        jdbc.queryForObject("SELECT encode(convert_to(text, 'UTF8'), 'hex') FROM entries", String::class.java) shouldBe
+            "7468616e6b20796f7520f09f998f"
+    }
+
+    /**
      * Ruling P12 (spec §3.2, doc 04 §7): an entry is stored exactly as its
      * author sent it. NFKC rewrites every one of these — `…` to three full
      * stops, `²` to `2`, `™` to `TM`, `ﬁ` to `fi` — and a trim would take the
@@ -423,6 +466,30 @@ internal class EntriesEndpointTest(
         beasTurn.status shouldBe 201
         beasTurn.getHeader(IdempotencyInterceptor.REPLAYED_HEADER).shouldBeNull()
         jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 2
+    }
+
+    /**
+     * A replay is re-read from the row, a fresh `201` rendered from memory:
+     * the two were only ever compared on ASCII. Every character here is one
+     * NFKC would rewrite or a lossy charset would drop — an ellipsis, a trade
+     * mark, the `ﬁ` ligature, an emoji outside the BMP — so this fails if
+     * either path normalises, re-encodes or answers in the wrong charset.
+     */
+    @Test
+    fun `a replay returns non-ASCII text byte for byte`() {
+        val key = UUID.randomUUID().toString()
+        val written = "\u2026thank you\u2122 \ufb01 \uD83D\uDE4F"
+        val body = """{"text":"$written"}"""
+
+        val first = submit(ada, bondId, body, key)
+        val replay = submit(ada, bondId, body, key)
+
+        first.status shouldBe 201
+        replay.status shouldBe 201
+        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
+        replay.getContentAsString(Charsets.UTF_8) shouldContain "\"text\":\"$written\""
+        replay.contentAsByteArray.toList() shouldBe first.contentAsByteArray.toList()
+        jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 1
     }
 
     @Test
