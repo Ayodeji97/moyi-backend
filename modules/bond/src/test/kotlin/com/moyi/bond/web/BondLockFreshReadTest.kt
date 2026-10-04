@@ -151,6 +151,61 @@ internal class BondLockFreshReadTest(
         (leftAt(bond.id, bond.ada) != null) shouldBe true
     }
 
+    // ---- AcceptInvite.accept (no guard; the invite is loaded before the lock) ----
+
+    @Test
+    fun `an accept queued behind the creator's leave does not join the bond that ended`() {
+        // The bond is archived and the code deliberately left live, which no
+        // real writer does (`EndBond` revokes it): that isolates the re-read
+        // of the *bond* from the compare-and-set on the *invite*, which would
+        // otherwise refuse this accept on its own and let a stale bond pass
+        // unnoticed.
+        val bond = pendingBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { accept(bond.bea, bond.code) },
+                committedMeanwhile = { holder ->
+                    holder.run("UPDATE bond_members SET left_at = now() WHERE bond_id = ?", UUID.fromString(bond.id))
+                    holder.run(
+                        "UPDATE bonds SET status = 'ARCHIVED', archived_at = now(), version = version + 1 WHERE id = ?",
+                        UUID.fromString(bond.id),
+                    )
+                },
+            )
+
+        response.status shouldBe 404
+        response.contentAsString shouldContain "\"code\":\"INVITE_NOT_USABLE\""
+        count("bond_members") shouldBe 1
+        count("bond_invites WHERE used_at IS NOT NULL") shouldBe 0
+        bondColumn(bond.id, "status") shouldBe "ARCHIVED"
+    }
+
+    @Test
+    fun `an accept queued behind a revoke does not spend the code that was revoked`() {
+        // The one thing this service reads *before* the lock is the invite,
+        // so its copy is as old as the wait. It is safe because spending the
+        // code is a compare-and-set that asks "still live?" in the UPDATE
+        // itself, not because anything re-reads it.
+        val bond = pendingBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { accept(bond.bea, bond.code) },
+                committedMeanwhile = { holder ->
+                    holder.run("UPDATE bond_invites SET revoked_at = now() WHERE bond_id = ?", UUID.fromString(bond.id)) shouldBe 1
+                },
+            )
+
+        response.status shouldBe 404
+        response.contentAsString shouldContain "\"code\":\"INVITE_NOT_USABLE\""
+        count("bond_members") shouldBe 1
+        count("bond_invites WHERE used_at IS NOT NULL") shouldBe 0
+        bondColumn(bond.id, "status") shouldBe "PENDING_MEMBER"
+    }
+
     // ---- the harness --------------------------------------------------------
 
     /**
@@ -344,6 +399,9 @@ internal class BondLockFreshReadTest(
             UUID.fromString(bondId),
             userId,
         )
+
+    /** Rows in a table, or in `table WHERE …` — test-only SQL, never caller input. */
+    private fun count(from: String): Int = jdbc.queryForObject("SELECT count(*) FROM $from", Int::class.java)!!
 
     private fun bearer(userId: UUID): String = "Bearer ${tokens.issue(userId).token}"
 
