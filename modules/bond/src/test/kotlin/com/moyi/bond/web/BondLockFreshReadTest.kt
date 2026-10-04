@@ -18,6 +18,7 @@ import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
@@ -204,6 +205,97 @@ internal class BondLockFreshReadTest(
         count("bond_members") shouldBe 1
         count("bond_invites WHERE used_at IS NOT NULL") shouldBe 0
         bondColumn(bond.id, "status") shouldBe "PENDING_MEMBER"
+    }
+
+    // ---- ChangeTimezone.propose, .confirm and .cancel ------------------------
+
+    @Test
+    fun `a zone proposal queued behind a leave is refused and records nothing`() {
+        // The two-member path writes a `bond_proposals` row and never the
+        // bond row, so `@Version` would have nothing to object to: a proposal
+        // decided on the pre-wait copy lands on an ended bond with a `200`.
+        val bond = pairedBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { proposeZone(bond.ada, bond.id, "Europe/London") },
+                committedMeanwhile = { holder -> holder.memberLeaves(bond.id, bond.bea) },
+            )
+
+        response.status shouldBe 409
+        response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        count("bond_proposals") shouldBe 0
+    }
+
+    @Test
+    fun `a zone proposal queued behind an accept asks the new member instead of moving the zone alone`() {
+        // `status == PENDING_MEMBER` is the branch that applies a change with
+        // nobody to ask. Bea joined while this waited, so there is somebody.
+        val bond = pendingBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { proposeZone(bond.ada, bond.id, "Europe/London") },
+                committedMeanwhile = { holder -> holder.partnerJoins(bond.id, bond.bea) },
+            )
+
+        response.status shouldBe 200
+        bondColumn(bond.id, "anchor_timezone") shouldBe "Africa/Lagos"
+        count("bond_proposals WHERE confirmed_at IS NULL AND cancelled_at IS NULL") shouldBe 1
+    }
+
+    @Test
+    fun `a zone confirmation queued behind a leave does not move the zone of the ended bond`() {
+        val bond = pairedBond()
+        proposeZone(bond.ada, bond.id, "Europe/London").status shouldBe 200
+        val proposalId = jdbc.queryForObject("SELECT id FROM bond_proposals", UUID::class.java)!!
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { confirmZone(bond.bea, bond.id, proposalId) },
+                committedMeanwhile = { holder -> holder.memberLeaves(bond.id, bond.ada) },
+            )
+
+        // `409`, the answer leave-first gives; not the `404` of a proposal
+        // that happens to have been cancelled by the ending.
+        response.status shouldBe 409
+        response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        bondColumn(bond.id, "anchor_timezone") shouldBe "Africa/Lagos"
+        count("bond_proposals WHERE confirmed_at IS NOT NULL") shouldBe 0
+    }
+
+    @Test
+    fun `a zone cancellation queued behind the confirmation finds nothing left to cancel`() {
+        // This path never reads the bond. What it decides on is the proposal,
+        // twice over: a query after the lock, then a compare-and-set.
+        val bond = pairedBond()
+        proposeZone(bond.ada, bond.id, "Europe/London").status shouldBe 200
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { delete(bond.ada, "/api/v1/bonds/${bond.id}/timezone") },
+                committedMeanwhile = { holder ->
+                    holder.run(
+                        "UPDATE bond_proposals SET confirmed_at = now(), confirmed_by_member_id = " +
+                            "(SELECT id FROM bond_members WHERE bond_id = ? AND user_id = ?)",
+                        UUID.fromString(bond.id),
+                        bond.bea,
+                    ) shouldBe 1
+                    holder.run(
+                        "UPDATE bonds SET anchor_timezone = 'Europe/London', timezone_changed_at = now(), version = version + 1 WHERE id = ?",
+                        UUID.fromString(bond.id),
+                    )
+                },
+            )
+
+        response.status shouldBe 404
+        count("bond_proposals WHERE cancelled_at IS NOT NULL") shouldBe 0
+        count("bond_proposals WHERE confirmed_at IS NOT NULL") shouldBe 1
+        bondColumn(bond.id, "anchor_timezone") shouldBe "Europe/London"
     }
 
     // ---- the harness --------------------------------------------------------
@@ -399,6 +491,37 @@ internal class BondLockFreshReadTest(
             UUID.fromString(bondId),
             userId,
         )
+
+    private fun proposeZone(
+        userId: UUID,
+        bondId: String,
+        zone: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .patch("/api/v1/bonds/$bondId/timezone") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"anchorTimezone":"$zone"}"""
+            }.andReturn()
+            .response
+
+    private fun confirmZone(
+        userId: UUID,
+        bondId: String,
+        proposalId: UUID,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/timezone/confirm") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"proposalId":"$proposalId"}"""
+            }.andReturn()
+            .response
+
+    private fun delete(
+        userId: UUID,
+        path: String,
+    ): MockHttpServletResponse = mockMvc.delete(path) { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
 
     /** Rows in a table, or in `table WHERE …` — test-only SQL, never caller input. */
     private fun count(from: String): Int = jdbc.queryForObject("SELECT count(*) FROM $from", Int::class.java)!!
