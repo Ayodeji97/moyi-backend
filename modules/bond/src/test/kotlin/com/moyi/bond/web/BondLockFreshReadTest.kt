@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
 import java.sql.Connection
 import java.time.Duration
 import java.util.UUID
@@ -296,6 +297,161 @@ internal class BondLockFreshReadTest(
         count("bond_proposals WHERE cancelled_at IS NOT NULL") shouldBe 0
         count("bond_proposals WHERE confirmed_at IS NOT NULL") shouldBe 1
         bondColumn(bond.id, "anchor_timezone") shouldBe "Europe/London"
+    }
+
+    // ---- MemberSettingsService.replace --------------------------------------
+
+    @Test
+    fun `a settings update queued behind the member's own leave is refused and does not undo the leave`() {
+        // Ada leaves on one device while her other device saves a reminder.
+        // This path writes her member row and nothing else — every column of
+        // it, `left_at` included — so a copy from before the leave would put
+        // `left_at` back to null on a bond that has ended, and say `200`.
+        val bond = pairedBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = {
+                    mockMvc
+                        .put("/api/v1/bonds/${bond.id}/members/me/settings") {
+                            header(HttpHeaders.AUTHORIZATION, bearer(bond.ada))
+                            contentType = MediaType.APPLICATION_JSON
+                            content = """{"reminderTimeLocal":"07:30"}"""
+                        }.andReturn()
+                        .response
+                },
+                committedMeanwhile = { holder -> holder.memberLeaves(bond.id, bond.ada) },
+            )
+
+        response.status shouldBe 409
+        response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        (leftAt(bond.id, bond.ada) != null) shouldBe true
+        jdbc.queryForObject(
+            "SELECT reminder_time_local::text FROM bond_members WHERE user_id = ?",
+            String::class.java,
+            bond.ada,
+        ) shouldBe "20:00:00"
+    }
+
+    // ---- RevokeInvite.revoke and CreateInvite.forBond -------------------------
+
+    @Test
+    fun `a revoke queued behind a leave is told the bond has ended, not that the invite is missing`() {
+        // ADR-0028 §6a's own case: leave-first is `409`, revoke-first is
+        // `204`, and the `404` of a conditional UPDATE that matched nothing
+        // is an answer neither ordering produces.
+        val bond = pendingBond()
+        val inviteId = jdbc.queryForObject("SELECT id FROM bond_invites", UUID::class.java)!!
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { delete(bond.ada, "/api/v1/bonds/${bond.id}/invites/$inviteId") },
+                committedMeanwhile = { holder -> holder.memberLeaves(bond.id, bond.ada) },
+            )
+
+        response.status shouldBe 409
+        response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+    }
+
+    @Test
+    fun `a new invite queued behind a leave is refused and no code is issued for the ended bond`() {
+        val bond = pendingBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/invites") },
+                committedMeanwhile = { holder -> holder.memberLeaves(bond.id, bond.ada) },
+            )
+
+        response.status shouldBe 409
+        response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        count("bond_invites") shouldBe 1
+        count("bond_invites WHERE used_at IS NULL AND revoked_at IS NULL") shouldBe 0
+    }
+
+    @Test
+    fun `a new invite queued behind an accept is refused as full and no second code is issued`() {
+        val bond = pendingBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/invites") },
+                committedMeanwhile = { holder -> holder.partnerJoins(bond.id, bond.bea) },
+            )
+
+        response.status shouldBe 409
+        response.contentAsString shouldContain "\"code\":\"BOND_FULL\""
+        count("bond_invites") shouldBe 1
+    }
+
+    // ---- RequestDeletion.request and .cancel ----------------------------------
+
+    @Test
+    fun `a deletion request queued behind a leave is refused and records nothing`() {
+        val bond = pairedBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/deletion-request") },
+                committedMeanwhile = { holder -> holder.memberLeaves(bond.id, bond.bea) },
+            )
+
+        response.status shouldBe 409
+        response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        count("bond_proposals") shouldBe 0
+    }
+
+    @Test
+    fun `a deletion request queued behind an accept waits for the new member instead of confirming itself`() {
+        // `activeMembers.size == 1` is the branch that starts the cooling-off
+        // with nobody to ask. Counted from before the accept, Ada would
+        // schedule the destruction of a bond Bea had just joined, alone.
+        val bond = pendingBond()
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/deletion-request") },
+                committedMeanwhile = { holder -> holder.partnerJoins(bond.id, bond.bea) },
+            )
+
+        response.status shouldBe 202
+        bondColumn(bond.id, "status") shouldBe "ACTIVE"
+        bondColumn(bond.id, "deletion_requested_at") shouldBe null
+        count("bond_proposals WHERE confirmed_at IS NULL AND cancelled_at IS NULL") shouldBe 1
+    }
+
+    @Test
+    fun `a deletion cancel queued behind the member's own leave cannot call the deletion off`() {
+        // A leave during the cooling-off writes `left_at` and leaves the bond
+        // row — and its version — exactly as they were (`Bond.end`), so this
+        // is the caller `@Version` could never have protected.
+        val bond = pairedBond()
+        post(bond.ada, "/api/v1/bonds/${bond.id}/deletion-request").status shouldBe 202
+        post(bond.bea, "/api/v1/bonds/${bond.id}/deletion-request").status shouldBe 202
+        bondColumn(bond.id, "status") shouldBe "PENDING_DELETION"
+
+        val response =
+            whileQueuedBehindTheBondLock(
+                bond.id,
+                request = { delete(bond.ada, "/api/v1/bonds/${bond.id}/deletion-request") },
+                committedMeanwhile = { holder ->
+                    holder.run(
+                        "UPDATE bond_members SET left_at = now() WHERE bond_id = ? AND user_id = ?",
+                        UUID.fromString(bond.id),
+                        bond.ada,
+                    ) shouldBe 1
+                },
+            )
+
+        response.status shouldBe 404
+        bondColumn(bond.id, "status") shouldBe "PENDING_DELETION"
+        (bondColumn(bond.id, "deletion_requested_at") != null) shouldBe true
     }
 
     // ---- the harness --------------------------------------------------------
