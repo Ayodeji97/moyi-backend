@@ -16,8 +16,11 @@
 # X-RateLimit-* headers and Retry-After on the way, against the compose Valkey.
 # Since the C1 rework it is written to check that a confirmed zone change is
 # reported at once and decides no date until the current Bond-day ends (BR-6,
-# ADR-0031). Last run against the rework on 2026-10-03, on the jar built from
-# b08b385: 350 passed, 0 failed. A later commit is unproven until it is run again.
+# ADR-0031). Since the C1 follow-up it also checks the Idempotency-Key contract
+# on the wire, the media refusal, the author's own today, ALREADY_MEMBER, and
+# that typographic text comes back as it was sent. Last run on 2026-10-04, on
+# the jar built from 0397200: 361 passed, 0 failed. A later commit is unproven
+# until it is run again.
 #
 # If the application refuses to start on a Flyway checksum mismatch: V11, V12
 # and V13 were edited in place while unmerged (ADR-0031), so a database that
