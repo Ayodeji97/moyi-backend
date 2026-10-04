@@ -468,6 +468,30 @@ internal class EntriesEndpointTest(
         jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 2
     }
 
+    /**
+     * A replay is re-read from the row, a fresh `201` rendered from memory:
+     * the two were only ever compared on ASCII. Every character here is one
+     * NFKC would rewrite or a lossy charset would drop — an ellipsis, a trade
+     * mark, the `ﬁ` ligature, an emoji outside the BMP — so this fails if
+     * either path normalises, re-encodes or answers in the wrong charset.
+     */
+    @Test
+    fun `a replay returns non-ASCII text byte for byte`() {
+        val key = UUID.randomUUID().toString()
+        val written = "\u2026thank you\u2122 \ufb01 \uD83D\uDE4F"
+        val body = """{"text":"$written"}"""
+
+        val first = submit(ada, bondId, body, key)
+        val replay = submit(ada, bondId, body, key)
+
+        first.status shouldBe 201
+        replay.status shouldBe 201
+        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
+        replay.getContentAsString(Charsets.UTF_8) shouldContain "\"text\":\"$written\""
+        replay.contentAsByteArray.toList() shouldBe first.contentAsByteArray.toList()
+        jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 1
+    }
+
     @Test
     fun `the idempotency row names the entry and holds none of its words in any column`() {
         val key = UUID.randomUUID().toString()

@@ -5,14 +5,20 @@ import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.shouldBeInstanceOf
 import io.kotest.matchers.types.shouldBeSameInstanceAs
+import jakarta.servlet.FilterChain
 import jakarta.servlet.ReadListener
 import jakarta.servlet.ServletInputStream
 import jakarta.servlet.http.HttpServletRequest
+import jakarta.servlet.http.HttpServletRequestWrapper
+import jakarta.servlet.http.HttpServletResponse
 import org.junit.jupiter.api.Test
 import org.springframework.mock.web.MockFilterChain
 import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
+import org.springframework.web.method.HandlerMethod
 import java.io.InputStream
+import java.security.Principal
+import java.util.UUID
 
 /**
  * [IdempotencyRequestCachingFilter] and the wrapper it applies, with no
@@ -103,6 +109,58 @@ internal class IdempotencyRequestCachingFilterTest {
             passedDownTheChain(request) shouldBeSameInstanceAs request
             request.getAttribute(IdempotencyRequestCachingFilter.SEEN_ATTRIBUTE).shouldNotBeNull()
         }
+    }
+
+    /**
+     * In the real application this filter runs *inside* Spring Security's
+     * chain, so by the time the interceptor sees the request something else
+     * has wrapped the [ReplayableHttpServletRequest] again. The interceptor
+     * must find it through that wrapper (`WebUtils.getNativeRequest`), not by
+     * the request's own type — every other test here hands it the wrapper
+     * directly, so a lookup by type would have passed them all.
+     */
+    @Test
+    fun `the interceptor finds the replayable request through a wrapper another filter put outside it`() {
+        val body = """{"text":"thank you"}"""
+        val caller = UUID.randomUUID()
+        val key = UUID.randomUUID().toString()
+        val request =
+            MockHttpServletRequest("POST", "/api/v1/probe/entries").apply {
+                contentType = "application/json"
+                setContent(body.toByteArray())
+                addHeader(IdempotencyInterceptor.HEADER, key)
+                userPrincipal = Principal { caller.toString() }
+            }
+        val interceptor = IdempotencyInterceptor { method, path, bytes -> "$method $path ${String(bytes)}" }
+        val handler = HandlerMethod(IdempotentProbe(), IdempotentProbe::class.java.getMethod("create"))
+        var reached = false
+
+        filter.doFilter(
+            request,
+            MockHttpServletResponse(),
+            FilterChain { inner, response ->
+                inner.shouldBeInstanceOf<ReplayableHttpServletRequest>()
+                // What Spring Security's own wrapper is to this one: outside it, and of another type.
+                val outer = object : HttpServletRequestWrapper(inner) {}
+
+                interceptor.preHandle(outer, response as HttpServletResponse, handler) shouldBe true
+
+                val prepared = IdempotencyInterceptor.requestOf(outer)
+                prepared.key shouldBe key
+                prepared.userId shouldBe caller
+                prepared.fingerprint shouldBe "POST /api/v1/probe/entries $body"
+                // And the handler's own read, made through the outer wrapper, still gets the whole body.
+                String(outer.inputStream.readAllBytes()) shouldBe body
+                reached = true
+            },
+        )
+
+        reached shouldBe true
+    }
+
+    private class IdempotentProbe {
+        @Idempotent
+        fun create() = Unit
     }
 
     private fun passedDownTheChain(request: HttpServletRequest): HttpServletRequest {
