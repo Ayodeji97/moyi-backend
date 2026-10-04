@@ -213,7 +213,10 @@ internal class SubmitEntrySettledDayTest(
 
     @ParameterizedTest
     @ValueSource(strings = ["EMPTY", "FROZEN", "SUSPENDED"])
-    fun `a claimed day that is already stamped closed sends the draft to today, whatever its status`(status: String) {
+    fun `a claimed day that is already stamped closed sends the draft to today, whatever its status`(
+        status: String,
+        output: CapturedOutput,
+    ) {
         // Spec §6.1.2: settled is `closedAt != null`, "including FROZEN and
         // elapsed SUSPENDED" — and §6.1's own note on why EMPTY is in the
         // list. SUSPENDED is the one a status-only check misses: the close
@@ -234,6 +237,10 @@ internal class SubmitEntrySettledDayTest(
         intendedAtOf(response) shouldBe NOW
         entriesOn(YESTERDAY) shouldBe 1
         entriesOn(TODAY) shouldBe 1
+        // The claim was refused by the unlocked check, so the fallback line
+        // was written — at DEBUG. At the default level it must not appear: a
+        // client whose clock runs fast would write it on every submission.
+        output.all shouldNotContain "an intendedAt was not used"
     }
 
     // ---- the close, standing in for C3 ----------------------------------

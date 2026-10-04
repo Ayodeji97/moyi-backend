@@ -617,7 +617,9 @@ at `WARN` with no stack trace. Caught at the read rather than by a handler for
 `IOException`, which would also have swallowed the server's own I/O faults. **Not changed:**
 on a real server the body of that `400` is Boot's default error document, not this
 application's problem details, because Tomcat has already put the response in its error
-state. There is no client left to read it.
+state. A client that aborted is no longer there to read it. A client that only stalled (a
+socket timeout) is still connected and does receive that document, so this is a real hole
+in the error contract, recorded under Owed.
 
 ## Consequences
 
@@ -883,6 +885,12 @@ on. None of them is built here.
   `ALREADY_MEMBER`, an unpaired surrogate, typographic text stored as sent): **361 passed,
   0 failed.** Anything committed after `0397200` that is not documentation has not been
   smoke-tested until the script is run again.
+- **A read failure on an `@Idempotent` route answers `400` with the framework's default error
+  body, not RFC 9457** (decision 27). Tomcat error-dispatches once the read of the body
+  fails, so on a real server the response is Boot's default error document. It is the one
+  known hole in "every error is problem details". Observed by hand on 2026-10-04, not
+  asserted by a test: `IdempotencyRealServerTest` asserts the status only. Not assigned to
+  a slice, and not ruled on.
 - **Two product questions about `EntryText` are open and not ruled** (decision 23 has the
   first): whether the 500 should be counted on the raw text rather than the NFKC form, and
   whether an entry made only of zero-width characters should be refused. The C1 follow-up

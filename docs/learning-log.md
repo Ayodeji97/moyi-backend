@@ -1797,8 +1797,10 @@ Expected: a tidy-up. The reviews of #46 had left a short list of small items tha
          them had a predicted outcome written beside them, both from reading the code:
          the surrogate "may store `?` or may be a 500", the disconnect "is probably an
          ERROR-logged 500". The instruction was to run each before touching it.
-Reality: **both predictions were half right, and the half that was wrong was the half a
-         client would see.**
+Reality: **neither was a plain `500`, and each had a part nobody had predicted.** The
+         surrogate did store `?`, as the list said it might; what was not predicted was
+         a `201` echoing the surrogate back while the row held `?`. The disconnect did
+         log an ERROR; the status on a real server was not the predicted one.
          The surrogate. `{"text":"thank you\ud800"}` was a `201`. The response echoed the
          surrogate back, rendered from memory. The row held `?`. So ADR-0031 decision 23,
          "stored exactly as sent", was false for one class of input, and the test that
@@ -1814,7 +1816,8 @@ Reality: **both predictions were half right, and the half that was wrong was the
          either way (catch the `IOException` where the body is read, answer `400`, log a
          WARN), but only the real server showed that the body of that `400` is Boot's
          default error document and not our problem details, before the fix and after
-         it. I left that alone. Nobody is there to read it.
+         it. That was left as it is and recorded as owed in ADR-0031. It has not been
+         ruled on. A client that aborted is not there to read it; one that only stalled is.
          The log line. `redirectOnce` wrote "an offline entry is redirected to {date}"
          and then checked whether that date was settled. When it was, the request was a
          `409` and the log had recorded a redirect. A log line written before the
@@ -1826,13 +1829,16 @@ Reality: **both predictions were half right, and the half that was wrong was the
          The smoke script went from 350 probes to 361, and `ALREADY_MEMBER`, which the
          list said to skip unless a sequential probe could reach it, turned out to be one
          request: the creator accepting their own code.
-Wrong about: what "stored exactly as sent" was a claim about. I had read it as a claim
-         about normalisation, because normalisation was the bug that produced it. It is
+Wrong about: what "stored exactly as sent" was a claim about. ADR-0031 decision 23 and
+         the tests under it are about normalisation, because normalisation was the bug
+         that produced the decision. The brief said the surrogate was either a `?` or a
+         `500`, and nobody had run it. The sentence is in fact
          a claim about every string a JSON parser will hand over, and a JSON string is
          UTF-16 code units, not characters. The driver's substitution was silent, and
          the response was built before the driver ran.
          Also: a reproduction is a claim about the harness it ran in. The MockMvc test
-         said `500` and I would have written "it is a 500" in the ADR. It took the
+         said `500`, which is also what the brief expected, and on that evidence alone
+         the ADR would have recorded a `500`. It took the
          socket to learn that the wire said `400` and that the defect was in the log.
          Smaller: the brief said to remove both items from the ADR's "Owed". Neither was
          there. They had lived in review comments on the PR, which is to say nowhere a

@@ -153,7 +153,9 @@ internal class EntryTextTest {
 
     @Test
     fun `a well-formed surrogate pair is kept exactly - every emoji outside the BMP is one`() {
-        for (text in listOf("\uD83D\uDE4F", "thank you \uD83D\uDE4F", "\uD83D\uDE4F\uD83D\uDE4F", "a\uD83C\uDDF3\uD83C\uDDECb")) {
+        // The last is a ZWJ sequence, the four-person family: four pairs joined by U+200D.
+        val family = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66"
+        for (text in listOf("\uD83D\uDE4F", "thank you \uD83D\uDE4F", "\uD83D\uDE4F\uD83D\uDE4F", "a\uD83C\uDDF3\uD83C\uDDECb", family)) {
             EntryText.of(text).value shouldBe text
             EntryText.of(text).value.toByteArray(Charsets.UTF_8) shouldBe text.toByteArray(Charsets.UTF_8)
         }
