@@ -59,8 +59,17 @@ import javax.sql.DataSource
  * **Each was watched going red** with the bond loaded before the lock in the
  * service under test (`bonds.findByMember(…)` one line above `lockBond`), and
  * all the member-scoped ones again with `spring.jpa.open-in-view: true` in
- * this module's test configuration. The pull request records what each
- * failure looked like.
+ * this module's test configuration. Two needed a different mutation and say
+ * so where they stand; ADR-0028 §6b records what each failure looked like.
+ *
+ * **What is not here, and why.** "A new invite behind an accept is `BOND_FULL`"
+ * and "a deletion request behind an accept does not confirm itself" were
+ * written, passed, and *stayed green* with the bond loaded before the lock:
+ * both decide on how many member rows there are, and a row another
+ * transaction **inserted** is new to the persistence context, so the query
+ * returns it fresh whatever else is stale. Only rows that were *updated* hide
+ * behind the identity map. A test that cannot fail for the defect it is filed
+ * under is not kept under it.
  */
 @SpringBootTest(classes = [BondTestApplication::class])
 @AutoConfigureMockMvc
@@ -372,22 +381,6 @@ internal class BondLockFreshReadTest(
         count("bond_invites WHERE used_at IS NULL AND revoked_at IS NULL") shouldBe 0
     }
 
-    @Test
-    fun `a new invite queued behind an accept is refused as full and no second code is issued`() {
-        val bond = pendingBond()
-
-        val response =
-            whileQueuedBehindTheBondLock(
-                bond.id,
-                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/invites") },
-                committedMeanwhile = { holder -> holder.partnerJoins(bond.id, bond.bea) },
-            )
-
-        response.status shouldBe 409
-        response.contentAsString shouldContain "\"code\":\"BOND_FULL\""
-        count("bond_invites") shouldBe 1
-    }
-
     // ---- RequestDeletion.request and .cancel ----------------------------------
 
     @Test
@@ -404,26 +397,6 @@ internal class BondLockFreshReadTest(
         response.status shouldBe 409
         response.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
         count("bond_proposals") shouldBe 0
-    }
-
-    @Test
-    fun `a deletion request queued behind an accept waits for the new member instead of confirming itself`() {
-        // `activeMembers.size == 1` is the branch that starts the cooling-off
-        // with nobody to ask. Counted from before the accept, Ada would
-        // schedule the destruction of a bond Bea had just joined, alone.
-        val bond = pendingBond()
-
-        val response =
-            whileQueuedBehindTheBondLock(
-                bond.id,
-                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/deletion-request") },
-                committedMeanwhile = { holder -> holder.partnerJoins(bond.id, bond.bea) },
-            )
-
-        response.status shouldBe 202
-        bondColumn(bond.id, "status") shouldBe "ACTIVE"
-        bondColumn(bond.id, "deletion_requested_at") shouldBe null
-        count("bond_proposals WHERE confirmed_at IS NULL AND cancelled_at IS NULL") shouldBe 1
     }
 
     @Test
