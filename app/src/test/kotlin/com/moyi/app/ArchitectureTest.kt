@@ -116,6 +116,13 @@ class ArchitectureTest {
         /** The file `BondMembership.asReader()` lives in (`gratitude.service`). */
         private const val READER_FACTORY_FILE = "BondCalendars"
 
+        /**
+         * Every way a class can open or join a transaction by import:
+         * Spring's annotation, `TransactionTemplate` and the manager behind
+         * it, and Jakarta's own `@Transactional`.
+         */
+        private val TRANSACTION_APIS = listOf("org.springframework.transaction.", "jakarta.transaction.")
+
         private data class Location(
             val module: String,
             val layer: String,
@@ -288,6 +295,40 @@ class ArchitectureTest {
         assertTrue(
             violations.isEmpty(),
             "Controllers are the HTTP edge and belong in the web layer. Found elsewhere: $violations",
+        )
+    }
+
+    @Test
+    fun `nothing in a module's web layer opens a transaction`() {
+        // Ten of the eleven `BondStore.lockBond` call sites are correct for
+        // one reason: the controller's `BondAccessGuard` read runs in its own
+        // transaction, which is over before the service's begins, so the
+        // service's "read under the lock" cannot be answered from entities
+        // the guard loaded (ADR-0028 §6b). A transaction opened at the web
+        // layer joins the two, and every one of those services starts
+        // deciding on what was true before it queued — creating an invite for
+        // a bond that has ended, undoing a leave — with nothing failing.
+        // `BondLockFreshReadTest` is what goes red when that happens; this
+        // rule is what says so at the line that caused it. Its sibling is
+        // `JpaTransactionScopeTest`, which holds the other way to join them
+        // (`open-in-view`).
+        //
+        // Import-based, like the layer rule above and with the same gap: a
+        // fully qualified `@org.springframework.transaction…Transactional`
+        // needs no import. Main sources only — a test class in a `web`
+        // package may open whatever transaction its assertions need.
+        val violations =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
+                .filter { locationOf(it.packagee?.name)?.layer == "web" }
+                .filter { file -> file.imports.any { import -> TRANSACTION_APIS.any(import.name::startsWith) } }
+                .map { it.name }
+
+        assertTrue(
+            violations.isEmpty(),
+            "A controller (or anything else in a web layer) must not open a transaction: the access guard and the " +
+                "service it authorises have to run in separate ones, or the service's read under the bond lock is " +
+                "answered from the guard's stale copy (ADR-0028 §6b). Move the boundary into the service. Found in: $violations",
         )
     }
 
