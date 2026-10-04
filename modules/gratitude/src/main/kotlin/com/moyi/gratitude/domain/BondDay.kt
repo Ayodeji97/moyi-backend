@@ -2,6 +2,7 @@ package com.moyi.gratitude.domain
 
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -191,6 +192,40 @@ internal data class BondDay(
             entryCount = entryCount + 1,
             status = if (status == BondDayStatus.SUSPENDED) BondDayStatus.SUSPENDED else BondDayStatus.PARTIAL,
         )
+
+    /**
+     * FR-062: two live entries wait in their own status until the configured
+     * local time on this day's snapshot calendar. Java's zone resolution moves
+     * a gap forward and chooses the earlier offset in an overlap. Comparing
+     * instants also handles an elapsed joining day and a westward extended day.
+     * The caller holds the day lock and persists both entries in this transaction.
+     */
+    fun revealWhenDue(
+        revealTime: LocalTime?,
+        now: Instant,
+    ): BondDay {
+        if (entryCount != MAX_ENTRIES || status !in setOf(BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL)) return this
+        val due = revealTime?.let { date.atTime(it).atZone(anchorTimezone).toInstant() }
+        return if (due != null && now.isBefore(due)) {
+            copy(status = BondDayStatus.PENDING_REVEAL)
+        } else {
+            copy(status = BondDayStatus.REVEALED, revealedAt = revealedAt ?: now.truncatedTo(ChronoUnit.MICROS))
+        }
+    }
+
+    /**
+     * Spec §12.4: only the suspended day containing the recorded activation
+     * resumes. Older private days stay private; elapsed joining days still
+     * resume. The caller reconciles the timeline span before asking this rule.
+     */
+    fun resumeJoiningDay(activeSince: Instant?): BondDay {
+        val joining = activeSince != null && !activeSince.isBefore(startsAt) && activeSince.isBefore(endsAt)
+        return if (status == BondDayStatus.SUSPENDED && joining) {
+            copy(status = if (entryCount == 0) BondDayStatus.OPEN else BondDayStatus.PARTIAL)
+        } else {
+            this
+        }
+    }
 
     /**
      * This day with its span brought up to what the bond's calendar now says
