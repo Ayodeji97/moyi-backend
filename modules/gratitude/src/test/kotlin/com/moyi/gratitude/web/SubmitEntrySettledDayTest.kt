@@ -237,10 +237,11 @@ internal class SubmitEntrySettledDayTest(
         intendedAtOf(response) shouldBe NOW
         entriesOn(YESTERDAY) shouldBe 1
         entriesOn(TODAY) shouldBe 1
-        // The claim was refused by the unlocked check, so the fallback line
-        // was written — at DEBUG. At the default level it must not appear: a
-        // client whose clock runs fast would write it on every submission.
-        output.all shouldNotContain "an intendedAt was not used"
+        // The entry is on a day its author did not name, so the fallback is
+        // on the record at INFO, with the reason. (Only a claim ahead of the
+        // server's clock is DEBUG — `EntriesEndpointTest` pins that one.)
+        output.all shouldContain "an intendedAt was not used for bond $bondId (DAY_SETTLED)"
+        output.all shouldContain "filed by submission time, on $TODAY"
     }
 
     // ---- the close, standing in for C3 ----------------------------------

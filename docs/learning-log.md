@@ -1840,6 +1840,14 @@ Wrong about: what "stored exactly as sent" was a claim about. ADR-0031 decision 
          said `500`, which is also what the brief expected, and on that evidence alone
          the ADR would have recorded a `500`. It took the
          socket to learn that the wire said `400` and that the defect was in the log.
+         And one made in this same piece of work. The fallback log line was noisy for a
+         client whose clock runs fast, and the fix was to make the line DEBUG. That one
+         line covered four reasons a claim is not used; three of them (too old, before
+         the bond began, a settled day) put the entry on a day its author did not name,
+         which is exactly what the line exists to explain. The noise was fixed by
+         hiding the three cases that needed the record. A reviewer on the PR caught it.
+         `DayAssignment.resolve` now says which reason it was, and only the
+         ahead-of-clock one is DEBUG.
          Smaller: the brief said to remove both items from the ADR's "Owed". Neither was
          there. They had lived in review comments on the PR, which is to say nowhere a
          later reader of the repository would find them.

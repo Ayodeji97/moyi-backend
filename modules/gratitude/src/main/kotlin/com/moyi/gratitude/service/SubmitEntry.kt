@@ -327,14 +327,27 @@ internal class SubmitEntry(
             DayAssignment.resolve(now, intendedAt, calendar) { candidate ->
                 days.findByBondAndDate(bondId, candidate)?.isSettled == true
             }
-        // BR-3a decided against the client's claim. Traceable, because the
-        // member sees an entry on a day they did not expect: the bond and the
-        // date it was filed on — never the words, and not the member. DEBUG,
-        // not INFO: a claim ahead of the server's clock is one of the reasons
-        // (ruling P11), so a client whose clock runs a little fast would
-        // write this line on every submission it ever makes.
-        if (intendedAt != null && !claimed.usedIntendedAt) {
-            log.debug("BR-3a: an intendedAt was not used for bond {}; the entry is filed by submission time, on {}", bondId, claimed.date)
+        // BR-3a decided against the client's claim. Why is `resolve`'s to say
+        // (`claimed.claim`), never worked out again here. The bond, the reason
+        // and the date it was filed on — never the words, the claimed instant
+        // or the member.
+        when (claimed.claim) {
+            // On a day the member did not name, so it is on the record at
+            // INFO: this line is what answers "why is my entry on that day".
+            DayAssignment.Claim.TOO_OLD, DayAssignment.Claim.BEFORE_THE_BOND, DayAssignment.Claim.DAY_SETTLED -> {
+                log.info(FALLBACK_LOG, bondId, claimed.claim, claimed.date)
+            }
+
+            // On today, which is where the member expects it — and a client
+            // whose clock runs a little fast would write this on every
+            // submission it ever makes (ruling P11). DEBUG.
+            DayAssignment.Claim.AHEAD_OF_CLOCK -> {
+                log.debug(FALLBACK_LOG, bondId, claimed.claim, claimed.date)
+            }
+
+            DayAssignment.Claim.USED, DayAssignment.Claim.ABSENT -> {
+                // Nothing was refused, so there is nothing to explain.
+            }
         }
         val claimedDay = openAndLock(membership, claimed.bounds, now)
         // BR-3a, rechecked under the day's own lock (spec §6.1.3). The check
@@ -434,5 +447,8 @@ internal class SubmitEntry(
     private companion object {
         /** `201` — what a fresh submission answers, and so what its key replays. */
         const val CREATED = 201
+
+        /** A BR-3a fallback: the bond, why the claim was not used (a [DayAssignment.Claim]), and the date filed on. */
+        const val FALLBACK_LOG = "BR-3a: an intendedAt was not used for bond {} ({}); the entry is filed by submission time, on {}"
     }
 }

@@ -696,8 +696,14 @@ in the error contract, recorded under Owed.
   (`WHERE deleted_at IS NULL`) cannot serve that read.
 - **Nothing that holds an entry's words prints them.** `SubmitEntryRequest`, `EntryDraft`
   and `EntryResponse` were data classes carrying the text as a plain `String`; each now
-  prints `text=(redacted)`. One `INFO` line, bond id and date only, records a BR-3a
-  fallback or redirect, so a member's "why is my entry on that day" is answerable.
+  prints `text=(redacted)`. One `INFO` line — bond id, a reason and a date only — records a
+  BR-3a redirect, and a BR-3a fallback whose claim was too old, predates the bond or names a
+  settled day, so a member's "why is my entry on that day" is answerable. *(Amended
+  2026-10-04.)* A fallback whose claim was only **ahead of the server's clock** is `DEBUG`:
+  that entry lands on today, where its author expects it, and a client whose clock runs fast
+  would write the line on every submission. `DayAssignment.resolve` reports which of the
+  four it was (`Resolution.claim`); `SubmitEntry` chooses the level from that and does not
+  restate the rule.
 - **V11 and V12 were edited in place, more than once, and V13 is new.** Any database that
   applied an earlier copy of them refuses to start on a checksum mismatch, and resetting the
   checksums does not fix it: the tables themselves have the earlier shape. The shared
