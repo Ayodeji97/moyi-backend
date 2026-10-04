@@ -14,9 +14,12 @@ import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
@@ -46,6 +49,7 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
+@ExtendWith(OutputCaptureExtension::class)
 @Import(EntriesEndpointTest.TimeConfiguration::class)
 internal class EntriesEndpointTest(
     @Autowired private val mockMvc: MockMvc,
@@ -201,7 +205,7 @@ internal class EntriesEndpointTest(
     }
 
     @Test
-    fun `an intendedAt from before the bond existed is ignored, not a 500`() {
+    fun `an intendedAt from before the bond existed is ignored, not a 500`(output: CapturedOutput) {
         // Cara's bond is created at NOW; one hour earlier is inside BR-3a's
         // windows but before the bond's calendar begins. The anchor timeline
         // cannot place that instant, and must not be asked to: the claim
@@ -215,16 +219,21 @@ internal class EntriesEndpointTest(
         val filedOn = jdbc.queryForObject("SELECT date::text FROM bond_days WHERE bond_id = ?::uuid", String::class.java, bondIdOf(solo))
         filedOn shouldBe "2026-09-15"
         intendedAtOf(response) shouldBe NOW
+        // On a day the member did not name: recorded at INFO, with the reason.
+        output.all shouldContain "an intendedAt was not used for bond ${bondIdOf(solo)} (BEFORE_THE_BOND)"
     }
 
     @Test
-    fun `an intendedAt past the 36h offline window is ignored, and the entry lands on today`() {
+    fun `an intendedAt past the 36h offline window is ignored, and the entry lands on today`(output: CapturedOutput) {
         val tooOld = NOW.minus(Duration.ofHours(40))
 
         val response = submit(ada, bondId, """{"text":"too old to back-file","intendedAt":"$tooOld"}""")
 
         response.status shouldBe 201
         jdbc.queryForObject("SELECT date::text FROM bond_days", String::class.java) shouldBe "2026-09-15"
+        // On a day the member did not name: recorded at INFO, with the reason.
+        output.all shouldContain "an intendedAt was not used for bond $bondId (TOO_OLD)"
+        output.all shouldNotContain "too old to back-file"
     }
 
     /**
@@ -239,7 +248,7 @@ internal class EntriesEndpointTest(
      * before this fix, the raw claim was stored and echoed back regardless.
      */
     @Test
-    fun `a claim DayAssignment rejects is never the value stored or echoed`() {
+    fun `a claim DayAssignment rejects is never the value stored or echoed`(output: CapturedOutput) {
         val rejected = "2099-01-01T00:00:00Z"
 
         val response = submit(ada, bondId, """{"text":"clock skew","intendedAt":"$rejected"}""")
@@ -248,6 +257,11 @@ internal class EntriesEndpointTest(
         response.contentAsString shouldContain "\"date\":\"2026-09-15\""
         intendedAtOf(response) shouldBe NOW
         jdbc.queryForObject("SELECT intended_at FROM entries", java.sql.Timestamp::class.java)!!.toInstant() shouldBe NOW
+        // Ahead of the clock is the one fallback that is NOT on the record at
+        // the default level: the entry is on today, where its author expects
+        // it, and a phone whose clock runs fast would write the line on every
+        // submission it ever makes. The other three reasons are INFO.
+        output.all shouldNotContain "an intendedAt was not used"
     }
 
     /**

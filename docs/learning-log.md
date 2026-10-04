@@ -1840,6 +1840,65 @@ Wrong about: what "stored exactly as sent" was a claim about. ADR-0031 decision 
          said `500`, which is also what the brief expected, and on that evidence alone
          the ADR would have recorded a `500`. It took the
          socket to learn that the wire said `400` and that the defect was in the log.
+         And one made in this same piece of work. The fallback log line was noisy for a
+         client whose clock runs fast, and the fix was to make the line DEBUG. That one
+         line covered four reasons a claim is not used; three of them (too old, before
+         the bond began, a settled day) put the entry on a day its author did not name,
+         which is exactly what the line exists to explain. The noise was fixed by
+         hiding the three cases that needed the record. A reviewer on the PR caught it.
+         `DayAssignment.resolve` now says which reason it was, and only the
+         ahead-of-clock one is DEBUG.
          Smaller: the brief said to remove both items from the ADR's "Owed". Neither was
          there. They had lived in review comments on the PR, which is to say nowhere a
          later reader of the repository would find them.
+
+## 2026-10-04 · Phase 3 · Auditing the other lock callers — a right conclusion filed under a wrong reason
+Expected: the recorded note predicted a defect. C1 had found a "re-read under the lock"
+         that read nothing, and eleven other call sites take the same lock and then read.
+         ADR-0031's Owed list and `lockBond`'s KDoc said of them: they all write the bond
+         afterwards, so a stale read meets `@Version`; any that decides without writing
+         the bond row would not be caught. On that note the audit would find such a caller
+         and fix it with `refreshReads = true`.
+Reality: **none of the eleven was wrong, and the sentence was.** Eight of them do not
+         write the bond row on at least one path: a new invite, a revoke, a proposal, a
+         cancel, a first deletion request, a member's settings. `@Version` was never
+         going to see those. And a leave during a cooling-off moves `left_at` and not the
+         bond's version, so cancelling a deletion, which does write the bond row when it
+         is counting down, was not covered by `@Version` either.
+         What keeps them right is smaller and was already written down, in ADR-0028 and in
+         a comment in `application.yml`: the controller's guard reads in its own
+         transaction, that transaction is over before the service's begins, and the lock
+         is the first statement of an empty one. A reviewer had said so from reading. It
+         had not been run. Fourteen tests now run it, each a request sent through its
+         controller, seen queued in `pg_blocking_pids` behind a transaction that holds
+         the bond's row and then commits a leave or an accept.
+         The mutations were the informative part. With the bond loaded one line above the
+         lock, the callers that write the bond answered `500`: `@Version` did catch them,
+         as a server error. The ones that do not answered `200`, `201`, `202` and `204`
+         for a bond that had ended. With `open-in-view` switched on in the test
+         configuration and no source line changed, eleven of the fourteen went red.
+         Two tests written during the audit did not survive their own mutation, and were
+         deleted in it. A new invite behind an accept, and a deletion request behind an
+         accept, both stayed green with the bond stale, because both count member rows
+         and an inserted row is new to the persistence context, so the query returns it.
+         Only updated rows hide. And one test needed two mutations at once to fail:
+         cancelling a zone proposal reads it after the lock and then cancels by
+         compare-and-set, and each of those is enough alone.
+Wrong about: what the earlier note was. "They all write the bond afterwards" read like a
+         finding. It was a claim recorded about eleven call sites that had not been read.
+         It went into an ADR and a KDoc, and a review and a brief both repeated it. The
+         conclusion it supported was true, which is why nothing contradicted it.
+         Also where a property like this lives. No line in any of the eight services says
+         "my transaction starts empty". It is true because of an annotation that is absent
+         from six controllers and one line of YAML, and it would have stopped being true
+         with a single `@Transactional` added somewhere reasonable-looking. There is an
+         architecture rule for that now. It was run against one real violation,
+         `@Transactional` on `BondInvitesController`, and failed naming it; one
+         controller, not six.
+         What is still not covered: a service that calls the guard itself and then locks,
+         in one transaction. That is exactly what `lockMembershipOf` is, and why it
+         refreshes. Nothing stops the next one being written without it. Nor is a
+         transaction opened by a filter or interceptor outside the domain modules, a
+         transactional base class from another layer, or a hand-registered
+         `OpenEntityManagerInViewFilter`. ADR-0028 §6b lists them, with the runtime check
+         that would close them and was not built.

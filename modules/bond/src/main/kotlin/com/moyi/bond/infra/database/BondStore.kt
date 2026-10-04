@@ -124,10 +124,22 @@ internal class BondStore(
      * a bond that had ended while the submission waited. `BondDayStore.lockAndFind`
      * met the same trap for the same reason.
      *
-     * `true` only for `BondAccess.lockMembershipOf` today. The other callers
-     * all *write* the bond afterwards, so a stale read meets `@Version` as a
-     * conflict rather than passing silently; whether they should refresh too
-     * is a question for those callers, not settled here.
+     * `true` only for `BondAccess.lockMembershipOf`, and that is settled
+     * rather than pending (ADR-0028 §6b): it is the one caller that runs the
+     * guard and takes the lock *in the same transaction*. Every other caller
+     * is a service whose controller ran the guard in a separate, finished
+     * transaction, so its own starts with an empty persistence context, this
+     * lock is its first statement, and there is nothing to refresh.
+     * `BondLockFreshReadTest` holds that per caller; `ArchitectureTest` and
+     * `JpaTransactionScopeTest` hold the two things it rests on — no
+     * transaction opened in a `web` layer, and no `open-in-view`.
+     *
+     * **It is not `@Version` that protects them.** Creating or revoking an
+     * invite, proposing, cancelling, requesting a deletion and a member's
+     * settings do not write the bond row on at least one path, so a stale
+     * read there would pass silently. A new caller that
+     * reads the bond, or lets the guard read it, before this lock in the same
+     * transaction must pass `true`.
      *
      * `refresh` also **discards unflushed changes** to the instances it
      * refreshes, so a caller opts in before it mutates the bond or its
