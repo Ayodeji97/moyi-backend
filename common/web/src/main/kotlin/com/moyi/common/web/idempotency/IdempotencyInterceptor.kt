@@ -18,6 +18,7 @@ import org.springframework.web.servlet.HandlerInterceptor
 import org.springframework.web.util.WebUtils
 import java.io.BufferedReader
 import java.io.ByteArrayInputStream
+import java.io.IOException
 import java.io.InputStreamReader
 import java.nio.charset.Charset
 import java.util.UUID
@@ -68,6 +69,11 @@ import java.util.UUID
  *   KMP client's engines do. The body is read up to the bound and no further.
  * - **Longer than [MAX_BODY_BYTES]** — `413`, whether the length was declared
  *   (refused unread) or discovered while reading a chunked body.
+ * - **The body stops arriving** — the client went away or stalled mid-body,
+ *   and the container's read throws an `IOException`: `400`
+ *   ([RequestBodyUnreadableException]). It is raised here, inside MVC, only
+ *   because this is where the body is now read; left alone it reached the
+ *   catch-all as an ERROR-logged `500` for something no server did wrong.
  * - **Multipart** — not wrapped, not prepared; the handler's `@RequestBody`
  *   has no converter for it and Spring answers `415` itself.
  * - **The filter never ran at all** — the one case that *is* a wiring bug,
@@ -295,15 +301,27 @@ internal class ReplayableHttpServletRequest(
      * undeclared one (chunked) is read to at most one byte past the bound —
      * that byte is how "too long" is known — so what this holds in memory is
      * bounded whatever the client sends and however it frames it.
+     *
+     * A read that fails — the client aborted, the socket timed out, the body
+     * ended before the length it declared — is [RequestBodyUnreadableException]:
+     * the client's failure, answered and logged as one. Nothing is kept, so a
+     * later call reads again rather than serving half a body.
      */
     fun buffered(maxBytes: Int): ByteArray {
         body?.let { return it }
         if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()
-        val read = request.inputStream.readNBytes(maxBytes + 1)
+        val read = readAtMost(maxBytes + 1)
         if (read.size > maxBytes) throw RequestBodyTooLargeException()
         body = read
         return read
     }
+
+    private fun readAtMost(bytes: Int): ByteArray =
+        try {
+            request.inputStream.readNBytes(bytes)
+        } catch (failure: IOException) {
+            throw RequestBodyUnreadableException(failure)
+        }
 
     override fun getInputStream(): ServletInputStream = body?.let(::ReplayableServletInputStream) ?: super.getInputStream()
 
@@ -355,6 +373,24 @@ class RequestBodyTooLargeException :
         HttpStatus.CONTENT_TOO_LARGE,
         ErrorCode.MALFORMED_REQUEST,
         "The request body is too large.",
+    )
+
+/**
+ * 400: an `@Idempotent` request's body could not be read to its end — the
+ * client disconnected or stalled part-way. `MALFORMED_REQUEST` with the
+ * sentence an unparseable body gets, because to this application they are
+ * the same thing: a body it was not given. There is usually no client left
+ * to read it; what matters is that it is a WARN and a `4xx`, not an ERROR
+ * with a stack trace and a `500` counted against the server. [cause] is kept
+ * for a debugger, and is never logged or returned.
+ */
+class RequestBodyUnreadableException(
+    cause: IOException,
+) : ApiException(
+        HttpStatus.BAD_REQUEST,
+        ErrorCode.MALFORMED_REQUEST,
+        "The request body could not be read.",
+        cause,
     )
 
 /** 422: the same key was already sent against a different method or path, or with a body that hashes differently. */

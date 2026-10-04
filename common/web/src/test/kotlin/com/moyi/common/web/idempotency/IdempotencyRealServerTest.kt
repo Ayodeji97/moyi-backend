@@ -3,15 +3,20 @@ package com.moyi.common.web.idempotency
 import com.moyi.common.testing.PostgresIntegrationTest
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletRequestWrapper
 import jakarta.servlet.http.HttpServletResponse
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
@@ -20,6 +25,7 @@ import org.springframework.core.annotation.Order
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.web.filter.OncePerRequestFilter
 import java.io.ByteArrayInputStream
+import java.net.Socket
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -50,6 +56,7 @@ import java.util.UUID
  * under test is the body, not the token.
  */
 @SpringBootTest(classes = [IdempotencyTestApplication::class], webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ExtendWith(OutputCaptureExtension::class)
 @Import(IdempotencyRealServerTest.CallerConfiguration::class)
 class IdempotencyRealServerTest(
     @Autowired private val controller: IdempotencyProbeController,
@@ -112,6 +119,44 @@ class IdempotencyRealServerTest(
         send(chunked(atTheBound), UUID.randomUUID().toString()).statusCode() shouldBe 201
     }
 
+    /**
+     * The same thing against a real Tomcat, which is where it was reasoned
+     * about and never run: a client declares 100 bytes, sends 12 and stops.
+     * Tomcat raises `ClientAbortException` (an `IOException`) from the read
+     * in `preHandle`. The socket is only half-closed, so the answer can still
+     * be read here — a real aborting client would not wait for it.
+     *
+     * **What is asserted is the log, and that nothing ran.** Tomcat has
+     * already marked the response `400` by the time the exception is thrown,
+     * and answers through its own error dispatch — so the body on the wire is
+     * Boot's default error document, not this application's problem details,
+     * before the fix and after it. Nobody reads it. What changed is that it
+     * is no longer an ERROR with a stack trace.
+     */
+    @Test
+    fun `a client that stops mid-body is a 400 and a WARN, not an unhandled exception`(output: CapturedOutput) {
+        val answer =
+            Socket("localhost", port).use { socket ->
+                socket.soTimeout = SOCKET_TIMEOUT_MILLIS
+                val head =
+                    "POST /api/v1/probe/entries HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n" +
+                        "${IdempotencyInterceptor.HEADER}: ${UUID.randomUUID()}\r\n$CALLER_HEADER: $ada\r\n" +
+                        "Content-Length: 100\r\nConnection: close\r\n\r\n{\"text\":\"tha"
+                socket.getOutputStream().write(head.toByteArray())
+                socket.getOutputStream().flush()
+                socket.shutdownOutput()
+                // The whole answer: by the time it ends, the request has been handled and logged.
+                String(socket.getInputStream().readAllBytes())
+            }
+
+        answer shouldStartWith "HTTP/1.1 400"
+        controller.handlerRuns.get() shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM idempotency_keys", Int::class.java) shouldBe 0
+        output.all shouldNotContain "Unhandled exception"
+        output.all shouldNotContain "ClientAbortException"
+        output.all shouldContain "MALFORMED_REQUEST -> 400"
+    }
+
     private fun chunked(bytes: ByteArray): HttpRequest.BodyPublisher =
         HttpRequest.BodyPublishers.ofInputStream { ByteArrayInputStream(bytes) }
 
@@ -158,5 +203,6 @@ class IdempotencyRealServerTest(
 
     private companion object {
         const val CALLER_HEADER = "X-Probe-Caller"
+        const val SOCKET_TIMEOUT_MILLIS = 15_000
     }
 }
