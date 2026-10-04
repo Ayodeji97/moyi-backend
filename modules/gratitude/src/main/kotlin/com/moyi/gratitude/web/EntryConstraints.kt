@@ -36,7 +36,8 @@ import kotlin.reflect.KClass
 /**
  * FR-041, asked of the domain rather than restated: [EntryText.of] is run
  * against the field's value, and any [IllegalArgumentException] it throws —
- * a NUL character, over the octet cap, blank, over the grapheme cap, in the
+ * a NUL character, an unpaired surrogate, over the octet cap, blank, over
+ * the grapheme cap, in the
  * order that factory checks them — becomes this constraint's violation
  * message. Nothing the factory returns is kept here: the request carries the
  * raw string on to the service, which runs the same factory and stores that
