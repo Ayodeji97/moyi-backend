@@ -35,7 +35,8 @@ internal data class TodayView(
  * `GET /bonds/{bondId}/today` (spec §5.1): today's Bond-day, and each side's
  * entry, exactly as BR-1 gates it.
  *
- * **A read never writes.** [DayAssignment.dateFor] resolves which date
+ * **This view query never writes.** The controller conditionally reconciles
+ * an existing suspended joining day before entering this read transaction. [DayAssignment.dateFor] resolves which date
  * "today" is, the same function [SubmitEntry] uses — `null` for `intendedAt`
  * (nobody backdates a read) and `{ false }` for `isSettled` (the lambda only
  * matters for an offline draft's claimed date, and a read makes no claim),

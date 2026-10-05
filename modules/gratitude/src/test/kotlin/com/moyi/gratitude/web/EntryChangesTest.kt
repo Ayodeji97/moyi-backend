@@ -56,6 +56,7 @@ internal class EntryChangesTest(
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
     @Autowired private val clock: MutableClock,
+    @Autowired private val routes: org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -137,10 +138,23 @@ internal class EntryChangesTest(
     @Test
     fun `entry routes hide another author and another tenant exactly like a missing id`() {
         val id = entryId(submit(ada, bondId, """{"text":"private"}"""))
-        listOf(bea to id, eve to id, ada to UUID.randomUUID().toString(), ada to "bad-id").forEach { (caller, target) ->
-            patchEntry(caller, target, """{"text":"edit"}""").status shouldBe 404
-            deleteEntry(caller, target).status shouldBe 404
-        }
+        val targets = listOf(bea to id, eve to id, ada to UUID.randomUUID().toString(), ada to "bad-id")
+        val edits = targets.map { (caller, target) -> patchEntry(caller, target, """{"text":"edit"}""") }
+        val deletes = targets.map { (caller, target) -> deleteEntry(caller, target) }
+        (edits + deletes).forEach { it.status shouldBe 404 }
+
+        fun withoutInstance(response: MockHttpServletResponse) =
+            response.contentAsString.replace(Regex("\"instance\":\"[^\"]*\""), "\"instance\":\"-\"")
+        edits.map(::withoutInstance).toSet().size shouldBe 1
+        deletes.map(::withoutInstance).toSet().size shouldBe 1
+        val discovered =
+            routes.handlerMethods.keys
+                .flatMap { info ->
+                    info.pathPatternsCondition?.patternValues.orEmpty().filter { "{entryId}" in it }.flatMap { path ->
+                        info.methodsCondition.methods.map { "${it.name} $path" }
+                    }
+                }.toSet()
+        discovered shouldBe setOf("PATCH /api/v1/entries/{entryId}", "DELETE /api/v1/entries/{entryId}")
     }
 
     @Test
@@ -194,6 +208,29 @@ internal class EntryChangesTest(
         ) shouldBe
             2
         jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayRevealed'", Int::class.java) shouldBe 1
+    }
+
+    @Test
+    fun `a keyed patch replays the current tombstone and never re-applies the edit`() {
+        val id = entryId(submit(ada, bondId, """{"text":"original"}"""))
+        val key = UUID.randomUUID().toString()
+
+        fun edit() =
+            mockMvc
+                .patch("/api/v1/entries/$id") {
+                    header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(ada).token}")
+                    header(IdempotencyInterceptor.HEADER, key)
+                    contentType = MediaType.APPLICATION_JSON
+                    content = """{"text":"changed"}"""
+                }.andReturn()
+                .response
+        edit().status shouldBe 200
+        deleteEntry(ada, id).status shouldBe 204
+        val replay = edit()
+        replay.status shouldBe 200
+        replay.getHeader(IdempotencyInterceptor.REPLAYED_HEADER) shouldBe "true"
+        replay.contentAsString shouldContain "\"status\":\"DELETED\""
+        replay.contentAsString shouldNotContain "changed"
     }
 
     private fun entryId(response: MockHttpServletResponse): String = bondIdOf(response)

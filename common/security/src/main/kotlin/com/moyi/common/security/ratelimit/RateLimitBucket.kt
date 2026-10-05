@@ -69,6 +69,9 @@ enum class RateLimitBucket(
      */
     INVITE_CODE_IP("invite:code:ip", Subject.IP, 20, Duration.ofHours(1)),
 
+    /** Spec §5.5, corpus doc 06 §4: 20 entry submission attempts per day per user. */
+    ENTRIES_CREATE_USER("entries:create:user", Subject.USER, 20, Duration.ofDays(1)),
+
     /** Doc 06 §4: "global authenticated 120 / min", per user, on every request that carries a valid token. */
     AUTHENTICATED("authenticated:user", Subject.USER, 120, Duration.ofMinutes(1)),
     ;

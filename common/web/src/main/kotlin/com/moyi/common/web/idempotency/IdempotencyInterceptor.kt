@@ -91,7 +91,8 @@ class IdempotencyInterceptor(
         response: HttpServletResponse,
         handler: Any,
     ): Boolean {
-        val isIdempotent = (handler as? HandlerMethod)?.getMethodAnnotation(Idempotent::class.java) != null
+        val policy = (handler as? HandlerMethod)?.getMethodAnnotation(Idempotent::class.java)
+        val isIdempotent = policy != null && (policy.required || request.getHeader(HEADER) != null)
         // `null` for a request the filter declined — a multipart body. Nothing
         // is prepared for it; the handler's @RequestBody cannot read
         // multipart, and Spring's own 415 is the answer.

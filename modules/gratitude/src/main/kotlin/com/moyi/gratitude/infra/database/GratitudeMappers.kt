@@ -24,7 +24,7 @@ import java.time.ZoneId
  * genuinely does `save()` a freshly built entity. The update path for a
  * [BondDay] is [applyTo], which carries a changed aggregate onto the managed
  * entity it came from. [Entry] has no update path in this task — nothing
- * here ever changes a submitted entry — so it has no `applyTo`.
+ * here originally changed a submitted entry. C2 updates it through `EntryStore.update`.
  *
  * `ZoneId.of` on the way **out** of the database re-validates the stored
  * id, the same call `RegionZone.of` makes in `bond`. A zone the JDK's tzdb

@@ -5,8 +5,7 @@ import java.util.UUID
 
 /**
  * Doc 07 §2's `entries.status` `CHECK`. [SUBMITTED] is every entry this
- * slice ever produces — [REVEALED] arrives with the reveal slice's own
- * transition, [DELETED] with whichever slice adds `DELETE /entries/{id}`.
+ * submission produces; C2 adds [REVEALED] and [DELETED].
  *
  * **BR-2's slot is freed by `deleted_at`, not by [status] alone** (whole-
  * branch review, F5 — an earlier version of this KDoc said the opposite).
@@ -113,9 +112,7 @@ internal data class Entry(
      *    own timestamp was never set. The timestamp is monotonic — nothing in
      *    this phase clears it.
      *
-     * C1 sets [revealedAt] nowhere (C2's reveal does), so only [Readability.FULL]
-     * for an author and [Readability.LOCKED] for a partner are reachable
-     * through this slice's own writes. The rule is written whole regardless.
+     * C2 stamps [revealedAt] transactionally; later status changes never clear it.
      *
      * Callers that render want [readBy], which returns the answer bound to
      * the entry it was given for.

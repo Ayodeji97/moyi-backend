@@ -43,7 +43,7 @@ internal class ChangeEntry(
             checkNotNull(
                 transactions.execute {
                     val initial = entries.find(entryId) ?: throw NotFoundException("That entry was not found.")
-                    val membership = access.lockMembershipOf(userId, initial.bondId)
+                    val membership = membershipOrNotFound(userId, initial.bondId)
                     if (initial.authorMemberId != membership.memberId) throw NotFoundException("That entry was not found.")
                     if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
                     if (unsupportedMedia) throw MediaNotYetSupportedException()
@@ -60,6 +60,31 @@ internal class ChangeEntry(
             )
         } catch (violation: DataIntegrityViolationException) {
             throw violation.redacted()
+        }
+
+    /** A replay is a read, including on an archived bond; erasure wins over its original content. */
+    fun read(
+        userId: UUID,
+        entryId: EntryId,
+    ): EntryView {
+        val entry = entries.find(entryId) ?: throw NotFoundException("That entry was not found.")
+        val membership = membershipOrNotFound(userId, entry.bondId, lock = false)
+        if (entry.authorMemberId != membership.memberId) throw NotFoundException("That entry was not found.")
+        joining.beforeRead(membership)
+        val current = checkNotNull(entries.find(entryId))
+        return EntryView(current.readBy(membership.asReader()), checkNotNull(days.find(entry.bondDayId)))
+    }
+
+    /** The entry route must not disclose whether routing found a bond or an entry. */
+    private fun membershipOrNotFound(
+        userId: UUID,
+        bondId: UUID,
+        lock: Boolean = true,
+    ): BondMembership =
+        try {
+            if (lock) access.lockMembershipOf(userId, bondId) else access.membershipOf(userId, bondId)
+        } catch (_: NotFoundException) {
+            throw NotFoundException("That entry was not found.")
         }
 
     /** Acquire any two days chronologically before the entry lock. */

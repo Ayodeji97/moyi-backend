@@ -805,6 +805,11 @@ expect "an entry of one non-breaking space is 422 on text, not 500" 422 '"field"
 # held '?' in its place (found 2026-10-04). It is a 422 on the field now.
 expect "an entry with an unpaired surrogate is 422 on text" 422 '"field":"text"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"thank you\ud800"}'
 
+# C2: an author can edit while the partner's entry is still absent.
+EDITED_TEXT="thank you for another quiet morning"
+expect "PATCH before reveal changes the author's words" 200 "\"text\":\"$EDITED_TEXT\"" -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS" -d "{\"text\":\"$EDITED_TEXT\"}"
+expect "the partner cannot edit the author's entry" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $PARTNER_ACCESS" -d '{"text":"not mine"}'
+
 # Ruling P12: an entry is stored exactly as sent. Each of these characters is
 # one NFKC would rewrite (… to three full stops, ™ to TM, ﬁ to fi). The partner
 # writes last in this section: the probes above need them not to have written.
@@ -813,13 +818,30 @@ expect "an entry with typographic characters is 201, and echoes them" 201 "\"tex
 expect "…and its author's today shows the same characters, stored as sent" 200 "\"text\":\"$TYPOGRAPHIC_TEXT\"" -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $PARTNER_ACCESS"
 if grep -qF "$TYPOGRAPHIC_TEXT" "$MOYI_LOG"; then fail "text in log" "the typographic entry's text appears in the log"; else pass "…and it is not in the log either"; fi
 
+# The second submission revealed both entries in one transaction.
+expect "both submissions make today REVEALED" 200 '"status":"REVEALED"' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
+[[ "$LAST_BODY" == *"\"text\":\"$TYPOGRAPHIC_TEXT\""* ]] && pass "…and the author reads the partner's words" || fail "reveal" "partner text absent"
+expect "the partner reads the author's edited words" 200 "\"text\":\"$EDITED_TEXT\"" -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $PARTNER_ACCESS"
+expect "PATCH after reveal is ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS" -d '{"text":"too late"}'
+expect "the partner cannot delete the author's entry" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $PARTNER_ACCESS"
+expect "DELETE after reveal succeeds" 204 '' -- -X DELETE "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS"
+expect "repeated DELETE succeeds" 204 '' -- -X DELETE "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS"
+expect "the partner sees the tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $PARTNER_ACCESS"
+[[ "$LAST_BODY" != *"$EDITED_TEXT"* ]] && pass "…and the deleted words are gone" || fail "erasure" "deleted text returned"
+expect "POST replay after DELETE returns its tombstone" 201 '"status":"DELETED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d "{\"text\":\"$ENTRY_TEXT\"}"
+
 # Doc 04 §8.3a: the creator may write before their partner joins, and the day
 # that write lands on opens SUSPENDED, not OPEN, so neither the close job nor
 # the streak walk (neither built yet) mistake it for an ordinary day.
 expect "a lone creator's bond is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $AUTHOR_ACCESS" -d "$(bond_body "Solo for now")"
 SOLO_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
 expect "writing before a partner has joined is still 201" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$SOLO_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"writing alone, for now"}'
+SOLO_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
 expect "…and the day it landed on opens SUSPENDED, not OPEN" 200 '"status":"SUSPENDED"' -- "$API/bonds/$SOLO_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
+
+expect "DELETE before reveal frees the author's slot" 204 '' -- -X DELETE "$API/entries/$SOLO_ENTRY" -H "Authorization: Bearer $AUTHOR_ACCESS"
+expect "the author can write a replacement on the same day" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$SOLO_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"replacement after deletion"}'
+expect "today deterministically selects the live replacement" 200 '"text":"replacement after deletion"' -- "$API/bonds/$SOLO_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
 
 echo; echo "gratitude — a confirmed zone change decides no date until tomorrow (BR-6, ADR-0031 §3)"
 flush_buckets

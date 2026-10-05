@@ -2,12 +2,17 @@ package com.moyi.gratitude.web
 
 import com.moyi.common.security.CurrentUser
 import com.moyi.common.web.NotFoundException
+import com.moyi.common.web.idempotency.IdempotencyInterceptor
+import com.moyi.common.web.idempotency.Idempotent
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.service.ChangeEntry
+import com.moyi.gratitude.service.PatchEntry
+import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotNull
 import org.springframework.http.HttpStatus
+import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -22,21 +27,27 @@ import java.util.UUID
 @RequestMapping("/api/v1/entries")
 internal class EntryChangesController(
     private val changes: ChangeEntry,
+    private val patch: PatchEntry,
 ) {
+    @Idempotent(required = false)
     @PatchMapping("/{entryId}")
     fun patchEntry(
         caller: CurrentUser,
         @PathVariable entryId: String,
         @Valid @RequestBody request: PatchEntryRequest,
-    ): EntryResponse {
+        http: HttpServletRequest,
+    ): ResponseEntity<EntryResponse> {
         val view =
-            changes.change(
+            patch.patch(
                 caller.id,
                 idOrNotFound(entryId),
                 EntryText.of(checkNotNull(request.text)),
                 request.imageMediaId != null || request.voiceMediaId != null,
+                if (http.getHeader(IdempotencyInterceptor.HEADER) == null) null else IdempotencyInterceptor.requestOf(http),
             )
-        return checkNotNull(EntryResponse.from(view))
+        val response = ResponseEntity.ok()
+        if (view.replayed) response.header(IdempotencyInterceptor.REPLAYED_HEADER, "true")
+        return response.body(checkNotNull(EntryResponse.from(view.view)))
     }
 
     @DeleteMapping("/{entryId}")

@@ -204,24 +204,26 @@ class OpenApiConfiguration {
      * module) remains the one place both limits are actually enforced.
      */
     private fun documentEntryTextLimits(api: OpenAPI) {
-        val text =
-            api.components.schemas[SUBMIT_ENTRY_REQUEST]
-                ?.properties
-                ?.get(ENTRY_TEXT_PROPERTY) ?: return
-        text.minLength = 1
-        text.maxLength = ENTRY_TEXT_MAX_OCTETS
-        text.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
-        text.description =
-            "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does " +
-            "not count either), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
-            "$ENTRY_TEXT_MAX_GRAPHEMES user-perceived characters (graphemes, not UTF-16 code units — an " +
-            "emoji sequence can be one grapheme and several of those). `maxLength` here states the octet " +
-            "cap in UTF-16 characters, which is not the same unit as either real limit and both are wider " +
-            "than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a " +
-            "guarantee. The server enforces both limits exactly and is the only authority on whether a " +
-            "given body is accepted. The text is stored and returned exactly as sent — not normalised, " +
-            "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted on its NFKC-normalised, trimmed form " +
-            "(so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused."
+        listOf(SUBMIT_ENTRY_REQUEST, "PatchEntryRequest").forEach { schemaName ->
+            val text =
+                api.components.schemas[schemaName]
+                    ?.properties
+                    ?.get(ENTRY_TEXT_PROPERTY) ?: return@forEach
+            text.minLength = 1
+            text.maxLength = ENTRY_TEXT_MAX_OCTETS
+            text.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
+            text.description =
+                "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does " +
+                "not count either), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
+                "$ENTRY_TEXT_MAX_GRAPHEMES user-perceived characters (graphemes, not UTF-16 code units — an " +
+                "emoji sequence can be one grapheme and several of those). `maxLength` here states the octet " +
+                "cap in UTF-16 characters, which is not the same unit as either real limit and both are wider " +
+                "than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a " +
+                "guarantee. The server enforces both limits exactly and is the only authority on whether a " +
+                "given body is accepted. The text is stored and returned exactly as sent — not normalised, " +
+                "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted on its NFKC-normalised, trimmed form " +
+                "(so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused."
+        }
     }
 
     private fun statusesFor(
@@ -315,7 +317,7 @@ class OpenApiConfiguration {
             Parameter()
                 .`in`(HEADER_PARAMETER)
                 .name(IDEMPOTENCY_KEY)
-                .required(true)
+                .required(operation.operationId == "submitEntry")
                 .description(
                     "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the " +
                         "same request returns the first attempt's status and the same resource, re-read and rendered " +
@@ -327,7 +329,7 @@ class OpenApiConfiguration {
                         "the same key. The same key with a different method, path or body is 422; the same key " +
                         "while the first attempt is still in flight is 409. The key itself is 1 to " +
                         "$IDEMPOTENCY_KEY_MAX_LENGTH visible ASCII characters (a UUID is the usual choice); a " +
-                        "missing or malformed one is 422 VALIDATION_FAILED with an `errors` entry naming this header.",
+                        "malformed one is 422 VALIDATION_FAILED. It is required on submission and optional on PATCH.",
                 ).schema(StringSchema().minLength(1).maxLength(IDEMPOTENCY_KEY_MAX_LENGTH).pattern(IDEMPOTENCY_KEY_PATTERN)),
         )
         operation.responses
@@ -425,6 +427,8 @@ class OpenApiConfiguration {
                 // — and none of them was visible to a generated client without
                 // this entry.
                 "submitEntry",
+                "patchEntry",
+                "deleteEntry",
             )
 
         /**
@@ -443,7 +447,7 @@ class OpenApiConfiguration {
          * [requireIdempotencyKey] exists at all: springdoc cannot read this
          * off the controller the way it reads an actual `@RequestHeader`.
          */
-        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry")
+        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry", "patchEntry")
 
         private const val IDEMPOTENCY_KEY = "Idempotency-Key"
 

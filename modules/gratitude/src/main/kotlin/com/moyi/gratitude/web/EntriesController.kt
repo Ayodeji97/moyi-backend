@@ -2,6 +2,8 @@ package com.moyi.gratitude.web
 
 import com.moyi.bond.api.BondAccess
 import com.moyi.common.security.CurrentUser
+import com.moyi.common.security.ratelimit.RateLimitBucket
+import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.common.web.NotFoundException
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.common.web.idempotency.Idempotent
@@ -71,6 +73,7 @@ internal class EntriesController(
     // own KDoc has the fuller account, including the test that holds both
     // in step: OpenApiContractTest's own 201 assertion for this operation).
     @Idempotent
+    @RateLimited(RateLimitBucket.ENTRIES_CREATE_USER)
     @PostMapping("/{bondId}/entries")
     @ResponseStatus(HttpStatus.CREATED)
     fun submitEntry(

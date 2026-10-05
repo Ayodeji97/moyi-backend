@@ -62,14 +62,9 @@ internal class EntryStore(
      * Every entry filed against one day — BR-2 caps this at two, but nothing
      * here assumes it.
      *
-     * **Returns an erased row too** (whole-branch review, F5), and that is
-     * no longer a leak waiting to happen: every entry leaves the service
-     * layer through [Entry.readBy], and BR-1 answers an erased entry as a
-     * tombstone for everyone (ADR-0031 decision 10). What is still owed is
-     * *which* row a caller picks once one author can have two on a day — an
-     * erased one and its replacement. `GetToday` takes the first it finds;
-     * the slice that first sets `deleted_at` must make that choice
-     * deterministic (ADR-0031, Owed, C2).
+     * Includes erased rows for tombstones and replay. GetToday selects live
+     * rows first, then the newest tombstone (createdAt and UUID tie-break), so
+     * withdraw-then-rewrite never lets an unordered row hide the replacement.
      */
     fun findForDay(bondDayId: BondDayId): List<Entry> = entries.findAllByBondDayId(bondDayId.value).map { it.toDomain() }
 

@@ -1337,7 +1337,7 @@
             "type" : "string"
           }
         }, {
-          "description" : "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the same request returns the first attempt's status and the same resource, re-read and rendered from its current state — never a stored copy. A replay is authorised as a read of the result: a caller who may still read it gets it back even if a new write would now be refused, a caller who may no longer read it gets the read's refusal, and a resource erased since is returned as its tombstone. Only a success is recorded; a request that was refused may be corrected and retried under the same key. The same key with a different method, path or body is 422; the same key while the first attempt is still in flight is 409. The key itself is 1 to 255 visible ASCII characters (a UUID is the usual choice); a missing or malformed one is 422 VALIDATION_FAILED with an `errors` entry naming this header.",
+          "description" : "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the same request returns the first attempt's status and the same resource, re-read and rendered from its current state — never a stored copy. A replay is authorised as a read of the result: a caller who may still read it gets it back even if a new write would now be refused, a caller who may no longer read it gets the read's refusal, and a resource erased since is returned as its tombstone. Only a success is recorded; a request that was refused may be corrected and retried under the same key. The same key with a different method, path or body is 422; the same key while the first attempt is still in flight is 409. The key itself is 1 to 255 visible ASCII characters (a UUID is the usual choice); a malformed one is 422 VALIDATION_FAILED. It is required on submission and optional on PATCH.",
           "in" : "header",
           "name" : "Idempotency-Key",
           "required" : true,
@@ -2313,6 +2313,238 @@
         "tags" : [ "entries-controller" ]
       }
     },
+    "/api/v1/entries/{entryId}" : {
+      "delete" : {
+        "operationId" : "deleteEntry",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "entryId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "entry-changes-controller" ]
+      },
+      "patch" : {
+        "operationId" : "patchEntry",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "entryId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "description" : "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the same request returns the first attempt's status and the same resource, re-read and rendered from its current state — never a stored copy. A replay is authorised as a read of the result: a caller who may still read it gets it back even if a new write would now be refused, a caller who may no longer read it gets the read's refusal, and a resource erased since is returned as its tombstone. Only a success is recorded; a request that was refused may be corrected and retried under the same key. The same key with a different method, path or body is 422; the same key while the first attempt is still in flight is 409. The key itself is 1 to 255 visible ASCII characters (a UUID is the usual choice); a malformed one is 422 VALIDATION_FAILED. It is required on submission and optional on PATCH.",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 255,
+            "minLength" : 1,
+            "pattern" : "^[\\x21-\\x7E]+$"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PatchEntryRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/EntryResponse"
+                }
+              }
+            },
+            "description" : "OK",
+            "headers" : {
+              "Idempotency-Replayed" : {
+                "description" : "`true` when this response answers a replay of an earlier request under the same Idempotency-Key (doc 06 §1): nothing was written again, and the body is the resource as it stands now. Absent on a fresh response.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "413" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Content Too Large"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "entry-changes-controller" ]
+      }
+    },
     "/api/v1/invites/{code}" : {
       "get" : {
         "operationId" : "resolve",
@@ -3063,6 +3295,27 @@
           }
         }
       },
+      "PatchEntryRequest" : {
+        "type" : "object",
+        "properties" : {
+          "imageMediaId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          },
+          "text" : {
+            "type" : [ "string", "null" ],
+            "description" : "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does not count either), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted. The text is stored and returned exactly as sent — not normalised, not trimmed. The 500 are counted on its NFKC-normalised, trimmed form (so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused.",
+            "maxLength" : 8192,
+            "minLength" : 1,
+            "pattern" : "[\\s\\S]*\\S[\\s\\S]*"
+          },
+          "voiceMediaId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid"
+          }
+        },
+        "required" : [ "text" ]
+      },
       "PendingDeletionRequestResponse" : {
         "type" : "object",
         "properties" : {
@@ -3110,7 +3363,7 @@
         "properties" : {
           "code" : {
             "type" : "string",
-            "enum" : [ "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"
