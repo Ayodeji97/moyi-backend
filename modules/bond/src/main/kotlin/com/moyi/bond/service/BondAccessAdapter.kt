@@ -89,7 +89,9 @@ internal class BondAccessAdapter(
             BondClosingView(
                 bondId = bondId,
                 activeSince = activeSinceOf(bond),
-                endedAt = bond.archivedAt,
+                // Archived, or counting down to deletion: either way it takes no
+                // more writes from here, which is what the closer means by ended.
+                endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
                 revealTimeLocal = bond.revealTimeLocal,
                 anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
             )

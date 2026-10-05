@@ -13,7 +13,9 @@ import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Clock
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 /**
  * Settles **one** Bond-day (spec §6.4 step 2): one transaction, one row lock,
@@ -54,6 +56,7 @@ internal class CloseDay(
     private val reveal: RevealDay,
     private val events: EventPublisher,
     private val transactions: TransactionTemplate,
+    private val clock: Clock,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -72,12 +75,19 @@ internal class CloseDay(
         ALREADY_CLOSED,
     }
 
+    /**
+     * @param now the caller's reading of the time: a reveal is due, or not, as of this
+     * @param endedAsOf a day is closed only if it had ended by this instant. The job
+     * passes a minute before [now] (`DayCloser.SETTLE_MARGIN`); the default is for a
+     * caller that has no concurrent bond write to allow for.
+     */
     fun settle(
         dayId: BondDayId,
         now: Instant,
+        endedAsOf: Instant = now,
     ): Outcome =
         try {
-            checkNotNull(transactions.execute { underTheDayLock(dayId, now) })
+            checkNotNull(transactions.execute { underTheDayLock(dayId, now, endedAsOf) })
         } catch (violation: DataIntegrityViolationException) {
             // The closer updates entries too (the SOLO reveal), and Postgres
             // reports a violated CHECK with the row. See `redacted`.
@@ -87,6 +97,7 @@ internal class CloseDay(
     private fun underTheDayLock(
         dayId: BondDayId,
         now: Instant,
+        endedAsOf: Instant,
     ): Outcome {
         val locked = days.lockAndFind(dayId)
         val view = if (locked.closedAt == null) access.closingViewOf(locked.bondId) else null
@@ -100,11 +111,16 @@ internal class CloseDay(
             checkNotNull(view.anchorTimeline.asCalendar().dayAt(locked.startsAt)) {
                 "a bond-day starts no earlier than its bond's timeline: $dayId"
             }
-        val current = reveal.apply(locked.extendedTo(window).resumeJoiningDay(view.activeSince), view.revealTimeLocal, now)
-        return if (now.isBefore(current.endsAt)) {
+        // What is written as "when": read under the lock, never earlier
+        // than the caller's `now`. A run reads the time once and may take
+        // minutes; stamped from that reading, a day could be closed "before"
+        // an entry written on it while the run was under way.
+        val at = maxOf(now, clock.instant()).truncatedTo(ChronoUnit.MICROS)
+        val current = reveal.apply(locked.extendedTo(window).resumeJoiningDay(view.activeSince), view.revealTimeLocal, at)
+        return if (endedAsOf.isBefore(current.endsAt)) {
             if (locked.revealedAt == null && current.revealedAt != null) Outcome.REVEALED else Outcome.NOT_YET
         } else {
-            close(current, now)
+            close(current, at)
             Outcome.CLOSED
         }
     }

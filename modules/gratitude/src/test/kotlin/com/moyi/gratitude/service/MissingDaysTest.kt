@@ -147,6 +147,31 @@ internal class MissingDaysTest(
         days(bond.id).keys shouldBe (10..12).map { LocalDate.of(2026, 9, it) }.toSet()
     }
 
+    /**
+     * Spec §6.4 step 1: never an `EMPTY` day "in pending-member, suspension,
+     * deletion or archived intervals". A bond counting down to deletion
+     * refuses every write, so a day in that month is not one the couple
+     * missed.
+     */
+    @Test
+    fun `a bond counting down to deletion gets no days written for its cooling-off`() {
+        val bond = pairedOn("2026-09-10")
+        clock.set(Instant.parse("2026-09-12T10:00:00Z"))
+        for (member in listOf(bond.ada, bond.bea)) {
+            mockMvc
+                .post("/api/v1/bonds/${bond.id}/deletion-request") { header(HttpHeaders.AUTHORIZATION, bearer(member)) }
+                .andReturn()
+                .response.status shouldBe 202
+        }
+        jdbc.queryForObject("SELECT status FROM bonds WHERE id = ?::uuid", String::class.java, bond.id) shouldBe "PENDING_DELETION"
+        clock.set(NOW)
+
+        closer.closeElapsedDays(NOW, BUDGET).created shouldBe 3
+
+        days(bond.id).keys shouldBe (10..12).map { LocalDate.of(2026, 9, it) }.toSet()
+        closer.closeElapsedDays(NOW.plusSeconds(900), BUDGET).created shouldBe 0
+    }
+
     @Test
     fun `a long silence is written four hundred days at a time, and the result says there is more`() {
         // 500 days before the 15th of September 2026, to the day.

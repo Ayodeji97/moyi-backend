@@ -4,6 +4,7 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
+import com.moyi.gratitude.api.DayCloser
 import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
@@ -62,8 +63,10 @@ import javax.sql.DataSource
 @AutoConfigureMockMvc
 @Import(CloseRaceTest.TimeConfiguration::class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@Suppress("LongParameterList") // A test's collaborators, each named; nothing to bundle them into.
 internal class CloseRaceTest(
     @Autowired private val closeDay: CloseDay,
+    @Autowired private val closer: DayCloser,
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired directory: UserDirectory,
@@ -195,6 +198,60 @@ internal class CloseRaceTest(
         jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayClosed'", Int::class.java) shouldBe 1
     }
 
+    // --- the closer reads the bond without its lock: a bond write that is still committing ---
+
+    /**
+     * The closer takes no bond lock (ADR-0031 decision 18), so it reads when
+     * a bond became two from whatever has committed. A pairing stamped at
+     * 23:59:59 can still be committing at 00:00:01 — and the job fires on the
+     * quarter-hour, which is when days end. Read then, the bond is still one
+     * person, the day is closed as a suspended day nobody is asked about,
+     * and when the pairing lands a moment later it is the couple's joining
+     * day, closed, which nothing reopens.
+     *
+     * So the job leaves a day alone until it has been over for a minute:
+     * longer than a commit takes, shorter than anybody would notice.
+     */
+    @Test
+    fun `a pairing still committing when midnight passes does not find its joining day closed`() {
+        val cara = users.verified("Cara")
+        val dan = users.verified("Dan")
+        val created = createBond(cara)
+        val waiting = idOf(created)
+        submitTo(waiting, cara, """{"text":"written while waiting"}""").status shouldBe 201
+        jdbc.execute("DELETE FROM bond_days WHERE bond_id = '$bond'")
+
+        val accepted =
+            dataSource.connection.use { holder ->
+                holder.autoCommit = false
+                val pid =
+                    holder.createStatement().use { statement ->
+                        statement.executeQuery("SELECT pg_backend_pid() FROM bonds WHERE id = '$waiting' FOR UPDATE").use { result ->
+                            check(result.next())
+                            result.getInt(1)
+                        }
+                    }
+                // Stamped now, at 11:00 on the day, and parked behind the bond's row.
+                val accepting = pool.submit(Callable { accept(dan, codeOf(created)) })
+                try {
+                    awaitQueued(pid, 1)
+                    // Five seconds past midnight: the pairing has not committed.
+                    closer.closeElapsedDays(END.plusSeconds(5), budget = 100).closed shouldBe 0
+                    jdbc.queryForObject("SELECT closed_at IS NULL FROM bond_days WHERE bond_id = '$waiting'", Boolean::class.java) shouldBe
+                        true
+                } finally {
+                    holder.rollback()
+                }
+                accepting.get(15, TimeUnit.SECONDS)
+            }
+
+        accepted.status shouldBe 200
+        closer.closeElapsedDays(END.plus(DayCloser.SETTLE_MARGIN), budget = 100).closed shouldBe 1
+        jdbc.queryForObject("SELECT status FROM bond_days WHERE bond_id = '$waiting'", String::class.java) shouldBe "SOLO"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE bond_id = '$waiting' AND revealed_at IS NOT NULL", Int::class.java) shouldBe
+            1
+    }
+
     /**
      * Runs [first] and then [second], each queued on the day's row before the
      * other is let go: see the class KDoc. Fails, rather than passing by
@@ -257,6 +314,20 @@ internal class CloseRaceTest(
     ): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/bonds/$bond/entries") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(caller).token}")
+                header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                contentType = MediaType.APPLICATION_JSON
+                content = body
+            }.andReturn()
+            .response
+
+    private fun submitTo(
+        bondId: String,
+        caller: UUID,
+        body: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/entries") {
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(caller).token}")
                 header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
                 contentType = MediaType.APPLICATION_JSON

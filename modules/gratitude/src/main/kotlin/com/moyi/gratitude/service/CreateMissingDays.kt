@@ -8,8 +8,10 @@ import com.moyi.common.events.OutboxEvent
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.DayWindow
 import com.moyi.gratitude.infra.database.MissingDays
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Clock
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -47,37 +49,74 @@ internal class CreateMissingDays(
     private val events: EventPublisher,
     private val ids: IdGenerator,
     private val transactions: TransactionTemplate,
+    private val clock: Clock,
 ) {
+    private val log = LoggerFactory.getLogger(javaClass)
+
     /** What one call wrote: how many days, for which bonds, and whether it stopped at [budget] with more to write. */
     data class Created(
         val days: Int,
         val bonds: Set<UUID>,
         val backlog: Boolean,
+        /** Bonds whose days could not be worked out or written, and were left for the next run. */
+        val failed: Int,
     )
 
+    /**
+     * @param now the caller's reading of the time
+     * @param endedAsOf only a day that had ended by this instant is written (`DayCloser.SETTLE_MARGIN`)
+     */
     fun create(
         now: Instant,
+        endedAsOf: Instant,
         budget: Int,
     ): Created {
-        var written = 0
-        var backlog = false
-        val bonds = mutableSetOf<UUID>()
+        val tally = Tally()
         var after: UUID? = null
         var page = access.bondsToSweep(after, BOND_PAGE)
-        while (page.isNotEmpty() && !backlog) {
+        while (page.isNotEmpty() && !tally.backlog) {
             for (bondId in page) {
-                val gaps = gapsOf(bondId, now)
-                val room = budget - written
-                if (gaps.size > room) backlog = true
-                val count = write(bondId, gaps.take(room), now)
-                if (count > 0) bonds += bondId
-                written += count
-                if (backlog) break
+                fill(bondId, now, endedAsOf, budget, tally)
+                if (tally.backlog) break
             }
             after = page.last()
             page = access.bondsToSweep(after, BOND_PAGE)
         }
-        return Created(written, bonds, backlog)
+        return Created(tally.written, tally.bonds.toSet(), tally.backlog, tally.failed)
+    }
+
+    private class Tally {
+        var written = 0
+        var failed = 0
+        var backlog = false
+        val bonds = mutableSetOf<UUID>()
+    }
+
+    /**
+     * One bond, and whatever goes wrong with it stays with it. This runs
+     * before the sweep, for every bond, on every run: one bond whose
+     * calendar cannot be read would otherwise stop every couple's days from
+     * closing, every quarter of an hour, until somebody noticed.
+     */
+    @Suppress("TooGenericExceptionCaught") // As `CloseElapsedDays.settle`: one bond must not hold the others.
+    private fun fill(
+        bondId: UUID,
+        now: Instant,
+        endedAsOf: Instant,
+        budget: Int,
+        tally: Tally,
+    ) {
+        try {
+            val gaps = gapsOf(bondId, now, endedAsOf)
+            val room = budget - tally.written
+            if (gaps.size > room) tally.backlog = true
+            val count = write(bondId, gaps.take(room), now)
+            if (count > 0) tally.bonds += bondId
+            tally.written += count
+        } catch (failure: Exception) {
+            tally.failed++
+            log.error("close: the missing days of bond {} could not be written: {}", bondId, failure.javaClass.simpleName)
+        }
     }
 
     private data class Gap(
@@ -97,12 +136,16 @@ internal class CreateMissingDays(
         } else {
             checkNotNull(
                 transactions.execute {
+                    // When they were written: the clock inside the transaction,
+                    // never earlier than the run's own `now`, which may by
+                    // then be minutes old.
+                    val at = maxOf(now, clock.instant()).truncatedTo(ChronoUnit.MICROS)
                     gaps.count { gap ->
                         val id = ids.timeOrdered()
-                        missing.insertClosed(id, bondId, gap.window, gap.zone, gap.status, now).also { inserted ->
+                        missing.insertClosed(id, bondId, gap.window, gap.zone, gap.status, at).also { inserted ->
                             if (inserted) {
                                 events.publish(
-                                    OutboxEvent("BondDay", id, "DayClosed", mapOf("bondId" to bondId), now.truncatedTo(ChronoUnit.MICROS)),
+                                    OutboxEvent("BondDay", id, "DayClosed", mapOf("bondId" to bondId), maxOf(at, gap.window.endsAt)),
                                 )
                             }
                         }
@@ -114,18 +157,26 @@ internal class CreateMissingDays(
     private fun gapsOf(
         bondId: UUID,
         now: Instant,
+        endedAsOf: Instant,
     ): List<Gap> {
         val view = access.closingViewOf(bondId)
         val activeSince = view?.activeSince ?: return emptyList()
         val have = missing.datesOf(bondId)
-        return windowsOf(view, activeSince, now).filter { it.window.date !in have }.toList()
+        return windowsOf(view, activeSince, now, endedAsOf).filter { it.window.date !in have }.toList()
     }
 
-    /** Every window of [view]'s calendar that has ended by [now] and began before the bond ended, with the labels skipped between them. */
+    /**
+     * Every window of [view]'s calendar that had ended by [endedAsOf] and
+     * began before the bond ended, and every label the calendar stepped over
+     * on the way — including one stepped over by a window that has begun and
+     * not yet ended: the label was skipped the moment the calendar moved
+     * past it, and a streak walked that evening must already find it.
+     */
     private fun windowsOf(
         view: BondClosingView,
         activeSince: Instant,
         now: Instant,
+        endedAsOf: Instant,
     ): Sequence<Gap> =
         sequence {
             val timeline = view.anchorTimeline
@@ -134,17 +185,18 @@ internal class CreateMissingDays(
             var previous: DayWindow? = null
             while (true) {
                 val bounds = timeline.dayBoundsAt(at)
-                if (bounds.endsAt.isAfter(now) || !bounds.startsAt.isBefore(until)) break
+                if (!bounds.startsAt.isBefore(until)) break
                 val window = DayWindow(bounds.date, bounds.startsAt, bounds.endsAt)
                 val zone = timeline.zoneIdAt(bounds.startsAt)
                 // A jump in the labels: dates an eastward change stepped
                 // over. They have no instants, so each is a day of no length
                 // at the moment the calendar moved past it.
-                previous?.let { before ->
-                    generateSequence(before.date.plusDays(1)) { it.plusDays(1) }
+                if (previous != null && !window.startsAt.isAfter(endedAsOf)) {
+                    generateSequence(previous.date.plusDays(1)) { it.plusDays(1) }
                         .takeWhile { it.isBefore(window.date) }
                         .forEach { skipped -> yield(Gap(DayWindow(skipped, window.startsAt, window.startsAt), zone, BondDayStatus.FROZEN)) }
                 }
+                if (bounds.endsAt.isAfter(endedAsOf)) break
                 yield(Gap(window, zone, BondDayStatus.EMPTY))
                 check(bounds.endsAt.isAfter(at)) { "a bond's calendar must move forward: ${bounds.date} ends at ${bounds.endsAt}" }
                 previous = window

@@ -124,10 +124,10 @@ internal class CloseMatrixTest(
         writeAt("2026-09-15T22:30:00Z", by = bea) // 11:30 on the 15th in Pago Pago, 23:30 in Lagos
         statusOf("2026-09-15") shouldBe "REVEALED"
 
-        closeAt("2026-09-15T22:59:59Z")
+        closeAt("2026-09-15T23:00:59Z")
         closedAtOf("2026-09-15") shouldBe null
-        closeAt("2026-09-15T23:00:00Z")
-        closedAtOf("2026-09-15") shouldBe Instant.parse("2026-09-15T23:00:00Z")
+        closeAt("2026-09-15T23:01:00Z")
+        closedAtOf("2026-09-15") shouldBe Instant.parse("2026-09-15T23:01:00Z")
         statusOf("2026-09-15") shouldBe "REVEALED"
     }
 
@@ -145,12 +145,13 @@ internal class CloseMatrixTest(
         changeZone("Pacific/Kiritimati")
 
         closesExactlyAt("2026-09-15", HANDOFF_EAST)
-        // Nothing dated the 16th yet: a skipped label is only known for one
-        // once the day after it has itself ended.
-        jdbc.queryForObject("SELECT count(*) FROM bond_days WHERE date = '2026-09-16'", Int::class.java) shouldBe 0
+        // The 16th was stepped over at the handoff, and is on record as soon
+        // as the handoff is: FROZEN, before the day after it has ended.
+        statusOf("2026-09-16") shouldBe "FROZEN"
+        jdbc.queryForObject("SELECT count(*) FROM bond_days WHERE date = '2026-09-17'", Int::class.java) shouldBe 0
 
         // Kiritimati's 17th runs from the handoff to its own midnight, 10:00Z on the 17th.
-        closeAt("2026-09-17T10:00:00Z")
+        closeAt("2026-09-17T10:01:00Z")
 
         statusOf("2026-09-17") shouldBe "EMPTY"
         statusOf("2026-09-16") shouldBe "FROZEN"
@@ -182,7 +183,7 @@ internal class CloseMatrixTest(
 
         // The old midnight. The job looks, because the stored end has passed —
         // and finds the day has twenty-five hours still to run.
-        closeAt("2026-09-16T10:00:00Z")
+        closeAt("2026-09-16T10:01:00Z")
         statusOf("2026-09-16") shouldBe "PARTIAL"
         endsAtOf("2026-09-16") shouldBe Instant.parse(HANDOFF_WEST)
 
@@ -192,18 +193,25 @@ internal class CloseMatrixTest(
         runningAgainChangesNothing("2026-09-17T11:15:00Z")
     }
 
-    /** Still as the entry left it one second before [end]; `SOLO`, closed at [end], at it. */
+    /**
+     * Still as the entry left it one second before [end], and for the minute
+     * after it (`DayCloser.SETTLE_MARGIN`); `SOLO` and closed once that
+     * minute is up.
+     */
     private fun closesExactlyAt(
         date: String,
         end: String,
     ) {
-        closeAt(Instant.parse(end).minusSeconds(1).toString())
-        statusOf(date) shouldBe "PARTIAL"
-        closedAtOf(date) shouldBe null
+        val settles = Instant.parse(end).plus(DayCloser.SETTLE_MARGIN)
+        for (tooSoon in listOf(Instant.parse(end).minusSeconds(1), settles.minusSeconds(1))) {
+            closeAt(tooSoon.toString())
+            statusOf(date) shouldBe "PARTIAL"
+            closedAtOf(date) shouldBe null
+        }
 
-        closeAt(end)
+        closeAt(settles.toString())
         statusOf(date) shouldBe "SOLO"
-        closedAtOf(date) shouldBe Instant.parse(end)
+        closedAtOf(date) shouldBe settles
     }
 
     /** Spec §9, "close-job idempotency": a second run finds nothing. */

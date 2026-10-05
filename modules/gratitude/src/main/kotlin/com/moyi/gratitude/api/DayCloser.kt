@@ -1,5 +1,6 @@
 package com.moyi.gratitude.api
 
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -35,6 +36,21 @@ interface DayCloser {
     ): CloseResult
 
     companion object {
+        /**
+         * How long a day must have been over before it is settled.
+         *
+         * The closer reads a bond's facts — when it became two, where its
+         * calendar says the day ends — without the bond's lock (ADR-0031
+         * decision 18), so it sees what has committed. A pairing or a zone
+         * change stamped in the last second of a day can still be committing
+         * in the first second of the next, which is exactly when the job
+         * fires. Settled then, a joining day is closed unevaluated for good,
+         * or a day a westward change had just lengthened is closed a day
+         * early. A minute is far longer than a commit or two instances'
+         * clocks differ by, and nobody is waiting on a day's last minute.
+         */
+        val SETTLE_MARGIN: Duration = Duration.ofMinutes(1)
+
         /** Spec §6.4 step 1: "batches of at most 400 missing days". */
         const val MAX_CREATED_PER_RUN = 400
     }

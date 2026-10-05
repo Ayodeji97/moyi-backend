@@ -115,7 +115,7 @@ internal class CloseJobTest(
     }
 
     @Test
-    fun `the job is timed for every quarter-hour, which is what a forty-five minute offset needs`() {
+    fun `the job is timed a minute past every quarter-hour, which is what a forty-five minute offset needs`() {
         val scheduled = CloseJob::class.java.getMethod("run").getAnnotation(Scheduled::class.java)
         // The annotation reads a property and defaults to the constant; nothing sets the property outside the smoke run.
         scheduled.cron shouldBe "\${moyi.scheduling.close.cron:${CloseJob.EVERY_FIFTEEN_MINUTES}}"
@@ -124,9 +124,11 @@ internal class CloseJobTest(
 
         val next = generateSequence(cron.next(start)) { cron.next(it) }.take(5).map { it.toInstant() }.toList()
 
-        // 18:15Z is midnight in Kathmandu (+5:45).
+        // 18:15Z is midnight in Kathmandu (+5:45). A minute past each quarter:
+        // the closer leaves a day alone for its first minute over, and fired
+        // on the quarter itself every day would wait fifteen for the next run.
         next shouldBe
-            listOf("18:15", "18:30", "18:45", "19:00", "19:15").map { Instant.parse("2026-09-15T$it:00Z") }
+            listOf("18:16", "18:31", "18:46", "19:01", "19:16").map { Instant.parse("2026-09-15T$it:00Z") }
         val lock = CloseJob::class.java.getMethod("run").getAnnotation(SchedulerLock::class.java)
         lock.name shouldBe CloseJob.LOCK
         // Shorter than the interval: a dead instance's lock cannot outlast the next run.

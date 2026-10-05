@@ -170,7 +170,16 @@ class BondClosingView internal constructor(
     val bondId: UUID,
     /** As [BondMembership.activeSince]: the second member's join, `null` while the bond waits for one. */
     val activeSince: Instant?,
-    /** As [BondMembership.endedAt]. */
+    /**
+     * When the bond stopped taking writes: when it was archived, or — while
+     * it is counting down to deletion (`PENDING_DELETION`) — when deletion
+     * was requested. Wider than [BondMembership.endedAt], on purpose: spec
+     * §6.4 writes no day for "deletion or archived intervals", and a bond in
+     * its cooling-off refuses every entry, so a day in that month is not one
+     * the couple missed. **If the deletion is called off this is `null`
+     * again**: nothing records that the interval happened, and the days in
+     * it are then written as missed (ADR-0033, open with the owner).
+     */
     val endedAt: Instant?,
     /** The bond's **current** reveal time (FR-062) — what a `PENDING_REVEAL` day is waiting for. */
     val revealTimeLocal: LocalTime?,

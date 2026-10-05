@@ -45,27 +45,30 @@ internal class CloseElapsedDays(
         now: Instant,
         budget: Int,
     ): CloseResult {
+        // A day is settled only once it has been over for a minute: see
+        // `DayCloser.SETTLE_MARGIN`. A reveal falls due at `now` itself.
+        val endedAsOf = now.minus(DayCloser.SETTLE_MARGIN)
         // Step 1 before step 2 (spec §6.4): a day written here is written
         // closed, so the sweep below has nothing more to do to it.
-        val created = missingDays.create(now, DayCloser.MAX_CREATED_PER_RUN)
+        val created = missingDays.create(now, endedAsOf, DayCloser.MAX_CREATED_PER_RUN)
         val tally = Tally()
         var previous: CloseCandidate? = null
-        var page = candidates.after(previous, now, PAGE)
+        var page = candidates.after(previous, endedAsOf, PAGE)
         while (page.isNotEmpty() && tally.work < budget) {
             // Stops mid-page at the budget; `previous` is then the last day
             // actually looked at, so the check below sees what was not.
             for (candidate in page) {
                 if (tally.work >= budget) break
-                settle(candidate, now, tally)
+                settle(candidate, now, endedAsOf, tally)
                 previous = candidate
             }
-            page = candidates.after(previous, now, PAGE)
+            page = candidates.after(previous, endedAsOf, PAGE)
         }
         return CloseResult(
             created = created.days,
             closed = tally.closed,
             revealed = tally.revealed,
-            failed = tally.failed,
+            failed = tally.failed + created.failed,
             bondsChanged = tally.bonds + created.bonds,
             backlog = page.isNotEmpty() || created.backlog,
         )
@@ -75,10 +78,11 @@ internal class CloseElapsedDays(
     private fun settle(
         candidate: CloseCandidate,
         now: Instant,
+        endedAsOf: Instant,
         tally: Tally,
     ) {
         try {
-            when (closeDay.settle(candidate.id, now)) {
+            when (closeDay.settle(candidate.id, now, endedAsOf)) {
                 Outcome.CLOSED -> tally.closed(candidate.bondId)
                 Outcome.REVEALED -> tally.revealed(candidate.bondId)
                 Outcome.NOT_YET, Outcome.ALREADY_CLOSED -> Unit

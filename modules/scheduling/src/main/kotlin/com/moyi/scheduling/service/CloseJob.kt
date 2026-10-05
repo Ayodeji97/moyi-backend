@@ -27,6 +27,11 @@ import java.util.concurrent.atomic.AtomicLong
  * counter proves the job is doing work and not merely running: flat for more
  * than a day means no couple's midnight is being met.
  *
+ * **At one minute past each quarter, not on it.** The closer leaves a day
+ * alone until it has been over for a minute (`DayCloser.SETTLE_MARGIN`), and
+ * days end on the quarter-hour; fired on the quarter itself, every day would
+ * wait for the next run and close fifteen minutes late.
+ *
  * `lockAtMostFor` is a minute short of the interval, so an instance that
  * died mid-run cannot make the next run skip. `lockAtLeastFor` keeps a
  * second instance whose clock is a few seconds behind from running the same
@@ -71,7 +76,20 @@ internal class CloseJob(
         settled.increment((result.created + result.closed + result.revealed).toDouble())
         failed.increment(result.failed.toDouble())
         lastSuccess.set(now.epochSecond)
-        if (result.created + result.closed + result.revealed + result.failed > 0 || result.backlog) {
+        // More days than one run takes is a backlog, and a backlog is
+        // something to be told about (spec §6.4: "alert on a large backlog
+        // but keep draining it"); so is a day that would not close.
+        if (result.backlog || result.failed > 0) {
+            log.warn(
+                "close: created {}, closed {}, revealed {}, FAILED {}, bonds {}, more waiting: {}",
+                result.created,
+                result.closed,
+                result.revealed,
+                result.failed,
+                result.bondsChanged.size,
+                result.backlog,
+            )
+        } else if (result.created + result.closed + result.revealed > 0) {
             log.info(
                 "close: created {}, closed {}, revealed {}, failed {}, bonds {}, more waiting: {}",
                 result.created,
@@ -91,7 +109,7 @@ internal class CloseJob(
          * The property exists for one caller: `scripts/smoke.sh`, which
          * cannot wait a quarter of an hour to see the job run for real.
          */
-        const val EVERY_FIFTEEN_MINUTES = "0 */15 * * * *"
+        const val EVERY_FIFTEEN_MINUTES = "0 1/15 * * * *"
         const val LOCK = "close-days"
 
         /** `gratitude_close_job_last_success_timestamp` once exported (doc 11). */

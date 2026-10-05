@@ -78,19 +78,20 @@ internal class CloseElapsedDaysTest(
         val kathmandu = bondWithOneEntry("Asia/Kathmandu")
         val lagos = bondWithOneEntry("Africa/Lagos")
 
-        closer.closeElapsedDays(Instant.parse("2026-09-15T11:59:59Z"), BUDGET).closed shouldBe 0
+        // Auckland's day ended at 12:00Z, and is settled a minute later (`DayCloser.SETTLE_MARGIN`).
+        closer.closeElapsedDays(Instant.parse("2026-09-15T12:00:59Z"), BUDGET).closed shouldBe 0
 
-        val afterAuckland = closer.closeElapsedDays(Instant.parse("2026-09-15T12:00:00Z"), BUDGET)
+        val afterAuckland = closer.closeElapsedDays(Instant.parse("2026-09-15T12:01:00Z"), BUDGET)
         afterAuckland.closed shouldBe 1
         afterAuckland.bondsChanged shouldBe setOf(UUID.fromString(auckland))
         statuses() shouldBe mapOf(auckland to "SOLO", kathmandu to "PARTIAL", lagos to "PARTIAL")
 
         // 18:15Z: Kathmandu's quarter-hour offset is why the job runs every fifteen minutes.
-        closer.closeElapsedDays(Instant.parse("2026-09-15T18:14:59Z"), BUDGET).closed shouldBe 0
-        closer.closeElapsedDays(Instant.parse("2026-09-15T18:15:00Z"), BUDGET).closed shouldBe 1
+        closer.closeElapsedDays(Instant.parse("2026-09-15T18:15:59Z"), BUDGET).closed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("2026-09-15T18:16:00Z"), BUDGET).closed shouldBe 1
         statuses() shouldBe mapOf(auckland to "SOLO", kathmandu to "SOLO", lagos to "PARTIAL")
 
-        closer.closeElapsedDays(Instant.parse("2026-09-15T23:00:00Z"), BUDGET).closed shouldBe 1
+        closer.closeElapsedDays(Instant.parse("2026-09-15T23:01:00Z"), BUDGET).closed shouldBe 1
         statuses() shouldBe mapOf(auckland to "SOLO", kathmandu to "SOLO", lagos to "SOLO")
     }
 
@@ -208,7 +209,7 @@ internal class CloseElapsedDaysTest(
         val result =
             assertTimeoutPreemptively(
                 Duration.ofSeconds(30),
-                ThrowingSupplier { closer.closeElapsedDays(Instant.parse("2026-09-15T12:00:00Z"), budget = 1) },
+                ThrowingSupplier { closer.closeElapsedDays(Instant.parse("2026-09-15T12:01:00Z"), budget = 1) },
             )
 
         result.closed shouldBe 1
@@ -312,7 +313,9 @@ internal class CloseElapsedDaysTest(
 
     private companion object {
         val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
-        val LAGOS_END: Instant = Instant.parse("2026-09-15T23:00:00Z")
+
+        /** A minute past Lagos's midnight: the first instant the job settles the 15th (`DayCloser.SETTLE_MARGIN`). */
+        val LAGOS_END: Instant = Instant.parse("2026-09-15T23:01:00Z")
         const val BUDGET = 1_000
     }
 }
