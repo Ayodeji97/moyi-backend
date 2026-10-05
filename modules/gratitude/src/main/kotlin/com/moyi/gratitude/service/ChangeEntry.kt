@@ -5,6 +5,7 @@ import com.moyi.bond.api.BondMembership
 import com.moyi.common.web.NotFoundException
 import com.moyi.gratitude.domain.BondDay
 import com.moyi.gratitude.domain.BondDayId
+import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.infra.database.BondDayStore
@@ -52,9 +53,7 @@ internal class ChangeEntry(
         try {
             checkNotNull(
                 transactions.execute {
-                    val initial = entries.find(entryId) ?: throw NotFoundException("That entry was not found.")
-                    val membership = membershipOrNotFound(userId, initial.bondId)
-                    if (initial.authorMemberId != membership.memberId) throw NotFoundException("That entry was not found.")
+                    val (initial, membership) = authorOf(userId, entryId, lock = true)
                     if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
                     if (unsupportedMedia) throw MediaNotYetSupportedException()
                     val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
@@ -87,14 +86,7 @@ internal class ChangeEntry(
         userId: UUID,
         entryId: EntryId,
     ) {
-        val entry = entries.find(entryId) ?: return
-        val membership =
-            try {
-                access.membershipOf(userId, entry.bondId)
-            } catch (_: NotFoundException) {
-                return
-            }
-        if (entry.authorMemberId == membership.memberId) joining.beforeRead(membership)
+        authorOrNull(userId, entryId, lock = false)?.let { (_, membership) -> joining.beforeRead(membership) }
     }
 
     /** A replay is a read, including on an archived bond; erasure wins over its original content. */
@@ -102,25 +94,44 @@ internal class ChangeEntry(
         userId: UUID,
         entryId: EntryId,
     ): EntryView {
-        val entry = entries.find(entryId) ?: throw NotFoundException("That entry was not found.")
-        val membership = membershipOrNotFound(userId, entry.bondId, lock = false)
-        if (entry.authorMemberId != membership.memberId) throw NotFoundException("That entry was not found.")
+        val (entry, membership) = authorOf(userId, entryId, lock = false)
         joining.beforeRead(membership)
         val current = checkNotNull(entries.find(entryId))
         return EntryView(current.readBy(membership.asReader()), checkNotNull(days.find(entry.bondDayId)))
     }
 
-    /** The entry route must not disclose whether routing found a bond or an entry. */
-    private fun membershipOrNotFound(
+    /**
+     * The entry and the caller's membership of its bond, for the entry's
+     * **author** — and [EntryNotFoundException] for everybody else, whatever
+     * the reason: there is no such entry, the caller is not in its bond (the
+     * guard's own "no such bond" is not passed on, since that would say the
+     * entry exists), or the caller's partner wrote it. Every route by entry
+     * id asks here, so the rule is written once.
+     *
+     * What it returns of the **entry** was read before any lock and grants
+     * nothing but its bond, its day and its author, none of which change;
+     * [change] reads the entry again under its lock before deciding anything.
+     */
+    private fun authorOf(
         userId: UUID,
-        bondId: UUID,
-        lock: Boolean = true,
-    ): BondMembership =
-        try {
-            if (lock) access.lockMembershipOf(userId, bondId) else access.membershipOf(userId, bondId)
-        } catch (_: NotFoundException) {
-            throw NotFoundException("That entry was not found.")
-        }
+        entryId: EntryId,
+        lock: Boolean,
+    ): Pair<Entry, BondMembership> = authorOrNull(userId, entryId, lock) ?: throw EntryNotFoundException()
+
+    private fun authorOrNull(
+        userId: UUID,
+        entryId: EntryId,
+        lock: Boolean,
+    ): Pair<Entry, BondMembership>? {
+        val entry = entries.find(entryId)
+        val membership =
+            try {
+                entry?.let { if (lock) access.lockMembershipOf(userId, it.bondId) else access.membershipOf(userId, it.bondId) }
+            } catch (_: NotFoundException) {
+                null
+            }
+        return if (entry != null && membership != null && entry.authorMemberId == membership.memberId) entry to membership else null
+    }
 
     /** Acquire any two days chronologically before the entry lock. */
     private fun lockDays(

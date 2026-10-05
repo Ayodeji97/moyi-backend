@@ -36,15 +36,18 @@ import java.util.UUID
 import javax.sql.DataSource
 
 /**
- * `POST /bonds/{bondId}/entries`, through the real chain against a real
- * Postgres — `BondsEndpointTest`'s own precedent, and the first HTTP test in
- * `gratitude`: [GratitudeTestApplication] now scans `com.moyi.bond` too, so
- * [createBond] and [leave] below drive the **real** bond endpoints rather
- * than a fake stood up to dodge them (see that class's KDoc for why).
+ * `PATCH` and `DELETE /entries/{entryId}` (spec §5.2), through the real chain
+ * against a real Postgres: who may change an entry, until when, and what is
+ * left behind.
  *
- * The clock is pinned by [TimeConfiguration] so every entry this suite files
- * lands on one predictable calendar date, `2026-09-15` in `Africa/Lagos` —
- * every `submit` below runs at the same instant unless a test says otherwise.
+ * **These two routes are not in the route-driven cross-tenant suite**, which
+ * discovers routes by `{bondId}` and so cannot see a path that carries only
+ * an entry id (spec §5.2 chose that path on purpose). The test below that
+ * compares the `404`s is their cross-tenant test, and it asserts the exact
+ * set of `{entryId}` routes — so a third one added without a case here fails.
+ *
+ * The clock is pinned by [TimeConfiguration]: every entry lands on
+ * `2026-09-15` in `Africa/Lagos` unless a test moves it.
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
@@ -138,15 +141,22 @@ internal class EntryChangesTest(
     @Test
     fun `entry routes hide another author and another tenant exactly like a missing id`() {
         val id = entryId(submit(ada, bondId, """{"text":"private"}"""))
+        // The partner, a stranger, an id nobody has, and something that is not an id.
         val targets = listOf(bea to id, eve to id, ada to UUID.randomUUID().toString(), ada to "bad-id")
         val edits = targets.map { (caller, target) -> patchEntry(caller, target, """{"text":"edit"}""") }
+        val keyedEdits =
+            targets.map { (caller, target) ->
+                patchEntry(caller, target, """{"text":"edit"}""", key = UUID.randomUUID().toString())
+            }
         val deletes = targets.map { (caller, target) -> deleteEntry(caller, target) }
-        (edits + deletes).forEach { it.status shouldBe 404 }
+        // And the partner again once they have left: still not their entry, so still not there.
+        leave(bea).status shouldBe 204
+        val afterLeaving = listOf(patchEntry(bea, id, """{"text":"edit"}"""), deleteEntry(bea, id))
 
-        fun withoutInstance(response: MockHttpServletResponse) =
-            response.contentAsString.replace(Regex("\"instance\":\"[^\"]*\""), "\"instance\":\"-\"")
-        edits.map(::withoutInstance).toSet().size shouldBe 1
-        deletes.map(::withoutInstance).toSet().size shouldBe 1
+        (edits + keyedEdits + deletes + afterLeaving).forEach { it.status shouldBe 404 }
+        (edits + keyedEdits + deletes + afterLeaving).map(::comparable).toSet().size shouldBe 1
+        jdbc.queryForObject("SELECT text FROM entries WHERE id = ?::uuid", String::class.java, id) shouldBe "private"
+
         val discovered =
             routes.handlerMethods.keys
                 .flatMap { info ->
@@ -155,6 +165,41 @@ internal class EntryChangesTest(
                     }
                 }.toSet()
         discovered shouldBe setOf("PATCH /api/v1/entries/{entryId}", "DELETE /api/v1/entries/{entryId}")
+    }
+
+    /**
+     * ADR-0028: an ended bond is read-only for both. The author is told so —
+     * it is their entry, and `404` would be a lie about that — and is told
+     * only after the author check, so the `409` never answers anybody else.
+     */
+    @Test
+    fun `an ended bond's entries cannot be edited or deleted, by the member who left or the one who stayed`() {
+        val adas = entryId(submit(ada, bondId, """{"text":"hers"}"""))
+        clock.set(NOW.plusSeconds(86_400))
+        val beas = entryId(submit(bea, bondId, """{"text":"his"}"""))
+        leave(bea).status shouldBe 204
+
+        for ((author, id) in listOf(ada to adas, bea to beas)) {
+            val edit = patchEntry(author, id, """{"text":"changed"}""")
+            edit.status shouldBe 409
+            edit.contentAsString shouldContain "BOND_ARCHIVED"
+            val delete = deleteEntry(author, id)
+            delete.status shouldBe 409
+            delete.contentAsString shouldContain "BOND_ARCHIVED"
+        }
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE text IN ('hers', 'his') AND deleted_at IS NULL", Int::class.java) shouldBe 2
+    }
+
+    @Test
+    fun `editing an entry its author erased is refused without claiming it was revealed`() {
+        val id = entryId(submit(ada, bondId, """{"text":"gone"}"""))
+        deleteEntry(ada, id).status shouldBe 204
+
+        val refused = patchEntry(ada, id, """{"text":"back"}""")
+
+        refused.status shouldBe 409
+        refused.contentAsString shouldContain "ENTRY_IMMUTABLE"
+        refused.contentAsString shouldNotContain "revealed"
     }
 
     @Test
@@ -239,10 +284,12 @@ internal class EntryChangesTest(
         user: UUID,
         id: String,
         body: String,
+        key: String? = null,
     ): MockHttpServletResponse =
         mockMvc
             .patch("/api/v1/entries/$id") {
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}")
+                if (key != null) header(IdempotencyInterceptor.HEADER, key)
                 contentType = MediaType.APPLICATION_JSON
                 content = body
             }.andReturn()
@@ -304,7 +351,27 @@ internal class EntryChangesTest(
     private fun bondIdOf(response: MockHttpServletResponse): String =
         Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
 
-    /** `instance` is the path the caller typed, theirs to see (the lesson from #35's 404 body) — `BondCrossTenantTest`'s own helper. */
+    private fun leave(userId: UUID): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/leave") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(userId).token}") }
+            .andReturn()
+            .response
+
+    /**
+     * Everything of a response a caller could tell two refusals apart by:
+     * the body and every header. Two things are theirs to differ in and are
+     * taken out — `instance`, the path the caller typed (the lesson from
+     * #35's 404 body), and whatever names this one request.
+     */
+    private fun comparable(response: MockHttpServletResponse): String {
+        val body = response.contentAsString.replace(Regex("\"instance\":\"[^\"]*\""), "\"instance\":\"-\"")
+        val headers =
+            response.headerNames
+                .filterNot { it.equals("X-Request-Id", ignoreCase = true) || it.startsWith("X-RateLimit", ignoreCase = true) }
+                .sorted()
+                .joinToString { "$it=${response.getHeaders(it)}" }
+        return "$headers|$body"
+    }
 
     @TestConfiguration
     class TimeConfiguration {

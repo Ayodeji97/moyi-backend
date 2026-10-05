@@ -1,12 +1,12 @@
 package com.moyi.gratitude.web
 
 import com.moyi.common.security.CurrentUser
-import com.moyi.common.web.NotFoundException
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.common.web.idempotency.Idempotent
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.service.ChangeEntry
+import com.moyi.gratitude.service.EntryNotFoundException
 import com.moyi.gratitude.service.PatchEntry
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
@@ -43,7 +43,7 @@ internal class EntryChangesController(
                 idOrNotFound(entryId),
                 EntryText.of(checkNotNull(request.text)),
                 request.imageMediaId != null || request.voiceMediaId != null,
-                if (http.getHeader(IdempotencyInterceptor.HEADER) == null) null else IdempotencyInterceptor.requestOf(http),
+                IdempotencyInterceptor.requestOrNull(http),
             )
         val response = ResponseEntity.ok()
         if (view.replayed) response.header(IdempotencyInterceptor.REPLAYED_HEADER, "true")
@@ -60,7 +60,7 @@ internal class EntryChangesController(
     }
 
     private fun idOrNotFound(raw: String): EntryId =
-        runCatching { EntryId(UUID.fromString(raw)) }.getOrElse { throw NotFoundException("That entry was not found.") }
+        runCatching { EntryId(UUID.fromString(raw)) }.getOrElse { throw EntryNotFoundException() }
 }
 
 /** Text is the only editable content in C2; validation delegates to the same domain factory as submission. */

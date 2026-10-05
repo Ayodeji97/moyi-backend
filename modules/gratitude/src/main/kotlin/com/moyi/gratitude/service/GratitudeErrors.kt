@@ -2,9 +2,10 @@ package com.moyi.gratitude.service
 
 import com.moyi.common.web.ApiException
 import com.moyi.common.web.ErrorCode
+import com.moyi.common.web.NotFoundException
 import org.springframework.http.HttpStatus
 
-// The refusals SubmitEntry gives — `bond.service.BondErrors`' own precedent,
+// The refusals SubmitEntry and ChangeEntry give — `bond.service.BondErrors`' own precedent,
 // copied rather than shared because that file is `internal` to `bond` and
 // this module cannot see it. Each extends ApiException, so the shared
 // catch-all writes the RFC 9457 body and this module needs no advice of its
@@ -74,10 +75,24 @@ internal class DayClosedException :
         "That day is closed and cannot take a new entry.",
     )
 
-/** BR-7: the partner may already have read these words. */
+/**
+ * BR-7: the partner may already have read these words — or the author has
+ * erased them. The sentence says neither: it answers both, and "has been
+ * revealed" was false for an entry deleted before anybody else could read it.
+ */
 internal class EntryImmutableException :
     ApiException(
         HttpStatus.CONFLICT,
         ErrorCode.ENTRY_IMMUTABLE,
-        "This entry has been revealed and cannot be edited.",
+        "This entry can no longer be edited.",
     )
+
+/**
+ * The one answer for an entry the caller may not act on (spec §5.2, T-02):
+ * no such id, an id that is not a UUID, an entry in a bond the caller is not
+ * in, and an entry the caller's partner wrote. Four causes, one class, so
+ * the four `404`s are the same bytes because they are the same object — not
+ * because eight copies of a sentence happen to agree
+ * (`bond.service.BondNotFoundException`'s own shape).
+ */
+internal class EntryNotFoundException : NotFoundException("That entry was not found.")

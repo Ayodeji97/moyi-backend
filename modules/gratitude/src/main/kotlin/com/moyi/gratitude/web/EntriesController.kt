@@ -7,6 +7,7 @@ import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.common.web.NotFoundException
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.common.web.idempotency.Idempotent
+import com.moyi.gratitude.service.EntryNotFoundException
 import com.moyi.gratitude.service.GetToday
 import com.moyi.gratitude.service.ReconcileJoiningDay
 import com.moyi.gratitude.service.SubmitEntry
@@ -99,7 +100,7 @@ internal class EntriesController(
         // response is under the same gate as `today`). An author's own entry
         // is always this shape — in full, or its tombstone — so the 404 is
         // unreachable today, and is what answers if BR-1 ever stops saying so.
-        val body = EntryResponse.from(submission.view) ?: throw NotFoundException("That entry was not found.")
+        val body = EntryResponse.from(submission.view) ?: throw EntryNotFoundException()
         return response.body(body)
     }
 

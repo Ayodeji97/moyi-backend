@@ -118,7 +118,7 @@ internal data class Entry(
      * the entry it was given for.
      */
     fun canBeReadBy(reader: Reader): Readability {
-        val erased = deletedAt != null || status == EntryStatus.DELETED
+        val erased = isErased
         val everReadable = authorMemberId == reader.memberId || revealedAt != null
         return when {
             reader.bondId != bondId -> Readability.NOT_A_MEMBER
@@ -132,8 +132,14 @@ internal data class Entry(
     /** This entry as [reader] may see it — the only form an entry is rendered from ([EntryReading]). */
     fun readBy(reader: Reader): EntryReading = EntryReading.of(this, reader)
 
-    /** BR-7 is a domain rule; the service only translates its refusal to HTTP. */
+    /**
+     * Either mark of an erasure counts ([canBeReadBy], clause 2). Asked here
+     * by everything that needs to know — the read gate, the edit rule, the
+     * reveal — so the three cannot come to disagree about a half-erased row.
+     */
     val isErased: Boolean get() = deletedAt != null || status == EntryStatus.DELETED
+
+    /** BR-7 is a domain rule; the service only translates its refusal to HTTP. */
 
     val isEditable: Boolean get() = !isErased && revealedAt == null && status != EntryStatus.REVEALED
 
@@ -164,7 +170,7 @@ internal data class Entry(
 
     /** Reveal is monotonic, including across erasure and later lifecycle transitions. */
     fun reveal(now: Instant): Entry =
-        if (revealedAt != null || deletedAt != null || status == EntryStatus.DELETED) {
+        if (revealedAt != null || isErased) {
             this
         } else {
             copy(status = EntryStatus.REVEALED, revealedAt = now, updatedAt = now)

@@ -26,6 +26,9 @@ dependencies {
     // Reachable transitively through identity already; declared so the
     // composition root names everything it composes.
     implementation(projects.common.security)
+    // The outbox: its publisher bean and V14. Reachable through gratitude,
+    // which writes the first events; named for the same reason as above.
+    implementation(projects.common.events)
     // springdoc and the OpenAPI document's shape (ADR-0024).
     implementation(projects.contracts)
 

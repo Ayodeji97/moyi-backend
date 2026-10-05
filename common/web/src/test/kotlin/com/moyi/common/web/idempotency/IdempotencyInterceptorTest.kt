@@ -374,6 +374,39 @@ class IdempotencyInterceptorTest(
         jdbc.queryForObject("SELECT count(*) FROM idempotency_keys", Int::class.java) shouldBe 0
     }
 
+    /**
+     * `@Idempotent(required = false)`: the key is the caller's choice. Leaving
+     * it out is an ordinary request; sending one is held to the same rules
+     * as anywhere else.
+     */
+    @Test
+    fun `an optional key is skipped when absent, prepared when present and refused when malformed`() {
+        val absent = post(ada, key = null, body = """{"text":"thank you"}""", path = OPTIONAL_PATH)
+        absent.status shouldBe 200
+        absent.contentAsString shouldContain "\"keyed\":\"false\""
+
+        val present = post(ada, UUID.randomUUID().toString(), """{"text":"thank you"}""", OPTIONAL_PATH)
+        present.status shouldBe 200
+        present.contentAsString shouldContain "\"keyed\":\"true\""
+
+        val malformed = post(ada, "k".repeat(256), """{"text":"thank you"}""", OPTIONAL_PATH)
+        malformed.status shouldBe 422
+        malformed.contentAsString shouldContain "\"field\":\"Idempotency-Key\""
+    }
+
+    /**
+     * The bound belongs to the route, not to the header. Decided from the
+     * header, a caller escaped the 1 MiB limit on an optional-key route by
+     * leaving the key out — and the body was then parsed whole.
+     */
+    @Test
+    fun `a body over one mebibyte is 413 on an optional-key route with no key`() {
+        val response = post(ada, key = null, body = """{"text":"${"a".repeat(1024 * 1024)}"}""", path = OPTIONAL_PATH)
+
+        response.status shouldBe 413
+        response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+    }
+
     @Test
     fun `a multipart body is Spring's own 415, not a 500`() {
         val response =
@@ -483,6 +516,7 @@ class IdempotencyInterceptorTest(
     private companion object {
         const val ENTRIES_PATH = "/api/v1/probe/entries"
         const val OTHER_ENTRIES_PATH = "/api/v1/probe/other-entries"
+        const val OPTIONAL_PATH = "/api/v1/probe/optional"
         const val CREATED_ETAG = "\"7\""
         const val CREATED_LOCATION = "/api/v1/probe/entries/7"
         const val TIMEOUT_SECONDS = 10L
@@ -552,6 +586,17 @@ class IdempotencyProbeController(
         @RequestBody body: Map<String, String>,
         http: HttpServletRequest,
     ): ResponseEntity<Map<String, String?>> = respond(http, body)
+
+    @PostMapping("/api/v1/probe/optional")
+    @Idempotent(required = false)
+    fun optional(
+        @RequestBody body: Map<String, String>,
+        http: HttpServletRequest,
+    ): Map<String, String> =
+        mapOf(
+            "keyed" to (IdempotencyInterceptor.requestOrNull(http) != null).toString(),
+            "size" to body.size.toString(),
+        )
 
     private fun respond(
         http: HttpServletRequest,

@@ -5,6 +5,7 @@ import com.moyi.common.security.SecurityConfiguration
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
+import com.moyi.common.web.idempotency.Idempotent
 import com.moyi.contracts.OpenApiConfiguration
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.http.HttpHeaders
@@ -35,6 +37,7 @@ import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping
 import tools.jackson.databind.json.JsonMapper
 import java.io.File
 import java.util.UUID
@@ -58,6 +61,7 @@ class OpenApiContractTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val issuer: AccessTokenIssuer,
     @Autowired private val json: JsonMapper,
+    @Autowired @Qualifier("requestMappingHandlerMapping") private val handlerMapping: RequestMappingHandlerMapping,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
@@ -120,7 +124,7 @@ class OpenApiContractTest(
         // and has to appear, or a generated client cannot send it. The list is
         // exhaustive on purpose: a *new* header parameter should have to be
         // justified here, which is what this assertion makes someone do.
-        // `Idempotency-Key` joined it in fix round 1, C2 (`submitEntry`).
+        // `Idempotency-Key` joined it in C1 (`submitEntry`), and `patchEntry` carries it since C2.
         operations()
             .flatMap { (_, op) ->
                 op.parameters
@@ -280,6 +284,34 @@ class OpenApiContractTest(
         submit.parameters.map { it.name } shouldContain IdempotencyInterceptor.HEADER
         submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.`in` shouldBe "header"
         submit.parameters.first { it.name == IdempotencyInterceptor.HEADER }.required shouldBe true
+    }
+
+    @Test
+    fun `changing an entry documents an optional key, a text that is never null, and its refusals`() {
+        val patch = api.paths["/api/v1/entries/{entryId}"]!!.patch
+        val delete = api.paths["/api/v1/entries/{entryId}"]!!.delete
+
+        // The key is honoured on PATCH and may be left out; the controller's
+        // own annotation is the authority, and the document must agree with it.
+        val key = patch.parameters.first { it.name == IdempotencyInterceptor.HEADER }
+        key.required shouldBe false
+        handlerOf("patchEntry").getMethodAnnotation(Idempotent::class.java)!!.required shouldBe false
+        handlerOf("submitEntry").getMethodAnnotation(Idempotent::class.java)!!.required shouldBe true
+        // DELETE is idempotent by nature and takes no key at all.
+        delete.parameters.orEmpty().map { it.name } shouldNotContain IdempotencyInterceptor.HEADER
+
+        // `{"text": null}` is a 422: the document must not say it is accepted.
+        val text = api.components.schemas["PatchEntryRequest"]!!.properties["text"]!!
+        text.types shouldBe setOf("string")
+        api.components.schemas["PatchEntryRequest"]!!.required shouldContain "text"
+        text.maxLength shouldBe
+            api.components.schemas["SubmitEntryRequest"]!!
+                .properties["text"]!!
+                .maxLength
+
+        // 409 is ENTRY_IMMUTABLE and BOND_ARCHIVED; 413 is the body bound, key or no key.
+        patch.responses.keys shouldContainAll listOf("200", "404", "409", "413", "415", "422")
+        delete.responses.keys shouldContainAll listOf("204", "404", "409")
     }
 
     @Test
@@ -496,6 +528,8 @@ class OpenApiContractTest(
             )
         }
     }
+
+    private fun handlerOf(operationId: String) = handlerMapping.handlerMethods.values.single { it.method.name == operationId }
 
     private fun operations(): List<Pair<String, Operation>> =
         api.paths.flatMap { (path, item) -> item.readOperationsMap().map { (method, op) -> "$method $path" to op } }

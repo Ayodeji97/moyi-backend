@@ -336,7 +336,7 @@ internal class SubmitEntry(
         // on: the author's own entry, in full or as its tombstone. Anything
         // else — an entry of another bond, above all — has none to give.
         val day = reading?.disclosed?.let { days.find(it.bondDayId) }
-        if (reading == null || day == null) throw NotFoundException("That entry was not found.")
+        if (reading == null || day == null) throw EntryNotFoundException()
         return EntryView(reading, day)
     }
 
