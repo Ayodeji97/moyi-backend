@@ -253,6 +253,7 @@ internal class SubmitEntry(
         // stored outside the span of the day it was filed on.
         val intendedAt = draft.intendedAt?.truncatedTo(ChronoUnit.MICROS)
 
+        reconcileJoiningDay(userId, bondId)
         val submission =
             try {
                 transactions.execute {
@@ -282,6 +283,29 @@ internal class SubmitEntry(
             }
 
         return checkNotNull(submission) { "submit's transaction produces a Submission unless it threw" }
+    }
+
+    /**
+     * Spec §12.4's "first gratitude operation", committed on its own before
+     * the submission. Inside the submission's transaction it was rolled back
+     * with every refusal — and a day C1 left `SUSPENDED` with both entries is
+     * revealed by the reconcile, so a submission that resolves to that day is
+     * refused (`409`) by the very thing it set off. The calls under the bond lock in [write] stay: they
+     * are what keeps the lock order when a pairing lands after this read.
+     *
+     * A caller with no membership is not reconciled for; [submit] refuses them.
+     */
+    private fun reconcileJoiningDay(
+        userId: UUID,
+        bondId: UUID,
+    ) {
+        val membership =
+            try {
+                access.membershipOf(userId, bondId)
+            } catch (_: NotFoundException) {
+                return
+            }
+        joining.beforeRead(membership)
     }
 
     /**
@@ -451,7 +475,15 @@ internal class SubmitEntry(
         // whichever writer opens the row stamps the same zone. Relies on
         // `dayAt` never returning an empty window: an instant always lies in one.
         val zone = ZoneId.of(membership.anchorTimeline.zoneIdAt(window.startsAt))
-        val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
+        // Spec §12.4: a day that ended before the second member arrived is
+        // excluded for good, and that is a fact about the day, not about
+        // whether somebody happened to write on it while it lasted. Decided
+        // from `awaitingSecondMember` alone, a back-fill onto such a day that
+        // had no row opened it OPEN — and two back-fills revealed it — while
+        // the same day with a row stayed SUSPENDED and private.
+        val activeSince = membership.activeSince
+        val beforeThePairing = activeSince == null || !activeSince.isBefore(window.endsAt)
+        val openStatus = if (beforeThePairing) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
         val opened = days.openOrGet(membership.bondId, window, zone, now, openStatus)
         val locked = days.lockAndFind(opened.id)
         val extended = locked.extendedTo(window).resumeJoiningDay(membership.activeSince)

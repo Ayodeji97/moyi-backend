@@ -38,6 +38,16 @@ internal class ChangeEntry(
         entryId: EntryId,
         replacement: EntryText?,
         unsupportedMedia: Boolean = false,
+    ): EntryView {
+        reconcileJoiningDay(userId, entryId)
+        return changeUnderLocks(userId, entryId, replacement, unsupportedMedia)
+    }
+
+    private fun changeUnderLocks(
+        userId: UUID,
+        entryId: EntryId,
+        replacement: EntryText?,
+        unsupportedMedia: Boolean,
     ): EntryView =
         try {
             checkNotNull(
@@ -61,6 +71,31 @@ internal class ChangeEntry(
         } catch (violation: DataIntegrityViolationException) {
             throw violation.redacted()
         }
+
+    /**
+     * Spec §12.4's "first gratitude operation", committed on its own before
+     * the change it precedes. Run inside the change's transaction, a reveal
+     * the reconcile had just made was rolled back whenever the change was
+     * then refused — and on a day C1 left `SUSPENDED` with both entries, the
+     * reveal is exactly what makes a `PATCH` a `409`. [PatchEntry] calls this
+     * before it opens the key's transaction, for the same reason.
+     *
+     * It decides nothing: a caller this is not for is simply not reconciled
+     * for, and [change] gives them its own answer.
+     */
+    fun reconcileJoiningDay(
+        userId: UUID,
+        entryId: EntryId,
+    ) {
+        val entry = entries.find(entryId) ?: return
+        val membership =
+            try {
+                access.membershipOf(userId, entry.bondId)
+            } catch (_: NotFoundException) {
+                return
+            }
+        if (entry.authorMemberId == membership.memberId) joining.beforeRead(membership)
+    }
 
     /** A replay is a read, including on an archived bond; erasure wins over its original content. */
     fun read(

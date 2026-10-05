@@ -26,6 +26,8 @@ internal class PatchEntry(
     ): EntryChangeResult {
         if (request == null) return EntryChangeResult(changes.change(userId, id, text, media), false)
         require(request.userId == userId) { "the key belongs to a different caller" }
+        // Before the key's transaction, so that a refusal inside it cannot undo it.
+        changes.reconcileJoiningDay(userId, id)
         return checkNotNull(
             transactions.execute {
                 val outcome =
