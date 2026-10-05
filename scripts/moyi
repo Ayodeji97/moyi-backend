@@ -32,7 +32,9 @@
 # a shared machine anyone can read those with `ps`. The password, the tokens
 # and what you write reach curl and python through files only you can read
 # and through pipes. (What you type after `moyi write` is in your own shell's
-# argument list and history; `moyi write -` reads it from stdin instead.)
+# argument list and history; `moyi write -` reads it from stdin instead. An
+# invite code and a verification token are typed as arguments, and a code is
+# part of the URL curl is given: both are single-use.)
 #
 # It prints what the server sent. It decides nothing: every rule is the
 # server's, and this script is not a second copy of any of them.
@@ -121,18 +123,30 @@ print("" if node is None else node)' "$1"
 }
 
 # As the server sent it, indented; what two people wrote is shown as written, not as \u escapes.
-pretty() { python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin), indent=4, ensure_ascii=False))' 2>/dev/null || cat; }
+# A body that is not JSON is printed as it came.
+pretty() {
+  python3 -c '
+import json, sys
+raw = sys.stdin.read()
+try:
+    print(json.dumps(json.loads(raw), indent=4, ensure_ascii=False))
+except ValueError:
+    sys.stdout.write(raw)'
+}
 
 # call <method> <path> [json body] — leaves the status in STATUS and the body in BODY.
 # Sends the access token unless ANONYMOUS=1 (signing in, refreshing: a lapsed token there is only noise).
 call() {
   local method="$1" path="$2" body="${3:-}" token=""
   [ "${ANONYMOUS:-}" = 1 ] || token="$(session_get accessToken)"
+  # It becomes a header line. Anything that is not a token's alphabet is not sent.
+  [[ -z "$token" || "$token" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || die "the saved session is damaged: moyi login <email>"
+  rm -f "$TMP/out" "$TMP/body"
   {
     printf 'Accept: application/json\n'
     [ -z "$token" ] || printf 'Authorization: Bearer %s\n' "$token"
     [ -z "$body" ] || printf 'Content-Type: application/json\n'
-    # A write the client might send twice carries a key, so a retry is the same write (doc 06 §1).
+    # A write carries a key (doc 06 §1). A new one each time this sends: nothing here resends a write that may have landed.
     if [ "$method" = POST ] && [[ "$path" == */entries ]]; then
       printf 'Idempotency-Key: %s\n' "$(python3 -c 'import uuid; print(uuid.uuid4())')"
     fi
@@ -140,16 +154,21 @@ call() {
   local -a args=(--globoff -s -o "$TMP/out" -w '%{http_code}' -X "$method" -H "@$TMP/headers")
   if [ -n "$body" ]; then printf '%s' "$body" > "$TMP/body"; args+=(--data-binary "@$TMP/body"); fi
   STATUS="$(curl "${args[@]}" "$API$path")" || die "could not reach $API"
-  BODY="$(cat "$TMP/out")"
+  BODY="$(cat "$TMP/out" 2>/dev/null || true)"
 }
 
 # keep_tokens [key value …] — the two tokens out of BODY and into the session, with anything else given.
 keep_tokens() {
-  session_set accessToken "$(printf '%s' "$BODY" | field accessToken)" \
+  # With where they came from: a session is for one server, and its tokens are sent to no other.
+  session_set api "$API" accessToken "$(printf '%s' "$BODY" | field accessToken)" \
               refreshToken "$(printf '%s' "$BODY" | field refreshToken)" "$@"
 }
 
-signed_in() { [ -n "$(session_get accessToken)" ] || die "not signed in: moyi login <email>"; }
+signed_in() {
+  [ -n "$(session_get accessToken)" ] || die "not signed in: moyi login <email>"
+  local home; home="$(session_get api)"
+  [ -z "$home" ] || [ "$home" = "$API" ] || die "this session is for $home, not $API: moyi login <email>, or use another MOYI_PROFILE"
+}
 
 # authed <method> <path> [body] — call, and once more after a refresh if the access token had lapsed.
 authed() {
@@ -183,7 +202,7 @@ bond() {
   printf '%s' "$id"
 }
 
-ask_password() { local p; read -r -s -p "password: " p; echo >&2; printf '%s' "$p"; }
+ask_password() { local p; IFS= read -r -s -p "password: " p; echo >&2; printf '%s' "$p"; }
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
