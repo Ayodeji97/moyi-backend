@@ -21,9 +21,12 @@
 # that typographic text comes back as it was sent. Since slice C2 it checks the
 # reveal on the wire: an edit before it, both members reading each other after
 # it, ENTRY_IMMUTABLE, the tombstone a delete leaves, a replay of a deleted
-# entry, and a timed bond waiting in PENDING_REVEAL. Last run on 2026-10-05, on
-# the jar built from 421d811, against a database of its own (MOYI_DB, below):
-# 389 passed, 0 failed. A later commit is unproven until it is run again.
+# entry, and a timed bond waiting in PENDING_REVEAL. Since slice C3 it runs
+# the close job for real, on a five-second schedule, and checks it took its
+# lock, failed on nothing and left no ended day unclosed. Last run on
+# 2026-10-05, against a database of its own (MOYI_DB, below): 392 passed,
+# 0 failed. The pull request that last changed this file names the commit the
+# jar was built from; a later commit is unproven until it is run again.
 #
 # If the application refuses to start on a Flyway checksum mismatch: V11, V12
 # and V13 were edited in place while unmerged (ADR-0031), so a database that
@@ -970,7 +973,7 @@ case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|2") pass 
 echo; echo "scheduling — the close job runs, under its lock, without error (spec §6.4, C3)"
 CLOSE_LOCK="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM shedlock WHERE name='close-days'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
 case "$CLOSE_LOCK" in psql-unavailable) echo "  skip lock check";; 1) pass "the close job has taken its ShedLock row";; *) fail "close job" "expected one shedlock row named close-days, got '$CLOSE_LOCK'";; esac
-if grep -qE "close: day .* failed|Unexpected error occurred in scheduled task" "$MOYI_LOG"; then fail "close job" "the close job logged a failure"; else pass "…and has logged no failure"; fi
+if grep -qE "close: day .* failed|close: the missing days of bond|FAILED [1-9]|Unexpected error occurred in scheduled task" "$MOYI_LOG"; then fail "close job" "the close job logged a failure"; else pass "…and has logged no failure"; fi
 UNCLOSED_PAST="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM bond_days WHERE closed_at IS NULL AND ends_at < now() - interval '1 minute'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
 case "$UNCLOSED_PAST" in psql-unavailable) echo "  skip unclosed-day check";; 0) pass "…and no day that has ended is still unclosed";; *) fail "close job" "$UNCLOSED_PAST ended days are still unclosed";; esac
 

@@ -242,6 +242,23 @@ internal class MissingDaysTest(
             mapOf("status" to "EMPTY", "entry_count" to 0.toShort())
     }
 
+    @Test
+    fun `a bond whose days cannot be written, and has more of them than a run takes, does not end the run for the next bond`() {
+        val stuck = pairedOn("2025-05-03").id
+        val next = pairedOn("2026-09-13").id
+        jdbc.execute("ALTER TABLE bond_days ADD CONSTRAINT c3_missing_probe CHECK (bond_id <> '$stuck')")
+        try {
+            val result = closer.closeElapsedDays(NOW, BUDGET)
+
+            result.failed shouldBe 1
+            result.created shouldBe 2
+            days(next).keys shouldBe setOf(LocalDate.of(2026, 9, 13), LocalDate.of(2026, 9, 14))
+            days(stuck).size shouldBe 0
+        } finally {
+            jdbc.execute("ALTER TABLE bond_days DROP CONSTRAINT c3_missing_probe")
+        }
+    }
+
     /**
      * The race with a submission, at the one statement where it is decided:
      * the date already has a row — a member's entry opened it a moment ago —

@@ -19,8 +19,8 @@ internal data class CloseCandidate(
  * The days the close job should look at (spec §6.4 step 2): every unclosed
  * day that **may** have ended, and every day waiting on a reveal time.
  *
- * **`ends_at <= now` finds every day that has ended, and some that have
- * not.** A day's end only ever moves later (ADR-0031 decision 13), so its
+ * **A stored `ends_at` that has passed finds every day that has ended, and
+ * some that have not.** A day's end only ever moves later (ADR-0031 decision 13), so its
  * true end is never before the stored one: no ended day is missed. A row
  * opened before a westward zone change is found early; `CloseDay` extends it
  * under its lock and answers "not yet". That is why this is a filter and
@@ -45,7 +45,7 @@ internal class CloseCandidates(
 ) {
     fun after(
         previous: CloseCandidate?,
-        now: Instant,
+        endedAsOf: Instant,
         limit: Int,
     ): List<CloseCandidate> =
         jdbc.query(
@@ -57,7 +57,7 @@ internal class CloseCandidates(
                     row.getObject("date", LocalDate::class.java),
                 )
             },
-            Timestamp.from(now),
+            Timestamp.from(endedAsOf),
             previous?.bondId ?: FIRST_BOND,
             previous?.date ?: FIRST_DATE,
             limit,

@@ -53,7 +53,7 @@ internal class CloseJob(
     private val failed: Counter =
         Counter
             .builder(FAILED)
-            .description("Bond-days the close job could not settle and left for the next run")
+            .description("Bond-days the close job could not settle, and bonds whose missing days it could not write; left for the next run")
             .register(meters)
 
     init {

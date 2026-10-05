@@ -109,10 +109,12 @@ internal class CreateMissingDays(
         try {
             val gaps = gapsOf(bondId, now, endedAsOf)
             val room = budget - tally.written
-            if (gaps.size > room) tally.backlog = true
             val count = write(bondId, gaps.take(room), now)
             if (count > 0) tally.bonds += bondId
             tally.written += count
+            // Only once its days are written: a bond that fails with more
+            // days than the budget must not end the run for the bonds after it.
+            if (gaps.size > room) tally.backlog = true
         } catch (failure: Exception) {
             tally.failed++
             log.error("close: the missing days of bond {} could not be written: {}", bondId, failure.javaClass.simpleName)
@@ -145,7 +147,7 @@ internal class CreateMissingDays(
                         missing.insertClosed(id, bondId, gap.window, gap.zone, gap.status, at).also { inserted ->
                             if (inserted) {
                                 events.publish(
-                                    OutboxEvent("BondDay", id, "DayClosed", mapOf("bondId" to bondId), maxOf(at, gap.window.endsAt)),
+                                    OutboxEvent("BondDay", id, "DayClosed", mapOf("bondId" to bondId), at),
                                 )
                             }
                         }
@@ -193,7 +195,9 @@ internal class CreateMissingDays(
                 // A jump in the labels: dates an eastward change stepped
                 // over. They have no instants, so each is a day of no length
                 // at the moment the calendar moved past it.
-                if (began && previous != null && !window.startsAt.isAfter(endedAsOf)) {
+                // (The window that follows an ended one starts where that one
+                // ended, so by here the calendar has already moved past them.)
+                if (began && previous != null) {
                     generateSequence(previous.date.plusDays(1)) { it.plusDays(1) }
                         .takeWhile { it.isBefore(window.date) }
                         .forEach { skipped -> yield(Gap(DayWindow(skipped, window.startsAt, window.startsAt), zone, BondDayStatus.FROZEN)) }

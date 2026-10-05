@@ -23,12 +23,14 @@ import java.util.UUID
  */
 interface DayCloser {
     /**
-     * Writes the ended days nobody opened (at most [MAX_CREATED_PER_RUN] a
-     * call, spec §6.4 step 1), then settles days that have ended as of [now] and reveals days whose reveal
-     * time has come, each in a transaction of its own, and stops after
-     * [budget] of them have been closed, revealed or have failed. A day that
-     * is looked at and left does not count. Idempotent: a second call finds nothing the first one finished.
-     * A day that fails is counted and left for the next call; the rest go on.
+     * Writes the days nobody opened (at most [MAX_CREATED_PER_RUN] a call,
+     * spec §6.4 step 1), settles days that had ended [SETTLE_MARGIN] before
+     * [now], and reveals days whose reveal time has come by [now] — each in a
+     * transaction of its own. It stops after [budget] days have been closed,
+     * revealed or have failed; a day that is looked at and left does not
+     * count. Idempotent: a second call finds nothing the first one finished.
+     * A day or a bond that fails is counted and left for the next call; the
+     * rest go on.
      */
     fun closeElapsedDays(
         now: Instant,
@@ -64,7 +66,7 @@ data class CloseResult(
     val closed: Int,
     /** Days not yet ended whose reveal fell due. */
     val revealed: Int,
-    /** Days that threw while being settled, and were left as they were. */
+    /** Days that threw while being settled, and bonds whose missing days could not be written; each left as it was. */
     val failed: Int,
     /** Bonds with at least one day written, closed or revealed — where a streak may have moved (C4). */
     val bondsChanged: Set<UUID>,

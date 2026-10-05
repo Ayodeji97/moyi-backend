@@ -657,7 +657,8 @@ separate alert if it stays flat for more than 25 hours.
   unevaluated for good. The job therefore runs at one minute past each quarter-hour.
 - **Step 1 as built** (decision 6): missing days are written **already closed**, in one
   statement, `ON CONFLICT DO NOTHING`; gaps are worked out per bond from its timeline, not
-  by an anti-join; the 400 is per run across all bonds, oldest first. "Deletion … intervals"
+  by an anti-join; the 400 is per run across all bonds (bonds in id order, each bond's days
+  oldest first). "Deletion … intervals"
   is read as: from the deletion request on. The day a bond stopped taking writes *on* is
   written. A date an eastward change stepped over is written `FROZEN` as soon as the
   handoff has passed. *Open with the owner:* a deletion called off leaves no record of the
@@ -665,7 +666,7 @@ separate alert if it stays flat for more than 25 hours.
 - **Step 2's candidates** (decision 4): unclosed rows whose *stored* `ends_at` has passed,
   plus rows pending a reveal time. The stored end is a complete filter — it only ever moves
   later — and never the decision. V15 adds `bond_days (ends_at) WHERE closed_at IS NULL`;
-  §7's `(status, date)` partial index is not what the scan uses.
+  §7's `(status, date)` partial index at most serves the pending-reveal arm.
 - **`closedAt` and `revealedAt` are read under the day's lock**, not taken from the run's
   start (decision 8). A `SOLO` day reveals its lone live **entry**; the day's own
   `revealedAt` stays unset and no `DayRevealed` is written (decision 9). `DayClosed` is

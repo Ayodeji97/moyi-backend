@@ -58,14 +58,16 @@ Inside, in this order, and the order is the decision:
    gain `closedAt` and nothing else.
 
 **4. A stored end finds every day that has ended, and decides none of them.** The sweep's
-candidates are unclosed rows with `ends_at <= now`, plus rows pending a reveal time. A day's
+candidates are unclosed rows whose stored `ends_at` had passed a minute ago (decision 5),
+plus rows pending a reveal time. A day's
 end only ever moves later (ADR-0031 decision 13), so its true end is never before the stored
 one and the filter misses no ended day; it also finds, early, a row a westward change has
 since lengthened, which step 2 extends and step 4 answers "not yet". So no bond is visited
 to find days that have a row. V15 adds the partial index the scan uses
 (`bond_days (ends_at) WHERE closed_at IS NULL`); V12's `bond_days_open_idx`, on
-`(status, date)` for three statuses, was written for this job before it was designed and
-is now used by nothing.
+`(status, date)` for three statuses, was written for this job before it was designed; at
+most it now serves the `PENDING_REVEAL` arm of the scan. Which the planner chooses for
+that arm has not been looked at: the test asserts only that V15's index is used.
 
 **5. A day is settled only once it has been over for a minute.** This is the price of
 decision 18. Without the bond's lock the closer sees of a bond what has *committed*. A
@@ -76,7 +78,13 @@ day, closed, which nothing reopens (decision 7). A westward zone change confirme
 midnight is the same shape: the day is closed at its old end, a day early.
 
 `DayCloser.SETTLE_MARGIN` is one minute: far longer than a commit takes or two instances'
-clocks differ by. The job fires at one minute past each quarter, so the margin costs a
+clocks differ by. **It is a margin and not a proof.** `ChangeTimezone` reads its clock
+under the bond's lock, so its gap is a few statements and a commit. `AcceptInvite` reads
+its clock *before* it takes the lock, so its gap is however long it waits for that lock —
+and nothing bounds that in production: no `lock_timeout` is set outside tests (ADR-0031,
+Owed). A bond write held up for more than a minute across a midnight still loses the race,
+and the cost when it does is the one above: a joining day with an entry on it, closed
+suspended, for good. The job fires at one minute past each quarter, so the margin costs a
 minute and not fifteen. A reveal falls due at `now` itself: nothing a bond write does can
 make an already-due reveal wrong.
 
@@ -105,7 +113,8 @@ today (BR-3a) or refused. An entry is never filed on the closed day and never lo
 - **A date an eastward change stepped over is `FROZEN`**, without spending a freeze
   (ADR-0031 decision 14): a row of no length at the moment the calendar moved past it,
   written as soon as that moment has passed.
-- **At most 400 a run, across all bonds, oldest first** (spec §6.4). A run that stops there
+- **At most 400 a run, across all bonds** — bonds in id order, each bond's days oldest
+  first (spec §6.4). A run that stops there
   says so, and the next one resumes from whatever is still missing: nothing remembers
   where the last one got to.
 
@@ -148,7 +157,8 @@ away and the job did not run.
 every run that finishes, including the many that find nothing, so it goes stale only when
 the job has stopped. `gratitude.bonds.closed` counts **days** settled — closed, revealed at
 their time, or written — under the name doc 11 gave it. `gratitude.close.days.failed`
-keeps what could not be settled apart. A backlog, or any failure, is logged at `WARN`.
+keeps what could not be settled apart: days, and bonds whose missing days could not be
+written. A backlog, or any failure, is logged at `WARN`.
 
 **13. The reaper for `Idempotency-Key` rows rides the same module** (ADR-0031, Owed):
 hourly, at seven minutes past, under a lock of its own, deleting rows past their 24 hours.
@@ -192,7 +202,8 @@ the counter staying flat for 25 hours (doc 11); a `lock_timeout` outside tests �
 closer, holding one day and no bond, is the writer least exposed to its absence.
 
 **Not assigned.** `AcceptInvite` reads its clock before it takes the bond's lock, so a
-pairing can be stamped earlier than it could have committed; the margin covers it, and
+pairing can be stamped earlier than it could have committed; the margin covers it unless
+the wait for that lock outlasts the margin, and
 reading the clock under the lock, as `ChangeTimezone` does, would shrink what it has to
 cover. A westward zone change racing the closer is covered by the same margin and has no
 test of its own; the pairing case does.
@@ -205,12 +216,15 @@ test of its own; the pairing case does.
    day"). Ada cannot delete it: ADR-0032's first question, still open, is that an ended
    bond refuses the author's own delete. No route reads a past day yet, so nothing is shown
    to anyone in C3 — but the permission is stored, and C5's archive will honour it.
-2. **A deletion that is called off leaves no record that it was ever counting down.**
+2. **A deletion that is called off leaves no record that it was ever counting down** (and
+   one called off after a member has left archives the bond at the cancel, with the same
+   effect).
    `deletionRequestedAt` is cleared on cancel. While the countdown runs no day is written;
    once it is cancelled the job sees a live bond and writes that month as `EMPTY` days — a
    month in which every write was refused. Recording the interval is a change to `bond`.
 3. **A margin, not a lock** (decision 5): a minute's delay on every close, in exchange for
-   keeping decision 18 whole.
+   keeping decision 18 whole — and a residual race, if a pairing waits more than a minute
+   for the bond's lock across a midnight. The exact fix is a bond lock that never waits.
 
 ## Revisit when
 
@@ -222,7 +236,7 @@ test of its own; the pairing case does.
 
 - **Run:** the build and the smoke run are recorded on the pull request, with the commit
   they ran at. The smoke run starts the job on a five-second schedule and checks that it
-  took its lock, logged no failure and left no ended day unclosed; no day in a smoke run
+  took its lock, logged no failure of a day or a bond and left no ended day unclosed; no day in a smoke run
   has ended, so that proves the wiring and not a close.
 - **Reproduced by a test that failed first, then fixed:** decision 5 (a day closed while
   its pairing was still committing — a count of one where zero was right); the deletion

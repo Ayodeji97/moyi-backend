@@ -269,10 +269,10 @@ own date. It stays as a guard.
 ### Task 9: run it, record it, open it
 
 - [x] `./gradlew build --rerun-tasks`; counts.
-- [x] Smoke: the job cannot be time-travelled over HTTP. Add a probe that the scheduler is
-      registered and `gratitude_close_job_last_success_timestamp` appears on
-      `/actuator/metrics` after startup (the job runs once on boot in the `local` profile),
-      and run `MOYI_DB=moyi_c3_smoke scripts/smoke.sh`.
+- [x] Smoke: `MOYI_DB=moyi_c3_smoke scripts/smoke.sh`, with the job on a five-second
+      schedule (`moyi.scheduling.close.cron`). *As built:* the probe is the job's lock row,
+      no failure in the log and no ended day left unclosed — not `/actuator/metrics`,
+      which exposes `health` only.
 - [x] Two whole-branch reviews (concurrency and time; spec, privacy and tests), fixed.
       *As built:* a one-minute settle margin (ADR-0033 decision 5), the deletion
       cooling-off, per-bond isolation, lock-time stamps, `FROZEN` at the handoff.
