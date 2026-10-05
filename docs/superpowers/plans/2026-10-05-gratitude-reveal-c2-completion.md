@@ -206,11 +206,11 @@ returns a managed pre-lock instance; `EntryStore.update` then writes every colum
 section C, `docs/handover/2026-10-04-c2-reveal.md` (removed from the branch; its content
 moves to the untracked `.claude/HANDOVER.md`).
 
-- [ ] Mutations, each run and restored: remove `days.lockRow` in `BondDayStore.lockAndFind`
+- [x] Mutations, each run and restored: remove `days.lockRow` in `BondDayStore.lockAndFind`
       (`a second submission waits on the day lock…` red); rethrow raw in `ChangeEntry` and in
       `SubmitEntry` (the two canary tests red); remove the sort in `GetToday` (`delete frees
       the live slot…` red); remove `?:` in `EntryStore.update` (Task 3's test red).
-- [ ] ADR-0032: the reveal under the day lock and why the bond lock makes the simultaneous
+- [x] ADR-0032: the reveal under the day lock and why the bond lock makes the simultaneous
       test green without it (the owner-approved two-test split); the timed-reveal rule; the
       joining-day reconcile — who triggers it, that a read may now take the bond lock and
       extend a day, that it runs on an ended bond, its place in the lock order; `PATCH` and
@@ -221,12 +221,12 @@ moves to the untracked `.claude/HANDOVER.md`).
       sweep and its need for `revealTimeLocal` without a caller; a `closedAt` guard on
       `resumeJoiningDay`; the closer's one-day-at-a-time rule now protects three paths.
       **Owed, C5:** no event for an edit or an erasure; `last_error` may hold a message.
-- [ ] ADR-0031: the six C2 Owed bullets marked discharged, citing ADR-0032; decision 17
+- [x] ADR-0031: the six C2 Owed bullets marked discharged, citing ADR-0032; decision 17
       ("a read never takes the bond lock") amended.
-- [ ] Spec: dated amendments at §3.1, §5.2, §5.4, §5.5, §6.3, §9, §12.4.
-- [ ] The KDoc sweep (thirty stale statements, listed by the review with file and line).
-- [ ] `README.md` and `CLAUDE.md` name `common:events`. Learning-log entry.
-- [ ] Commit `docs: ADR-0032, and the spec says what C2 built`.
+- [x] Spec: dated amendments at §3.1, §5.2, §5.4, §5.5, §6.3, §9, §12.4.
+- [x] The KDoc sweep (thirty stale statements, listed by the review with file and line).
+- [x] `README.md` and `CLAUDE.md` name `common:events`. Learning-log entry.
+- [x] Commit `docs: ADR-0032, and the spec says what C2 built`.
 
 ### Task 8: the pull request
 

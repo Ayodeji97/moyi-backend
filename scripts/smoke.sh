@@ -22,7 +22,7 @@
 # reveal on the wire: an edit before it, both members reading each other after
 # it, ENTRY_IMMUTABLE, the tombstone a delete leaves, a replay of a deleted
 # entry, and a timed bond waiting in PENDING_REVEAL. Last run on 2026-10-05, on
-# the jar built from 1cd8864, against a database of its own (MOYI_DB, below):
+# the jar built from 421d811, against a database of its own (MOYI_DB, below):
 # 389 passed, 0 failed. A later commit is unproven until it is run again.
 #
 # If the application refuses to start on a Flyway checksum mismatch: V11, V12
