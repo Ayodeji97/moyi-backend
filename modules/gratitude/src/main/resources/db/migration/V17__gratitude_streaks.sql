@@ -50,7 +50,8 @@ CREATE TABLE streak_events (
 --                    again, because evaluation can change the status (a
 --                    missed day that spends a freeze becomes FROZEN) and
 --                    because "after the end" is in no status at all.
---   evaluated_strict whether the bond was in Strict mode at that moment.
+--   evaluated_strict whether the bond was in Strict mode as the day ended
+--                    (not when it was evaluated: FR-073).
 --   freeze_applied   whether this day spent a banked freeze.
 ALTER TABLE bond_days
     ADD COLUMN evaluated_at     timestamptz,

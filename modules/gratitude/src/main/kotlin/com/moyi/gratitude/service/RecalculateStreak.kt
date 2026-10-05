@@ -48,6 +48,11 @@ internal class RecalculateStreak(
         checkNotNull(
             transactions.execute {
                 val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
+                // Taking the lock makes a streak row. An id with no row and
+                // no evaluated day has no streak to rebuild, and is given none.
+                if (streaks.find(bondId) == null && streaks.evaluatedDays(bondId).isEmpty()) {
+                    return@execute Recalculated(StreakState.NONE, StreakState.NONE)
+                }
                 val before = streaks.lock(bondId, now)
                 val after =
                     streaks.evaluatedDays(bondId).fold(StreakState.NONE) { state, day ->

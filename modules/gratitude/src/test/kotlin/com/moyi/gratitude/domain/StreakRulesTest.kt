@@ -148,6 +148,14 @@ internal class StreakRulesTest {
     }
 
     @Test
+    fun `a stepped-over date does not start a run from nothing`() {
+        val skipped = StreakRules.step(StreakState.NONE, start, DayOutcome.FROZEN_BY_SKIP, strict = false)
+
+        skipped.change shouldBe StreakChange.NONE
+        skipped.state shouldBe StreakState.NONE
+    }
+
+    @Test
     fun `Strict mode never spends a freeze that is banked`() {
         val banked = after(*complete(14))
 

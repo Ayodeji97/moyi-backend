@@ -239,6 +239,28 @@ internal class StreakEvaluationTest(
         ) shouldBe true
     }
 
+    /**
+     * What one "last changed at" could not hold: off and on again, both
+     * after the day ended and before the job ran. The last change alone says
+     * "it was not strict before this"; the day ended in Strict mode.
+     */
+    @Test
+    fun `switching Strict mode off and on again after a day ended does not rescue the day`() {
+        (1..14).forEach { bothWriteOn(it) }
+        closeThrough(14)
+        clock.set(at(15))
+        strictMode(true)
+        clock.set(Instant.parse("${day(16)}T01:00:00Z"))
+        strictMode(false)
+        clock.set(Instant.parse("${day(16)}T01:00:05Z"))
+        strictMode(true)
+
+        closer.closeElapsedDays(Instant.parse("${day(16)}T02:00:00Z"), BUDGET).failed shouldBe 0
+
+        decisions().last() shouldBe Decision(day(15), "EMPTY", "MISSED", freeze = false)
+        streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(0, 1, 0) }
+    }
+
     @Test
     fun `a freeze is not spent on a day missed with no run to save`() {
         closeThrough(0)

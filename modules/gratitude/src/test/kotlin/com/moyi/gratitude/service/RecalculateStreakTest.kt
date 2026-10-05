@@ -172,11 +172,13 @@ internal class RecalculateStreakTest(
     }
 
     @Test
-    fun `a bond none of whose days has been evaluated recalculates to nothing`() {
+    fun `a bond none of whose days has been evaluated recalculates to nothing, and is given no row`() {
         val result = recalculate.recalculate(UUID.fromString(bond))
 
         result.changed shouldBe false
-        state()["current_streak"] shouldBe 0
+        // Nor is an id that is no bond at all: recalculating must not be a way to make streak rows.
+        recalculate.recalculate(UUID.randomUUID()).changed shouldBe false
+        jdbc.queryForObject("SELECT count(*) FROM streak_states", Int::class.java) shouldBe 0
     }
 
     private fun state(): Map<String, Any?> =

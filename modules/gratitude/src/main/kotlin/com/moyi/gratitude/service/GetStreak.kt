@@ -66,7 +66,12 @@ internal class GetStreak(
         // off the end of a window that follows the clock.
         val last = membership.endedAt?.let(membership.anchorTimeline::dateAt)?.takeIf { it.isBefore(today) } ?: today
         val from = maxOf(last.minusDays(CALENDAR_DAYS - 1), joiningDate(membership) ?: last.plusDays(1))
-        val days = calendar.between(membership.bondId, from, last, today)
+        val stored = calendar.between(membership.bondId, from, last, today)
+        // Today has a row only once somebody has written. Drawn only then,
+        // the square's presence would say that somebody has; so a bond two
+        // people can write in always has today's square, and it says OPEN.
+        val unwritten = last == today && !from.isAfter(today) && membership.isOpen && stored.lastOrNull()?.date != today
+        val days = if (unwritten) stored + StreakDay(today, StreakCell.OPEN) else stored
         val todayComplete = days.lastOrNull()?.takeIf { it.date == today }?.cell == StreakCell.COMPLETE
         return StreakDetail(view(membership, today, todayComplete), days)
     }

@@ -85,13 +85,13 @@ internal class StreakEndpointTest(
     }
 
     @Test
-    fun `a bond nobody has written in has a streak of nothing, and an empty calendar`() {
+    fun `a bond nobody has written in has a streak of nothing, and a calendar of today, open`() {
         val streak = streak(ada)
 
         streak.numbers() shouldBe Numbers(current = 0, longest = 0, freezes = 0, progress = 0, total = 0)
         streak["strictMode"].asBoolean() shouldBe false
         streak["lastCompleteDate"].isNull shouldBe true
-        streak["days"].size() shouldBe 0
+        calendar(ada) shouldBe listOf("${day(0)} OPEN")
         today(ada)["streak"].toString() shouldBe """{"current":0,"longest":0,"freezesAvailable":0,"strictMode":false}"""
     }
 
@@ -180,6 +180,34 @@ internal class StreakEndpointTest(
         calendar(bea).last() shouldBe "${day(3)} COMPLETE"
     }
 
+    /**
+     * Today has a row only once somebody has written. Were its square drawn
+     * only then, the square itself would tell a member who has not written
+     * that the other has.
+     */
+    @Test
+    fun `today is on the calendar and OPEN whether or not anybody has written`() {
+        bothWriteOn(1)
+        closeThrough(1)
+        clock.set(at(2))
+        val nobodyHasWritten = calendar(ada)
+
+        submit(bea)
+
+        nobodyHasWritten.last() shouldBe "${day(2)} OPEN"
+        calendar(ada) shouldBe nobodyHasWritten
+    }
+
+    @Test
+    fun `a bond that ended today has no open square, for nobody can write in it`() {
+        bothWriteOn(1)
+        closeThrough(1)
+        clock.set(at(2))
+        leave(bea)
+
+        calendar(ada).last() shouldBe "${day(1)} COMPLETE"
+    }
+
     @Test
     fun `a day a freeze covered is a rest day on the calendar, whoever wrote on it`() {
         (1..14).forEach { bothWriteOn(it) }
@@ -189,7 +217,7 @@ internal class StreakEndpointTest(
         clock.set(at(17))
 
         // Day 15, one entry, covered by the freeze; day 16, none, and nothing left to cover it.
-        calendar(bea).takeLast(3) shouldBe listOf("${day(14)} COMPLETE", "${day(15)} FROZEN", "${day(16)} MISSED")
+        calendar(bea).takeLast(4) shouldBe listOf("${day(14)} COMPLETE", "${day(15)} FROZEN", "${day(16)} MISSED", "${day(17)} OPEN")
     }
 
     /** FR-072, as the couple sees it: the fourteenth day shows the freeze it earned beside the fourteen, not at midnight. */
@@ -276,10 +304,10 @@ internal class StreakEndpointTest(
 
         val days = streak(ada)["days"]
 
-        // Today has no row yet, so the newest square is yesterday and the oldest is 370 days before today.
+        // 53 weeks of squares, today's included: the oldest is 370 days before today.
         days.first()["date"].asString() shouldBe day(400).minusDays(370).toString()
-        days.last()["date"].asString() shouldBe day(399).toString()
-        days.size() shouldBe 370
+        days.last()["date"].asString() shouldBe day(400).toString()
+        days.size() shouldBe 371
     }
 
     // --- what the payload says, and to whom ---

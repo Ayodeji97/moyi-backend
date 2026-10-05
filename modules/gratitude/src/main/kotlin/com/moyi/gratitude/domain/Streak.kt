@@ -60,10 +60,11 @@ internal enum class DayOutcome {
     SUSPENDED,
 
     /**
-     * A day that ended after its bond had stopped taking writes (doc 04
+     * A day **missed** after its bond had stopped taking writes (doc 04
      * §8.3): "the streak freezes rather than breaks — it is preserved at its
-     * value". Whatever the day's status, it moves nothing. Decided by the
-     * evaluation, which knows when the bond ended; no status says it.
+     * value". It moves nothing. Only a missed day: one both wrote on before
+     * the bond ended that day is [COMPLETE]. Decided by the evaluation,
+     * which knows when the bond ended; no status says it.
      */
     AFTER_THE_END,
     ;
@@ -148,7 +149,7 @@ internal enum class StreakChange {
     /** A missed day with nothing to cover it, on a run that was not already zero. */
     BROKEN,
 
-    /** Nothing moved: a suspended day, or a missed day on a run already at zero. */
+    /** Nothing moved: a suspended day, a day missed after the end, or a missed or stepped-over day on a run already at zero. */
     NONE,
 }
 
@@ -171,7 +172,7 @@ internal data class Evaluation(
  *
  * **Freezes accrue incrementally and this is not a formula (BR-5).** The
  * fourteenth complete day resets progress, and banks a freeze only if Strict
- * mode is off *at that evaluation* and fewer than [MAX_FREEZES] are banked.
+ * mode was off *as that day ended* and fewer than [MAX_FREEZES] are banked.
  * `floor(totalCompleteDays / 14) - freezesConsumed` would hand a couple the
  * freezes for every fortnight they spent in Strict mode the moment they
  * switched it off, and FR-073 says toggling Strict mode never alters a past
@@ -182,8 +183,8 @@ internal object StreakRules {
     const val MAX_FREEZES = 2
 
     /**
-     * @param strict whether the bond was in Strict mode when this day was
-     * evaluated — the stored value on a replay, never today's setting
+     * @param strict whether the bond was in Strict mode as this day ended —
+     * the stored value on a replay, never the setting at the time of asking
      * @param recordedFreeze `null` to decide whether a missed day spends a
      * freeze; the decision already made, when replaying (FR-074). A replay
      * that is told a freeze was spent spends one whatever [strict] now says.
@@ -209,8 +210,14 @@ internal object StreakRules {
                 complete(state, date, strict)
             }
 
+            // A rest day keeps a run going; it does not start one. From zero
+            // it would be a streak of one with no day anybody wrote on.
             DayOutcome.FROZEN_BY_SKIP -> {
-                Evaluation(extended(state), freezeApplied = false, StreakChange.EXTENDED, freezeBanked = false)
+                if (state.current > 0) {
+                    Evaluation(extended(state), freezeApplied = false, StreakChange.EXTENDED, freezeBanked = false)
+                } else {
+                    Evaluation(state, freezeApplied = false, StreakChange.NONE, freezeBanked = false)
+                }
             }
 
             DayOutcome.MISSED -> {
