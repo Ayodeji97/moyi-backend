@@ -108,14 +108,14 @@ interface BondAccess {
     fun bondsToSweep(after: UUID?, limit: Int): List<UUID>       // paired at some time; keyset by id
 }
 ```
-- [ ] Test: `closingViewOf` for a pending, an active, an archived and an unknown bond;
+- [x] Test: `closingViewOf` for a pending, an active, an archived and an unknown bond;
       `activeSince` is the second member's `joined_at`; the timeline answers `dayBoundsAt`.
-- [ ] Test: `bondsToSweep` pages every bond that ever had two members, in id order, and
+- [x] Test: `bondsToSweep` pages every bond that ever had two members, in id order, and
       never returns a bond that is still `PENDING_MEMBER`.
-- [ ] Architecture: the port has no `userId`, so document on it that it is for the system's
+- [x] Architecture: the port has no `userId`, so document on it that it is for the system's
       own jobs and must never be reachable from a controller; add a Konsist rule that only
       `gratitude.service` and `scheduling` may call it.
-- [ ] Implement; `./gradlew :modules:bond:check`; commit `feat(bond): a closer-facing view`.
+- [x] Implement; `./gradlew :modules:bond:check`; commit `feat(bond): a closer-facing view`.
 
 ### Task 2: the close, as transitions on `BondDay`
 
@@ -126,14 +126,14 @@ interface BondAccess {
 ```kotlin
 fun close(now: Instant): BondDay   // caller has already proved the day elapsed by the timeline
 ```
-- [ ] Tests, one per row: `OPEN → EMPTY`; `PARTIAL(1) → SOLO`; `PENDING_REVEAL → REVEALED`
+- [x] Tests, one per row: `OPEN → EMPTY`; `PARTIAL(1) → SOLO`; `PENDING_REVEAL → REVEALED`
       with `revealedAt = now` if unset; `SUSPENDED → SUSPENDED` with `closedAt`; an already
       settled day returns itself; `closedAt` is truncated to microseconds; a `PARTIAL(2)`
       day is refused (`check`) — it can only exist in memory.
-- [ ] `resumeJoiningDay` returns `this` when `closedAt != null`; test.
-- [ ] `revealWhenDue` on a `PENDING_REVEAL` day past its time (exists; add the test that it
+- [x] `resumeJoiningDay` returns `this` when `closedAt != null`; test.
+- [x] `revealWhenDue` on a `PENDING_REVEAL` day past its time (exists; add the test that it
       is what the sweep calls, with a day whose time passed *yesterday*).
-- [ ] Commit `feat(gratitude): closing a day, as the aggregate decides it`.
+- [x] Commit `feat(gratitude): closing a day, as the aggregate decides it`.
 
 ### Task 3: `CloseDay` — one day, one transaction, one lock
 
@@ -156,20 +156,24 @@ Order inside the transaction, and why each step is where it is:
    rules the synchronous path uses.
 5. If `now < endsAt` → persist what changed, `NOT_YET` (or `REVEALED`).
 6. `close(now)`; for `SOLO`, stamp the lone live entry's `revealed_at` (fresh read);
-   publish `DayClosed {bondId, status}`; persist.
+   publish `DayClosed {bondId}` (ids only; none for a `SUSPENDED` day); persist.
 
-- [ ] Tests (HTTP to build state, then `CloseDay` directly with a moved clock): each
+*As built:* the outcome for a closed day is `ALREADY_CLOSED`. One branch has no test: a day
+that reaches its end still `PENDING_REVEAL` with a reveal time later than that end, which
+only a day cut short by an eastward zone change can produce. Task 8's matrix owes it.
+
+- [x] Tests (HTTP to build state, then `CloseDay` directly with a moved clock): each
       transition; `SOLO` makes the lone entry readable by the partner through
       `GET /bonds/{id}/days`-less means — assert `revealed_at` and `canBeReadBy`; an `EMPTY`
       day; a joining day with zero, one and two entries; a pre-pairing `SUSPENDED` day gets
       `closedAt`, keeps its status, reveals nothing; a day extended westward is `NOT_YET` at
       its old midnight and `CLOSED` after the new one; a `PENDING_REVEAL` day before and
       after its time; run twice → second is `ALREADY_SETTLED`, one `DayClosed`.
-- [ ] Privacy: a probe CHECK violated by the closing `UPDATE` — neither member's words in
+- [x] Privacy: a probe CHECK violated by the closing `UPDATE` — neither member's words in
       output; the redaction is applied here too.
-- [ ] Mutations: skip step 3 (the westward test goes red); skip step 4's resume (the
+- [x] Mutations: skip step 3 (the westward test goes red); skip step 4's resume (the
       joining tests go red); drop the entry stamp in step 6.
-- [ ] Commit `feat(gratitude): CloseDay settles one day under its own lock`.
+- [x] Commit `feat(gratitude): CloseDay settles one day under its own lock`.
 
 ### Task 4: the closer against a live submission
 
