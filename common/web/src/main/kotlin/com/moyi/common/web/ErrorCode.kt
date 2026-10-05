@@ -225,6 +225,9 @@ enum class ErrorCode {
      */
     ENTRY_ALREADY_EXISTS,
 
+    /** BR-7: revealed content cannot be edited. */
+    ENTRY_IMMUTABLE,
+
     /**
      * `POST /bonds/{bondId}/entries` for a day that has already closed
      * (BR-10). 409: the day this entry would have landed on is no longer

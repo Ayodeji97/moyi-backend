@@ -34,15 +34,18 @@ import javax.sql.DataSource
 /**
  * FR-060's acceptance clause. A failure here is a P0 (doc 11).
  *
- * **The whole of BR-1 is asserted here, not only what C1's own writes can
- * produce.** C1 opens days `OPEN` or `SUSPENDED`, moves them to `PARTIAL`,
- * and sets `revealed_at` and `deleted_at` nowhere — C2 reveals, C3 closes,
- * a later slice erases. The gate is nonetheless written for the rule as the
- * spec states it (§4), so the states those slices will produce are put in
- * place **by hand, with `UPDATE`**, and each test that does so says so: all
- * eight day statuses, a revealed entry, and an erased one in each order of
- * revealing and erasing. C2 and C3 replace the hand-made states with their
- * own transitions; neither may narrow what is asserted.
+ * **The whole of BR-1 is asserted here, not only the states a request can
+ * reach.** The gate is written for the rule as the spec states it (§4), so
+ * the states under test are put in place **by hand, with `UPDATE`**, and
+ * each test that does so says so: all eight day statuses, a revealed entry,
+ * and an erased one in each order of revealing and erasing. That is on
+ * purpose, although a second submission now reveals a day and a `DELETE`
+ * erases an entry: some of these states — a `FROZEN` or `SOLO` day, an
+ * erasure carrying only one of its two marks — are ones no request
+ * produces, and the gate has to hold against them all the same.
+ * `RevealTest` drives the real transitions through the API; this class
+ * holds the gate, and nothing that adds a transition may narrow what is
+ * asserted here.
  *
  * `EntriesEndpointTest`'s own harness — a paired bond (`ada` and `bea`)
  * through the real `bond` endpoints [GratitudeTestApplication] scans for,
@@ -69,17 +72,20 @@ internal class RevealGateTest(
 
     @BeforeEach
     fun setUp() {
-        clock.set(NOW)
+        // Keep the synthetic status matrix separate from joining-day reconciliation.
+        clock.set(NOW.minusSeconds(86_400))
         ada = users.verified("Ada")
         bea = users.verified("Bea")
 
         val created = createBond(ada)
         bondId = bondIdOf(created)
         accept(bea, codeOf(created)).status shouldBe 200
+        clock.set(NOW)
     }
 
     @AfterEach
     fun clear() {
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
         jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
@@ -135,9 +141,9 @@ internal class RevealGateTest(
         // in full), so a naive `bondId`-keyed cache that served that same
         // response back to `ada` would leak exactly what test 1 above
         // proves the reveal gate refuses her — a failure test 1 alone would
-        // never catch, since it never primes anything. C1 caches nothing;
-        // this test is what makes adding one later a deliberate act rather
-        // than an accident.
+        // never catch, since it never primes anything. Nothing is cached
+        // today; this test is what makes adding a cache later a deliberate
+        // act rather than an accident.
         submit(bea, bondId, """{"text":"a secret kindness"}""").status shouldBe 201
         getToday(bea, bondId).status shouldBe 200
 
@@ -196,11 +202,12 @@ internal class RevealGateTest(
 
     // ---- BR-1 keyed on the entry's own reveal (spec §4, as revised) ------
     //
-    // C1 has no reveal and no close: C2 sets `entries.revealed_at`, C3 closes
-    // a day. Every test below therefore puts the row into the state under
-    // test BY HAND, with `UPDATE`, and says so — standing in for the slice
-    // that will produce it. What is under test is the gate, not the
-    // transition.
+    // Every test below puts the row into the state under test BY HAND, with
+    // `UPDATE`, and says so. The reveal exists — the second submission makes
+    // it, and `RevealTest` drives it through the API — but what is under
+    // test here is the gate, not the transition, and the gate has to hold
+    // against states no request can reach (a `FROZEN` or `SOLO` day, say),
+    // which only an `UPDATE` can put in place.
     //
     // Each test states what a broken gate would answer. The partner's entry
     // is always PRESENT in these responses — locked or in full, never
@@ -233,8 +240,9 @@ internal class RevealGateTest(
 
     @Test
     fun `the caller having written too does not reveal the partner's entry, under any day status`() {
-        // The ordinary C1 state: both have written, nothing has been revealed
-        // (C2 owns the reveal). A gate that reveals once both entries exist —
+        // A reveal time that has not come yet: nothing submitted below is revealed by its own submission.
+        jdbc.update("UPDATE bonds SET reveal_time_local = '23:59:59' WHERE id = ?::uuid", bondId)
+        // Both have written, but the configured reveal time has not arrived. A gate that reveals once both entries exist —
         // keyed on the day's entry count, say — answers Bea's entry in full
         // here, and both the exact-shape and the body-wide assertion see it.
         val beaMemberId = authorMemberIdOf(submit(bea, bondId, """{"text":"a secret kindness"}""").also { it.status shouldBe 201 })
@@ -315,6 +323,8 @@ internal class RevealGateTest(
 
     @Test
     fun `a partner who never could read a withdrawn entry sees its author and that it is gone, and nothing else`() {
+        // A reveal time that has not come yet: nothing submitted below is revealed by its own submission.
+        jdbc.update("UPDATE bonds SET reveal_time_local = '23:59:59' WHERE id = ?::uuid", bondId)
         // BR-8: while the entry was live this reader was entitled to author
         // and status. An erasure does not entitle them to more — not the id,
         // not when it was written. A gate that answers the wide tombstone
@@ -458,7 +468,7 @@ internal class RevealGateTest(
 
     // ---- helpers --------------------------------------------------------
 
-    /** C2's reveal, by hand: the entry's own timestamp and status, nothing else. */
+    /** What the reveal does to an entry, by hand: its own timestamp and status, nothing else. */
     private fun revealByHand(author: UUID) {
         jdbc.update(
             "UPDATE entries SET revealed_at = now(), status = 'REVEALED' WHERE author_member_id = ?::uuid",
@@ -477,7 +487,7 @@ internal class RevealGateTest(
         jdbc.update("UPDATE bond_days SET entry_count = entry_count - ? WHERE bond_id = ?::uuid", removed, bondId)
     }
 
-    /** C2's and C3's day transitions, by hand: the status, and `closed_at` exactly where that status is a closed one. */
+    /** A day's status, by hand — reachable by a request or not: the status, and `closed_at` exactly where that status is a closed one. */
     private fun setDayByHand(status: String) {
         val closed = status in setOf("REVEALED", "SOLO", "EMPTY", "FROZEN")
         jdbc.update(
@@ -566,10 +576,11 @@ internal class RevealGateTest(
         val DAY_STATUSES = listOf("OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN")
 
         /**
-         * Every way a row can say it was erased, by hand (nothing in C1
-         * erases). The text is left in place in each, so only the gate
-         * stands between it and the wire. The first three were never
-         * revealed; the last two were revealed first.
+         * Every way a row can say it was erased, by hand. A real erasure
+         * sets both marks and removes the text; these include the rows
+         * with one mark only, and the text is left in place in each, so only
+         * the gate stands between it and the wire. The first three were
+         * never revealed; the last two were revealed first.
          */
         val ERASED_STATES =
             listOf(

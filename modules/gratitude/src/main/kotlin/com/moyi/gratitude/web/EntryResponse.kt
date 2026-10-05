@@ -8,7 +8,8 @@ import java.time.LocalDate
 import java.util.UUID
 
 /**
- * `201` from `POST /bonds/{bondId}/entries`, and — from `GET /bonds/{bondId}/today`
+ * `201` from `POST /bonds/{bondId}/entries`, `200` from
+ * `PATCH /entries/{entryId}`, and — from `GET /bonds/{bondId}/today`
  * — any entry [com.moyi.gratitude.domain.Entry.canBeReadBy] grants the caller:
  * their own, and a partner's once it has been revealed (BR-1 keys on the
  * entry's own `revealedAt`, spec §4). Echoing [text] back to its own author
@@ -29,11 +30,12 @@ import java.util.UUID
  * row still holds some. **This wide tombstone is only for a reader who could
  * read the entry before it was erased** — its author, or a partner it had
  * been revealed to. A partner it was never revealed to gets
- * [ErasedEntryResponse], which has no id and no timestamps to give. Nothing in this slice erases an entry, but a response
- * must already be able to say so: an `Idempotency-Key` replay of
- * `POST /entries` re-reads the entry as it is *now* (spec §5.4), and after an
- * erasure there are no words to return — never the ones the first response
- * carried.
+ * [ErasedEntryResponse], which has no id and no timestamps to give.
+ * `DELETE /entries/{entryId}` is what erases an entry, and every response
+ * that renders one afterwards says so: `GET /today`, and an
+ * `Idempotency-Key` replay of `POST /entries` or `PATCH /entries/{entryId}`,
+ * which re-reads the entry as it is *now* (spec §5.4) — after an erasure
+ * there are no words to return, never the ones the first response carried.
  *
  * [date] is the Bond-day's own date — the one [com.moyi.gratitude.domain.DayAssignment]
  * resolved, which may differ from a UTC reading of [createdAt] on either

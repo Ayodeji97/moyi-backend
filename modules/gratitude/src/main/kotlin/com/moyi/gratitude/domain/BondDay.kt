@@ -2,14 +2,14 @@ package com.moyi.gratitude.domain
 
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
  * Doc 04 §3's state machine for a Bond-day, all **eight** values — even
- * though this slice (C1) only ever writes three of them ([OPEN], [PARTIAL]
- * and [SUSPENDED]).
+ * though later slices own closing and streak settlement.
  *
  * Doc 07's own DDL lists five and is stale (Phase 3 design §12.1): it is
  * missing [PENDING_REVEAL] (FR-062, the window between both entries arriving
@@ -80,13 +80,9 @@ internal enum class BondDayStatus(
  * what they were called with; nothing on this aggregate ever reads either
  * back off the bond.
  *
- * **This slice deliberately produces no reveal.** A day with two entries
- * stays [BondDayStatus.PARTIAL] — see [withEntry] — and the transition to
- * [BondDayStatus.REVEALED] belongs to the next slice, because it needs a row
- * lock and a concurrency test, neither of which belongs in a pure aggregate
- * with no store to lock through. Read the absence of a `reveal()` method
- * here as that decision, not as an oversight: `BondDayTest` asserts the
- * second entry does *not* reveal the day, on purpose.
+ * Counting an accepted entry ([withEntry]) is separate from evaluating the
+ * reveal ([revealWhenDue]). The service persists that transition, both entry
+ * timestamps and the outbox event in one transaction under this day's lock.
  */
 internal data class BondDay(
     val id: BondDayId,
@@ -134,63 +130,67 @@ internal data class BondDay(
     val isSettled: Boolean get() = closedAt != null || status.isClosed
 
     /**
-     * One more entry has arrived (doc 04 §3) — the day row's own reaction to
-     * what BR-2's unique index on `entries` just allowed through.
-     *
-     * **A [BondDayStatus.SUSPENDED] day stays [BondDayStatus.SUSPENDED].**
-     * The creator may write before their partner joins (`02` J1), and that
-     * write has to land somewhere (spec §12.4), but doc 04 §8.3a excludes a
-     * suspended day from evaluation altogether — so an entry landing on one
-     * changes [entryCount] and changes nothing else about it. [SUSPENDED] is
-     * its own mechanism, not [BondDayStatus.OPEN] under a different name:
-     * the close job (C3) and the streak walk both skip it by status, and
-     * flipping the status here would put it back in their path.
-     *
-     * **Nothing in this codebase ever moves a day out of [BondDayStatus.SUSPENDED]
-     * once opened — that is the next slice's explicit obligation, not
-     * something this method defers by accident** (F4, whole-branch review;
-     * see ADR-0031 §4's own amendment). Walk the scenario this leaves open:
-     * Ada creates a bond and writes on day D — [BondDay.openSuspended] opens
-     * it [SUSPENDED]. Bea accepts the invite later the same day and writes
-     * too — [withEntry] runs *again*, on the same row, and this clause keeps
-     * it [SUSPENDED] rather than promoting it to [BondDayStatus.PARTIAL] the
-     * way an ordinary day's second entry does. The row now has `entry_count
-     * = 2` and `status = SUSPENDED` — both entries present, the bond no
-     * longer awaiting a second member — and nothing ever writes that status
-     * again: the reveal C2 adds looks for [BondDayStatus.PARTIAL] or
-     * [BondDayStatus.PENDING_REVEAL], and C3's close job excludes
-     * [SUSPENDED] from its own partial index (`bond_days_open_idx`,
-     * V12) by design, precisely because a genuinely-still-suspended day must
-     * not be swept into a close it does not qualify for. **Whichever slice
-     * next reads or writes this status has to add the transition that
-     * un-suspends a day once its bond stops awaiting a second member.**
-     * It cannot happen "the moment the second member's membership is
-     * created", as this note once suggested: that moment is in `bond`, and
-     * `bond` cannot write `bond_days` — `gratitude` depends on `bond`, never
-     * the reverse. Spec §12.4 says where it does happen: **the first
-     * gratitude operation or close sweep on the joining day reconciles the
-     * row** under the bond and day locks — zero entries becomes
-     * [BondDayStatus.OPEN], one [BondDayStatus.PARTIAL], two follow the
-     * reveal rule — using the bond's activation instant
-     * (`BondMembership.activeSince`) to tell the joining day from earlier
-     * suspended days, which stay private. That is C2's (ADR-0031, Owed).
-     * Miss it, and the couple's first shared day — the one this whole slice
-     * exists to let them write on together — never reveals, and both of
-     * their first entries stay locked to each other permanently. This method
-     * is deliberately left doing nothing about that: inventing the
-     * transition here, without the reveal's own state machine in view, risks
-     * building the wrong one.
-     *
-     * **Every other day becomes [BondDayStatus.PARTIAL], including on the
-     * second entry.** C1 has no reveal — see the class doc — so there is no
-     * third value this could become yet; the second call is left honest
-     * about [entryCount] and wrong about nothing else.
+     * Counts the insert BR-2 accepted. Suspended days remain excluded until
+     * [resumeJoiningDay] proves activation occurred in their span. The caller
+     * follows this with [revealWhenDue] in the same locked transaction: a
+     * two-entry PARTIAL value is only an intermediate calculation, never a
+     * committed status.
      */
     fun withEntry(): BondDay =
         copy(
             entryCount = entryCount + 1,
             status = if (status == BondDayStatus.SUSPENDED) BondDayStatus.SUSPENDED else BondDayStatus.PARTIAL,
         )
+
+    /** A pre-reveal deletion changes the live count; settled history is authoritative (BR-10). */
+    fun withoutEntry(): BondDay =
+        if (isSettled) {
+            this
+        } else {
+            copy(
+                entryCount = entryCount - 1,
+                status =
+                    when {
+                        status == BondDayStatus.SUSPENDED -> status
+                        entryCount == 1 -> BondDayStatus.OPEN
+                        else -> BondDayStatus.PARTIAL
+                    },
+            )
+        }
+
+    /**
+     * FR-062: two live entries wait in their own status until the configured
+     * local time on this day's snapshot calendar. Java's zone resolution moves
+     * a gap forward and chooses the earlier offset in an overlap. Comparing
+     * instants also handles an elapsed joining day and a westward extended day.
+     * The caller holds the day lock and persists both entries in this transaction.
+     */
+    fun revealWhenDue(
+        revealTime: LocalTime?,
+        now: Instant,
+    ): BondDay {
+        if (entryCount != MAX_ENTRIES || status !in setOf(BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL)) return this
+        val due = revealTime?.let { date.atTime(it).atZone(anchorTimezone).toInstant() }
+        return if (due != null && now.isBefore(due)) {
+            copy(status = BondDayStatus.PENDING_REVEAL)
+        } else {
+            copy(status = BondDayStatus.REVEALED, revealedAt = revealedAt ?: now.truncatedTo(ChronoUnit.MICROS))
+        }
+    }
+
+    /**
+     * Spec §12.4: only the suspended day containing the recorded activation
+     * resumes. Older private days stay private; elapsed joining days still
+     * resume. The caller reconciles the timeline span before asking this rule.
+     */
+    fun resumeJoiningDay(activeSince: Instant?): BondDay {
+        val joining = activeSince != null && !activeSince.isBefore(startsAt) && activeSince.isBefore(endsAt)
+        return if (status == BondDayStatus.SUSPENDED && joining) {
+            copy(status = if (entryCount == 0) BondDayStatus.OPEN else BondDayStatus.PARTIAL)
+        } else {
+            this
+        }
+    }
 
     /**
      * This day with its span brought up to what the bond's calendar now says
@@ -216,12 +216,15 @@ internal data class BondDay(
      * Instants are compared and kept at microsecond precision, `timestamptz`'s
      * own, so a row read back equals the one written.
      *
-     * **Called under the day's lock, by a write** (`SubmitEntry`), before the
-     * entry is inserted. `GET /today` is a read and extends nothing, so a row
-     * opened before a change and never written to again keeps its shorter
-     * span until C3's close job reconciles it from the timeline. That is the
-     * accepted limit: until then the timeline, not this column, says when
-     * such a day ends.
+     * **Called under the day's lock, in two places.** `SubmitEntry` calls it
+     * for the day an entry is about to be filed on, before the insert.
+     * `ReconcileJoiningDay` calls it for a couple's joining day while that
+     * day is still `SUSPENDED` — and that one runs ahead of reads as well as
+     * writes, so it is the single case in which `GET /today` extends a day.
+     * Any other row opened before a change and never written to again keeps
+     * its shorter span until C3's close job reconciles it from the timeline.
+     * That is the accepted limit: until then the timeline, not this column,
+     * says when such a day ends.
      *
      * **An obligation on every writer that opens a row without going through
      * `SubmitEntry`** — C3's close job above all (ADR-0031, Owed): take the

@@ -2,10 +2,14 @@ package com.moyi.gratitude.web
 
 import com.moyi.bond.api.BondAccess
 import com.moyi.common.security.CurrentUser
+import com.moyi.common.security.ratelimit.RateLimitBucket
+import com.moyi.common.security.ratelimit.RateLimited
 import com.moyi.common.web.NotFoundException
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.common.web.idempotency.Idempotent
+import com.moyi.gratitude.service.EntryNotFoundException
 import com.moyi.gratitude.service.GetToday
+import com.moyi.gratitude.service.ReconcileJoiningDay
 import com.moyi.gratitude.service.SubmitEntry
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
@@ -43,6 +47,12 @@ import java.util.UUID
  * not depend on the bond existing, which is why `BondsController.patchBond`
  * accepts the same ordering for its own `@Valid` body.
  *
+ * **[today] is a read that may write first.** After the guard and before the
+ * read it calls `ReconcileJoiningDay.beforeRead`, which does nothing unless
+ * the couple's joining day is still `SUSPENDED`; then it takes the bond's row
+ * lock, in a transaction of its own, and takes that day out of `SUSPENDED`
+ * (spec §12.4) — so what `GetToday` goes on to read is the day as resumed.
+ *
  * The id is taken as text and parsed here, not as a `UUID` path variable —
  * `BondsController`'s own reasoning: a value that is not a UUID cannot name
  * a bond, and the answer is the same `404` as a UUID that names nobody's.
@@ -61,6 +71,7 @@ internal class EntriesController(
     private val access: BondAccess,
     private val submitEntry: SubmitEntry,
     private val getToday: GetToday,
+    private val joining: ReconcileJoiningDay,
 ) {
     // @ResponseStatus and the ResponseEntity below both set 201 — redundant
     // at runtime (the entity's own status wins), load-bearing for springdoc:
@@ -69,6 +80,7 @@ internal class EntriesController(
     // own KDoc has the fuller account, including the test that holds both
     // in step: OpenApiContractTest's own 201 assertion for this operation).
     @Idempotent
+    @RateLimited(RateLimitBucket.ENTRIES_CREATE_USER)
     @PostMapping("/{bondId}/entries")
     @ResponseStatus(HttpStatus.CREATED)
     fun submitEntry(
@@ -94,7 +106,7 @@ internal class EntriesController(
         // response is under the same gate as `today`). An author's own entry
         // is always this shape — in full, or its tombstone — so the 404 is
         // unreachable today, and is what answers if BR-1 ever stops saying so.
-        val body = EntryResponse.from(submission.view) ?: throw NotFoundException("That entry was not found.")
+        val body = EntryResponse.from(submission.view) ?: throw EntryNotFoundException()
         return response.body(body)
     }
 
@@ -113,6 +125,7 @@ internal class EntriesController(
         @PathVariable bondId: String,
     ): TodayResponse {
         val membership = access.membershipOf(caller.id, bondIdOrNotFound(bondId))
+        joining.beforeRead(membership)
         return TodayResponse.from(getToday.today(membership))
     }
 

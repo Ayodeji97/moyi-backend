@@ -83,6 +83,7 @@ internal class SubmitEntryBondLockTest(
     fun clear() {
         // The pool first: a submission still queued must not race the truncate.
         pool.shutdownNow()
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
         jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }

@@ -35,8 +35,16 @@ internal data class TodayView(
  * `GET /bonds/{bondId}/today` (spec §5.1): today's Bond-day, and each side's
  * entry, exactly as BR-1 gates it.
  *
- * **A read never writes.** [DayAssignment.dateFor] resolves which date
- * "today" is, the same function [SubmitEntry] uses — `null` for `intendedAt`
+ * **This query never writes; the request it serves sometimes does, before
+ * it.** [today] is a read-only transaction and stays one.
+ * `EntriesController.today` calls [ReconcileJoiningDay.beforeRead] first,
+ * and that is where the one write is: while the couple's joining day is still
+ * `SUSPENDED`, it takes the bond's row lock in a transaction of its own —
+ * committed before this one opens — resumes that day, moves its `endsAt`
+ * later if the calendar now says so, and puts it through the reveal rule. In
+ * every other case `GET /today` writes nothing and takes no lock.
+ *
+ * [DayAssignment.dateFor] resolves which date "today" is, the same function [SubmitEntry] uses — `null` for `intendedAt`
  * (nobody backdates a read) and `{ false }` for `isSettled` (the lambda only
  * matters for an offline draft's claimed date, and a read makes no claim),
  * against the same effective-zone calendar ([asCalendar]) [SubmitEntry]
@@ -47,8 +55,8 @@ internal data class TodayView(
  * on. A day nobody has written to yet has no row at all, and is reported as
  * whichever status [BondDayStore.openOrGet] *would* open it under —
  * [BondDayStatus.SUSPENDED] while [BondMembership.awaitingSecondMember]
- * (doc 04 §8.3a, the same condition [SubmitEntry] tests before its own
- * `openOrGet` call), [BondDayStatus.OPEN] otherwise — without a row ever
+ * (doc 04 §8.3a — the bond [SubmitEntry] opens today's row `SUSPENDED`
+ * for), [BondDayStatus.OPEN] otherwise — without a row ever
  * being created. Getting this wrong the other way (always reporting `OPEN`)
  * would let the status travel backwards through an edge the state machine
  * does not have: the creator of a still-solo bond writes (J1), `SubmitEntry`
@@ -67,10 +75,9 @@ internal data class TodayView(
  * **Nothing here is cached.** Every call re-reads the row and the entries
  * fresh; the day this returns is only ever as current as the transaction
  * that reads it. A cache in front of this method would have to be reasoned
- * about as a reveal-gate bypass in its own right (doc 12) — deliberately not
- * this slice's problem, and `RevealGateTest`'s own "priming today as one
- * member does not serve it to the other" is what would catch it if one were
- * added carelessly.
+ * about as a reveal-gate bypass in its own right (doc 12). There is none,
+ * and `RevealGateTest`'s own "priming today as one member does not serve it
+ * to the other" is what would catch it if one were added carelessly.
  *
  * **Neither `membership.hasLeft` nor `membership.isOpen` is checked.**
  * [BondMembership]'s own KDoc says, in bold, that a caller must check one of
@@ -103,7 +110,10 @@ internal class GetToday(
         }
 
         val reader = membership.asReader()
-        val entryList = entries.findForDay(day.id)
+        val entryList =
+            entries.findForDay(day.id).sortedWith(
+                compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value },
+            )
         return TodayView(
             date = date,
             status = day.status,

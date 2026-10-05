@@ -26,11 +26,13 @@ import java.time.LocalDate
  * the entry has been revealed, or its tombstone if withdrawn after that),
  * [LockedEntryResponse] (not yet revealed), [ErasedEntryResponse] (withdrawn
  * without ever having been revealed), or `null` when there is no partner
- * entry to report at all. **C1's own writes only ever produce the
- * locked one and the absent one** — C1 sets `revealedAt` nowhere — but
+ * entry to report at all. **All four are reachable through the API**: a
+ * partner's entry is locked until it is revealed, in full after that, and
+ * one tombstone or the other once its author deletes it, depending on which
+ * side of the reveal the delete fell. None of that is decided here —
  * [PartnerEntryResponse.of] renders whatever
  * [com.moyi.gratitude.domain.Entry.canBeReadBy] answered rather than
- * hard-coding "always locked", so C2's reveal needs no change here. Doc 12's
+ * choosing a shape from the day or the entry itself. Doc 12's
  * reveal-gate test proves exactly this: make the gate answer `FULL` always
  * and a partner's entry stops being a [LockedEntryResponse] and becomes a
  * full [EntryResponse] instead — the failure the gate's own test is written

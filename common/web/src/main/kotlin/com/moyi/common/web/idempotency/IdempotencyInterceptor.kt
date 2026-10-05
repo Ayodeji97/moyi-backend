@@ -28,7 +28,8 @@ import java.util.UUID
  * itself is [IdempotentExecution]'s, inside the handler's own transaction.
  *
  * **What this does, before the handler runs:** for an `@Idempotent` handler,
- * refuses a missing or malformed key (`422`), resolves the verified caller (`401` if
+ * refuses a missing or malformed key (`422`; a missing one is allowed where
+ * the handler says `required = false`, and then nothing is prepared), resolves the verified caller (`401` if
  * there is none), fingerprints the request through [RequestFingerprint] —
  * method, raw path and body — and leaves the result on the request as an
  * [IdempotentRequest], which the handler fetches with [requestOf] and hands to
@@ -91,12 +92,28 @@ class IdempotencyInterceptor(
         response: HttpServletResponse,
         handler: Any,
     ): Boolean {
-        val isIdempotent = (handler as? HandlerMethod)?.getMethodAnnotation(Idempotent::class.java) != null
+        val policy = (handler as? HandlerMethod)?.getMethodAnnotation(Idempotent::class.java)
         // `null` for a request the filter declined — a multipart body. Nothing
         // is prepared for it; the handler's @RequestBody cannot read
         // multipart, and Spring's own 415 is the answer.
-        val replayable = if (isIdempotent) replayableOf(request) else null
-        if (replayable != null) prepare(replayable, request)
+        val replayable = policy?.let { replayableOf(request) }
+        when {
+            policy == null || replayable == null -> {
+                Unit
+            }
+
+            policy.required || request.getHeader(HEADER) != null -> {
+                prepare(replayable, request)
+            }
+
+            else -> {
+                // No key, on a route where that is allowed: nothing to prepare,
+                // but the body is bounded all the same. The limit is the route's;
+                // tied to the header, leaving the key out was a way round it.
+                callerId(request)
+                replayable.buffered(MAX_BODY_BYTES)
+            }
+        }
         return true
     }
 
@@ -201,10 +218,18 @@ class IdempotencyInterceptor(
          * alternative is a handler that believes it is protected and is not.
          */
         fun requestOf(request: HttpServletRequest): IdempotentRequest =
-            checkNotNull(request.getAttribute(REQUEST_ATTRIBUTE) as? IdempotentRequest) {
+            checkNotNull(requestOrNull(request)) {
                 "No Idempotency-Key was prepared for ${request.method} ${request.requestURI}: the handler is not " +
                     "@Idempotent, or IdempotencyInterceptor is not registered (@Import(IdempotencyConfiguration::class))."
             }
+
+        /**
+         * [requestOf] for a handler declared `@Idempotent(required = false)`:
+         * `null` when the caller sent no key. Whether a request is keyed is
+         * decided once, in [preHandle]; a handler asks here rather than
+         * reading the header again and deciding a second time.
+         */
+        fun requestOrNull(request: HttpServletRequest): IdempotentRequest? = request.getAttribute(REQUEST_ATTRIBUTE) as? IdempotentRequest
     }
 }
 

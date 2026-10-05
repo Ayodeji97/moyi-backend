@@ -3,6 +3,7 @@ package com.moyi.gratitude.infra.database
 import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 
 /**
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component
 @Component
 internal class EntryStore(
     private val entries: EntryRepository,
+    private val entityManager: EntityManager,
 ) {
     /**
      * Writes one entry, and flushes it. `entries_one_per_member_per_day`
@@ -34,20 +36,56 @@ internal class EntryStore(
         entries.saveAndFlush(entry.toEntity())
     }
 
+    /** Refresh is necessary because routing loaded this entity before either lock. */
+    fun lockAndFind(id: EntryId): Entry {
+        entries.lockRow(id.value)
+        val entity = checkNotNull(entries.findById(id.value)) { "a locked entry must exist" }
+        entityManager.refresh(entity)
+        return entity.toDomain()
+    }
+
+    /** Updates a managed row while the caller holds its parent day's lock. */
+    fun update(entry: Entry) {
+        val entity = checkNotNull(entries.findById(entry.id.value)) { "cannot update a missing entry" }
+        entity.text = entry.text?.value
+        entity.status = entry.status
+        entity.updatedAt = entry.updatedAt
+        entity.revealedAt = entity.revealedAt ?: entry.revealedAt
+        entity.deletedAt = entry.deletedAt
+        entity.imageMediaId = entry.imageMediaId
+        entity.voiceMediaId = entry.voiceMediaId
+        entity.voiceDurationMs = entry.voiceDurationMs
+        entries.saveAndFlush(entity)
+    }
+
     /**
      * Every entry filed against one day — BR-2 caps this at two, but nothing
      * here assumes it.
      *
-     * **Returns an erased row too** (whole-branch review, F5), and that is
-     * no longer a leak waiting to happen: every entry leaves the service
-     * layer through [Entry.readBy], and BR-1 answers an erased entry as a
-     * tombstone for everyone (ADR-0031 decision 10). What is still owed is
-     * *which* row a caller picks once one author can have two on a day — an
-     * erased one and its replacement. `GetToday` takes the first it finds;
-     * the slice that first sets `deleted_at` must make that choice
-     * deterministic (ADR-0031, Owed, C2).
+     * Includes erased rows for tombstones and replay. GetToday selects live
+     * rows first, then the newest tombstone (createdAt and UUID tie-break), so
+     * withdraw-then-rewrite never lets an unordered row hide the replacement.
      */
     fun findForDay(bondDayId: BondDayId): List<Entry> = entries.findAllByBondDayId(bondDayId.value).map { it.toDomain() }
+
+    /**
+     * [findForDay], with every row read again from the database — for a
+     * caller about to **write** what it reads, under the day's lock.
+     *
+     * [findForDay] answers a row this transaction has already loaded from
+     * Hibernate's identity map, as it stood when it was loaded; and a route
+     * that finds its entry by id loads it before any lock is held. [update]
+     * writes every column from the entry it is given, so a reveal working
+     * from that older copy would write it back over whatever was committed
+     * in between — an edit undone, or erased words restored
+     * (`RevealFreshReadTest`). The same trap, and the same cure, as
+     * [BondDayStore.lockAndFind]'s.
+     */
+    fun findForDayFresh(bondDayId: BondDayId): List<Entry> =
+        entries.findAllByBondDayId(bondDayId.value).map { entity ->
+            entityManager.refresh(entity)
+            entity.toDomain()
+        }
 
     /**
      * One entry by id, **as it stands now** — a tombstone included (its

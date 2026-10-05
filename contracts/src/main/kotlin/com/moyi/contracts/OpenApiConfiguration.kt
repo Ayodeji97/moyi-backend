@@ -64,14 +64,18 @@ import org.springframework.http.HttpStatus
  *   entirely: that a client may leave it out. [CONDITIONAL_OPERATIONS] is the
  *   one list of operations that demand a condition, and it now says so in both
  *   places. Raised by the review of PR #40.
- * - **`Idempotency-Key`, required.** `@Idempotent` (`common:web`) is a marker
- *   annotation on the handler method, not a Spring-visible parameter, so
+ * - **`Idempotency-Key`, required unless the operation says otherwise.**
+ *   `@Idempotent` (`common:web`) is a marker annotation on the handler
+ *   method, not a Spring-visible parameter, so
  *   springdoc has no way to know the header exists at all — unlike `If-Match`,
  *   there is nothing here to correct the optionality of, only a parameter to
  *   add outright. [IDEMPOTENT_OPERATIONS] names the operations that carry
- *   `@Idempotent`, mirroring [CONDITIONAL_OPERATIONS]'s own shape. Fix round
- *   1, C2: found alongside the missing `409` below — a generated client had
- *   no header to send at all, so every call to `POST /bonds/{bondId}/entries`
+ *   `@Idempotent`, mirroring [CONDITIONAL_OPERATIONS]'s own shape, and
+ *   [OPTIONAL_KEY_OPERATIONS] the ones among them declared
+ *   `@Idempotent(required = false)` — `patchEntry` — where the parameter is
+ *   added as optional: the key is honoured when sent and may be left out.
+ *   Fix round 1, C2: found alongside the missing `409` below — a generated
+ *   client had no header to send at all, so every call to `POST /bonds/{bondId}/entries`
  *   it made would have been refused as `422 VALIDATION_FAILED`.
  * - **The `partnerEntry` discriminator.** `gratitude.web.TodayResponse.partnerEntry`
  *   is a Kotlin sealed interface's `oneOf` — springdoc already splits it into
@@ -204,24 +208,32 @@ class OpenApiConfiguration {
      * module) remains the one place both limits are actually enforced.
      */
     private fun documentEntryTextLimits(api: OpenAPI) {
-        val text =
-            api.components.schemas[SUBMIT_ENTRY_REQUEST]
-                ?.properties
-                ?.get(ENTRY_TEXT_PROPERTY) ?: return
-        text.minLength = 1
-        text.maxLength = ENTRY_TEXT_MAX_OCTETS
-        text.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
-        text.description =
-            "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does " +
-            "not count either), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
-            "$ENTRY_TEXT_MAX_GRAPHEMES user-perceived characters (graphemes, not UTF-16 code units — an " +
-            "emoji sequence can be one grapheme and several of those). `maxLength` here states the octet " +
-            "cap in UTF-16 characters, which is not the same unit as either real limit and both are wider " +
-            "than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a " +
-            "guarantee. The server enforces both limits exactly and is the only authority on whether a " +
-            "given body is accepted. The text is stored and returned exactly as sent — not normalised, " +
-            "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted on its NFKC-normalised, trimmed form " +
-            "(so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused."
+        listOf(SUBMIT_ENTRY_REQUEST, PATCH_ENTRY_REQUEST).forEach { schemaName ->
+            val text =
+                api.components.schemas[schemaName]
+                    ?.properties
+                    ?.get(ENTRY_TEXT_PROPERTY) ?: return@forEach
+            // `PatchEntryRequest.text` is a Kotlin `String?` only so that a
+            // missing field reaches Bean Validation as a 422 rather than
+            // Jackson as a 400; `@NotNull` then refuses `null`. springdoc
+            // reads the `?` and documents `["string", "null"]`, which says
+            // `{"text": null}` is accepted. It never is.
+            text.types = setOf(STRING_TYPE)
+            text.minLength = 1
+            text.maxLength = ENTRY_TEXT_MAX_OCTETS
+            text.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
+            text.description =
+                "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does " +
+                "not count either), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
+                "$ENTRY_TEXT_MAX_GRAPHEMES user-perceived characters (graphemes, not UTF-16 code units — an " +
+                "emoji sequence can be one grapheme and several of those). `maxLength` here states the octet " +
+                "cap in UTF-16 characters, which is not the same unit as either real limit and both are wider " +
+                "than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a " +
+                "guarantee. The server enforces both limits exactly and is the only authority on whether a " +
+                "given body is accepted. The text is stored and returned exactly as sent — not normalised, " +
+                "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted on its NFKC-normalised, trimmed form " +
+                "(so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused."
+        }
     }
 
     private fun statusesFor(
@@ -292,6 +304,7 @@ class OpenApiConfiguration {
 
     /**
      * Adds `Idempotency-Key` outright to every `@Idempotent` operation —
+     * required, unless the operation is in [OPTIONAL_KEY_OPERATIONS] —
      * see the class KDoc's own bullet for why this is an addition rather
      * than, as [requireIfMatch] does for `If-Match`, a correction of what
      * springdoc already found.
@@ -315,7 +328,7 @@ class OpenApiConfiguration {
             Parameter()
                 .`in`(HEADER_PARAMETER)
                 .name(IDEMPOTENCY_KEY)
-                .required(true)
+                .required(operation.operationId !in OPTIONAL_KEY_OPERATIONS)
                 .description(
                     "A client-chosen key, unique per retried request (doc 06 §1). A replay of the same key with the " +
                         "same request returns the first attempt's status and the same resource, re-read and rendered " +
@@ -327,7 +340,9 @@ class OpenApiConfiguration {
                         "the same key. The same key with a different method, path or body is 422; the same key " +
                         "while the first attempt is still in flight is 409. The key itself is 1 to " +
                         "$IDEMPOTENCY_KEY_MAX_LENGTH visible ASCII characters (a UUID is the usual choice); a " +
-                        "missing or malformed one is 422 VALIDATION_FAILED with an `errors` entry naming this header.",
+                        "malformed one is 422 VALIDATION_FAILED with an `errors` entry naming this header, and so is " +
+                        "a missing one wherever this parameter is marked required. Where it is optional, leaving it " +
+                        "out makes an ordinary, unrecorded request.",
                 ).schema(StringSchema().minLength(1).maxLength(IDEMPOTENCY_KEY_MAX_LENGTH).pattern(IDEMPOTENCY_KEY_PATTERN)),
         )
         operation.responses
@@ -386,7 +401,9 @@ class OpenApiConfiguration {
 
         /** `SubmitEntryRequest`'s schema name and its `text` property — see [documentEntryTextLimits]. */
         private const val SUBMIT_ENTRY_REQUEST = "SubmitEntryRequest"
+        private const val PATCH_ENTRY_REQUEST = "PatchEntryRequest"
         private const val ENTRY_TEXT_PROPERTY = "text"
+        private const val STRING_TYPE = "string"
 
         /** Mirrors `gratitude.domain.EntryText.MAX_OCTETS` — `internal`, and this module does not depend on `gratitude`. */
         private const val ENTRY_TEXT_MAX_OCTETS = 8192
@@ -425,6 +442,8 @@ class OpenApiConfiguration {
                 // — and none of them was visible to a generated client without
                 // this entry.
                 "submitEntry",
+                "patchEntry",
+                "deleteEntry",
             )
 
         /**
@@ -443,7 +462,16 @@ class OpenApiConfiguration {
          * [requireIdempotencyKey] exists at all: springdoc cannot read this
          * off the controller the way it reads an actual `@RequestHeader`.
          */
-        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry")
+        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry", "patchEntry")
+
+        /**
+         * The [IDEMPOTENT_OPERATIONS] declared `@Idempotent(required = false)`:
+         * the key is accepted and honoured, and may be left out. By id, for
+         * the same reason the set above is — the annotation is invisible to
+         * springdoc — and `OpenApiContractTest` holds it against the
+         * controllers' own annotations.
+         */
+        private val OPTIONAL_KEY_OPERATIONS = setOf("patchEntry")
 
         private const val IDEMPOTENCY_KEY = "Idempotency-Key"
 

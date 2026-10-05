@@ -27,12 +27,33 @@ class FlywayMigrationTest(
     private val jdbcTemplate = JdbcTemplate(dataSource)
 
     @Test
+    fun `the outbox carries the two indexes its guarantees rest on`() {
+        // V14's two indexes are correctness, not performance (spec §7): one
+        // delivery per event per consumer, and a pending-work index that
+        // stays small because it leaves the delivered rows out.
+        val outboxIndexes =
+            jdbcTemplate.queryForList(
+                "SELECT indexdef FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'outbox_deliveries'",
+                String::class.java,
+            )
+        assertTrue(
+            outboxIndexes.any { "UNIQUE" in it!! && "(event_id, consumer_id)" in it },
+            "Expected a unique (event_id, consumer_id) on outbox_deliveries, found: $outboxIndexes",
+        )
+        assertTrue(
+            outboxIndexes.any { "(consumer_id, next_attempt_at)" in it!! && "WHERE (processed_at IS NULL)" in it },
+            "Expected the partial pending index on outbox_deliveries, found: $outboxIndexes",
+        )
+    }
+
+    @Test
     fun `every module's migrations run, in one sequence, against one schema`() {
         // V1 lives in `app` (database-wide extensions); V2 to V8 live in
         // `modules/identity`, V9, V10 and V13 in `modules/bond` (its own
         // tables, its proposals, and the effective-anchor timeline), V11 in
-        // `common:web` (idempotency_keys, doc 06 §1) and V12 in
-        // `modules/gratitude`. Versions are one global sequence across
+        // `common:web` (idempotency_keys, doc 06 §1), V12 in
+        // `modules/gratitude` and V14 in `common:events` (the outbox, spec
+        // §8). Versions are one global sequence across
         // modules. Flyway merges every `classpath:db/migration` it finds, which
         // is what lets a module own its schema without `app` restating it — and
         // this assertion is what notices when a module's migrations are not on
@@ -53,8 +74,8 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll((1..13).toList()),
-            "Expected every module's migrations through V13, found: $versions",
+            versions.containsAll((1..14).toList()),
+            "Expected every module's migrations through V14, found: $versions",
         )
 
         val extensions =

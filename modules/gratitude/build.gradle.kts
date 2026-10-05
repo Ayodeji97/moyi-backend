@@ -5,15 +5,8 @@ plugins {
 dependencies {
     // Ids (UUID v7 for Bond-days, v4 for entries — doc 06 §1) and the Clock.
     implementation(projects.common.core)
-    // CurrentUser. F2 (whole-branch review): this line used to also claim
-    // "the per-user rate-limit bucket on the write" — false. There is no
-    // `RateLimitBucket` entry for entries and no `@RateLimited` on
-    // `EntriesController.submitEntry`; `POST /entries` is covered only by
-    // the generic `AUTHENTICATED` bucket every authenticated route shares.
-    // `RateLimitBucket`'s own KDoc says "a bucket that exists in a document
-    // but not in this enum is visibly not enforced" — a dedicated write
-    // bucket for entries is exactly that: named in the design, not built.
-    // Deliberately not added here (a scope decision for later, not this fix).
+    implementation(projects.common.events)
+    // CurrentUser and the dedicated per-user entry submission bucket.
     implementation(projects.common.security)
     // ApiException, ErrorCode, NotFoundException, and the Idempotency-Key
     // interceptor this slice adds there (doc 06 §1, §2).

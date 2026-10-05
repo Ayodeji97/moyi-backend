@@ -87,8 +87,25 @@ internal class EntriesEndpointTest(
 
     @AfterEach
     fun clear() {
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
         jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
+    }
+
+    @Test
+    fun `the second submission reveals both entries and records one content-free event`() {
+        submit(ada, bondId, """{"text":"private first words"}""").status shouldBe 201
+        val second = submit(bea, bondId, """{"text":"private second words"}""")
+        second.status shouldBe 201
+        jdbc.queryForObject("SELECT status FROM bond_days", String::class.java) shouldBe "REVEALED"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE status = 'REVEALED' AND revealed_at IS NOT NULL", Int::class.java) shouldBe
+            2
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayRevealed'", Int::class.java) shouldBe 1
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'EntrySubmitted'", Int::class.java) shouldBe 2
+        jdbc.queryForList("SELECT payload::text FROM outbox_events", String::class.java).forEach {
+            it shouldNotContain "private first words"
+            it shouldNotContain "private second words"
+        }
     }
 
     @Test
@@ -429,13 +446,14 @@ internal class EntriesEndpointTest(
     }
 
     /**
-     * `DayClosedException` (`409 DAY_CLOSED`) is unreachable through any
-     * write this slice's own code produces — C1 opens a day only `OPEN` or
-     * `SUSPENDED`, and closes none. It exists for the row `SubmitEntry`
-     * reads back from `BondDayStore.openOrGet` already existing and already
-     * closed by the time a later slice's close job (C3) runs alongside this
-     * one — so this test forces that state by hand, standing in for C3,
-     * rather than leaving the guard proven only by reading it.
+     * `DayClosedException` (`409 DAY_CLOSED`) is what a submission gets when
+     * the day it resolves to is settled. One request gets there by itself —
+     * a rewrite after a post-reveal delete, which `RevealTest` drives. The
+     * other way in is still to come: the row `SubmitEntry` reads back from
+     * `BondDayStore.openOrGet` already closed by C3's close job running
+     * alongside it. This test forces a settled day by hand, standing in for
+     * C3, so the guard is held against the row's own state rather than
+     * against the one route that reaches it today.
      */
     @Test
     fun `a day closed by a later slice's own writes refuses a new entry rather than silently accepting it`() {

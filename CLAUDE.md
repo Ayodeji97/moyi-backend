@@ -41,7 +41,7 @@ The jar needs JDK 25. Tests use Testcontainers, so Docker must be running.
 
 ## Structure
 
-`app` wires; `common/{core,web,security,testing}` is shared and holds no domain logic;
+`app` wires; `common/{core,web,security,events,testing}` is shared and holds no domain logic;
 `modules/*` is the domain. Inside a module the layers are `api`, `domain`, `service`,
 `infra`, `web`, and dependencies point inwards — `domain` depends on nothing.
 

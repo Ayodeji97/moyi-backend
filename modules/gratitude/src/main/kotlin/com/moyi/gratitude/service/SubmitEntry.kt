@@ -3,6 +3,8 @@ package com.moyi.gratitude.service
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.common.core.IdGenerator
+import com.moyi.common.events.EventPublisher
+import com.moyi.common.events.OutboxEvent
 import com.moyi.common.web.NotFoundException
 import com.moyi.common.web.idempotency.IdempotentExecution
 import com.moyi.common.web.idempotency.IdempotentRequest
@@ -20,6 +22,7 @@ import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.GratitudeConstraints
+import com.moyi.gratitude.infra.database.redacted
 import com.moyi.gratitude.infra.database.violates
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
@@ -116,8 +119,12 @@ internal data class Submission(
  * stores identity only). **What is rendered is BR-1's answer, not this
  * class's**: the replay asks [Entry.readBy] exactly as `GetToday` does (spec
  * §4 names "replayed responses" as under the same gate), so a tombstone is a
- * tombstone here for the reason it is one there. The unlocked `membershipOf`, not
- * `lockMembershipOf`: a read never queues behind the bond lock.
+ * tombstone here for the reason it is one there. The membership is read
+ * with the unlocked `membershipOf`, not `lockMembershipOf`, so the replay's
+ * own read never queues behind the bond lock. One thing on this path can:
+ * [ReconcileJoiningDay.beforeRead], which [replay] calls before it reads the
+ * entry, takes the bond's row lock while the couple's joining day is still
+ * `SUSPENDED` — and only then — to take that day out of it.
  *
  * **Then bond, then bond-day, then entry, held to commit (spec §2.1).** The
  * first thing a fresh submission does inside the transaction — before
@@ -149,9 +156,12 @@ internal data class Submission(
  *    [BondMembership.anchorTimezone], which is the zone the bond *requests*
  *    and differs for up to a day after a change is confirmed (BR-6). Then
  *    [BondDayStore.openOrGet] opens or finds it with the span the timeline
- *    gave — `SUSPENDED` rather than `OPEN` while
- *    [BondMembership.awaitingSecondMember] (doc 04 §8.3a, `02` J1: the
- *    creator may write before their partner joins).
+ *    gave — `SUSPENDED` rather than `OPEN` when the day ended before the
+ *    second member arrived, or nobody has arrived yet (spec §12.4; doc 04
+ *    §8.3a, `02` J1: the creator may write before their partner joins).
+ *    That is read from [BondMembership.activeSince] against the day's span,
+ *    in [openAndLock], which also resumes a `SUSPENDED` row whose span
+ *    contains the pairing ([BondDay.resumeJoiningDay]).
  *    **Then BR-3a is asked again, under the day's own lock** (spec §6.1.3).
  *    The settled-day check inside [DayAssignment.resolve] reads the day
  *    before any lock on it is held, and the close job takes no bond lock
@@ -161,16 +171,42 @@ internal data class Submission(
  *    day containing the submission instant — the words are kept, on a day
  *    that can still hold them — and anything else is `409 DAY_CLOSED`. The
  *    redirect does not recurse: a submission-time day that is itself settled
- *    is `409 DAY_CLOSED` too. It takes a second bond-day lock while holding
- *    the first; that is safe because every submitter of this bond is already
- *    serialised on the bond lock, and it obliges a lock-free writer (C3)
- *    never to hold two days of one bond at once.
+ *    is `409 DAY_CLOSED` too. A `REVEALED` day is settled as well, so this
+ *    is also the answer to an author who deleted their entry after the
+ *    reveal and writes that day again. The redirect takes a second bond-day
+ *    lock while holding the first, and the joining day (below) can be a
+ *    third: one submission holds up to three days of one bond, and takes
+ *    them oldest first. That is safe because every submitter of this bond
+ *    is already serialised on the bond lock, and it obliges a writer that
+ *    takes no bond lock (C3) never to hold two days of one bond at once, or
+ *    to take them oldest first as well.
  * 5. The insert. `entries_one_per_member_per_day` (V12/BR-2) is what
  *    refuses a second entry from the same member on the same day — this
  *    method attempts the write and catches the conflict, it does not read
  *    first and check: a read-then-insert here would race the very index it
  *    is trying to honour. See the boundary note below for why the catch has
  *    to sit where it does.
+ * 6. The event. `EntrySubmitted` goes to the outbox through
+ *    [EventPublisher], in this transaction and after the insert has been
+ *    flushed — so a submission BR-2 refused writes no event. It names the
+ *    entry, the bond and the Bond-day by id and carries nothing else.
+ * 7. The count, and the reveal. [BondDay.withEntry] counts the entry and
+ *    [RevealDay.apply] writes the day, still under its lock. With both
+ *    entries in, the day is either revealed there and then — `revealed_at`
+ *    stamped on both entries and `DayRevealed` published, all in this
+ *    transaction — or, when the bond has a reveal time that has not come
+ *    yet, left `PENDING_REVEAL`. A `SUSPENDED` day is counted and stays
+ *    `SUSPENDED`. The entry is then read again, so the response renders it
+ *    as the reveal left it.
+ *
+ * **The couple's joining day is taken out of `SUSPENDED` on the way (spec
+ * §12.4).** [submit] calls [ReconcileJoiningDay.beforeRead] before it opens
+ * its transaction — `reconcileJoiningDay` below says why that has to commit
+ * separately — and [write] calls [ReconcileJoiningDay.underBondLock] once the
+ * bond lock is held, which is what keeps the lock order when a pairing lands
+ * between the two. Under the lock the joining day is taken in date order with
+ * the day being written: before the claimed day when it is that day or an
+ * earlier one, after the insert and the reveal when it is a later one.
  *
  * **The day's row is locked before its `entryCount`/`status` are read for the
  * update** (fix round 1, I3): [BondDayStore.lockAndFind] takes the row lock
@@ -197,10 +233,10 @@ internal data class Submission(
  * requires: the lock is only worth taking inside the transaction that does
  * the write.
  *
- * `LongParameterList` is suppressed on the constructor: seven collaborators
- * is what one transaction spanning the key, the bond, the day and the entry
- * takes, and bundling two of them to get under the threshold would hide
- * which of them this class actually uses.
+ * `LongParameterList` is suppressed on the constructor: ten collaborators
+ * is what one transaction spanning the key, the bond, the day, the entry,
+ * the reveal and the outbox takes, and bundling some of them to get under
+ * the threshold would hide which of them this class actually uses.
  */
 @Service
 @Suppress("LongParameterList")
@@ -212,6 +248,9 @@ internal class SubmitEntry(
     private val clock: Clock,
     private val transactions: TransactionTemplate,
     private val execution: IdempotentExecution,
+    private val reveal: RevealDay,
+    private val joining: ReconcileJoiningDay,
+    private val events: EventPublisher,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -220,8 +259,10 @@ internal class SubmitEntry(
      * @throws com.moyi.common.web.NotFoundException the caller is not a member of [bondId], or there is no such bond
      * @throws BondArchivedException `membership.hasLeft`, or the bond has ended (BR-9)
      * @throws MediaNotYetSupportedException either media id is present (spec §1)
-     * @throws DayClosedException the Bond-day this entry resolves to has already closed
+     * @throws DayClosedException the Bond-day this entry resolves to is settled — closed, or already revealed —
+     *   and BR-3a has no other day to put it on
      * @throws EntryAlreadyExistsException a second entry from this member on this day (BR-2)
+     * @throws EntryNotFoundException on a replay, the key does not lead to an entry this caller wrote
      * @throws com.moyi.common.web.idempotency.IdempotencyKeyInFlightException the key's first request has not finished
      * @throws com.moyi.common.web.idempotency.IdempotencyKeyReusedException the key was first used for a different request
      */
@@ -247,6 +288,7 @@ internal class SubmitEntry(
         // stored outside the span of the day it was filed on.
         val intendedAt = draft.intendedAt?.truncatedTo(ChronoUnit.MICROS)
 
+        reconcileJoiningDay(userId, bondId)
         val submission =
             try {
                 transactions.execute {
@@ -271,11 +313,34 @@ internal class SubmitEntry(
                     Submission(view, outcome.status, outcome.wasReplayed)
                 }
             } catch (violation: DataIntegrityViolationException) {
-                if (!violation.violates(GratitudeConstraints.ENTRY_ONE_PER_MEMBER_PER_DAY)) throw violation
+                if (!violation.violates(GratitudeConstraints.ENTRY_ONE_PER_MEMBER_PER_DAY)) throw violation.redacted()
                 throw EntryAlreadyExistsException()
             }
 
         return checkNotNull(submission) { "submit's transaction produces a Submission unless it threw" }
+    }
+
+    /**
+     * Spec §12.4's "first gratitude operation", committed on its own before
+     * the submission. Inside the submission's transaction it was rolled back
+     * with every refusal — and a day C1 left `SUSPENDED` with both entries is
+     * revealed by the reconcile, so a submission that resolves to that day is
+     * refused (`409`) by the very thing it set off. The calls under the bond lock in [write] stay: they
+     * are what keeps the lock order when a pairing lands after this read.
+     *
+     * A caller with no membership is not reconciled for; [submit] refuses them.
+     */
+    private fun reconcileJoiningDay(
+        userId: UUID,
+        bondId: UUID,
+    ) {
+        val membership =
+            try {
+                access.membershipOf(userId, bondId)
+            } catch (_: NotFoundException) {
+                return
+            }
+        joining.beforeRead(membership)
     }
 
     /**
@@ -293,6 +358,7 @@ internal class SubmitEntry(
         entryId: EntryId,
     ): EntryView {
         val membership = access.membershipOf(userId, bondId)
+        joining.beforeRead(membership)
         // The author guard is the replay's own: a key answers only the member
         // whose request it recorded. What that member may then SEE is BR-1's
         // question, asked of the same gate `GetToday` asks.
@@ -305,12 +371,12 @@ internal class SubmitEntry(
         // on: the author's own entry, in full or as its tombstone. Anything
         // else — an entry of another bond, above all — has none to give.
         val day = reading?.disclosed?.let { days.find(it.bondDayId) }
-        if (reading == null || day == null) throw NotFoundException("That entry was not found.")
+        if (reading == null || day == null) throw EntryNotFoundException()
         return EntryView(reading, day)
     }
 
     /**
-     * Steps 4 and 5 of the class KDoc, under the bond lock [submit] already
+     * Steps 4 to 7 of the class KDoc, under the bond lock [submit] already
      * holds. Returns the entry's id beside its view: the key records the id,
      * and a reading only discloses one to a reader BR-1 grants it to.
      */
@@ -349,6 +415,8 @@ internal class SubmitEntry(
                 // Nothing was refused, so there is nothing to explain.
             }
         }
+        val joiningDate = joining.window(membership)?.date
+        if (joiningDate != null && !joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)
         val claimedDay = openAndLock(membership, claimed.bounds, now)
         // BR-3a, rechecked under the day's own lock (spec §6.1.3). The check
         // inside `resolve` read the day before this lock was held, and the
@@ -376,9 +444,11 @@ internal class SubmitEntry(
         // than deferred to a commit this catch could no longer be on the
         // stack for.
         entries.insert(entry)
-        val updated = day.withEntry()
-        days.update(updated)
-        return EntryView(entry.readBy(membership.asReader()), updated) to entry.id
+        events.publish(OutboxEvent("Entry", entry.id.value, "EntrySubmitted", mapOf("bondId" to bondId, "bondDayId" to day.id.value), now))
+        val updated = reveal.apply(day.withEntry(), membership.revealTimeLocal, now)
+        if (joiningDate != null && joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)
+        val persisted = checkNotNull(entries.find(entry.id))
+        return EntryView(persisted.readBy(membership.asReader()), updated) to entry.id
     }
 
     /**
@@ -400,6 +470,10 @@ internal class SubmitEntry(
     ): Pair<DayAssignment.Resolution, BondDay>? {
         if (!claimed.usedIntendedAt) return null
         val fallback = DayAssignment.resolve(now, null, calendar) { false }
+        // The claimed day is already locked. Reconcile the joining day before
+        // today's row so a redirected offline write keeps chronological order.
+        val joiningDate = joining.window(membership)?.date
+        if (joiningDate != null && !joiningDate.isBefore(claimed.date)) joining.underBondLock(membership, now)
         val fallbackDay = openAndLock(membership, fallback.bounds, now)
         // The rare one: a close landed between the unlocked check and the
         // lock. Logged only once the fallback day's own settled check has
@@ -424,7 +498,8 @@ internal class SubmitEntry(
      * later, and only on an unsettled day — here, under the day's lock and
      * before any entry is inserted, so no entry is ever filed on a row whose
      * span does not contain it. Both callers come through here, the BR-3a
-     * redirect included.
+     * redirect included. A `SUSPENDED` row whose span contains the pairing is
+     * resumed in the same step ([BondDay.resumeJoiningDay]).
      */
     private fun openAndLock(
         membership: BondMembership,
@@ -436,10 +511,18 @@ internal class SubmitEntry(
         // whichever writer opens the row stamps the same zone. Relies on
         // `dayAt` never returning an empty window: an instant always lies in one.
         val zone = ZoneId.of(membership.anchorTimeline.zoneIdAt(window.startsAt))
-        val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
+        // Spec §12.4: a day that ended before the second member arrived is
+        // excluded for good, and that is a fact about the day, not about
+        // whether somebody happened to write on it while it lasted. Decided
+        // from `awaitingSecondMember` alone, a back-fill onto such a day that
+        // had no row opened it OPEN — and two back-fills revealed it — while
+        // the same day with a row stayed SUSPENDED and private.
+        val activeSince = membership.activeSince
+        val beforeThePairing = activeSince == null || !activeSince.isBefore(window.endsAt)
+        val openStatus = if (beforeThePairing) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
         val opened = days.openOrGet(membership.bondId, window, zone, now, openStatus)
         val locked = days.lockAndFind(opened.id)
-        val extended = locked.extendedTo(window)
+        val extended = locked.extendedTo(window).resumeJoiningDay(membership.activeSince)
         if (extended != locked) days.update(extended)
         return extended
     }

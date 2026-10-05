@@ -23,8 +23,9 @@ import java.time.ZoneId
  * checklist asks not to carry. [Entry] keeps its own [toEntity]: `EntryStore.insert`
  * genuinely does `save()` a freshly built entity. The update path for a
  * [BondDay] is [applyTo], which carries a changed aggregate onto the managed
- * entity it came from. [Entry] has no update path in this task — nothing
- * here ever changes a submitted entry — so it has no `applyTo`.
+ * entity it came from. [Entry] has no `applyTo`: an edit, an erasure and a
+ * reveal are all written by `EntryStore.update`, which copies the fields
+ * that can change onto the managed entity itself.
  *
  * `ZoneId.of` on the way **out** of the database re-validates the stored
  * id, the same call `RegionZone.of` makes in `bond`. A zone the JDK's tzdb
@@ -106,7 +107,7 @@ internal fun EntryEntity.toDomain(): Entry =
         deletedAt = deletedAt,
     )
 
-/** Insert-only — see the header comment on why [BondDay] has no equivalent. */
+/** For the insert only (`EntryStore.insert`) — see the header comment on why [BondDay] has no equivalent. */
 internal fun Entry.toEntity(): EntryEntity =
     EntryEntity(
         id = id.value,

@@ -212,6 +212,9 @@ is insufficient. Tests cover both forward and backward date-line changes mid-day
   brings `endsAt` up to what the timeline now says. `GET /today` is a read and extends
   nothing, so a row opened before a change and never written to again keeps a stale
   `endsAt` until the close job reconciles it (§6.4 step 2).
+  *Amended 2026-10-05 (ADR-0032 decision 6):* one exception. While a bond's joining day is
+  still `SUSPENDED`, the first operation that meets it — `GET /today` included — reconciles
+  it under the bond and day locks (§12.4), and that reconcile brings `endsAt` up to date.
 - **The westward merge (ruling R3, decision 12) — this section had no text for it.**
   "Extend the handoff to the next unused date boundary" says where the handoff goes. What
   happens to the day that spans it: it **keeps the label it opened with and runs on to the
@@ -371,6 +374,24 @@ one byte-identical `404`, exactly as T-02 requires of the bond routes. The alter
 `/bonds/{bondId}/entries/{entryId}`, makes the client pass a fact the server must then check
 for agreement, which is a second way to be wrong.
 
+**Amended 2026-10-05 — what C2 built on these two routes (ADR-0032 decisions 8, 9, 10).**
+
+- **The author's partner gets the same `404`** as a non-member, an unknown id and a value
+  that is not a UUID. The paragraph above lists three causes; there are four, and they are
+  one exception class. `403` on an entry id would confirm an id the partner was never shown.
+- **`PATCH` changes the text only**, refuses media ids (`422`) as submission does, and is
+  `409 ENTRY_IMMUTABLE` for an entry that is revealed **or erased**.
+- **`DELETE` is a soft erase at any time**: `status = DELETED`, `deleted_at` set, the text
+  removed, `204`, repeatable. The table says "post-reveal leaves a tombstone"; a row is left
+  before the reveal too, because the idempotency key that created the entry must still
+  replay something. Before the reveal it frees BR-2's slot and steps the day back
+  (`PENDING_REVEAL` → `PARTIAL` → `OPEN`); after it the day does not change, and the author
+  cannot write that day again (`409 DAY_CLOSED`: a revealed day is settled).
+- **On an ended bond both are `409 BOND_ARCHIVED`** for the author (ADR-0028), decided only
+  after the author check. *Open with the owner: this means an author cannot withdraw their
+  words from an ended bond until C5.*
+- **`Idempotency-Key` is optional on `PATCH` and not accepted on `DELETE`** (§5.4).
+
 ### 5.3 New `ErrorCode` values (`common:web`)
 
 `ENTRY_ALREADY_EXISTS` (409) · `ENTRY_IMMUTABLE` (409) · `ENTRY_NOT_REVEALED` (409) ·
@@ -434,6 +455,12 @@ now because `POST /entries` is the first endpoint that *requires* it.
   body with no declared length (chunked transfer) is accepted and read to the bound; a
   multipart body is `415`.
 
+**Amended 2026-10-05 (ADR-0032 decision 10).** `PATCH /entries/{entryId}` **accepts** a key
+and does not require one: the same edit twice is the same row, so the key buys a caller
+nothing they need, and a client that sends one is honoured. A replay re-reads the entry and
+renders it as it stands. The 1 MiB bound on the body is the route's, not the header's: it
+applies to a `PATCH` with no key as well.
+
 ### 5.5 Rate limiting (doc 06 §4)
 
 `entries:create` — a per-user bucket. The global per-user bucket already applies to everything;
@@ -445,6 +472,12 @@ it is owed to C2.** Both C1 routes sit under the global authenticated per-user b
 (120/min). BR-2 already caps real writes at one per member per day, so the missing bucket
 bounds only *refused* attempts: until C2, a member can make 120 refused submissions a
 minute.
+
+**Amended 2026-10-05 (ADR-0032 decision 11).** Built in C2: **twenty a day per user**, on
+`POST /entries` only — doc 06 §4's number, under this section's spelling. The limiter runs
+before the idempotency interceptor, so every attempt spends a token: a refused write, a
+`404`, and **a replay** too. *Open with the owner: the twenty-first retry of one key in a
+day is `429`, not the replay.*
 
 ## 6. Rules, stated so they can be tested
 
@@ -526,6 +559,23 @@ Under the Bond-day's row lock, in the same transaction that persists the entry:
   both submissions at once and asserts **exactly one `DayRevealed` event**. It exists in C2 and
   it fails when the lock is removed, which is the only reason to believe the lock is doing the
   work — the lesson ADR-0029 paid for with `@Version`.
+
+**Amended 2026-10-05 — what C2 built (ADR-0032 decisions 3, 4, 5).**
+
+- **The last bullet's test is two tests.** Every submission takes the bond's row lock first
+  (§2.1), so two submissions for one bond are already serial, and "both at once, exactly one
+  `DayRevealed`" passes with the day lock removed. One test asserts the single event; a
+  second holds the day's row from another connection and asserts a submission is blocked on
+  it, and that is the one that fails when the lock is removed. The day lock is still
+  needed: the close job takes no bond lock.
+- **How `revealTimeLocal` is read**: on the day's own date, in the zone the day opened in,
+  compared as an instant. A time inside a spring-forward gap falls after the gap; a time
+  that happens twice falls on the first; a day run on by a westward change reveals at the
+  time on the date it is labelled with. The time is the bond's current setting, not a copy
+  taken when the day opened.
+- **Until C3 nothing looks at a `PENDING_REVEAL` day again when its time arrives.** The
+  table's fourth row is the job's, and C2 ships without the job. The sweep needs the bond's `revealTimeLocal` with no caller
+  to ask for it (§2.1's closer-facing accessor).
 
 ### 6.4 The close (FR-063, doc 05 §5.2)
 
@@ -737,7 +787,7 @@ the load-bearing assertions:
 |---|---|
 | **The reveal-gate matrix** | Every day status × caller state, asserting a locked entry is exactly `{authorMemberId, status: LOCKED}` and that `bondDay.status` **is** present. Doc 12: the most important test file in the repository. A failure is a P0 (doc 11). |
 | **Cache poisoning** | Prime `today` as A, read as B before B has written, assert none of A's content. Doc 12 names it as a bypass no authorisation layer sees. |
-| **Concurrent submission** | Both members submit at once; exactly one `DayRevealed`. Must fail with the lock removed. |
+| **Concurrent submission** | Both members submit at once; exactly one `DayRevealed`. Must fail with the lock removed. *(Amended 2026-10-05, ADR-0032 decision 3: two tests — see §6.3.)* |
 | **The timezone matrix** | Spring forward, fall back, Kathmandu, Chatham, members ≥12 h apart, a date-line crossing. |
 | **`intendedAt` back-fill** | Refuse settled `EMPTY`, `FROZEN` and elapsed `SUSPENDED`; race assignment against close. |
 | **Close-job idempotency** | Run twice; test interior missing dates before a newer lazy row, backlog over 400 dates, and ended bonds with pending reveal. |
@@ -746,7 +796,7 @@ the load-bearing assertions:
 | **Reveal persistence** | A revealed solo entry stays readable after freezing; joining on the current suspended day resumes it; prior suspended days stay private. *(Amended 2026-10-03, ADR-0031 decision 4: "joining … resumes it" is **C2's** to build and test — see §12.4. C1 leaves the day `SUSPENDED`.)* |
 | **Withdrawal and outbox** | With poller stopped, committed withdrawal immediately hides content; independent consumers and crash retries do not lose events. |
 | **Streak properties** | Randomised timelines; the four invariants in §6.5. |
-| **Cross-tenant** | The existing route-driven suite picks up every new endpoint automatically (ADR-0026), and a route added without a fixture fails the build. |
+| **Cross-tenant** | The existing route-driven suite picks up every new endpoint automatically (ADR-0026), and a route added without a fixture fails the build. *(Amended 2026-10-05, ADR-0032 decision 9: true of routes that carry `{bondId}`. The suite cannot see `/entries/{entryId}`; `EntryChangesTest` is those routes' cross-tenant test and asserts their exact set.)* |
 | **Grapheme counting** | A ZWJ family emoji, a flag, a combining sequence; 500 accepted only within the independent 8192-byte cap; 501 refused; large emoji strings exercise the byte cap. |
 
 ## 10. Slices
@@ -844,6 +894,20 @@ decided by the recorded activation instant (`BondMembership.activeSince`) — **
 it for joining-day rows that have already elapsed before C2 ships**, which would otherwise
 stay `SUSPENDED` with both members' first entries locked to each other for good. The
 reconcile lives in `gratitude`: `bond` cannot write `bond_days`.
+
+**Amended 2026-10-05 — as built in C2 (ADR-0032 decisions 6 and 7).**
+
+- **"The first gratitude operation" is every one of them**: `GET /today`, `POST /entries`,
+  `PATCH`, `DELETE` and both replays. Each write reconciles in a transaction of its own,
+  committed before its own work (and again under the bond lock inside it, for the lock order) — because the request can be refused by what the reconcile did (a day
+  it has just revealed makes an edit `409`), and a refusal must not undo the reveal.
+- **So a read can write, and can take the bond lock**: once per bond, while its joining day
+  is still `SUSPENDED`. It also runs on an ended bond and for a member who has left.
+- **"Earlier days remain private" is decided by the day, not by whether it had a row.** A day
+  whose span ended before `activeSince` opens `SUSPENDED` even when its first entry arrives
+  after the pairing, by back-fill.
+- **Owed to C3**: reconcile a joining day under its lock before stamping `closedAt` on it
+  (§6.4 step 2), or a closed joining day resumes into a state nothing settles.
 
 ### 12.5 `bond_days` needs a column doc 07 does not give it
 

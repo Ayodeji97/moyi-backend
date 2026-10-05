@@ -65,6 +65,7 @@ internal class SubmitEntryRealServerTest(
 
     @AfterEach
     fun clear() {
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
         jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
         framing.seen.clear()

@@ -32,6 +32,7 @@ rootProject.name = "moyi-backend"
 include(
     "app",
     "common:core",
+    "common:events",
     "common:web",
     "common:security",
     "common:testing",
