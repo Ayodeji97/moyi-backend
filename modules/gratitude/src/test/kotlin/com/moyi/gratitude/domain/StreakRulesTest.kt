@@ -124,6 +124,17 @@ internal class StreakRulesTest {
         suspended.change shouldBe StreakChange.NONE
     }
 
+    /** Doc 04 §8.3: ending a relationship "should not additionally delete the record that it was good". */
+    @Test
+    fun `a day after the bond ended moves nothing, whatever happened on it`() {
+        val five = after(*complete(5))
+
+        val afterTheEnd = StreakRules.step(five, start.plusDays(5), DayOutcome.AFTER_THE_END, strict = false)
+
+        afterTheEnd.state shouldBe five
+        afterTheEnd.change shouldBe StreakChange.NONE
+    }
+
     @Test
     fun `a date a zone change stepped over extends the run and earns nothing toward a freeze`() {
         val five = after(*complete(5))

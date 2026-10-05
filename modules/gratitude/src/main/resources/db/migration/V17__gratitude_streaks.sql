@@ -44,18 +44,29 @@ CREATE TABLE streak_events (
 -- applied strict-mode and freeze events alongside day outcomes so
 -- recalculation never substitutes today's setting for past decisions").
 --   evaluated_at     when; null until then. A day is evaluated once.
+--   evaluated_as     what the day was to the streak: both wrote, a date a
+--                    zone change stepped over, missed, suspended, or after
+--                    the bond had ended. Stored, not derived from `status`
+--                    again, because evaluation can change the status (a
+--                    missed day that spends a freeze becomes FROZEN) and
+--                    because "after the end" is in no status at all.
 --   evaluated_strict whether the bond was in Strict mode at that moment.
---   freeze_applied   whether this day spent a banked freeze — which is also
---                    what tells a FROZEN day that was a missed one from a
---                    FROZEN date a zone change stepped over.
+--   freeze_applied   whether this day spent a banked freeze.
 ALTER TABLE bond_days
     ADD COLUMN evaluated_at     timestamptz,
+    ADD COLUMN evaluated_as     text,
     ADD COLUMN evaluated_strict boolean,
     ADD COLUMN freeze_applied   boolean,
+    ADD CONSTRAINT bond_days_evaluated_as_check CHECK (
+        evaluated_as IN ('COMPLETE', 'FROZEN_BY_SKIP', 'MISSED', 'SUSPENDED', 'AFTER_THE_END')
+    ),
     ADD CONSTRAINT bond_days_evaluation_check CHECK (
-        (evaluated_at IS NULL AND evaluated_strict IS NULL AND freeze_applied IS NULL)
-        OR (evaluated_at IS NOT NULL AND closed_at IS NOT NULL AND evaluated_strict IS NOT NULL AND freeze_applied IS NOT NULL)
-    );
+        (evaluated_at IS NULL AND evaluated_as IS NULL AND evaluated_strict IS NULL AND freeze_applied IS NULL)
+        OR (evaluated_at IS NOT NULL AND closed_at IS NOT NULL AND evaluated_as IS NOT NULL
+            AND evaluated_strict IS NOT NULL AND freeze_applied IS NOT NULL)
+    ),
+    -- Only a missed day spends a freeze.
+    ADD CONSTRAINT bond_days_freeze_check CHECK (freeze_applied IS NOT TRUE OR evaluated_as = 'MISSED');
 
 -- The evaluation's scan: a bond's days that are settled and not yet
 -- evaluated, in date order. Partial, so it holds only what is still to do.

@@ -58,6 +58,14 @@ internal enum class DayOutcome {
 
     /** Excluded from evaluation (doc 04 §8.1, §8.2, §8.3a): neither extends the run nor ends it. */
     SUSPENDED,
+
+    /**
+     * A day that ended after its bond had stopped taking writes (doc 04
+     * §8.3): "the streak freezes rather than breaks — it is preserved at its
+     * value". Whatever the day's status, it moves nothing. Decided by the
+     * evaluation, which knows when the bond ended; no status says it.
+     */
+    AFTER_THE_END,
     ;
 
     companion object {
@@ -131,10 +139,26 @@ internal object StreakRules {
         recordedFreeze: Boolean? = null,
     ): Evaluation =
         when (outcome) {
-            DayOutcome.SUSPENDED -> Evaluation(state, freezeApplied = false, StreakChange.NONE, freezeBanked = false)
-            DayOutcome.COMPLETE -> complete(state, date, strict)
-            DayOutcome.FROZEN_BY_SKIP -> Evaluation(extended(state), freezeApplied = false, StreakChange.EXTENDED, freezeBanked = false)
-            DayOutcome.MISSED -> missed(state, strict, recordedFreeze)
+            DayOutcome.SUSPENDED, DayOutcome.AFTER_THE_END -> {
+                Evaluation(
+                    state,
+                    freezeApplied = false,
+                    StreakChange.NONE,
+                    freezeBanked = false,
+                )
+            }
+
+            DayOutcome.COMPLETE -> {
+                complete(state, date, strict)
+            }
+
+            DayOutcome.FROZEN_BY_SKIP -> {
+                Evaluation(extended(state), freezeApplied = false, StreakChange.EXTENDED, freezeBanked = false)
+            }
+
+            DayOutcome.MISSED -> {
+                missed(state, strict, recordedFreeze)
+            }
         }
 
     private fun extended(state: StreakState): StreakState {

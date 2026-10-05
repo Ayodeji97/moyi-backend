@@ -62,7 +62,9 @@ data class CloseResult(
     val closed: Int,
     /** Days not yet ended whose reveal fell due. */
     val revealed: Int,
-    /** Days that threw while being settled, and bonds whose missing days could not be written; each left as it was. */
+    /** Settled days whose effect on their bond's streak was worked out and recorded (spec §6.4 step 3). */
+    val evaluated: Int,
+    /** Days that threw while being settled, and bonds whose missing days or streak could not be written; each left as it was. */
     val failed: Int,
     /** Bonds with at least one day written, closed or revealed — where a streak may have moved (C4). */
     val bondsChanged: Set<UUID>,

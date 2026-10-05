@@ -113,7 +113,8 @@ internal class CloseElapsedDaysTest(
 
         first.closed shouldBe 3
         first.backlog shouldBe false
-        second shouldBe second.copy(created = 0, closed = 0, revealed = 0, failed = 0, bondsChanged = emptySet(), backlog = false)
+        second shouldBe
+            second.copy(created = 0, closed = 0, revealed = 0, evaluated = 0, failed = 0, bondsChanged = emptySet(), backlog = false)
         events("DayClosed") shouldBe 3
     }
 
