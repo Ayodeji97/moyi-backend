@@ -10,10 +10,6 @@ post {
   auth: bearer
 }
 
-headers {
-  Idempotency-Key: {{$guid}}
-}
-
 auth:bearer {
   token: {{accessToken}}
 }
@@ -24,10 +20,15 @@ body:json {
   }
 }
 
+script:pre-request {
+  // A new key on every send: a retry of one send is then the same write (doc 06 section 1).
+  req.setHeader("Idempotency-Key", require("uuid").v4());
+}
+
 script:post-response {
   bru.setVar("entryId", res.body.id);
 }
 
 docs {
-  One entry a day each. A second is 409. The Idempotency-Key is new on every send; to try a replay, send the same key twice by hand.
+  One entry a day each. A second is 409. The Idempotency-Key is made new on every send by the pre-request script; to try a replay, replace it there with a fixed UUID and send twice.
 }

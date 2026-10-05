@@ -96,9 +96,10 @@ scripts/moyi today
 scripts/moyi streak
 ```
 
-`scripts/moyi help` lists the rest. `tools/bruno` is the same requests as a
-[Bruno](https://www.usebruno.com) collection. Both only send requests: every rule is the
-server's.
+`scripts/moyi help` lists the rest. It talks to `MOYI_API` (this machine by default), and
+refuses plain `http` to any other host: your password travels there. `tools/bruno` is the
+same requests as a [Bruno](https://www.usebruno.com) collection. Both only send requests:
+every rule is the server's.
 
 ## How do I test it
 

@@ -24,10 +24,9 @@ body:json {
 
 script:post-response {
   bru.setVar("bondId", res.body.id);
-  bru.setVar("inviteCodeIssued", res.body.invite.code);
 }
 
 docs {
   The bond's timezone decides where a day begins and ends for both of you.
-  The response carries the invite code to give your partner. You can write before they join.
+  The response carries the invite code (invite.code) to give your partner: read it off the response. You can write before they join.
 }
