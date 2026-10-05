@@ -58,7 +58,7 @@ internal class CloseJob(
             .register(meters)
     }
 
-    @Scheduled(cron = EVERY_FIFTEEN_MINUTES)
+    @Scheduled(cron = "\${moyi.scheduling.close.cron:$EVERY_FIFTEEN_MINUTES}")
     @SchedulerLock(name = LOCK, lockAtMostFor = "PT14M", lockAtLeastFor = "PT30S")
     fun run() {
         closeOnce()
@@ -86,6 +86,11 @@ internal class CloseJob(
     }
 
     internal companion object {
+        /**
+         * The schedule, unless `moyi.scheduling.close.cron` says otherwise.
+         * The property exists for one caller: `scripts/smoke.sh`, which
+         * cannot wait a quarter of an hour to see the job run for real.
+         */
         const val EVERY_FIFTEEN_MINUTES = "0 */15 * * * *"
         const val LOCK = "close-days"
 

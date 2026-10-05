@@ -166,7 +166,8 @@ if [ "$ATTACH" = 0 ]; then
   MOYI_LOG="$(mktemp -t moyi-smoke.XXXXXX.log)"
   echo "booting $JAR (local profile) on $("$JAVA" -version 2>&1 | head -1), log: $MOYI_LOG"
   "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" \
-    --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" >"$MOYI_LOG" 2>&1 &
+    --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" \
+    --moyi.scheduling.close.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
   trap 'kill $APP_PID 2>/dev/null; wait $APP_PID 2>/dev/null || true' EXIT
   for _ in $(seq 1 90); do
@@ -960,6 +961,18 @@ SESSIONS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SEL
 # login after the reset and the one the bond section signed in with; the
 # joiner is a different account and is not counted here.
 case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|2") pass "refresh tokens stored as hashes; exactly two live sessions remain ($SESSIONS)";; *) fail "sessions" "expected exactly two live refresh tokens, got '$SESSIONS'";; esac
+
+# The close job (slice C3), on the wire. The run above started it on a
+# five-second schedule instead of its quarter-hour, so by now it has run many
+# times, against real rows, through the real scheduler, lock and closer. It
+# cannot be shown closing a day — no day in this run has ended — so what is
+# checked is that it ran, holds its lock by name, and failed on nothing.
+echo; echo "scheduling — the close job runs, under its lock, without error (spec §6.4, C3)"
+CLOSE_LOCK="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM shedlock WHERE name='close-days'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+case "$CLOSE_LOCK" in psql-unavailable) echo "  skip lock check";; 1) pass "the close job has taken its ShedLock row";; *) fail "close job" "expected one shedlock row named close-days, got '$CLOSE_LOCK'";; esac
+if grep -qE "close: day .* failed|Unexpected error occurred in scheduled task" "$MOYI_LOG"; then fail "close job" "the close job logged a failure"; else pass "…and has logged no failure"; fi
+UNCLOSED_PAST="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM bond_days WHERE closed_at IS NULL AND ends_at < now() - interval '1 minute'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+case "$UNCLOSED_PAST" in psql-unavailable) echo "  skip unclosed-day check";; 0) pass "…and no day that has ended is still unclosed";; *) fail "close job" "$UNCLOSED_PAST ended days are still unclosed";; esac
 
 echo; printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 # The exit status is the failure count, as the README says (capped at what a

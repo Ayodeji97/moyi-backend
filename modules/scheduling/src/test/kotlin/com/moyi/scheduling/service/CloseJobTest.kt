@@ -117,7 +117,9 @@ internal class CloseJobTest(
     @Test
     fun `the job is timed for every quarter-hour, which is what a forty-five minute offset needs`() {
         val scheduled = CloseJob::class.java.getMethod("run").getAnnotation(Scheduled::class.java)
-        val cron = CronExpression.parse(scheduled.cron)
+        // The annotation reads a property and defaults to the constant; nothing sets the property outside the smoke run.
+        scheduled.cron shouldBe "\${moyi.scheduling.close.cron:${CloseJob.EVERY_FIFTEEN_MINUTES}}"
+        val cron = CronExpression.parse(CloseJob.EVERY_FIFTEEN_MINUTES)
         val start = Instant.parse("2026-09-15T18:01:00Z").atZone(ZoneOffset.UTC)
 
         val next = generateSequence(cron.next(start)) { cron.next(it) }.take(5).map { it.toInstant() }.toList()
