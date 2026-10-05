@@ -2009,3 +2009,48 @@ Wrong about: where the risk was. I tested the closer against everything that tou
          Not settled, and the owner's: the job reveals a lone entry on a bond that ended
          that afternoon, because the spec says an ended bond must not strand a day, and the
          author can no longer delete it. Nothing can read a past day yet. C5 will.
+
+## 2026-10-05 · Phase 3 · The streak — a number shown and then taken back, and two tests that could not fail
+
+Expected: the easy slice. The rules are a fold over a list of days, the spec states them,
+         and for once the hard part (when does a day end) was somebody else's and done. I
+         planned the rules as a pure function first so the property tests would need no
+         database, and expected the reviews to find wording.
+Reality: the function was fine. What I got wrong was everything around it that decides
+         what the function is *given*.
+         A day both people wrote on, on the day one of them left, was recorded as "after
+         the end" and dropped. I had written the rule as "a day that ends after the bond
+         stopped taking writes moves nothing", to stop the day somebody left from breaking
+         the streak. It also stopped it from counting. The couple were shown 31 that
+         morning, by my own read path, and 30 for ever after. The rule is about a *missed*
+         day and I wrote it about a day.
+         Strict mode was read when the job ran. The job runs after the day is over, and
+         one member can change the setting alone. So: miss a day in Strict mode, switch it
+         off before quarter past, have a freeze spent on it. The spec's sentence is "not
+         in Strict mode at that moment" and I never asked which moment. The bond had no
+         way to answer for a past instant, so that was a column in another module.
+         The calendar returned each day's status. The design system has a paragraph
+         saying exactly why it must not: you know which days you wrote, so a calendar of
+         SOLO days is a calendar of the other person's misses. I had read `states.md` §7
+         for the layout and not for that.
+         And two of my four property tests could not fail. "Replay is a fixed point"
+         replayed each day with the same Strict-mode value it was decided with, so a
+         replay that ignored the record and decided again got the same answer. "Toggling
+         Strict mode alters no past day" toggled the tail of a list and compared the head
+         of a fold. Two thousand timelines each, green, proving nothing. I had run
+         mutations on the table tests and not on these, because a property test feels
+         like it is already the stronger thing.
+Wrong about: what "pure" bought. I made the rules pure so they could be tested without a
+         database, and then took the tests of the rules for tests of the streak. Every
+         defect was in an argument: which outcome, which Strict mode, which days, in what
+         order. None was in the function.
+         And what an invariant is worth. An invariant that holds for every implementation
+         is a fact about the test. The question to ask of a property is the one I ask of
+         any test here: what do I break to make this fail? For two of them the answer was
+         "nothing in this repository".
+         Also which document was the specification. The API contract said `status`, so I
+         returned the status. The rule that forbade it was in the design system, under a
+         screen.
+         Not settled, and the owner's: a deletion that is called off leaves a month of
+         empty days, and those now end the streak. Nothing records that the countdown
+         happened. ADR-0034, question 1.

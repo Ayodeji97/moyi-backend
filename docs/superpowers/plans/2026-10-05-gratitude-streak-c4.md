@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox
-> (`- [ ]`) syntax for tracking.
+> (`- [x]`) syntax for tracking.
 
 **Goal:** A bond has a streak two people share: it grows with every day both wrote, survives
 a missed day when a freeze is banked, and can be recomputed from the bond's days alone.
@@ -24,7 +24,7 @@ evaluation's writes, JUnit 5 with seeded random timelines.
 doc 03 FR-070–FR-076; `adr/0033-the-close-job.md` "Owed, C4".
 
 **Stacked on `feat/gratitude-close` (PR #54, unmerged).** Branch `feat/gratitude-streak`,
-worktree `.worktrees/feat-gratitude-streak`. Migration **V17**. Rebase when #54 changes.
+worktree `.worktrees/feat-gratitude-streak`. Migrations **V17** and **V18** (the second came out of review). Rebase when #54 changes.
 
 ## Global constraints
 
@@ -47,8 +47,8 @@ worktree `.worktrees/feat-gratitude-streak`. Migration **V17**. Rebase when #54 
    separate step that takes the *prefix* of settled days and stops at the first that is not.
 2. **Which bonds to evaluate is derived, not remembered**: any bond with a day that is
    closed and not evaluated. A run that failed half-way is found again by the next.
-3. **The decision is stored on the day**: `bond_days.evaluated_at`, `evaluated_strict`,
-   `freeze_applied`. Spec §6.5: "persist the applied strict-mode and freeze events alongside
+3. **The decision is stored on the day**: `bond_days.evaluated_at`, `evaluated_as`,
+   `evaluated_strict`, `freeze_applied`. Spec §6.5: "persist the applied strict-mode and freeze events alongside
    day outcomes". `recalculate` folds the same rules over those columns and must reproduce
    `streak_states` exactly.
 4. **What counts.** `REVEALED` extends the run and is a *complete* day (it advances
@@ -101,24 +101,24 @@ object StreakRules { fun step(state, date, outcome, strict, freezeApplied: Boole
 ```
 `freezeApplied = null` decides; a value replays (for `recalculate`).
 
-- [ ] Table tests: each outcome from each relevant state; the 14th day banks, in Strict it
+- [x] Table tests: each outcome from each relevant state; the 14th day banks, in Strict it
       does not, at the cap it does not; a missed day with a freeze, without, in Strict.
-- [ ] Properties over seeded random timelines: `longest` never decreases; replaying the
+- [x] Properties over seeded random timelines: `longest` never decreases; replaying the
       recorded decisions reproduces the state (fixed point); inserting a `SUSPENDED` run of
       any length anywhere changes nothing; flipping Strict mode for the *rest* of a timeline
       changes no earlier evaluation.
-- [ ] Commit `feat(gratitude): the streak rules, as a fold over a bond's days`.
+- [x] Commit `feat(gratitude): the streak rules, as a fold over a bond's days`.
 
 ### Task 2: V17 and the closer's view
 
 **Files:** `V17__gratitude_streaks.sql`, `bond/api/BondAccess.kt` (+ adapter, test),
 `FlywayMigrationTest`.
 
-- [ ] `streak_states` (doc 07 §2's columns), `streak_events` (append-only), and on
+- [x] `streak_states` (doc 07 §2's columns), `streak_events` (append-only), and on
       `bond_days`: `evaluated_at`, `evaluated_strict`, `freeze_applied`, with a partial
       index on `(bond_id, date) WHERE closed_at IS NOT NULL AND evaluated_at IS NULL`.
-- [ ] `BondClosingView.strictMode`.
-- [ ] Commit `feat(gratitude): V17 — streak state, its audit log, and the decision on the day`.
+- [x] `BondClosingView.strictMode`.
+- [x] Commit `feat(gratitude): V17 — streak state, its audit log, and the decision on the day`.
 
 ### Task 3: `EvaluateStreaks`, the close job's third step
 
@@ -132,15 +132,15 @@ at the first day that ends after the bond stopped taking writes; fold; write eac
 decision (and `FROZEN` when a freeze was spent), the state, `streak_events`, and the two
 outbox events.
 
-- [ ] Tests through `DayCloser`: N revealed days → N; a missed day → 0 and `StreakBroken`;
+- [x] Tests through `DayCloser`: N revealed days → N; a missed day → 0 and `StreakBroken`;
       14 complete days bank a freeze and the next missed day is `FROZEN` with the run kept
       and the lone entry still revealed; Strict mode spends none and banks none; a
       `SUSPENDED` day neither extends nor breaks; a skipped date counts; an ended bond keeps
       its streak; a backlog written in one run equals the same days a night at a time; an
       unsettled older day holds evaluation back; one bond failing stops no other; two runs
       at once evaluate a day once.
-- [ ] Mutations for each.
-- [ ] Commit `feat(gratitude): the close job evaluates the streak of the days it settles`.
+- [x] Mutations for each.
+- [x] Commit `feat(gratitude): the close job evaluates the streak of the days it settles`.
 
 ### Task 4: reading it
 
@@ -148,50 +148,67 @@ outbox events.
 `service/GetToday.kt`, `web/TodayResponse.kt`, `GratitudeCrossTenantTest`,
 `contracts/openapi.json`, `OpenApiContractTest`.
 
-- [ ] `GET /bonds/{bondId}/streak` → `{current, longest, freezesAvailable, freezeProgress,
+- [x] `GET /bonds/{bondId}/streak` → `{current, longest, freezesAvailable, freezeProgress,
       strictMode, totalCompleteDays, lastCompleteDate, days: [{date, status}]}`; `days` is
       the heatmap, the last 371 days at most (53 weeks), oldest first.
-- [ ] `GET /today` gains `streak: {current, longest, freezesAvailable, strictMode}` (doc 06
+- [x] `GET /today` gains `streak: {current, longest, freezesAvailable, strictMode}` (doc 06
       §3.4).
-- [ ] Today counts when complete (decision 7): tested at 30 → 31 on the second submission.
-- [ ] A non-member gets the one `404`; the route joins the cross-tenant suite.
-- [ ] Nothing in either payload says who has or has not written beyond the day statuses
+- [x] Today counts when complete (decision 7): tested at 30 → 31 on the second submission.
+- [x] A non-member gets the one `404`; the route joins the cross-tenant suite.
+- [x] Nothing in either payload says who has or has not written beyond the day statuses
       `GET /today` already shares (FR-076); a test names the fields.
-- [ ] Regenerate the contract. Additive: no new error code, no label.
-- [ ] Commit `feat(gratitude): GET /streak, and the streak on today`.
+- [x] Regenerate the contract. Additive: no new error code, no label.
+- [x] Commit `feat(gratitude): GET /streak, and the streak on today`.
 
 ### Task 5: `recalculate`
 
 **Files:** `service/RecalculateStreak.kt`, `service/RecalculateStreakTest.kt`.
 
-- [ ] Folds the rules over the bond's evaluated days using the stored decisions, under the
+- [x] Folds the rules over the bond's evaluated days using the stored decisions, under the
       same row lock, and writes `streak_states` with `recomputed_at`.
-- [ ] Tests: after each scenario of Task 3, `recalculate` changes nothing (fixed point);
+- [x] Tests: after each scenario of Task 3, `recalculate` changes nothing (fixed point);
       with `streak_states` corrupted by hand it restores it; with Strict mode toggled since,
       it does not re-decide a past freeze; it never changes a `bond_days` row.
-- [ ] Commit `feat(gratitude): recalculate replays a bond's days and changes nothing`.
+- [x] Commit `feat(gratitude): recalculate replays a bond's days and changes nothing`.
 
 ### Task 6: M3's tooling
 
 **Files:** `tools/bruno/**`, `scripts/moyi` (a small CLI), `README.md`.
 
-- [ ] A Bruno collection: register, verify, login, create bond, invite, accept, write,
+- [x] A Bruno collection: register, verify, login, create bond, invite, accept, write,
       today, edit, delete, streak — with an environment file and no secrets committed.
-- [ ] `scripts/moyi`: `login`, `write "<text>"`, `today`, `streak`, against `MOYI_API`,
+- [x] `scripts/moyi`: `login`, `write "<text>"`, `today`, `streak`, against `MOYI_API`,
       keeping its token in `~/.config/moyi/` with mode 600. What two people need to run the
       loop for a week by hand.
-- [ ] Commit `chore(tools): a Bruno collection and a CLI, for a week of the loop by hand`.
+- [x] Commit `chore(tools): a Bruno collection and a CLI, for a week of the loop by hand`.
 
 ### Task 7: run it, record it, open it
 
-- [ ] `./gradlew build --rerun-tasks`; smoke with `MOYI_DB`, with probes for `/streak` and
+- [x] `./gradlew build --rerun-tasks`; smoke with `MOYI_DB`, with probes for `/streak` and
       `today.streak`.
-- [ ] Whole-slice reviews by lens; fix; one review of the fixes.
-- [ ] ADR-0034; ADR-0033 "Owed, C4" discharged; spec amended; learning log; corpus.
-- [ ] Draft pull request, based on `feat/gratitude-close` until #54 merges.
+- [x] Whole-slice reviews by lens; fix; one review of the fixes.
+- [x] ADR-0034; ADR-0033 "Owed, C4" discharged; spec amended; learning log; corpus.
+- [x] Draft pull request, based on `feat/gratitude-close` until #54 merges.
 
 ## Not in this slice
 
 Milestones and their event (C6). The admin route for `recalculate`. Suspension of a member
 (doc 04 §8.1–§8.2): nothing sets it yet; the rules already skip a `SUSPENDED` day. A
 deletion called off (ADR-0033, question 2): the month it leaves is evaluated as missed days.
+
+## As built — where the slice left this plan (ADR-0034)
+
+Two reviews of the built slice changed six things this plan says:
+
+- Decision 6 is narrower: only a day **missed** after the end moves nothing. A day both
+  wrote on before the bond ended that day counts.
+- Strict mode is the setting the day **ended** under (`bonds.strict_mode_changed_at`, V18),
+  not the one in force "at that evaluation" (decisions 4 and 5).
+- A freeze is not spent on a run of zero.
+- Decision 7's "adds today" is one more application of `StreakRules.step`, so the freeze
+  numbers move with the run.
+- Task 4's `days: [{date, status}]` carries a calendar vocabulary (`COMPLETE`, `FROZEN`,
+  `MISSED`, `OPEN`), not the day's status: `states.md` §7 forbids drawing a solo day.
+- `StreakExtended` is published only for a day both wrote on.
+- Task 1's fourth property (and the second, as written) could not fail; ADR-0034
+  decision 13 says what replaced them.

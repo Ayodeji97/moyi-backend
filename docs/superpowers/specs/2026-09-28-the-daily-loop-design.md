@@ -318,6 +318,13 @@ Two notes on the numbered list:
 every change to it — which is what makes "why did my streak break?" answerable at a support
 desk rather than by reasoning. Both land in C4.
 
+**Amended 2026-10-05 — as built (ADR-0034 decisions 1, 4 and 9).** The rules are one pure
+function, `StreakRules.step`, folded by the close job, by `recalculate`, and once by a read
+for today. `streak_states` is a row per bond and doubles as the evaluation's lock.
+`streak_events` has one line per day that changed the run and one per freeze banked, unique
+on bond, date and event. What was decided for a day is on the day itself: four columns on
+`bond_days` (§6.5, as amended).
+
 ## 4. The reveal gate
 
 FR-060's acceptance clause calls this "the single most important test in the system", and doc
@@ -357,6 +364,10 @@ layer sees: prime `today` as A, read as B before B has written, and B gets A's c
 Doc 06 §3.4 fixes the shape and calls it the most carefully designed response in the API. It is
 the home screen in one call: `bondDay`, `myEntry`, `partnerEntry` (locked or not), `partner`,
 `streak`, `prompt`. C1 ships it with `streak` and `prompt` absent; C4 and C6 fill them in.
+
+**Amended 2026-10-05 (ADR-0034 decisions 8 and 12).** C4 adds `streak: {current, longest,
+freezesAvailable, strictMode}`. Today is counted in it as soon as today is `REVEALED`, by
+the same function the close job will apply at midnight.
 
 **Amended 2026-10-03 (ADR-0031, Consequences).** C1 also ships it **without `partner`**.
 `BondMembership` carries only the caller's own facts and names nothing about the other
@@ -675,6 +686,14 @@ separate alert if it stays flat for more than 25 hours.
 - *Open with the owner:* the job reveals a lone entry on a bond that ended earlier that
   day, as step 2 asks, and its author can no longer delete it (ADR-0033, question 1).
 
+**Amended 2026-10-05 — step 3 as slice C4 built it (ADR-0034 decisions 2, 3, 9).** "For
+changed Bonds" is not how the bonds are chosen: every bond with a day that is closed and
+not evaluated is evaluated, so a run that died after closing is finished by the next. A
+bond's days are evaluated oldest first, in one transaction per bond under its
+`streak_states` row, and the fold **stops at the first day that is not settled or does not
+directly follow the one before** — steps 1 and 2 settle days out of order, and a streak
+evaluated out of order is a different number. One bond failing stops no other.
+
 **The timezone test matrix** (doc 04 §6) is not a suggestion: a DST spring-forward day (23 h), a
 DST fall-back day (25 h), `Asia/Kathmandu`, `Pacific/Chatham`, a Bond whose members are ≥12 h
 apart, and a member crossing the date line.
@@ -710,10 +729,46 @@ apart, and a member crossing the date line.
   break: no endpoint returns "your partner has not written yet" as a message, and no outbox
   event carries one.
 
+**Amended 2026-10-05 — what slice C4 built that the rules above do not say (ADR-0034).**
+
+- **BR-4's "today, if complete" is done at read time** (decision 8): the stored run ends at
+  the last evaluated day, and a read applies the rules once more for a complete today. A
+  lapsed run reads zero only because the job evaluated the missed days.
+- **A freeze-covered day extends the run and is not a complete day** (decision 5): it does
+  not advance `freezeProgress`, `totalCompleteDays` or `lastCompleteDate`.
+- **A freeze is not spent on a run of zero** (decision 5). "Consumed on the next missed
+  day" is read as the next missed day of a run. *Open with the owner.*
+- **"Persist the applied strict-mode and freeze events alongside day outcomes"** is four
+  columns on `bond_days`: `evaluated_at`, `evaluated_as`, `evaluated_strict`,
+  `freeze_applied` (decision 4). `evaluated_as` is needed because a covered day and a
+  stepped-over date are both `FROZEN` and replay differently.
+- **"Not in Strict mode at that moment" is the moment the day ended**, not the moment the
+  job ran (decision 6). `bonds.strict_mode_changed_at` (V18) makes that answerable; it
+  keeps one instant, so it is exact back to the change before the last.
+- **A day missed after a bond ended moves nothing** (decision 7, doc 04 §8.3); a day both
+  wrote on before it ended that day counts.
+- **`recalculate` is a service, not yet a route**, and writes no event (decision 10).
+- **`StreakExtended` is published only for a day both wrote on; `StreakBroken` must never
+  reach a member as a message** (decision 11, FR-076).
+- **`GET /streak`'s calendar is not day statuses** (decision 12): `COMPLETE`, `FROZEN`,
+  `MISSED`, `OPEN`. A `SOLO` day is `MISSED` and today is `OPEN` until complete, because
+  `states.md` §7 forbids a calendar that shows which days exactly one person wrote. It
+  starts at the day the bond became two people, covers at most 371 days, and for an ended
+  bond ends where the bond did.
+- *Open with the owner:* a deletion called off leaves a month of `EMPTY` days, which are
+  evaluated as missed and end the streak (ADR-0034, question 1).
+
 **Property-based tests belong here and nowhere else in the phase.** Generate a random timeline
 of day statuses, apply the rules, and assert the invariants: `longestStreak` never decreases;
 `recalculate` is a fixed point; a `SUSPENDED` run of any length leaves the streak unchanged;
 Strict mode never alters a past day.
+
+*Amended 2026-10-05 (ADR-0034 decision 13).* Seeded random timelines in plain JUnit. Two of
+the four, written literally, cannot fail: a replay given the same Strict-mode values it
+decided with, and "a later toggle alters no earlier day" over any fold. They are tested as
+*a replay with Strict mode inverted on every missed day reproduces every state* and *a day
+evaluated in Strict mode banks no freeze and spends none*; FR-073 itself is tested against
+a real `PATCH` between a day's end and the job.
 
 ### 6.6 The archive, favourites and search (FR-090 – FR-093, FR-050)
 
@@ -777,12 +832,14 @@ slice order. `V10` is the last one Phase 2 uses.
 | C2 | `V14__common_outbox_events.sql` | `common:events` | `outbox_events`, `outbox_deliveries` |
 | C3 | `V15__gratitude_close_candidates.sql` | `modules:gratitude` | the close job's index on `bond_days` |
 | C3 | `V16__scheduling_shedlock.sql` | `modules:scheduling` | `shedlock` |
-| C4 | `V17__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events` |
-| C5 | `V18__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
-| C6 | `V19__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
+| C4 | `V17__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events`, four decision columns on `bond_days` |
+| C4 | `V18__bond_strict_mode_changed_at.sql` | `modules:bond` | `bonds.strict_mode_changed_at` |
+| C5 | `V19__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
+| C6 | `V20__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
 
 C1 owns V11–V13. The first draft of this table gave C1 two versions and C2 `V13`; see §12.5.
-*(Amended 2026-10-05, ADR-0033: C3 took two versions, V15 and V16, so C4 to C6 each moved one later.)*
+*(Amended 2026-10-05, ADR-0033: C3 took two versions, V15 and V16, so C4 to C6 each moved one later.
+Amended again the same day, ADR-0034: C4 took two, V17 and V18, so C5 and C6 moved one more.)*
 
 Doc 07 §2 carries the column lists and this document does not restate them, with four
 exceptions recorded in §12 because doc 07 is wrong about them.
@@ -872,7 +929,7 @@ otherwise was an error in its first draft. They are built in C4.
 | `POST /entries` | §4 *Compose* |
 | the reveal | §5 *Reveal — the one animation* |
 | `GET /days`, `/days/{date}` | §6 *Archive* |
-| `GET /streak`, `/milestones` | §7 *Streak* |
+| `GET /streak`, `/milestones` | §7 *Streak*. *(Amended 2026-10-05, ADR-0034: three gaps recorded there — no field tells a freeze-covered day from a stepped-over date; the length of a run that just broke ("ended at 23 days") is not sent; §7's Strict-mode paragraph reads as clearing banked freezes, which FR-073 forbids.)* |
 | withdrawal on block | §9 *Ending*, whose retained-access line §6.7 qualifies |
 | `PATCH`/`DELETE /entries/{id}` | §4 and §10 *Failure, offline and sync* |
 | search, `/prompts`, `/on-this-day` | **Gaps** — record them in `states.md` before C6 |

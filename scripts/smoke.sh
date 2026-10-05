@@ -26,7 +26,7 @@
 # lock, failed on nothing and left no ended day unclosed. Since slice C4 it
 # reads the streak: one on the first day both have written, and on today's
 # payload, and zero while a day waits on its reveal time. Last run on
-# 2026-10-05, against a database of its own (MOYI_DB, below): 392 passed,
+# 2026-10-05, against a database of its own (MOYI_DB, below): 398 passed,
 # 0 failed. The pull request that last changed this file names the commit the
 # jar was built from; a later commit is unproven until it is run again.
 #
@@ -857,7 +857,7 @@ expect "the partner reads the author's edited words" 200 "\"text\":\"$EDITED_TEX
 # Slice C4: the streak. A day is counted when the close job evaluates it, and
 # today is added as soon as both have written — so the first shared day reads one.
 expect "the streak counts today once both have written" 200 '"current":1' -- "$API/bonds/$GRAT_BOND/streak" -H "Authorization: Bearer $PARTNER_ACCESS"
-[[ "$LAST_BODY" == *'"days":[{"date":"'*'"status":"REVEALED"}]'* ]] && pass "…and its calendar is that one day, REVEALED" || fail "streak calendar" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" == *'"days":[{"date":"'*'"status":"COMPLETE"}]'* ]] && pass "…and its calendar is that one day, COMPLETE" || fail "streak calendar" "${LAST_BODY:0:250}"
 expect "…and today carries the same streak" 200 '"streak":{"current":1,"longest":1,"freezesAvailable":0,"strictMode":false}' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
 expect "PATCH after reveal is ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS" -d '{"text":"too late"}'
 expect "the partner cannot delete the author's entry" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $PARTNER_ACCESS"
@@ -895,6 +895,8 @@ expect "the second writes, and is not shown a reveal" 201 '"status":"SUBMITTED"'
 expect "both have written and the day is PENDING_REVEAL, not PARTIAL" 200 '"status":"PENDING_REVEAL"' -- "$API/bonds/$TIMED_BOND/today" -H "Authorization: Bearer $LATE_ACCESS"
 [[ "$LAST_BODY" == *'"status":"LOCKED"'* && "$LAST_BODY" != *"$TIMED_TEXT"* ]] && pass "…and the partner's entry is still locked, its words withheld" || fail "timed reveal" "${LAST_BODY:0:250}"
 expect "a day still waiting on its reveal time is not in the streak yet" 200 '"current":0' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $EARLY_ACCESS"
+# states.md §7: the calendar never says that exactly one of two has written. Today is OPEN, to both.
+[[ "$LAST_BODY" == *'"status":"OPEN"}]'* && "$LAST_BODY" != *PARTIAL* && "$LAST_BODY" != *PENDING_REVEAL* && "$LAST_BODY" != *SOLO* ]] && pass "…and its calendar says OPEN, not who has written" || fail "streak calendar vocabulary" "${LAST_BODY:0:250}"
 expect "a stranger asking for a bond's streak gets the one 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $AUTHOR_ACCESS"
 
 echo; echo "gratitude — a confirmed zone change decides no date until tomorrow (BR-6, ADR-0031 §3)"

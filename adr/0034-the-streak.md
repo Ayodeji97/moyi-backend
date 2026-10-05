@@ -1,0 +1,262 @@
+# ADR-0034 — The streak
+
+**Status:** Proposed · **Date:** 2026-10-05 · **Deciders:** Daniel
+
+## Context
+
+After C3 every day of a bond ends: `REVEALED`, `SOLO`, `EMPTY`, or `FROZEN` for a date a zone
+change stepped over. Slice C4 turns those days into the number two people share (spec §6.5,
+doc 04 BR-4 and BR-5, FR-070 to FR-076): a run that grows with every day both wrote, a
+freeze earned every fourteen complete days that covers one missed day, a Strict mode that
+turns freezes off, and a `recalculate` that must rebuild all of it from the days alone.
+
+The spec gives the rules. It does not say when a day is judged, what is written down when
+it is, or what a member is shown. Those are the decisions here. With C4 the daily loop is
+complete, which is milestone **M3** — and M3 needs a way for two people to run it with no
+app, so the slice also ships a CLI and a Bruno collection (doc 15 §4).
+
+The slice was built in six tasks and then read whole by two independent reviewers. They
+found one defect that showed a couple a number and then took a day from it, one way to
+rescue a missed day after the fact, and a calendar that disclosed what the design system
+forbids. "How this was checked" says which decisions came from that.
+
+## Decision
+
+**1. The rules are one pure function, and everything that judges a day calls it.**
+`StreakRules.step(state, date, outcome, strict, recordedFreeze?)` takes a streak and one
+day and returns the streak after it, whether a freeze was spent, and what changed. The
+close job folds it over new days; `recalculate` folds it over old ones; a read applies it
+once, to today. There is no second statement of BR-4 or BR-5 to drift from the first.
+
+**2. A day is evaluated once, after it is settled, in date order, and never ahead of an
+unsettled day before it.** The close job's first two steps can settle a bond's days out of
+order: a missing day is written before an older row is closed, and a day that fails to
+close stays open while later ones close. A streak is a fold, and a fold over days in the
+wrong order is a different number. So evaluation is a third step (spec §6.4 step 3) that
+takes the *prefix* of a bond's settled days and stops at the first that is not settled, or
+does not directly follow the one before. Days from before the bond was two people are the
+exception: they are whichever days the creator wrote on, need not be consecutive, and are
+all `SUSPENDED`.
+
+**3. Which bonds to evaluate is derived, not remembered.** Any bond with a day that is
+closed and not evaluated. ADR-0033 owed C4 "evaluate the streak for
+`CloseResult.bondsChanged`"; that set is what one run happened to touch, and a run that
+died between closing and evaluating would leave days no later run was told about. The set
+stays on the result, for the log.
+
+**4. What was decided for a day is written on the day.** Four columns on `bond_days` (V17):
+`evaluated_at`, `evaluated_as`, `evaluated_strict`, `freeze_applied`. Spec §6.5: "persist
+the applied strict-mode and freeze events alongside day outcomes so recalculation never
+substitutes today's setting for past decisions". `evaluated_as` is there because the status
+is not enough: a missed day a freeze covered *becomes* `FROZEN`, the same status as a date
+a zone change stepped over, and the two replay differently; and a day missed after the bond
+ended (decision 7) has an ordinary status and moves nothing.
+
+**5. What counts** (BR-4, BR-5).
+
+| The day | The run | Counts toward a freeze |
+|---|---|---|
+| `REVEALED` | +1 | yes |
+| `FROZEN`, a date a zone change stepped over (BR-6) | +1 | no |
+| `SOLO` / `EMPTY`, a freeze banked, not Strict, **and a run to save** | +1, the freeze is spent, the day becomes `FROZEN` | no |
+| `SOLO` / `EMPTY` otherwise | ends | — |
+| `SUSPENDED` | unchanged | — |
+
+A covered day extends the run and is not a *complete* day: `totalCompleteDays`,
+`freezeProgress` and `lastCompleteDate` do not move. The fourteenth complete day resets
+progress and banks a freeze only outside Strict mode and below the cap of two; in Strict
+mode it resets and banks nothing. Never the formula (BR-5). **A freeze is not spent on a
+run of zero**: there is nothing to save, and spent there it made a streak of one out of a
+day nobody wrote on. The spec does not say this; it follows from what a freeze is for.
+
+The one change evaluation makes to a settled day is `SOLO`/`EMPTY` → `FROZEN`. The lone
+entry on it was revealed when the day closed and stays revealed (spec §4).
+
+**6. A day is judged by the Strict mode it ended under.** Evaluation runs after a day is
+over — a minute after, or days after if the job was down — and either member can change
+Strict mode alone, at once. Judged by the setting at evaluation, a couple could
+miss a day in Strict mode, switch it off before the job ran, and have a freeze spent on
+it; and after an outage every day in the backlog took the setting of the moment. FR-073:
+"toggling Strict mode never alters past days".
+
+`bonds.strict_mode_changed_at` (V18) records when the setting last really changed, and the
+closer's view of a bond answers `strictModeAt(instant)`: the current value from that
+instant on, its opposite before. **One instant is kept**, so the answer is exact back to
+the change before the last one and no further. Two changes inside one unevaluated gap, with
+a day ending between them, would misjudge that day. The gap is a minute in normal running.
+A full history is a table and was not built for it.
+
+**7. A bond that has ended keeps its streak** (doc 04 §8.3: "the streak freezes rather than
+breaks — it is preserved at its value"). A day **missed** after the bond stopped taking
+writes is recorded as `AFTER_THE_END` and moves nothing. Only a missed day: a day both
+wrote on before one of them left that afternoon is a complete day like any other. §8.3
+protects a streak from a break; it does not take a day from it.
+
+**8. Today counts when it is complete, at read time, by the same function.**
+`streak_states` holds the run through the last evaluated day. A read applies
+`StreakRules.step` once more for today when today is `REVEALED` and directly follows the
+last evaluated day (or is the bond's first shared day). So a couple at thirty who both
+write see thirty-one now, not at midnight, and on a fourteenth day the freeze shows as
+earned beside the fourteen — every number moves together because one function moved them.
+Nothing else is computed at read time. A run that has lapsed reads zero because the job
+wrote and evaluated the missed days, never because a read noticed a gap; and while the job
+is behind, today is *not* added to a run that yesterday may have ended.
+
+**9. The streak's row is its mutex.** Evaluation and `recalculate` take the bond's
+`streak_states` row `FOR UPDATE` (inserted if absent) and hold it for the bond's
+transaction. Still no bond lock (ADR-0031 decision 18). Each day's record also refuses a
+second write (`evaluated_at IS NULL` in the update, and `streak_events` is unique on bond,
+date and event), so without the lock a day is still counted once — but the second run
+fails, and a failure is a bond left for the next run for no reason. One bond failing stops
+no other.
+
+**10. `recalculate` replays and announces nothing.** It folds decision 1's function over the
+bond's evaluated days using decision 4's columns, under decision 9's lock, and writes
+`streak_states` with `recomputed_at`. It touches no day and writes no event: a
+recalculation that published would tell two people their streak grew, again. It is a
+**service and not a route**: FR-074 calls it an admin operation and there is no admin
+surface or role yet. The route arrives with `modules/admin`.
+
+**11. Events.** `streak_events` is the audit log (doc 07): one line per day that changed the
+run — `EXTENDED`, `FREEZE_CONSUMED`, `BROKEN` — and one for `FREEZE_BANKED`. The outbox
+gets two (spec §8), in the evaluation's transaction, each carrying the bond's id and
+nothing else:
+
+- **`StreakExtended` only for a day both wrote on.** A covered day and a stepped-over date
+  also extend the run; announced, they would celebrate a day somebody missed.
+- **`StreakBroken` must never become a message to a member** (FR-076). To the one who
+  wrote, "your streak ended" says the other did not. It is for the screen to state when
+  opened (`states.md` §7) and for analytics. Phase 4's notification consumer must not
+  subscribe to it.
+
+`MilestoneReached` is C6's, with the milestones endpoint.
+
+**12. The calendar has its own vocabulary, and it cannot say that one of two wrote.**
+`GET /bonds/{bondId}/streak` returns the numbers and `days`, a square per date:
+`COMPLETE`, `FROZEN`, `MISSED`, `OPEN`. Not the day's status. `states.md` §7: "Solo is not
+rendered on the calendar ... a month-long ledger of days when exactly one person wrote is a
+durable inference surface: you know your own history, so every Solo cell resolves to a
+partner miss." So a `SOLO` day and an `EMPTY` day are the same `MISSED` square, and today
+is `OPEN` until it is complete, whoever has written. (`GET /today` does share today's
+status. That is one day, the product needs it, and spec §4 lists it as deliberately
+shared; a year of them is a different thing.)
+
+A square is drawn for a day once it is evaluated, and for today. Suspended days and days
+missed after the end are not drawn. The calendar runs from the day the bond became two
+people (spec §12.4: earlier days are the creator's alone), for at most 371 days — 53
+weeks — and for an ended bond it ends where the bond did, so the record doc 04 §8.3 says is
+kept does not scroll away. The route runs the joining-day reconciliation `GET /today` runs,
+because a joiner's first request may be this one. A non-member gets the one `404`.
+
+`GET /today` gains `streak: {current, longest, freezesAvailable, strictMode}` (doc 06 §3.4).
+
+**13. The property tests are seeded random timelines in plain JUnit.** The rules are a fold
+over a list; a generator is a seeded `Random` and a loop, and a failure prints its seed.
+Spec §6.5 names four invariants. Two of them, as first written here, **could not fail**:
+"replay is a fixed point" replayed with the same Strict-mode values it decided with, and
+"toggling Strict mode alters no past day" is true of any fold. They are replaced by
+properties that fail when the code is broken: a replay with Strict mode *inverted* on every
+missed day still reproduces every state (so the decision is read from the record); a day
+evaluated in Strict mode banks nothing and spends nothing; a freeze is only ever spent on a
+run that exists. FR-073 itself is held where it can fail — decision 6, against a real
+`PATCH`.
+
+**14. M3's tooling.** `scripts/moyi` is the loop from a terminal: sign in, write, today,
+streak, with the session in `~/.config/moyi/<profile>.json` at mode 600. **Nothing secret is
+an argument of a process it starts** — the password, tokens and entry text reach `curl` and
+`python3` through pipes and a private temporary directory, because arguments are readable
+by every user of a machine. It refuses plain `http` to anything but this machine unless
+told otherwise, and refuses an id or invite code that is not shaped like one before it is
+put in a URL. `tools/bruno` is the same twelve requests for somebody who would sooner
+click. Both decide nothing: every rule is the server's.
+
+## Consequences
+
+- **Migrations V17 (`gratitude`) and V18 (`bond`).** C4 took two versions, so C5 and C6 each
+  move one later than spec §7 said. Neither has been applied to a shared database.
+- **The API gains a route and a field.** Additive: no new error code, no
+  `breaking-api-change` label.
+- **`BondClosingView` no longer exposes the current Strict mode**, only
+  `strictModeAt(instant)`. There is no way left to judge a day by today's setting by
+  accident.
+- **A bond is given a `streak_states` row the first time it has a day to evaluate.** A read
+  of a bond with none answers zeros.
+- **The evaluation reads every unevaluated day of a bond, oldest first.** After a long
+  outage that is a bond's whole backlog in one transaction. It is bounded by the 400 days a
+  run writes.
+- **`states.md` and this API differ in three places**, recorded as gaps for the design
+  system and not guessed at: the calendar has no field that tells a freeze-covered day from
+  a stepped-over date (both are `FROZEN`, and the "we used a rest day" copy fits only the
+  first); the length of a run that has just broken ("your streak ended at 23 days") is not
+  sent, `longest` being the longest ever; and `states.md` §7's Strict-mode
+  paragraph reads as if switching it on clears banked freezes, where FR-073 and BR-5 keep
+  them unspent.
+
+## Owed
+
+**ADR-0033's "Owed, C4" is discharged** by decisions 2 and 3, with the one change decision 3
+states.
+
+**C5, the archive.** A day's page will show its status. Whether a `SOLO` day may say so
+there is the same question decision 12 answers for the calendar, and `states.md` §6 should
+be read before it is built.
+
+**C6.** `MilestoneReached` and the milestones endpoint.
+
+**`modules/admin`.** The route for `recalculate`.
+
+**Phase 4.** The notification consumer must not subscribe to `StreakBroken` (decision 11).
+
+**Not assigned.** Suspension of a member (doc 04 §8.1, §8.2): nothing sets it yet; the
+rules already skip a `SUSPENDED` day, and a property test holds that for a run of any
+length. The Bruno collection has not been opened in Bruno.
+
+## Questions that are the owner's
+
+1. **A deletion that is called off breaks the streak, retroactively.** ADR-0033's second
+   question, no longer hypothetical. While a deletion counts down, no day is written. When
+   it is cancelled the bond is live again, the job writes that month as `EMPTY` days, and
+   C4 evaluates them as missed: a thirty-day streak is zero the morning after the couple
+   changed their minds. Nothing records that the countdown happened, so nothing can tell
+   those days from days the couple simply did not write. The fix is a change to `bond` —
+   keep the interval — after which those days are `SUSPENDED` and decision 5 already does
+   the right thing.
+2. **One instant of Strict-mode history** (decision 6). Exact in normal running, wrong for a
+   day that ended between two changes inside one outage. Is that enough, or is the history
+   a table?
+3. **A freeze is kept, not spent, when there is no run to save** (decision 5). The spec says
+   a freeze "is consumed on the next missed day". This reads that as the next missed day
+   *of a run*.
+4. **The calendar tells a member less than `GET /today` did on the day** (decision 12). A
+   member who looked yesterday knows yesterday was `SOLO`; the calendar says `MISSED`. That
+   is `states.md`'s rule as written. It means the app cannot draw a solo day from this
+   route even if the design later wants to.
+
+## Revisit when
+
+- The owner rules on question 1: the fix is in `bond`, and the days it leaves need a
+  one-off `recalculate`.
+- A second consumer of `StreakExtended` appears: it carries only the bond's id, by design.
+- The number of bonds makes "every bond with an unevaluated day" show in the run's length.
+
+## How this was checked
+
+- **Run:** the build and the smoke run are recorded on the pull request, with the commit
+  they ran at. The smoke run reads `/streak` and `today.streak` after two people write, on
+  a throwaway database. No day in a smoke run ends, so it proves the read and the wiring,
+  and **not an evaluation**: that is the integration tests', which run the job with an
+  instant.
+- **Found by review, not by a test written first:** decision 7's "only a missed day" (a day
+  both wrote on, on the day the bond ended, was recorded `AFTER_THE_END`: the couple were
+  shown 31 and then 30); decision 6 (Strict mode read at evaluation); "a run to save" in
+  decision 5; decision 12 (the first calendar returned the raw status, `SOLO` included);
+  decision 8's use of the one function (the first read added one to two counters and left
+  the freeze numbers behind); `StreakExtended` for covered days in decision 11; and
+  decision 13's two tests that could not fail. Each now has a test, and each test was seen
+  to fail with its fix removed.
+- **Mutations**, each a mechanism removed and a named test seen to fail, are listed on the
+  pull request.
+- **Read, not run:** that evaluation cannot deadlock with a writer — it takes one
+  `streak_states` row and then updates day rows by id, and no request takes a streak row.
+  The CLI was run end to end against the jar; **the Bruno collection was not opened in
+  Bruno.**
