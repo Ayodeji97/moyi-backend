@@ -30,7 +30,8 @@ internal class RevealDay(
     ): BondDay {
         val next = day.revealWhenDue(revealTime, now)
         if (day.revealedAt == null && next.revealedAt != null) {
-            entries.findForDay(day.id).forEach { entry ->
+            // Fresh: this writes each entry back, and one may have been loaded before the lock.
+            entries.findForDayFresh(day.id).forEach { entry ->
                 val revealed = entry.reveal(next.revealedAt)
                 if (revealed != entry) entries.update(revealed)
             }

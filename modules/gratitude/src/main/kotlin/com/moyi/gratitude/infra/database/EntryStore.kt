@@ -69,6 +69,25 @@ internal class EntryStore(
     fun findForDay(bondDayId: BondDayId): List<Entry> = entries.findAllByBondDayId(bondDayId.value).map { it.toDomain() }
 
     /**
+     * [findForDay], with every row read again from the database — for a
+     * caller about to **write** what it reads, under the day's lock.
+     *
+     * [findForDay] answers a row this transaction has already loaded from
+     * Hibernate's identity map, as it stood when it was loaded; and a route
+     * that finds its entry by id loads it before any lock is held. [update]
+     * writes every column from the entry it is given, so a reveal working
+     * from that older copy would write it back over whatever was committed
+     * in between — an edit undone, or erased words restored
+     * (`RevealFreshReadTest`). The same trap, and the same cure, as
+     * [BondDayStore.lockAndFind]'s.
+     */
+    fun findForDayFresh(bondDayId: BondDayId): List<Entry> =
+        entries.findAllByBondDayId(bondDayId.value).map { entity ->
+            entityManager.refresh(entity)
+            entity.toDomain()
+        }
+
+    /**
      * One entry by id, **as it stands now** — a tombstone included (its
      * `text` is `null`). No authorisation here: the caller checks the bond
      * and the author before trusting what this returns.
