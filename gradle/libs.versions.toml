@@ -23,6 +23,10 @@ bucket4j = "8.20.0"
 # the contract test reads back.
 springdoc = "3.1.1"
 swaggerParser = "2.1.48"
+# One instance runs a scheduled job at a time (doc 05 §5.2), on Postgres and
+# not Redis (spec §12.3: Redis fails open here, which is unsafe for a lock).
+# 7.x is the line built against Spring Framework 7. Not in the Spring Boot BOM.
+shedlock = "7.10.1"
 
 [libraries]
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
@@ -31,6 +35,8 @@ mockk = { module = "io.mockk:mockk", version.ref = "mockk" }
 bucket4j-lettuce = { module = "com.bucket4j:bucket4j_jdk17-lettuce", version.ref = "bucket4j" }
 springdoc-webmvc-api = { module = "org.springdoc:springdoc-openapi-starter-webmvc-api", version.ref = "springdoc" }
 swagger-parser = { module = "io.swagger.parser.v3:swagger-parser", version.ref = "swaggerParser" }
+shedlock-spring = { module = "net.javacrumbs.shedlock:shedlock-spring", version.ref = "shedlock" }
+shedlock-jdbc = { module = "net.javacrumbs.shedlock:shedlock-provider-jdbc-template", version.ref = "shedlock" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 # flyway-core / flyway-database-postgresql, the postgresql JDBC driver, and

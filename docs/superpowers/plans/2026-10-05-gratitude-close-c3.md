@@ -179,17 +179,17 @@ only a day cut short by an eastward zone change can produce. Task 8's matrix owe
 
 **Files:** tests only, unless they find something: `web/CloseRaceTest.kt`.
 
-- [ ] A submission holds the day (blocked from a second connection on its insert); the
+- [x] A submission holds the day (blocked from a second connection on its insert); the
       closer waits on the day lock; the submission commits; the closer then sees
       `PARTIAL(1)` or `REVEALED` and decides on that.
-- [ ] The closer holds the day; a submission waits; the closer commits `EMPTY`; the
+- [x] The closer holds the day; a submission waits; the closer commits `EMPTY`; the
       submission is redirected once (BR-3a) or refused `409 DAY_CLOSED` — never filed on
       the closed day. (`SubmitEntrySettledDayTest` simulates the closer by hand today; these
       replace the hand with `CloseDay`.)
-- [ ] A `PATCH` and a `DELETE` against the closer, both orders.
-- [ ] Two `CloseDay.settle` calls on one day at once: one `DayClosed`.
-- [ ] Mutation: remove `lockRow`; these go red.
-- [ ] Commit `test(gratitude): the closer and a live write, both orders`.
+- [x] A `PATCH` and a `DELETE` against the closer, both orders.
+- [x] Two `CloseDay.settle` calls on one day at once: one `DayClosed`.
+- [x] Mutation: remove `lockRow`; these go red.
+- [x] Commit `test(gratitude): the closer and a live write, both orders`.
 
 ### Task 5: the sweep of days that have a row
 
@@ -201,53 +201,58 @@ only a day cut short by an eastward zone change can produce. Task 8's matrix owe
 interface DayCloser { fun closeElapsedDays(now: Instant, budget: Int): CloseResult }
 data class CloseResult(val closed: Int, val revealed: Int, val created: Int, val bondsChanged: Set<UUID>, val backlog: Boolean)
 ```
-- [ ] Candidate query, keyset-paged, ordered `(bond_id, date)`: unsettled rows with
+- [x] Candidate query, keyset-paged, ordered `(bond_id, date)`: unsettled rows with
       `ends_at <= :now`, **plus** `PENDING_REVEAL` rows regardless of `ends_at`. The existing
       partial index is on `(status, date)` and omits `SUSPENDED`; V15 adds
       `bond_days (ends_at) WHERE closed_at IS NULL`. `EXPLAIN` test that it is used.
-- [ ] Each candidate → `CloseDay.settle` in its own transaction; an exception on one is
+- [x] Each candidate → `CloseDay.settle` in its own transaction; an exception on one is
       logged (ids only) and counted, and the sweep goes on.
-- [ ] Tests: a mixed set across three bonds and four zones settles in one call; a failing
+- [x] Tests: a mixed set across three bonds and four zones settles in one call; a failing
       day does not stop the rest; `budget` is honoured and `backlog` says so; an ended
       bond's `PARTIAL` day still becomes `SOLO`; a second call is a no-op.
-- [ ] Commit `feat(gratitude): DayCloser sweeps every day that may have ended`.
+- [x] Commit `feat(gratitude): DayCloser sweeps every day that may have ended`.
 
 ### Task 6: the days nobody opened
 
 **Files:** `service/CreateMissingDays.kt`, `infra/database/BondDayStore.kt`.
 
-- [ ] For each bond from `bondsToSweep`: walk its timeline from `activeSince` to
+- [x] For each bond from `bondsToSweep`: walk its timeline from `activeSince` to
       `min(endedAt, now)`, one window at a time (`dayBoundsAt(previous.endsAt)`), and collect
       windows that have ended and have no row. Labels the timeline skipped between an
       interval's last label and its successor's first are `FROZEN`.
-- [ ] Insert each as a **closed** row (`EMPTY`/`FROZEN`, `closedAt = now`) with
+- [x] Insert each as a **closed** row (`EMPTY`/`FROZEN`, `closedAt = now`) with
       `ON CONFLICT (bond_id, date) DO NOTHING` — a submission that opened it first wins and
       Task 5 settles it. No lock is needed for a row that does not exist.
-- [ ] At most 400 inserts a run; resume from the bond and date reached; `backlog = true`
+- [x] At most 400 inserts a run; resume from the bond and date reached; `backlog = true`
       and a `WARN` with the count.
-- [ ] Tests: interior gaps behind a newer lazy row; nothing before `activeSince`; nothing
+- [x] Tests: interior gaps behind a newer lazy row; nothing before `activeSince`; nothing
       after `endedAt`, but gaps before it are filled; a skipped label is `FROZEN`; a bond
       quiet for 500 days drains in two runs; a degenerate (empty) window is not written;
       racing a submission for the same date leaves one row.
-- [ ] Commit `feat(gratitude): days nobody opened are written, closed`.
+- [x] Commit `feat(gratitude): days nobody opened are written, closed`.
 
 ### Task 7: `modules/scheduling`
 
 **Files:** `modules/scheduling/**` (new sources), `V15__scheduling_shedlock.sql`,
 `gradle/libs.versions.toml`, `app/build.gradle.kts`, `ArchitectureTest.kt`.
 
-- [ ] V15: `shedlock(name, lock_until, locked_at, locked_by)` and Task 5's index.
-- [ ] `CloseJob`: `@Scheduled(cron = "0 */15 * * * *")`,
+- [x] V15: `shedlock(name, lock_until, locked_at, locked_by)` and Task 5's index.
+- [x] `CloseJob`: `@Scheduled(cron = "0 */15 * * * *")`,
       `@SchedulerLock(name = "close-days", lockAtMostFor = "PT14M", lockAtLeastFor = "PT30S")`,
       calls `DayCloser`, sets `gratitude_close_job_last_success_timestamp` on **every**
       successful run and adds to `gratitude_bonds_closed_total`. Off by property in tests
       (`moyi.scheduling.enabled`), so no test depends on a timer.
-- [ ] `ReapIdempotencyKeys`: hourly, its own lock name, `IdempotencyKeyStore.deleteExpired`.
-- [ ] Tests: the job calls the port and moves both meters; with the lock row held by
+- [x] `ReapIdempotencyKeys`: hourly, its own lock name, `IdempotencyKeyStore.deleteExpired`.
+- [x] Tests: the job calls the port and moves both meters; with the lock row held by
       another name-holder the job does not run; a run that throws does not move
       `last_success`; the reaper removes an expired key and keeps a live one.
-- [ ] Architecture rule: `scheduling` depends on `gratitude.api` and `common` only.
-- [ ] Commit `feat(scheduling): the fifteen-minute job, ShedLock on Postgres, two counters`.
+- [x] Architecture rule: `scheduling` depends on `gratitude.api` and `common` only.
+- [x] Commit `feat(scheduling): the fifteen-minute job, ShedLock on Postgres, two counters`.
+
+*As built, Tasks 5–7:* the budget counts days closed, revealed or failed, not days looked at.
+Migrations are **V15** (`gratitude`, the close job's index) and **V16** (`scheduling`,
+`shedlock`, with zoneless timestamps — see the migration). Not yet tested: the `FROZEN`
+branch for a skipped label, and that the failure log omits the exception's message.
 
 ### Task 8: the timezone matrix, end to end
 

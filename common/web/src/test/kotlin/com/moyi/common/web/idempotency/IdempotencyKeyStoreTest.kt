@@ -119,6 +119,20 @@ class IdempotencyKeyStoreTest(
     }
 
     @Test
+    fun `the reaper's sweep removes every expired row, whoever's, and no live one`() {
+        val longAgo = Instant.parse("2026-09-01T00:00:00Z")
+        val now = longAgo.plus(Duration.ofHours(30))
+        store.insert(record(UUID.randomUUID(), "expired-a", createdAt = longAgo))
+        store.insert(record(UUID.randomUUID(), "expired-b", createdAt = longAgo.plusSeconds(60)))
+        store.insert(record(UUID.randomUUID(), "live", createdAt = now.minus(Duration.ofHours(1))))
+
+        store.deleteAllExpired(now) shouldBe 2
+
+        jdbc.queryForList("SELECT idempotency_key FROM idempotency_keys", String::class.java) shouldBe listOf("live")
+        store.deleteAllExpired(now) shouldBe 0
+    }
+
+    @Test
     fun `a result is named by id and kind together or not at all`() {
         // V11's pair CHECK (Task 6 carry 2): an id with no kind cannot be
         // routed to a re-read. Drop the constraint and these inserts succeed.

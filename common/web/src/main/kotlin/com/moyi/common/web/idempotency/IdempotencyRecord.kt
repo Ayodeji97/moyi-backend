@@ -115,6 +115,15 @@ class IdempotencyKeyStore(
     }
 
     /**
+     * Removes every row past its 24 hours — the reaper's sweep (ADR-0031,
+     * Owed). [deleteExpired] only ever clears the one key a request is about
+     * to reuse, so without this a key that is never used again stays for
+     * good. Same scope as there, `expires_at <= :now`: it cannot touch a row
+     * a replay could still answer from. Returns how many went.
+     */
+    fun deleteAllExpired(now: Instant): Int = jdbc.update("DELETE FROM idempotency_keys WHERE expires_at <= ?", micros(now))
+
+    /**
      * Clears an expired row under this key, so the [insert] that follows does
      * not meet it at the unique constraint. Scoped to `expires_at <= :now`,
      * so it can never remove a live row.
