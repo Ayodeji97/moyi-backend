@@ -1,0 +1,25 @@
+meta {
+  name: Edit entry
+  type: http
+  seq: 10
+}
+
+patch {
+  url: {{api}}/entries/{{entryId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "text": "Thank you for making the tea before I asked, again."
+  }
+}
+
+docs {
+  Until your partner has written. After the reveal it is 409 ENTRY_IMMUTABLE.
+}

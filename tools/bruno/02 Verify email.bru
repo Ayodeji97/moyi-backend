@@ -1,0 +1,17 @@
+meta {
+  name: Verify email
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{api}}/auth/verify-email
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "token": "{{verificationToken}}"
+  }
+}

@@ -1,0 +1,33 @@
+meta {
+  name: Write today's entry
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{api}}/bonds/{{bondId}}/entries
+  body: json
+  auth: bearer
+}
+
+headers {
+  Idempotency-Key: {{$guid}}
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "text": "Thank you for making the tea before I asked."
+  }
+}
+
+script:post-response {
+  bru.setVar("entryId", res.body.id);
+}
+
+docs {
+  One entry a day each. A second is 409. The Idempotency-Key is new on every send; to try a replay, send the same key twice by hand.
+}

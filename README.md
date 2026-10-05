@@ -84,6 +84,22 @@ drives the per-IP limits.
 detekt, and tests — including integration tests that spin up a real
 Postgres via Testcontainers (needs Docker running).
 
+### Using it by hand
+
+There is no app yet, so the daily loop is run from a terminal or from Bruno:
+
+```
+scripts/moyi login you@example.com        # once; MOYI_PROFILE=<name> for a second person
+scripts/moyi bond new "Us" Africa/Lagos   # prints the code to send your partner
+scripts/moyi write "Thank you for the tea."
+scripts/moyi today
+scripts/moyi streak
+```
+
+`scripts/moyi help` lists the rest. `tools/bruno` is the same requests as a
+[Bruno](https://www.usebruno.com) collection. Both only send requests: every rule is the
+server's.
+
 ## How do I test it
 
 Three layers, cheapest first.

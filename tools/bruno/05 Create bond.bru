@@ -1,0 +1,33 @@
+meta {
+  name: Create bond
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{api}}/bonds
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "name": "Us",
+    "type": "COUPLE",
+    "anchorTimezone": "{{timezone}}"
+  }
+}
+
+script:post-response {
+  bru.setVar("bondId", res.body.id);
+  bru.setVar("inviteCodeIssued", res.body.invite.code);
+}
+
+docs {
+  The bond's timezone decides where a day begins and ends for both of you.
+  The response carries the invite code to give your partner. You can write before they join.
+}

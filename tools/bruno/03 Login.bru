@@ -1,0 +1,28 @@
+meta {
+  name: Login
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{api}}/auth/login
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "{{email}}",
+    "password": "{{password}}",
+    "device": { "platform": "ANDROID", "appVersion": "bruno", "osVersion": "bruno" }
+  }
+}
+
+script:post-response {
+  bru.setVar("accessToken", res.body.accessToken);
+  bru.setVar("refreshToken", res.body.refreshToken);
+}
+
+docs {
+  Keeps both tokens as collection variables, in memory only. An access token lasts fifteen minutes: run Refresh, or Login again.
+}

@@ -1,0 +1,19 @@
+meta {
+  name: Delete entry
+  type: http
+  seq: 11
+}
+
+delete {
+  url: {{api}}/entries/{{entryId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Before the reveal the day opens again for you. After it, a tombstone is left where the words were.
+}
