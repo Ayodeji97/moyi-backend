@@ -251,19 +251,21 @@ data class CloseResult(val closed: Int, val revealed: Int, val created: Int, val
 
 *As built, Tasks 5–7:* the budget counts days closed, revealed or failed, not days looked at.
 Migrations are **V15** (`gratitude`, the close job's index) and **V16** (`scheduling`,
-`shedlock`, with zoneless timestamps — see the migration). Not yet tested: the `FROZEN`
-branch for a skipped label, and that the failure log omits the exception's message.
+`shedlock`, with zoneless timestamps — see the migration). Not tested: that the failure log omits the exception's message (`CloseDay` already redacts
+what reaches it). Task 8 found the one branch Task 3 could not test to be unreachable: no
+day reaches its end with a reveal time still ahead, because the time is read on the day's
+own date. It stays as a guard.
 
 ### Task 8: the timezone matrix, end to end
 
 **Files:** `gratitude/.../web/CloseMatrixTest.kt`.
 
-- [ ] Spring forward (23 h), fall back (25 h), `Asia/Kathmandu`, `Pacific/Chatham`, members
+- [x] Spring forward (23 h), fall back (25 h), `Asia/Kathmandu`, `Pacific/Chatham`, members
       twelve hours apart, a date-line crossing east (a skipped label → `FROZEN`) and west (a
       merged day closes once, at the later end). For each: the day is `NOT_YET` one second
       before its end and settled at it.
-- [ ] `the job run twice changes nothing the second time` over the whole matrix.
-- [ ] Commit `test(gratitude): the close job over the timezone matrix`.
+- [x] `the job run twice changes nothing the second time` over the whole matrix.
+- [x] Commit `test(gratitude): the close job over the timezone matrix`.
 
 ### Task 9: run it, record it, open it
 
