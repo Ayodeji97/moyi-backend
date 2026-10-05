@@ -315,6 +315,26 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `the streak is documented on its own route and on today, with no field about either member`() {
+        val streak = api.paths["/api/v1/bonds/{bondId}/streak"]!!.get
+
+        streak.operationId shouldBe "streak"
+        streak.responses.keys shouldContainAll listOf("200", "404")
+        // FR-076: counts about the bond and a status per day. A field about a
+        // member would tell one of them something about the other.
+        api.components.schemas["StreakResponse"]!!
+            .properties.keys shouldBe
+            setOf("current", "longest", "freezesAvailable", "freezeProgress", "strictMode", "totalCompleteDays", "lastCompleteDate", "days")
+        api.components.schemas["StreakDayResponse"]!!
+            .properties.keys shouldBe setOf("date", "status")
+        api.components.schemas["TodayStreakResponse"]!!
+            .properties.keys shouldBe
+            setOf("current", "longest", "freezesAvailable", "strictMode")
+        api.components.schemas["TodayResponse"]!!
+            .properties.keys shouldContain "streak"
+    }
+
+    @Test
     fun `an idempotent operation documents its key's bound, and the 413 and 415 its body can earn`() {
         // Final whole-branch review, A5 and A6. The key is 1 to 255 visible
         // ASCII characters (V11's CHECK and the interceptor say the same), a

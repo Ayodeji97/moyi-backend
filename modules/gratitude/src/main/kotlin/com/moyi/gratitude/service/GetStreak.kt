@@ -1,0 +1,107 @@
+package com.moyi.gratitude.service
+
+import com.moyi.bond.api.BondMembership
+import com.moyi.gratitude.domain.BondDayStatus
+import com.moyi.gratitude.domain.DayAssignment
+import com.moyi.gratitude.domain.StreakDay
+import com.moyi.gratitude.domain.StreakState
+import com.moyi.gratitude.infra.database.StreakCalendar
+import com.moyi.gratitude.infra.database.StreakStore
+import org.springframework.stereotype.Service
+import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
+import java.time.LocalDate
+
+/** A bond's streak as a member is shown it: the stored run, with today in it when today is complete. */
+internal data class StreakView(
+    val current: Int,
+    val longest: Int,
+    val freezesAvailable: Int,
+    val freezeProgress: Int,
+    val strictMode: Boolean,
+    val totalCompleteDays: Int,
+    val lastCompleteDate: LocalDate?,
+)
+
+internal data class StreakDetail(
+    val streak: StreakView,
+    val days: List<StreakDay>,
+)
+
+/**
+ * `GET /bonds/{bondId}/streak`, and the `streak` object on `GET /today`
+ * (spec §5.1, §5.2, §6.5).
+ *
+ * **What is stored is the run through the last day the close job has
+ * evaluated; what is shown adds today, when today is complete** (FR-071:
+ * consecutive complete days "ending at today or yesterday"). A couple at
+ * thirty who have both written today see thirty-one today, not at midnight.
+ * Today is added only when it directly follows the last evaluated day — or
+ * is the bond's first day as two people, with nothing evaluated yet. If
+ * yesterday has not been evaluated, the job is a minute or a run behind, and
+ * the stored run is shown as it is until it has caught up.
+ *
+ * **Nothing else is worked out at read time.** A run that lapsed reads zero
+ * because the close job wrote the missed days and evaluated them, not because
+ * a read noticed the date. One place decides the streak.
+ *
+ * **The calendar starts on the day the bond became two people.** Earlier
+ * days have a row only where the creator wrote while waiting, and are
+ * private (spec §12.4): showing them would tell the partner which days those
+ * were.
+ */
+@Service
+internal class GetStreak(
+    private val streaks: StreakStore,
+    private val calendar: StreakCalendar,
+    private val clock: Clock,
+) {
+    @Transactional(readOnly = true)
+    fun detail(membership: BondMembership): StreakDetail {
+        val today = today(membership)
+        val from = maxOf(today.minusDays(CALENDAR_DAYS - 1), joiningDate(membership) ?: today.plusDays(1))
+        val days = calendar.between(membership.bondId, from, today)
+        val todayStatus = days.lastOrNull()?.takeIf { it.date == today }?.status
+        return StreakDetail(view(membership, today, todayStatus), days)
+    }
+
+    /** The streak for [today], whose day has [todayStatus] (`null` if it has no row yet). Reads; the caller owns the transaction. */
+    fun view(
+        membership: BondMembership,
+        today: LocalDate,
+        todayStatus: BondDayStatus?,
+    ): StreakView {
+        val state = streaks.find(membership.bondId) ?: StreakState.NONE
+        val counted = todayStatus == BondDayStatus.REVEALED && todayFollows(membership, today)
+        val current = state.current + if (counted) 1 else 0
+        return StreakView(
+            current = current,
+            longest = maxOf(state.longest, current),
+            freezesAvailable = state.freezesAvailable,
+            freezeProgress = state.freezeProgress,
+            strictMode = membership.strictMode,
+            totalCompleteDays = state.totalCompleteDays + if (counted) 1 else 0,
+            lastCompleteDate = if (counted) today else state.lastCompleteDate,
+        )
+    }
+
+    /** Whether a complete today extends the stored run: see the class KDoc. An evaluated today is already in it. */
+    private fun todayFollows(
+        membership: BondMembership,
+        today: LocalDate,
+    ): Boolean =
+        when (val last = streaks.lastEvaluatedDate(membership.bondId)) {
+            null -> joiningDate(membership) == today
+            else -> last == today.minusDays(1) || (last.isBefore(today) && joiningDate(membership) == today)
+        }
+
+    private fun today(membership: BondMembership): LocalDate =
+        DayAssignment.dateFor(clock.instant(), null, membership.anchorTimeline.asCalendar()) { false }
+
+    private fun joiningDate(membership: BondMembership): LocalDate? = membership.activeSince?.let(membership.anchorTimeline::dateAt)
+
+    private companion object {
+        /** Fifty-three weeks: a year of the calendar with whole weeks at both ends. */
+        const val CALENDAR_DAYS = 371L
+    }
+}

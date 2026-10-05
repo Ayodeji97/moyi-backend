@@ -81,6 +81,12 @@ internal enum class DayOutcome {
     }
 }
 
+/** One square of a bond's calendar: a date and what the day was. */
+internal data class StreakDay(
+    val date: LocalDate,
+    val status: BondDayStatus,
+)
+
 /** What one day did to the run — the vocabulary of `streak_events`, and of "why did my streak break?". */
 internal enum class StreakChange {
     EXTENDED,

@@ -126,8 +126,8 @@ class ArchitectureTest {
         /** `bond.api.BondAccess`'s close-job methods run no membership guard. */
         private val UNGUARDED_BOND_READS = listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep")
 
-        /** The two classes that are the close job's reads of a bond (`gratitude.service`). */
-        private val THE_CLOSER = setOf("CloseDay.kt", "CreateMissingDays.kt")
+        /** The classes that are the close job's three steps (`gratitude.service`): each reads a bond with no caller to ask about. */
+        private val THE_CLOSER = setOf("CloseDay.kt", "CreateMissingDays.kt", "EvaluateStreaks.kt")
 
         private data class Location(
             val module: String,

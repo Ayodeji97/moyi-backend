@@ -65,6 +65,8 @@ internal data class TodayResponse(
     val bondDay: BondDayResponse,
     val myEntry: EntryResponse?,
     val partnerEntry: PartnerEntryResponse?,
+    /** Doc 06 §3.4. About the bond, never about either member: see [StreakResponse]. */
+    val streak: TodayStreakResponse,
 ) {
     companion object {
         fun from(view: TodayView): TodayResponse =
@@ -72,6 +74,7 @@ internal data class TodayResponse(
                 bondDay = BondDayResponse(date = view.date, status = view.status),
                 myEntry = view.myEntry?.let { EntryResponse.of(it, view.date) },
                 partnerEntry = view.partnerEntry?.let { PartnerEntryResponse.of(it, view.date) },
+                streak = TodayStreakResponse.from(view.streak),
             )
     }
 }

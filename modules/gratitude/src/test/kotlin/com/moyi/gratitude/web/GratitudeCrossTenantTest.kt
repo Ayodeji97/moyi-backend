@@ -104,6 +104,7 @@ internal class GratitudeCrossTenantTest(
             // suite; this is only the T-02 stranger/unknown-id/malformed-id
             // coverage every bond-scoped route owes this table.
             "GET /api/v1/bonds/{bondId}/today" to Fixture(),
+            "GET /api/v1/bonds/{bondId}/streak" to Fixture(),
         )
 
     private data class Fixture(
