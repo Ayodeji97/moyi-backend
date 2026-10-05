@@ -61,14 +61,13 @@ internal class EntryAlreadyExistsException :
  * BR-10: the Bond-day this entry would have landed on is settled — closed,
  * or already revealed.
  *
- * One request reaches it today: a `REVEALED` day is settled, so an author
- * who deletes their entry after the reveal and writes that day again is
- * refused here — which is what stops delete-then-rewrite from replacing
- * words already read. The other way in is still to come: the row
- * `SubmitEntry` reads back from
+ * One request reaches it by itself: a `REVEALED` day is settled, so an
+ * author who deletes their entry after the reveal and writes that day again
+ * is refused here — which is what stops delete-then-rewrite from replacing
+ * words already read. The other way in is a race: the close job takes no
+ * bond lock, so the row `SubmitEntry` reads back from
  * [com.moyi.gratitude.infra.database.BondDayStore.openOrGet] may already
- * be closed once C3's close job runs alongside it, and this guard is in
- * place before that job exists, so a race with it is a `409` rather than a
+ * be closed by a run alongside it, and that race is a `409` rather than a
  * silent entry on a settled day, past BR-2's one per member per day.
  */
 internal class DayClosedException :

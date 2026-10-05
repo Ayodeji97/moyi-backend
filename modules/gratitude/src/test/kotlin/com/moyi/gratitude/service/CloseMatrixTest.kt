@@ -59,10 +59,17 @@ internal class CloseMatrixTest(
 
     @BeforeEach
     fun setUp() {
+        clear()
         ada = users.verified("Ada")
         bea = users.verified("Bea")
     }
 
+    /**
+     * Before as well as after ([setUp] calls it first). The close job works on every bond in the
+     * database, and this database is shared with test classes that leave
+     * bonds behind: their unwritten days would be written first and use up
+     * the job's allowance for a run before it reached the bond under test.
+     */
     @AfterEach
     fun clear() {
         jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")

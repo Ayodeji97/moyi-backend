@@ -178,8 +178,9 @@ internal data class Submission(
  *    third: one submission holds up to three days of one bond, and takes
  *    them oldest first. That is safe because every submitter of this bond
  *    is already serialised on the bond lock, and it obliges a writer that
- *    takes no bond lock (C3) never to hold two days of one bond at once, or
- *    to take them oldest first as well.
+ *    takes no bond lock never to hold two days of one bond at once, or to
+ *    take them oldest first as well. The close job is that writer, and
+ *    `CloseDay` holds one day per transaction.
  * 5. The insert. `entries_one_per_member_per_day` (V12/BR-2) is what
  *    refuses a second entry from the same member on the same day — this
  *    method attempts the write and catches the conflict, it does not read
@@ -216,7 +217,7 @@ internal data class Submission(
  * [BondDayStore.openOrGet] happened to return. Two members of one bond now
  * also serialise on the bond lock before they get this far, so for the
  * submit path alone the day lock is belt to the bond lock's braces; it stays
- * because writers that take no bond lock (C3's close job, plan R1) contend
+ * because a writer that takes no bond lock (the close job, plan R1) contends
  * for the same row.
  *
  * **One [TransactionTemplate] boundary, not `@Transactional`.** `RegisterUser.kt`

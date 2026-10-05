@@ -60,10 +60,10 @@ internal class BondDayStore(
      * westward anchor change agreed since the row was opened (plan R3). This
      * method does not reconcile that; a writer does, under the day's lock,
      * with [BondDay.extendedTo] and [update] (ruling P10). A row nobody
-     * writes to again keeps its shorter `ends_at` until C3's close job
-     * reconciles it from the timeline. Instants are truncated to
-     * microseconds, Postgres's own `timestamptz` resolution, so the row read
-     * back is the row written.
+     * writes to again keeps its shorter `ends_at` until `CloseDay` extends
+     * it from the timeline, before deciding whether it has ended. Instants
+     * are truncated to microseconds, Postgres's own `timestamptz` resolution,
+     * so the row read back is the row written.
      */
     fun openOrGet(
         bondId: UUID,
@@ -151,7 +151,7 @@ internal class BondDayStore(
     /**
      * Writes a changed [BondDay] — an entry counted or taken back, a span
      * extended ([BondDay.extendedTo]), a joining day resumed, a reveal
-     * ([BondDay.revealWhenDue]); the close transitions are C3's to add.
+     * ([BondDay.revealWhenDue]), a close ([BondDay.close]).
      * [day] is the aggregate *after* its own transition, as
      * `BondStore.update`'s own KDoc describes; the same warning applies:
      * this is not the layer that prevents a lost update.

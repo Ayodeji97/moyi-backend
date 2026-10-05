@@ -14,6 +14,7 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.api.function.ThrowingSupplier
@@ -66,6 +67,13 @@ internal class CloseElapsedDaysTest(
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
 
+    /**
+     * Before as well as after. The close job works on every bond in the
+     * database, and this database is shared with test classes that leave
+     * bonds behind: their unwritten days would be written first and use up
+     * the job's allowance for a run before it reached the bond under test.
+     */
+    @BeforeEach
     @AfterEach
     fun clear() {
         jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")

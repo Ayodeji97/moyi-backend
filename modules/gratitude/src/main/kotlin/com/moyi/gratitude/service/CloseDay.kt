@@ -49,6 +49,9 @@ import java.time.temporal.ChronoUnit
  *    entry is revealed (FR-063), read fresh under the lock.
  */
 @Service
+// Seven collaborators: what settling one day touches — the bond's view, the day, its
+// entries, the reveal, the outbox, a transaction and the clock.
+@Suppress("LongParameterList")
 internal class CloseDay(
     private val access: BondAccess,
     private val days: BondDayStore,

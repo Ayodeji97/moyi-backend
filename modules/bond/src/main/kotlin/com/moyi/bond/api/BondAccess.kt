@@ -139,8 +139,8 @@ class BondMembership internal constructor(
      * `bond_members.joined_at`, not `bonds.created_at`. Null while the bond is
      * still `PENDING_MEMBER`.
      *
-     * The distinction is load-bearing for C3, which generates missing day
-     * labels from activation forward: starting at `created_at` instead would
+     * The distinction is load-bearing for the close job, which writes missing
+     * days from activation forward: starting at `created_at` instead would
      * manufacture `EMPTY` days across the whole waiting window, which is
      * precisely the harm doc 04 §8.3a's `SUSPENDED` resolution exists to
      * prevent. There is no activation column on `bonds`; this is derived.

@@ -65,11 +65,13 @@ import javax.sql.DataSource
  *   instead — a write one second either side of the :15 boundary, two
  *   writers whose own calendars disagree.
  *
- * **The eastward date-line case asserts what C1 guarantees, not a `FROZEN`
- * row** (ruling P9): nothing in C1 writes a row for a skipped label, because
- * no instant belongs to it and `gratitude` only opens a day an entry lands
- * on. **C3's close job settles the skipped label FROZEN (spec §13,
- * BR-6/§8.5).** An `intendedAt` aimed at the skipped label is not refused
+ * **The eastward date-line case asserts what a submission guarantees, not a
+ * `FROZEN` row** (ruling P9): no submission writes a row for a skipped
+ * label, because no instant belongs to it and a submission only opens a day
+ * an entry lands on. **The close job writes the skipped label FROZEN (spec
+ * §13, BR-6/§8.5)** — `CreateMissingDays`, asserted in
+ * `service/CloseMatrixTest` — and nothing runs the close job in this test.
+ * An `intendedAt` aimed at the skipped label is not refused
  * and does not fall back: it is an *accepted* claim, resolved through the
  * timeline onto the neighbouring label that instant really belongs to.
  *
@@ -352,7 +354,7 @@ internal class TimezoneMatrixTest(
      * - Kiritimati's 17th, clipped to the handoff: [09-16T11:00Z, 09-17T10:00Z),
      *   23 hours.
      *
-     * What C1 guarantees (ruling P9), each asserted below: the days either
+     * What a submission guarantees (ruling P9), each asserted below: the days either
      * side are the 15th and the 17th; **no row exists for the 16th**; an
      * `intendedAt` aimed at either zone's idea of the 16th is **accepted**
      * (stored as claimed — not a fallback, not a refusal) and resolved
@@ -360,12 +362,16 @@ internal class TimezoneMatrixTest(
      * to, instead of opening the 16th; and the two persisted spans meet at
      * the handoff — the 15th's `ends_at` is the 17th's `starts_at`.
      *
-     * The back-fill onto the 15th is accepted only because C1 has no close
-     * job: the 15th is still unsettled at 09-16T20:00Z. Once C3 settles it at
-     * the handoff, that same claim falls back to the submission-time day (the
-     * 17th) under BR-3a, and this test's first `intendedAt` probe changes.
+     * The back-fill onto the 15th is accepted only because nothing runs the
+     * close job in this test: the 15th is still unsettled at 09-16T20:00Z.
+     * With the job running, the 15th is closed once the handoff has passed
+     * and that same claim falls back to the submission-time day (the 17th)
+     * under BR-3a — `service/MissingDaysTest` has that fallback, onto a day
+     * the job had closed.
      *
-     * C3's close job settles the skipped label FROZEN (spec §13, BR-6/§8.5).
+     * No row for the 16th, likewise: the close job writes the skipped label
+     * FROZEN (spec §13, BR-6/§8.5; `CreateMissingDays`), and
+     * `service/CloseMatrixTest` asserts that for this same crossing.
      */
     @Test
     fun `an eastward crossing skips a label - no row for it, no way to write onto it, no gap in UTC`() {
@@ -484,7 +490,7 @@ internal class TimezoneMatrixTest(
      * filed on it. The persisted `ends_at` has to say so: an entry lives on
      * this row whose instant the span must contain, and the 17th's row starts
      * at 09-17T11:00Z, so anything shorter leaves a hole in the bond's
-     * calendar that C3's close job (which reads these columns) would act on.
+     * stored calendar — and the close job finds its days by these columns.
      *
      * **Ruling P10 is what makes this hold.** `SubmitEntry` extends the row
      * under the day's lock, before the entry is inserted: the write at
@@ -527,7 +533,7 @@ internal class TimezoneMatrixTest(
      * `intendedAt` 09-16T20:00Z — on the merged 16th, 16 hours back, inside
      * BR-3a's window. The 16th is unsettled when the submission looks, so it
      * resolves there and queues on the row's lock, which this test holds on
-     * its own connection, standing in for C3's close. The close stamps the
+     * its own connection, standing in for `CloseDay`. The close stamps the
      * day `SOLO` and commits. The submission then holds a settled day whose
      * window ends later than its row: it must leave the row alone and
      * redirect once to the submission-time day (spec §6.1.3).
@@ -628,7 +634,7 @@ internal class TimezoneMatrixTest(
         }
     }
 
-    // ---- the close, standing in for C3 ----------------------------------
+    // ---- the close, by hand, standing in for `CloseDay` -----------------
 
     /**
      * Holds the day row's `FOR UPDATE` on its own connection and hands [block]

@@ -185,18 +185,20 @@ internal class CreateMissingDays(
             var previous: DayWindow? = null
             while (true) {
                 val bounds = timeline.dayBoundsAt(at)
-                if (!bounds.startsAt.isBefore(until)) break
                 val window = DayWindow(bounds.date, bounds.startsAt, bounds.endsAt)
                 val zone = timeline.zoneIdAt(bounds.startsAt)
+                // Began before the bond stopped taking writes; a window that
+                // did not is not this bond's day at all.
+                val began = bounds.startsAt.isBefore(until)
                 // A jump in the labels: dates an eastward change stepped
                 // over. They have no instants, so each is a day of no length
                 // at the moment the calendar moved past it.
-                if (previous != null && !window.startsAt.isAfter(endedAsOf)) {
+                if (began && previous != null && !window.startsAt.isAfter(endedAsOf)) {
                     generateSequence(previous.date.plusDays(1)) { it.plusDays(1) }
                         .takeWhile { it.isBefore(window.date) }
                         .forEach { skipped -> yield(Gap(DayWindow(skipped, window.startsAt, window.startsAt), zone, BondDayStatus.FROZEN)) }
                 }
-                if (bounds.endsAt.isAfter(endedAsOf)) break
+                if (!began || bounds.endsAt.isAfter(endedAsOf)) break
                 yield(Gap(window, zone, BondDayStatus.EMPTY))
                 check(bounds.endsAt.isAfter(at)) { "a bond's calendar must move forward: ${bounds.date} ends at ${bounds.endsAt}" }
                 previous = window

@@ -9,7 +9,7 @@ import java.util.UUID
 
 /**
  * Doc 04 §3's state machine for a Bond-day, all **eight** values — even
- * though later slices own closing and streak settlement.
+ * though streak settlement is a later slice's (C4).
  *
  * Doc 07's own DDL lists five and is stale (Phase 3 design §12.1): it is
  * missing [PENDING_REVEAL] (FR-062, the window between both entries arriving
@@ -43,7 +43,7 @@ internal enum class BondDayStatus(
      * **Not closed — and that is the subtle one.** Nothing closed this day;
      * doc 04 §8.3a excludes it from evaluation entirely while its bond waits
      * for a second member, which is a different thing from having been
-     * closed. BR-3a's fallback, the eventual close job (C3) and the streak
+     * closed. BR-3a's fallback, the close job and the streak
      * walk all have to tell the two apart: a closed day is a record nothing
      * may write into again, a suspended one is a day nobody is being asked
      * about yet. `isClosed == false` here is what lets a caller that only
@@ -253,18 +253,19 @@ internal data class BondDay(
      * Instants are compared and kept at microsecond precision, `timestamptz`'s
      * own, so a row read back equals the one written.
      *
-     * **Called under the day's lock, in two places.** `SubmitEntry` calls it
-     * for the day an entry is about to be filed on, before the insert.
+     * **Called under the day's lock, in three places.** `SubmitEntry` calls
+     * it for the day an entry is about to be filed on, before the insert.
      * `ReconcileJoiningDay` calls it for a couple's joining day while that
      * day is still `SUSPENDED` — and that one runs ahead of reads as well as
      * writes, so it is the single case in which `GET /today` extends a day.
-     * Any other row opened before a change and never written to again keeps
-     * its shorter span until C3's close job reconciles it from the timeline.
-     * That is the accepted limit: until then the timeline, not this column,
-     * says when such a day ends.
+     * `CloseDay` calls it for the day it is settling, before it asks whether
+     * that day has ended. So a row opened before a change and never written
+     * to again keeps its shorter span until the close job reaches it, which
+     * is once its stored end has passed. That is the accepted limit: until
+     * then the timeline, not this column, says when such a day ends.
      *
      * **An obligation on every writer that opens a row without going through
-     * `SubmitEntry`** — C3's close job above all (ADR-0031, Owed): take the
+     * `SubmitEntry`** — `CreateMissingDays` is one (ADR-0031, Owed): take the
      * row's window from the bond's timeline, never from a zone's natural
      * midnight. A row whose `starts_at` disagrees with the timeline fails the
      * second `require` below on every later `POST /entries` for that day,

@@ -14,6 +14,7 @@ import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
@@ -59,6 +60,13 @@ internal class MissingDaysTest(
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
 
+    /**
+     * Before as well as after. The close job works on every bond in the
+     * database, and this database is shared with test classes that leave
+     * bonds behind: their unwritten days would be written first and use up
+     * the job's allowance for a run before it reached the bond under test.
+     */
+    @BeforeEach
     @AfterEach
     fun clear() {
         jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")

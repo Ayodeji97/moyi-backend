@@ -8,7 +8,9 @@ dependencies {
     // IdempotencyKeyStore, for the reaper (ADR-0031, Owed).
     implementation(projects.common.web)
     // `gratitude.api.DayCloser` and nothing else of it: this module knows
-    // when, never what (spec §2.2). ArchitectureTest holds the "nothing else".
+    // when, never what (spec §2.2). The compiler holds the "nothing else":
+    // everything in `gratitude` outside its `api` package is Kotlin
+    // `internal`, and ArchitectureTest fails a declaration there that is not.
     implementation(projects.modules.gratitude)
 
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
