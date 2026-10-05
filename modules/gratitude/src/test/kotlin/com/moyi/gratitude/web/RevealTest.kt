@@ -218,6 +218,32 @@ internal class RevealTest(
         entryCount() shouldBe 0
     }
 
+    /**
+     * Withdraw-then-rewrite leaves several rows by one author on a day, and
+     * `today` shows one. Which one is a rule (ADR-0032 decision 14), and a
+     * single delete-and-rewrite cannot hold it: with two rows, an unordered
+     * read picks the right one half the time. Four tombstones and a live row
+     * leave chance one in five; then the live row goes too, and the answer
+     * must be the newest of five tombstones, by id.
+     */
+    @Test
+    fun `today shows the live entry over any number of withdrawn ones, and then the newest withdrawn one`() {
+        repeat(4) { round ->
+            clock.set(NOW.plusSeconds(60L * round))
+            deleteEntry(ada, idOf(submit(ada, """{"text":"draft $round"}"""))).status shouldBe 204
+        }
+        clock.set(NOW.plusSeconds(600))
+        val kept = idOf(submit(ada, """{"text":"the one she kept"}"""))
+
+        today(ada).contentAsString shouldContain "\"myEntry\":{\"id\":\"$kept\""
+        today(ada).contentAsString shouldContain "the one she kept"
+
+        deleteEntry(ada, kept).status shouldBe 204
+
+        today(ada).contentAsString shouldContain "\"myEntry\":{\"id\":\"$kept\""
+        today(ada).contentAsString shouldContain "\"status\":\"DELETED\""
+    }
+
     // --- the outbox says what happened, and only that ---
 
     @Test
