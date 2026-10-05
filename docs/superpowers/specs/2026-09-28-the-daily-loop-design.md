@@ -736,15 +736,15 @@ apart, and a member crossing the date line.
   lapsed run reads zero only because the job evaluated the missed days.
 - **A freeze-covered day extends the run and is not a complete day** (decision 5): it does
   not advance `freezeProgress`, `totalCompleteDays` or `lastCompleteDate`.
-- **A freeze is not spent on a run of zero** (decision 5). "Consumed on the next missed
-  day" is read as the next missed day of a run. *Open with the owner.*
+- **A freeze is not spent on a run of zero, and a stepped-over date does not start a run**
+  (decision 5). A rest day keeps a run going; it does not make one. *Open with the owner.*
 - **"Persist the applied strict-mode and freeze events alongside day outcomes"** is four
   columns on `bond_days`: `evaluated_at`, `evaluated_as`, `evaluated_strict`,
   `freeze_applied` (decision 4). `evaluated_as` is needed because a covered day and a
   stepped-over date are both `FROZEN` and replay differently.
 - **"Not in Strict mode at that moment" is the moment the day ended**, not the moment the
-  job ran (decision 6). `bonds.strict_mode_changed_at` (V18) makes that answerable; it
-  keeps one instant, so it is exact back to the change before the last.
+  job ran (decision 6). `bond_strict_mode_changes` (V18), a row per real change, makes
+  that answerable for any past instant.
 - **A day missed after a bond ended moves nothing** (decision 7, doc 04 §8.3); a day both
   wrote on before it ended that day counts.
 - **`recalculate` is a service, not yet a route**, and writes no event (decision 10).
@@ -754,7 +754,7 @@ apart, and a member crossing the date line.
   `MISSED`, `OPEN`. A `SOLO` day is `MISSED` and today is `OPEN` until complete, because
   `states.md` §7 forbids a calendar that shows which days exactly one person wrote. It
   starts at the day the bond became two people, covers at most 371 days, and for an ended
-  bond ends where the bond did.
+  bond ends where the bond did. Today always has a square while the bond takes writes.
 - *Open with the owner:* a deletion called off leaves a month of `EMPTY` days, which are
   evaluated as missed and end the streak (ADR-0034, question 1).
 
@@ -833,7 +833,7 @@ slice order. `V10` is the last one Phase 2 uses.
 | C3 | `V15__gratitude_close_candidates.sql` | `modules:gratitude` | the close job's index on `bond_days` |
 | C3 | `V16__scheduling_shedlock.sql` | `modules:scheduling` | `shedlock` |
 | C4 | `V17__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events`, four decision columns on `bond_days` |
-| C4 | `V18__bond_strict_mode_changed_at.sql` | `modules:bond` | `bonds.strict_mode_changed_at` |
+| C4 | `V18__bond_strict_mode_changes.sql` | `modules:bond` | `bond_strict_mode_changes` |
 | C5 | `V19__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
 | C6 | `V20__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
 

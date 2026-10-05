@@ -202,9 +202,10 @@ Two reviews of the built slice changed six things this plan says:
 
 - Decision 6 is narrower: only a day **missed** after the end moves nothing. A day both
   wrote on before the bond ended that day counts.
-- Strict mode is the setting the day **ended** under (`bonds.strict_mode_changed_at`, V18),
-  not the one in force "at that evaluation" (decisions 4 and 5).
-- A freeze is not spent on a run of zero.
+- Strict mode is the setting the day **ended** under (`bond_strict_mode_changes`, V18),
+  not the one in force "at that evaluation" (decisions 4 and 5). A review of the fixes
+  found one "last changed at" column could be defeated by toggling twice; it is a history.
+- A freeze is not spent on a run of zero, and a stepped-over date does not start a run.
 - Decision 7's "adds today" is one more application of `StreakRules.step`, so the freeze
   numbers move with the run.
 - Task 4's `days: [{date, status}]` carries a calendar vocabulary (`COMPLETE`, `FROZEN`,

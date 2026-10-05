@@ -57,7 +57,7 @@ ended (decision 7) has an ordinary status and moves nothing.
 | The day | The run | Counts toward a freeze |
 |---|---|---|
 | `REVEALED` | +1 | yes |
-| `FROZEN`, a date a zone change stepped over (BR-6) | +1 | no |
+| `FROZEN`, a date a zone change stepped over (BR-6), **on a run** | +1 | no |
 | `SOLO` / `EMPTY`, a freeze banked, not Strict, **and a run to save** | +1, the freeze is spent, the day becomes `FROZEN` | no |
 | `SOLO` / `EMPTY` otherwise | ends | — |
 | `SUSPENDED` | unchanged | — |
@@ -67,7 +67,8 @@ A covered day extends the run and is not a *complete* day: `totalCompleteDays`,
 progress and banks a freeze only outside Strict mode and below the cap of two; in Strict
 mode it resets and banks nothing. Never the formula (BR-5). **A freeze is not spent on a
 run of zero**: there is nothing to save, and spent there it made a streak of one out of a
-day nobody wrote on. The spec does not say this; it follows from what a freeze is for.
+day nobody wrote on. For the same reason **a stepped-over date keeps a run going and does
+not start one**. The spec says neither; both follow from what a rest day is for.
 
 The one change evaluation makes to a settled day is `SOLO`/`EMPTY` → `FROZEN`. The lone
 entry on it was revealed when the day closed and stays revealed (spec §4).
@@ -79,12 +80,18 @@ miss a day in Strict mode, switch it off before the job ran, and have a freeze s
 it; and after an outage every day in the backlog took the setting of the moment. FR-073:
 "toggling Strict mode never alters past days".
 
-`bonds.strict_mode_changed_at` (V18) records when the setting last really changed, and the
-closer's view of a bond answers `strictModeAt(instant)`: the current value from that
-instant on, its opposite before. **One instant is kept**, so the answer is exact back to
-the change before the last one and no further. Two changes inside one unevaluated gap, with
-a day ending between them, would misjudge that day. The gap is a minute in normal running.
-A full history is a table and was not built for it.
+`bond_strict_mode_changes` (V18) records every real change of the setting with its time,
+written by `UpdateBond` under the bond's lock, and the closer's view of a bond answers
+`strictModeBefore(instant)`: the setting in force up to that instant, not including it. A
+day is `[startsAt, endsAt)`, so a change stamped exactly at a day's end belongs to the next
+day. The view has no "Strict mode now" at all.
+
+**A single `strict_mode_changed_at` column was built first and is not enough.** The third
+review found the hole: off and on again, both after the day ended and before the job ran,
+and the last change alone says "it was not strict before this". The rescue this decision
+exists to prevent, at the cost of one more request. So it is a history. A bond with no row
+has never changed the setting; days from before V18 are judged by the setting the bond has
+when they are first evaluated, there being nothing else to judge them by.
 
 **7. A bond that has ended keeps its streak** (doc 04 §8.3: "the streak freezes rather than
 breaks — it is preserved at its value"). A day **missed** after the bond stopped taking
@@ -141,8 +148,10 @@ is `OPEN` until it is complete, whoever has written. (`GET /today` does share to
 status. That is one day, the product needs it, and spec §4 lists it as deliberately
 shared; a year of them is a different thing.)
 
-A square is drawn for a day once it is evaluated, and for today. Suspended days and days
-missed after the end are not drawn. The calendar runs from the day the bond became two
+A square is drawn for a day once it is evaluated, and for today. **Today always has its
+square while the bond takes writes**, whether or not it has a row yet: a day gets its row
+with its first entry, and a square that appeared only then would itself say that somebody
+had written. Suspended days and days missed after the end are not drawn. The calendar runs from the day the bond became two
 people (spec §12.4: earlier days are the creator's alone), for at most 371 days — 53
 weeks — and for an ended bond it ends where the bond did, so the record doc 04 §8.3 says is
 kept does not scroll away. The route runs the joining-day reconciliation `GET /today` runs,
@@ -172,18 +181,20 @@ click. Both decide nothing: every rule is the server's.
 
 ## Consequences
 
-- **Migrations V17 (`gratitude`) and V18 (`bond`).** C4 took two versions, so C5 and C6 each
+- **Migrations V17 (`gratitude`) and V18 (`bond`, a table).** C4 took two versions, so C5 and C6 each
   move one later than spec §7 said. Neither has been applied to a shared database.
 - **The API gains a route and a field.** Additive: no new error code, no
   `breaking-api-change` label.
 - **`BondClosingView` no longer exposes the current Strict mode**, only
-  `strictModeAt(instant)`. There is no way left to judge a day by today's setting by
+  `strictModeBefore(instant)`. There is no way left to judge a day by today's setting by
   accident.
 - **A bond is given a `streak_states` row the first time it has a day to evaluate.** A read
   of a bond with none answers zeros.
 - **The evaluation reads every unevaluated day of a bond, oldest first.** After a long
-  outage that is a bond's whole backlog in one transaction. It is bounded by the 400 days a
-  run writes.
+  outage that is a bond's whole backlog in one transaction, and nothing bounds it per run.
+- **A read is two statements with no lock.** An evaluation committing between them can
+  make one response show yesterday's number. It cannot count a day twice: a today that
+  has been evaluated is never added.
 - **`states.md` and this API differ in three places**, recorded as gaps for the design
   system and not guessed at: the calendar has no field that tells a freeze-covered day from
   a stepped-over date (both are `FROZEN`, and the "we used a rest day" copy fits only the
@@ -221,13 +232,10 @@ length. The Bruno collection has not been opened in Bruno.
    those days from days the couple simply did not write. The fix is a change to `bond` —
    keep the interval — after which those days are `SUSPENDED` and decision 5 already does
    the right thing.
-2. **One instant of Strict-mode history** (decision 6). Exact in normal running, wrong for a
-   day that ended between two changes inside one outage. Is that enough, or is the history
-   a table?
-3. **A freeze is kept, not spent, when there is no run to save** (decision 5). The spec says
-   a freeze "is consumed on the next missed day". This reads that as the next missed day
-   *of a run*.
-4. **The calendar tells a member less than `GET /today` did on the day** (decision 12). A
+2. **A rest day keeps a run and does not start one** (decision 5). The spec says a freeze
+   "is consumed on the next missed day", and that a stepped-over date "counts". This reads
+   both as: of a run. On a run of zero the freeze is kept and the date moves nothing.
+3. **The calendar tells a member less than `GET /today` did on the day** (decision 12). A
    member who looked yesterday knows yesterday was `SOLO`; the calendar says `MISSED`. That
    is `states.md`'s rule as written. It means the app cannot draw a solo day from this
    route even if the design later wants to.
@@ -246,6 +254,9 @@ length. The Bruno collection has not been opened in Bruno.
   a throwaway database. No day in a smoke run ends, so it proves the read and the wiring,
   and **not an evaluation**: that is the integration tests', which run the job with an
   instant.
+- **Found by a third review, of the fixes:** that one instant of Strict-mode history could
+  be defeated with two requests (decision 6, now a table); that today's square existed
+  only once somebody had written (decision 12); and "does not start one" in decision 5.
 - **Found by review, not by a test written first:** decision 7's "only a missed day" (a day
   both wrote on, on the day the bond ended, was recorded `AFTER_THE_END`: the couple were
   shown 31 and then 30); decision 6 (Strict mode read at evaluation); "a run to save" in

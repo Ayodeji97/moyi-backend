@@ -2051,6 +2051,14 @@ Wrong about: what "pure" bought. I made the rules pure so they could be tested w
          Also which document was the specification. The API contract said `status`, so I
          returned the status. The rule that forbade it was in the design system, under a
          screen.
+         Then I fixed the Strict-mode one with a single "last changed at" column and
+         wrote in the ADR that it was exact unless two changes fell either side of a
+         day's end. A third reader showed that case is the one it gets right. The one it
+         gets wrong is two changes *after* the day ended: off, on, and the last change
+         says the day was not strict. The fix I had just shipped for "rescue a missed day
+         with one request" could be beaten with two. It is a table of changes now. I had
+         reasoned about my own shortcut and reasoned wrong, in the document meant to say
+         what it cost.
          Not settled, and the owner's: a deletion that is called off leaves a month of
          empty days, and those now end the streak. Nothing records that the countdown
          happened. ADR-0034, question 1.
