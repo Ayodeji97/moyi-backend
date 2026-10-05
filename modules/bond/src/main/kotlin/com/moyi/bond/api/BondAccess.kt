@@ -189,10 +189,16 @@ class BondClosingView internal constructor(
     val endedAt: Instant?,
     /** The bond's **current** reveal time (FR-062) — what a `PENDING_REVEAL` day is waiting for. */
     val revealTimeLocal: LocalTime?,
-    /** Whether the bond is in Strict mode **now** (FR-073) — what the streak's evaluation of a day records beside it. */
-    val strictMode: Boolean,
+    /**
+     * Whether the bond was in Strict mode at an instant (FR-073) — asked of
+     * the instant a day ended, which is the setting that day is judged by.
+     * `bond.domain.Bond.strictModeAt` has what it can and cannot say.
+     */
+    private val strictModeAtFn: (Instant) -> Boolean,
     val anchorTimeline: BondAnchorTimeline,
 ) {
+    fun strictModeAt(instant: Instant): Boolean = strictModeAtFn(instant)
+
     override fun toString(): String = "BondClosingView(bondId=$bondId)"
 }
 

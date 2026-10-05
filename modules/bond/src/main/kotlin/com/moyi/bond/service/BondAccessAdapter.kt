@@ -12,6 +12,7 @@ import com.moyi.bond.domain.BondStatus
 import com.moyi.bond.domain.DayBounds
 import com.moyi.bond.domain.Membership
 import com.moyi.bond.domain.UserId
+import com.moyi.bond.domain.strictModeAt
 import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.BondClosingStore
 import com.moyi.bond.infra.database.BondStore
@@ -93,7 +94,7 @@ internal class BondAccessAdapter(
                 // more writes from here, which is what the closer means by ended.
                 endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
                 revealTimeLocal = bond.revealTimeLocal,
-                strictMode = bond.strictMode,
+                strictModeAtFn = bond::strictModeAt,
                 anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
             )
         }

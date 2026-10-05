@@ -49,7 +49,7 @@ class FlywayMigrationTest(
     @Test
     fun `every module's migrations run, in one sequence, against one schema`() {
         // V1 lives in `app` (database-wide extensions); V2 to V8 live in
-        // `modules/identity`, V9, V10 and V13 in `modules/bond` (its own
+        // `modules/identity`, V9, V10, V13 and V18 in `modules/bond` (its own
         // tables, its proposals, and the effective-anchor timeline), V11 in
         // `common:web` (idempotency_keys, doc 06 §1), V12, V15 and V17 in
         // `modules/gratitude` (its tables, the close job's index, the streak), V14
@@ -75,8 +75,8 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll((1..17).toList()),
-            "Expected every module's migrations through V17, found: $versions",
+            versions.containsAll((1..18).toList()),
+            "Expected every module's migrations through V18, found: $versions",
         )
 
         val extensions =

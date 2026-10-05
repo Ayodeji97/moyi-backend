@@ -270,6 +270,33 @@ internal class BondTest {
     }
 
     @Test
+    fun `Strict mode is remembered with the instant it changed, so a past day can be judged by what it was`() {
+        val t0 = Instant.parse("2026-09-10T00:00:30Z")
+        val bond = create()
+        bond.strictMode shouldBe false
+        bond.strictModeAt(t0) shouldBe false
+
+        val strict = bond.update(BondSettings(strictMode = true), now = t0)
+
+        strict.strictModeChangedAt shouldBe t0
+        // A day that ended half a minute before the change was not a Strict-mode day.
+        strict.strictModeAt(t0.minusSeconds(30)) shouldBe false
+        strict.strictModeAt(t0) shouldBe true
+        strict.strictModeAt(t0.plusSeconds(86_400)) shouldBe true
+    }
+
+    @Test
+    fun `sending the Strict mode a bond already has is not a change`() {
+        val t0 = Instant.parse("2026-09-10T00:00:30Z")
+        val strict = create().update(BondSettings(strictMode = true), now = t0)
+
+        val again = strict.update(BondSettings(strictMode = true, name = "Us two"), now = t0.plusSeconds(3_600))
+
+        again.strictModeChangedAt shouldBe t0
+        again.strictModeAt(t0.plusSeconds(60)) shouldBe true
+    }
+
+    @Test
     fun `updating changes only the fields the caller named`() {
         val bond = create().copy(revealTimeLocal = LocalTime.of(21, 0), strictMode = true)
 

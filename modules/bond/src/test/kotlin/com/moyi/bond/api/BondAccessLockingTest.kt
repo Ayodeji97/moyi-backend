@@ -405,7 +405,7 @@ internal class BondAccessLockingTest(
         live.activeSince shouldBe joined
         live.endedAt.shouldBeNull()
         live.revealTimeLocal.shouldBeNull()
-        live.strictMode shouldBe false
+        live.strictModeAt(joined) shouldBe false
         live.anchorTimeline.beginsAt shouldBe created
         // Lagos is UTC+1 all year: the 5th runs from 23:00Z on the 4th.
         live.anchorTimeline.dayBoundsAt(Instant.parse("2026-09-05T08:00:00Z")).startsAt shouldBe Instant.parse("2026-09-04T23:00:00Z")
@@ -417,7 +417,8 @@ internal class BondAccessLockingTest(
         ended.endedAt shouldBe archivedAtOf(bond.id)
         ended.activeSince shouldBe joined
         ended.revealTimeLocal shouldBe LocalTime.of(21, 0)
-        ended.strictMode shouldBe true
+        // Set by hand above, with no change instant recorded: read as "always was".
+        ended.strictModeAt(joined) shouldBe true
     }
 
     @Test
