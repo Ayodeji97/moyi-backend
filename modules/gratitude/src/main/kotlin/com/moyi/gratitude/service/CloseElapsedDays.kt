@@ -37,6 +37,7 @@ import java.util.UUID
 internal class CloseElapsedDays(
     private val candidates: CloseCandidates,
     private val closeDay: CloseDay,
+    private val missingDays: CreateMissingDays,
 ) : DayCloser {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -44,6 +45,9 @@ internal class CloseElapsedDays(
         now: Instant,
         budget: Int,
     ): CloseResult {
+        // Step 1 before step 2 (spec §6.4): a day written here is written
+        // closed, so the sweep below has nothing more to do to it.
+        val created = missingDays.create(now, DayCloser.MAX_CREATED_PER_RUN)
         val tally = Tally()
         var previous: CloseCandidate? = null
         var page = candidates.after(previous, now, PAGE)
@@ -57,7 +61,14 @@ internal class CloseElapsedDays(
             }
             page = candidates.after(previous, now, PAGE)
         }
-        return CloseResult(tally.closed, tally.revealed, tally.failed, tally.bonds.toSet(), backlog = page.isNotEmpty())
+        return CloseResult(
+            created = created.days,
+            closed = tally.closed,
+            revealed = tally.revealed,
+            failed = tally.failed,
+            bondsChanged = tally.bonds + created.bonds,
+            backlog = page.isNotEmpty() || created.backlog,
+        )
     }
 
     @Suppress("TooGenericExceptionCaught") // See the class KDoc: one day must not hold the others.

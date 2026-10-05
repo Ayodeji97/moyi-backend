@@ -103,7 +103,7 @@ internal class CloseElapsedDaysTest(
 
         first.closed shouldBe 3
         first.backlog shouldBe false
-        second shouldBe second.copy(closed = 0, revealed = 0, failed = 0, bondsChanged = emptySet(), backlog = false)
+        second shouldBe second.copy(created = 0, closed = 0, revealed = 0, failed = 0, bondsChanged = emptySet(), backlog = false)
         events("DayClosed") shouldBe 3
     }
 
@@ -255,11 +255,16 @@ internal class CloseElapsedDaysTest(
         return bond to ada
     }
 
-    /** Two fresh people, paired two days before [NOW], so the day under test is an ordinary one. */
+    /**
+     * Two fresh people, paired an hour before [NOW] — the same local day in
+     * all three zones. Today is the bond's first day as two, so there is no
+     * earlier day for the job to write: these tests are about the days that
+     * have a row (`MissingDaysTest` has the ones that do not).
+     */
     private fun pairedBond(zone: String): Triple<String, UUID, UUID> {
         val ada = users.verified("Ada")
         val bea = users.verified("Bea")
-        clock.set(NOW.minusSeconds(172_800))
+        clock.set(NOW.minusSeconds(3_600))
         val created =
             mockMvc
                 .post("/api/v1/bonds") {
