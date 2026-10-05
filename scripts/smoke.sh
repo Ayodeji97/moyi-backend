@@ -18,9 +18,12 @@
 # reported at once and decides no date until the current Bond-day ends (BR-6,
 # ADR-0031). Since the C1 follow-up it also checks the Idempotency-Key contract
 # on the wire, the media refusal, the author's own today, ALREADY_MEMBER, and
-# that typographic text comes back as it was sent. Last run on 2026-10-04, on
-# the jar built from 0397200: 361 passed, 0 failed. A later commit is unproven
-# until it is run again.
+# that typographic text comes back as it was sent. Since slice C2 it checks the
+# reveal on the wire: an edit before it, both members reading each other after
+# it, ENTRY_IMMUTABLE, the tombstone a delete leaves, a replay of a deleted
+# entry, and a timed bond waiting in PENDING_REVEAL. Last run on 2026-10-05, on
+# the jar built from 1cd8864, against a database of its own (MOYI_DB, below):
+# 389 passed, 0 failed. A later commit is unproven until it is run again.
 #
 # If the application refuses to start on a Flyway checksum mismatch: V11, V12
 # and V13 were edited in place while unmerged (ADR-0031), so a database that
@@ -46,6 +49,16 @@
 #   BASE=http://localhost:8080 scripts/smoke.sh --attach  # probe a server you started yourself;
 #                                                          # needs MOYI_LOG=<its log file> to read the emailed link
 #   MOYI_JAVA=/path/to/jdk-25/bin/java scripts/smoke.sh   # boot with that JDK instead of the one found
+#   MOYI_DB=moyi_smoke scripts/smoke.sh                    # a database of its own, created if absent
+#
+# MOYI_DB is for a branch that carries a migration `main` does not have yet.
+# The compose Postgres is shared by every checkout and every worktree, and a
+# migration applied to its `moyi` database stays applied: every other branch
+# then refuses to start ("detected applied migration not resolved locally"),
+# and if the migration is edited before it merges, that database needs the
+# hand repair described above. A database of its own costs a few seconds and
+# is dropped with `docker compose exec postgres dropdb -U moyi <name>`. The
+# rate-limit buckets are still the shared Valkey's, flushed as before.
 #
 # The jar is compiled for JDK 25 (build-logic's jvmToolchain), which is not
 # necessarily the `java` on PATH: Gradle downloads its own toolchain and
@@ -57,6 +70,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 PORT="${PORT:-8080}"
+MOYI_DB="${MOYI_DB:-moyi}"
+[[ "$MOYI_DB" =~ ^[a-z_][a-z0-9_]*$ ]] || { echo "MOYI_DB must be a plain lower-case database name, got '$MOYI_DB'" >&2; exit 2; }
 BASE="${BASE:-http://localhost:$PORT}"
 API="$BASE/api/v1"
 BUILD=1
@@ -133,6 +148,12 @@ header_is() {
 if [ "$ATTACH" = 0 ]; then
   command -v docker >/dev/null || { echo "docker is required"; exit 1; }
   docker compose up -d postgres >/dev/null
+  if [ "$MOYI_DB" != "moyi" ]; then
+    for _ in $(seq 1 30); do docker compose exec -T postgres pg_isready -U moyi -d moyi >/dev/null 2>&1 && break; sleep 1; done
+    docker compose exec -T postgres psql -U moyi -d postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '$MOYI_DB'" | grep -q 1 \
+      || docker compose exec -T postgres createdb -U moyi "$MOYI_DB"
+    echo "using database $MOYI_DB, not the shared moyi"
+  fi
   if [ "$BUILD" = 1 ]; then
     echo "building the jar…"
     ./gradlew -q :app:bootJar
@@ -141,7 +162,8 @@ if [ "$ATTACH" = 0 ]; then
   JAVA="$(find_java)" || { echo "no JDK $MIN_JAVA or newer found: set MOYI_JAVA or JAVA_HOME, or install one (README: sdk install java 25.0.4-tem)"; exit 1; }
   MOYI_LOG="$(mktemp -t moyi-smoke.XXXXXX.log)"
   echo "booting $JAR (local profile) on $("$JAVA" -version 2>&1 | head -1), log: $MOYI_LOG"
-  "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" >"$MOYI_LOG" 2>&1 &
+  "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" \
+    --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
   trap 'kill $APP_PID 2>/dev/null; wait $APP_PID 2>/dev/null || true' EXIT
   for _ in $(seq 1 90); do
@@ -299,9 +321,9 @@ expect "an oversized password is 422, not work" 422 '"code":"VALIDATION_FAILED"'
 flush_buckets
 for i in 2 3 4 5; do curl -s -o /dev/null -H 'Content-Type: application/json' -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "wrong $i")"; done
 expect "after five failures the RIGHT password is refused, identically" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
-LOCK="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT failed_attempts || '|' || CAST(EXTRACT(EPOCH FROM (locked_until - now())) AS int) FROM credentials c JOIN users u ON u.id=c.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
+LOCK="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT failed_attempts || '|' || CAST(EXTRACT(EPOCH FROM (locked_until - now())) AS int) FROM credentials c JOIN users u ON u.id=c.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
 case "$LOCK" in 5\|5[5-9]|5\|60) pass "locked for a minute after five failures ($LOCK)";; psql-unavailable) echo "  skip lock check (psql unavailable)";; *) fail "lockout row" "expected 5|55..60, got '$LOCK'";; esac
-docker compose exec -T postgres psql -U moyi -d moyi -Atc "UPDATE credentials SET locked_until = now() - interval '1 second' FROM users u WHERE u.id = credentials.user_id AND u.email='$EMAIL'" >/dev/null 2>&1 || true
+docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "UPDATE credentials SET locked_until = now() - interval '1 second' FROM users u WHERE u.id = credentials.user_id AND u.email='$EMAIL'" >/dev/null 2>&1 || true
 flush_buckets
 expect "once the lock expires the right password signs in again" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
 REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
@@ -460,7 +482,7 @@ THIRD_CODE="$(printf '%s' "$LAST_BODY" | jget code)"
 expect "…and the replaced code no longer works" 404 '"code":"INVITE_NOT_USABLE"' -- "$API/invites/$SECOND_CODE" -H "Authorization: Bearer $BOND_ACCESS"
 expect "the new one does" 200 '"bondName":"Two"' -- "$API/invites/$THIRD_CODE" -H "Authorization: Bearer $BOND_ACCESS"
 expect "revoking another bond's invite id is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$SECOND_BOND/invites/$SECOND_INVITE" -H "Authorization: Bearer $JOINER_ACCESS"
-THIRD_INVITE="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT id FROM bond_invites WHERE code='$THIRD_CODE'" 2>/dev/null | tr -d '[:space:]')"
+THIRD_INVITE="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT id FROM bond_invites WHERE code='$THIRD_CODE'" 2>/dev/null | tr -d '[:space:]')"
 expect "revoking the live one is 204" 204 "" -- -X DELETE "$API/bonds/$SECOND_BOND/invites/$THIRD_INVITE" -H "Authorization: Bearer $JOINER_ACCESS"
 expect "…and it stops working at once" 404 '"code":"INVITE_NOT_USABLE"' -- "$API/invites/$THIRD_CODE" -H "Authorization: Bearer $BOND_ACCESS"
 expect "revoking it again is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$SECOND_BOND/invites/$THIRD_INVITE" -H "Authorization: Bearer $JOINER_ACCESS"
@@ -561,7 +583,7 @@ expect "the code it carried is dead" 404 '"code":"INVITE_NOT_USABLE"' -- "$API/i
 # Block is the one write an archived bond accepts, and it repeats (FR-029).
 expect "blocking an archived bond is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
 expect "blocking again is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
-BLOCK_ROWS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) FROM blocks WHERE bond_id='$LEFT_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+BLOCK_ROWS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM blocks WHERE bond_id='$LEFT_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
 case "$BLOCK_ROWS" in psql-unavailable) echo "  skip block row count";; 1) pass "…and one row, not two";; *) fail "block rows" "expected 1, got '$BLOCK_ROWS'";; esac
 
 # A non-member is refused before the bond's state is even looked at (T-02).
@@ -770,7 +792,7 @@ expect "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS" 409 '"
 
 expect "replaying the same key with the same body is 201 again" 201 "\"id\":\"$ENTRY_ID\"" -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d "{\"text\":\"$ENTRY_TEXT\"}"
 header_is "…and says it was replayed" Idempotency-Replayed true
-ENTRY_ROWS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) FROM entries WHERE id='$ENTRY_ID'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+ENTRY_ROWS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM entries WHERE id='$ENTRY_ID'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
 case "$ENTRY_ROWS" in psql-unavailable) echo "  skip entry row count";; 1) pass "…and exactly one row landed in entries";; *) fail "entry rows" "expected 1, got '$ENTRY_ROWS'";; esac
 
 expect "the same key with a different body is 422 IDEMPOTENCY_KEY_REUSED" 422 '"code":"IDEMPOTENCY_KEY_REUSED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d '{"text":"this is not the body that key reserved"}'
@@ -808,6 +830,7 @@ expect "an entry with an unpaired surrogate is 422 on text" 422 '"field":"text"'
 # C2: an author can edit while the partner's entry is still absent.
 EDITED_TEXT="thank you for another quiet morning"
 expect "PATCH before reveal changes the author's words" 200 "\"text\":\"$EDITED_TEXT\"" -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS" -d "{\"text\":\"$EDITED_TEXT\"}"
+if grep -qF "$EDITED_TEXT" "$MOYI_LOG"; then fail "text in log" "the edited entry's text appears in the log"; else pass "…and the edited words are not in the log"; fi
 expect "the partner cannot edit the author's entry" 404 '"code":"NOT_FOUND"' -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $PARTNER_ACCESS" -d '{"text":"not mine"}'
 
 # Ruling P12: an entry is stored exactly as sent. Each of these characters is
@@ -842,6 +865,21 @@ expect "…and the day it landed on opens SUSPENDED, not OPEN" 200 '"status":"SU
 expect "DELETE before reveal frees the author's slot" 204 '' -- -X DELETE "$API/entries/$SOLO_ENTRY" -H "Authorization: Bearer $AUTHOR_ACCESS"
 expect "the author can write a replacement on the same day" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$SOLO_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"replacement after deletion"}'
 expect "today deterministically selects the live replacement" 200 '"text":"replacement after deletion"' -- "$API/bonds/$SOLO_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
+
+echo; echo "gratitude — a timed reveal waits in its own status (FR-062, ADR-0032)"
+flush_buckets
+verified_account "early" "203.0.113.78"; EARLY_ACCESS="$ACCOUNT_ACCESS"
+verified_account "late" "203.0.113.79";  LATE_ACCESS="$ACCOUNT_ACCESS"
+# 23:59 in Lagos: not yet, on any run that is not in that last minute.
+expect "a bond that reveals at 23:59 is 201" 201 '"revealTimeLocal":"23:59"' -- -X POST "$API/bonds" -H "Authorization: Bearer $EARLY_ACCESS" -d '{"name":"Evenings","type":"COUPLE","anchorTimezone":"Africa/Lagos","revealTimeLocal":"23:59"}'
+TIMED_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+TIMED_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$TIMED_CODE/accept" -H "Authorization: Bearer $LATE_ACCESS"
+TIMED_TEXT="kept until the evening"
+expect "the first writes" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$TIMED_BOND/entries" -H "Authorization: Bearer $EARLY_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"$TIMED_TEXT\"}"
+expect "the second writes, and is not shown a reveal" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$TIMED_BOND/entries" -H "Authorization: Bearer $LATE_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"mine can wait too"}'
+expect "both have written and the day is PENDING_REVEAL, not PARTIAL" 200 '"status":"PENDING_REVEAL"' -- "$API/bonds/$TIMED_BOND/today" -H "Authorization: Bearer $LATE_ACCESS"
+[[ "$LAST_BODY" == *'"status":"LOCKED"'* && "$LAST_BODY" != *"$TIMED_TEXT"* ]] && pass "…and the partner's entry is still locked, its words withheld" || fail "timed reveal" "${LAST_BODY:0:250}"
 
 echo; echo "gratitude — a confirmed zone change decides no date until tomorrow (BR-6, ADR-0031 §3)"
 flush_buckets
@@ -902,17 +940,17 @@ else
   expect "the partner's today is that same day, PARTIAL" 200 "\"bondDay\":{\"date\":\"$LAGOS_DATE\",\"status\":\"PARTIAL\"}" -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $STAYER_ACCESS"
   # The rows behind it: the day keeps the zone it began under, and the timeline
   # holds a closed Lagos interval followed by an open one that starts later.
-  DAY_ZONE="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT anchor_timezone FROM bond_days WHERE bond_id='$HANDOFF_BOND' AND date='$LAGOS_DATE'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+  DAY_ZONE="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT anchor_timezone FROM bond_days WHERE bond_id='$HANDOFF_BOND' AND date='$LAGOS_DATE'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
   case "$DAY_ZONE" in psql-unavailable) echo "  skip the bond_days check";; Africa/Lagos) pass "…the day's row keeps Africa/Lagos";; *) fail "day zone" "expected Africa/Lagos, got '$DAY_ZONE'";; esac
-  INTERVALS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT string_agg(zone || CASE WHEN effective_to IS NULL THEN ':open' ELSE ':closed' END || CASE WHEN effective_from > now() THEN ':future' ELSE ':past' END, ',' ORDER BY effective_from) FROM bond_anchor_intervals WHERE bond_id='$HANDOFF_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+  INTERVALS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT string_agg(zone || CASE WHEN effective_to IS NULL THEN ':open' ELSE ':closed' END || CASE WHEN effective_from > now() THEN ':future' ELSE ':past' END, ',' ORDER BY effective_from) FROM bond_anchor_intervals WHERE bond_id='$HANDOFF_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
   case "$INTERVALS" in psql-unavailable) echo "  skip the timeline check";; "Africa/Lagos:closed:past,$NEW_ZONE:open:future") pass "…and the timeline hands over later: $INTERVALS";; *) fail "timeline" "expected Africa/Lagos:closed:past,$NEW_ZONE:open:future, got '$INTERVALS'";; esac
 fi
 
 echo; echo "database state"
-ROW="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
+ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.
 if [ "$ROW" = "ACTIVE|t|2|2" ]; then pass "user ACTIVE, verified, two tokens (verification + reset), both consumed"; elif [ "$ROW" = "psql-unavailable" ]; then echo "  skip database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|2|2, got '$ROW'"; fi
-SESSIONS="$(docker compose exec -T postgres psql -U moyi -d moyi -Atc "SELECT count(*) || '|' || count(*) FILTER (WHERE revoked_at IS NULL) FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
+SESSIONS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) || '|' || count(*) FILTER (WHERE revoked_at IS NULL) FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
 # Every family started here was ended: two by reuse detection and logout,
 # the phone's and the watch's by DELETE /auth/sessions, the rest by
 # logout-all and the reset. Two live tokens remain for THIS account — the
