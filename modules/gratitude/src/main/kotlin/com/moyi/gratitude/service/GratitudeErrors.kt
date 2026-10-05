@@ -17,11 +17,11 @@ import org.springframework.http.HttpStatus
  * `bond.service.BondArchivedException`'s own wording, copied verbatim so the
  * two modules give one answer for one fact.
  *
- * [SubmitEntry] checks `membership.hasLeft` explicitly rather than leaning
- * on `membership.isOpen` alone to cover it — the second review of PR #41
- * found exactly that assumption in `RequestDeletion.cancel`, and
+ * [SubmitEntry] and [ChangeEntry] check `membership.hasLeft` explicitly
+ * rather than leaning on `membership.isOpen` alone to cover it — the second
+ * review of PR #41 found exactly that assumption in `RequestDeletion.cancel`, and
  * `BondMembership`'s own KDoc now says a write path that does not check
- * `isOpen` must check `left` itself. This one checks both.
+ * `isOpen` must check `left` itself. Both check both.
  */
 internal class BondArchivedException :
     ApiException(
@@ -31,8 +31,8 @@ internal class BondArchivedException :
     )
 
 /**
- * `POST /bonds/{bondId}/entries` naming `imageMediaId` or `voiceMediaId`
- * (spec §1): refused rather than stored and silently ignored — Phase 4 has
+ * `POST /bonds/{bondId}/entries` or `PATCH /entries/{entryId}` naming
+ * `imageMediaId` or `voiceMediaId` (spec §1): refused rather than stored and silently ignored — Phase 4 has
  * not built anywhere for either to go yet, and accepting the field only to
  * drop it on the floor would be a promise this response cannot keep.
  */
@@ -58,14 +58,17 @@ internal class EntryAlreadyExistsException :
     )
 
 /**
- * BR-10: the Bond-day this entry would have landed on has already closed.
+ * BR-10: the Bond-day this entry would have landed on is settled — closed,
+ * or already revealed.
  *
- * Unreachable through any write this slice's own code produces — C1 opens a
- * day only `OPEN` or `SUSPENDED`, and closes none — but the row `SubmitEntry`
- * reads back from [com.moyi.gratitude.infra.database.BondDayStore.openOrGet]
- * may already exist and already be closed by the time a later slice's close
- * job (C3) runs alongside this one. This is that guard, in place before the
- * day that needs it exists, so a race with C3 is a `409` rather than a
+ * One request reaches it today: a `REVEALED` day is settled, so an author
+ * who deletes their entry after the reveal and writes that day again is
+ * refused here — which is what stops delete-then-rewrite from replacing
+ * words already read. The other way in is still to come: the row
+ * `SubmitEntry` reads back from
+ * [com.moyi.gratitude.infra.database.BondDayStore.openOrGet] may already
+ * be closed once C3's close job runs alongside it, and this guard is in
+ * place before that job exists, so a race with it is a `409` rather than a
  * silent entry on a settled day, past BR-2's one per member per day.
  */
 internal class DayClosedException :

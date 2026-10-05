@@ -107,9 +107,13 @@ internal interface BondDayRepository : Repository<BondDayEntity, UUID> {
 /**
  * Entries.
  *
- * [findAllByBondDayId] is what `EntryStore.findForDay` needs; [findById] is
- * the re-read an `Idempotency-Key` replay makes. BR-2's uniqueness is the
- * database's job (`entries_one_per_member_per_day`), not a query here.
+ * [findAllByBondDayId] is what `EntryStore.findForDay` and
+ * `findForDayFresh` need; [findById] is behind every read of one entry —
+ * an `Idempotency-Key` replay's re-read, the lookup `PATCH` and `DELETE
+ * /entries/{entryId}` route by, and the entity `EntryStore.update` and
+ * `lockAndFind` write to or refresh. [lockRow] is the entry's own row lock,
+ * for an edit or an erasure. BR-2's uniqueness is the database's job
+ * (`entries_one_per_member_per_day`), not a query here.
  */
 internal interface EntryRepository : Repository<EntryEntity, UUID> {
     /** Taken after the parent day lock; no content is returned before the caller's guard. */
@@ -117,8 +121,9 @@ internal interface EntryRepository : Repository<EntryEntity, UUID> {
     fun lockRow(id: UUID): Int?
 
     /**
-     * Writes and flushes — no plain `save()` beside it. `EntryStore.insert`
-     * needs the flush, not for an `ETag` (no entry carries one) but so
+     * Writes and flushes — no plain `save()` beside it; `EntryStore.update`
+     * writes through it too. `EntryStore.insert` needs the flush, not for an
+     * `ETag` (no entry carries one) but so
      * `entries_one_per_member_per_day`'s violation is raised **here**,
      * inside this call, rather than deferred to whatever transaction the
      * caller eventually commits. A `@Transactional` method cannot catch its
@@ -131,6 +136,6 @@ internal interface EntryRepository : Repository<EntryEntity, UUID> {
 
     fun findAllByBondDayId(bondDayId: UUID): List<EntryEntity>
 
-    /** One entry by id — the re-read behind an `Idempotency-Key` replay (`SubmitEntry`). */
+    /** One entry by id — a replay's re-read, a route by entry id, and the row `EntryStore` updates or refreshes. */
     fun findById(id: UUID): EntryEntity?
 }

@@ -137,7 +137,7 @@ monolith would teach nothing. This is the middle.
 moyi-backend/
 ├─ build-logic/     convention plugins shared across modules
 ├─ app/             @SpringBootApplication, wiring — depends on everything
-├─ common/          core, web, security, testing — shared, no domain logic
+├─ common/          core, web, security, events, testing — shared, no domain logic
 ├─ modules/         identity, bond, gratitude, media, notification,
 │                   scheduling, admin, analytics — the actual domain
 ├─ contracts/       OpenAPI generation for the client
@@ -167,7 +167,7 @@ flowchart TD
     admin["admin"]
     analytics["analytics"]
 
-    common["<b>common</b> — core · web · security · testing"]
+    common["<b>common</b> — core · web · security · events · testing"]
 
     app --> identity & bond & gratitude & media
     app --> notification & scheduling & admin & analytics

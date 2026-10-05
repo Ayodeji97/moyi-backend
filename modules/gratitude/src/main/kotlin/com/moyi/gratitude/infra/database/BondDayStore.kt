@@ -20,9 +20,10 @@ import java.util.UUID
  *
  * Not transactional itself, for the reason `BondStore`'s own KDoc gives: the
  * boundary is the caller's (doc 18 §4). A caller of [openOrGet] or [update]
- * supplies one — a `TransactionTemplate` in a test, a `@Transactional`
- * service method once one exists — the same discipline `BondPersistenceTest`
- * and `MemberPersistenceTest` already hold every `bond` store to.
+ * supplies one — a `TransactionTemplate`, in a test or in the services
+ * that write a day (`SubmitEntry`, `ChangeEntry`, `ReconcileJoiningDay`) —
+ * the same discipline `BondPersistenceTest` and `MemberPersistenceTest`
+ * already hold every `bond` store to.
  */
 @Component
 internal class BondDayStore(
@@ -94,13 +95,14 @@ internal class BondDayStore(
      * The day for a bond and a date, if one has ever been opened — `null`,
      * not created, when nobody has written yet.
      *
-     * **This is [GetToday]'s own read, and the reason it exists separately
-     * from [openOrGet]: a `GET` must never manufacture the row [openOrGet]
-     * exists to lazily open for a write.** Every other caller of this store
-     * either already holds a [BondDayId] ([find], [lockAndFind]) or is about
-     * to create the row if it is missing ([openOrGet]) — [GetToday] is the
-     * first caller that has to ask "does this day exist" and accept "no" as
-     * a real, cheap answer, rather than opening it to find out. Delegates to
+     * **This is the read for a caller that must not open the row, and the
+     * reason it exists separately from [openOrGet]: a `GET` must never
+     * manufacture the row [openOrGet] exists to lazily open for a write.**
+     * `GetToday` asks "does this day exist" and accepts "no" as a real,
+     * cheap answer, rather than opening it to find out. So does
+     * `ReconcileJoiningDay`, which looks for a couple's joining day and
+     * leaves a missing one missing, and so does `SubmitEntry`'s BR-3a check
+     * of whether a claimed day is already settled. Delegates to
      * the same [BondDayRepository.findByBondIdAndDate] [openOrGet] already
      * uses internally to read back what it just opened or found — this is
      * that same query, exposed for a caller with no write to make first.
@@ -112,8 +114,10 @@ internal class BondDayStore(
 
     /**
      * Holds the day's row for the rest of the transaction, then reads it back
-     * fresh under that lock (fix round 1, I3). `SubmitEntry`'s own use:
-     * `entry_count`/`status` is a read-modify-write — [BondDay.withEntry] is
+     * fresh under that lock (fix round 1, I3). Every writer of a day comes
+     * through here first — `SubmitEntry`, `ChangeEntry` and
+     * `ReconcileJoiningDay` — and `SubmitEntry`'s use is the one that shows
+     * why: `entry_count`/`status` is a read-modify-write — [BondDay.withEntry] is
      * computed in application code from whatever was last read, then [update]
      * writes it back — and two members submitting on the same day
      * concurrently is the ordinary case this product exists for, not a race
@@ -145,9 +149,10 @@ internal class BondDayStore(
     }
 
     /**
-     * Writes a changed [BondDay] — an entry counted, a span extended
-     * ([BondDay.extendedTo]), and the reveal and close transitions later
-     * slices add. [day] is the aggregate *after* its own transition, as
+     * Writes a changed [BondDay] — an entry counted or taken back, a span
+     * extended ([BondDay.extendedTo]), a joining day resumed, a reveal
+     * ([BondDay.revealWhenDue]); the close transitions are C3's to add.
+     * [day] is the aggregate *after* its own transition, as
      * `BondStore.update`'s own KDoc describes; the same warning applies:
      * this is not the layer that prevents a lost update.
      */

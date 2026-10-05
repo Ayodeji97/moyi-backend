@@ -80,7 +80,7 @@ internal enum class BondDayStatus(
  * what they were called with; nothing on this aggregate ever reads either
  * back off the bond.
  *
- * C2 separates counting an accepted entry ([withEntry]) from evaluating the
+ * Counting an accepted entry ([withEntry]) is separate from evaluating the
  * reveal ([revealWhenDue]). The service persists that transition, both entry
  * timestamps and the outbox event in one transaction under this day's lock.
  */
@@ -134,7 +134,7 @@ internal data class BondDay(
      * [resumeJoiningDay] proves activation occurred in their span. The caller
      * follows this with [revealWhenDue] in the same locked transaction: a
      * two-entry PARTIAL value is only an intermediate calculation, never a
-     * committed status on the C2 write path.
+     * committed status.
      */
     fun withEntry(): BondDay =
         copy(
@@ -216,12 +216,15 @@ internal data class BondDay(
      * Instants are compared and kept at microsecond precision, `timestamptz`'s
      * own, so a row read back equals the one written.
      *
-     * **Called under the day's lock, by a write** (`SubmitEntry`), before the
-     * entry is inserted. `GET /today` is a read and extends nothing, so a row
-     * opened before a change and never written to again keeps its shorter
-     * span until C3's close job reconciles it from the timeline. That is the
-     * accepted limit: until then the timeline, not this column, says when
-     * such a day ends.
+     * **Called under the day's lock, in two places.** `SubmitEntry` calls it
+     * for the day an entry is about to be filed on, before the insert.
+     * `ReconcileJoiningDay` calls it for a couple's joining day while that
+     * day is still `SUSPENDED` — and that one runs ahead of reads as well as
+     * writes, so it is the single case in which `GET /today` extends a day.
+     * Any other row opened before a change and never written to again keeps
+     * its shorter span until C3's close job reconciles it from the timeline.
+     * That is the accepted limit: until then the timeline, not this column,
+     * says when such a day ends.
      *
      * **An obligation on every writer that opens a row without going through
      * `SubmitEntry`** — C3's close job above all (ADR-0031, Owed): take the

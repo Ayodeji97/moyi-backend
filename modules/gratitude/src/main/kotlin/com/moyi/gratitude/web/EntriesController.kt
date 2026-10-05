@@ -47,6 +47,12 @@ import java.util.UUID
  * not depend on the bond existing, which is why `BondsController.patchBond`
  * accepts the same ordering for its own `@Valid` body.
  *
+ * **[today] is a read that may write first.** After the guard and before the
+ * read it calls `ReconcileJoiningDay.beforeRead`, which does nothing unless
+ * the couple's joining day is still `SUSPENDED`; then it takes the bond's row
+ * lock, in a transaction of its own, and takes that day out of `SUSPENDED`
+ * (spec §12.4) — so what `GetToday` goes on to read is the day as resumed.
+ *
  * The id is taken as text and parsed here, not as a `UUID` path variable —
  * `BondsController`'s own reasoning: a value that is not a UUID cannot name
  * a bond, and the answer is the same `404` as a UUID that names nobody's.

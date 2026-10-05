@@ -49,9 +49,11 @@ internal class BondDayTest {
     }
 
     @Test
-    fun `the first entry makes it partial and the second does not reveal it yet`() {
-        // C1 has no reveal — that is C2, with the row lock and the race test.
-        // The day is left honest about its count and wrong about nothing else.
+    fun `the first entry makes it partial and the second is only counted`() {
+        // `withEntry` only counts. Revealing is a separate step,
+        // `revealWhenDue`, which the service takes next under the day's lock
+        // (`RevealTransitionTest`). Here the day is left honest about its
+        // count and wrong about nothing else.
         val partial = BondDay.open(dayId, bondId, window, lagos, now).withEntry()
         partial.status shouldBe BondDayStatus.PARTIAL
         partial.entryCount shouldBe 1
@@ -148,7 +150,7 @@ internal class BondDayTest {
     }
 
     @Test
-    fun `the eight statuses doc 04 defines all exist, whatever this slice produces`() {
+    fun `the eight statuses doc 04 defines all exist`() {
         BondDayStatus.entries.map { it.name } shouldContainExactlyInAnyOrder
             listOf("OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN")
     }

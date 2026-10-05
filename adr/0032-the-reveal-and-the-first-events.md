@@ -62,8 +62,9 @@ who both write before it stay locked to each other, and clearing the time afterw
 nothing. This is the slicing the spec chose; it is stated here because nothing else said so.
 
 **6. The joining day is reconciled by the first gratitude operation that meets it, in a
-transaction of its own.** `GET /today`, `POST /entries`, `PATCH`, `DELETE` and both replays
-call `ReconcileJoiningDay.beforeRead` before their own work: zero entries becomes `OPEN`, one
+transaction of its own.** `GET /today`, `POST /entries`, `PATCH` and `DELETE` call
+`ReconcileJoiningDay.beforeRead` before their own work (a replay calls it too, inside the
+key's transaction — a replay writes nothing else and is not refused for what it finds): zero entries becomes `OPEN`, one
 `PARTIAL`, two follow the reveal rule, on the day whose span contains `activeSince` and no
 other. It commits before the request's own transaction because the request can be refused *by
 the reconcile's own result*: on a day C1 left `SUSPENDED` with both entries, the reconcile

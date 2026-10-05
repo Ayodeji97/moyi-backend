@@ -4,19 +4,20 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Doc 07 §2's `entries.status` `CHECK`. [SUBMITTED] is every entry this
- * submission produces; C2 adds [REVEALED] and [DELETED].
+ * Doc 07 §2's `entries.status` `CHECK`. [SUBMITTED] is what [Entry.submit]
+ * produces, [REVEALED] what [Entry.reveal] makes of it, and [DELETED] what
+ * [Entry.erase] leaves.
  *
  * **BR-2's slot is freed by `deleted_at`, not by [status] alone** (whole-
  * branch review, F5 — an earlier version of this KDoc said the opposite).
  * `entries_one_per_member_per_day` (V12) is `WHERE deleted_at IS NULL`, a
- * *partial* unique index keyed on that column, not on `status`. A future
- * `delete()` written from the wrong premise — setting `status = DELETED`
- * and leaving `deleted_at` null — would leave the slot held: the index would
- * still see a live row, and the author who "deleted" it could never write
- * that day again. `delete()` must set both. [EntryStore.findForDay]'s own
- * KDoc has the matching note on the read side: it returns a [DELETED] row
- * too, harmless while nothing produces one yet, wrong the day this lands.
+ * *partial* unique index keyed on that column, not on `status`. An erasure
+ * written from the wrong premise — setting `status = DELETED` and leaving
+ * `deleted_at` null — would leave the slot held: the index would still see
+ * a live row, and the author who "deleted" it could never write that day
+ * again. [Entry.erase] sets both. On the read side, `EntryStore.findForDay`
+ * returns a [DELETED] row along with the live ones, so one author can have
+ * more than one row on a day; its KDoc says how `GetToday` chooses.
  */
 internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
 
@@ -30,15 +31,15 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  *
  * **[text] is `null` exactly on a tombstone** — an entry content-erased by
  * BR-10/BR-10a (text and media references nulled, `status = DELETED`, the
- * row kept). No path in this slice erases one; the type admits it because a
- * *read* must already be able to render it: an `Idempotency-Key` replay
- * re-reads the entry from its current state (spec §5.4), and a row erased
+ * row kept). [erase] is what makes one, and every *read* has to be able to
+ * render it: `GET /today` shows it, and an `Idempotency-Key` replay
+ * re-reads the entry from its current state (spec §5.4), where a row erased
  * since has no words to hand back, by design. Every entry [submit] produces
  * has words — `entries.text` is also nullable for the media-only entry a
- * later Phase 4 slice adds, which this slice refuses at the edge
+ * later Phase 4 slice adds, which is refused for now
  * (`422 MEDIA_NOT_YET_SUPPORTED`) — so the `init` below admits a missing
- * text only where the status says why. Loosening it for media-only entries
- * is that later slice's change to make.
+ * text only where the status or `deletedAt` says why. Loosening it for
+ * media-only entries is that later slice's change to make.
  *
  * [imageMediaId], [voiceMediaId], [voiceDurationMs] and [promptId] are
  * carried anyway, always `null` for now, so a row [submit] builds already
@@ -83,7 +84,7 @@ internal data class Entry(
         // and stamped `deleted_at` before it flipped the status must load,
         // and render as its tombstone, not fail in the mapper.
         require(text != null || status == EntryStatus.DELETED || deletedAt != null) {
-            "only an erased entry has no text in this slice"
+            "only an erased entry has no text"
         }
     }
 
@@ -112,7 +113,7 @@ internal data class Entry(
      *    own timestamp was never set. The timestamp is monotonic — nothing in
      *    this phase clears it.
      *
-     * C2 stamps [revealedAt] transactionally; later status changes never clear it.
+     * [reveal] stamps [revealedAt], in the transaction that reveals the day; later status changes never clear it.
      *
      * Callers that render want [readBy], which returns the answer bound to
      * the entry it was given for.
@@ -193,8 +194,9 @@ internal data class Entry(
          * always the day this row is actually filed against, never an
          * unvalidated value a caller typed.
          * [createdAt] and [updatedAt] start equal, as they do for every row
-         * until its first edit; nothing this slice does ever produces a
-         * second one.
+         * until it first changes: [edit], [erase] and [reveal] each move
+         * [updatedAt] when they change the entry, and nothing moves
+         * [createdAt].
          *
          * `@Suppress("LongParameterList")` here, on the function rather than
          * the class (`Entry` itself needs none — detekt's `LongParameterList`

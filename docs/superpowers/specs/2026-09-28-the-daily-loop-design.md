@@ -898,7 +898,7 @@ reconcile lives in `gratitude`: `bond` cannot write `bond_days`.
 **Amended 2026-10-05 — as built in C2 (ADR-0032 decisions 6 and 7).**
 
 - **"The first gratitude operation" is every one of them**: `GET /today`, `POST /entries`,
-  `PATCH`, `DELETE` and both replays. Each reconciles in a transaction of its own, committed
+  `PATCH`, `DELETE` and both replays. Each write reconciles in a transaction of its own, committed
   before its own work — because the request can be refused by what the reconcile did (a day
   it has just revealed makes an edit `409`), and a refusal must not undo the reveal.
 - **So a read can write, and can take the bond lock**: once per bond, while its joining day

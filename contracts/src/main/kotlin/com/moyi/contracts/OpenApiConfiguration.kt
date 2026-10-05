@@ -64,14 +64,18 @@ import org.springframework.http.HttpStatus
  *   entirely: that a client may leave it out. [CONDITIONAL_OPERATIONS] is the
  *   one list of operations that demand a condition, and it now says so in both
  *   places. Raised by the review of PR #40.
- * - **`Idempotency-Key`, required.** `@Idempotent` (`common:web`) is a marker
- *   annotation on the handler method, not a Spring-visible parameter, so
+ * - **`Idempotency-Key`, required unless the operation says otherwise.**
+ *   `@Idempotent` (`common:web`) is a marker annotation on the handler
+ *   method, not a Spring-visible parameter, so
  *   springdoc has no way to know the header exists at all — unlike `If-Match`,
  *   there is nothing here to correct the optionality of, only a parameter to
  *   add outright. [IDEMPOTENT_OPERATIONS] names the operations that carry
- *   `@Idempotent`, mirroring [CONDITIONAL_OPERATIONS]'s own shape. Fix round
- *   1, C2: found alongside the missing `409` below — a generated client had
- *   no header to send at all, so every call to `POST /bonds/{bondId}/entries`
+ *   `@Idempotent`, mirroring [CONDITIONAL_OPERATIONS]'s own shape, and
+ *   [OPTIONAL_KEY_OPERATIONS] the ones among them declared
+ *   `@Idempotent(required = false)` — `patchEntry` — where the parameter is
+ *   added as optional: the key is honoured when sent and may be left out.
+ *   Fix round 1, C2: found alongside the missing `409` below — a generated
+ *   client had no header to send at all, so every call to `POST /bonds/{bondId}/entries`
  *   it made would have been refused as `422 VALIDATION_FAILED`.
  * - **The `partnerEntry` discriminator.** `gratitude.web.TodayResponse.partnerEntry`
  *   is a Kotlin sealed interface's `oneOf` — springdoc already splits it into
