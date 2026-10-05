@@ -128,12 +128,6 @@ internal data class Bond(
     /** The row-version prefix of the representation ETag. `0` until the first update. */
     val version: Int,
     val members: List<Member>,
-    /**
-     * When [strictMode] last changed, or `null` if it never has. Kept so that
-     * a day can be judged by the setting it ended under and not by the one
-     * in force when somebody got round to judging it ([strictModeAt]).
-     */
-    val strictModeChangedAt: Instant? = null,
 ) {
     init {
         // Mirrors V9's CHECKs, for the reason given there: the database
@@ -310,20 +304,13 @@ internal data class Bond(
      * number needs a rule about the members already in the bond rather than an
      * arithmetic side effect here.
      */
-    fun update(
-        settings: BondSettings,
-        now: Instant? = null,
-    ): Bond {
+    fun update(settings: BondSettings): Bond {
         check(isOpen) { "a bond that has ended cannot be changed" }
-        val strict = settings.strictMode ?: strictMode
         return copy(
             name = settings.name ?: name,
             type = settings.type ?: type,
             revealTimeLocal = settings.revealTimeLocal.orKeep(revealTimeLocal),
-            strictMode = strict,
-            // Only a real change moves the instant: sending the value the
-            // bond already has is not a toggle.
-            strictModeChangedAt = if (strict != strictMode && now != null) now else strictModeChangedAt,
+            strictMode = settings.strictMode ?: strictMode,
         )
     }
 
@@ -492,23 +479,4 @@ internal data class Bond(
             )
         }
     }
-}
-
-/**
- * Whether the bond was in Strict mode at [instant] (FR-073: "toggling
- * Strict mode never alters past days"). The streak is evaluated after a
- * day has ended — a minute after, or days after if the job was down — and
- * either member can change the setting alone in between. Judged by the
- * setting at evaluation, a couple could switch Strict mode off just
- * after missing a day and have a freeze spent on it.
- *
- * One instant is kept, the last change, so this is exact for any instant
- * since the change before that one: before the last change the setting
- * was the other value. A day older than two changes ago reads as that
- * other value too, which may be wrong; it needs two toggles and a backlog
- * of evaluation at once, and a history table is what would close it.
- */
-internal fun Bond.strictModeAt(instant: Instant): Boolean {
-    val changed = strictModeChangedAt
-    return if (changed == null || !instant.isBefore(changed)) strictMode else !strictMode
 }

@@ -114,7 +114,7 @@ internal class EvaluateStreaks(
             // The setting the day ended under, not the one in force now
             // (FR-073): this runs after the day is over, and the setting is
             // one member's to change in the meantime.
-            val strict = view.strictModeAt(day.endsAt)
+            val strict = view.strictModeBefore(day.endsAt)
             val step = StreakRules.step(state, day.date, outcome, strict)
             streaks.recordDay(day.id, outcome, strict, step.freezeApplied, now)
             record(bondId, day.date, state, step.state, announce = outcome == DayOutcome.COMPLETE, step, now)

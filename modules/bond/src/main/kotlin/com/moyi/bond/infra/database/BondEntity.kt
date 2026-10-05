@@ -54,7 +54,6 @@ internal class BondEntity(
     var revealTimeLocal: LocalTime?,
     @Column(nullable = false)
     var strictMode: Boolean,
-    var strictModeChangedAt: Instant? = null,
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     var status: BondStatus,
