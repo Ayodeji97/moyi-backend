@@ -1,7 +1,7 @@
 # ADR-0031 — The Bond-day, and the first entry
 
 **Status:** Accepted · **Date:** 2026-09-29 · **Deciders:** Daniel
-**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review) · 2026-10-05 (C2: the Owed list discharged, decision 17's read rule qualified — ADR-0032)
+**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review) · 2026-10-05 (C2: the Owed list discharged, decision 17's read rule qualified — ADR-0032; C3: its Owed list discharged — ADR-0033)
 
 ## Context
 
@@ -823,7 +823,13 @@ written, for what they asked.*
 - **Set `entries.revealed_at` in the reveal's own transaction**, and never clear it. BR-1 reads
   nothing else.
 
-**C3, the close job.**
+**C3, the close job.** *All discharged on 2026-10-05; ADR-0033 is the record. No bond lock:
+its decision 3, and decision 5 is what that costs. The closer-facing accessor: decision 14.
+Every window from the timeline, and a stale `ends_at` reconciled first: decisions 3 and 4.
+A skipped label `FROZEN`: decision 6. One day at a time: decision 3. Missing days from
+`activeSince`: decision 6. The reaper: decision 13. The two added on 2026-10-05 — the sweep
+out of `PENDING_REVEAL`, and a joining day reconciled before it is closed — are decisions 3
+and 7. The bullets are kept as written, for what they asked.*
 
 - **Take no bond lock** (decision 18), and therefore treat the unique `(bond_id, date)` index
   and the day's row lock as the only things between the sweep and a live submission.
@@ -923,7 +929,7 @@ written, for what they asked.*
   C2 adds `PENDING_REVEAL`/`REVEALED` and the outbox — it sets `revealed_at`, `FULL` becomes
   reachable for a partner for the first time, and `RevealGateTest`'s hand-made states are
   replaced by real transitions without narrowing what C1 already asserts.
-- C3 adds the close job and `SOLO` — everything under Owed for C3 falls due, and so does the
+- *(Done 2026-10-05, ADR-0033.)* C3 adds the close job and `SOLO` — everything under Owed for C3 falls due, and so does the
   reaper that clears `idempotency_keys` on schedule (ShedLock).
 - A second idempotent endpoint arrives — `IdempotentOutcome`'s `etag`/`location` get their first
   reader, and `ResultKind` its second value.

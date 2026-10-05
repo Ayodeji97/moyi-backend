@@ -22,7 +22,8 @@ paired with; nothing built so far does the thing the product exists for.
 - `bond_days` and `entries`, with server-side day assignment (BR-3) and the offline-intent
   rule (BR-3a).
 - The reveal: synchronous on the second entry, and at day close for a lone one (FR-063).
-- The per-timezone close job, every fifteen minutes, correct across DST and 45-minute offsets.
+- The close job, every fifteen minutes, correct across DST and 45-minute offsets. *(Amended
+  2026-10-05, ADR-0033 decision 1: not per timezone — see §2.2.)*
 - Streaks, freezes and Strict mode, with a deterministic `recalculate`.
 - The archive feed, per-caller favourites, reactions, full-text search and prompts.
 - `Idempotency-Key`, specified in doc 06 §1 since the corpus was written and never built.
@@ -60,7 +61,7 @@ Four modules gain code; `common:events` is new. `bond` also gains the public acc
 | Module | What lands here |
 |---|---|
 | `modules/gratitude` | Bond-days, entries, the reveal, streaks, prompts, search. The phase's centre. |
-| `modules/scheduling` | The close job: the fifteen-minute trigger, the ShedLock guard, the timezone selection. Doc 05 §2.1 puts it here and it stays here. |
+| `modules/scheduling` | The close job: the fifteen-minute trigger and the ShedLock guard. *(Amended 2026-10-05, ADR-0033 decision 1: there is no timezone selection — see §2.2.)* Doc 05 §2.1 puts it here and it stays here. |
 | `common:events` | **New.** `outbox_events`, the publishing port and the poller. |
 | `common:web` | `Idempotency-Key` — doc 05 §2.1 already lists "idempotency filter" here. |
 
@@ -140,7 +141,9 @@ so gratitude does not query bond's private tables.
   window from the timeline (§6.4 step 2, as amended) and to generate missing days from
   `activeSince` through `endedAt`, C3 must add a method to this port that returns the
   timeline and the lifecycle instants for a bond id alone — read-only, and for the closer
-  only. It does not exist yet; it is recorded in ADR-0031 under Owed.
+  only. It does not exist yet; it is recorded in ADR-0031 under Owed. *(Built 2026-10-05, slice
+  C3: `BondAccess.closingViewOf` and `bondsToSweep`, ADR-0033 decision 14. Neither runs the
+  membership guard, and an architecture rule names the two classes that may call them.)*
 
 ### 2.2 Why `scheduling` does not own the transitions
 
@@ -160,6 +163,21 @@ interface DayCloser {
 ```
 
 `scheduling` knows about ShedLock and the clock. `gratitude` knows what `PARTIAL` becomes.
+
+**Amended 2026-10-05 — the port as built (ADR-0033 decision 1).** The sketch above is per
+zone, and §6.4, written after it and amended twice, makes that unbuildable: a day's end is
+read from its bond's own timeline of zones, and a day opened under one zone may belong to a
+bond that now requests another. "The days in this zone" is not a question the data can
+answer. As built:
+
+```kotlin
+interface DayCloser {
+    fun closeElapsedDays(now: Instant, budget: Int): CloseResult
+}
+```
+
+The job passes the clock and nothing iterates zones. `CloseResult` carries counts and the
+ids of the bonds that changed, which is where C4's streak evaluation attaches.
 
 ## 3. Domain model
 
@@ -573,7 +591,9 @@ Under the Bond-day's row lock, in the same transaction that persists the entry:
   that happens twice falls on the first; a day run on by a westward change reveals at the
   time on the date it is labelled with. The time is the bond's current setting, not a copy
   taken when the day opened.
-- **Until C3 nothing looks at a `PENDING_REVEAL` day again when its time arrives.** The
+- *(No longer true since 2026-10-05: slice C3's close job reveals such a day at its time —
+  §6.4, ADR-0033 decision 3. The bullet is kept for what C2 shipped.)*
+  **Until C3 nothing looks at a `PENDING_REVEAL` day again when its time arrives.** The
   table's fourth row is the job's, and C2 ships without the job. The sweep needs the bond's `revealTimeLocal` with no caller
   to ask for it (§2.1's closer-facing accessor).
 
@@ -627,6 +647,35 @@ find no zone crossing midnight, so it never goes stale on a quiet interval; and
 separate alert if it stays flat for more than 25 hours.
 
 **ShedLock on Postgres** — see §12.3.
+
+**Amended 2026-10-05 — what slice C3 built that this section does not say (ADR-0033).**
+
+- **A day is settled only once it has been over for a minute** (decision 5). The closer
+  takes no bond lock (ADR-0031 decision 18), so it sees of a bond what has committed; a
+  pairing or a westward zone change stamped in a day's last second can still be committing
+  in the next, which is when the job fires. Settled then, a joining day was closed
+  unevaluated for good. The job therefore runs at one minute past each quarter-hour.
+- **Step 1 as built** (decision 6): missing days are written **already closed**, in one
+  statement, `ON CONFLICT DO NOTHING`; gaps are worked out per bond from its timeline, not
+  by an anti-join; the 400 is per run across all bonds, oldest first. "Deletion … intervals"
+  is read as: from the deletion request on. The day a bond stopped taking writes *on* is
+  written. A date an eastward change stepped over is written `FROZEN` as soon as the
+  handoff has passed. *Open with the owner:* a deletion called off leaves no record of the
+  countdown, and that month is then written as `EMPTY` days.
+- **Step 2's candidates** (decision 4): unclosed rows whose *stored* `ends_at` has passed,
+  plus rows pending a reveal time. The stored end is a complete filter — it only ever moves
+  later — and never the decision. V15 adds `bond_days (ends_at) WHERE closed_at IS NULL`;
+  §7's `(status, date)` partial index is not what the scan uses.
+- **`closedAt` and `revealedAt` are read under the day's lock**, not taken from the run's
+  start (decision 8). A `SOLO` day reveals its lone live **entry**; the day's own
+  `revealedAt` stays unset and no `DayRevealed` is written (decision 9). `DayClosed` is
+  written for every day settled except a `SUSPENDED` one.
+- **The budget counts days closed, revealed or failed**, not days looked at, and one day or
+  one bond failing stops nothing else (decision 10).
+- **The two counters** (decision 12): `gratitude_bonds_closed_total` counts *days* settled.
+  A third meter counts days that failed. Neither is exported yet: that is the deploy slice's.
+- *Open with the owner:* the job reveals a lone entry on a bond that ended earlier that
+  day, as step 2 asks, and its author can no longer delete it (ADR-0033, question 1).
 
 **The timezone test matrix** (doc 04 §6) is not a suggestion: a DST spring-forward day (23 h), a
 DST fall-back day (25 h), `Asia/Kathmandu`, `Pacific/Chatham`, a Bond whose members are ≥12 h
@@ -728,12 +777,14 @@ slice order. `V10` is the last one Phase 2 uses.
 | C1 | `V12__gratitude_bond_days_and_entries.sql` | `modules:gratitude` | `bond_days`, `entries` |
 | C1 | `V13__bond_anchor_intervals.sql` | `modules:bond` | `bond_anchor_intervals` (§3.1's effective-zone timeline) |
 | C2 | `V14__common_outbox_events.sql` | `common:events` | `outbox_events`, `outbox_deliveries` |
-| C3 | `V15__scheduling_shedlock.sql` | `modules:scheduling` | `shedlock` |
-| C4 | `V16__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events` |
-| C5 | `V17__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
-| C6 | `V18__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
+| C3 | `V15__gratitude_close_candidates.sql` | `modules:gratitude` | the close job's index on `bond_days` |
+| C3 | `V16__scheduling_shedlock.sql` | `modules:scheduling` | `shedlock` |
+| C4 | `V17__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events` |
+| C5 | `V18__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
+| C6 | `V19__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
 
 C1 owns V11–V13. The first draft of this table gave C1 two versions and C2 `V13`; see §12.5.
+*(Amended 2026-10-05, ADR-0033: C3 took two versions, V15 and V16, so C4 to C6 each moved one later.)*
 
 Doc 07 §2 carries the column lists and this document does not restate them, with four
 exceptions recorded in §12 because doc 07 is wrong about them.

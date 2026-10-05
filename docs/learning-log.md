@@ -1957,3 +1957,55 @@ Wrong about: what a green build and a clean review add up to. The reviewers were
          ended; a delete before the reveal shows the partner that something was removed;
          a replay spends a rate-limit token. Each is built one way with one test on it.
          ADR-0032 has them. And a day in `PENDING_REVEAL` has no way out until C3.
+
+## 2026-10-05 · Phase 3 · The close job — the lock I was told not to take, and what not taking it costs
+Expected: C3 came with twelve obligations written down by the two slices before it, and
+         one ruling: the closer takes no bond lock. I planned it as nine tasks around one
+         idea, that a day is settled alone, in its own transaction, under its own row.
+         Everything a submission could do to a day was already tested against a close made
+         by hand; replacing the hand with the real closer looked like the safe part.
+Reality: the eight build tasks went as planned and the tests found three of my own
+         mistakes before a reviewer did.
+         The budget was wrong twice. It charged for days the job looked at and left, so
+         enough couples waiting on an evening reveal would have used it up every run and
+         nothing behind them would close; and my fix for that did not stop mid-page,
+         because `takeWhile` on a list is decided before anything in the loop has run. I
+         found both by breaking the code on purpose to see whether the tests noticed. The
+         tests I had written first passed either way.
+         ShedLock's table was wrong. I gave it `timestamptz` like every other table. Four
+         tests failed and the failures said only that the job had not run. The cause was
+         an hour: ShedLock's database clock writes UTC with no zone, and in a zoned column
+         that reads as local time, so on this machine a lock that had lapsed was an hour
+         from lapsing. The library's documented schema says `timestamp`. I had not read it.
+         And the test class's first version hung, because I counted waiters by asking who
+         the lock holder was blocking; a second waiter on a row queues behind the first
+         waiter, not behind the holder.
+         Then two reviewers read the slice. The spec reviewer found that a bond counting
+         down to deletion was being given an `EMPTY` day for each day of the countdown,
+         which the spec forbids in so many words. I had read that sentence and built for
+         "archived".
+         The other finding was the ruling itself. Without the bond's lock the closer sees
+         what has committed. A pairing stamped at 23:59:59 can commit at 00:00:01, and the
+         job fires at midnight because that is when days end. Read in between, the bond is
+         one person, the day is closed as nobody's, and when the pairing lands it was the
+         couple's first day together, shut, with the one thing that would have reopened it
+         removed by me two tasks earlier for a good reason. I wrote the test: hold the
+         bond's row, start the accept, run the job five seconds past midnight. It closed
+         the day.
+         The fix is a minute. A day is not settled until it has been over for one, and the
+         job runs at a minute past the quarter.
+Wrong about: where the risk was. I tested the closer against everything that touches a
+         *day*, in both orders, because the day is what it locks. The race was against
+         something that touches the *bond*, which the closer only reads. "Takes no lock on
+         X" was written as a property of the closer's writes. It is also a statement about
+         every read of X the closer makes, and I made two.
+         And what a margin is. It is not a proof. It covers a commit and a clock a few
+         seconds off; it does not cover a transaction that hangs for two minutes. The exact
+         fix is a lock that never waits, and that is a bond lock, which is not mine to add.
+         ADR-0033 says so, as a question.
+         Also the 38-minute build. One run took 38 minutes and I went looking for which of
+         my tests was slow. A validation test in another module showed sixteen minutes.
+         The machine had slept. The next run took two.
+         Not settled, and the owner's: the job reveals a lone entry on a bond that ended
+         that afternoon, because the spec says an ended bond must not strand a day, and the
+         author can no longer delete it. Nothing can read a past day yet. C5 will.

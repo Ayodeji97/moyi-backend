@@ -20,10 +20,9 @@ closer-facing read of a bond's calendar that needs no caller.
 **Spec:** `docs/superpowers/specs/2026-09-28-the-daily-loop-design.md` §2.2, §6.3 (row 4),
 §6.4, §9, §12.3; `adr/0031-…` "Owed, C3"; `adr/0032-…` "Owed, C3".
 
-**Stacked on `feat/gratitude-reveal` (PR #53, unmerged).** Branch `feat/gratitude-close`,
-worktree `.worktrees/feat-gratitude-close`. Rebase when #53 changes; the pull request for
-this slice is opened against `main` only after #53 merges, or as a draft based on #53's
-branch before then. Migration **V15**.
+**Branch `feat/gratitude-close`**, worktree `.worktrees/feat-gratitude-close`. It began
+stacked on PR #53; #53 merged on 2026-10-05 and the branch was rebased onto `main`.
+Migrations **V15** and **V16**.
 
 ## Global constraints
 
@@ -269,13 +268,14 @@ own date. It stays as a guard.
 
 ### Task 9: run it, record it, open it
 
-- [ ] `./gradlew build --rerun-tasks`; counts.
-- [ ] Smoke: the job cannot be time-travelled over HTTP. Add a probe that the scheduler is
+- [x] `./gradlew build --rerun-tasks`; counts.
+- [x] Smoke: the job cannot be time-travelled over HTTP. Add a probe that the scheduler is
       registered and `gratitude_close_job_last_success_timestamp` appears on
       `/actuator/metrics` after startup (the job runs once on boot in the `local` profile),
       and run `MOYI_DB=moyi_c3_smoke scripts/smoke.sh`.
-- [ ] Three whole-branch reviews by lens (concurrency; privacy and contract; spec), fix,
-      then one review of the fixes.
+- [x] Two whole-branch reviews (concurrency and time; spec, privacy and tests), fixed.
+      *As built:* a one-minute settle margin (ADR-0033 decision 5), the deletion
+      cooling-off, per-bond isolation, lock-time stamps, `FROZEN` at the handoff.
 - [ ] ADR-0033; ADR-0031 and ADR-0032 "Owed, C3" discharged; spec amended at §2.2 and
       §6.4; learning log; README module list; corpus copies and doc 05's ShedLock sentence.
 - [ ] Draft pull request; update `.claude/HANDOVER.md`.
