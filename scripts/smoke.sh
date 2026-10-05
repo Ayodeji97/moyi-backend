@@ -50,6 +50,8 @@
 #                                                          # needs MOYI_LOG=<its log file> to read the emailed link
 #   MOYI_JAVA=/path/to/jdk-25/bin/java scripts/smoke.sh   # boot with that JDK instead of the one found
 #   MOYI_DB=moyi_smoke scripts/smoke.sh                    # a database of its own, created if absent
+#                                                          # (with --attach it only names the database the
+#                                                          # checks read: start your server against the same one)
 #
 # MOYI_DB is for a branch that carries a migration `main` does not have yet.
 # The compose Postgres is shared by every checkout and every worktree, and a
@@ -150,6 +152,7 @@ if [ "$ATTACH" = 0 ]; then
   docker compose up -d postgres >/dev/null
   if [ "$MOYI_DB" != "moyi" ]; then
     for _ in $(seq 1 30); do docker compose exec -T postgres pg_isready -U moyi -d moyi >/dev/null 2>&1 && break; sleep 1; done
+    docker compose exec -T postgres pg_isready -U moyi -d moyi >/dev/null 2>&1 || { echo "postgres did not become ready"; exit 1; }
     docker compose exec -T postgres psql -U moyi -d postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '$MOYI_DB'" | grep -q 1 \
       || docker compose exec -T postgres createdb -U moyi "$MOYI_DB"
     echo "using database $MOYI_DB, not the shared moyi"

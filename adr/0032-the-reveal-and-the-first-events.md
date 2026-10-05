@@ -32,9 +32,9 @@ has one, and `EntryStore.update` never clears or moves a stamp the row already h
 `EntryStore.update` writes every column. Hibernate answers a row the transaction has already
 loaded from its identity map, and a route that finds its entry by id loads it before any lock
 is held. So a reveal working from the map wrote the older copy back: an edit undone, or erased
-words restored. It was not reachable — every writer of an entry also reconciled the joining
-day in the same commit, so the copy could not differ — but that is an invariant held somewhere
-else, and C3 and C5 add writers that do not hold it. `findForDayFresh` refreshes each row.
+words restored. By a reviewer's trace it was not reachable — every writer of an entry also
+reconciled the joining day in the same commit, so the copy could not differ — but that is an
+invariant held somewhere else, and C3 and C5 add writers that do not hold it. `findForDayFresh` refreshes each row.
 ADR-0031 decision 9 records the same trap for a day.
 
 **3. The concurrency requirement is held by two tests, not one.** Spec §6.3 asks for a test
@@ -56,10 +56,12 @@ decision 12) still reveals at the time on the date it is labelled with. The time
 bond's **current** setting, not a copy taken when the day opened: changing it changes when
 today reveals.
 
-**5. Nothing in C2 takes a day out of `PENDING_REVEAL`.** The synchronous path puts it there;
-the second sweep that releases it is C3's (spec §6.3). Until C3, a couple with a reveal time
-who both write before it stay locked to each other, and clearing the time afterwards releases
-nothing. This is the slicing the spec chose; it is stated here because nothing else said so.
+**5. Nothing in C2 looks at a `PENDING_REVEAL` day again when its time arrives.** The
+synchronous path puts it there; the second sweep that releases it is C3's (spec §6.3). Until
+C3, a couple with a reveal time who both write before it stay locked to each other, and
+clearing the time afterwards releases nothing. (A delete steps such a day back to `PARTIAL`,
+decision 8, and a rewrite then meets the reveal rule afresh; that is a way out only for
+somebody who withdraws their entry.) This is the slicing the spec chose; it is stated here because nothing else said so.
 
 **6. The joining day is reconciled by the first gratitude operation that meets it, in a
 transaction of its own.** `GET /today`, `POST /entries`, `PATCH` and `DELETE` call
@@ -75,15 +77,29 @@ Three consequences, each a change to something written earlier:
 
 - **A read may now take the bond's row lock and may extend a day.** ADR-0031 decision 17 said
   a read never does, and spec §3.1 that `GET /today` extends nothing. Both hold except for
-  this: once per bond, while its joining day is still `SUSPENDED`. No `lock_timeout` is set
-  outside tests (ADR-0031, Owed), so that one read can wait behind a stuck bond write.
+  this: while a bond's joining day is still `SUSPENDED` — once per bond as things stand,
+  since the first reconcile ends that state. No `lock_timeout` is set outside tests
+  (ADR-0031, Owed), so that one read can wait behind a stuck bond write.
+- **The same wait now precedes a write's own refusals.** The reconcile runs before the
+  idempotency key is examined, so a duplicate that would be refused at once
+  (`409 IDEMPOTENCY_KEY_IN_FLIGHT`) can queue behind the bond lock first, in that same
+  window; and a request refused for a reason that has nothing to do with the joining day
+  still leaves the reconcile committed. No status or body changes. Only a member of the
+  bond (`POST`) or the entry's author (`PATCH`, `DELETE`) can set it off.
+- **A `DELETE` as the first request on a legacy joining day reveals, then erases.** The
+  member withdrawing can then read the partner's words, and the partner gets a tombstone.
+  Both entries were already owed a reveal, so this is the order of two things that were
+  each due, and a test pins it.
 - **It runs on an ended bond and for a member who has left.** An ended bond is read-only to
   its members (ADR-0028), and this is not a member's write: spec §6.4 says an archived bond
   must not strand an earlier day, and a legacy joining day is exactly that.
 - **The writers reconcile again under the bond lock**, which is what keeps the lock order
   when a pairing lands between the first read and the lock. The order is unchanged — key,
   bond, day, entry — and where a request holds two or three days of one bond (the joining
-  day, the claimed day, the BR-3a fallback) it takes them oldest first.
+  day, the claimed day, the BR-3a fallback) it takes them oldest first. A keyed `PATCH` is
+  the case that needed care: it reconciles before it opens the key's transaction and calls
+  only the locked half inside it, because a reconcile inside would join that transaction
+  and could take the joining day ahead of an older one.
 
 **7. A day that ended before the second member arrived opens `SUSPENDED`, whether or not it
 already had a row.** The opening status is decided from `activeSince` against the day's span.
@@ -127,8 +143,8 @@ named bucket; the global per-user one covers them.
 **12. An event names things by id and carries nothing else.** `OutboxEvent.references` is a
 `Map<String, UUID>`, so a payload cannot hold an entry's words by accident.
 `EntrySubmitted {bondId, bondDayId}` on aggregate `Entry` and `DayRevealed {bondId}` on
-`BondDay`, each written in the transaction of the change it describes (`MANDATORY`), after
-the insert has been flushed — so a submission refused by BR-2 writes no event.
+`BondDay`, each written in the transaction of the change it describes (`MANDATORY`) — so a
+submission that is refused writes no event, because the refusal rolls it back.
 `outbox_deliveries` exists and is empty: delivery state belongs to a consumer (spec §8), and
 the first consumer is C5's.
 
@@ -147,15 +163,17 @@ one, then the newest.** Withdraw-then-rewrite puts two rows by one author on a d
 - **One new `ErrorCode`, `ENTRY_IMMUTABLE`, so this is a breaking change** for a client that
   generates the codes as a sealed class. The pull request carries `breaking-api-change`.
 - `common:events` is a new module (spec §12.7) and owns V14. `app` names it.
-- `POST /entries` reads the membership once more than it did, outside its transaction, for
-  the reconcile's unlocked check. One indexed read per submission.
+- Every write pays for the reconcile's unlocked check, for good: `POST` resolves the
+  membership once more than it did and reads the joining day's row; `PATCH` and `DELETE`
+  also read the entry once more. A handful of indexed reads per write, not measured.
 - A deleted entry before the reveal is visible to the partner as a deletion (below).
 
 ## Owed
 
 **C3, the close job.**
 
-- **The second sweep**, which is the only way out of `PENDING_REVEAL` (decision 5). It needs
+- **The second sweep**, which is what releases a `PENDING_REVEAL` day when its time comes
+  (decision 5). It needs
   the bond's `revealTimeLocal` without a caller: `RevealDay.apply` takes it as a parameter,
   and the closer-facing accessor ADR-0031 already owes on `BondAccess` lists only the
   timeline and the lifecycle instants. Add it there.
@@ -210,11 +228,14 @@ Each is built one way, pinned by one test, and cheap to turn.
 What was executed, and by whom, so that "verified" means one thing in this document.
 
 - **Reproduced by a test that failed first, then fixed:** decision 6's rollback
-  (`JoiningDayTest`, four cases red: the day stayed `SUSPENDED`), decision 7
+  (`JoiningDayTest`, three cases red — a `PATCH`, a keyed `PATCH` and a `POST` — each with
+  the day still `SUSPENDED`), decision 7
   (`JoiningDayTest`: `expected SUSPENDED but was REVEALED`), decision 2
   (`RevealFreshReadTest`: the original text came back), and decision 10's body bound (`413`
   expected, `200` returned).
 - **Mutation runs** — the mechanism removed, the named test seen to fail, the file restored —
   are listed with their results in the pull request, not here: they are a fact about a commit.
 - **Read, not run:** the lock-order table for every path, and the claim that no two paths can
-  deadlock, are a reviewer's trace of the code. The day-lock test proves one edge of it.
+  deadlock, are a reviewer's trace of the code. The day-lock test proves one edge of it. So
+  are decision 2's "not reachable", and the keyed `PATCH`'s lock order in decision 6: the
+  fix for the latter was made from a reviewer's interleaving, and no test holds it.

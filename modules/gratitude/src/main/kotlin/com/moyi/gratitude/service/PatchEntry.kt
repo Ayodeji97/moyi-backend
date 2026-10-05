@@ -32,7 +32,7 @@ internal class PatchEntry(
             transactions.execute {
                 val outcome =
                     execution.once(request) {
-                        IdempotentResult(changes.change(userId, id, text, media), id.value, ResultKind.ENTRY, OK)
+                        IdempotentResult(changes.changeUnderLocks(userId, id, text, media), id.value, ResultKind.ENTRY, OK)
                     }
                 val view = outcome.value ?: changes.read(userId, EntryId(outcome.resultId))
                 EntryChangeResult(view, outcome.wasReplayed)

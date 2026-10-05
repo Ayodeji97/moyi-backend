@@ -573,8 +573,8 @@ Under the Bond-day's row lock, in the same transaction that persists the entry:
   that happens twice falls on the first; a day run on by a westward change reveals at the
   time on the date it is labelled with. The time is the bond's current setting, not a copy
   taken when the day opened.
-- **Until C3 there is no way out of `PENDING_REVEAL`.** The table's fourth row is the job's,
-  and C2 ships without the job. The sweep needs the bond's `revealTimeLocal` with no caller
+- **Until C3 nothing looks at a `PENDING_REVEAL` day again when its time arrives.** The
+  table's fourth row is the job's, and C2 ships without the job. The sweep needs the bond's `revealTimeLocal` with no caller
   to ask for it (§2.1's closer-facing accessor).
 
 ### 6.4 The close (FR-063, doc 05 §5.2)
@@ -898,8 +898,8 @@ reconcile lives in `gratitude`: `bond` cannot write `bond_days`.
 **Amended 2026-10-05 — as built in C2 (ADR-0032 decisions 6 and 7).**
 
 - **"The first gratitude operation" is every one of them**: `GET /today`, `POST /entries`,
-  `PATCH`, `DELETE` and both replays. Each write reconciles in a transaction of its own, committed
-  before its own work — because the request can be refused by what the reconcile did (a day
+  `PATCH`, `DELETE` and both replays. Each write reconciles in a transaction of its own,
+  committed before its own work (and again under the bond lock inside it, for the lock order) — because the request can be refused by what the reconcile did (a day
   it has just revealed makes an edit `409`), and a refusal must not undo the reveal.
 - **So a read can write, and can take the bond lock**: once per bond, while its joining day
   is still `SUSPENDED`. It also runs on an ended bond and for a member who has left.

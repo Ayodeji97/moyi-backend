@@ -44,11 +44,18 @@ internal class ChangeEntry(
         return changeUnderLocks(userId, entryId, replacement, unsupportedMedia)
     }
 
-    private fun changeUnderLocks(
+    /**
+     * [change] without its first step. For a caller that has already run
+     * [reconcileJoiningDay] and has since opened a transaction of its own
+     * ([PatchEntry], for the key): run again in there, the reconcile would
+     * join that transaction — rolled back with a refusal after all — and
+     * could lock the joining day before an older day this then locks.
+     */
+    fun changeUnderLocks(
         userId: UUID,
         entryId: EntryId,
         replacement: EntryText?,
-        unsupportedMedia: Boolean,
+        unsupportedMedia: Boolean = false,
     ): EntryView =
         try {
             checkNotNull(

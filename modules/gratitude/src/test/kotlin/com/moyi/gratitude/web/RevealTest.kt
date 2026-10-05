@@ -220,19 +220,22 @@ internal class RevealTest(
 
     /**
      * Withdraw-then-rewrite leaves several rows by one author on a day, and
-     * `today` shows one. Which one is a rule (ADR-0032 decision 14), and a
-     * single delete-and-rewrite cannot hold it: with two rows, an unordered
-     * read picks the right one half the time. Four tombstones and a live row
-     * leave chance one in five; then the live row goes too, and the answer
-     * must be the newest of five tombstones, by id.
+     * `today` shows one. Which one is a rule (ADR-0032 decision 14): a live
+     * row before an erased one, then the newest, then by id.
+     *
+     * All five rows here are written at **one instant**, on purpose. Through
+     * the API a live row is always the newest its author has, so with the
+     * clock moving, "newest first" alone picks it and the live-first rule is
+     * never asked. At one instant it is the only thing that tells the live
+     * row from the four tombstones — and once that row is withdrawn too, the
+     * id is the only thing left to order five tombstones by.
      */
     @Test
-    fun `today shows the live entry over any number of withdrawn ones, and then the newest withdrawn one`() {
-        repeat(4) { round ->
-            clock.set(NOW.plusSeconds(60L * round))
-            deleteEntry(ada, idOf(submit(ada, """{"text":"draft $round"}"""))).status shouldBe 204
-        }
-        clock.set(NOW.plusSeconds(600))
+    fun `today shows the live entry over withdrawn ones written at the same instant, and then orders tombstones by id`() {
+        val withdrawn =
+            List(4) { round ->
+                idOf(submit(ada, """{"text":"draft $round"}""")).also { deleteEntry(ada, it).status shouldBe 204 }
+            }
         val kept = idOf(submit(ada, """{"text":"the one she kept"}"""))
 
         today(ada).contentAsString shouldContain "\"myEntry\":{\"id\":\"$kept\""
@@ -240,8 +243,20 @@ internal class RevealTest(
 
         deleteEntry(ada, kept).status shouldBe 204
 
-        today(ada).contentAsString shouldContain "\"myEntry\":{\"id\":\"$kept\""
+        val first = (withdrawn + kept).map(UUID::fromString).min()
+        today(ada).contentAsString shouldContain "\"myEntry\":{\"id\":\"$first\""
         today(ada).contentAsString shouldContain "\"status\":\"DELETED\""
+    }
+
+    @Test
+    fun `today shows the newest of an author's withdrawn entries when they were written at different times`() {
+        val withdrawn =
+            List(4) { round ->
+                clock.set(NOW.plusSeconds(60L * round))
+                idOf(submit(ada, """{"text":"draft $round"}""")).also { deleteEntry(ada, it).status shouldBe 204 }
+            }
+
+        today(ada).contentAsString shouldContain "\"myEntry\":{\"id\":\"${withdrawn.last()}\""
     }
 
     // --- the outbox says what happened, and only that ---
