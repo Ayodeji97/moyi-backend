@@ -44,16 +44,15 @@ import javax.sql.DataSource
 
 /**
  * The closer against a live write, in both orders (spec §9, "Consent and
- * lifecycle races"). The closer takes no bond lock (ADR-0031 decision 18), so
- * the day's row lock is the only thing between it and a submission, an edit
- * or a delete: whichever gets the row first finishes, and the other decides
- * on what it left.
+ * lifecycle races"). The closer now follows the same bond-then-day order as
+ * submissions, edits and deletes. The row locks make each transition observe
+ * the preceding transaction's committed state.
  *
  * **How an order is forced, without a sleep.** A third connection holds the
- * day's row. The party meant to go first is started and seen to be queued on
- * that row; then the second is started and seen queued too; then the row is
- * released. Postgres hands a row lock to its waiters in the order they
- * arrived, so they run in the order they were queued.
+ * bond row and then the day's row. The party meant to go first is started
+ * and seen to be queued on the bond; then the second is started and seen
+ * queued too; then both rows are released. Postgres hands a row lock to its
+ * waiters in the order they arrived, so they run in the order they queued.
  *
  * The requests run with the clock at 11:00 on the day; the closer is told
  * the day's end. That is two clocks, deliberately: what is on trial is which
@@ -205,19 +204,14 @@ internal class CloseRaceTest(
         jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayClosed'", Int::class.java) shouldBe 1
     }
 
-    // --- the closer reads the bond without its lock: a bond write that is still committing ---
+    // --- a pairing and the closer serialize on the bond lock ---
 
     /**
-     * The closer takes no bond lock (ADR-0031 decision 18), so it reads when
-     * a bond became two from whatever has committed. A pairing stamped at
-     * 23:59:59 can still be committing at 00:00:01 — and the job fires on the
-     * quarter-hour, which is when days end. Read then, the bond is still one
-     * person, the day is closed as a suspended day nobody is asked about,
-     * and when the pairing lands a moment later it is the couple's joining
-     * day, closed, which nothing reopens.
-     *
-     * So the job leaves a day alone until it has been over for a minute:
-     * longer than a commit takes, shorter than anybody would notice.
+     * Invite acceptance and closing both use the bond row as their first
+     * lock. If acceptance is already waiting on it, closing waits too and
+     * sees the committed member and timestamp before it decides the day's
+     * status. The activation instant is captured after the bond lock, so an
+     * acceptance that runs after a close belongs to the later day.
      */
     @Test
     fun `a pairing still committing when midnight passes does not find its joining day closed`() {
@@ -259,6 +253,63 @@ internal class CloseRaceTest(
             1
     }
 
+    @Test
+    fun `an accept queued past the settle margin records activation after the bond lock`() {
+        val cara = users.verified("Cara")
+        val dan = users.verified("Dan")
+        val created = createBond(cara)
+        val waiting = idOf(created)
+        submitTo(waiting, cara, """{"text":"written while waiting"}""").status shouldBe 201
+        val activationBeforeLock = END.minusSeconds(30)
+        val activationAfterWait = END.plusSeconds(90)
+        clock.set(activationBeforeLock)
+
+        dataSource.connection.use { holder ->
+            holder.autoCommit = false
+            val pid =
+                holder.createStatement().use { statement ->
+                    statement.executeQuery("SELECT pg_backend_pid() FROM bonds WHERE id = '$waiting' FOR UPDATE").use { result ->
+                        check(result.next())
+                        result.getInt(1)
+                    }
+                }
+            val accepting = pool.submit(Callable { accept(dan, codeOf(created)) })
+            lateinit var closing: java.util.concurrent.Future<com.moyi.gratitude.api.CloseResult>
+            try {
+                awaitQueued(pid, 1)
+                // The invite request began before day-end, but it cannot join until
+                // this writer releases the bond. The close job queues behind the
+                // same lock and must see the committed activation before deciding.
+                clock.set(activationAfterWait)
+                closing = pool.submit(Callable { closer.closeElapsedDays(activationAfterWait, budget = 100) })
+                awaitQueued(pid, 2)
+                jdbc.queryForObject(
+                    "SELECT status FROM bond_days WHERE bond_id = '$waiting'",
+                    String::class.java,
+                ) shouldBe "SUSPENDED"
+                jdbc.queryForObject(
+                    "SELECT closed_at IS NOT NULL FROM bond_days WHERE bond_id = '$waiting'",
+                    Boolean::class.java,
+                ) shouldBe false
+            } finally {
+                holder.rollback()
+            }
+            accepting.get(15, TimeUnit.SECONDS).status shouldBe 200
+            closing.get(15, TimeUnit.SECONDS).closed shouldBe 1
+        }
+
+        val joinedAt =
+            jdbc
+                .queryForObject(
+                    "SELECT joined_at FROM bond_members WHERE bond_id = '$waiting' AND user_id = ?",
+                    java.sql.Timestamp::class.java,
+                    dan,
+                )!!
+                .toInstant()
+        joinedAt shouldBe activationAfterWait
+        joinedAt.isAfter(activationBeforeLock) shouldBe true
+    }
+
     /**
      * Runs [first] and then [second], each queued on the day's row before the
      * other is let go: see the class KDoc. Fails, rather than passing by
@@ -272,11 +323,16 @@ internal class CloseRaceTest(
             holder.autoCommit = false
             val pid =
                 holder.createStatement().use { statement ->
-                    statement.executeQuery("SELECT pg_backend_pid() FROM bond_days FOR UPDATE").use { result ->
+                    statement.executeQuery("SELECT pg_backend_pid() FROM bonds WHERE id = '$bond' FOR UPDATE").use { result ->
                         check(result.next())
                         result.getInt(1)
                     }
                 }
+            holder.createStatement().use { statement ->
+                statement.executeQuery("SELECT id FROM bond_days WHERE bond_id = '$bond' FOR UPDATE").use { result ->
+                    check(result.next())
+                }
+            }
             val a = pool.submit(Callable { first() })
             val b =
                 try {

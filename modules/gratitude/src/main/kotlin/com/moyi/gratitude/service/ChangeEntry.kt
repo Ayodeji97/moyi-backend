@@ -24,7 +24,7 @@ import java.util.UUID
  * The initial read grants nothing: membership and author are checked, then
  * bond, day and entry are read under the locks, in C1 order. The day lock
  * serializes editing against reveal, including the close job's
- * bond-lock-free sweep.
+ * close sweep, which takes the same bond-then-day lock order.
  */
 @Service
 internal class ChangeEntry(

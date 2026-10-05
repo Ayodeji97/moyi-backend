@@ -13,12 +13,11 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
-import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
-import org.junit.jupiter.api.function.ThrowingSupplier
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
@@ -40,6 +39,8 @@ import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
@@ -361,24 +362,38 @@ internal class CloseDayTest(
         closeDay.settle(dayOf(bond), now = END.plusSeconds(60), endedAsOf = END) shouldBe Outcome.CLOSED
     }
 
-    /** ADR-0031 decision 18: the closer starts at the day and never waits for the bond. */
+    /** ADR-0033: close queues on the bond before it can lock the day. */
     @Test
-    fun `the closer settles a day while the bond's own row is locked by somebody else`() {
+    fun `the closer waits for the bond row before settling its day`() {
         val bond = pairedBond()
         submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
 
-        val outcome =
-            dataSource.connection.use { holder ->
-                holder.autoCommit = false
-                holder.createStatement().use { it.execute("SELECT 1 FROM bonds WHERE id = '$bond' FOR UPDATE") }
-                try {
-                    assertTimeoutPreemptively(Duration.ofSeconds(10), ThrowingSupplier { closeDay.settle(dayOf(bond), END) })
-                } finally {
-                    holder.rollback()
+        dataSource.connection.use { holder ->
+            holder.autoCommit = false
+            val holderPid =
+                holder.createStatement().use { statement ->
+                    statement.executeQuery("SELECT pg_backend_pid() FROM bonds WHERE id = '$bond' FOR UPDATE").use { result ->
+                        check(result.next())
+                        result.getInt(1)
+                    }
                 }
+            val closing = CompletableFuture.supplyAsync { closeDay.settle(dayOf(bond), END) }
+            try {
+                await().atMost(Duration.ofSeconds(10)).until {
+                    closing.isDone ||
+                        jdbc.queryForObject(
+                            "SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))",
+                            Int::class.java,
+                            holderPid,
+                        )!! > 0
+                }
+                closing.isDone shouldBe false
+                closedAt(bond) shouldBe null
+            } finally {
+                holder.rollback()
             }
-
-        outcome shouldBe Outcome.CLOSED
+            closing.get(10, TimeUnit.SECONDS) shouldBe Outcome.CLOSED
+        }
     }
 
     // --- what two people wrote does not leave with a failure ---

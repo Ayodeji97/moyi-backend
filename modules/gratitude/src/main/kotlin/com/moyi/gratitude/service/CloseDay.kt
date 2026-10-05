@@ -18,15 +18,16 @@ import java.time.Instant
 import java.time.temporal.ChronoUnit
 
 /**
- * Settles **one** Bond-day (spec §6.4 step 2): one transaction, one row lock,
- * and no bond lock (ADR-0031 decision 18). The close job calls this once per
+ * Settles **one** Bond-day (spec §6.4 step 2): one transaction, first the
+ * bond lock, then the day row lock, matching the application's writer order.
+ * The close job calls this once per
  * day that may have ended; nothing here knows there is a job.
  *
  * **Why one day at a time.** The writers that hold more than one day of a
  * bond (`SubmitEntry`, `ChangeEntry`) take them oldest first and under the
- * bond's lock. The closer holds no bond lock, so the only way it can never
- * be the other half of a deadlock with them is never to hold two days at
- * once. It also means a failure costs one day, and the next run retries it.
+ * bond's lock. The closer holds the same bond lock before its one day lock,
+ * so it shares their order and cannot form the other half of a deadlock. It
+ * also means a failure costs one day, and the next run retries it.
  *
  * **The order inside, and why each step is where it is:**
  *
@@ -97,19 +98,26 @@ internal class CloseDay(
             throw violation.redacted()
         }
 
+    @Suppress("ReturnCount")
     private fun underTheDayLock(
         dayId: BondDayId,
         now: Instant,
         endedAsOf: Instant,
     ): Outcome {
-        val locked = days.lockAndFind(dayId)
-        val view = if (locked.closedAt == null) access.closingViewOf(locked.bondId) else null
+        // The parent id is immutable. Read it first, then take the bond lock
+        // before the day lock so a pairing or zone change cannot commit
+        // between the closer's lifecycle read and this day's transition.
+        val initial = days.find(dayId) ?: return Outcome.ALREADY_CLOSED
+        if (initial.closedAt != null) return Outcome.ALREADY_CLOSED
+        val view = access.lockClosingViewOf(initial.bondId)
         if (view == null) {
-            // No view of an unclosed day means its bond's row is gone. Left
-            // alone: there is no timeline to say when the day ended.
-            if (locked.closedAt == null) log.warn("close: bond {} of day {} was not found; the day is left as it is", locked.bondId, dayId)
+            // No view means the bond's row is gone. Left alone: there is no
+            // timeline to say when the day ended.
+            log.warn("close: bond {} of day {} was not found; the day is left as it is", initial.bondId, dayId)
             return Outcome.ALREADY_CLOSED
         }
+        val locked = days.lockAndFind(dayId)
+        if (locked.closedAt != null) return Outcome.ALREADY_CLOSED
         val window =
             checkNotNull(view.anchorTimeline.asCalendar().dayAt(locked.startsAt)) {
                 "a bond-day starts no earlier than its bond's timeline: $dayId"

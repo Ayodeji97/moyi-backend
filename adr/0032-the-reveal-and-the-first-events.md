@@ -45,7 +45,8 @@ submissions for one bond are already serial and that test stays green without th
 The requirement is therefore split: the simultaneous test asserts one event, and a second holds
 the day's row from another connection and asserts a submission is blocked on it — which is the
 one that goes red when `lockRow` is removed. The day lock is not redundant: C3's close job
-takes no bond lock (decision 18), and against it the day lock is the only thing there is.
+takes the bond lock before the day lock (amended by ADR-0033 after PR #54 review); against
+other day writers, the day lock still protects the read-modify-write.
 *Codex's notes record that the owner approved this split on 2026-10-04; it is written here so
 that the approval has a place to be confirmed or withdrawn.*
 

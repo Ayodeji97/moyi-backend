@@ -41,15 +41,11 @@ interface DayCloser {
         /**
          * How long a day must have been over before it is settled.
          *
-         * The closer reads a bond's facts — when it became two, where its
-         * calendar says the day ends — without the bond's lock (ADR-0031
-         * decision 18), so it sees what has committed. A pairing or a zone
-         * change stamped in the last second of a day can still be committing
-         * in the first second of the next, which is exactly when the job
-         * fires. Settled then, a joining day is closed unevaluated for good,
-         * or a day a westward change had just lengthened is closed a day
-         * early. A minute is far longer than a commit or two instances'
-         * clocks differ by, and nobody is waiting on a day's last minute.
+         * This margin absorbs ordinary clock skew between the scheduled
+         * instance and writers. The closer takes the bond lock before the
+         * day lock, so a pairing or zone change already in flight commits
+         * before its day is evaluated; a writer that arrives afterwards sees
+         * the settled day under the same lock order.
          */
         val SETTLE_MARGIN: Duration = Duration.ofMinutes(1)
 

@@ -164,9 +164,9 @@ internal data class Submission(
  *    contains the pairing ([BondDay.resumeJoiningDay]).
  *    **Then BR-3a is asked again, under the day's own lock** (spec §6.1.3).
  *    The settled-day check inside [DayAssignment.resolve] reads the day
- *    before any lock on it is held, and the close job takes no bond lock
- *    (plan R1), so a close can land between that read and
- *    [BondDayStore.lockAndFind]. If the day is settled once locked: an entry
+ *    before the day lock is held. The close job takes the bond lock first,
+ *    so it cannot settle this bond between that check and
+ *    [BondDayStore.lockAndFind]. If the day was already settled: an entry
  *    that was placed there by its `intendedAt` is **redirected once** to the
  *    day containing the submission instant — the words are kept, on a day
  *    that can still hold them — and anything else is `409 DAY_CLOSED`. The
@@ -177,10 +177,9 @@ internal data class Submission(
  *    lock while holding the first, and the joining day (below) can be a
  *    third: one submission holds up to three days of one bond, and takes
  *    them oldest first. That is safe because every submitter of this bond
- *    is already serialised on the bond lock, and it obliges a writer that
- *    takes no bond lock never to hold two days of one bond at once, or to
- *    take them oldest first as well. The close job is that writer, and
- *    `CloseDay` holds one day per transaction.
+ *    is already serialised on the bond lock. The close job takes that same
+ *    lock before one day per transaction, so all writers share the same
+ *    order.
  * 5. The insert. `entries_one_per_member_per_day` (V12/BR-2) is what
  *    refuses a second entry from the same member on the same day — this
  *    method attempts the write and catches the conflict, it does not read
@@ -217,8 +216,8 @@ internal data class Submission(
  * [BondDayStore.openOrGet] happened to return. Two members of one bond now
  * also serialise on the bond lock before they get this far, so for the
  * submit path alone the day lock is belt to the bond lock's braces; it stays
- * because a writer that takes no bond lock (the close job, plan R1) contends
- * for the same row.
+ * because close takes the bond lock before the day lock (ADR-0033); the day lock
+ * remains the repository boundary for day state and direct insert races.
  *
  * **One [TransactionTemplate] boundary, not `@Transactional`.** `RegisterUser.kt`
  * documents the trap this avoids: a `@Transactional` method that catches its
@@ -420,9 +419,9 @@ internal class SubmitEntry(
         if (joiningDate != null && !joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)
         val claimedDay = openAndLock(membership, claimed.bounds, now)
         // BR-3a, rechecked under the day's own lock (spec §6.1.3). The check
-        // inside `resolve` read the day before this lock was held, and the
-        // close job takes no bond lock (plan R1), so a close can land in
-        // between. See step 4 of the class KDoc.
+        // inside `resolve` read the day before this lock was held. The close
+        // job also takes the bond lock first, so only a prior settlement can
+        // be found here. See step 4 of the class KDoc.
         val (resolution, day) =
             if (!claimedDay.isSettled) {
                 claimed to claimedDay

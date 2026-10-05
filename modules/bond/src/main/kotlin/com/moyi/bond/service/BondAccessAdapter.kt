@@ -98,6 +98,21 @@ internal class BondAccessAdapter(
         }
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun lockClosingViewOf(bondId: UUID): BondClosingView? {
+        val id = BondId(bondId)
+        bonds.lockBond(id)
+        return closing.find(id)?.let { bond ->
+            BondClosingView(
+                bondId = bondId,
+                activeSince = activeSinceOf(bond),
+                endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
+                revealTimeLocal = bond.revealTimeLocal,
+                anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
+            )
+        }
+    }
+
     @Transactional(readOnly = true)
     override fun bondsToSweep(
         after: UUID?,

@@ -123,8 +123,8 @@ class ArchitectureTest {
          */
         private val TRANSACTION_APIS = listOf("org.springframework.transaction.", "jakarta.transaction.")
 
-        /** `bond.api.BondAccess`'s two methods that run no membership guard — the close job's. */
-        private val UNGUARDED_BOND_READS = listOf("closingViewOf", "bondsToSweep")
+        /** `bond.api.BondAccess`'s close-job methods run no membership guard. */
+        private val UNGUARDED_BOND_READS = listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep")
 
         /** The two classes that are the close job's reads of a bond (`gratitude.service`). */
         private val THE_CLOSER = setOf("CloseDay.kt", "CreateMissingDays.kt")
@@ -340,10 +340,10 @@ class ArchitectureTest {
 
     @Test
     fun `the closer's unguarded view of a bond is asked for by the closer and nobody else`() {
-        // `BondAccess.closingViewOf` and `bondsToSweep` run no membership
+        // The closing-view methods and `bondsToSweep` run no membership
         // guard: the close job has no caller to ask about (ADR-0031, Owed,
         // C3). Every other way into a bond from outside `bond` begins with
-        // the guard, so these two are the only ones a request must never
+        // the guard, so these are the only ones a request must never
         // reach — and a request reaches a service as easily as a controller,
         // so the rule is a list of who MAY name them, not of who may not.
         // Text-based: the names are distinctive, and a call through an alias

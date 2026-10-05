@@ -11,11 +11,11 @@ Slice C3 is the part of the loop that runs without anybody submitting (spec §6.
 quarter of an hour a job settles the days that have ended, reveals the days whose time has
 come, and writes the days nobody opened.
 
-ADR-0031 and ADR-0032 left twelve obligations on it by name. The hard one is ADR-0031
-decision 18, ruled by the owner: **the closer takes no bond lock.** Every other writer of a
-day begins by taking the bond's row; the closer handles every bond on a timer and would
-serialise behind each one. So the closer and a live submission meet at the day's row and at
-`bond_days`'s unique `(bond_id, date)`, and nowhere else.
+ADR-0031 and ADR-0032 left twelve obligations on it by name. The hard one was ADR-0031 decision 18, which ruled out a bond lock for the closer. A review
+of PR #54 found that a one-minute settle margin could not protect a joining day when an
+accept request waited longer than a minute for the bond lock. The C3 implementation is now
+amended: both pairing and close serialize on the bond row, and close then takes its one
+bond-day row.
 
 The slice was built in eight tasks and then read whole by two independent reviewers, one
 for locking and time, one against the spec. They found no deadlock. They found one race a
@@ -37,15 +37,14 @@ does to it is a transition on `BondDay` (`close`), beside the ones the synchrono
 uses, so the two cannot state one rule twice (spec §2.2). Nothing in `scheduling` can reach
 past `gratitude.api`: everything else there is Kotlin `internal`.
 
-**3. One day, one transaction, one row lock, no bond lock** (`CloseDay.settle`). The writers
-that hold more than one day of a bond take them oldest first under the bond's lock
-(ADR-0032 decision 6). The closer has no bond lock, so the only way it can never be the
-other half of a deadlock with them is never to hold two days at once. A failure then costs
-one day, which is a candidate again on the next run.
+**3. One day, one transaction, bond then day** (`CloseDay.settle`). The writers that hold
+more than one day take them oldest first under the bond lock (ADR-0032 decision 6). Close
+takes the same bond lock first, then only one day, so it cannot form a deadlock with them.
+A failure costs one day, which is a candidate again on the next run.
 
 Inside, in this order, and the order is the decision:
 
-1. Lock the day's row and read it again.
+1. Read the day to learn its immutable bond id; lock that bond; then lock and reread the day.
 2. Bring its span up to the bond's timeline (`extendedTo`). A row opened before a westward
    zone change still ends where the calendar said then.
 3. Resume it if it is the joining day and apply the reveal rule — the same two steps, by
@@ -69,29 +68,17 @@ to find days that have a row. V15 adds the partial index the scan uses
 most it now serves the `PENDING_REVEAL` arm of the scan. Which the planner chooses for
 that arm has not been looked at: the test asserts only that V15's index is used.
 
-**5. A day is settled only once it has been over for a minute.** This is the price of
-decision 18. Without the bond's lock the closer sees of a bond what has *committed*. A
-pairing stamped in a day's last second can still be committing in the next — and the job
-fires when days end. Read then, the bond is still one person, the day is closed as a
-suspended day nobody is asked about, and when the pairing lands it is the couple's joining
-day, closed, which nothing reopens (decision 7). A westward zone change confirmed across
-midnight is the same shape: the day is closed at its old end, a day early.
+**5. A day is settled only once it has been over for a minute.** The one-minute margin
+absorbs ordinary clock skew between instances. It is no longer relied on to cover a
+transaction waiting for the bond lock: pairing and timezone changes serialize with close on
+the bond row. `AcceptInvite` captures `joinedAt` after it acquires that lock and rechecks
+invite expiry then, so if close gets the lock first, activation cannot be backdated into the
+closed interval. The job still fires one minute past each quarter; a reveal falls due at
+`now` itself and is not delayed by the settle margin.
 
-`DayCloser.SETTLE_MARGIN` is one minute: far longer than a commit takes or two instances'
-clocks differ by. **It is a margin and not a proof.** `ChangeTimezone` reads its clock
-under the bond's lock, so its gap is a few statements and a commit. `AcceptInvite` reads
-its clock *before* it takes the lock, so its gap is however long it waits for that lock —
-and nothing bounds that in production: no `lock_timeout` is set outside tests (ADR-0031,
-Owed). A bond write held up for more than a minute across a midnight still loses the race,
-and the cost when it does is the one above: a joining day with an entry on it, closed
-suspended, for good. The job fires at one minute past each quarter, so the margin costs a
-minute and not fifteen. A reveal falls due at `now` itself: nothing a bond write does can
-make an already-due reveal wrong.
-
-*Rejected:* taking the bond's row `FOR SHARE SKIP LOCKED` under the day lock, and answering
-"not yet" when it is held. It is exact against a transaction in flight and does nothing for
-clock skew between instances; and it is a bond lock, which decision 18 ruled out. If the
-margin is ever found wanting, this is the next step, and it needs that ruling revisited.
+*Rejected:* taking the bond row `FOR SHARE SKIP LOCKED` under the day lock and returning
+"not yet" when held. That reverses the application's bond-then-day order and can deadlock
+with a writer; the closer instead takes the ordinary bond lock before the day lock.
 
 **6. The days nobody opened are written closed, in one statement.** `CreateMissingDays`
 walks each bond's timeline from its activation, one window at a time — each asked of the
@@ -198,15 +185,11 @@ through a cancelled deletion (question 2 below) will read as missed days.
 **C5, the archive.** Question 1 below must be ruled before a past day can be read.
 
 **The deploy slice.** Export the meters; alert on the gauge's maximum going stale and on
-the counter staying flat for 25 hours (doc 11); a `lock_timeout` outside tests — the
-closer, holding one day and no bond, is the writer least exposed to its absence.
+the counter staying flat for 25 hours (doc 11); configure a `lock_timeout` outside tests.
 
-**Not assigned.** `AcceptInvite` reads its clock before it takes the bond's lock, so a
-pairing can be stamped earlier than it could have committed; the margin covers it unless
-the wait for that lock outlasts the margin, and
-reading the clock under the lock, as `ChangeTimezone` does, would shrink what it has to
-cover. A westward zone change racing the closer is covered by the same margin and has no
-test of its own; the pairing case does.
+**Resolved in the 2026-10-05 amendment.** `AcceptInvite` now samples `joinedAt` after it
+gets the bond lock and checks invite expiry against that instant. Pairing and timezone
+changes serialize with close. The one-minute margin absorbs ordinary clock skew.
 
 ## Questions that are the owner's
 
@@ -222,9 +205,9 @@ test of its own; the pairing case does.
    `deletionRequestedAt` is cleared on cancel. While the countdown runs no day is written;
    once it is cancelled the job sees a live bond and writes that month as `EMPTY` days — a
    month in which every write was refused. Recording the interval is a change to `bond`.
-3. **A margin, not a lock** (decision 5): a minute's delay on every close, in exchange for
-   keeping decision 18 whole — and a residual race, if a pairing waits more than a minute
-   for the bond's lock across a midnight. The exact fix is a bond lock that never waits.
+3. **A margin plus serialization** (amended decision 5): one minute on every close for
+   ordinary clock skew, with bond-then-day locking to serialize lifecycle changes and
+   pairing. The exact long-wait race is covered by the PR #54 regression test.
 
 ## Revisit when
 
@@ -251,3 +234,15 @@ test of its own; the pairing case does.
   in both orders, against a second closer, and against a held bond row. The insert race in
   decision 6 was traced in both orders and tested in one, sequentially. That the failure
   log omits an exception's message is not pinned: `CloseDay` already redacts what reaches it.
+
+
+## Amendment — 2026-10-05: serialize close and pairing
+
+PR #54 review identified a concrete lost joining-day race: `AcceptInvite` sampled activation
+time before waiting on the bond lock, while close could settle the suspended day after the
+one-minute margin. The regression test queues both operations behind a held bond row, advances
+the clock beyond the margin, and verifies close waits and activation is timestamped after the
+lock is acquired. The code now uses bond-then-day locking in `CloseDay` and records
+`joinedAt` after `AcceptInvite` obtains the bond lock. This supersedes the no-bond-lock ruling
+for the existing-day close path. `CreateMissingDays` still uses its unique conflict handling
+for rows it inserts directly; it does not close an existing day.

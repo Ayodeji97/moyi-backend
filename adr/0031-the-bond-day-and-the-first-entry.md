@@ -483,6 +483,12 @@ uncommitted, the submission waits on the unique index and nothing else, and both
 Removing the index turns that test red; removing the bond lock does not, which is the evidence
 for which mechanism it proves. The day lock stays for the same reason.
 
+**Amended 2026-10-05 by ADR-0033:** decision 18's no-bond-lock rule is superseded for
+closing an existing day. `CloseDay` takes the bond row before the day row, matching writer
+order; the PR #54 race test proves pairing cannot be backdated past a close while waiting on
+the bond lock. `CreateMissingDays` remains an insert-only path and relies on the unique
+`(bond_id, date)` index to arbitrate a concurrent opener.
+
 **19. `BondMembership` keeps `hasLeft`, and `activeSince` is the second-earliest `joinedAt`
 (R2).** §2.1's field list omits `hasLeft`. `SubmitEntry` checks it explicitly, because the
 second review of PR #41 found `RequestDeletion.cancel` assuming `isOpen` covered it, and the
@@ -496,7 +502,8 @@ the activation.
 
 **20. BR-3a is asked twice, and the second time is under the day's lock.**
 `DayAssignment.resolve` checks whether the claimed day is settled before any lock on it is held,
-and the close job takes no bond lock (decision 18), so a close can land in between.
+and close takes bond then day (ADR-0033), so settlement can land between this preliminary
+read and the writer acquiring the bond lock.
 `SubmitEntry` asks again after `lockAndFind`. If the day is settled then, an entry placed there
 by its `intendedAt` is redirected once to the day containing the submission instant, so the
 words are kept on a day that can still hold them; anything else is `409 DAY_CLOSED`, and so is a
@@ -823,16 +830,17 @@ written, for what they asked.*
 - **Set `entries.revealed_at` in the reveal's own transaction**, and never clear it. BR-1 reads
   nothing else.
 
-**C3, the close job.** *All discharged on 2026-10-05; ADR-0033 is the record. No bond lock:
-its decision 3, and decision 5 is what that costs. The closer-facing accessor: decision 14.
+**C3, the close job.** *All discharged on 2026-10-05; ADR-0033 is the record. Close locks
+bond then day (amendment to decision 18); decision 5 documents the clock margin. The closer-facing accessor: decision 14.
 Every window from the timeline, and a stale `ends_at` reconciled first: decisions 3 and 4.
 A skipped label `FROZEN`: decision 6. One day at a time: decision 3. Missing days from
 `activeSince`: decision 6. The reaper: decision 13. The two added on 2026-10-05 — the sweep
 out of `PENDING_REVEAL`, and a joining day reconciled before it is closed — are decisions 3
 and 7. The bullets are kept as written, for what they asked.*
 
-- **Take no bond lock** (decision 18), and therefore treat the unique `(bond_id, date)` index
-  and the day's row lock as the only things between the sweep and a live submission.
+- **Take the bond lock before the day lock when closing an existing day** (ADR-0033
+  amendment). The unique `(bond_id, date)` index remains necessary for `CreateMissingDays`,
+  which inserts absent rows without first locking each bond.
 - **Add a closer-facing accessor to `bond.api.BondAccess`.** `membershipOf` and
   `lockMembershipOf` both take a `userId` and run the membership guard; the close job has no
   caller. It needs the timeline and the lifecycle instants (`activeSince`, `endedAt`) for a

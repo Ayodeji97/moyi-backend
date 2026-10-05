@@ -113,7 +113,7 @@ Writes use `lockMembershipOf` with transaction propagation `MANDATORY` in the sa
 transaction as the gratitude mutation, and keep the lock until commit. A membership value is
 a snapshot, not a durable authorization grant. The lock order is **bond, then bond-day, then
 entry** on submission, editing, closing and lifecycle reconciliation *(not for closing: the
-close job takes no bond lock — see the amendment below this paragraph, ADR-0031 decision 18)*.
+close originally took no bond lock; amended 2026-10-05 by ADR-0033 to take bond then day)*.
 This serializes writes
 with leave, block, deletion and timezone confirmation; checking `isOpen` before taking a
 separate day lock would allow a write to commit after the bond ended. The port also exposes
@@ -122,13 +122,10 @@ so gratitude does not query bond's private tables.
 
 **Amended 2026-10-03 — three things C1 built differently (ADR-0031 decisions 18, 19 and 16).**
 
-- **The close job takes no bond lock (ruling R1, ADR-0031 decision 18).** The lock-order
-  sentence above holds for submission, editing and lifecycle reconciliation. It does **not**
-  hold for closing: C3's sweep handles many bonds per run and would serialise behind each
-  bond's row, so the closer starts at the bond-day and never holds the bond. Against the
-  closer, what stands between a sweep and a live submission is the day's own row lock and
-  `bond_days`'s unique `(bond_id, date)`. The closer must also never hold two days of one
-  bond at once. `BondAccess.lockMembershipOf`'s KDoc now says the same.
+- **The close job initially took no bond lock (ruling R1, ADR-0031 decision 18).** Amended
+  2026-10-05 by ADR-0033 after PR #54 review: close now takes bond then day, matching writer
+  order. The one-minute margin is for ordinary clock skew, not an unbounded lock wait. The
+  joining instant is sampled after `AcceptInvite` gets the bond lock.
 - **The field list above is additive, not exhaustive (ruling R2, ADR-0031 decision 19).** As
   built, `BondMembership` also carries **`hasLeft`** (checked explicitly by every write;
   `isOpen` does not cover it — the second review of PR #41), names the pending flag
@@ -585,7 +582,7 @@ Under the Bond-day's row lock, in the same transaction that persists the entry:
   `DayRevealed`" passes with the day lock removed. One test asserts the single event; a
   second holds the day's row from another connection and asserts a submission is blocked on
   it, and that is the one that fails when the lock is removed. The day lock is still
-  needed: the close job takes no bond lock.
+  needed: the close job takes the bond lock before the day lock (ADR-0033 amendment).
 - **How `revealTimeLocal` is read**: on the day's own date, in the zone the day opened in,
   compared as an instant. A time inside a spring-forward gap falls after the gap; a time
   that happens twice falls on the first; a day run on by a westward change reveals at the
@@ -651,10 +648,10 @@ separate alert if it stays flat for more than 25 hours.
 **Amended 2026-10-05 — what slice C3 built that this section does not say (ADR-0033).**
 
 - **A day is settled only once it has been over for a minute** (decision 5). The closer
-  takes no bond lock (ADR-0031 decision 18), so it sees of a bond what has committed; a
-  pairing or a westward zone change stamped in a day's last second can still be committing
-  in the next, which is when the job fires. Settled then, a joining day was closed
-  unevaluated for good. The job therefore runs at one minute past each quarter-hour.
+  takes the bond lock before the day lock (ADR-0033 amendment), so pairing and timezone
+  changes serialize with settlement. `AcceptInvite` records its activation instant after
+  acquiring the bond lock. The minute is for ordinary inter-instance clock skew; the job
+  therefore runs one minute past each quarter-hour.
 - **Step 1 as built** (decision 6): missing days are written **already closed**, in one
   statement, `ON CONFLICT DO NOTHING`; gaps are worked out per bond from its timeline, not
   by an anti-join; the 400 is per run across all bonds (bonds in id order, each bond's days

@@ -11,7 +11,7 @@ releases the days waiting on a reveal time, and writes the days nobody opened.
 **Architecture:** `modules/scheduling` owns the trigger, ShedLock and the counters, and
 calls `gratitude.api.DayCloser`. `gratitude` owns what a crossing does to a day, as
 transitions on `BondDay` beside the ones the synchronous path uses, each applied to **one day,
-in one transaction, under that day's row lock and no bond lock**. `bond.api` gains a
+in one transaction, under the bond lock followed by that day's row lock**. `bond.api` gains a
 closer-facing read of a bond's calendar that needs no caller.
 
 **Tech stack:** Kotlin, Spring Boot 4.1, Postgres 18 (Testcontainers), JPA, Spring
@@ -30,8 +30,8 @@ Migrations **V15** and **V16**.
 - Conventional Commits, subject ≤ 88 characters. Test first, seen to fail for the stated
   reason. After a task's tests pass, break the mechanism and see them fail.
 - A concurrency test synchronises on a lock held or a statement blocked, never on a sleep.
-- **The closer takes no bond lock** (ADR-0031 decision 18, ruled by the owner). The day's row
-  lock and the unique `(bond_id, date)` are all that stand between it and a live submission.
+- **The closer initially took no bond lock** (ADR-0031 decision 18). ADR-0033 amendment 2026-10-05 now makes close take bond then day after the PR #54 race review. The bond lock serializes it with pairing and lifecycle changes; the day row lock protects
+  the day transition. `CreateMissingDays` still relies on the unique index for direct inserts.
 - **The closer never holds two days of one bond at once.** One day, one transaction.
 - Every window comes from the bond's timeline — never a zone's natural midnight, never a
   stored `ends_at` trusted as final.

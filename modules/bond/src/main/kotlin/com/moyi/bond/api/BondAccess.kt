@@ -40,11 +40,10 @@ interface BondAccess {
      * the only honest option (spec §2.1).
      *
      * **The lock order across this application is bond, then bond-day, then
-     * entry**, on submission, editing and lifecycle reconciliation. **The
-     * close job is the exception** (ruling R1, ADR-0031 decision 18): it
-     * takes no bond lock and starts at the bond-day, so against the closer
-     * it is the day's own row lock and `bond_days`'s unique `(bond_id, date)`
-     * that hold, not this one.
+     * entry**, on submission, editing, lifecycle reconciliation and closing.
+     * The close job takes the same bond lock through [lockClosingViewOf]
+     * before it locks a day, so a close sees committed pairing and timezone
+     * changes and cannot reverse the writer lock order.
      * `ChangeTimezone`, `EndBond`, `RequestDeletion`, `UpdateBond`,
      * `CreateInvite`, `RevokeInvite`, `AcceptInvite` and `MemberSettingsService`
      * already take this same lock first, which is what makes a gratitude write
@@ -77,6 +76,13 @@ interface BondAccess {
      * never holds the bond's row.
      */
     fun closingViewOf(bondId: UUID): BondClosingView?
+
+    /**
+     * The closer's view, after taking the bond lock in the current
+     * transaction. The closer takes this before a Bond-day lock, preserving
+     * the application's bond -> bond-day order while it settles a day.
+     */
+    fun lockClosingViewOf(bondId: UUID): BondClosingView?
 
     /**
      * The ids of bonds that have ever had two members, in id order, after

@@ -64,8 +64,8 @@ internal class EntryAlreadyExistsException :
  * One request reaches it by itself: a `REVEALED` day is settled, so an
  * author who deletes their entry after the reveal and writes that day again
  * is refused here — which is what stops delete-then-rewrite from replacing
- * words already read. The other way in is a race: the close job takes no
- * bond lock, so the row `SubmitEntry` reads back from
+ * words already read. The other way in is a race with the close job, which
+ * takes the bond lock before the row `SubmitEntry` reads back from
  * [com.moyi.gratitude.infra.database.BondDayStore.openOrGet] may already
  * be closed by a run alongside it, and that race is a `409` rather than a
  * silent entry on a settled day, past BR-2's one per member per day.
