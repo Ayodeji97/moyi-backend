@@ -74,19 +74,19 @@ gratitude operation … reconciles".
 **Files:** `service/ChangeEntry.kt`, `service/SubmitEntry.kt`,
 `web/EntryChangesTest.kt`.
 
-- [ ] Test `a refused first PATCH still leaves an elapsed joining day revealed`: build the
+- [x] Test `a refused first PATCH still leaves an elapsed joining day revealed`: build the
       legacy state as `the first read after pairing…` does; `PATCH` Ada's entry as the first
       operation; expect `409 ENTRY_IMMUTABLE`; then, with no `GET`, assert
       `bond_days.status = 'REVEALED'`, both `entries.revealed_at` set, one `DayRevealed`.
       Run it: red on `SUSPENDED`.
-- [ ] Same for `DELETE` (expect `204`, day `REVEALED`) and for a `POST` onto that day
+- [x] Same for `DELETE` (expect `204`, day `REVEALED`) and for a `POST` onto that day
       (expect `409`, day `REVEALED`), and for a `POST` replay and a keyed-`PATCH` replay.
-- [ ] `ChangeEntry.change`: before the main transaction, read the entry, resolve the
+- [x] `ChangeEntry.change`: before the main transaction, read the entry, resolve the
       membership unlocked, check the author, then `joining.beforeRead(membership)`.
       `SubmitEntry.submit`: `access.membershipOf` then `joining.beforeRead` before
       `transactions.execute`. Keep the in-transaction `underBondLock` calls: they are what
       holds the lock order when the pre-step lost a race.
-- [ ] Green; commit `fix(gratitude): the joining-day reconcile commits before the write`.
+- [x] Green; commit `fix(gratitude): the joining-day reconcile commits before the write`.
 
 ### Task 2: a day from before the pairing opens `SUSPENDED`
 
@@ -98,17 +98,17 @@ days "remain private and excluded".
 **Files:** `service/SubmitEntry.kt`, `domain/BondDay.kt` (only if the rule belongs there),
 `web/EntryChangesTest.kt` or a new `web/JoiningDayTest.kt`.
 
-- [ ] Test `a day from before the pairing stays private, row or no row`: Cara creates on
+- [x] Test `a day from before the pairing stays private, row or no row`: Cara creates on
       D−1; Eve accepts on D; both post with `intendedAt` on D−1. Assert D−1 is `SUSPENDED`,
       no `revealed_at`, no `DayRevealed`, each reads only their own entry. Second case: Cara
       wrote on D−1 while pending. Red on the first case (`REVEALED`).
-- [ ] `openAndLock`: open `SUSPENDED` when `awaitingSecondMember`, or when `activeSince` is
+- [x] `openAndLock`: open `SUSPENDED` when `awaitingSecondMember`, or when `activeSince` is
       not before `window.endsAt`.
-- [ ] Same file, the positive cases the review found unpinned — `the second member's first
+- [x] Same file, the positive cases the review found unpinned — `the second member's first
       entry on the joining day resumes it and reveals` (no hand `UPDATE`); `pairing on a day
       one wrote on makes it PARTIAL, and an empty one OPEN`. Mutation: remove the
       `underBondLock` call before `openAndLock`; the first must go red.
-- [ ] Green; commit `fix(gratitude): a day before the pairing opens SUSPENDED, row or not`.
+- [x] Green; commit `fix(gratitude): a day before the pairing opens SUSPENDED, row or not`.
 
 ### Task 3: the reveal reads entries fresh
 
@@ -118,12 +118,12 @@ returns a managed pre-lock instance; `EntryStore.update` then writes every colum
 **Files:** `infra/database/EntryStore.kt`, `service/RevealDay.kt`, a new
 `infra/database/RevealFreshReadTest.kt`.
 
-- [ ] Test: in one transaction `entries.find(id)`; from a second connection commit
+- [x] Test: in one transaction `entries.find(id)`; from a second connection commit
       `UPDATE entries SET text = 'new'`; lock the day; `reveal.apply`; assert the row's text
       is `'new'` and `revealed_at` is set. Red.
-- [ ] `EntryStore.findForDayFresh` (refresh each managed entity); `RevealDay.apply` uses it.
-- [ ] Test for the unpinned guard: `EntryStore.update` never clears or moves `revealed_at`.
-- [ ] Green; commit `fix(gratitude): the reveal re-reads each entry under the day lock`.
+- [x] `EntryStore.findForDayFresh` (refresh each managed entity); `RevealDay.apply` uses it.
+- [x] Test for the unpinned guard: `EntryStore.update` never clears or moves `revealed_at`.
+- [x] Green; commit `fix(gratitude): the reveal re-reads each entry under the day lock`.
 
 ### Task 4: one answer per rule on the entry routes
 
@@ -135,26 +135,26 @@ returns a managed pre-lock instance; `EntryStore.update` then writes every colum
 `contracts/.../OpenApiConfiguration.kt`, `app/build.gradle.kts`,
 `app/src/test/.../FlywayMigrationTest.kt`, `OpenApiContractTest.kt`.
 
-- [ ] Extend `entry routes hide another author…`: add a partner who has left, a partner on
+- [x] Extend `entry routes hide another author…`: add a partner who has left, a partner on
       an archived bond, the keyed `PATCH`, and compare headers apart from the rate-limit
       counters. Add `an author who has left gets 409, never 404`. Mutation: swap the author
       check and the archived check in `ChangeEntry`; expect red.
-- [ ] `EntryNotFoundException` replaces the eight copies of the literal; one
+- [x] `EntryNotFoundException` replaces the eight copies of the literal; one
       `ChangeEntry.authorOf(userId, entryId, lock)` replaces the three find → membership →
       author sequences. `Entry.isErased` is used by `canBeReadBy` and `reveal`.
-- [ ] Test `an unkeyed PATCH over 1 MiB is 413`: red. The interceptor and its filter bound
+- [x] Test `an unkeyed PATCH over 1 MiB is 413`: red. The interceptor and its filter bound
       the body for every `@Idempotent` handler; only preparing the key depends on the
       header. `IdempotencyInterceptor.requestOrNull(http)` replaces the controller's own
       header read. `common:web` test: `an optional key is skipped when absent, enforced when
       present, refused when malformed`.
-- [ ] Contract: `PatchEntryRequest.text` is `string`, not nullable; the optional-key
+- [x] Contract: `PatchEntryRequest.text` is `string`, not nullable; the optional-key
       operations are a named set, not a string comparison; the `submitEntry` description
       regains "missing or malformed". Assertions in `OpenApiContractTest`. Regenerate.
-- [ ] `ENTRY_IMMUTABLE`'s detail becomes "This entry can no longer be edited." (true for a
+- [x] `ENTRY_IMMUTABLE`'s detail becomes "This entry can no longer be edited." (true for a
       revealed and for an erased entry).
-- [ ] `FlywayMigrationTest` requires V1–V14 and asserts `outbox_deliveries`' key and its
+- [x] `FlywayMigrationTest` requires V1–V14 and asserts `outbox_deliveries`' key and its
       partial index; `app` names `projects.common.events`.
-- [ ] Green; commit per bullet group (`refactor`, `fix(web)`, `fix(contracts)`, `test`).
+- [x] Green; commit per bullet group (`refactor`, `fix(web)`, `fix(contracts)`, `test`).
 
 ### Task 5: pin what is built
 
@@ -163,41 +163,41 @@ returns a managed pre-lock instance; `EntryStore.update` then writes every colum
 **Files:** `domain/RevealTransitionTest.kt`, `domain/BondDayTest.kt`,
 `web/RevealGateTest.kt`, `web/EntryChangesTest.kt`, `web/EntriesEndpointTest.kt`.
 
-- [ ] `a timed reveal holds both entries in PENDING_REVEAL until the bond's time` (HTTP;
+- [x] `a timed reveal holds both entries in PENDING_REVEAL until the bond's time` (HTTP;
       status, no stamps, no event, each partner entry exactly the locked shape).
-- [ ] `a reveal time already passed reveals at once` (day and both entries share one
+- [x] `a reveal time already passed reveals at once` (day and both entries share one
       `revealed_at`; one `DayRevealed` at that instant).
-- [ ] `once both have written each reads the other's words` (no hand `UPDATE`). Mutation:
+- [x] `once both have written each reads the other's words` (no hand `UPDATE`). Mutation:
       make `RevealDay` skip the entry update.
-- [ ] `revealWhenDue` across a DST gap (Europe/London 2026-03-29 01:30) and an overlap
+- [x] `revealWhenDue` across a DST gap (Europe/London 2026-03-29 01:30) and an overlap
       (2026-10-25 01:30), and on a westward-extended day.
-- [ ] `withoutEntry`, parameterised: `PARTIAL(1)→OPEN(0)`, `PENDING_REVEAL(2)→PARTIAL(1)`,
+- [x] `withoutEntry`, parameterised: `PARTIAL(1)→OPEN(0)`, `PENDING_REVEAL(2)→PARTIAL(1)`,
       `SUSPENDED(n)→SUSPENDED(n−1)`; settled days return the same instance.
-- [ ] `deleting on a PENDING_REVEAL day returns it to PARTIAL and a rewrite follows the
+- [x] `deleting on a PENDING_REVEAL day returns it to PARTIAL and a rewrite follows the
       reveal rule`; `after a post-reveal delete the author cannot write that day again`
       (`409 DAY_CLOSED`); `a deleted entry is the wide tombstone to both after reveal`;
       `a pre-reveal delete shows the partner exactly this` (pins today's shape — see the
       owner's questions); `PATCH is allowed while PENDING_REVEAL`.
-- [ ] `a refused submission leaves no outbox row` (BR-2 `409`, media `422`).
-- [ ] `a constraint failure during the reveal never exposes either member's words` (a probe
+- [x] `a refused submission leaves no outbox row` (BR-2 `409`, media `422`).
+- [x] `a constraint failure during the reveal never exposes either member's words` (a probe
       CHECK the reveal `UPDATE` violates; `500`; neither canary in body or output).
-- [ ] `an ended bond's entries cannot be edited or deleted` — pins `409 BOND_ARCHIVED` as
+- [x] `an ended bond's entries cannot be edited or deleted` — pins `409 BOND_ARCHIVED` as
       built, for the member who left and the one who stayed.
-- [ ] Commit `test(gratitude): pin the timed reveal, deletion and the outbox's atomicity`.
+- [x] Commit `test(gratitude): pin the timed reveal, deletion and the outbox's atomicity`.
 
 ### Task 6: the smoke run, on a database of its own
 
 **Files:** `scripts/smoke.sh`.
 
-- [ ] `MOYI_DB` (default `moyi`): the script creates the database if absent, boots the jar
+- [x] `MOYI_DB` (default `moyi`): the script creates the database if absent, boots the jar
       with `--spring.datasource.url` pointing at it, and uses it in every `psql` call.
       Header comment says why: an unmerged migration is smoke-tested without touching the
       shared database.
-- [ ] Add a log grep for the edited text; a probe that a timed bond reads `PENDING_REVEAL`.
-- [ ] `./gradlew :app:bootJar`, then `MOYI_DB=moyi_c2_smoke PORT=18090 scripts/smoke.sh
+- [x] Add a log grep for the edited text; a probe that a timed bond reads `PENDING_REVEAL`.
+- [x] `./gradlew :app:bootJar`, then `MOYI_DB=moyi_c2_smoke PORT=18090 scripts/smoke.sh
       --no-build`. Record probes passed/failed. Fix what it finds, test first.
-- [ ] Confirm `moyi`'s `flyway_schema_history` still ends at 13. Drop `moyi_c2_smoke`.
-- [ ] Commit `chore(smoke): a database of its own, and the reveal on the wire`.
+- [x] Confirm `moyi`'s `flyway_schema_history` still ends at 13. Drop `moyi_c2_smoke`.
+- [x] Commit `chore(smoke): a database of its own, and the reveal on the wire`.
 
 ### Task 7: prove the guards, then the record
 

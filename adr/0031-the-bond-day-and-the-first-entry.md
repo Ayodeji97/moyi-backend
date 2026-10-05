@@ -1,7 +1,7 @@
 # ADR-0031 — The Bond-day, and the first entry
 
 **Status:** Accepted · **Date:** 2026-09-29 · **Deciders:** Daniel
-**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review)
+**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review) · 2026-10-05 (C2: the Owed list discharged, decision 17's read rule qualified — ADR-0032)
 
 ## Context
 
@@ -464,6 +464,9 @@ on return, which looks like working and protects nothing.
   lock.
 - **A read never takes the bond lock.** `GetToday` and the replay use `membershipOf`. A test
   holds the bond's row and shows `today` still answers.
+  *Amended 2026-10-05 (ADR-0032 decision 6):* with one exception since C2. While a bond's
+  joining day is still `SUSPENDED`, the first read that meets it reconciles it, under the
+  bond lock and in a transaction of its own, before the read itself begins. Once per bond.
 
 **18. The close job takes no bond lock, so `bond_days`'s unique index stays load-bearing (R1,
 ruled by Daniel).** C3's sweep handles many bonds per run and would serialise behind each bond's
@@ -785,7 +788,12 @@ in the error contract, recorded under Owed.
 What this slice knowingly leaves for a later one. Each is an obligation, with the slice it falls
 on. None of them is built here.
 
-**C2, the reveal.**
+**C2, the reveal.** *All six discharged on 2026-10-05; ADR-0032 is the record. In order:
+the un-suspend is its decisions 6 and 7 (and it found that a day from before the pairing with
+no row opened `OPEN`); the bucket is decision 11; the redacted rethrow is decision 13;
+`DELETE` setting both marks is decision 8; `GetToday`'s deterministic choice is decision 14;
+`revealed_at` in the reveal's own transaction is decisions 1 and 2. The bullets are kept as
+written, for what they asked.*
 
 - **Un-suspend a paired bond's day** (decision 4's amendment), by spec §12.4's actual rule:
   on the joining day, the first gratitude operation or close sweep reconciles the
@@ -833,6 +841,10 @@ on. None of them is built here.
   and every write in those hours becomes `409 DAY_CLOSED`.
 - **Settle a skipped label `FROZEN` without consuming a freeze** (decision 14), deriving the
   skipped labels from the timeline. Nothing stores them.
+- *Added 2026-10-05 by ADR-0032 (its own "Owed, C3" has the reasons):* **the second sweep
+  out of `PENDING_REVEAL`**, which needs `revealTimeLocal` on the closer-facing accessor
+  below; and **reconcile a joining day under its lock before stamping `closedAt` on it**.
+  The two-days rule in the next bullet now protects three paths, not only the redirect.
 - **Never hold two days of one bond at once, or take them older first.** The BR-3a redirect
   holds the settled day's lock and then today's (decision 20). Since decision 22 a claim is
   never ahead of the submission instant, so those two locks are always older then newer;
@@ -906,7 +918,9 @@ on. None of them is built here.
 
 ## Revisit when
 
-- C2 adds `PENDING_REVEAL`/`REVEALED` and the outbox — it sets `revealed_at`, `FULL` becomes
+- *(Done 2026-10-05, ADR-0032. `RevealGateTest` keeps its hand-made states on purpose — they
+  include states no request can produce — and `RevealTest` drives the real transitions beside it.)*
+  C2 adds `PENDING_REVEAL`/`REVEALED` and the outbox — it sets `revealed_at`, `FULL` becomes
   reachable for a partner for the first time, and `RevealGateTest`'s hand-made states are
   replaced by real transitions without narrowing what C1 already asserts.
 - C3 adds the close job and `SOLO` — everything under Owed for C3 falls due, and so does the

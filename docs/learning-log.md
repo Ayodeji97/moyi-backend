@@ -1902,3 +1902,58 @@ Wrong about: what the earlier note was. "They all write the bond afterwards" rea
          transactional base class from another layer, or a hand-registered
          `OpenEntityManagerInViewFilter`. ADR-0028 §6b lists them, with the runtime check
          that would close them and was not built.
+
+## 2026-10-05 · Phase 3 · Finishing C2 from somebody else's desk — green, reviewed, and two defects a request could reach
+Expected: Codex had built the reveal over two days and its session ended mid-test. Its
+         own note listed what was left: a rate bucket, some tests, the ADR. The note was
+         two hours behind the code, so the first job was finding out what the code was.
+         Committed as it stood, the build was green: 873 tests. Three reviewers then read
+         the whole branch, one each for locking, for privacy and the contract, and for the
+         spec. None found a leak, an authorisation hole or a deadlock. On that the rest
+         looked like paperwork.
+Reality: two of the findings were wrong behaviour a request could reach, and both were
+         about the same day: the one a couple pairs on.
+         The first: a day C1 had left `SUSPENDED` with both entries on it is reconciled
+         by the first request that meets it, and the reconcile ran inside that request's
+         transaction. Reconciling reveals the day. A revealed entry cannot be edited. So
+         a `PATCH` as the first request reveals, is refused `409` because of the reveal
+         it has just made, and rolls it back. Every retry does the same. Each step is
+         right. Only a `GET /today` got the couple out, because a read has nothing to be
+         refused for.
+         The second: whether a day from before the pairing stays private depended on
+         whether anybody had written on it at the time. With a row it was `SUSPENDED`.
+         Without one, a back-fill after pairing opened it `OPEN`, and two back-fills
+         revealed it. The opening status asked "is the bond still waiting?" where the
+         spec's rule is about the day.
+         Both were written as tests first and both failed for the reason given: the day
+         stayed `SUSPENDED`; `expected SUSPENDED but was REVEALED`.
+         A third finding was called latent and not reachable, and it was still worth a
+         test: the reveal read a day's entries from Hibernate's identity map and wrote
+         each back whole, so an entry loaded before the lock was written back as it
+         stood then. The test changed the row from another connection in between and
+         got the original text back.
+         Then the tests themselves. Fourteen new ones pinned behaviour that was built
+         and untested, and all fourteen passed on the first run, which says nothing. Ten
+         mechanisms were then removed one at a time. Nine runs went red. The tenth,
+         `GET /today` choosing a live entry over a withdrawn one, stayed green with its
+         ordering gone: one tombstone and one live row, and an unordered read is right
+         half the time. It took five rows to make a test that fails.
+         The smoke run was the last unknown and found nothing: 389 probes, 0 failed. It
+         ran against a database of its own, because V14 is unmerged and the compose
+         Postgres is shared by every checkout.
+Wrong about: what a green build and a clean review add up to. The reviewers were asked
+         for defects and found them by tracing; nobody ran anything. The two that
+         mattered were each one request away, and neither was in any test, because every
+         test of the joining day began with a `GET`.
+         Also the word "latent". The stale-copy write was unreachable because every
+         writer of an entry also reconciled the joining day in the same commit. That was
+         true, and it is the same kind of sentence as "they all write the bond
+         afterwards" from the day before: a property of eleven call sites, stated once,
+         somewhere else. The slice after this one adds a writer that would have broken it.
+         And a smaller one, mine. I wrote in the plan that Task 5's tests would "pin what
+         is built". A test that has never failed pins nothing; the plan should have said
+         the mutation run was part of the task, not the task after it.
+         Not settled, and the owner's: an author cannot delete an entry once the bond has
+         ended; a delete before the reveal shows the partner that something was removed;
+         a replay spends a rate-limit token. Each is built one way with one test on it.
+         ADR-0032 has them. And a day in `PENDING_REVEAL` has no way out until C3.
