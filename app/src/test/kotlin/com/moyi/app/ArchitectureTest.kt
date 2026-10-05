@@ -126,6 +126,9 @@ class ArchitectureTest {
         /** `bond.api.BondAccess`'s two methods that run no membership guard — the close job's. */
         private val UNGUARDED_BOND_READS = listOf("closingViewOf", "bondsToSweep")
 
+        /** The two classes that are the close job's reads of a bond (`gratitude.service`). */
+        private val THE_CLOSER = setOf("CloseDay.kt", "CreateMissingDays.kt")
+
         private data class Location(
             val module: String,
             val layer: String,
@@ -336,22 +339,24 @@ class ArchitectureTest {
     }
 
     @Test
-    fun `the closer's unguarded view of a bond is never asked for from a web layer`() {
+    fun `the closer's unguarded view of a bond is asked for by the closer and nobody else`() {
         // `BondAccess.closingViewOf` and `bondsToSweep` run no membership
         // guard: the close job has no caller to ask about (ADR-0031, Owed,
         // C3). Every other way into a bond from outside `bond` begins with
         // the guard, so these two are the only ones a request must never
-        // reach — a controller that called one would answer for a bond its
-        // caller is not in. Text-based: the names are distinctive, and a
-        // call through an alias would still have to spell one of them.
+        // reach — and a request reaches a service as easily as a controller,
+        // so the rule is a list of who MAY name them, not of who may not.
+        // Text-based: the names are distinctive, and a call through an alias
+        // would still have to spell one of them.
         val violations =
             project.files
                 .filter { it.normalisedProjectPath.contains("/src/main/") }
-                .filter { locationOf(it.packagee?.name)?.layer == "web" }
+                .filterNot { locationOf(it.packagee?.name)?.module == "bond" }
                 .filter { file -> UNGUARDED_BOND_READS.any { it in file.text } }
-                .map { it.normalisedProjectPath }
+                .map { it.normalisedProjectPath.substringAfterLast('/') }
+                .filterNot { it in THE_CLOSER }
 
-        assertTrue(violations.isEmpty(), "A web layer calls the close job's unguarded bond read:\n" + violations.joinToString("\n"))
+        assertTrue(violations.isEmpty(), "Only the close job may call BondAccess's unguarded reads. Found in: $violations")
     }
 
     @Test

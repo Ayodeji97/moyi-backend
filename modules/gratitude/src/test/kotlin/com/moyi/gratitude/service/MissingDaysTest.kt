@@ -12,6 +12,7 @@ import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.gratitude.infra.database.MissingDays
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -190,6 +191,47 @@ internal class MissingDaysTest(
         days(bond).keys.max() shouldBe LocalDate.of(2026, 9, 14)
 
         closer.closeElapsedDays(NOW, BUDGET).created shouldBe 0
+    }
+
+    @Test
+    fun `the day a bond became two starts when the bond did, not at a midnight`() {
+        val bond = pairedOn("2026-09-10").id
+
+        closer.closeElapsedDays(NOW, BUDGET)
+
+        // Created and joined at 10:00Z on the 10th: the calendar begins there.
+        jdbc
+            .queryForObject(
+                "SELECT starts_at FROM bond_days WHERE bond_id = ?::uuid AND date = '2026-09-10'",
+                java.sql.Timestamp::class.java,
+                bond,
+            )?.toInstant() shouldBe Instant.parse("2026-09-10T10:00:00Z")
+    }
+
+    /**
+     * BR-3a after the job: yesterday was written `EMPTY` and closed, and a
+     * phone that was offline yesterday now sends what was typed then. A
+     * settled day takes no entry; the words are kept, on today.
+     */
+    @Test
+    fun `an offline entry aimed at a day the job wrote EMPTY is filed on today, and that day stays empty`() {
+        val bond = pairedOn("2026-09-13")
+        closer.closeElapsedDays(NOW, BUDGET).created shouldBe 2
+
+        val filed =
+            mockMvc
+                .post("/api/v1/bonds/${bond.id}/entries") {
+                    header(HttpHeaders.AUTHORIZATION, bearer(bond.ada))
+                    header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                    contentType = MediaType.APPLICATION_JSON
+                    content = """{"text":"typed yesterday","intendedAt":"2026-09-14T12:00:00Z"}"""
+                }.andReturn()
+                .response
+
+        filed.status shouldBe 201
+        filed.contentAsString shouldContain "\"date\":\"2026-09-15\""
+        jdbc.queryForMap("SELECT status, entry_count FROM bond_days WHERE bond_id = ?::uuid AND date = '2026-09-14'", bond.id) shouldBe
+            mapOf("status" to "EMPTY", "entry_count" to 0.toShort())
     }
 
     /**

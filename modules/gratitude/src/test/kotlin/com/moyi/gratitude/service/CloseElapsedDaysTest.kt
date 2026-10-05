@@ -7,6 +7,7 @@ import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.gratitude.api.DayCloser
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
+import com.moyi.gratitude.infra.database.CloseCandidates
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -157,6 +158,56 @@ internal class CloseElapsedDaysTest(
     }
 
     @Test
+    fun `a bond counting down to deletion does not strand the day the countdown began on`() {
+        val (bond, ada, bea) = pairedBond("Africa/Lagos")
+        submit(ada, bond, "hers").status shouldBe 201
+        for (member in listOf(ada, bea)) {
+            mockMvc
+                .post("/api/v1/bonds/$bond/deletion-request") { header(HttpHeaders.AUTHORIZATION, bearer(member)) }
+                .andReturn()
+                .response.status shouldBe 202
+        }
+
+        closer.closeElapsedDays(LAGOS_END, BUDGET).closed shouldBe 1
+
+        statuses()[bond] shouldBe "SOLO"
+    }
+
+    @Test
+    fun `an ended bond's day that was waiting on its reveal time is still revealed when the time comes`() {
+        val (bond, ada, bea) = pairedBond("Africa/Lagos")
+        jdbc.update("UPDATE bonds SET reveal_time_local = '20:00' WHERE id = ?::uuid", bond)
+        submit(ada, bond, "hers").status shouldBe 201
+        submit(bea, bond, "his").status shouldBe 201
+        mockMvc
+            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, bearer(ada)) }
+            .andReturn()
+            .response.status shouldBe 204
+
+        closer.closeElapsedDays(Instant.parse("2026-09-15T18:59:00Z"), BUDGET).revealed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("2026-09-15T19:00:00Z"), BUDGET).revealed shouldBe 1
+
+        statuses()[bond] shouldBe "REVEALED"
+        events("DayRevealed") shouldBe 1
+    }
+
+    @Test
+    fun `a bond whose calendar cannot be read stops neither the days written for others nor their closing`(output: CapturedOutput) {
+        val broken = bondWithOneEntry("Africa/Lagos", text = "privacy-canary-on-the-broken-bond")
+        val fine = bondWithOneEntry("Africa/Lagos")
+        jdbc.update("DELETE FROM bond_anchor_intervals WHERE bond_id = ?::uuid", broken)
+
+        val result = closer.closeElapsedDays(LAGOS_END, BUDGET)
+
+        // The broken bond fails twice over: its missing days, and its one day with a row.
+        result.failed shouldBe 2
+        result.closed shouldBe 1
+        statuses() shouldBe mapOf(broken to "PARTIAL", fine to "SOLO")
+        output.all shouldContain "close: the missing days of bond $broken could not be written"
+        output.all shouldNotContain "privacy-canary"
+    }
+
+    @Test
     fun `a day waiting on its reveal time is found before its end, and revealed when the time comes`() {
         val (bond, ada, bea) = pairedBond("Africa/Lagos")
         jdbc.update("UPDATE bonds SET reveal_time_local = '20:00' WHERE id = ?::uuid", bond)
@@ -219,17 +270,18 @@ internal class CloseElapsedDaysTest(
 
     @Test
     fun `the scan for days that may have ended can use its index`() {
+        // The statement the job runs, not a copy of it.
         val plan =
             dataSource.connection
                 .use { connection ->
                     connection.autoCommit = false
-                    connection.createStatement().use { statement ->
-                        statement.execute("SET LOCAL enable_seqscan = off")
-                        statement
-                            .executeQuery(
-                                "EXPLAIN SELECT id FROM bond_days WHERE closed_at IS NULL AND ends_at <= now() " +
-                                    "ORDER BY bond_id, date LIMIT 200",
-                            ).use { rows -> generateSequence { if (rows.next()) rows.getString(1) else null }.toList() }
+                    connection.createStatement().use { it.execute("SET LOCAL enable_seqscan = off") }
+                    connection.prepareStatement("EXPLAIN " + CloseCandidates.SQL).use { statement ->
+                        statement.setTimestamp(1, java.sql.Timestamp.from(LAGOS_END))
+                        statement.setObject(2, UUID(0, 0))
+                        statement.setObject(3, java.time.LocalDate.of(1, 1, 1))
+                        statement.setInt(4, 200)
+                        statement.executeQuery().use { rows -> generateSequence { if (rows.next()) rows.getString(1) else null }.toList() }
                     }
                 }.joinToString("\n")
 

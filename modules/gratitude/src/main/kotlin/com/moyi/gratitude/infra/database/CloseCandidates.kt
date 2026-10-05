@@ -49,14 +49,7 @@ internal class CloseCandidates(
         limit: Int,
     ): List<CloseCandidate> =
         jdbc.query(
-            """
-            SELECT id, bond_id, date FROM bond_days
-            WHERE closed_at IS NULL
-              AND (ends_at <= ? OR status = 'PENDING_REVEAL')
-              AND (bond_id, date) > (?, ?)
-            ORDER BY bond_id, date
-            LIMIT ?
-            """.trimIndent(),
+            SQL,
             { row, _ ->
                 CloseCandidate(
                     BondDayId(row.getObject("id", UUID::class.java)),
@@ -70,7 +63,18 @@ internal class CloseCandidates(
             limit,
         )
 
-    private companion object {
+    internal companion object {
+        /** Parameters: the instant, the bond and date to page after, the limit. */
+        val SQL =
+            """
+            SELECT id, bond_id, date FROM bond_days
+            WHERE closed_at IS NULL
+              AND (ends_at <= ? OR status = 'PENDING_REVEAL')
+              AND (bond_id, date) > (?, ?)
+            ORDER BY bond_id, date
+            LIMIT ?
+            """.trimIndent()
+
         val FIRST_BOND = UUID(0, 0)
         val FIRST_DATE: LocalDate = LocalDate.of(1, 1, 1)
     }

@@ -171,6 +171,35 @@ internal class CloseJobTest(
         jdbc.update("UPDATE shedlock SET lock_until = $UTC_NOW - interval '1 second'")
     }
 
+    @Test
+    fun `while another instance holds the reaper's lock nothing is reaped`() {
+        val created = Instant.parse("2026-09-14T10:00:00Z")
+        insertKey("expired", created, created.plusSeconds(86_400))
+        clock.set(created.plusSeconds(90_000))
+        lockHeld(ReapIdempotencyKeys.LOCK, until = "$UTC_NOW + interval '10 minutes'")
+
+        reaper.run()
+
+        jdbc.queryForList("SELECT idempotency_key FROM idempotency_keys", String::class.java) shouldBe listOf("expired")
+    }
+
+    /**
+     * ShedLock compares the lock against a zoneless UTC reading of the
+     * database's clock. In a `timestamptz` column that reading is taken for
+     * local time, and a lapsed lock looks as far in the future as the
+     * session's offset: on a machine at UTC+1 the job did not run for an
+     * hour. The lock tests above write their rows the way ShedLock reads
+     * them, so they cannot see this; the column's type is what holds it.
+     */
+    @Test
+    fun `the lock's instants are stored without a zone, as ShedLock's database clock writes them`() {
+        jdbc.queryForList(
+            "SELECT data_type FROM information_schema.columns " +
+                "WHERE table_name = 'shedlock' AND column_name IN ('lock_until', 'locked_at')",
+            String::class.java,
+        ) shouldBe listOf("timestamp without time zone", "timestamp without time zone")
+    }
+
     private fun insertKey(
         key: String,
         createdAt: Instant,

@@ -14,9 +14,11 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.function.ThrowingSupplier
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.TestConfiguration
@@ -35,6 +37,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.post
 import java.sql.Timestamp
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -57,7 +60,7 @@ internal class CloseDayTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired directory: UserDirectory,
-    @Autowired dataSource: DataSource,
+    @Autowired private val dataSource: DataSource,
     @Autowired private val clock: MutableClock,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
@@ -283,6 +286,92 @@ internal class CloseDayTest(
 
         status(bond) shouldBe "SUSPENDED"
         jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `a joining day whose only entry was withdrawn closes EMPTY`() {
+        clock.set(NOW)
+        val created = createBond(ada)
+        val bond = idOf(created)
+        deleteEntry(ada, idOf(submit(ada, bond, """{"text":"thought better of it"}"""))).status shouldBe 204
+        accept(bea, codeOf(created)).status shouldBe 200
+        status(bond) shouldBe "SUSPENDED"
+
+        closeDay.settle(dayOf(bond), END) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "EMPTY"
+        events("DayClosed") shouldBe 1
+    }
+
+    // --- which entry a SOLO day reveals, when it is stamped, and what the closer waits for ---
+
+    @Test
+    fun `on a SOLO day only the live entry is revealed, never one its author withdrew`() {
+        val bond = pairedBond()
+        val withdrawn = idOf(submit(ada, bond, """{"text":"first try"}"""))
+        deleteEntry(ada, withdrawn).status shouldBe 204
+        val kept = idOf(submit(ada, bond, """{"text":"second try"}"""))
+
+        closeDay.settle(dayOf(bond), END) shouldBe Outcome.CLOSED
+
+        jdbc.queryForList("SELECT id::text FROM entries WHERE revealed_at IS NOT NULL", String::class.java) shouldBe listOf(kept)
+    }
+
+    /**
+     * A run reads the time once and may take minutes. What it writes as
+     * "when" is read again under the day's lock: stamped with the run's own
+     * reading, a day could be closed "before" an entry written on it while
+     * the run was under way, and its event would precede its cause.
+     */
+    @Test
+    fun `a day is stamped with the time it was closed, not the time the run began`() {
+        val bond = pairedBond()
+        submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
+        val closedFor = END
+        val actuallyNow = END.plusSeconds(240)
+        clock.set(actuallyNow)
+
+        closeDay.settle(dayOf(bond), closedFor) shouldBe Outcome.CLOSED
+
+        closedAt(bond) shouldBe actuallyNow
+        jdbc.queryForObject("SELECT revealed_at FROM entries", Timestamp::class.java)?.toInstant() shouldBe actuallyNow
+        jdbc
+            .queryForObject(
+                "SELECT occurred_at FROM outbox_events WHERE event_type = 'DayClosed'",
+                Timestamp::class.java,
+            )?.toInstant() shouldBe
+            actuallyNow
+    }
+
+    @Test
+    fun `a day that ended after the instant the caller allows for is left, even though it has ended`() {
+        val bond = pairedBond()
+        submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
+
+        closeDay.settle(dayOf(bond), now = END.plusSeconds(30), endedAsOf = END.minusSeconds(30)) shouldBe Outcome.NOT_YET
+
+        status(bond) shouldBe "PARTIAL"
+        closeDay.settle(dayOf(bond), now = END.plusSeconds(60), endedAsOf = END) shouldBe Outcome.CLOSED
+    }
+
+    /** ADR-0031 decision 18: the closer starts at the day and never waits for the bond. */
+    @Test
+    fun `the closer settles a day while the bond's own row is locked by somebody else`() {
+        val bond = pairedBond()
+        submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
+
+        val outcome =
+            dataSource.connection.use { holder ->
+                holder.autoCommit = false
+                holder.createStatement().use { it.execute("SELECT 1 FROM bonds WHERE id = '$bond' FOR UPDATE") }
+                try {
+                    assertTimeoutPreemptively(Duration.ofSeconds(10), ThrowingSupplier { closeDay.settle(dayOf(bond), END) })
+                } finally {
+                    holder.rollback()
+                }
+            }
+
+        outcome shouldBe Outcome.CLOSED
     }
 
     // --- what two people wrote does not leave with a failure ---
