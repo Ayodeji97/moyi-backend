@@ -93,6 +93,7 @@ internal class BondAccessAdapter(
                 // more writes from here, which is what the closer means by ended.
                 endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
                 revealTimeLocal = bond.revealTimeLocal,
+                strictMode = bond.strictMode,
                 anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
             )
         }
