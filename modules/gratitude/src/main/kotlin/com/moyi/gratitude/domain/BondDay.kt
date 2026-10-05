@@ -185,10 +185,47 @@ internal data class BondDay(
      */
     fun resumeJoiningDay(activeSince: Instant?): BondDay {
         val joining = activeSince != null && !activeSince.isBefore(startsAt) && activeSince.isBefore(endsAt)
-        return if (status == BondDayStatus.SUSPENDED && joining) {
+        // A closed day is a record (BR-10). The closer reconciles a joining
+        // day BEFORE it stamps it, under the same lock; resumed afterwards, a
+        // one-entry day would be PARTIAL and closed at once, which nothing settles.
+        return if (status == BondDayStatus.SUSPENDED && joining && closedAt == null) {
             copy(status = if (entryCount == 0) BondDayStatus.OPEN else BondDayStatus.PARTIAL)
         } else {
             this
+        }
+    }
+
+    /**
+     * The end of the day (spec §6.4 step 2, FR-063): what it is once nobody
+     * can write on it any more.
+     *
+     * - `OPEN` becomes `EMPTY`, and `PARTIAL` becomes `SOLO`. On a `SOLO` day
+     *   the caller reveals the lone entry; [revealedAt] here stays unset,
+     *   because it records the two being read together, which did not happen.
+     * - `PENDING_REVEAL` becomes `REVEALED`: a reveal time later than the
+     *   day's own end cannot hold both entries back past it.
+     * - A day revealed while it was open, and a `SUSPENDED` day, gain
+     *   [closedAt] and nothing else. A suspended day is excluded from
+     *   evaluation (doc 04 §8.3a), so closing it reveals nothing and counts
+     *   for nothing; it is closed so that it is not swept again.
+     *
+     * **The caller proves the day has ended, by the bond's timeline** — after
+     * [extendedTo], never from a stored [endsAt] taken on trust — and has
+     * already applied [resumeJoiningDay] and [revealWhenDue], under the day's
+     * lock. Idempotent: a closed day is returned as it is.
+     */
+    fun close(now: Instant): BondDay {
+        if (closedAt != null) return this
+        require(!now.isBefore(endsAt)) { "a bond-day cannot be closed before it has ended" }
+        check(
+            status != BondDayStatus.PARTIAL || entryCount == 1,
+        ) { "a two-entry day is revealed or pending, never PARTIAL, by the time it closes" }
+        val at = now.truncatedTo(ChronoUnit.MICROS)
+        return when (status) {
+            BondDayStatus.OPEN -> copy(status = BondDayStatus.EMPTY, closedAt = at)
+            BondDayStatus.PARTIAL -> copy(status = BondDayStatus.SOLO, closedAt = at)
+            BondDayStatus.PENDING_REVEAL -> copy(status = BondDayStatus.REVEALED, revealedAt = revealedAt ?: at, closedAt = at)
+            else -> copy(closedAt = at)
         }
     }
 
