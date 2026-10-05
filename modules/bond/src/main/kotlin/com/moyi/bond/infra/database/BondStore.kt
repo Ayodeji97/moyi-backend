@@ -8,6 +8,7 @@ import com.moyi.bond.domain.UserId
 import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 import java.time.Instant
+import java.util.UUID
 
 /**
  * The Bond and its members, spoken in domain terms — the `AccountStore`

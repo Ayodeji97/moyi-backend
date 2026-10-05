@@ -59,6 +59,37 @@ interface BondAccess {
         userId: UUID,
         bondId: UUID,
     ): BondMembership
+
+    /**
+     * A bond's calendar and lifecycle instants **for a caller that is nobody's
+     * user** — the close job (spec §6.4, ADR-0031 "Owed, C3"). `null` when
+     * there is no such bond.
+     *
+     * [membershipOf] and [lockMembershipOf] both begin with the membership
+     * guard, because they answer a request and a request has a caller. The
+     * closer has none: it settles days for every bond, on a timer. So this
+     * runs no guard, and that is the whole reason it exists — **which makes
+     * it the one method here that must never be reachable from a request.**
+     * It discloses nothing of a bond but dates and a time, and it is still
+     * not to be called from a controller: `ArchitectureTest` holds that.
+     *
+     * No lock (ADR-0031 decision 18): the closer starts at the bond-day and
+     * never holds the bond's row.
+     */
+    fun closingViewOf(bondId: UUID): BondClosingView?
+
+    /**
+     * The ids of bonds that have ever had two members, in id order, after
+     * [after] — a keyset page for the close job's walk over every calendar
+     * that can be missing a day. A bond that has only ever had its creator is
+     * left out: doc 04 §8.3a creates no days for it but the ones its creator
+     * writes on. A bond that has since ended is kept: the days before it
+     * ended still have to be settled (spec §6.4).
+     */
+    fun bondsToSweep(
+        after: UUID?,
+        limit: Int,
+    ): List<UUID>
 }
 
 /**
@@ -126,6 +157,26 @@ class BondMembership internal constructor(
 ) {
     /** Ids only — a bond's name is the couple's words (doc 18 §9). */
     override fun toString(): String = "BondMembership(bondId=$bondId, memberId=$memberId)"
+}
+
+/**
+ * What the close job may know of a bond ([BondAccess.closingViewOf]): when it
+ * became two people, when it ended, when its days reveal, and the timeline
+ * its days are cut from. No member, no user, no name — the closer acts for
+ * nobody, and a type that cannot carry a member cannot be mistaken for
+ * permission to act as one.
+ */
+class BondClosingView internal constructor(
+    val bondId: UUID,
+    /** As [BondMembership.activeSince]: the second member's join, `null` while the bond waits for one. */
+    val activeSince: Instant?,
+    /** As [BondMembership.endedAt]. */
+    val endedAt: Instant?,
+    /** The bond's **current** reveal time (FR-062) — what a `PENDING_REVEAL` day is waiting for. */
+    val revealTimeLocal: LocalTime?,
+    val anchorTimeline: BondAnchorTimeline,
+) {
+    override fun toString(): String = "BondClosingView(bondId=$bondId)"
 }
 
 /**

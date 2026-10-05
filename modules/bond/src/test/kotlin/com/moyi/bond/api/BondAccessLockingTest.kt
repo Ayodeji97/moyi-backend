@@ -11,6 +11,7 @@ import com.moyi.common.web.NotFoundException
 import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
@@ -33,6 +34,7 @@ import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -389,6 +391,58 @@ internal class BondAccessLockingTest(
     }
 
     // ---- fixtures -----------------------------------------------------------
+
+    // --- the closer's view: a bond's calendar for a caller that is nobody's user (C3) ---
+
+    @Test
+    fun `the closing view carries when the bond became two, when it ended, and its timeline`() {
+        val created = Instant.parse("2026-09-01T00:00:00Z")
+        val joined = Instant.parse("2026-09-04T09:00:00Z")
+        val bond = bondForTwo(createdAt = created, joinedAt = joined)
+
+        val live = access.closingViewOf(bond.id).shouldNotBeNull()
+        live.bondId shouldBe bond.id
+        live.activeSince shouldBe joined
+        live.endedAt.shouldBeNull()
+        live.revealTimeLocal.shouldBeNull()
+        live.anchorTimeline.beginsAt shouldBe created
+        // Lagos is UTC+1 all year: the 5th runs from 23:00Z on the 4th.
+        live.anchorTimeline.dayBoundsAt(Instant.parse("2026-09-05T08:00:00Z")).startsAt shouldBe Instant.parse("2026-09-04T23:00:00Z")
+
+        jdbc.update("UPDATE bonds SET reveal_time_local = '21:00' WHERE id = ?", bond.id)
+        leave(bond.ada, bond.id)
+
+        val ended = access.closingViewOf(bond.id).shouldNotBeNull()
+        ended.endedAt shouldBe archivedAtOf(bond.id)
+        ended.activeSince shouldBe joined
+        ended.revealTimeLocal shouldBe LocalTime.of(21, 0)
+    }
+
+    @Test
+    fun `the closing view of a bond still waiting for its partner has no activeSince, and an unknown bond has no view`() {
+        val pending = bondPendingMember()
+
+        access
+            .closingViewOf(pending.id)
+            .shouldNotBeNull()
+            .activeSince
+            .shouldBeNull()
+        access.closingViewOf(UUID.randomUUID()).shouldBeNull()
+    }
+
+    @Test
+    fun `bondsToSweep pages every bond that has ever been two, in id order, and none that never was`() {
+        val paired = List(3) { bondForTwo().id }.sorted()
+        val endedButOncePaired = bondForTwo().also { leave(it.ada, it.id) }.id
+        bondPendingMember()
+        val expected = (paired + endedButOncePaired).sorted()
+
+        access.bondsToSweep(after = null, limit = 10) shouldBe expected
+        val firstPage = access.bondsToSweep(after = null, limit = 2)
+        firstPage shouldBe expected.take(2)
+        access.bondsToSweep(after = firstPage.last(), limit = 10) shouldBe expected.drop(2)
+        access.bondsToSweep(after = expected.last(), limit = 10) shouldBe emptyList()
+    }
 
     /** The same reconstruction `AnchorIntervalStore.timelineOf` does, read directly off the table. */
     private fun directTimelineOf(bondId: UUID): AnchorTimeline =
