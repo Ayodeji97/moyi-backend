@@ -69,17 +69,20 @@ internal class RevealGateTest(
 
     @BeforeEach
     fun setUp() {
-        clock.set(NOW)
+        // Keep the synthetic status matrix separate from joining-day reconciliation.
+        clock.set(NOW.minusSeconds(86_400))
         ada = users.verified("Ada")
         bea = users.verified("Bea")
 
         val created = createBond(ada)
         bondId = bondIdOf(created)
         accept(bea, codeOf(created)).status shouldBe 200
+        clock.set(NOW)
     }
 
     @AfterEach
     fun clear() {
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
         jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
@@ -233,8 +236,9 @@ internal class RevealGateTest(
 
     @Test
     fun `the caller having written too does not reveal the partner's entry, under any day status`() {
-        // The ordinary C1 state: both have written, nothing has been revealed
-        // (C2 owns the reveal). A gate that reveals once both entries exist —
+        // Both submissions remain genuinely unrevealed under C2.
+        jdbc.update("UPDATE bonds SET reveal_time_local = '23:59:59' WHERE id = ?::uuid", bondId)
+        // Both have written, but the configured reveal time has not arrived. A gate that reveals once both entries exist —
         // keyed on the day's entry count, say — answers Bea's entry in full
         // here, and both the exact-shape and the body-wide assertion see it.
         val beaMemberId = authorMemberIdOf(submit(bea, bondId, """{"text":"a secret kindness"}""").also { it.status shouldBe 201 })
@@ -315,6 +319,8 @@ internal class RevealGateTest(
 
     @Test
     fun `a partner who never could read a withdrawn entry sees its author and that it is gone, and nothing else`() {
+        // Both submissions remain genuinely unrevealed under C2.
+        jdbc.update("UPDATE bonds SET reveal_time_local = '23:59:59' WHERE id = ?::uuid", bondId)
         // BR-8: while the entry was live this reader was entitled to author
         // and status. An erasure does not entitle them to more — not the id,
         // not when it was written. A gate that answers the wide tombstone

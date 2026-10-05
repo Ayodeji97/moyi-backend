@@ -73,3 +73,11 @@ internal class DayClosedException :
         ErrorCode.DAY_CLOSED,
         "That day is closed and cannot take a new entry.",
     )
+
+/** BR-7: the partner may already have read these words. */
+internal class EntryImmutableException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.ENTRY_IMMUTABLE,
+        "This entry has been revealed and cannot be edited.",
+    )

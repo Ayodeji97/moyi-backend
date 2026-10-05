@@ -3,6 +3,8 @@ package com.moyi.gratitude.service
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.common.core.IdGenerator
+import com.moyi.common.events.EventPublisher
+import com.moyi.common.events.OutboxEvent
 import com.moyi.common.web.NotFoundException
 import com.moyi.common.web.idempotency.IdempotentExecution
 import com.moyi.common.web.idempotency.IdempotentRequest
@@ -20,6 +22,7 @@ import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.GratitudeConstraints
+import com.moyi.gratitude.infra.database.redacted
 import com.moyi.gratitude.infra.database.violates
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
@@ -212,6 +215,9 @@ internal class SubmitEntry(
     private val clock: Clock,
     private val transactions: TransactionTemplate,
     private val execution: IdempotentExecution,
+    private val reveal: RevealDay,
+    private val joining: ReconcileJoiningDay,
+    private val events: EventPublisher,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -271,7 +277,7 @@ internal class SubmitEntry(
                     Submission(view, outcome.status, outcome.wasReplayed)
                 }
             } catch (violation: DataIntegrityViolationException) {
-                if (!violation.violates(GratitudeConstraints.ENTRY_ONE_PER_MEMBER_PER_DAY)) throw violation
+                if (!violation.violates(GratitudeConstraints.ENTRY_ONE_PER_MEMBER_PER_DAY)) throw violation.redacted()
                 throw EntryAlreadyExistsException()
             }
 
@@ -293,6 +299,7 @@ internal class SubmitEntry(
         entryId: EntryId,
     ): EntryView {
         val membership = access.membershipOf(userId, bondId)
+        joining.beforeRead(membership)
         // The author guard is the replay's own: a key answers only the member
         // whose request it recorded. What that member may then SEE is BR-1's
         // question, asked of the same gate `GetToday` asks.
@@ -349,6 +356,8 @@ internal class SubmitEntry(
                 // Nothing was refused, so there is nothing to explain.
             }
         }
+        val joiningDate = joining.window(membership)?.date
+        if (joiningDate != null && !joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)
         val claimedDay = openAndLock(membership, claimed.bounds, now)
         // BR-3a, rechecked under the day's own lock (spec §6.1.3). The check
         // inside `resolve` read the day before this lock was held, and the
@@ -376,9 +385,11 @@ internal class SubmitEntry(
         // than deferred to a commit this catch could no longer be on the
         // stack for.
         entries.insert(entry)
-        val updated = day.withEntry()
-        days.update(updated)
-        return EntryView(entry.readBy(membership.asReader()), updated) to entry.id
+        events.publish(OutboxEvent("Entry", entry.id.value, "EntrySubmitted", mapOf("bondId" to bondId, "bondDayId" to day.id.value), now))
+        val updated = reveal.apply(day.withEntry(), membership.revealTimeLocal, now)
+        if (joiningDate != null && joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)
+        val persisted = checkNotNull(entries.find(entry.id))
+        return EntryView(persisted.readBy(membership.asReader()), updated) to entry.id
     }
 
     /**
@@ -400,6 +411,10 @@ internal class SubmitEntry(
     ): Pair<DayAssignment.Resolution, BondDay>? {
         if (!claimed.usedIntendedAt) return null
         val fallback = DayAssignment.resolve(now, null, calendar) { false }
+        // The claimed day is already locked. Reconcile the joining day before
+        // today's row so a redirected offline write keeps chronological order.
+        val joiningDate = joining.window(membership)?.date
+        if (joiningDate != null && !joiningDate.isBefore(claimed.date)) joining.underBondLock(membership, now)
         val fallbackDay = openAndLock(membership, fallback.bounds, now)
         // The rare one: a close landed between the unlocked check and the
         // lock. Logged only once the fallback day's own settled check has
@@ -439,7 +454,7 @@ internal class SubmitEntry(
         val openStatus = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
         val opened = days.openOrGet(membership.bondId, window, zone, now, openStatus)
         val locked = days.lockAndFind(opened.id)
-        val extended = locked.extendedTo(window)
+        val extended = locked.extendedTo(window).resumeJoiningDay(membership.activeSince)
         if (extended != locked) days.update(extended)
         return extended
     }

@@ -5,6 +5,7 @@ plugins {
 dependencies {
     // Ids (UUID v7 for Bond-days, v4 for entries — doc 06 §1) and the Clock.
     implementation(projects.common.core)
+    implementation(projects.common.events)
     // CurrentUser. F2 (whole-branch review): this line used to also claim
     // "the per-user rate-limit bucket on the write" — false. There is no
     // `RateLimitBucket` entry for entries and no `@RateLimited` on

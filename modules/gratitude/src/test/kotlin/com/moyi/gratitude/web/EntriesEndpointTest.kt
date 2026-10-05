@@ -87,8 +87,25 @@ internal class EntriesEndpointTest(
 
     @AfterEach
     fun clear() {
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
         jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
+    }
+
+    @Test
+    fun `the second submission reveals both entries and records one content-free event`() {
+        submit(ada, bondId, """{"text":"private first words"}""").status shouldBe 201
+        val second = submit(bea, bondId, """{"text":"private second words"}""")
+        second.status shouldBe 201
+        jdbc.queryForObject("SELECT status FROM bond_days", String::class.java) shouldBe "REVEALED"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE status = 'REVEALED' AND revealed_at IS NOT NULL", Int::class.java) shouldBe
+            2
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayRevealed'", Int::class.java) shouldBe 1
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'EntrySubmitted'", Int::class.java) shouldBe 2
+        jdbc.queryForList("SELECT payload::text FROM outbox_events", String::class.java).forEach {
+            it shouldNotContain "private first words"
+            it shouldNotContain "private second words"
+        }
     }
 
     @Test

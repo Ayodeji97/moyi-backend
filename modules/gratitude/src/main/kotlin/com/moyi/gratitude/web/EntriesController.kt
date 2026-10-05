@@ -6,6 +6,7 @@ import com.moyi.common.web.NotFoundException
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.common.web.idempotency.Idempotent
 import com.moyi.gratitude.service.GetToday
+import com.moyi.gratitude.service.ReconcileJoiningDay
 import com.moyi.gratitude.service.SubmitEntry
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
@@ -61,6 +62,7 @@ internal class EntriesController(
     private val access: BondAccess,
     private val submitEntry: SubmitEntry,
     private val getToday: GetToday,
+    private val joining: ReconcileJoiningDay,
 ) {
     // @ResponseStatus and the ResponseEntity below both set 201 — redundant
     // at runtime (the entity's own status wins), load-bearing for springdoc:
@@ -113,6 +115,7 @@ internal class EntriesController(
         @PathVariable bondId: String,
     ): TodayResponse {
         val membership = access.membershipOf(caller.id, bondIdOrNotFound(bondId))
+        joining.beforeRead(membership)
         return TodayResponse.from(getToday.today(membership))
     }
 

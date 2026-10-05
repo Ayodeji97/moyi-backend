@@ -103,7 +103,10 @@ internal class GetToday(
         }
 
         val reader = membership.asReader()
-        val entryList = entries.findForDay(day.id)
+        val entryList =
+            entries.findForDay(day.id).sortedWith(
+                compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value },
+            )
         return TodayView(
             date = date,
             status = day.status,

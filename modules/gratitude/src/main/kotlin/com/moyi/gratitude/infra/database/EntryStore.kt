@@ -3,6 +3,7 @@ package com.moyi.gratitude.infra.database
 import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 
 /**
@@ -20,6 +21,7 @@ import org.springframework.stereotype.Component
 @Component
 internal class EntryStore(
     private val entries: EntryRepository,
+    private val entityManager: EntityManager,
 ) {
     /**
      * Writes one entry, and flushes it. `entries_one_per_member_per_day`
@@ -32,6 +34,28 @@ internal class EntryStore(
      */
     fun insert(entry: Entry) {
         entries.saveAndFlush(entry.toEntity())
+    }
+
+    /** Refresh is necessary because routing loaded this entity before either lock. */
+    fun lockAndFind(id: EntryId): Entry {
+        entries.lockRow(id.value)
+        val entity = checkNotNull(entries.findById(id.value)) { "a locked entry must exist" }
+        entityManager.refresh(entity)
+        return entity.toDomain()
+    }
+
+    /** Updates a managed row while the caller holds its parent day's lock. */
+    fun update(entry: Entry) {
+        val entity = checkNotNull(entries.findById(entry.id.value)) { "cannot update a missing entry" }
+        entity.text = entry.text?.value
+        entity.status = entry.status
+        entity.updatedAt = entry.updatedAt
+        entity.revealedAt = entity.revealedAt ?: entry.revealedAt
+        entity.deletedAt = entry.deletedAt
+        entity.imageMediaId = entry.imageMediaId
+        entity.voiceMediaId = entry.voiceMediaId
+        entity.voiceDurationMs = entry.voiceDurationMs
+        entries.saveAndFlush(entity)
     }
 
     /**

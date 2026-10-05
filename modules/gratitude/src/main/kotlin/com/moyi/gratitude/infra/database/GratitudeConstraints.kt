@@ -28,6 +28,16 @@ internal object GratitudeConstraints {
  * swallow a genuine bug — a NOT NULL breach, a bad foreign key — as a
  * polite `409` instead of the `500` that would surface it.
  */
+internal fun DataIntegrityViolationException.redacted(): DataIntegrityViolationException {
+    val constraint =
+        generateSequence(cause) { it.cause }
+            .filterIsInstance<ConstraintViolationException>()
+            .firstOrNull()
+            ?.constraintName
+    // Do not retain the cause or suppressed exceptions: PostgreSQL's detail contains the row.
+    return DataIntegrityViolationException(constraint ?: "unknown_constraint")
+}
+
 internal fun DataIntegrityViolationException.violates(constraint: String): Boolean =
     generateSequence(cause) { it.cause }
         .any { it is ConstraintViolationException && it.constraintName.equals(constraint, ignoreCase = true) }

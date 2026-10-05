@@ -108,6 +108,7 @@ internal class TimezoneMatrixTest(
         // failed assertion must not commit after the truncate.
         pool.shutdownNow()
         check(pool.awaitTermination(10, TimeUnit.SECONDS)) { "a worker thread outlived the test" }
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
         jdbc.execute(
             "TRUNCATE TABLE idempotency_keys, entries, bond_days, bond_anchor_intervals, bond_proposals, " +
                 "blocks, bond_invites, bond_members, bonds CASCADE",

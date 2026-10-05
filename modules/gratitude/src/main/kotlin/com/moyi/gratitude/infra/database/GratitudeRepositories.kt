@@ -112,6 +112,10 @@ internal interface BondDayRepository : Repository<BondDayEntity, UUID> {
  * database's job (`entries_one_per_member_per_day`), not a query here.
  */
 internal interface EntryRepository : Repository<EntryEntity, UUID> {
+    /** Taken after the parent day lock; no content is returned before the caller's guard. */
+    @Query(nativeQuery = true, value = "SELECT 1 FROM entries WHERE id = :id FOR UPDATE")
+    fun lockRow(id: UUID): Int?
+
     /**
      * Writes and flushes — no plain `save()` beside it. `EntryStore.insert`
      * needs the flush, not for an `ETag` (no entry carries one) but so

@@ -135,6 +135,44 @@ internal data class Entry(
     /** This entry as [reader] may see it — the only form an entry is rendered from ([EntryReading]). */
     fun readBy(reader: Reader): EntryReading = EntryReading.of(this, reader)
 
+    /** BR-7 is a domain rule; the service only translates its refusal to HTTP. */
+    val isErased: Boolean get() = deletedAt != null || status == EntryStatus.DELETED
+
+    val isEditable: Boolean get() = !isErased && revealedAt == null && status != EntryStatus.REVEALED
+
+    /** Replaces the author's words before anyone else has been entitled to read them. */
+    fun edit(
+        replacement: EntryText,
+        now: Instant,
+    ): Entry {
+        check(isEditable) { "a revealed or erased entry is immutable" }
+        return if (text == replacement) this else copy(text = replacement, updatedAt = now)
+    }
+
+    /** Erasure is idempotent, frees BR-2's slot, and never clears the reveal stamp. */
+    fun erase(now: Instant): Entry =
+        if (isErased) {
+            this
+        } else {
+            copy(
+                text = null,
+                imageMediaId = null,
+                voiceMediaId = null,
+                voiceDurationMs = null,
+                status = EntryStatus.DELETED,
+                deletedAt = now,
+                updatedAt = now,
+            )
+        }
+
+    /** Reveal is monotonic, including across erasure and later lifecycle transitions. */
+    fun reveal(now: Instant): Entry =
+        if (revealedAt != null || deletedAt != null || status == EntryStatus.DELETED) {
+            this
+        } else {
+            copy(status = EntryStatus.REVEALED, revealedAt = now, updatedAt = now)
+        }
+
     companion object {
         /**
          * A member's write lands (`POST /bonds/{bondId}/entries`, Task 7).

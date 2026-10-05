@@ -193,6 +193,22 @@ internal data class BondDay(
             status = if (status == BondDayStatus.SUSPENDED) BondDayStatus.SUSPENDED else BondDayStatus.PARTIAL,
         )
 
+    /** A pre-reveal deletion changes the live count; settled history is authoritative (BR-10). */
+    fun withoutEntry(): BondDay =
+        if (isSettled) {
+            this
+        } else {
+            copy(
+                entryCount = entryCount - 1,
+                status =
+                    when {
+                        status == BondDayStatus.SUSPENDED -> status
+                        entryCount == 1 -> BondDayStatus.OPEN
+                        else -> BondDayStatus.PARTIAL
+                    },
+            )
+        }
+
     /**
      * FR-062: two live entries wait in their own status until the configured
      * local time on this day's snapshot calendar. Java's zone resolution moves

@@ -97,6 +97,7 @@ internal class SubmitEntryConcurrencyTest(
         // failed assertion must not commit after the truncate.
         pool.shutdownNow()
         check(pool.awaitTermination(10, TimeUnit.SECONDS)) { "a worker thread outlived the test" }
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
         jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
     }
@@ -199,8 +200,51 @@ internal class SubmitEntryConcurrencyTest(
         statuses shouldContainExactlyInAnyOrder listOf(201, 201)
         jdbc.queryForObject("SELECT count(*) FROM bond_days", Int::class.java) shouldBe 1
         jdbc.queryForObject("SELECT entry_count FROM bond_days", Int::class.java) shouldBe 2
-        jdbc.queryForObject("SELECT status FROM bond_days", String::class.java) shouldBe "PARTIAL"
+        jdbc.queryForObject("SELECT status FROM bond_days", String::class.java) shouldBe "REVEALED"
         jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 2
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayRevealed'", Int::class.java) shouldBe 1
+    }
+
+    @Test
+    fun `a second submission waits on the day lock before it can reveal`() {
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        accept(bea, codeOf(created)).status shouldBe 200
+        submit(ada, bondId, """{"text":"first"}""").status shouldBe 201
+
+        val response =
+            checkNotNull(jdbc.dataSource).connection.use { holder ->
+                holder.autoCommit = false
+                val pid =
+                    holder.createStatement().use { statement ->
+                        statement.executeQuery("SELECT pg_backend_pid() FROM bond_days FOR UPDATE").use { result ->
+                            check(result.next())
+                            result.getInt(1)
+                        }
+                    }
+                val second = pool.submit(Callable { submit(bea, bondId, """{"text":"second"}""") })
+                try {
+                    awaitBlockedOrDone(pid, second)
+                    second.isDone shouldBe false
+                    // An INSERT's FK can also wait here; only the explicit pre-read
+                    // day lock proves the mechanism. Removing it fails this assertion.
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid)) " +
+                            "AND query LIKE '%SELECT 1 FROM bond_days%FOR UPDATE%'",
+                        Int::class.java,
+                        pid,
+                    ) shouldBe 1
+                    jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayRevealed'", Int::class.java) shouldBe 0
+                } finally {
+                    holder.rollback()
+                }
+                second.get(10, TimeUnit.SECONDS)
+            }
+        response.status shouldBe 201
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayRevealed'", Int::class.java) shouldBe 1
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 2
     }
 
     /** Runs every call on its own thread and releases them together — `InviteRaceTest`'s own helper. */
