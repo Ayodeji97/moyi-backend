@@ -102,6 +102,51 @@ internal class StreakRulesTest {
         afterSwitchingOff.totalCompleteDays shouldBe 41
     }
 
+    /**
+     * A freeze saves a run; with none to save it is kept. Spent on a run of
+     * zero it made a streak of one out of a day nobody wrote on.
+     */
+    @Test
+    fun `a missed day on a run of zero spends no freeze, and the freeze is still there for a run`() {
+        val banked = after(*complete(14))
+        val broken = StreakRules.step(banked, start.plusDays(14), DayOutcome.MISSED, strict = true).state
+        (broken.current to broken.freezesAvailable) shouldBe (0 to 1)
+
+        val missedAgain = StreakRules.step(broken, start.plusDays(15), DayOutcome.MISSED, strict = false)
+
+        missedAgain.freezeApplied shouldBe false
+        missedAgain.change shouldBe StreakChange.NONE
+        (missedAgain.state.current to missedAgain.state.freezesAvailable) shouldBe (0 to 1)
+    }
+
+    @Test
+    fun `a calendar square says complete, rest, missed or open - and never that one of two wrote`() {
+        fun cell(
+            status: BondDayStatus,
+            outcome: DayOutcome?,
+            today: Boolean = false,
+        ) = StreakCell.of(status, outcome, today)
+
+        cell(BondDayStatus.REVEALED, DayOutcome.COMPLETE) shouldBe StreakCell.COMPLETE
+        // The same square, whether one wrote or nobody did.
+        cell(BondDayStatus.SOLO, DayOutcome.MISSED) shouldBe StreakCell.MISSED
+        cell(BondDayStatus.EMPTY, DayOutcome.MISSED) shouldBe StreakCell.MISSED
+        // A freeze covered it, or a zone change stepped over it.
+        cell(BondDayStatus.FROZEN, DayOutcome.MISSED) shouldBe StreakCell.FROZEN
+        cell(BondDayStatus.FROZEN, DayOutcome.FROZEN_BY_SKIP) shouldBe StreakCell.FROZEN
+        // Days that moved nothing are not drawn.
+        cell(BondDayStatus.SUSPENDED, DayOutcome.SUSPENDED) shouldBe null
+        cell(BondDayStatus.SOLO, DayOutcome.AFTER_THE_END) shouldBe null
+        // Nor is a day still to be evaluated, unless it is today.
+        cell(BondDayStatus.SOLO, null) shouldBe null
+        cell(BondDayStatus.REVEALED, null) shouldBe null
+        // Today: open until both have written, whoever has.
+        for (status in listOf(BondDayStatus.OPEN, BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL, BondDayStatus.SUSPENDED)) {
+            cell(status, null, today = true) shouldBe StreakCell.OPEN
+        }
+        cell(BondDayStatus.REVEALED, null, today = true) shouldBe StreakCell.COMPLETE
+    }
+
     @Test
     fun `Strict mode never spends a freeze that is banked`() {
         val banked = after(*complete(14))

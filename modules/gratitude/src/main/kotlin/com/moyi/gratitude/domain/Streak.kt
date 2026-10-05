@@ -81,10 +81,61 @@ internal enum class DayOutcome {
     }
 }
 
-/** One square of a bond's calendar: a date and what the day was. */
+/**
+ * What one square of a bond's calendar says. **Fewer things than a day's
+ * status, on purpose.** The design system's rule for this screen is that a
+ * solo day is not drawn: "a month-long ledger of days when exactly one
+ * person wrote is a durable inference surface: you know your own history, so
+ * every Solo cell resolves to a partner miss" (`states.md` §7). `GET /today`
+ * shares today's status because the product needs it today; a year of them
+ * is a different thing. So a day one wrote on and a day nobody wrote on are
+ * the same square, and so is today until it is complete.
+ */
+internal enum class StreakCell {
+    /** Both wrote. */
+    COMPLETE,
+
+    /** A rest day: a freeze covered it, or a zone change stepped over the date. Counts toward the run. */
+    FROZEN,
+
+    /** The run did not include this day. Whether one wrote or neither is not said. */
+    MISSED,
+
+    /** Today, not complete yet. Whether anybody has written is `GET /today`'s to say, not this calendar's. */
+    OPEN,
+    ;
+
+    companion object {
+        /**
+         * The square for a day with [status] that was evaluated as [outcome]
+         * (`null`: not evaluated yet), or `null` for a day the calendar does
+         * not draw:
+         *
+         * - a day not yet evaluated, unless it is today — its square could
+         *   still change (a missed day may become a rest day), and "the
+         *   numbers must agree with the grid": the run counts evaluated days;
+         * - a suspended day, and a missed day after the bond had ended, which
+         *   moved nothing and must not sit in the grid looking like a break.
+         */
+        fun of(
+            status: BondDayStatus,
+            outcome: DayOutcome?,
+            isToday: Boolean,
+        ): StreakCell? =
+            when {
+                isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN
+                outcome == DayOutcome.COMPLETE -> COMPLETE
+                outcome == DayOutcome.FROZEN_BY_SKIP -> FROZEN
+                outcome == DayOutcome.MISSED -> if (status == BondDayStatus.FROZEN) FROZEN else MISSED
+                else -> null
+            }
+    }
+}
+
+/** One square of a bond's calendar. */
 internal data class StreakDay(
     val date: LocalDate,
-    val status: BondDayStatus,
+    val cell: StreakCell,
 )
 
 /** What one day did to the run — the vocabulary of `streak_events`, and of "why did my streak break?". */
@@ -194,7 +245,9 @@ internal object StreakRules {
         strict: Boolean,
         recordedFreeze: Boolean?,
     ): Evaluation {
-        val spends = recordedFreeze ?: (!strict && state.freezesAvailable > 0)
+        // A freeze saves a run. With no run to save it is kept: spent on a
+        // run of zero it "extended" the streak to one, on a day nobody wrote.
+        val spends = recordedFreeze ?: (!strict && state.freezesAvailable > 0 && state.current > 0)
         return if (spends) {
             check(state.freezesAvailable > 0) { "a day cannot have spent a freeze the bond did not have" }
             val next = extended(state).copy(freezesAvailable = state.freezesAvailable - 1, freezesConsumed = state.freezesConsumed + 1)

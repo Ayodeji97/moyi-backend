@@ -31,7 +31,7 @@ internal data class EvaluatedDay(
 )
 
 /**
- * The streak's rows (V17): `streak_states`, `streak_events`, and the three
+ * The streak's rows (V17): `streak_states`, `streak_events`, and the four
  * decision columns on `bond_days`.
  *
  * Plain SQL, like [CloseCandidates] and for the same reason: the evaluation

@@ -3583,7 +3583,7 @@
           },
           "status" : {
             "type" : "string",
-            "enum" : [ "OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN" ]
+            "enum" : [ "COMPLETE", "FROZEN", "MISSED", "OPEN" ]
           }
         }
       },

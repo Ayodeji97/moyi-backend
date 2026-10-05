@@ -1,9 +1,11 @@
 package com.moyi.gratitude.service
 
 import com.moyi.bond.api.BondMembership
-import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.DayAssignment
+import com.moyi.gratitude.domain.DayOutcome
+import com.moyi.gratitude.domain.StreakCell
 import com.moyi.gratitude.domain.StreakDay
+import com.moyi.gratitude.domain.StreakRules
 import com.moyi.gratitude.domain.StreakState
 import com.moyi.gratitude.infra.database.StreakCalendar
 import com.moyi.gratitude.infra.database.StreakStore
@@ -59,29 +61,40 @@ internal class GetStreak(
     @Transactional(readOnly = true)
     fun detail(membership: BondMembership): StreakDetail {
         val today = today(membership)
-        val from = maxOf(today.minusDays(CALENDAR_DAYS - 1), joiningDate(membership) ?: today.plusDays(1))
-        val days = calendar.between(membership.bondId, from, today)
-        val todayStatus = days.lastOrNull()?.takeIf { it.date == today }?.status
-        return StreakDetail(view(membership, today, todayStatus), days)
+        // An ended bond's calendar ends where the bond did, and stays: its
+        // record is kept "permanently" (doc 04 §8.3), not until it scrolls
+        // off the end of a window that follows the clock.
+        val last = membership.endedAt?.let(membership.anchorTimeline::dateAt)?.takeIf { it.isBefore(today) } ?: today
+        val from = maxOf(last.minusDays(CALENDAR_DAYS - 1), joiningDate(membership) ?: last.plusDays(1))
+        val days = calendar.between(membership.bondId, from, last, today)
+        val todayComplete = days.lastOrNull()?.takeIf { it.date == today }?.cell == StreakCell.COMPLETE
+        return StreakDetail(view(membership, today, todayComplete), days)
     }
 
-    /** The streak for [today], whose day has [todayStatus] (`null` if it has no row yet). Reads; the caller owns the transaction. */
+    /** The streak for [today]. [todayComplete]: both have written today. Reads; the caller owns the transaction. */
     fun view(
         membership: BondMembership,
         today: LocalDate,
-        todayStatus: BondDayStatus?,
+        todayComplete: Boolean,
     ): StreakView {
-        val state = streaks.find(membership.bondId) ?: StreakState.NONE
-        val counted = todayStatus == BondDayStatus.REVEALED && todayFollows(membership, today)
-        val current = state.current + if (counted) 1 else 0
+        val stored = streaks.find(membership.bondId) ?: StreakState.NONE
+        // Today, by the same rule the close job will apply to it tonight, so
+        // every number moves together: on a fourteenth day the freeze shows
+        // as earned beside the fourteen, not at midnight.
+        val state =
+            if (todayComplete && todayFollows(membership, today)) {
+                StreakRules.step(stored, today, DayOutcome.COMPLETE, membership.strictMode).state
+            } else {
+                stored
+            }
         return StreakView(
-            current = current,
-            longest = maxOf(state.longest, current),
+            current = state.current,
+            longest = state.longest,
             freezesAvailable = state.freezesAvailable,
             freezeProgress = state.freezeProgress,
             strictMode = membership.strictMode,
-            totalCompleteDays = state.totalCompleteDays + if (counted) 1 else 0,
-            lastCompleteDate = if (counted) today else state.lastCompleteDate,
+            totalCompleteDays = state.totalCompleteDays,
+            lastCompleteDate = state.lastCompleteDate,
         )
     }
 

@@ -3,8 +3,9 @@ package com.moyi.gratitude.web
 import com.moyi.bond.api.BondAccess
 import com.moyi.common.security.CurrentUser
 import com.moyi.common.web.NotFoundException
-import com.moyi.gratitude.domain.BondDayStatus
+import com.moyi.gratitude.domain.StreakCell
 import com.moyi.gratitude.service.GetStreak
+import com.moyi.gratitude.service.ReconcileJoiningDay
 import com.moyi.gratitude.service.StreakDetail
 import com.moyi.gratitude.service.StreakView
 import org.springframework.web.bind.annotation.GetMapping
@@ -27,6 +28,7 @@ import java.util.UUID
 internal class StreakController(
     private val access: BondAccess,
     private val getStreak: GetStreak,
+    private val joining: ReconcileJoiningDay,
 ) {
     // Named `streak`: the method name is the API's operationId (see EntriesController).
     @GetMapping("/{bondId}/streak")
@@ -35,7 +37,10 @@ internal class StreakController(
         @PathVariable bondId: String,
     ): StreakResponse {
         val id = runCatching { UUID.fromString(bondId) }.getOrElse { throw NotFoundException("That bond was not found.") }
-        return StreakResponse.from(getStreak.detail(access.membershipOf(caller.id, id)))
+        val membership = access.membershipOf(caller.id, id)
+        // As `GET /today` does: a joiner's first request may be this one.
+        joining.beforeRead(membership)
+        return StreakResponse.from(getStreak.detail(membership))
     }
 }
 
@@ -43,9 +48,10 @@ internal class StreakController(
  * The streak, and the calendar behind it.
  *
  * **Nothing here says who wrote and who did not** (FR-076). The fields are
- * counts about the bond; [days] carries each day's status, which is what
- * `GET /today` already shares about today (spec §4, "what is deliberately
- * shared"). There is no per-member field, and none may be added.
+ * counts about the bond, and [days] is a square per day from a vocabulary
+ * that cannot say "one of you wrote" ([StreakCell]): a member knows their own
+ * history, so a year of solo days would be a year of the other's misses.
+ * There is no per-member field, and none may be added.
  */
 internal data class StreakResponse(
     val current: Int,
@@ -56,7 +62,7 @@ internal data class StreakResponse(
     val strictMode: Boolean,
     val totalCompleteDays: Int,
     val lastCompleteDate: LocalDate?,
-    /** The last 53 weeks at most, oldest first, from the day the bond became two people. A date with no row is absent. */
+    /** The last 53 weeks at most, oldest first, from the day the bond became two people. A date the calendar does not draw is absent. */
     val days: List<StreakDayResponse>,
 ) {
     companion object {
@@ -69,14 +75,14 @@ internal data class StreakResponse(
                 strictMode = detail.streak.strictMode,
                 totalCompleteDays = detail.streak.totalCompleteDays,
                 lastCompleteDate = detail.streak.lastCompleteDate,
-                days = detail.days.map { StreakDayResponse(it.date, it.status) },
+                days = detail.days.map { StreakDayResponse(it.date, it.cell) },
             )
     }
 }
 
 internal data class StreakDayResponse(
     val date: LocalDate,
-    val status: BondDayStatus,
+    val status: StreakCell,
 )
 
 /** The `streak` object of `GET /today` (doc 06 §3.4): the four numbers the home screen shows. */

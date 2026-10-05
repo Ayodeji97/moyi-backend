@@ -8,8 +8,8 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
- * Doc 04 §3's state machine for a Bond-day, all **eight** values — even
- * though streak settlement is a later slice's (C4).
+ * Doc 04 §3's state machine for a Bond-day, all **eight** values. What a
+ * settled day is to the streak is [DayOutcome]'s, not a status.
  *
  * Doc 07's own DDL lists five and is stale (Phase 3 design §12.1): it is
  * missing [PENDING_REVEAL] (FR-062, the window between both entries arriving

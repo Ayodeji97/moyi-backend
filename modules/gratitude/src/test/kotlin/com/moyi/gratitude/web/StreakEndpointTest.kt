@@ -25,6 +25,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
+import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
@@ -105,7 +106,7 @@ internal class StreakEndpointTest(
         bothWriteOn(4)
 
         for (member in listOf(ada, bea)) {
-            streak(member).numbers() shouldBe Numbers(current = 4, longest = 4, freezes = 0, progress = 3, total = 4)
+            streak(member).numbers() shouldBe Numbers(current = 4, longest = 4, freezes = 0, progress = 4, total = 4)
             streak(member)["lastCompleteDate"].asString() shouldBe day(4).toString()
             today(member)["streak"]["current"].asInt() shouldBe 4
         }
@@ -152,13 +153,19 @@ internal class StreakEndpointTest(
         streak(ada)["current"].asInt() shouldBe 3
 
         closeThrough(4)
-        streak(ada).numbers() shouldBe Numbers(current = 1, longest = 3, freezes = 0, progress = 3, total = 4)
+        streak(ada).numbers() shouldBe Numbers(current = 1, longest = 3, freezes = 0, progress = 4, total = 4)
     }
 
     // --- the calendar ---
 
+    /**
+     * `states.md` §7: "Solo is not rendered on the calendar ... you know your
+     * own history, so every Solo cell resolves to a partner miss." Day 0
+     * nobody wrote on; day 2 only Ada did; today only Bea has. The calendar
+     * says the same of the first two, and of today only that it is open.
+     */
     @Test
-    fun `the calendar is each day and its status, oldest first, today included`() {
+    fun `the calendar is a square a day, oldest first, and never says that only one wrote`() {
         bothWriteOn(1)
         clock.set(at(2))
         submit(ada)
@@ -166,13 +173,77 @@ internal class StreakEndpointTest(
         clock.set(at(3))
         submit(bea)
 
-        streak(ada)["days"].toList().map { "${it["date"].asString()} ${it["status"].asString()}" } shouldBe
-            listOf(
-                "${day(0)} EMPTY",
-                "${day(1)} REVEALED",
-                "${day(2)} SOLO",
-                "${day(3)} PARTIAL",
-            )
+        for (member in listOf(ada, bea)) {
+            calendar(member) shouldBe listOf("${day(0)} MISSED", "${day(1)} COMPLETE", "${day(2)} MISSED", "${day(3)} OPEN")
+        }
+        submit(ada)
+        calendar(bea).last() shouldBe "${day(3)} COMPLETE"
+    }
+
+    @Test
+    fun `a day a freeze covered is a rest day on the calendar, whoever wrote on it`() {
+        (1..14).forEach { bothWriteOn(it) }
+        clock.set(at(15))
+        submit(ada)
+        closeThrough(16)
+        clock.set(at(17))
+
+        // Day 15, one entry, covered by the freeze; day 16, none, and nothing left to cover it.
+        calendar(bea).takeLast(3) shouldBe listOf("${day(14)} COMPLETE", "${day(15)} FROZEN", "${day(16)} MISSED")
+    }
+
+    /** FR-072, as the couple sees it: the fourteenth day shows the freeze it earned beside the fourteen, not at midnight. */
+    @Test
+    fun `on the fourteenth day the freeze shows as earned as soon as both have written`() {
+        (1..13).forEach { bothWriteOn(it) }
+        closeThrough(13)
+
+        bothWriteOn(14)
+
+        streak(ada).numbers() shouldBe Numbers(current = 14, longest = 14, freezes = 1, progress = 0, total = 14)
+        today(bea)["streak"]["freezesAvailable"].asInt() shouldBe 1
+        closeThrough(14)
+        clock.set(at(15))
+        streak(ada).numbers() shouldBe Numbers(current = 14, longest = 14, freezes = 1, progress = 0, total = 14)
+    }
+
+    /**
+     * Doc 04 §8.3: an ended bond's record is kept. The day both wrote on
+     * before one of them left stays in it, the calendar stops where the bond
+     * did, and a year on it has not scrolled away.
+     */
+    @Test
+    fun `an ended bond keeps the streak it was shown, and a calendar that ends where it did`() {
+        (1..2).forEach { bothWriteOn(it) }
+        closeThrough(2)
+        bothWriteOn(3)
+        streak(ada)["current"].asInt() shouldBe 3
+        clock.set(at(3).plusSeconds(3_600))
+        leave(bea)
+        streak(ada)["current"].asInt() shouldBe 3
+
+        closeThrough(5)
+        clock.set(at(500))
+
+        for (member in listOf(ada, bea)) {
+            streak(member).numbers() shouldBe Numbers(current = 3, longest = 3, freezes = 0, progress = 3, total = 3)
+            calendar(member) shouldBe listOf("${day(0)} MISSED", "${day(1)} COMPLETE", "${day(2)} COMPLETE", "${day(3)} COMPLETE")
+        }
+    }
+
+    @Test
+    fun `a bond still waiting for its second person has no streak and no calendar, whatever its creator wrote`() {
+        clear()
+        val cara = users.verified("Cara")
+        clock.set(at(1))
+        bond = idOf(createBond(cara))
+        submit(cara)
+        closeThrough(1)
+        clock.set(at(2))
+        submit(cara)
+
+        streak(cara).numbers() shouldBe Numbers(current = 0, longest = 0, freezes = 0, progress = 0, total = 0)
+        streak(cara)["days"].size() shouldBe 0
     }
 
     /** Spec §12.4: days from before the pairing are private. Their dates are the days the creator wrote alone. */
@@ -215,9 +286,10 @@ internal class StreakEndpointTest(
 
     /**
      * FR-076: the system never tells one member that the other has not
-     * written. These payloads are counts about the bond and a status per day
-     * — the status `GET /today` already shares. A field about a member would
-     * be a new disclosure, so the fields are named here, all of them.
+     * written. These payloads are counts about the bond and a square per day
+     * from a vocabulary that cannot say one of two wrote. A field about a
+     * member would be a new disclosure, so the fields are named here, all of
+     * them.
      */
     @Test
     fun `the streak payloads carry these fields and no other`() {
@@ -233,7 +305,14 @@ internal class StreakEndpointTest(
 
     @Test
     fun `Strict mode is reported as the bond has it now`() {
-        jdbc.update("UPDATE bonds SET strict_mode = true WHERE id = ?::uuid", bond)
+        mockMvc
+            .patch("/api/v1/bonds/$bond") {
+                header(HttpHeaders.AUTHORIZATION, bearer(bea))
+                header(HttpHeaders.IF_MATCH, get(bea, "/api/v1/bonds/$bond").getHeader(HttpHeaders.ETAG)!!)
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"strictMode":true}"""
+            }.andReturn()
+            .response.status shouldBe 200
 
         streak(ada)["strictMode"].asBoolean() shouldBe true
         today(ada)["streak"]["strictMode"].asBoolean() shouldBe true
@@ -251,10 +330,7 @@ internal class StreakEndpointTest(
         get(ada, "/api/v1/bonds/not-an-id/streak").status shouldBe 404
 
         clock.set(at(3))
-        mockMvc
-            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, bearer(bea)) }
-            .andReturn()
-            .response.status shouldBe 204
+        leave(bea)
         streak(bea).numbers() shouldBe Numbers(current = 2, longest = 2, freezes = 0, progress = 2, total = 2)
     }
 
@@ -276,6 +352,16 @@ internal class StreakEndpointTest(
             this["freezeProgress"].asInt(),
             this["totalCompleteDays"].asInt(),
         )
+
+    private fun calendar(member: UUID): List<String> =
+        streak(member)["days"].toList().map { "${it["date"].asString()} ${it["status"].asString()}" }
+
+    private fun leave(member: UUID) {
+        mockMvc
+            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, bearer(member)) }
+            .andReturn()
+            .response.status shouldBe 204
+    }
 
     private fun streak(member: UUID): JsonNode = read(get(member, "/api/v1/bonds/$bond/streak"))
 

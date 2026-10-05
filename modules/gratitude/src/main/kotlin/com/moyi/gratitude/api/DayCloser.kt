@@ -66,7 +66,11 @@ data class CloseResult(
     val evaluated: Int,
     /** Days that threw while being settled, and bonds whose missing days or streak could not be written; each left as it was. */
     val failed: Int,
-    /** Bonds with at least one day written, closed or revealed — where a streak may have moved (C4). */
+    /**
+     * Bonds with at least one day written, closed or revealed. For the log.
+     * Which bonds have a streak to evaluate is not taken from this: it is
+     * read from the days themselves, so a run that died is found by the next.
+     */
     val bondsChanged: Set<UUID>,
     /** True when [DayCloser.closeElapsedDays] stopped at its budget with days still waiting. */
     val backlog: Boolean,

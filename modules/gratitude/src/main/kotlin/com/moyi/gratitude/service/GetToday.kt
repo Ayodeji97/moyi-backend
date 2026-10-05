@@ -109,7 +109,8 @@ internal class GetToday(
 
         if (day == null) {
             val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
-            return TodayView(date, status, myEntry = null, partnerEntry = null, streak = streak.view(membership, date, null))
+            val unwritten = streak.view(membership, date, todayComplete = false)
+            return TodayView(date, status, myEntry = null, partnerEntry = null, streak = unwritten)
         }
 
         val reader = membership.asReader()
@@ -122,7 +123,7 @@ internal class GetToday(
             status = day.status,
             myEntry = entryList.firstOrNull { it.authorMemberId == membership.memberId }?.readBy(reader),
             partnerEntry = entryList.firstOrNull { it.authorMemberId != membership.memberId }?.readBy(reader),
-            streak = streak.view(membership, date, day.status),
+            streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),
         )
     }
 }

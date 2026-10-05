@@ -40,7 +40,8 @@ internal class StreakPropertiesTest {
                     in 0..14 -> DayOutcome.COMPLETE
                     15, 16 -> DayOutcome.MISSED
                     17 -> DayOutcome.FROZEN_BY_SKIP
-                    else -> DayOutcome.SUSPENDED
+                    18 -> DayOutcome.SUSPENDED
+                    else -> DayOutcome.AFTER_THE_END
                 }
             Day(outcome, strict)
         }
@@ -79,22 +80,35 @@ internal class StreakPropertiesTest {
         }
     }
 
-    /** FR-074: recalculate "MUST produce identical results". Replaying what was decided is a fixed point. */
+    /**
+     * FR-074: recalculate "MUST produce identical results". A replay reads
+     * whether a freeze was spent from the record. To show that it does, every
+     * missed day is replayed with Strict mode the other way round: a replay
+     * that decided again would decide differently, and this would fail.
+     */
     @Test
-    fun `replaying a timeline with its recorded decisions reproduces every state`() {
+    fun `a replay takes each freeze decision from the record, whatever Strict mode says on the day`() {
         forEachTimeline { _, days, _ ->
             val first = run(days)
+            val misremembered = days.map { if (it.outcome == DayOutcome.MISSED) it.copy(strict = !it.strict) else it }
 
-            run(days, recorded = first.decisions) shouldBe first
+            run(misremembered, recorded = first.decisions) shouldBe first
         }
     }
 
-    /** Doc 04 §8.1: suspended days "neither extend nor break it", however many and wherever they fall. */
+    /**
+     * Doc 04 §8.1: suspended days "neither extend nor break it", however many
+     * and wherever they fall. §8.3 says the same of a day missed after a bond
+     * ended.
+     */
     @Test
-    fun `a run of suspended days of any length, anywhere, leaves the streak as it was`() {
+    fun `a run of days that do not count, of any length, anywhere, leaves the streak as it was`() {
         forEachTimeline { _, days, random ->
             val at = random.nextInt(days.size + 1)
-            val suspended = List(random.nextInt(1, 60)) { Day(DayOutcome.SUSPENDED, random.nextBoolean()) }
+            val suspended =
+                List(random.nextInt(1, 60)) {
+                    Day(if (random.nextBoolean()) DayOutcome.SUSPENDED else DayOutcome.AFTER_THE_END, random.nextBoolean())
+                }
 
             val with = run(days.take(at) + suspended + days.drop(at))
 
@@ -105,15 +119,39 @@ internal class StreakPropertiesTest {
         }
     }
 
-    /** FR-073: "toggling Strict mode never alters past days". */
+    /**
+     * BR-5 and FR-072, on every timeline: Strict mode "disables freezes
+     * entirely". A day evaluated in it banks none and spends none, however the
+     * bond got there and whatever it had banked before.
+     *
+     * (That a later toggle alters no earlier day — FR-073 — is not tested
+     * here: over a fold it cannot fail. What can fail is which setting a day
+     * is given, and `StreakEvaluationTest` holds that against a real toggle.)
+     */
     @Test
-    fun `changing Strict mode for the rest of a timeline alters nothing evaluated before the change`() {
-        forEachTimeline { _, days, random ->
-            val from = random.nextInt(days.size)
-            val toggled = days.mapIndexed { index, day -> if (index >= from) day.copy(strict = !day.strict) else day }
+    fun `a day evaluated in Strict mode banks no freeze and spends none`() {
+        forEachTimeline { _, days, _ ->
+            days.foldIndexed(StreakState.NONE) { index, state, day ->
+                val step = StreakRules.step(state, start.plusDays(index.toLong()), day.outcome, day.strict)
+                if (day.strict) {
+                    step.freezeBanked shouldBe false
+                    step.freezeApplied shouldBe false
+                    step.state.freezesAvailable shouldBe state.freezesAvailable
+                }
+                step.state
+            }
+        }
+    }
 
-            run(toggled).states.take(from) shouldBe run(days).states.take(from)
-            run(toggled).decisions.take(from) shouldBe run(days).decisions.take(from)
+    /** A freeze is spent to save a run, so never on a run of zero: the run after a spent freeze is at least two. */
+    @Test
+    fun `a freeze is only ever spent on a run that exists`() {
+        forEachTimeline { _, days, _ ->
+            days.foldIndexed(StreakState.NONE) { index, state, day ->
+                val step = StreakRules.step(state, start.plusDays(index.toLong()), day.outcome, day.strict)
+                if (step.freezeApplied) step.state.current shouldBeGreaterThanOrEqual 2
+                step.state
+            }
         }
     }
 

@@ -9,6 +9,7 @@ import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.awaitility.Awaitility.await
@@ -27,11 +28,13 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import org.springframework.dao.DuplicateKeyException
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
 import java.time.Duration
@@ -166,6 +169,8 @@ internal class StreakEvaluationTest(
         // The day was SOLO for the instant between its closing and its evaluation; a freeze makes it FROZEN.
         decisions().last() shouldBe Decision(day(15), "FROZEN", "MISSED", freeze = true)
         streakEvents().last() shouldBe "FREEZE_CONSUMED 14>15"
+        // The run grew, and nobody is told so: an announcement of day 15 would celebrate a day one of them missed.
+        outbox("StreakExtended") shouldBe 14
         // Spec §4: "applying a freeze to a solo day ... must not hide previously revealed words".
         jdbc.queryForObject("SELECT revealed_at IS NOT NULL FROM entries WHERE id = ?::uuid", Boolean::class.java, adas) shouldBe true
     }
@@ -204,6 +209,47 @@ internal class StreakEvaluationTest(
 
         streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(0, 1, 0) }
         decisions().last() shouldBe Decision(day(15), "EMPTY", "MISSED", freeze = false)
+    }
+
+    /**
+     * FR-073, for the gap between a day ending and the job judging it. Either
+     * member can change Strict mode alone, so a day judged by the setting at
+     * evaluation could be rescued after the fact: miss a day in Strict mode,
+     * switch it off before the job runs, and have a freeze spent on it.
+     */
+    @Test
+    fun `a day is judged by the Strict mode it ended under, not the one in force when the job ran`() {
+        (1..14).forEach { bothWriteOn(it) }
+        closeThrough(14)
+        clock.set(at(15))
+        strictMode(true)
+        // Day 15 ends at 23:00Z with nobody having written. Two hours later, before any job has run, it is switched off.
+        clock.set(Instant.parse("${day(16)}T01:00:00Z"))
+        strictMode(false)
+
+        closer.closeElapsedDays(Instant.parse("${day(16)}T02:00:00Z"), BUDGET).failed shouldBe 0
+
+        decisions().last() shouldBe Decision(day(15), "EMPTY", "MISSED", freeze = false)
+        streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(0, 1, 0) }
+        jdbc.queryForObject(
+            "SELECT evaluated_strict FROM bond_days WHERE bond_id = ?::uuid AND date = ?",
+            Boolean::class.java,
+            bond,
+            day(15),
+        ) shouldBe true
+    }
+
+    @Test
+    fun `a freeze is not spent on a day missed with no run to save`() {
+        closeThrough(0)
+        // A freeze in hand and a run of zero: what a couple has after a break in Strict mode.
+        jdbc.update("UPDATE streak_states SET freezes_available = 1 WHERE bond_id = ?::uuid", bond)
+
+        closeThrough(1)
+
+        decisions().last() shouldBe Decision(day(1), "EMPTY", "MISSED", freeze = false)
+        streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(0, 1, 0) }
+        streakEvents() shouldBe emptyList()
     }
 
     // --- days that move nothing ---
@@ -262,6 +308,8 @@ internal class StreakEvaluationTest(
                 "2026-09-17 REVEALED COMPLETE",
             )
         streak().let { Triple(it.current, it.total, it.consumed) shouldBe Triple(4, 3, 0) }
+        // Three days were written on. The date nobody could have written on is not announced.
+        outbox("StreakExtended") shouldBe 3
     }
 
     /** Doc 04 §8.3: when a bond ends "the streak freezes rather than breaks — it is preserved at its value". */
@@ -280,6 +328,56 @@ internal class StreakEvaluationTest(
         streak().let { (it.current to it.longest) shouldBe (3 to 3) }
         decisions().last() shouldBe Decision(day(4), "SOLO", "AFTER_THE_END", freeze = false)
         outbox("StreakBroken") shouldBe 0
+    }
+
+    /**
+     * §8.3 protects a streak from a break; it does not take a day from it.
+     * Both wrote in the morning and were shown a streak of four; one left in
+     * the afternoon. The day they completed is in the record they keep.
+     */
+    @Test
+    fun `a day both wrote on before the bond ended that day is counted`() {
+        (1..3).forEach { bothWriteOn(it) }
+        bothWriteOn(4)
+        clock.set(at(4).plusSeconds(3_600))
+        mockMvc
+            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, bearer(bea)) }
+            .andReturn()
+            .response.status shouldBe 204
+
+        closeThrough(6)
+
+        streak() shouldBe Streak(current = 4, longest = 4, lastComplete = day(4), freezes = 0, progress = 4, consumed = 0, total = 4)
+        decisions().last() shouldBe Decision(day(4), "REVEALED", "COMPLETE", freeze = false)
+    }
+
+    // --- what is written down ---
+
+    /** Spec §8: events carry ids only. FR-076: nothing in one says who wrote, or that anybody did not. */
+    @Test
+    fun `a streak event carries the bond's id and nothing else`() {
+        bothWriteOn(1)
+
+        closeThrough(2)
+
+        jdbc.queryForList(
+            "SELECT event_type || ' ' || payload::text FROM outbox_events WHERE event_type LIKE 'Streak%' ORDER BY event_type",
+            String::class.java,
+        ) shouldBe listOf("""StreakBroken {"bondId": "$bond"}""", """StreakExtended {"bondId": "$bond"}""")
+    }
+
+    /** The audit log is append-only and says a thing once: a second evaluation of a day cannot add to it. */
+    @Test
+    fun `the audit log refuses a second line for one day's one change`() {
+        bothWriteOn(1)
+        closeThrough(1)
+
+        shouldThrow<DuplicateKeyException> {
+            jdbc.update(
+                "INSERT INTO streak_events (id, bond_id, date, event, streak_before, streak_after, created_at) " +
+                    "SELECT gen_random_uuid(), bond_id, date, event, streak_before, streak_after, created_at FROM streak_events",
+            )
+        }
     }
 
     // --- order: the job settles days out of order, and the streak is a fold ---
@@ -534,8 +632,22 @@ internal class StreakEvaluationTest(
         submit(second, bond, "his").status shouldBe 201
     }
 
+    /** A member's own request, at the clock's instant: the bond records when the setting changed, and the job reads that. */
     private fun strictMode(on: Boolean) {
-        jdbc.update("UPDATE bonds SET strict_mode = ? WHERE id = ?::uuid", on, bond)
+        val etag =
+            mockMvc
+                .get("/api/v1/bonds/$bond") { header(HttpHeaders.AUTHORIZATION, bearer(ada)) }
+                .andReturn()
+                .response
+                .getHeader(HttpHeaders.ETAG)!!
+        mockMvc
+            .patch("/api/v1/bonds/$bond") {
+                header(HttpHeaders.AUTHORIZATION, bearer(ada))
+                header(HttpHeaders.IF_MATCH, etag)
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"strictMode":$on}"""
+            }.andReturn()
+            .response.status shouldBe 200
     }
 
     private fun pair(

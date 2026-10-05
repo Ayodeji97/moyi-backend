@@ -6,6 +6,7 @@ import com.moyi.common.core.IdGenerator
 import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
 import com.moyi.gratitude.domain.DayOutcome
+import com.moyi.gratitude.domain.Evaluation
 import com.moyi.gratitude.domain.StreakChange
 import com.moyi.gratitude.domain.StreakRules
 import com.moyi.gratitude.domain.StreakState
@@ -100,19 +101,27 @@ internal class EvaluateStreaks(
 
     private fun evaluateBond(bondId: UUID): Int {
         val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
-        var state = streaks.lock(bondId, now)
+        // Before the lock: taking it makes the bond a streak row, and a bond
+        // whose own row is gone should not be given one.
         val view = access.closingViewOf(bondId) ?: return 0
+        var state = streaks.lock(bondId, now)
         val joiningDate = view.activeSince?.let(view.anchorTimeline::dateAt)
         var previous = streaks.lastEvaluatedDate(bondId)
         var evaluated = 0
         for (day in streaks.unevaluatedDays(bondId)) {
             if (!day.isClosed || !follows(day.date, previous, joiningDate)) break
             val outcome = outcomeOf(day, view)
-            val step = StreakRules.step(state, day.date, outcome, view.strictMode)
-            streaks.recordDay(day.id, outcome, view.strictMode, step.freezeApplied, now)
-            record(bondId, day.date, state, step.state, step.change, step.freezeBanked, now)
+            // The setting the day ended under, not the one in force now
+            // (FR-073): this runs after the day is over, and the setting is
+            // one member's to change in the meantime.
+            val strict = view.strictModeAt(day.endsAt)
+            val step = StreakRules.step(state, day.date, outcome, strict)
+            streaks.recordDay(day.id, outcome, strict, step.freezeApplied, now)
+            record(bondId, day.date, state, step.state, announce = outcome == DayOutcome.COMPLETE, step, now)
             state = step.state
-            previous = day.date
+            // Never backwards. Days are read in date order, so this is a
+            // guard and not a path: nothing reaches here out of order today.
+            previous = maxOf(previous ?: day.date, day.date)
             evaluated++
         }
         if (evaluated > 0) streaks.save(bondId, state, now)
@@ -136,49 +145,49 @@ internal class EvaluateStreaks(
 
     /**
      * What [day] is to the streak. Its status says, with one exception no
-     * status carries: a day that ended after the bond stopped taking writes
-     * moves nothing (doc 04 §8.3 — the streak "is preserved at its value").
+     * status carries: a day **missed** after the bond stopped taking writes
+     * does not end the run (doc 04 §8.3 — the streak "is preserved at its
+     * value"). Only a missed day: a day both wrote on before one of them
+     * left that afternoon is a complete day like any other, and §8.3
+     * protects a streak from a break, it does not take a day away from it.
      */
     private fun outcomeOf(
         day: DayToEvaluate,
         view: BondClosingView,
     ): DayOutcome {
+        val byStatus = checkNotNull(DayOutcome.of(day.status)) { "a closed bond-day has a settled status: ${day.id}" }
         val ended = view.endedAt
-        return if (ended != null && day.endsAt.isAfter(ended)) {
-            DayOutcome.AFTER_THE_END
-        } else {
-            checkNotNull(DayOutcome.of(day.status)) { "a closed bond-day has a settled status: ${day.id}" }
-        }
+        return if (byStatus == DayOutcome.MISSED && ended != null && day.endsAt.isAfter(ended)) DayOutcome.AFTER_THE_END else byStatus
     }
 
+    /**
+     * What the day did to the run, written down: a line in the audit log for
+     * every change, and an event for the two a consumer may act on.
+     *
+     * **`StreakExtended` is for a day both wrote on, and no other.** A missed
+     * day covered by a freeze and a date a zone change stepped over also
+     * extend the run, and are in `streak_events`; announced, they would be a
+     * celebration of a day nobody wrote. **`StreakBroken` must never become a
+     * message to a member** (FR-076): to the one who wrote, "your streak
+     * ended" says the other did not. It is for the screen to state when
+     * opened (`states.md` §7), and for analytics. Both carry the bond's id
+     * and nothing else.
+     */
     @Suppress("LongParameterList") // One day's before and after.
     private fun record(
         bondId: UUID,
         date: LocalDate,
         before: StreakState,
         after: StreakState,
-        change: StreakChange,
-        freezeBanked: Boolean,
+        announce: Boolean,
+        step: Evaluation,
         now: Instant,
     ) {
-        StreakStore.eventOf(change)?.let { streaks.appendEvent(ids.timeOrdered(), bondId, date, it, before.current, after.current, now) }
-        if (freezeBanked) {
-            streaks.appendEvent(
-                ids.timeOrdered(),
-                bondId,
-                date,
-                StreakStore.FREEZE_BANKED,
-                before.current,
-                after.current,
-                now,
-            )
-        }
-        // FR-076: an event says what happened to the run, by id. It names
-        // nobody, and carries no word about who did or did not write.
-        when (change) {
-            StreakChange.EXTENDED, StreakChange.FREEZE_CONSUMED -> publish("StreakExtended", bondId, now)
-            StreakChange.BROKEN -> publish("StreakBroken", bondId, now)
-            StreakChange.NONE -> Unit
+        val lines = listOfNotNull(StreakStore.eventOf(step.change), StreakStore.FREEZE_BANKED.takeIf { step.freezeBanked })
+        lines.forEach { streaks.appendEvent(ids.timeOrdered(), bondId, date, it, before.current, after.current, now) }
+        when {
+            step.change == StreakChange.BROKEN -> publish("StreakBroken", bondId, now)
+            step.change == StreakChange.EXTENDED && announce -> publish("StreakExtended", bondId, now)
         }
     }
 

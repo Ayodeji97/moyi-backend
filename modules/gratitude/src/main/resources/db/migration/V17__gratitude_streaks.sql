@@ -2,7 +2,7 @@
 
 -- One row per bond: the run through the last of its days that has been
 -- evaluated. A projection — `recalculate` (FR-074) rebuilds it from the
--- bond's days and what was decided for each (the three columns added to
+-- bond's days and what was decided for each (the four columns added to
 -- `bond_days` below). No foreign key to `bonds`: it is another module's table.
 CREATE TABLE streak_states (
     bond_id             uuid        PRIMARY KEY,
@@ -68,6 +68,8 @@ ALTER TABLE bond_days
     -- Only a missed day spends a freeze.
     ADD CONSTRAINT bond_days_freeze_check CHECK (freeze_applied IS NOT TRUE OR evaluated_as = 'MISSED');
 
--- The evaluation's scan: a bond's days that are settled and not yet
--- evaluated, in date order. Partial, so it holds only what is still to do.
+-- The evaluation's first question: which bonds have a day that is settled
+-- and not yet evaluated. Partial, so it holds only what is still to do. (A
+-- bond's own days are then read by `bond_days_bond_date_key`: that read
+-- needs the unsettled ones too, to know where to stop.)
 CREATE INDEX bond_days_unevaluated_idx ON bond_days (bond_id, date) WHERE closed_at IS NOT NULL AND evaluated_at IS NULL;
