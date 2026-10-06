@@ -3583,7 +3583,7 @@
           },
           "status" : {
             "type" : "string",
-            "enum" : [ "COMPLETE", "FROZEN", "MISSED", "OPEN" ]
+            "enum" : [ "COMPLETE", "FROZEN", "SOLO", "MISSED", "OPEN" ]
           }
         }
       },

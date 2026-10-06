@@ -49,6 +49,11 @@ internal enum class BondDayStatus(
      * about yet. `isClosed == false` here is what lets a caller that only
      * checks [isClosed] correctly leave a suspended day alone rather than
      * treating "not open to further writes" as the same question.
+     *
+     * Since ADR-0034's rulings there is a second kind, which *is* closed: a
+     * day the close job writes for a deletion that counted down and was
+     * called off. It carries `closedAt`, and [BondDay.isSettled] — not this
+     * flag — is what tells the two apart.
      */
     SUSPENDED(isClosed = false),
     FROZEN(isClosed = true),

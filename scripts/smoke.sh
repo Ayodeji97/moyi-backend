@@ -895,7 +895,7 @@ expect "the second writes, and is not shown a reveal" 201 '"status":"SUBMITTED"'
 expect "both have written and the day is PENDING_REVEAL, not PARTIAL" 200 '"status":"PENDING_REVEAL"' -- "$API/bonds/$TIMED_BOND/today" -H "Authorization: Bearer $LATE_ACCESS"
 [[ "$LAST_BODY" == *'"status":"LOCKED"'* && "$LAST_BODY" != *"$TIMED_TEXT"* ]] && pass "…and the partner's entry is still locked, its words withheld" || fail "timed reveal" "${LAST_BODY:0:250}"
 expect "a day still waiting on its reveal time is not in the streak yet" 200 '"current":0' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $EARLY_ACCESS"
-# states.md §7: the calendar never says that exactly one of two has written. Today is OPEN, to both.
+# Today, until both have written, is OPEN on the calendar to both: who has written so far is GET /today's to say.
 [[ "$LAST_BODY" == *'"status":"OPEN"}]'* && "$LAST_BODY" != *PARTIAL* && "$LAST_BODY" != *PENDING_REVEAL* && "$LAST_BODY" != *SOLO* ]] && pass "…and its calendar says OPEN, not who has written" || fail "streak calendar vocabulary" "${LAST_BODY:0:250}"
 expect "a stranger asking for a bond's streak gets the one 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $AUTHOR_ACCESS"
 
