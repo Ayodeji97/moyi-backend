@@ -207,6 +207,20 @@ internal class StreakEndpointTest(
         calendar(ada).last() shouldBe "${day(1)} COMPLETE"
     }
 
+    /** The day's row stays unsettled until midnight; the bond takes no more entries now. */
+    @Test
+    fun `a bond that ended today after one had written has no open square either`() {
+        bothWriteOn(1)
+        closeThrough(1)
+        clock.set(at(2))
+        submit(ada)
+        calendar(bea).last() shouldBe "${day(2)} OPEN"
+
+        leave(bea)
+
+        for (member in listOf(ada, bea)) calendar(member).last() shouldBe "${day(1)} COMPLETE"
+    }
+
     @Test
     fun `a day a freeze covered is a rest day on the calendar, whoever wrote on it`() {
         (1..14).forEach { bothWriteOn(it) }
