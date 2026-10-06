@@ -183,8 +183,8 @@ class BondClosingView internal constructor(
      * §6.4 writes no day for "deletion or archived intervals", and a bond in
      * its cooling-off refuses every entry, so a day in that month is not one
      * the couple missed. **If the deletion is called off this is `null`
-     * again**: nothing records that the interval happened, and the days in
-     * it are then written as missed (ADR-0033, open with the owner).
+     * again**, and the stretch is then answered by [wasPausedAt] (V19): its
+     * days are suspended, not missed.
      */
     val endedAt: Instant?,
     /** The bond's **current** reveal time (FR-062) — what a `PENDING_REVEAL` day is waiting for. */
@@ -202,16 +202,20 @@ class BondClosingView internal constructor(
     fun strictModeBefore(instant: Instant): Boolean = past.strictModeBefore(instant)
 
     /**
-     * Whether, for any part of `[startsAt, endsAt)`, the bond was refusing
-     * every write and later took them again: a deletion that counted down
-     * and was called off. A day nobody completed in such a stretch is not a
-     * day anybody missed (the owner's ruling, ADR-0034): it is `SUSPENDED`.
-     * A countdown still running is [endedAt], not this.
+     * Whether, as [instant] arrived, the bond was refusing every write in a
+     * stretch it later came back from: a deletion that counted down and was
+     * called off. Asked with the instant a day ended. A day that ended while
+     * the bond would take no entry is not a day anybody missed (the owner's
+     * ruling, ADR-0034): it is `SUSPENDED`.
+     *
+     * **The day's end, and not "any part of the day", on purpose.** Any
+     * overlap would make a three-second request-and-cancel at ten to
+     * midnight a free rest day, every day, in Strict mode too. And the day a
+     * deletion is called off is an ordinary day from then on: the bond takes
+     * entries for the rest of it. A countdown still running is [endedAt],
+     * not this.
      */
-    fun wasPausedDuring(
-        startsAt: Instant,
-        endsAt: Instant,
-    ): Boolean = past.pausedDuring(startsAt, endsAt)
+    fun wasPausedAt(instant: Instant): Boolean = past.pausedAt(instant)
 
     override fun toString(): String = "BondClosingView(bondId=$bondId)"
 }
@@ -223,7 +227,7 @@ class BondClosingView internal constructor(
  */
 internal class BondPast(
     val strictModeBefore: (Instant) -> Boolean,
-    val pausedDuring: (Instant, Instant) -> Boolean,
+    val pausedAt: (Instant) -> Boolean,
 )
 
 /**

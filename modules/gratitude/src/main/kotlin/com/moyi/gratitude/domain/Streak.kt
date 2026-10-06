@@ -39,7 +39,7 @@ internal data class StreakState(
 
 /**
  * What a settled day is, to the streak (spec §3.1's table, "counts toward the
- * streak"). Four answers, where a day has eight statuses, because the streak
+ * streak"). Five answers, where a day has eight statuses, because the streak
  * asks a narrower question than the status answers.
  */
 internal enum class DayOutcome {
@@ -56,7 +56,12 @@ internal enum class DayOutcome {
     /** `SOLO` or `EMPTY`: spends a freeze, or ends the run. */
     MISSED,
 
-    /** Excluded from evaluation (doc 04 §8.1, §8.2, §8.3a): neither extends the run nor ends it. */
+    /**
+     * Excluded from evaluation: neither extends the run nor ends it. A day
+     * from before the bond was two people (doc 04 §8.3a), a suspended member's
+     * (§8.1, §8.2), or one that ended while a deletion since called off was
+     * counting down (ADR-0034, Rulings 1).
+     */
     SUSPENDED,
 
     /**

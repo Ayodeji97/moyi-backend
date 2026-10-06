@@ -114,7 +114,7 @@ internal class StreakAfterCancelledDeletionTest(
         streak() shouldBe Streak(current = 5, longest = 5, lastComplete = day(8), freezes = 0, progress = 5, consumed = 0, total = 5)
         decisions().takeLast(5) shouldBe
             listOf(
-                // Days 4 to 6: the bond took no writes for some or all of each. Day 7: it took them again, and both wrote.
+                // Days 4 to 6 each ended with the bond taking no writes. Day 7: it took them again, and both wrote.
                 Decision(day(4), "SUSPENDED", "SUSPENDED", freeze = false),
                 Decision(day(5), "SUSPENDED", "SUSPENDED", freeze = false),
                 Decision(day(6), "SUSPENDED", "SUSPENDED", freeze = false),
@@ -146,9 +146,13 @@ internal class StreakAfterCancelledDeletionTest(
         outbox("StreakBroken") shouldBe 0
     }
 
-    /** One wrote on what was left of the day the deletion was called off. Not a miss either. */
+    /**
+     * The day a deletion is called off is an ordinary day from then on: the
+     * bond takes entries for the rest of it. Were any overlap enough, asking
+     * and cancelling at ten to midnight would be a free rest day, every day.
+     */
     @Test
-    fun `a day one wrote on after a deletion was called off that day does not end the run`() {
+    fun `the day a deletion is called off on is judged like any other`() {
         (1..3).forEach { bothWriteOn(it) }
         clock.set(at(4))
         requestDeletion(ada)
@@ -156,13 +160,119 @@ internal class StreakAfterCancelledDeletionTest(
         clock.set(at(6))
         cancelDeletion(ada)
         writeOn(6, ada)
+
+        closeThrough(6)
+
+        streak().let { (it.current to it.longest) shouldBe (0 to 3) }
+        decisions().takeLast(3).map { "${it.date} ${it.status} ${it.evaluatedAs}" } shouldBe
+            listOf("${day(4)} SUSPENDED SUSPENDED", "${day(5)} SUSPENDED SUSPENDED", "${day(6)} SOLO MISSED")
+    }
+
+    /** One had written before the two of them asked. The day ended with the bond closed to the other: not a miss. */
+    @Test
+    fun `a day one had written on before the countdown began is suspended too, and keeps its entry's status`() {
+        (1..3).forEach { bothWriteOn(it) }
+        writeOn(4, ada)
+        clock.set(at(4).plusSeconds(3_600))
+        requestDeletion(ada)
+        requestDeletion(bea)
+        clock.set(at(6))
+        cancelDeletion(bea)
+        bothWriteOn(6)
+
+        closeThrough(6)
+
+        streak().let { (it.current to it.longest) shouldBe (4 to 4) }
+        decisions().takeLast(3).map { "${it.date} ${it.status} ${it.evaluatedAs}" } shouldBe
+            listOf("${day(4)} SOLO SUSPENDED", "${day(5)} SUSPENDED SUSPENDED", "${day(6)} REVEALED COMPLETE")
+    }
+
+    @Test
+    fun `asking and calling off within one day suspends nothing`() {
+        (1..3).forEach { bothWriteOn(it) }
+        clock.set(at(4))
+        requestDeletion(ada)
+        requestDeletion(bea)
+        cancelDeletion(bea)
+
+        closeThrough(4)
+
+        streak().current shouldBe 0
+        decisions().last() shouldBe Decision(day(4), "EMPTY", "MISSED", freeze = false)
+    }
+
+    @Test
+    fun `no freeze is spent on a suspended day, and the day after the countdown can spend one`() {
+        (1..14).forEach { bothWriteOn(it) }
+        clock.set(at(15))
+        requestDeletion(ada)
+        requestDeletion(bea)
+        clock.set(at(17))
+        cancelDeletion(ada)
+
+        closeThrough(17)
+
+        decisions().takeLast(3) shouldBe
+            listOf(
+                Decision(day(15), "SUSPENDED", "SUSPENDED", freeze = false),
+                Decision(day(16), "SUSPENDED", "SUSPENDED", freeze = false),
+                // Day 17: called off at ten, nobody wrote for the rest of it. A missed day; the banked freeze covers it.
+                Decision(day(17), "FROZEN", "MISSED", freeze = true),
+            )
+        streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(15, 0, 1) }
+    }
+
+    /** The other door out of a countdown: one member left during it, so calling it off ends the bond instead. */
+    @Test
+    fun `a countdown called off after a member left leaves a streak that is kept, not broken`() {
+        (1..3).forEach { bothWriteOn(it) }
+        clock.set(at(4))
+        requestDeletion(ada)
+        requestDeletion(bea)
+        clock.set(at(5))
+        mockMvc
+            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, bearer(bea)) }
+            .andReturn()
+            .response.status shouldBe 204
+        clock.set(at(7))
+        cancelDeletion(ada)
+
+        closeThrough(9)
+
+        streak().let { (it.current to it.longest) shouldBe (3 to 3) }
+        outbox("StreakBroken") shouldBe 0
+        decisions().takeLast(4).map { "${it.date} ${it.status} ${it.evaluatedAs}" } shouldBe
+            listOf(
+                "${day(4)} SUSPENDED SUSPENDED",
+                "${day(5)} SUSPENDED SUSPENDED",
+                "${day(6)} SUSPENDED SUSPENDED",
+                // The day the bond ended on: missed after the end, and moves nothing.
+                "${day(7)} EMPTY AFTER_THE_END",
+            )
+    }
+
+    @Test
+    fun `two countdowns called off are two stretches, each suspended`() {
+        (1..3).forEach { bothWriteOn(it) }
+        clock.set(at(4))
+        requestDeletion(ada)
+        requestDeletion(bea)
+        clock.set(at(5))
+        cancelDeletion(ada)
+        bothWriteOn(5)
+        clock.set(at(6))
+        requestDeletion(bea)
+        requestDeletion(ada)
+        clock.set(at(7))
+        cancelDeletion(bea)
         bothWriteOn(7)
 
         closeThrough(7)
 
-        streak().let { (it.current to it.longest) shouldBe (4 to 4) }
-        decisions().takeLast(2).map { "${it.date} ${it.status} ${it.evaluatedAs}" } shouldBe
-            listOf("${day(6)} SOLO SUSPENDED", "${day(7)} REVEALED COMPLETE")
+        jdbc.queryForObject("SELECT count(*) FROM bond_write_pauses", Int::class.java) shouldBe 2
+        decisions().takeLast(4).map { "${it.date} ${it.evaluatedAs}" } shouldBe
+            listOf("${day(4)} SUSPENDED", "${day(5)} COMPLETE", "${day(6)} SUSPENDED", "${day(7)} COMPLETE")
+        streak().current shouldBe 5
     }
 
     // ---- helpers ----------------------------------------------------------

@@ -11,11 +11,12 @@ internal data class WritePause(
     val from: Instant,
     val to: Instant,
 ) {
-    /** Whether any of `[startsAt, endsAt)` fell inside this pause. */
-    fun overlaps(
-        startsAt: Instant,
-        endsAt: Instant,
-    ): Boolean = from.isBefore(endsAt) && startsAt.isBefore(to)
+    /**
+     * Whether the bond was refusing writes as [instant] arrived: the pause
+     * had begun before it and had not ended before it. Asked of the instant
+     * a day ends — see `BondClosingView.wasPausedAt` for why that instant.
+     */
+    fun covers(instant: Instant): Boolean = from.isBefore(instant) && !to.isBefore(instant)
 }
 
 /**

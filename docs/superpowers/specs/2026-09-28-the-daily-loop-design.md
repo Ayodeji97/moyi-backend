@@ -750,13 +750,15 @@ apart, and a member crossing the date line.
 - **`recalculate` is a service, not yet a route**, and writes no event (decision 10).
 - **`StreakExtended` is published only for a day both wrote on; `StreakBroken` must never
   reach a member as a message** (decision 11, FR-076).
-- **`GET /streak`'s calendar is not day statuses** (decision 12): `COMPLETE`, `FROZEN`,
-  `MISSED`, `OPEN`. A `SOLO` day is `MISSED` and today is `OPEN` until complete, because
-  `states.md` §7 forbids a calendar that shows which days exactly one person wrote. It
+- **`GET /streak`'s calendar is not day statuses** (decision 12): as first built,
+  `COMPLETE`, `FROZEN`, `MISSED`, `OPEN`, with a `SOLO` day sent as `MISSED` because
+  `states.md` §7 forbade a calendar showing which days exactly one person wrote —
+  *reversed by the owner on 2026-10-06, see the last bullet.* Today is `OPEN` until complete. It
   starts at the day the bond became two people, covers at most 371 days, and for an ended
   bond ends where the bond did. Today always has a square while the bond takes writes.
 - **Ruled by the owner, 2026-10-06 (ADR-0034, Rulings).** The days of a deletion that was
-  called off are `SUSPENDED` (`bond_write_pauses`, V19) and the run goes on. A solo day
+  called off are `SUSPENDED` (`bond_write_pauses`, V19) and the run goes on — a day
+  counts as one of them if it *ended* while the countdown ran. A solo day
   **is** drawn on the calendar, as `SOLO`: the vocabulary is `COMPLETE`, `FROZEN`, `SOLO`,
   `MISSED`, `OPEN`. FR-073 stands over `states.md` §7's Strict-mode paragraph.
 

@@ -21,7 +21,7 @@ internal class BondPasts(
         val pauses = writePauses.of(bond.id)
         return BondPast(
             strictModeBefore = StrictModeHistory(bond.strictMode, strictModeChanges.of(bond.id))::before,
-            pausedDuring = { from, to -> pauses.any { it.overlaps(from, to) } },
+            pausedAt = { instant -> pauses.any { it.covers(instant) } },
         )
     }
 }

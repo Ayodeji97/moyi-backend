@@ -32,7 +32,11 @@ internal class ReconcileJoiningDay(
     /** Called before a read transaction, so its conditional write is not read-only. */
     fun beforeRead(membership: BondMembership) {
         val joining = window(membership) ?: return
-        if (days.findByBondAndDate(membership.bondId, joining.date)?.status != BondDayStatus.SUSPENDED) return
+        // Suspended and still open. A suspended day that is closed — one the
+        // close job wrote for a called-off deletion — will never resume, and
+        // must not send every read to the bond's lock to find that out.
+        val day = days.findByBondAndDate(membership.bondId, joining.date)
+        if (day?.status != BondDayStatus.SUSPENDED || day.closedAt != null) return
         try {
             transactions.executeWithoutResult {
                 val fresh = access.lockMembershipOf(membership.userId, membership.bondId)
@@ -52,7 +56,7 @@ internal class ReconcileJoiningDay(
         val initial =
             days
                 .findByBondAndDate(membership.bondId, joining.date)
-                ?.takeIf { it.status == BondDayStatus.SUSPENDED } ?: return
+                ?.takeIf { it.status == BondDayStatus.SUSPENDED && it.closedAt == null } ?: return
         val locked = days.lockAndFind(initial.id)
         val resumed = locked.extendedTo(joining).resumeJoiningDay(membership.activeSince)
         if (resumed != locked) reveal.apply(resumed, membership.revealTimeLocal, now)

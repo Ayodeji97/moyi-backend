@@ -196,6 +196,9 @@ click. Both decide nothing: every rule is the server's.
   of a bond with none answers zeros.
 - **The evaluation reads every unevaluated day of a bond, oldest first.** After a long
   outage that is a bond's whole backlog in one transaction, and nothing bounds it per run.
+- **For a quarter of an hour after a deletion is called off**, the countdown's days have
+  no rows yet, so a today both write on shows `COMPLETE` on the calendar and is not yet
+  in `current`. The next run writes and evaluates them and the number catches up.
 - **A read is two statements with no lock.** An evaluation committing between them can
   make one response show yesterday's number. It cannot count a day twice: a today that
   has been evaluated is never added.
@@ -222,6 +225,10 @@ be read before it is built.
 
 **Phase 4.** The notification consumer must not subscribe to `StreakBroken` (decision 11).
 
+**Phase 5, the deletion job.** It must remove `gratitude`'s days with the bond. No foreign
+key crosses the module, and a day left behind with no bond row is reported as a failed
+evaluation on every run, for ever — by design, so that it is seen.
+
 **Not assigned.** Suspension of a member (doc 04 §8.1, §8.2): nothing sets it yet; the
 rules already skip a `SUSPENDED` day, and a property test holds that for a run of any
 length. The Bruno collection has not been opened in Bruno.
@@ -234,12 +241,23 @@ pull request that follows the slice's.
 1. **A deletion that is called off: its days are `SUSPENDED`.** `bond` now records the
    stretch (`bond_write_pauses`, V19) when a countdown is cancelled, including when the
    cancel archives the bond because a member left meanwhile. The closer's view answers
-   `wasPausedDuring(startsAt, endsAt)`. A missing day that overlaps such a stretch is
-   written `SUSPENDED`, not `EMPTY`, with no `DayClosed`; a day that already had a row and
-   was missed (one member wrote on what was left of the day the deletion was called off)
-   keeps its status and is *evaluated* as suspended. Either way the run goes on. Any part
-   of a day counts: a day the bond refused writes for an hour of is not a day anybody can
-   be said to have missed.
+   `wasPausedAt(instant)`.
+
+   **A day is one of the countdown's if it ended while the countdown was running.** Not
+   "if any part of it overlapped": that was built first, and a reviewer showed what it
+   allowed — ask, agree and cancel in three seconds at ten to midnight, and the day is a
+   free rest day, every day, in Strict mode too. So the day a deletion is called off on
+   is an ordinary day from then on (the bond takes entries for the rest of it), and a
+   countdown that begins and ends within one day suspends nothing. What is left: two
+   members who hold a countdown across midnight, together, get that one day. It takes both
+   of them and is the shape of the real case; it is not prevented.
+
+   A missing day that ended in a countdown is written `SUSPENDED`, not `EMPTY`, with no
+   `DayClosed`. A day that already had a row and was missed (one member had written
+   before the two of them asked) keeps its status and is *evaluated* as suspended. If the
+   job ran during the countdown, the day the request fell on was already written `EMPTY`
+   and evaluated as "after the end": the same nothing to the streak, under another name.
+   A date a zone change stepped over inside a countdown is still a rest day.
 2. **Solo days are drawn on the calendar.** Decision 12 is reversed in this one respect:
    the vocabulary is `COMPLETE`, `FROZEN`, `SOLO`, `MISSED`, `OPEN`. A day one of the two
    wrote on, that ended and was not covered by a freeze, is `SOLO`. `states.md` §7's
