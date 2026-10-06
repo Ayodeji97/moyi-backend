@@ -66,7 +66,13 @@ internal class GetStreak(
         // off the end of a window that follows the clock.
         val last = membership.endedAt?.let(membership.anchorTimeline::dateAt)?.takeIf { it.isBefore(today) } ?: today
         val from = maxOf(last.minusDays(CALENDAR_DAYS - 1), joiningDate(membership) ?: last.plusDays(1))
-        val stored = calendar.between(membership.bondId, from, last, today)
+        // OPEN is "this day can still be completed". A bond that ended today
+        // with one entry in keeps that day's row unsettled until midnight;
+        // nobody can write on it, so it is not drawn as open in the meantime.
+        val stored =
+            calendar
+                .between(membership.bondId, from, last, today)
+                .filter { membership.isOpen || it.cell != StreakCell.OPEN }
         // Today has a row only once somebody has written. Drawn only then,
         // the square's presence would say that somebody has; so a bond two
         // people can write in always has today's square, and it says OPEN.

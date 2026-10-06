@@ -89,7 +89,8 @@ internal class StreakStore(
     /** Every day of the bond not yet evaluated, settled or not, oldest first. */
     fun unevaluatedDays(bondId: UUID): List<DayToEvaluate> =
         jdbc.query(
-            "SELECT id, date, status, ends_at, closed_at FROM bond_days WHERE bond_id = ? AND evaluated_at IS NULL ORDER BY date",
+            "SELECT id, date, status, ends_at, closed_at FROM bond_days " +
+                "WHERE bond_id = ? AND evaluated_at IS NULL ORDER BY date",
             { row, _ ->
                 DayToEvaluate(
                     row.getObject("id", UUID::class.java),

@@ -47,11 +47,11 @@ internal class StreakController(
 /**
  * The streak, and the calendar behind it.
  *
- * **Nothing here says who wrote and who did not** (FR-076). The fields are
- * counts about the bond, and [days] is a square per day from a vocabulary
- * that cannot say "one of you wrote" ([StreakCell]): a member knows their own
- * history, so a year of solo days would be a year of the other's misses.
- * There is no per-member field, and none may be added.
+ * **No field here names a member** (FR-076), and none may be added. The
+ * fields are counts about the bond, and [days] is a square per day
+ * ([StreakCell]). One of those squares is `SOLO` — a day one of the two wrote
+ * on — by the owner's ruling (ADR-0034, as amended); it says what `GET /today`
+ * said about that day while it was today, and no more.
  */
 internal data class StreakResponse(
     val current: Int,

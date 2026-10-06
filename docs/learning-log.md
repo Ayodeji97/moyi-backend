@@ -2062,3 +2062,25 @@ Wrong about: what "pure" bought. I made the rules pure so they could be tested w
          Not settled, and the owner's: a deletion that is called off leaves a month of
          empty days, and those now end the streak. Nothing records that the countdown
          happened. ADR-0034, question 1.
+
+## 2026-10-06 · Phase 3 · Three rulings, and a reviewer who found what three of mine had not
+
+Expected: the streak was reviewed three times and green; the pull request was the end of it.
+Reality: Codex read it and found two things in an hour. Days whose bond row is gone were
+         reported as a successful evaluation of nothing, for ever, with no count and no
+         log: I had changed a `checkNotNull` into `return 0` to avoid making an orphan
+         row, and made an invisible retry loop instead. And my Strict-mode history kept
+         two changes at one instant as one row with the later value, which the history
+         then read backwards. I had written that upsert with the comment "one change to
+         whichever came last", which is true of the bond and false of the history.
+         Then the owner ruled. Called-off deletion days are suspended; that needed `bond`
+         to remember the countdown, which it had been forgetting since B5. Solo days are drawn on the calendar after all. FR-073 beats
+         the drawn Strict-mode frame.
+Wrong about: the solo ruling, in a useful way. I had treated `states.md` as a rule to obey
+         and built an API that *could not* draw a solo day. The rule was a design
+         position, the owner's to change, and he changed it in a sentence. Holding a
+         product decision in the type system is right when the decision is settled and
+         a tax when it is not; I did not ask which this was.
+         And reviewers are not interchangeable. Three readers I briefed found what I
+         pointed them at. The fourth I had not briefed, and found what I had not thought
+         to point at.

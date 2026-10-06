@@ -33,6 +33,10 @@ import java.util.UUID
  * first entry, says nothing about the week before it. Every window from
  * activation is checked against the dates the bond has.
  *
+ * **A day that ended while a deletion was counting down, since called off, is
+ * written `SUSPENDED`** and not `EMPTY` (ADR-0034, Rulings 1): the bond would
+ * take no entry, so nobody missed it.
+ *
  * **Never before the pairing, never after the end.** Doc 04 §8.3a creates no
  * day for a bond that is one person. A bond that has ended gets the days up
  * to the one it ended on, and none after.
@@ -145,7 +149,8 @@ internal class CreateMissingDays(
                     gaps.count { gap ->
                         val id = ids.timeOrdered()
                         missing.insertClosed(id, bondId, gap.window, gap.zone, gap.status, at).also { inserted ->
-                            if (inserted) {
+                            // As `CloseDay`: a suspended day is settled without an announcement.
+                            if (inserted && gap.status != BondDayStatus.SUSPENDED) {
                                 events.publish(
                                     OutboxEvent("BondDay", id, "DayClosed", mapOf("bondId" to bondId), at),
                                 )
@@ -203,7 +208,11 @@ internal class CreateMissingDays(
                         .forEach { skipped -> yield(Gap(DayWindow(skipped, window.startsAt, window.startsAt), zone, BondDayStatus.FROZEN)) }
                 }
                 if (!began || bounds.endsAt.isAfter(endedAsOf)) break
-                yield(Gap(window, zone, BondDayStatus.EMPTY))
+                // Nobody wrote; and if it ended while the bond would take no
+                // entry — a deletion counting down, since called off — nobody
+                // was let down either (ADR-0034, the owner's ruling).
+                val paused = view.wasPausedAt(window.endsAt)
+                yield(Gap(window, zone, if (paused) BondDayStatus.SUSPENDED else BondDayStatus.EMPTY))
                 check(bounds.endsAt.isAfter(at)) { "a bond's calendar must move forward: ${bounds.date} ends at ${bounds.endsAt}" }
                 previous = window
                 at = bounds.endsAt

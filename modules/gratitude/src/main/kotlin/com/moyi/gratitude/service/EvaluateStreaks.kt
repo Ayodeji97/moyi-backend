@@ -139,7 +139,8 @@ internal class EvaluateStreaks(
      * Whether [date] may be evaluated after [previous]. Before the bond was
      * two people its days are the ones its creator happened to write on, and
      * need not be consecutive; they are all suspended and move nothing. From
-     * the joining day on, each must directly follow the last.
+     * the joining day on, each must directly follow the last — the suspended
+     * days of a called-off deletion included, which the job writes one a date.
      */
     private fun follows(
         date: LocalDate,
@@ -151,8 +152,10 @@ internal class EvaluateStreaks(
             date == previous?.plusDays(1)
 
     /**
-     * What [day] is to the streak. Its status says, with one exception no
-     * status carries: a day **missed** after the bond stopped taking writes
+     * What [day] is to the streak. Its status says, with two exceptions no
+     * status carries, both for a **missed** day only. One that ended while a
+     * deletion since called off was counting down is suspended (ADR-0034,
+     * Rulings 1). And one missed after the bond stopped taking writes
      * does not end the run (doc 04 §8.3 — the streak "is preserved at its
      * value"). Only a missed day: a day both wrote on before one of them
      * left that afternoon is a complete day like any other, and §8.3
@@ -164,7 +167,17 @@ internal class EvaluateStreaks(
     ): DayOutcome {
         val byStatus = checkNotNull(DayOutcome.of(day.status)) { "a closed bond-day has a settled status: ${day.id}" }
         val ended = view.endedAt
-        return if (byStatus == DayOutcome.MISSED && ended != null && day.endsAt.isAfter(ended)) DayOutcome.AFTER_THE_END else byStatus
+        return when {
+            byStatus != DayOutcome.MISSED -> byStatus
+
+            ended != null && day.endsAt.isAfter(ended) -> DayOutcome.AFTER_THE_END
+
+            // A deletion that counted down and was called off: this day ended
+            // while the bond took no writes. Not a day anybody missed.
+            view.wasPausedAt(day.endsAt) -> DayOutcome.SUSPENDED
+
+            else -> DayOutcome.MISSED
+        }
     }
 
     /**

@@ -159,13 +159,12 @@ internal class StreakEndpointTest(
     // --- the calendar ---
 
     /**
-     * `states.md` §7: "Solo is not rendered on the calendar ... you know your
-     * own history, so every Solo cell resolves to a partner miss." Day 0
-     * nobody wrote on; day 2 only Ada did; today only Bea has. The calendar
-     * says the same of the first two, and of today only that it is open.
+     * Day 0 nobody wrote on; day 2 only Ada did; today only Bea has. A solo
+     * day is drawn as one (the owner's ruling, ADR-0034 as amended), to both
+     * members alike. Today says only that it is open.
      */
     @Test
-    fun `the calendar is a square a day, oldest first, and never says that only one wrote`() {
+    fun `the calendar is a square a day, oldest first, with a solo day drawn as one`() {
         bothWriteOn(1)
         clock.set(at(2))
         submit(ada)
@@ -174,7 +173,7 @@ internal class StreakEndpointTest(
         submit(bea)
 
         for (member in listOf(ada, bea)) {
-            calendar(member) shouldBe listOf("${day(0)} MISSED", "${day(1)} COMPLETE", "${day(2)} MISSED", "${day(3)} OPEN")
+            calendar(member) shouldBe listOf("${day(0)} MISSED", "${day(1)} COMPLETE", "${day(2)} SOLO", "${day(3)} OPEN")
         }
         submit(ada)
         calendar(bea).last() shouldBe "${day(3)} COMPLETE"
@@ -206,6 +205,20 @@ internal class StreakEndpointTest(
         leave(bea)
 
         calendar(ada).last() shouldBe "${day(1)} COMPLETE"
+    }
+
+    /** The day's row stays unsettled until midnight; the bond takes no more entries now. */
+    @Test
+    fun `a bond that ended today after one had written has no open square either`() {
+        bothWriteOn(1)
+        closeThrough(1)
+        clock.set(at(2))
+        submit(ada)
+        calendar(bea).last() shouldBe "${day(2)} OPEN"
+
+        leave(bea)
+
+        for (member in listOf(ada, bea)) calendar(member).last() shouldBe "${day(1)} COMPLETE"
     }
 
     @Test
@@ -314,10 +327,9 @@ internal class StreakEndpointTest(
 
     /**
      * FR-076: the system never tells one member that the other has not
-     * written. These payloads are counts about the bond and a square per day
-     * from a vocabulary that cannot say one of two wrote. A field about a
-     * member would be a new disclosure, so the fields are named here, all of
-     * them.
+     * written. These payloads are counts about the bond and a square per day.
+     * A field about a member would be a new disclosure, so the fields are
+     * named here, all of them.
      */
     @Test
     fun `the streak payloads carry these fields and no other`() {
