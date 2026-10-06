@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+# moyi — the daily loop from a terminal.
+#
+# M3 is "the loop runs live for a week between two real people via the HTTP
+# API" (doc 15 §4), and there is no app yet. This is what those two people
+# type: sign in once, then `moyi write "..."` and `moyi today` each day, and
+# `moyi streak` when they want to know how it is going. Bruno
+# (tools/bruno) is the same requests for somebody who would sooner click.
+#
+#   MOYI_API=http://localhost:8080/api/v1   where the server is (the default)
+#   MOYI_PROFILE=ada                         whose session; one file per profile
+#   MOYI_INSECURE=1                          allow plain http to a host that is not this machine
+#
+#   moyi register <email> <display name>     then: moyi verify <token from the email>
+#   moyi login <email>
+#   moyi bond new <name> <timezone>          prints the invite code to send your partner
+#   moyi bond join <code>
+#   moyi bond use <bondId>                   which bond the commands below mean
+#   moyi write "<text>"                      or: moyi write -   (the text from stdin)
+#   moyi today
+#   moyi edit <entryId> "<text>"             until your partner has written
+#   moyi delete <entryId>
+#   moyi streak
+#   moyi whoami
+#
+# The session (two tokens and the bond in use) is kept in
+# ~/.config/moyi/<profile>.json, readable by you alone. The password is asked
+# for and never stored. An access token lasts fifteen minutes; when one has
+# lapsed the refresh token is used once, as the app will.
+#
+# Nothing secret is ever a command-line argument of a process this starts: on
+# a shared machine anyone can read those with `ps`. The password, the tokens
+# and what you write reach curl and python through files only you can read
+# and through pipes. (What you type after `moyi write` is in your own shell's
+# argument list and history; `moyi write -` reads it from stdin instead. An
+# invite code and a verification token are typed as arguments, and a code is
+# part of the URL curl is given: both are single-use.)
+#
+# It prints what the server sent. It decides nothing: every rule is the
+# server's, and this script is not a second copy of any of them.
+set -euo pipefail
+
+API="${MOYI_API:-http://localhost:8080/api/v1}"
+PROFILE="${MOYI_PROFILE:-default}"
+DIR="${XDG_CONFIG_HOME:-$HOME/.config}/moyi"
+SESSION="$DIR/$PROFILE.json"
+
+die() { echo "moyi: $*" >&2; exit 1; }
+[[ "$PROFILE" =~ ^[A-Za-z0-9_-]+$ ]] || die "MOYI_PROFILE must be letters, digits, - or _"
+command -v curl >/dev/null || die "curl is required"
+command -v python3 >/dev/null || die "python3 is required"
+
+# The password and the tokens travel to MOYI_API. Over plain http anybody on
+# the path reads them, so that is for this machine only unless you say so.
+LOCAL='^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/|$)'
+if [[ ! "$API" =~ ^https://[^/[:space:]]+ ]] && [[ ! "$API" =~ $LOCAL ]]; then
+  [ "${MOYI_INSECURE:-}" = 1 ] && [[ "$API" =~ ^http://[^/[:space:]]+ ]] ||
+    die "MOYI_API must be https://… (or http://localhost). Set MOYI_INSECURE=1 to send your password over plain http."
+fi
+
+UUID='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+# These become part of a URL. Anything that is not what the server issues is refused here, not sent.
+need_uuid() { [[ "$2" =~ $UUID ]] || die "$1 is not an id: it should look like 019a0c1e-7b2a-7c3d-8e4f-5a6b7c8d9e0f"; }
+need_code() { [[ "$1" =~ ^[A-Za-z0-9_-]{4,64}$ ]] || die "that is not an invite code"; }
+
+# Request bodies and headers are written here: a directory only you can read, gone when this exits.
+TMP="$(umask 077; mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# session_get <key> — a value from the session file, or empty.
+session_get() {
+  [ -f "$SESSION" ] || return 0
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2]) or "")' "$SESSION" "$1"
+}
+
+# pairs <key> <value> … | python — hands values to python on stdin, NUL-separated. `printf` is the shell's own:
+# nothing here is an argument of a process.
+pairs() { printf '%s\0' "$@"; }
+
+# session_set <key> <value> … — merges pairs into the session file, mode 600.
+session_set() {
+  mkdir -p "$DIR"; chmod 700 "$DIR"
+  ( umask 077
+    pairs "$@" | python3 -c '
+import json, os, sys
+path = sys.argv[1]
+a = sys.stdin.buffer.read().decode().split("\0")[:-1]
+data = json.load(open(path)) if os.path.exists(path) else {}
+data.update(dict(zip(a[0::2], a[1::2])))
+tmp = path + ".tmp"
+with open(tmp, "w") as out:
+    json.dump(data, out)
+os.replace(tmp, path)' "$SESSION"
+  )
+  chmod 600 "$SESSION"
+}
+
+# json_of <key> <value> … — a JSON object of strings, every value escaped by a JSON library and not by this shell.
+json_of() {
+  pairs "$@" | python3 -c '
+import json, sys
+a = sys.stdin.buffer.read().decode().split("\0")[:-1]
+print(json.dumps(dict(zip(a[0::2], a[1::2]))))'
+}
+
+# with_json <object as JSON> <key> <value> … — the same, merged over an object that needs more than strings.
+with_json() {
+  local base="$1"; shift
+  pairs "$@" | python3 -c '
+import json, sys
+a = sys.stdin.buffer.read().decode().split("\0")[:-1]
+print(json.dumps({**json.loads(sys.argv[1]), **dict(zip(a[0::2], a[1::2]))}))' "$base"
+}
+
+# field <dotted.path> — reads JSON on stdin; prints the value or nothing.
+field() {
+  python3 -c '
+import json, sys
+node = json.load(sys.stdin)
+for part in sys.argv[1].split("."):
+    node = node.get(part) if isinstance(node, dict) else None
+print("" if node is None else node)' "$1"
+}
+
+# As the server sent it, indented; what two people wrote is shown as written, not as \u escapes.
+# A body that is not JSON is printed as it came.
+pretty() {
+  python3 -c '
+import json, sys
+raw = sys.stdin.read()
+try:
+    print(json.dumps(json.loads(raw), indent=4, ensure_ascii=False))
+except ValueError:
+    sys.stdout.write(raw)'
+}
+
+# call <method> <path> [json body] — leaves the status in STATUS and the body in BODY.
+# Sends the access token unless ANONYMOUS=1 (signing in, refreshing: a lapsed token there is only noise).
+call() {
+  local method="$1" path="$2" body="${3:-}" token=""
+  [ "${ANONYMOUS:-}" = 1 ] || token="$(session_get accessToken)"
+  # It becomes a header line. Anything that is not a token's alphabet is not sent.
+  [[ -z "$token" || "$token" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || die "the saved session is damaged: moyi login <email>"
+  rm -f "$TMP/out" "$TMP/body"
+  {
+    printf 'Accept: application/json\n'
+    [ -z "$token" ] || printf 'Authorization: Bearer %s\n' "$token"
+    [ -z "$body" ] || printf 'Content-Type: application/json\n'
+    # A write carries a key (doc 06 §1). A new one each time this sends: nothing here resends a write that may have landed.
+    if [ "$method" = POST ] && [[ "$path" == */entries ]]; then
+      printf 'Idempotency-Key: %s\n' "$(python3 -c 'import uuid; print(uuid.uuid4())')"
+    fi
+  } > "$TMP/headers"
+  local -a args=(--globoff -s -o "$TMP/out" -w '%{http_code}' -X "$method" -H "@$TMP/headers")
+  if [ -n "$body" ]; then printf '%s' "$body" > "$TMP/body"; args+=(--data-binary "@$TMP/body"); fi
+  STATUS="$(curl "${args[@]}" "$API$path")" || die "could not reach $API"
+  BODY="$(cat "$TMP/out" 2>/dev/null || true)"
+}
+
+# keep_tokens [key value …] — the two tokens out of BODY and into the session, with anything else given.
+keep_tokens() {
+  # With where they came from: a session is for one server, and its tokens are sent to no other.
+  session_set api "$API" accessToken "$(printf '%s' "$BODY" | field accessToken)" \
+              refreshToken "$(printf '%s' "$BODY" | field refreshToken)" "$@"
+}
+
+signed_in() {
+  [ -n "$(session_get accessToken)" ] || die "not signed in: moyi login <email>"
+  local home; home="$(session_get api)"
+  [ -z "$home" ] || [ "$home" = "$API" ] || die "this session is for $home, not $API: moyi login <email>, or use another MOYI_PROFILE"
+}
+
+# authed <method> <path> [body] — call, and once more after a refresh if the access token had lapsed.
+authed() {
+  signed_in
+  call "$@"
+  if [ "$STATUS" = 401 ] && refresh; then call "$@"; fi
+}
+
+refresh() {
+  local token; token="$(session_get refreshToken)"
+  [ -n "$token" ] || return 1
+  ANONYMOUS=1 call POST /auth/refresh "$(json_of refreshToken "$token")"
+  [ "$STATUS" = 200 ] || return 1
+  keep_tokens
+}
+
+# show [expected status …] — prints the body; fails with the server's own words on any other status.
+show() {
+  for ok in "$@"; do
+    if [ "$STATUS" = "$ok" ]; then [ -n "$BODY" ] && printf '%s\n' "$BODY" | pretty; return 0; fi
+  done
+  echo "moyi: the server answered $STATUS" >&2
+  printf '%s\n' "$BODY" | pretty >&2
+  exit 1
+}
+
+bond() {
+  local id; id="$(session_get bondId)"
+  [ -n "$id" ] || die "no bond in use: moyi bond new …, moyi bond join <code>, or moyi bond use <bondId>"
+  need_uuid "the bond in use" "$id"
+  printf '%s' "$id"
+}
+
+ask_password() { local p; IFS= read -r -s -p "password: " p; echo >&2; printf '%s' "$p"; }
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  register)
+    [ $# -eq 2 ] || die "usage: moyi register <email> <display name>"
+    password="$(ask_password)"
+    ANONYMOUS=1 call POST /auth/register \
+      "$(with_json '{"locale":"en","acceptedTermsVersion":"2026-09-01","over18":true}' email "$1" password "$password" displayName "$2")"
+    [ "$STATUS" = 201 ] || show 201
+    echo "Registered. Now: moyi verify <the token in the email>, then moyi login $1"
+    ;;
+  verify)
+    [ $# -eq 1 ] || die "usage: moyi verify <token>"
+    ANONYMOUS=1 call POST /auth/verify-email "$(json_of token "$1")"; show 200
+    echo "Verified."
+    ;;
+  login)
+    [ $# -eq 1 ] || die "usage: moyi login <email>"
+    password="$(ask_password)"
+    ANONYMOUS=1 call POST /auth/login \
+      "$(with_json '{"device":{"platform":"ANDROID","appVersion":"moyi-cli","osVersion":"cli"}}' email "$1" password "$password")"
+    # A session that was there stays as it was until this one has succeeded.
+    [ "$STATUS" = 200 ] || show 200
+    keep_tokens email "$1"
+    echo "Signed in as $1 (profile $PROFILE)."
+    ;;
+  whoami)
+    authed GET /me; show 200
+    echo "bond in use: $(session_get bondId)"
+    ;;
+  bond)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      new)
+        [ $# -eq 2 ] || die "usage: moyi bond new <name> <timezone, e.g. Africa/Lagos>"
+        authed POST /bonds "$(json_of name "$1" type COUPLE anchorTimezone "$2")"
+        [ "$STATUS" = 201 ] || show 201
+        session_set bondId "$(printf '%s' "$BODY" | field id)"
+        echo "Bond created and in use. Send your partner this code: $(printf '%s' "$BODY" | field invite.code)"
+        ;;
+      join)
+        [ $# -eq 1 ] || die "usage: moyi bond join <code>"
+        need_code "$1"
+        authed POST "/invites/$1/accept"
+        [ "$STATUS" = 200 ] || show 200
+        session_set bondId "$(printf '%s' "$BODY" | field id)"
+        echo "Joined. This bond is now in use."
+        ;;
+      use)
+        [ $# -eq 1 ] || die "usage: moyi bond use <bondId>"
+        need_uuid "$1" "$1"
+        session_set bondId "$1"; echo "Using bond $1."
+        ;;
+      list|"") authed GET /bonds; show 200 ;;
+      *) die "unknown: moyi bond $sub" ;;
+    esac
+    ;;
+  write)
+    [ $# -eq 1 ] || die 'usage: moyi write "<text>"   or: moyi write -   (the text from stdin)'
+    signed_in; BOND="$(bond)"
+    if [ "$1" = - ]; then text="$(cat)"; else text="$1"; fi
+    authed POST "/bonds/$BOND/entries" "$(json_of text "$text")"; show 201
+    ;;
+  today)  signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/today";  show 200 ;;
+  streak) signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/streak"; show 200 ;;
+  edit)
+    [ $# -eq 2 ] || die 'usage: moyi edit <entryId> "<text>"'
+    need_uuid "$1" "$1"
+    authed PATCH "/entries/$1" "$(json_of text "$2")"; show 200
+    ;;
+  delete)
+    [ $# -eq 1 ] || die "usage: moyi delete <entryId>"
+    need_uuid "$1" "$1"
+    authed DELETE "/entries/$1"; show 204
+    echo "Deleted."
+    ;;
+  help|-h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command: $cmd (try: moyi help)" ;;
+esac

@@ -1,0 +1,34 @@
+meta {
+  name: Write today's entry
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{api}}/bonds/{{bondId}}/entries
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "text": "Thank you for making the tea before I asked."
+  }
+}
+
+script:pre-request {
+  // A new key on every send: a retry of one send is then the same write (doc 06 section 1).
+  req.setHeader("Idempotency-Key", require("uuid").v4());
+}
+
+script:post-response {
+  bru.setVar("entryId", res.body.id);
+}
+
+docs {
+  One entry a day each. A second is 409. The Idempotency-Key is made new on every send by the pre-request script; to try a replay, replace it there with a fixed UUID and send twice.
+}

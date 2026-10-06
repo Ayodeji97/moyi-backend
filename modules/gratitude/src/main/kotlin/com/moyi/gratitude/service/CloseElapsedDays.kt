@@ -38,6 +38,7 @@ internal class CloseElapsedDays(
     private val candidates: CloseCandidates,
     private val closeDay: CloseDay,
     private val missingDays: CreateMissingDays,
+    private val streaks: EvaluateStreaks,
 ) : DayCloser {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -64,12 +65,18 @@ internal class CloseElapsedDays(
             }
             page = candidates.after(previous, endedAsOf, PAGE)
         }
+        // Step 3 (spec §6.4): once this run's days are written and closed.
+        // It finds its own work — any bond with a settled day not yet
+        // evaluated — so a bond this run did not touch, but an earlier run
+        // left half done, is picked up too.
+        val evaluated = streaks.evaluate()
         return CloseResult(
             created = created.days,
             closed = tally.closed,
             revealed = tally.revealed,
-            failed = tally.failed + created.failed,
-            bondsChanged = tally.bonds + created.bonds,
+            evaluated = evaluated.days,
+            failed = tally.failed + created.failed + evaluated.failed,
+            bondsChanged = tally.bonds + created.bonds + evaluated.bonds,
             backlog = page.isNotEmpty() || created.backlog,
         )
     }

@@ -1922,6 +1922,82 @@
         "tags" : [ "bond-member-settings-controller" ]
       }
     },
+    "/api/v1/bonds/{bondId}/streak" : {
+      "get" : {
+        "operationId" : "streak",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StreakResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "streak-controller" ]
+      }
+    },
     "/api/v1/bonds/{bondId}/timezone" : {
       "delete" : {
         "operationId" : "cancelBondTimezoneChange",
@@ -3498,6 +3574,57 @@
           }
         }
       },
+      "StreakDayResponse" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "COMPLETE", "FROZEN", "MISSED", "OPEN" ]
+          }
+        }
+      },
+      "StreakResponse" : {
+        "type" : "object",
+        "properties" : {
+          "current" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "days" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/StreakDayResponse"
+            }
+          },
+          "freezeProgress" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "freezesAvailable" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "lastCompleteDate" : {
+            "type" : [ "string", "null" ],
+            "format" : "date"
+          },
+          "longest" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "strictMode" : {
+            "type" : "boolean"
+          },
+          "totalCompleteDays" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }
+      },
       "SubmitEntryRequest" : {
         "type" : "object",
         "properties" : {
@@ -3556,6 +3683,29 @@
             }, {
               "type" : "null"
             } ]
+          },
+          "streak" : {
+            "$ref" : "#/components/schemas/TodayStreakResponse"
+          }
+        }
+      },
+      "TodayStreakResponse" : {
+        "type" : "object",
+        "properties" : {
+          "current" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "freezesAvailable" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "longest" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "strictMode" : {
+            "type" : "boolean"
           }
         }
       },

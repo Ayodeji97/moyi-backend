@@ -53,6 +53,7 @@ internal class RecordingCloser : DayCloser {
     }
 
     companion object {
-        val NOTHING = CloseResult(created = 0, closed = 0, revealed = 0, failed = 0, bondsChanged = emptySet(), backlog = false)
+        val NOTHING =
+            CloseResult(created = 0, closed = 0, revealed = 0, evaluated = 0, failed = 0, bondsChanged = emptySet(), backlog = false)
     }
 }

@@ -1,0 +1,15 @@
+meta {
+  name: List bonds
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{api}}/bonds
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}

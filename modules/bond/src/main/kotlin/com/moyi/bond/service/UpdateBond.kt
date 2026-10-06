@@ -3,11 +3,14 @@ package com.moyi.bond.service
 import com.moyi.bond.domain.BondSettings
 import com.moyi.bond.domain.Membership
 import com.moyi.bond.infra.database.BondStore
+import com.moyi.bond.infra.database.StrictModeChanges
 import com.moyi.common.web.IfMatch
 import com.moyi.common.web.PreconditionFailedException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
+import java.time.temporal.ChronoUnit
 
 /**
  * `PATCH /bonds/{bondId}` (doc 06 §1 and §3.3, ADR-0029).
@@ -43,6 +46,8 @@ import org.springframework.transaction.annotation.Transactional
 internal class UpdateBond(
     private val bonds: BondStore,
     private val views: BondViews,
+    private val strictModeChanges: StrictModeChanges,
+    private val clock: Clock,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -66,7 +71,14 @@ internal class UpdateBond(
         if (!bond.isOpen) throw BondArchivedException()
         if (!ifMatch.matches(views.of(bond, membership.userId).entityTag())) throw PreconditionFailedException()
 
-        bonds.update(bond.update(settings))
+        val updated = bond.update(settings)
+        bonds.update(updated)
+        // The streak judges a day by the Strict mode it ended under (FR-073),
+        // and judges it after the fact: so a real change is written down with
+        // its time, under the bond's lock, in this transaction.
+        if (updated.strictMode != bond.strictMode) {
+            strictModeChanges.record(bond.id, clock.instant().truncatedTo(ChronoUnit.MICROS), updated.strictMode)
+        }
         log.info("Bond {} settings updated", membership.bondId.value)
         // Re-read, so the `ETag` carries the version the row now has rather than
         // the one this object was loaded with. Returning the stale one would

@@ -11,10 +11,12 @@ import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.BondStatus
 import com.moyi.bond.domain.DayBounds
 import com.moyi.bond.domain.Membership
+import com.moyi.bond.domain.StrictModeHistory
 import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.BondClosingStore
 import com.moyi.bond.infra.database.BondStore
+import com.moyi.bond.infra.database.StrictModeChanges
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -45,6 +47,7 @@ internal class BondAccessAdapter(
     private val bonds: BondStore,
     private val anchorIntervals: AnchorIntervalStore,
     private val closing: BondClosingStore,
+    private val strictModeChanges: StrictModeChanges,
 ) : BondAccess {
     @Transactional(readOnly = true)
     override fun membershipOf(
@@ -83,7 +86,17 @@ internal class BondAccessAdapter(
     }
 
     @Transactional(readOnly = true)
-    override fun closingViewOf(bondId: UUID): BondClosingView? {
+    override fun closingViewOf(bondId: UUID): BondClosingView? = closingView(bondId)
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun lockClosingViewOf(bondId: UUID): BondClosingView? {
+        val id = BondId(bondId)
+        bonds.lockBond(id)
+        return closingView(bondId)
+    }
+
+    /** A raw id, like its two callers: there is no membership here to take, which is the point of them. */
+    private fun closingView(bondId: UUID): BondClosingView? {
         val id = BondId(bondId)
         return closing.find(id)?.let { bond ->
             BondClosingView(
@@ -93,21 +106,7 @@ internal class BondAccessAdapter(
                 // more writes from here, which is what the closer means by ended.
                 endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
                 revealTimeLocal = bond.revealTimeLocal,
-                anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
-            )
-        }
-    }
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    override fun lockClosingViewOf(bondId: UUID): BondClosingView? {
-        val id = BondId(bondId)
-        bonds.lockBond(id)
-        return closing.find(id)?.let { bond ->
-            BondClosingView(
-                bondId = bondId,
-                activeSince = activeSinceOf(bond),
-                endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
-                revealTimeLocal = bond.revealTimeLocal,
+                strictModeBeforeFn = StrictModeHistory(bond.strictMode, strictModeChanges.of(id))::before,
                 anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
             )
         }

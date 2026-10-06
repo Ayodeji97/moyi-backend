@@ -29,6 +29,8 @@ internal data class TodayView(
     val status: BondDayStatus,
     val myEntry: EntryReading?,
     val partnerEntry: EntryReading?,
+    /** The bond's streak, with today in it when today is complete ([GetStreak]). */
+    val streak: StreakView,
 )
 
 /**
@@ -93,6 +95,7 @@ internal class GetToday(
     private val days: BondDayStore,
     private val entries: EntryStore,
     private val clock: Clock,
+    private val streak: GetStreak,
 ) {
     @Transactional(readOnly = true)
     fun today(membership: BondMembership): TodayView {
@@ -106,7 +109,8 @@ internal class GetToday(
 
         if (day == null) {
             val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
-            return TodayView(date = date, status = status, myEntry = null, partnerEntry = null)
+            val unwritten = streak.view(membership, date, todayComplete = false)
+            return TodayView(date, status, myEntry = null, partnerEntry = null, streak = unwritten)
         }
 
         val reader = membership.asReader()
@@ -119,6 +123,7 @@ internal class GetToday(
             status = day.status,
             myEntry = entryList.firstOrNull { it.authorMemberId == membership.memberId }?.readBy(reader),
             partnerEntry = entryList.firstOrNull { it.authorMemberId != membership.memberId }?.readBy(reader),
+            streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),
         )
     }
 }

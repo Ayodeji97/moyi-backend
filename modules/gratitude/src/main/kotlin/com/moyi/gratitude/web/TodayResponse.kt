@@ -38,12 +38,11 @@ import java.time.LocalDate
  * full [EntryResponse] instead — the failure the gate's own test is written
  * to catch.
  *
- * **`streak` and `prompt` are absent, not `null` placeholders.** They arrive
- * in C4 and C6 respectively (doc 06 §3.3's own promise for `BondResponse`
- * makes the same call). A field that does not exist yet is not part of this
- * contract; a client reading this response today learns nothing about
- * either by their absence, and a later slice adding them is additive, not a
- * breaking change.
+ * **`prompt` is absent, not a `null` placeholder.** It arrives in C6 (doc 06
+ * §3.3's own promise for `BondResponse` makes the same call). A field that
+ * does not exist yet is not part of this contract; a client reading this
+ * response today learns nothing by its absence, and a later slice adding it
+ * is additive, not a breaking change. `streak` arrived that way, in C4.
  *
  * **No `partner` field.** The plan's own shape for this response names one
  * alongside `bondDay`, `myEntry` and `partnerEntry`, and it is left out of
@@ -65,6 +64,8 @@ internal data class TodayResponse(
     val bondDay: BondDayResponse,
     val myEntry: EntryResponse?,
     val partnerEntry: PartnerEntryResponse?,
+    /** Doc 06 §3.4. About the bond, never about either member: see [StreakResponse]. */
+    val streak: TodayStreakResponse,
 ) {
     companion object {
         fun from(view: TodayView): TodayResponse =
@@ -72,6 +73,7 @@ internal data class TodayResponse(
                 bondDay = BondDayResponse(date = view.date, status = view.status),
                 myEntry = view.myEntry?.let { EntryResponse.of(it, view.date) },
                 partnerEntry = view.partnerEntry?.let { PartnerEntryResponse.of(it, view.date) },
+                streak = TodayStreakResponse.from(view.streak),
             )
     }
 }

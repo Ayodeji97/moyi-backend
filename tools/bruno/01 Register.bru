@@ -1,0 +1,27 @@
+meta {
+  name: Register
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{api}}/auth/register
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "{{email}}",
+    "password": "{{password}}",
+    "displayName": "{{displayName}}",
+    "locale": "en",
+    "acceptedTermsVersion": "2026-09-01",
+    "over18": true
+  }
+}
+
+docs {
+  The server emails a verification link. Locally nothing is sent: the link is in the application log.
+  Put its token in the environment as `verificationToken`, then run Verify.
+}

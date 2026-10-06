@@ -189,8 +189,18 @@ class BondClosingView internal constructor(
     val endedAt: Instant?,
     /** The bond's **current** reveal time (FR-062) — what a `PENDING_REVEAL` day is waiting for. */
     val revealTimeLocal: LocalTime?,
+    private val strictModeBeforeFn: (Instant) -> Boolean,
     val anchorTimeline: BondAnchorTimeline,
 ) {
+    /**
+     * Whether the bond was in Strict mode up to [instant], not including it
+     * (FR-073) — asked with the instant a day ended, which gives the setting
+     * that day ended under. **There is no "Strict mode now" here, on
+     * purpose:** the closer judges days that are already over, and the
+     * setting of the moment is the wrong one to judge them by.
+     */
+    fun strictModeBefore(instant: Instant): Boolean = strictModeBeforeFn(instant)
+
     override fun toString(): String = "BondClosingView(bondId=$bondId)"
 }
 

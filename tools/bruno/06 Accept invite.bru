@@ -1,0 +1,23 @@
+meta {
+  name: Accept invite
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{api}}/invites/{{inviteCode}}/accept
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+script:post-response {
+  bru.setVar("bondId", res.body.id);
+}
+
+docs {
+  The partner's request. Set `inviteCode` in the environment to the code you were given.
+}

@@ -178,7 +178,9 @@ architecture rule lists the two classes that may name them.
 
 ## Owed
 
-**C4, streaks.** Evaluate the streak for `CloseResult.bondsChanged` (spec §6.4 step 3).
+**C4, streaks.** *Discharged 2026-10-05, ADR-0034 decisions 2 and 3 — with one change: the
+bonds to evaluate are read from the days, not taken from `bondsChanged`.* Evaluate the
+streak for `CloseResult.bondsChanged` (spec §6.4 step 3).
 The `FROZEN` row for a skipped date exists from the handoff on. `EMPTY` days written
 through a cancelled deletion (question 2 below) will read as missed days.
 
