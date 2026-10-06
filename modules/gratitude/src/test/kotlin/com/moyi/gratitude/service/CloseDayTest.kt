@@ -122,6 +122,25 @@ internal class CloseDayTest(
     }
 
     @Test
+    fun `a lone entry on a bond that ended before the day did is never revealed, and the day still closes SOLO`() {
+        val bond = pairedBond()
+        submit(ada, bond, """{"text":"written for a bond that was still hers"}""").status shouldBe 201
+        // Bea leaves at noon, well before the day ends.
+        clock.set(NOW.plusSeconds(7_200))
+        mockMvc
+            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(bea).token}") }
+            .andReturn()
+            .response.status shouldBe 204
+
+        closeDay.settle(dayOf(bond), END) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "SOLO"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 0
+        jdbc.queryForObject("SELECT status FROM entries", String::class.java) shouldBe "SUBMITTED"
+        events("DayClosed") shouldBe 1
+    }
+
+    @Test
     fun `a day both wrote on, revealed while it was open, gains closedAt and one DayClosed`() {
         val bond = pairedBond()
         submit(ada, bond, """{"text":"hers"}""").status shouldBe 201

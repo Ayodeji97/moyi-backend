@@ -195,12 +195,16 @@ changes serialize with close. The one-minute margin absorbs ordinary clock skew.
 
 ## Questions that are the owner's
 
-1. **The closer reveals a lone entry on a bond that ended earlier that day.** Ada writes at
-   ten; Bea leaves, or blocks her, at noon; at midnight the day closes `SOLO` and Ada's
-   entry is revealed, as spec §6.4 asks ("`ARCHIVED` … cannot strand an earlier partial …
-   day"). Ada cannot delete it: ADR-0032's first question, still open, is that an ended
-   bond refuses the author's own delete. No route reads a past day yet, so nothing is shown
-   to anyone in C3 — but the permission is stored, and C5's archive will honour it.
+1. **The closer does not reveal a lone entry on a bond that ended before the day did.**
+   *Ruled by the owner on 2026-10-06, replacing the first reading of spec §6.4.* Ada writes
+   at ten; Bea leaves, or blocks her, at noon; at midnight the day closes `SOLO` and Ada's
+   entry stays unrevealed. The day still counts as written (`SOLO`); only the unlock is
+   skipped, because the partner is gone and the author wrote for a bond that was still hers.
+   "Ended" is the closer's view (`BondClosingView.endedAt`: archived, or counting down to
+   deletion), compared with the day's own end. A day that ended before the bond did still
+   reveals. C5's archive must read a closed `SOLO` day with no `revealedAt` as private to its
+   author. This does not change ADR-0032's first question (an author cannot delete on an
+   ended bond), which stays open.
 2. **A deletion that is called off leaves no record that it was ever counting down** (and
    one called off after a member has left archives the bond at the cancel, with the same
    effect).
