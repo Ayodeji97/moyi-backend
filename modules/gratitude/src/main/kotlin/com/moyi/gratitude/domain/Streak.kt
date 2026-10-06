@@ -83,14 +83,21 @@ internal enum class DayOutcome {
 }
 
 /**
- * What one square of a bond's calendar says. **Fewer things than a day's
- * status, on purpose.** The design system's rule for this screen is that a
- * solo day is not drawn: "a month-long ledger of days when exactly one
- * person wrote is a durable inference surface: you know your own history, so
- * every Solo cell resolves to a partner miss" (`states.md` §7). `GET /today`
- * shares today's status because the product needs it today; a year of them
- * is a different thing. So a day one wrote on and a day nobody wrote on are
- * the same square, and so is today until it is complete.
+ * What one square of a bond's calendar says: what the day was *to the
+ * streak*, which is not always its status. A freeze-covered day and a
+ * stepped-over date are both a rest day; a day that moved nothing has no
+ * square at all.
+ *
+ * **A day only one of the two wrote on has its own square, [SOLO].** That is
+ * the owner's ruling of 2026-10-06 (ADR-0034, as amended), and it reverses
+ * the first build, which followed `states.md` §7's "Solo is not rendered on
+ * the calendar" and drew such a day as [MISSED]. The cost was weighed and
+ * taken: a member knows which days they wrote, so a solo square on a day
+ * they did not is the other's entry, and on a day they did is the other's
+ * miss. `GET /today` already says as much about each day while it is today.
+ *
+ * Today, until it is complete, is still only [OPEN] here: who has written so
+ * far today is `GET /today`'s to say.
  */
 internal enum class StreakCell {
     /** Both wrote. */
@@ -99,7 +106,10 @@ internal enum class StreakCell {
     /** A rest day: a freeze covered it, or a zone change stepped over the date. Counts toward the run. */
     FROZEN,
 
-    /** The run did not include this day. Whether one wrote or neither is not said. */
+    /** One of the two wrote, and the day ended. Not in the run. */
+    SOLO,
+
+    /** Nobody wrote. Not in the run. */
     MISSED,
 
     /** Today, not complete yet. Whether anybody has written is `GET /today`'s to say, not this calendar's. */
@@ -127,8 +137,15 @@ internal enum class StreakCell {
                 isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN
                 outcome == DayOutcome.COMPLETE -> COMPLETE
                 outcome == DayOutcome.FROZEN_BY_SKIP -> FROZEN
-                outcome == DayOutcome.MISSED -> if (status == BondDayStatus.FROZEN) FROZEN else MISSED
+                outcome == DayOutcome.MISSED -> missed(status)
                 else -> null
+            }
+
+        private fun missed(status: BondDayStatus): StreakCell =
+            when (status) {
+                BondDayStatus.FROZEN -> FROZEN
+                BondDayStatus.SOLO -> SOLO
+                else -> MISSED
             }
     }
 }

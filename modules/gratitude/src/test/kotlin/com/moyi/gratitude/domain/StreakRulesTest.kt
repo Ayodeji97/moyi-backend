@@ -120,7 +120,7 @@ internal class StreakRulesTest {
     }
 
     @Test
-    fun `a calendar square says complete, rest, missed or open - and never that one of two wrote`() {
+    fun `a calendar square says what the day was to the streak`() {
         fun cell(
             status: BondDayStatus,
             outcome: DayOutcome?,
@@ -128,8 +128,8 @@ internal class StreakRulesTest {
         ) = StreakCell.of(status, outcome, today)
 
         cell(BondDayStatus.REVEALED, DayOutcome.COMPLETE) shouldBe StreakCell.COMPLETE
-        // The same square, whether one wrote or nobody did.
-        cell(BondDayStatus.SOLO, DayOutcome.MISSED) shouldBe StreakCell.MISSED
+        // A day one of the two wrote on is drawn as that (the owner's ruling, ADR-0034).
+        cell(BondDayStatus.SOLO, DayOutcome.MISSED) shouldBe StreakCell.SOLO
         cell(BondDayStatus.EMPTY, DayOutcome.MISSED) shouldBe StreakCell.MISSED
         // A freeze covered it, or a zone change stepped over it.
         cell(BondDayStatus.FROZEN, DayOutcome.MISSED) shouldBe StreakCell.FROZEN
@@ -137,10 +137,12 @@ internal class StreakRulesTest {
         // Days that moved nothing are not drawn.
         cell(BondDayStatus.SUSPENDED, DayOutcome.SUSPENDED) shouldBe null
         cell(BondDayStatus.SOLO, DayOutcome.AFTER_THE_END) shouldBe null
+        // A day the bond was refusing writes for, whoever wrote on what was left of it.
+        cell(BondDayStatus.SOLO, DayOutcome.SUSPENDED) shouldBe null
         // Nor is a day still to be evaluated, unless it is today.
         cell(BondDayStatus.SOLO, null) shouldBe null
         cell(BondDayStatus.REVEALED, null) shouldBe null
-        // Today: open until both have written, whoever has.
+        // Today: open until both have written, whoever has. That much is still `GET /today`'s to say.
         for (status in listOf(BondDayStatus.OPEN, BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL, BondDayStatus.SUSPENDED)) {
             cell(status, null, today = true) shouldBe StreakCell.OPEN
         }
