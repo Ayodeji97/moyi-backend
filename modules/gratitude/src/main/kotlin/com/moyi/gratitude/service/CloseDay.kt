@@ -47,7 +47,8 @@ import java.time.temporal.ChronoUnit
  *    changed and stop.
  * 5. Close it ([BondDay.close]). A day both wrote on that was still waiting
  *    for its time is revealed first, as a reveal; on a `SOLO` day the lone
- *    entry is revealed (FR-063), read fresh under the lock.
+ *    entry is revealed (FR-063), read fresh under the lock — unless the bond
+ *    stopped taking writes before the day ended (ADR-0033 decision 9).
  */
 @Service
 // Seven collaborators: what settling one day touches — the bond's view, the day, its

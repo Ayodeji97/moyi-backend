@@ -638,7 +638,9 @@ unsettled days**, regardless of the bond's current status or current requested z
    Set `closedAt` idempotently, including on elapsed `SUSPENDED` rows without revealing
    previously private suspended entries. Already revealed content remains readable.
    Current `ARCHIVED` or `PENDING_DELETION` status cannot strand an earlier partial or
-   pending-reveal day. The timed-reveal sweep also scans existing rows in their snapshot
+   pending-reveal day. *(Amended 2026-10-06, the owner's ruling, ADR-0033 decision 9: a
+   partial day is still settled `SOLO`, but its lone entry is not revealed when the bond
+   stopped taking writes before the day ended. Its author alone reads it.)* The timed-reveal sweep also scans existing rows in their snapshot
    zone independently of the current bond status.
 3. **Evaluate the streak** for changed bonds (§6.5), from C4 onward.
 
@@ -683,8 +685,9 @@ separate alert if it stays flat for more than 25 hours.
   one bond failing stops nothing else (decision 10).
 - **The two counters** (decision 12): `gratitude_bonds_closed_total` counts *days* settled.
   A third meter counts days that failed. Neither is exported yet: that is the deploy slice's.
-- *Open with the owner:* the job reveals a lone entry on a bond that ended earlier that
-  day, as step 2 asks, and its author can no longer delete it (ADR-0033, question 1).
+- *Ruled by the owner, 2026-10-06 (ADR-0033, question 1 and decision 9 as amended):* the
+  job does **not** reveal a lone entry on a bond that ended before the day did. The day
+  closes `SOLO`; the entry stays its author's alone.
 
 **Amended 2026-10-05 — step 3 as slice C4 built it (ADR-0034 decisions 2, 3, 9).** "For
 changed Bonds" is not how the bonds are chosen: every bond with a day that is closed and

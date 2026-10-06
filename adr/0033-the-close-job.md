@@ -52,8 +52,8 @@ Inside, in this order, and the order is the decision:
    second sweep of spec §6.3: a `PENDING_REVEAL` day whose time has come is revealed here
    whether or not it has ended.
 4. Only now ask whether the day has ended.
-5. Close it: `OPEN` to `EMPTY`, `PARTIAL` to `SOLO` with the lone live entry revealed,
-   `PENDING_REVEAL` to `REVEALED`. A day revealed while it was open, and a `SUSPENDED` day,
+5. Close it: `OPEN` to `EMPTY`, `PARTIAL` to `SOLO` with the lone live entry revealed
+   (unless the bond ended first: decision 9, as amended), `PENDING_REVEAL` to `REVEALED`. A day revealed while it was open, and a `SUSPENDED` day,
    gain `closedAt` and nothing else.
 
 **4. A stored end finds every day that has ended, and decides none of them.** The sweep's
@@ -122,6 +122,14 @@ A consumer reads the day to tell `SOLO` from `EMPTY` from `FROZEN`. A `SOLO` day
 `DayRevealed` and its `revealedAt` stays unset: that column records two people reading
 together, which did not happen; the lone *entry* is revealed (FR-063). A `SUSPENDED` day is
 excluded from evaluation, so closing it settles nothing anybody is waiting to hear about.
+
+*Amended 2026-10-06, the owner's ruling on question 1.* The lone entry is **not** revealed
+when the bond stopped taking writes before the day ended (`BondClosingView.endedAt` earlier
+than the day's `endsAt`). The day still closes `SOLO` and still gets its `DayClosed`; the
+entry keeps no `revealedAt`, and only its author reads it. A day that ended before the bond
+did reveals as before. This supersedes spec §6.4 step 2's "`ARCHIVED` or `PENDING_DELETION`
+… cannot strand an earlier partial … day" for the unlock, and only for the unlock: the day
+is still settled.
 
 **10. One day failing does not stop the rest, and neither does one bond.** A day that
 throws is counted, logged by id and exception class — never the message — and left for the
@@ -205,6 +213,13 @@ changes serialize with close. The one-minute margin absorbs ordinary clock skew.
    reveals. C5's archive must read a closed `SOLO` day with no `revealedAt` as private to its
    author. This does not change ADR-0032's first question (an author cannot delete on an
    ended bond), which stays open.
+
+   *Still the owner's, and wider than the ruling:* "ended" includes a deletion that is
+   counting down. A lone entry on a day that ends inside a countdown is not revealed, and
+   if the deletion is then called off the couple are still together and that entry stays
+   readable by its author alone, with nothing that releases it. Private is the safe side;
+   narrowing the check to an archived bond needs the closer's view to say which of the two
+   it is. No test pins the countdown case either way.
 2. **A deletion that is called off leaves no record that it was ever counting down** (and
    one called off after a member has left archives the bond at the cancel, with the same
    effect).
