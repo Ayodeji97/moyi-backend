@@ -12,6 +12,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 import tools.jackson.databind.json.JsonMapper
@@ -23,7 +24,7 @@ import java.util.UUID
 internal class EventPublisherTest(
     @Autowired private val publisher: EventPublisher,
     @Autowired private val jdbc: JdbcTemplate,
-    @Autowired manager: PlatformTransactionManager,
+    @Autowired private val manager: PlatformTransactionManager,
 ) : PostgresIntegrationTest() {
     private val transactions = TransactionTemplate(manager)
 
@@ -86,6 +87,40 @@ internal class EventPublisherTest(
             it["attempts"] shouldBe 0
             it["last_error"] shouldBe null
         }
+    }
+
+    @Test
+    fun `a publisher in a transaction stricter than READ COMMITTED is refused, and writes nothing`() {
+        // Held back by a registering consumer, such a transaction resumes on the
+        // snapshot it already had, sees no new subscription, and commits an
+        // event nobody is owed (the review of this module proved it). So it may
+        // not publish at all.
+        val event = event()
+        subscribe("test.publisher.strict", event.eventType)
+        listOf(TransactionDefinition.ISOLATION_REPEATABLE_READ, TransactionDefinition.ISOLATION_SERIALIZABLE).forEach { level ->
+            val strict = TransactionTemplate(manager).apply { isolationLevel = level }
+            strict.executeWithoutResult {
+                shouldThrow<IllegalStateException> { publisher.publish(event) }.message shouldBe
+                    "An event may be published only in a READ COMMITTED transaction: at a stricter level a publisher " +
+                    "held back by a registering consumer would not see its subscription, and the event would never be delivered to it."
+                // Asked inside the transaction: the refusal itself wrote nothing; the rollback is not what removed it.
+                eventsFor(event) shouldBe 0
+                deliveriesTo("test.publisher.strict") shouldBe 0
+                // The refusal has also doomed the caller's transaction, as any exception out of a
+                // participating @Transactional does. Said here so the template ends it quietly.
+                it.isRollbackOnly shouldBe true
+                it.setRollbackOnly()
+            }
+        }
+        eventsFor(event) shouldBe 0
+
+        // The level every publisher here runs at, said out loud, and the default: both publish.
+        TransactionTemplate(manager)
+            .apply { isolationLevel = TransactionDefinition.ISOLATION_READ_COMMITTED }
+            .executeWithoutResult { publisher.publish(event) }
+        transactions.executeWithoutResult { publisher.publish(event) }
+        eventsFor(event) shouldBe 2
+        deliveriesTo("test.publisher.strict") shouldBe 2
     }
 
     private fun subscribe(

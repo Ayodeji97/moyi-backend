@@ -26,7 +26,12 @@ interface OutboxDispatcher {
         budget: Int,
     ): DispatchResult
 
-    /** Due and unprocessed, per consumer; and the age in seconds of the oldest such delivery. */
+    /**
+     * One [ConsumerBacklog] per registered consumer, as things stand at [now]:
+     * how many of its deliveries are due and unprocessed, how many are
+     * unprocessed after five failures or more, and the age of the oldest event
+     * it has not yet handled.
+     */
     fun backlog(now: Instant): List<ConsumerBacklog>
 }
 
@@ -43,8 +48,15 @@ data class DispatchResult(
 /**
  * One registered consumer's queue. [pending] is what is due and unprocessed;
  * [failing] is what is unprocessed after five failures or more, due or not,
- * and is the nearest thing here to a dead-letter queue; [oldestAgeSeconds] is
- * how long the longest-waiting due delivery has been due, zero when none is.
+ * and is the nearest thing here to a dead-letter queue.
+ *
+ * [oldestAgeSeconds] is the event's age, not the delivery's wait: the seconds
+ * between `now` and the `occurred_at` of the oldest event that has an
+ * unprocessed delivery for this consumer, **whether that delivery is due or
+ * not**, and zero when it has none. A delivery that keeps failing is due again
+ * only every fifteen minutes at most; measured from when it last fell due it
+ * would never look older than that, and an alert on "oldest event older than
+ * fifteen minutes" could never fire for the one case it most needs to.
  */
 data class ConsumerBacklog(
     val consumerId: String,
@@ -299,9 +311,10 @@ internal class JdbcOutboxDispatcher(
             SELECT c.consumer_id,
                    count(d.event_id) FILTER (WHERE d.next_attempt_at <= ?) AS pending,
                    count(d.event_id) FILTER (WHERE d.attempts >= $FAILING_FROM) AS failing,
-                   min(d.next_attempt_at) FILTER (WHERE d.next_attempt_at <= ?) AS oldest_due
+                   min(e.occurred_at) AS oldest_unhandled
             FROM outbox_consumers c
             LEFT JOIN outbox_deliveries d ON d.consumer_id = c.consumer_id AND d.processed_at IS NULL
+            LEFT JOIN outbox_events e ON e.id = d.event_id
             GROUP BY c.consumer_id
             ORDER BY c.consumer_id
             """.trimIndent(),
@@ -310,10 +323,11 @@ internal class JdbcOutboxDispatcher(
                     consumerId = row.getString("consumer_id"),
                     pending = row.getLong("pending"),
                     failing = row.getLong("failing"),
-                    oldestAgeSeconds = row.getTimestamp("oldest_due")?.let { Duration.between(it.toInstant(), at).seconds } ?: 0,
+                    // Never negative: an event stamped ahead of this clock has no age yet.
+                    oldestAgeSeconds =
+                        row.getTimestamp("oldest_unhandled")?.let { Duration.between(it.toInstant(), at).seconds.coerceAtLeast(0) } ?: 0,
                 )
             },
-            Timestamp.from(at),
             Timestamp.from(at),
         )
     }

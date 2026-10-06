@@ -432,7 +432,7 @@ internal class OutboxDispatcherTest(
     }
 
     @Test
-    fun `the backlog counts what is due and what keeps failing, per consumer, against the instant handed in`() {
+    fun `the backlog counts what is due and what keeps failing, per consumer, and its age is the oldest unhandled event's`() {
         val busy = TestConsumer()
         val idle = TestConsumer(id = FAILING)
         dispatcherFor(busy, idle)
@@ -442,22 +442,35 @@ internal class OutboxDispatcherTest(
         val done = publish(at = now.minusSeconds(500))
         jdbc.update("DELETE FROM outbox_deliveries WHERE consumer_id = ?", FAILING)
         jdbc.update("UPDATE outbox_deliveries SET processed_at = ?, attempts = 9 WHERE event_id = ?", Timestamp.from(now), done)
-        // Backing off, so not due; five failures, so failing. Four is not yet.
+        // The oldest has failed seven times and is waiting out its backoff: not
+        // due, so not pending, but it is still the event that has gone longest
+        // unhandled. Measured from when it next falls due, its age would never
+        // pass the backoff's cap, and an alert on age could never fire for it.
+        jdbc.update(
+            "UPDATE outbox_deliveries SET attempts = 7, next_attempt_at = ? WHERE event_id = ?",
+            Timestamp.from(now.plusSeconds(600)),
+            oldest,
+        )
+        // Five failures is failing; four is not yet.
         jdbc.update("UPDATE outbox_deliveries SET attempts = 5 WHERE event_id = ?", notDue)
         jdbc.update("UPDATE outbox_deliveries SET attempts = 4 WHERE event_id = ?", recent)
 
         wired.backlog(now) shouldContainExactly
             listOf(
-                ConsumerBacklog(CONSUMER, pending = 2, failing = 1, oldestAgeSeconds = 90),
+                ConsumerBacklog(CONSUMER, pending = 1, failing = 2, oldestAgeSeconds = 90),
                 // A consumer with nothing owed is reported, at zero: a gauge has to be able to come back down.
                 ConsumerBacklog(FAILING, pending = 0, failing = 0, oldestAgeSeconds = 0),
             )
         wired.backlog(now.plusSeconds(30).plusNanos(999)) shouldContainExactly
             listOf(
-                ConsumerBacklog(CONSUMER, pending = 3, failing = 1, oldestAgeSeconds = 120),
+                ConsumerBacklog(CONSUMER, pending = 2, failing = 2, oldestAgeSeconds = 120),
                 ConsumerBacklog(FAILING, pending = 0, failing = 0, oldestAgeSeconds = 0),
             )
-        delivery(oldest).attempts shouldBe 0
+
+        // Once the old ones are handled, the age is that of what is left: an
+        // event that has not happened yet by this clock is no age at all, not a negative one.
+        jdbc.update("UPDATE outbox_deliveries SET processed_at = ? WHERE event_id IN (?, ?)", Timestamp.from(now), oldest, recent)
+        wired.backlog(now).first() shouldBe ConsumerBacklog(CONSUMER, pending = 0, failing = 1, oldestAgeSeconds = 0)
     }
 
     @Test
@@ -507,7 +520,8 @@ internal class OutboxDispatcherTest(
     private fun registered(vararg consumers: EventConsumer): ConsumerRegistry =
         registryOf(*consumers).also { it.afterSingletonsInstantiated() }
 
-    private fun registryOf(vararg consumers: EventConsumer) = ConsumerRegistry(consumers.toList(), jdbc, manager, clock)
+    private fun registryOf(vararg consumers: EventConsumer) =
+        ConsumerRegistry(consumers.toList(), jdbc, manager, clock, RegistrationProperties())
 
     /** Publishes an event of [ofType] (this test's own unless said), due at [at], and answers its id. */
     private fun publish(

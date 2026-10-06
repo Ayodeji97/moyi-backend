@@ -1,10 +1,13 @@
 package com.moyi.common.events
 
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.SmartInitializingSingleton
+import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.sql.SQLException
 import java.sql.Timestamp
 import java.time.Clock
 import java.time.temporal.ChronoUnit
@@ -29,9 +32,16 @@ import java.time.temporal.ChronoUnit
  * holds back each one about to. Those it waited for are committed and so in
  * the backfill; those it held back read the subscriptions only after it has
  * committed. That second half rests on publishers running at `READ COMMITTED`,
- * where a statement sees what committed while the one before it waited; every
- * publisher here does. The mode also conflicts with itself, so two instances
- * starting together register one after the other.
+ * where a statement sees what committed while the one before it waited;
+ * [JdbcEventPublisher] refuses to publish at any other. The mode also conflicts
+ * with itself, so two instances starting together register one after the other.
+ *
+ * **Why the wait for that lock is bounded.** While registration waits, every
+ * new publisher waits behind it, so one session that published and never
+ * committed would hang this start-up and stop the instances already serving.
+ * After [RegistrationProperties.lockTimeout] registration gives up instead: the
+ * exception leaves [afterSingletonsInstantiated], the context does not start,
+ * and no instance ever runs with a consumer it has not registered.
  *
  * A context with no consumers touches nothing, so this bean costs the contexts
  * that only publish (or have no outbox tables at all) no statement.
@@ -42,6 +52,7 @@ internal class ConsumerRegistry(
     private val jdbc: JdbcTemplate,
     transactionManager: PlatformTransactionManager,
     private val clock: Clock,
+    private val properties: RegistrationProperties,
 ) : SmartInitializingSingleton {
     private val byId: Map<String, EventConsumer> =
         consumers
@@ -54,6 +65,7 @@ internal class ConsumerRegistry(
                 sameId.single()
             }
     private val transactions = TransactionTemplate(transactionManager)
+    private val log = LoggerFactory.getLogger(javaClass)
 
     /** The consumer registered in this process under [id]; none when another instance's build owns it. */
     fun consumer(id: String): EventConsumer? = byId[id]
@@ -61,22 +73,47 @@ internal class ConsumerRegistry(
     /** Every consumer of this process: the dispatcher claims deliveries for these, of the types they declare, and leaves the rest. */
     fun consumers(): Collection<EventConsumer> = byId.values
 
-    /** One transaction per consumer, so the lock is held for one consumer's backfill and no longer. */
+    /**
+     * One transaction per consumer, so the lock is held for one consumer's
+     * backfill and no longer. The line is logged once that transaction has
+     * committed, so it never reports a registration that was rolled back.
+     */
     override fun afterSingletonsInstantiated() {
-        byId.values.forEach { consumer -> transactions.executeWithoutResult { register(consumer) } }
+        byId.values.forEach { consumer ->
+            val registration =
+                try {
+                    transactions.execute { register(consumer) }
+                } catch (refused: DataAccessException) {
+                    throw if (refused.isLockTimeout()) notRegistered(consumer, refused) else refused
+                }
+            // Ids, type names and a count: an event carries nothing else that could be said here.
+            log.info(
+                "Event consumer registered: consumer={} subscribed={} backfilled={}",
+                consumer.id,
+                registration.subscribed,
+                registration.backfilled,
+            )
+        }
     }
 
     /**
      * Brings the stored subscriptions of [consumer] into line with what it
-     * declares. **The caller owns the transaction**: the lock taken first is
-     * held until that transaction ends, and is the whole of the guarantee.
-     * (Postgres refuses `LOCK TABLE` outside a transaction, so calling this
-     * without one fails rather than registering unguarded.)
+     * declares, and answers what was new. **The caller owns the transaction**:
+     * the lock taken here is held until that transaction ends, and is the
+     * whole of the guarantee. (Postgres refuses `LOCK TABLE` outside a
+     * transaction, so calling this without one fails rather than registering
+     * unguarded.)
+     *
+     * The bound on the wait is set with `set_config(…, true)`, which is
+     * `SET LOCAL` with a parameter: it lasts for this transaction and is gone
+     * from the session when it ends, however it ends, so a pooled connection
+     * goes back as it came.
      *
      * Separate from [afterSingletonsInstantiated] so a test can hold the
      * transaction open and watch a publisher wait.
      */
-    fun register(consumer: EventConsumer) {
+    fun register(consumer: EventConsumer): Registration {
+        jdbc.queryForObject("SELECT set_config('lock_timeout', ?, true)", String::class.java, "${properties.lockTimeout.toMillis()}ms")
         jdbc.execute("LOCK TABLE outbox_events IN SHARE ROW EXCLUSIVE MODE")
         // Truncated, because Postgres rounds: these are compared with what comes back.
         val now = Timestamp.from(clock.instant().truncatedTo(ChronoUnit.MICROS))
@@ -91,41 +128,72 @@ internal class ConsumerRegistry(
                 .queryForList("SELECT event_type FROM outbox_subscriptions WHERE consumer_id = ?", String::class.java, consumer.id)
                 .filterNotNull()
                 .toSet()
-        (consumer.eventTypes - stored).forEach { eventType -> subscribe(consumer, eventType, now) }
+        val declared = consumer.eventTypes
+        val added = (declared - stored).sorted()
+        val backfilled = added.sumOf { eventType -> subscribe(consumer, eventType, now) }
         // What it no longer declares stops being fanned out to it. Deliveries
         // already owed are kept: they were promised when their events were published.
-        (stored - consumer.eventTypes).forEach { eventType ->
+        (stored - declared).forEach { eventType ->
             jdbc.update("DELETE FROM outbox_subscriptions WHERE consumer_id = ? AND event_type = ?", consumer.id, eventType)
         }
+        return Registration(subscribed = added, backfilled = backfilled)
     }
+
+    /** What one registration added: the event types newly subscribed, and the deliveries written for events already published. */
+    data class Registration(
+        val subscribed: List<String>,
+        val backfilled: Int,
+    )
 
     /**
      * The backfill runs only here, with the subscription's insert, so a
      * restart cannot repeat it and [StartFrom] is asked exactly once per type.
-     * Backfilled deliveries are due at once.
+     * Backfilled deliveries are due at once. Answers how many were written.
      */
     private fun subscribe(
         consumer: EventConsumer,
         eventType: String,
         now: Timestamp,
-    ) {
+    ): Int {
         jdbc.update(
             "INSERT INTO outbox_subscriptions (consumer_id, event_type, subscribed_at) VALUES (?, ?, ?)",
             consumer.id,
             eventType,
             now,
         )
-        if (consumer.startFrom == StartFrom.BEGINNING) {
-            jdbc.update(
-                """
-                INSERT INTO outbox_deliveries (event_id, consumer_id, next_attempt_at)
-                SELECT id, ?, ? FROM outbox_events WHERE event_type = ?
-                ON CONFLICT DO NOTHING
-                """.trimIndent(),
-                consumer.id,
-                now,
-                eventType,
-            )
-        }
+        if (consumer.startFrom != StartFrom.BEGINNING) return 0
+        return jdbc.update(
+            """
+            INSERT INTO outbox_deliveries (event_id, consumer_id, next_attempt_at)
+            SELECT id, ?, ? FROM outbox_events WHERE event_type = ?
+            ON CONFLICT DO NOTHING
+            """.trimIndent(),
+            consumer.id,
+            now,
+            eventType,
+        )
+    }
+
+    /**
+     * The start-up failure, in words an operator can act on. The message
+     * carries the consumer's id and the configured bound; the driver's own
+     * exception rides along as the cause.
+     */
+    private fun notRegistered(
+        consumer: EventConsumer,
+        refused: DataAccessException,
+    ) = IllegalStateException(
+        "Event consumer '${consumer.id}' was not registered: the lock on outbox_events was not granted within " +
+            "${properties.lockTimeout}. A session that has published an event and not committed is holding it. " +
+            "The application will not start with a consumer it has not registered.",
+        refused,
+    )
+
+    private fun DataAccessException.isLockTimeout(): Boolean =
+        generateSequence<Throwable>(this) { it.cause }.filterIsInstance<SQLException>().any { it.sqlState == LOCK_NOT_AVAILABLE }
+
+    private companion object {
+        /** Postgres' SQLSTATE for a lock that `lock_timeout` gave up on. */
+        const val LOCK_NOT_AVAILABLE = "55P03"
     }
 }
