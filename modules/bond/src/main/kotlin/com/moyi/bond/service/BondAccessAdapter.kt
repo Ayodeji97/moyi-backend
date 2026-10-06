@@ -86,7 +86,17 @@ internal class BondAccessAdapter(
     }
 
     @Transactional(readOnly = true)
-    override fun closingViewOf(bondId: UUID): BondClosingView? {
+    override fun closingViewOf(bondId: UUID): BondClosingView? = closingView(bondId)
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun lockClosingViewOf(bondId: UUID): BondClosingView? {
+        val id = BondId(bondId)
+        bonds.lockBond(id)
+        return closingView(bondId)
+    }
+
+    /** A raw id, like its two callers: there is no membership here to take, which is the point of them. */
+    private fun closingView(bondId: UUID): BondClosingView? {
         val id = BondId(bondId)
         return closing.find(id)?.let { bond ->
             BondClosingView(
@@ -97,21 +107,6 @@ internal class BondAccessAdapter(
                 endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
                 revealTimeLocal = bond.revealTimeLocal,
                 strictModeBeforeFn = StrictModeHistory(bond.strictMode, strictModeChanges.of(id))::before,
-                anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
-            )
-        }
-    }
-
-    @Transactional(propagation = Propagation.MANDATORY)
-    override fun lockClosingViewOf(bondId: UUID): BondClosingView? {
-        val id = BondId(bondId)
-        bonds.lockBond(id)
-        return closing.find(id)?.let { bond ->
-            BondClosingView(
-                bondId = bondId,
-                activeSince = activeSinceOf(bond),
-                endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
-                revealTimeLocal = bond.revealTimeLocal,
                 anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
             )
         }

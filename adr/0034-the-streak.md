@@ -111,7 +111,10 @@ is behind, today is *not* added to a run that yesterday may have ended.
 
 **9. The streak's row is its mutex.** Evaluation and `recalculate` take the bond's
 `streak_states` row `FOR UPDATE` (inserted if absent) and hold it for the bond's
-transaction. Still no bond lock (ADR-0031 decision 18). Each day's record also refuses a
+transaction. **It takes the bond's lock first**, as the closer does since ADR-0033 was
+amended (`lockClosingViewOf`): the order is bond, then streak, then the days it writes, and
+a change of Strict mode still committing is in, with its stamp, before a day is judged by
+it. Nothing that holds a day waits for a bond or a streak. Each day's record also refuses a
 second write (`evaluated_at IS NULL` in the update, and `streak_events` is unique on bond,
 date and event), so without the lock a day is still counted once — but the second run
 fails, and a failure is a bond left for the next run for no reason. One bond failing stops
@@ -267,7 +270,8 @@ length. The Bruno collection has not been opened in Bruno.
   to fail with its fix removed.
 - **Mutations**, each a mechanism removed and a named test seen to fail, are listed on the
   pull request.
-- **Read, not run:** that evaluation cannot deadlock with a writer — it takes one
-  `streak_states` row and then updates day rows by id, and no request takes a streak row.
+- **Read, not run:** that evaluation cannot deadlock with a writer — it takes the bond's
+  row, then one `streak_states` row, then updates day rows by id; every other writer
+  takes the bond first too, and no request takes a streak row.
   The CLI was run end to end against the jar; **the Bruno collection was not opened in
   Bruno.**

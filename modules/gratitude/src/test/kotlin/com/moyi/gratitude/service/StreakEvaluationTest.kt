@@ -532,6 +532,41 @@ internal class StreakEvaluationTest(
         streakEvents().size shouldBe 3
     }
 
+    /**
+     * The evaluation takes the bond's lock first, as the closer does: a
+     * change of Strict mode that is still committing is then in, with its
+     * stamp, before a day is judged by it. Held here as a member's request
+     * would hold it; the evaluation waits, and finishes once it is released.
+     */
+    @Test
+    fun `an evaluation waits for a write to its bond that is still committing`() {
+        bothWriteOn(0)
+        closeDay.settle(dayId(0), settles(0)) shouldBe CloseDay.Outcome.CLOSED
+
+        val evaluated =
+            dataSource.connection.use { holder ->
+                holder.autoCommit = false
+                holder.createStatement().use { it.execute("SELECT 1 FROM bonds WHERE id = '$bond' FOR UPDATE") }
+                val run = pool.submit(Callable { streaks.evaluate() })
+                try {
+                    await().atMost(Duration.ofSeconds(10)).until {
+                        jdbc.queryForObject(
+                            "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'",
+                            Int::class.java,
+                        )!! >= 1
+                    }
+                    // Blocked, and nothing judged yet.
+                    jdbc.queryForObject("SELECT count(*) FROM bond_days WHERE evaluated_at IS NOT NULL", Int::class.java) shouldBe 0
+                } finally {
+                    holder.rollback()
+                }
+                run.get(15, TimeUnit.SECONDS)
+            }
+
+        evaluated.days shouldBe 1
+        streak().current shouldBe 1
+    }
+
     // ---- what is read back ----------------------------------------------
 
     private data class Streak(

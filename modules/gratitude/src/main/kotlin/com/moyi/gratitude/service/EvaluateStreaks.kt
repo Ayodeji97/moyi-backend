@@ -101,9 +101,11 @@ internal class EvaluateStreaks(
 
     private fun evaluateBond(bondId: UUID): Int {
         val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
-        // Before the lock: taking it makes the bond a streak row, and a bond
-        // whose own row is gone should not be given one.
-        val view = access.closingViewOf(bondId) ?: return 0
+        // The bond's lock first, as the closer takes it (ADR-0033): a change
+        // of Strict mode still committing is then in, with its stamp, before
+        // a day is judged by it. And before the streak's own lock, which
+        // makes a row: a bond whose row is gone should not be given one.
+        val view = access.lockClosingViewOf(bondId) ?: return 0
         var state = streaks.lock(bondId, now)
         val joiningDate = view.activeSince?.let(view.anchorTimeline::dateAt)
         var previous = streaks.lastEvaluatedDate(bondId)
