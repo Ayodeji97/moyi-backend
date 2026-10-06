@@ -74,13 +74,20 @@ internal class AcceptInvite(
         caller: UserId,
         code: InviteCode,
     ): BondView {
-        val now = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
+        val lookupAt = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
         val joiner = users.find(caller.value)
         if (joiner == null || !joiner.emailVerified) throw EmailNotVerifiedException()
 
-        val invite = invites.findLiveByCode(code, now) ?: throw InviteNotUsableException()
+        val invite = invites.findLiveByCode(code, lookupAt) ?: throw InviteNotUsableException()
         bonds.lockBond(invite.bondId)
         val bond = bonds.findAnyForInvite(invite.bondId) ?: throw InviteNotUsableException()
+
+        // The activation instant is when this transaction actually acquires
+        // the bond and can add the member. Capturing it before lockBond lets a
+        // long wait make a pairing appear to have happened on a day the close
+        // job has already settled. Recheck expiry at the same instant so a
+        // code that expired while this request waited cannot still be spent.
+        val joinedAt = support.clock.instant().truncatedTo(ChronoUnit.MICROS)
 
         if (bond.memberOf(caller)?.isActive == true) throw AlreadyMemberException()
         bonds.lockBondsOf(caller)
@@ -88,9 +95,9 @@ internal class AcceptInvite(
         if (!bond.hasRoom) throw InviteNotUsableException()
         if (blocks.existsBetween(caller, bond.everyMemberUserId())) throw InviteNotUsableException()
 
-        if (!invites.consume(invite.id, caller, now)) throw InviteNotUsableException()
+        if (!invites.consume(invite.id, caller, joinedAt)) throw InviteNotUsableException()
 
-        val member = Member.member(MemberId(support.ids.timeOrdered()), bond.id, caller, bond.anchorTimezone, now)
+        val member = Member.member(MemberId(support.ids.timeOrdered()), bond.id, caller, bond.anchorTimezone, joinedAt)
         bonds.addMember(bond.accept(member), member)
         log.info("User {} joined bond {}", caller.value, bond.id.value)
         // Re-read rather thanreturning the in-memory aggregate: `accept` leaves the

@@ -50,9 +50,9 @@ import javax.sql.DataSource
  * `SubmitEntry` takes the bond's row lock before resolving a day (spec 2.1),
  * so two *members* never race to create a day: they queue on the bonds row.
  * The old two-members-at-once case therefore stopped being a race over the
- * index. The index is still load-bearing, because the close job takes no bond
- * lock (plan R1): a sweep opening a missing date can collide with a member
- * writing that same date. The first test drives exactly that.
+ * index. The index remains load-bearing for `CreateMissingDays`: its direct insert of a
+ * missing date can collide with a member opening that same date, independently of the
+ * close-existing-day path. The first test drives exactly that.
  *
  * **Deterministic, not a barrier race.** The sweep's transaction inserts the
  * day and holds it uncommitted; the submission is then started and observed,
@@ -127,7 +127,7 @@ internal class SubmitEntryConcurrencyTest(
         val opened = CompletableFuture<Int>() // the sweep's pid, completed only after its INSERT ran
         val commit = CountDownLatch(1)
         try {
-            // The close job's shape: open the day directly, no bond lock, and
+            // The direct insert path: open the day without a bond lock, and
             // stay in the transaction.
             val sweep: Future<UUID> =
                 pool.submit<UUID> {

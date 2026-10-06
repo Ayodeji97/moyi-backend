@@ -2,6 +2,7 @@ package com.moyi.bond.service
 
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondAnchorTimeline
+import com.moyi.bond.api.BondClosingView
 import com.moyi.bond.api.BondDayBounds
 import com.moyi.bond.api.BondMembership
 import com.moyi.bond.domain.AnchorTimeline
@@ -12,6 +13,7 @@ import com.moyi.bond.domain.DayBounds
 import com.moyi.bond.domain.Membership
 import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.database.AnchorIntervalStore
+import com.moyi.bond.infra.database.BondClosingStore
 import com.moyi.bond.infra.database.BondStore
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -42,6 +44,7 @@ internal class BondAccessAdapter(
     private val guard: BondAccessGuard,
     private val bonds: BondStore,
     private val anchorIntervals: AnchorIntervalStore,
+    private val closing: BondClosingStore,
 ) : BondAccess {
     @Transactional(readOnly = true)
     override fun membershipOf(
@@ -79,6 +82,43 @@ internal class BondAccessAdapter(
         return assemble(membership, bond)
     }
 
+    @Transactional(readOnly = true)
+    override fun closingViewOf(bondId: UUID): BondClosingView? {
+        val id = BondId(bondId)
+        return closing.find(id)?.let { bond ->
+            BondClosingView(
+                bondId = bondId,
+                activeSince = activeSinceOf(bond),
+                // Archived, or counting down to deletion: either way it takes no
+                // more writes from here, which is what the closer means by ended.
+                endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
+                revealTimeLocal = bond.revealTimeLocal,
+                anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
+            )
+        }
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun lockClosingViewOf(bondId: UUID): BondClosingView? {
+        val id = BondId(bondId)
+        bonds.lockBond(id)
+        return closing.find(id)?.let { bond ->
+            BondClosingView(
+                bondId = bondId,
+                activeSince = activeSinceOf(bond),
+                endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
+                revealTimeLocal = bond.revealTimeLocal,
+                anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
+            )
+        }
+    }
+
+    @Transactional(readOnly = true)
+    override fun bondsToSweep(
+        after: UUID?,
+        limit: Int,
+    ): List<UUID> = closing.everPairedAfter(after, limit)
+
     private fun assemble(
         membership: Membership,
         bond: Bond,
@@ -95,7 +135,7 @@ internal class BondAccessAdapter(
             awaitingSecondMember = bond.status == BondStatus.PENDING_MEMBER,
             activeSince = activeSinceOf(bond),
             endedAt = bond.archivedAt,
-            anchorTimeline = anchorTimelineOf(membership),
+            anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(membership.bondId)),
         )
 
     /**
@@ -127,16 +167,14 @@ internal class BondAccessAdapter(
      * implementation of the date arithmetic stays in the domain; this closes
      * over it rather than reimplementing any of it.
      */
-    private fun anchorTimelineOf(membership: Membership): BondAnchorTimeline {
-        val timeline = anchorIntervals.timelineOf(membership.bondId)
-        return BondAnchorTimeline(
+    private fun apiTimelineOf(timeline: AnchorTimeline): BondAnchorTimeline =
+        BondAnchorTimeline(
             beginsAt = timeline.intervals.first().effectiveFrom,
             zoneIdAtFn = { at -> timeline.zoneAt(at).id },
             dateAtFn = timeline::dateAt,
             dayBoundsAtFn = { at -> timeline.dayBoundsAt(at).toApi() },
             usedLabelsUpToFn = timeline::usedLabelsUpTo,
         )
-    }
 
     private fun DayBounds.toApi(): BondDayBounds =
         BondDayBounds(

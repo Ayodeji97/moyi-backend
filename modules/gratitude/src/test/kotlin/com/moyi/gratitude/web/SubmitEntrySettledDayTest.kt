@@ -43,9 +43,12 @@ import javax.sql.DataSource
  * state under the day lock; if a close raced with offline assignment,
  * redirect once to the submission-time day."
  *
- * **There is no close job yet (C3), so the close is a raw JDBC transaction.**
- * It takes `bond_days`' own `FOR UPDATE` on the day — the lock a close would
- * hold — waits until the submission is observed queued behind it through
+ * **The close here is a raw JDBC transaction, not the close job, on
+ * purpose:** it has to land at one exact point inside a submission's
+ * transaction. (`service/CloseRaceTest` runs `CloseDay` itself against a
+ * submission, in both orders.)
+ * It takes `bond_days`' own `FOR UPDATE` on the day — the lock `CloseDay`
+ * holds — waits until the submission is observed queued behind it through
  * `pg_blocking_pids`, then stamps the day closed and commits. That is the
  * race itself, frozen at the one moment that matters: the submission has
  * already resolved its day against a row that was open when it looked
@@ -245,7 +248,7 @@ internal class SubmitEntrySettledDayTest(
         output.all shouldContain "filed by submission time, on $TODAY"
     }
 
-    // ---- the close, standing in for C3 ----------------------------------
+    // ---- the close, by hand, standing in for `CloseDay` -----------------
 
     private fun <T> async(call: () -> T): Future<T> = pool.submit<T> { call() }
 

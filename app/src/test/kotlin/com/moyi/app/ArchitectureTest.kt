@@ -123,6 +123,12 @@ class ArchitectureTest {
          */
         private val TRANSACTION_APIS = listOf("org.springframework.transaction.", "jakarta.transaction.")
 
+        /** `bond.api.BondAccess`'s close-job methods run no membership guard. */
+        private val UNGUARDED_BOND_READS = listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep")
+
+        /** The two classes that are the close job's reads of a bond (`gratitude.service`). */
+        private val THE_CLOSER = setOf("CloseDay.kt", "CreateMissingDays.kt")
+
         private data class Location(
             val module: String,
             val layer: String,
@@ -330,6 +336,27 @@ class ArchitectureTest {
                 "service it authorises have to run in separate ones, or the service's read under the bond lock is " +
                 "answered from the guard's stale copy (ADR-0028 §6b). Move the boundary into the service. Found in: $violations",
         )
+    }
+
+    @Test
+    fun `the closer's unguarded view of a bond is asked for by the closer and nobody else`() {
+        // The closing-view methods and `bondsToSweep` run no membership
+        // guard: the close job has no caller to ask about (ADR-0031, Owed,
+        // C3). Every other way into a bond from outside `bond` begins with
+        // the guard, so these are the only ones a request must never
+        // reach — and a request reaches a service as easily as a controller,
+        // so the rule is a list of who MAY name them, not of who may not.
+        // Text-based: the names are distinctive, and a call through an alias
+        // would still have to spell one of them.
+        val violations =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
+                .filterNot { locationOf(it.packagee?.name)?.module == "bond" }
+                .filter { file -> UNGUARDED_BOND_READS.any { it in file.text } }
+                .map { it.normalisedProjectPath.substringAfterLast('/') }
+                .filterNot { it in THE_CLOSER }
+
+        assertTrue(violations.isEmpty(), "Only the close job may call BondAccess's unguarded reads. Found in: $violations")
     }
 
     @Test

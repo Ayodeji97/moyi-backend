@@ -21,6 +21,9 @@ dependencies {
     // root sees the EmailSender bean; identity depends on the module for the
     // `api` package only.
     implementation(projects.modules.notification)
+    // Phase 3 slice C3: the fifteen-minute close job and the key reaper,
+    // with ShedLock's table (V16). It calls `gratitude.api.DayCloser`.
+    implementation(projects.modules.scheduling)
     implementation(projects.common.web)
     // The filter chain, the JWT encoder/decoder and the current-user resolver.
     // Reachable transitively through identity already; declared so the

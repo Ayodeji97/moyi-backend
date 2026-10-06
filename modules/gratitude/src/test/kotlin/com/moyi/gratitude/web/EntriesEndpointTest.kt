@@ -449,14 +449,14 @@ internal class EntriesEndpointTest(
      * `DayClosedException` (`409 DAY_CLOSED`) is what a submission gets when
      * the day it resolves to is settled. One request gets there by itself —
      * a rewrite after a post-reveal delete, which `RevealTest` drives. The
-     * other way in is still to come: the row `SubmitEntry` reads back from
-     * `BondDayStore.openOrGet` already closed by C3's close job running
-     * alongside it. This test forces a settled day by hand, standing in for
-     * C3, so the guard is held against the row's own state rather than
-     * against the one route that reaches it today.
+     * other way in is a race: the row `SubmitEntry` reads back from
+     * `BondDayStore.openOrGet` already closed by the close job running
+     * alongside it, which `service/CloseRaceTest` drives. This test forces a
+     * settled day by hand, so the guard is held against the row's own state
+     * rather than against either route that reaches it.
      */
     @Test
-    fun `a day closed by a later slice's own writes refuses a new entry rather than silently accepting it`() {
+    fun `a day that is already closed refuses a new entry rather than silently accepting it`() {
         submit(ada, bondId, """{"text":"today"}""").status shouldBe 201
         jdbc.update("UPDATE bond_days SET status = 'REVEALED' WHERE bond_id = ?::uuid", bondId)
 

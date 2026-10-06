@@ -9,7 +9,7 @@ import java.util.UUID
 
 /**
  * Doc 04 §3's state machine for a Bond-day, all **eight** values — even
- * though later slices own closing and streak settlement.
+ * though streak settlement is a later slice's (C4).
  *
  * Doc 07's own DDL lists five and is stale (Phase 3 design §12.1): it is
  * missing [PENDING_REVEAL] (FR-062, the window between both entries arriving
@@ -43,7 +43,7 @@ internal enum class BondDayStatus(
      * **Not closed — and that is the subtle one.** Nothing closed this day;
      * doc 04 §8.3a excludes it from evaluation entirely while its bond waits
      * for a second member, which is a different thing from having been
-     * closed. BR-3a's fallback, the eventual close job (C3) and the streak
+     * closed. BR-3a's fallback, the close job and the streak
      * walk all have to tell the two apart: a closed day is a record nothing
      * may write into again, a suspended one is a day nobody is being asked
      * about yet. `isClosed == false` here is what lets a caller that only
@@ -185,10 +185,47 @@ internal data class BondDay(
      */
     fun resumeJoiningDay(activeSince: Instant?): BondDay {
         val joining = activeSince != null && !activeSince.isBefore(startsAt) && activeSince.isBefore(endsAt)
-        return if (status == BondDayStatus.SUSPENDED && joining) {
+        // A closed day is a record (BR-10). The closer reconciles a joining
+        // day BEFORE it stamps it, under the same lock; resumed afterwards, a
+        // one-entry day would be PARTIAL and closed at once, which nothing settles.
+        return if (status == BondDayStatus.SUSPENDED && joining && closedAt == null) {
             copy(status = if (entryCount == 0) BondDayStatus.OPEN else BondDayStatus.PARTIAL)
         } else {
             this
+        }
+    }
+
+    /**
+     * The end of the day (spec §6.4 step 2, FR-063): what it is once nobody
+     * can write on it any more.
+     *
+     * - `OPEN` becomes `EMPTY`, and `PARTIAL` becomes `SOLO`. On a `SOLO` day
+     *   the caller reveals the lone entry; [revealedAt] here stays unset,
+     *   because it records the two being read together, which did not happen.
+     * - `PENDING_REVEAL` becomes `REVEALED`: a reveal time later than the
+     *   day's own end cannot hold both entries back past it.
+     * - A day revealed while it was open, and a `SUSPENDED` day, gain
+     *   [closedAt] and nothing else. A suspended day is excluded from
+     *   evaluation (doc 04 §8.3a), so closing it reveals nothing and counts
+     *   for nothing; it is closed so that it is not swept again.
+     *
+     * **The caller proves the day has ended, by the bond's timeline** — after
+     * [extendedTo], never from a stored [endsAt] taken on trust — and has
+     * already applied [resumeJoiningDay] and [revealWhenDue], under the day's
+     * lock. Idempotent: a closed day is returned as it is.
+     */
+    fun close(now: Instant): BondDay {
+        if (closedAt != null) return this
+        require(!now.isBefore(endsAt)) { "a bond-day cannot be closed before it has ended" }
+        check(
+            status != BondDayStatus.PARTIAL || entryCount == 1,
+        ) { "a two-entry day is revealed or pending, never PARTIAL, by the time it closes" }
+        val at = now.truncatedTo(ChronoUnit.MICROS)
+        return when (status) {
+            BondDayStatus.OPEN -> copy(status = BondDayStatus.EMPTY, closedAt = at)
+            BondDayStatus.PARTIAL -> copy(status = BondDayStatus.SOLO, closedAt = at)
+            BondDayStatus.PENDING_REVEAL -> copy(status = BondDayStatus.REVEALED, revealedAt = revealedAt ?: at, closedAt = at)
+            else -> copy(closedAt = at)
         }
     }
 
@@ -216,18 +253,19 @@ internal data class BondDay(
      * Instants are compared and kept at microsecond precision, `timestamptz`'s
      * own, so a row read back equals the one written.
      *
-     * **Called under the day's lock, in two places.** `SubmitEntry` calls it
-     * for the day an entry is about to be filed on, before the insert.
+     * **Called under the day's lock, in three places.** `SubmitEntry` calls
+     * it for the day an entry is about to be filed on, before the insert.
      * `ReconcileJoiningDay` calls it for a couple's joining day while that
      * day is still `SUSPENDED` — and that one runs ahead of reads as well as
      * writes, so it is the single case in which `GET /today` extends a day.
-     * Any other row opened before a change and never written to again keeps
-     * its shorter span until C3's close job reconciles it from the timeline.
-     * That is the accepted limit: until then the timeline, not this column,
-     * says when such a day ends.
+     * `CloseDay` calls it for the day it is settling, before it asks whether
+     * that day has ended. So a row opened before a change and never written
+     * to again keeps its shorter span until the close job reaches it, which
+     * is once its stored end has passed. That is the accepted limit: until
+     * then the timeline, not this column, says when such a day ends.
      *
      * **An obligation on every writer that opens a row without going through
-     * `SubmitEntry`** — C3's close job above all (ADR-0031, Owed): take the
+     * `SubmitEntry`** — `CreateMissingDays` is one (ADR-0031, Owed): take the
      * row's window from the bond's timeline, never from a zone's natural
      * midnight. A row whose `starts_at` disagrees with the timeline fails the
      * second `require` below on every later `POST /entries` for that day,

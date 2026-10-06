@@ -1,6 +1,7 @@
 # ADR-0032 — The reveal, and the first events
 
 **Status:** Proposed · **Date:** 2026-10-05 · **Deciders:** Daniel
+**Amended:** 2026-10-05 (C3: the "Owed, C3" list discharged, decision 5 superseded — ADR-0033)
 
 ## Context
 
@@ -44,7 +45,8 @@ submissions for one bond are already serial and that test stays green without th
 The requirement is therefore split: the simultaneous test asserts one event, and a second holds
 the day's row from another connection and asserts a submission is blocked on it — which is the
 one that goes red when `lockRow` is removed. The day lock is not redundant: C3's close job
-takes no bond lock (decision 18), and against it the day lock is the only thing there is.
+takes the bond lock before the day lock (amended by ADR-0033 after PR #54 review); against
+other day writers, the day lock still protects the read-modify-write.
 *Codex's notes record that the owner approved this split on 2026-10-04; it is written here so
 that the approval has a place to be confirmed or withdrawn.*
 
@@ -56,7 +58,8 @@ decision 12) still reveals at the time on the date it is labelled with. The time
 bond's **current** setting, not a copy taken when the day opened: changing it changes when
 today reveals.
 
-**5. Nothing in C2 looks at a `PENDING_REVEAL` day again when its time arrives.** The
+**5. Nothing in C2 looks at a `PENDING_REVEAL` day again when its time arrives.** *(Superseded
+2026-10-05: slice C3's close job does — ADR-0033 decision 3.)* The
 synchronous path puts it there; the second sweep that releases it is C3's (spec §6.3). Until
 C3, a couple with a reveal time who both write before it stay locked to each other, and
 clearing the time afterwards releases nothing. (A delete steps such a day back to `PARTIAL`,
@@ -170,7 +173,11 @@ one, then the newest.** Withdraw-then-rewrite puts two rows by one author on a d
 
 ## Owed
 
-**C3, the close job.**
+**C3, the close job.** *All four discharged on 2026-10-05 by ADR-0033: the second sweep and
+`revealTimeLocal` on the closer's view (its decisions 3 and 14); a joining day reconciled
+before `closedAt`, and a closed one never resumed — both halves of the "or" (decision 7);
+one day at a time (decision 3); entries read fresh before they are written (decision 3,
+step 5).*
 
 - **The second sweep**, which is what releases a `PENDING_REVEAL` day when its time comes
   (decision 5). It needs
@@ -217,7 +224,7 @@ Each is built one way, pinned by one test, and cheap to turn.
 
 ## Revisit when
 
-- C3 lands: everything under "Owed, C3", and decision 5 stops being true.
+- *(Done 2026-10-05, ADR-0033.)* C3 lands: everything under "Owed, C3", and decision 5 stops being true.
 - C5 registers the first consumer: `outbox_deliveries` gets its first rows and the three
   notes above fall due.
 - A second route by entry id arrives (favourites and reactions, C5): it uses

@@ -176,6 +176,7 @@ flowchart TD
     notification & scheduling & admin & analytics --> common
 
     gratitude -. "only via bond's api" .-> bond
+    scheduling -. "only via gratitude's api" .-> gratitude
 
     classDef wiring fill:#f4cccc,stroke:#a61c00,stroke-width:2px,color:#1a1a1a
     classDef shared fill:#cfe2f3,stroke:#1155cc,stroke-width:2px,color:#1a1a1a
@@ -183,9 +184,11 @@ flowchart TD
     class common shared
 ```
 
-That dotted arrow is the one that matters. The reveal gate needs
+Those dotted arrows are the ones that matter. The reveal gate needs
 `gratitude` to ask `bond` "is this person really a member here?"
-synchronously, mid-request — so unlike the course (whose modules never
+synchronously, mid-request, and `scheduling`'s close job has to ask
+`gratitude` to settle the days that have ended — so unlike the course
+(whose modules never
 call each other and communicate over RabbitMQ), we do have direct
 cross-module calls. They are confined to `api` packages, and everything
 else is Kotlin `internal`, so the compiler makes the alternative

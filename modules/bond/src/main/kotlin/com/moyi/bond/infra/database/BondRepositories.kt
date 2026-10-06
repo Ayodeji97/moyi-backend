@@ -41,6 +41,27 @@ internal interface BondRepository : Repository<BondEntity, UUID> {
     fun findAllByIdIn(ids: Collection<UUID>): List<BondEntity>
 
     /**
+     * Keyset page of the bonds that have ever had two members: a second
+     * `bond_members` row exists, whether or not either has since left (a
+     * leave sets `left_at`; it deletes nothing). `CAST(... AS uuid)` because
+     * a bare null parameter has no type for Postgres to compare.
+     */
+    @Query(
+        nativeQuery = true,
+        value = """
+            SELECT b.id FROM bonds b
+            WHERE (CAST(:after AS uuid) IS NULL OR b.id > CAST(:after AS uuid))
+              AND (SELECT count(*) FROM bond_members m WHERE m.bond_id = b.id) >= 2
+            ORDER BY b.id
+            LIMIT :limit
+        """,
+    )
+    fun findEverPairedAfter(
+        after: UUID?,
+        limit: Int,
+    ): List<UUID>
+
+    /**
      * Serialises "count my open bonds, then create one" for the rest of the
      * current transaction, and is the reason FR-025's limit cannot be raced.
      *

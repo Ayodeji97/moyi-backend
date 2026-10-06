@@ -65,9 +65,11 @@ data class IdempotencyRecord(
  * **The 24h window is enforced here, at read** (Ruling B, review round 1):
  * [find] filters `expires_at > :now`, the same shape `verification_tokens`,
  * `refresh_tokens` and `bond_invites` already use, so an expired row is
- * never handed back as something a retry can replay. No reaper exists yet —
- * that is slice C3 — so the physical row can still be sitting there under
- * the unique constraint when the next use of the same key arrives;
+ * never handed back as something a retry can replay. The reaper
+ * (`scheduling`'s `ReapIdempotencyKeys`, through [deleteAllExpired]) runs
+ * hourly, not at the instant a row expires, so the physical row can still be
+ * sitting there under the unique constraint when the next use of the same
+ * key arrives;
  * [deleteExpired] clears it, under the same lock (spec §5.4: "expired-key
  * replacement uses the same lock").
  */
@@ -113,6 +115,15 @@ class IdempotencyKeyStore(
             micros(record.expiresAt),
         )
     }
+
+    /**
+     * Removes every row past its 24 hours — the reaper's sweep (ADR-0031,
+     * Owed). [deleteExpired] only ever clears the one key a request is about
+     * to reuse, so without this a key that is never used again stays for
+     * good. Same scope as there, `expires_at <= :now`: it cannot touch a row
+     * a replay could still answer from. Returns how many went.
+     */
+    fun deleteAllExpired(now: Instant): Int = jdbc.update("DELETE FROM idempotency_keys WHERE expires_at <= ?", micros(now))
 
     /**
      * Clears an expired row under this key, so the [insert] that follows does

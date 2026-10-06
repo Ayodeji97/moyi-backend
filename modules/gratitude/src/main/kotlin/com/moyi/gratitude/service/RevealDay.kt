@@ -13,8 +13,9 @@ import java.time.LocalTime
 
 /**
  * Persists the domain's reveal and its event together. Callers hold the day
- * lock before reading the aggregate. C3 can use this same transition without
- * taking the bond lock; it owns when to sweep, never a second reveal rule.
+ * lock before reading the aggregate. `CloseDay` uses this same transition
+ * without taking the bond lock; the closer owns when to sweep, never a second
+ * reveal rule.
  */
 @Service
 internal class RevealDay(

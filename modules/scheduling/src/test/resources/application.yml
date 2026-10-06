@@ -1,0 +1,9 @@
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 4
+
+moyi:
+  scheduling:
+    # Nothing fires on its own in a test: each calls the job it is about.
+    enabled: false

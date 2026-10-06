@@ -26,6 +26,9 @@ spring:
       ddl-auto: validate
 
 moyi:
+  scheduling:
+    # No job fires on its own in a test; the jobs' own tests call them.
+    enabled: false
   notification:
     email:
       # The composition root boots in these tests; nothing in them sends

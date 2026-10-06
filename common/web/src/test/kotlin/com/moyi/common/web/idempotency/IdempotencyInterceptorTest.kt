@@ -258,8 +258,9 @@ class IdempotencyInterceptorTest(
 
     @Test
     fun `an expired reservation does not replay`() {
-        // Ruling B, review round 1: the 24h window is enforced at read. No
-        // reaper exists yet (slice C3), so this also proves the row Ruling B
+        // Ruling B, review round 1: the 24h window is enforced at read. The
+        // reaper (`scheduling`'s `ReapIdempotencyKeys`) runs hourly and not
+        // in this test, so this also proves the row Ruling B
         // leaves behind does not turn a legitimate reuse of the same key,
         // a day later, into a 500 under the unique constraint.
         val key = UUID.randomUUID().toString()

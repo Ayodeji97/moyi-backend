@@ -23,7 +23,8 @@ import java.util.UUID
  * Resolves an entry's parent before locking; only its author may mutate it.
  * The initial read grants nothing: membership and author are checked, then
  * bond, day and entry are read under the locks, in C1 order. The day lock
- * serializes editing against reveal, including C3's bond-lock-free sweep.
+ * serializes editing against reveal, including the close job's
+ * close sweep, which takes the same bond-then-day lock order.
  */
 @Service
 internal class ChangeEntry(
