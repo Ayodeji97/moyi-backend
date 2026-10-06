@@ -6,6 +6,7 @@ dependencies {
     implementation(projects.common.core)
     implementation("org.springframework:spring-jdbc")
     implementation("org.springframework:spring-context")
+    implementation("org.slf4j:slf4j-api")
     implementation("tools.jackson.module:jackson-module-kotlin")
     testImplementation(projects.common.testing)
     testImplementation("org.springframework.boot:spring-boot-starter-test")

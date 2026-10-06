@@ -58,6 +58,9 @@ internal class ConsumerRegistry(
     /** The consumer registered in this process under [id]; none when another instance's build owns it. */
     fun consumer(id: String): EventConsumer? = byId[id]
 
+    /** Every consumer of this process: the dispatcher claims deliveries for these, of the types they declare, and leaves the rest. */
+    fun consumers(): Collection<EventConsumer> = byId.values
+
     /** One transaction per consumer, so the lock is held for one consumer's backfill and no longer. */
     override fun afterSingletonsInstantiated() {
         byId.values.forEach { consumer -> transactions.executeWithoutResult { register(consumer) } }
