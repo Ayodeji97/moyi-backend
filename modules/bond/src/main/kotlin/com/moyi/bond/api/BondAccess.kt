@@ -189,7 +189,7 @@ class BondClosingView internal constructor(
     val endedAt: Instant?,
     /** The bond's **current** reveal time (FR-062) — what a `PENDING_REVEAL` day is waiting for. */
     val revealTimeLocal: LocalTime?,
-    private val strictModeBeforeFn: (Instant) -> Boolean,
+    private val past: BondPast,
     val anchorTimeline: BondAnchorTimeline,
 ) {
     /**
@@ -199,10 +199,32 @@ class BondClosingView internal constructor(
      * purpose:** the closer judges days that are already over, and the
      * setting of the moment is the wrong one to judge them by.
      */
-    fun strictModeBefore(instant: Instant): Boolean = strictModeBeforeFn(instant)
+    fun strictModeBefore(instant: Instant): Boolean = past.strictModeBefore(instant)
+
+    /**
+     * Whether, for any part of `[startsAt, endsAt)`, the bond was refusing
+     * every write and later took them again: a deletion that counted down
+     * and was called off. A day nobody completed in such a stretch is not a
+     * day anybody missed (the owner's ruling, ADR-0034): it is `SUSPENDED`.
+     * A countdown still running is [endedAt], not this.
+     */
+    fun wasPausedDuring(
+        startsAt: Instant,
+        endsAt: Instant,
+    ): Boolean = past.pausedDuring(startsAt, endsAt)
 
     override fun toString(): String = "BondClosingView(bondId=$bondId)"
 }
+
+/**
+ * The two questions [BondClosingView] answers about a bond's past, as the
+ * functions that answer them. Built inside this module from its own records;
+ * the view shows a caller the questions and not the records.
+ */
+internal class BondPast(
+    val strictModeBefore: (Instant) -> Boolean,
+    val pausedDuring: (Instant, Instant) -> Boolean,
+)
 
 /**
  * The UTC span `[startsAt, endsAt)` of one Bond-day, and whether it is the

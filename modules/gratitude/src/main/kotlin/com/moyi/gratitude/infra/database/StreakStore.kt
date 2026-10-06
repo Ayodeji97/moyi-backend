@@ -17,6 +17,7 @@ internal data class DayToEvaluate(
     val id: UUID,
     val date: LocalDate,
     val status: BondDayStatus,
+    val startsAt: Instant,
     val endsAt: Instant,
     /** False for a day still open: evaluation stops in front of it. */
     val isClosed: Boolean,
@@ -89,12 +90,14 @@ internal class StreakStore(
     /** Every day of the bond not yet evaluated, settled or not, oldest first. */
     fun unevaluatedDays(bondId: UUID): List<DayToEvaluate> =
         jdbc.query(
-            "SELECT id, date, status, ends_at, closed_at FROM bond_days WHERE bond_id = ? AND evaluated_at IS NULL ORDER BY date",
+            "SELECT id, date, status, starts_at, ends_at, closed_at FROM bond_days " +
+                "WHERE bond_id = ? AND evaluated_at IS NULL ORDER BY date",
             { row, _ ->
                 DayToEvaluate(
                     row.getObject("id", UUID::class.java),
                     row.getObject("date", LocalDate::class.java),
                     BondDayStatus.valueOf(row.getString("status")),
+                    row.getTimestamp("starts_at").toInstant(),
                     row.getTimestamp("ends_at").toInstant(),
                     row.getTimestamp("closed_at") != null,
                 )

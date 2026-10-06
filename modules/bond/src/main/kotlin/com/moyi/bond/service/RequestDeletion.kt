@@ -9,6 +9,7 @@ import com.moyi.bond.domain.ProposalKind
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.InviteStore
 import com.moyi.bond.infra.database.ProposalStore
+import com.moyi.bond.infra.database.WritePauses
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -42,6 +43,7 @@ internal class RequestDeletion(
     private val invites: InviteStore,
     private val views: BondViews,
     private val support: BondSupport,
+    private val pauses: WritePauses,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -128,6 +130,10 @@ internal class RequestDeletion(
 
                 // Already counting down: this is the escape hatch itself.
                 bond.status == BondStatus.PENDING_DELETION -> {
+                    // Written down before the request's timestamp is cleared:
+                    // from then until now the bond refused every write, and
+                    // the days in between are not days anybody missed.
+                    bond.deletionRequestedAt?.let { pauses.record(bond.id, it, now) }
                     bonds.update(bond.cancelDeletion(now))
                     true
                 }

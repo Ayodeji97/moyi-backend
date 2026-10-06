@@ -164,7 +164,17 @@ internal class EvaluateStreaks(
     ): DayOutcome {
         val byStatus = checkNotNull(DayOutcome.of(day.status)) { "a closed bond-day has a settled status: ${day.id}" }
         val ended = view.endedAt
-        return if (byStatus == DayOutcome.MISSED && ended != null && day.endsAt.isAfter(ended)) DayOutcome.AFTER_THE_END else byStatus
+        return when {
+            byStatus != DayOutcome.MISSED -> byStatus
+
+            ended != null && day.endsAt.isAfter(ended) -> DayOutcome.AFTER_THE_END
+
+            // A deletion that counted down and was called off: for some of
+            // this day the bond took no writes. Not a day anybody missed.
+            view.wasPausedDuring(day.startsAt, day.endsAt) -> DayOutcome.SUSPENDED
+
+            else -> DayOutcome.MISSED
+        }
     }
 
     /**
