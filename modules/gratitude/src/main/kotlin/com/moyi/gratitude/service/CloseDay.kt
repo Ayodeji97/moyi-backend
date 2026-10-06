@@ -47,7 +47,8 @@ import java.time.temporal.ChronoUnit
  *    changed and stop.
  * 5. Close it ([BondDay.close]). A day both wrote on that was still waiting
  *    for its time is revealed first, as a reveal; on a `SOLO` day the lone
- *    entry is revealed (FR-063), read fresh under the lock.
+ *    entry is revealed (FR-063), read fresh under the lock — unless the bond
+ *    stopped taking writes before the day ended (ADR-0033 decision 9).
  */
 @Service
 // Seven collaborators: what settling one day touches — the bond's view, the day, its
@@ -131,21 +132,33 @@ internal class CloseDay(
         return if (endedAsOf.isBefore(current.endsAt)) {
             if (locked.revealedAt == null && current.revealedAt != null) Outcome.REVEALED else Outcome.NOT_YET
         } else {
-            close(current, at)
+            close(current, at, view.endedAt)
             Outcome.CLOSED
         }
     }
 
+    /**
+     * @param bondEndedAt when the bond stopped taking writes, or `null` while it is live
+     * (`BondClosingView.endedAt`: archived, or counting down to deletion).
+     */
     private fun close(
         ended: BondDay,
         now: Instant,
+        bondEndedAt: Instant?,
     ) {
         // The day's own end outranks a reveal time later than it. Done as a
         // reveal, so both entries are stamped and DayRevealed is written.
         val day = if (ended.status == BondDayStatus.PENDING_REVEAL) reveal.apply(ended, null, now) else ended
         val closed = day.close(now)
         val closedAt = checkNotNull(closed.closedAt)
-        if (closed.status == BondDayStatus.SOLO) {
+        // A lone entry is unlocked to a partner who did not write (FR-063), but
+        // not when the bond had ended before the day did: the partner left, was
+        // blocked, or is deleting it, and the author wrote for a bond that was
+        // still theirs. The day still closes SOLO, so it counts as written; the
+        // entry stays unrevealed, and only its author reads it. (ADR-0033,
+        // owner question 1, ruled 2026-10-06.)
+        val bondEndedFirst = bondEndedAt != null && bondEndedAt.isBefore(closed.endsAt)
+        if (closed.status == BondDayStatus.SOLO && !bondEndedFirst) {
             entries.findForDayFresh(closed.id).forEach { entry ->
                 val revealed = entry.reveal(closedAt)
                 if (revealed != entry) entries.update(revealed)
