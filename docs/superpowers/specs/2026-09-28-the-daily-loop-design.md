@@ -755,8 +755,10 @@ apart, and a member crossing the date line.
   `states.md` §7 forbids a calendar that shows which days exactly one person wrote. It
   starts at the day the bond became two people, covers at most 371 days, and for an ended
   bond ends where the bond did. Today always has a square while the bond takes writes.
-- *Open with the owner:* a deletion called off leaves a month of `EMPTY` days, which are
-  evaluated as missed and end the streak (ADR-0034, question 1).
+- **Ruled by the owner, 2026-10-06 (ADR-0034, Rulings).** The days of a deletion that was
+  called off are `SUSPENDED` (`bond_write_pauses`, V19) and the run goes on. A solo day
+  **is** drawn on the calendar, as `SOLO`: the vocabulary is `COMPLETE`, `FROZEN`, `SOLO`,
+  `MISSED`, `OPEN`. FR-073 stands over `states.md` §7's Strict-mode paragraph.
 
 **Property-based tests belong here and nowhere else in the phase.** Generate a random timeline
 of day statuses, apply the rules, and assert the invariants: `longestStreak` never decreases;
@@ -834,8 +836,9 @@ slice order. `V10` is the last one Phase 2 uses.
 | C3 | `V16__scheduling_shedlock.sql` | `modules:scheduling` | `shedlock` |
 | C4 | `V17__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events`, four decision columns on `bond_days` |
 | C4 | `V18__bond_strict_mode_changes.sql` | `modules:bond` | `bond_strict_mode_changes` |
-| C5 | `V19__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
-| C6 | `V20__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
+| C4 | `V19__bond_write_pauses.sql` | `modules:bond` | `bond_write_pauses` (a deletion called off) |
+| C5 | `V20__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
+| C6 | `V21__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
 
 C1 owns V11–V13. The first draft of this table gave C1 two versions and C2 `V13`; see §12.5.
 *(Amended 2026-10-05, ADR-0033: C3 took two versions, V15 and V16, so C4 to C6 each moved one later.

@@ -141,7 +141,8 @@ nothing else:
 
 `MilestoneReached` is C6's, with the milestones endpoint.
 
-**12. The calendar has its own vocabulary, and it cannot say that one of two wrote.**
+**12. The calendar has its own vocabulary.** *(As first built; the owner reversed the
+treatment of solo days on 2026-10-06 — see Rulings, 2.)*
 `GET /bonds/{bondId}/streak` returns the numbers and `days`, a square per date:
 `COMPLETE`, `FROZEN`, `MISSED`, `OPEN`. Not the day's status. `states.md` §7: "Solo is not
 rendered on the calendar ... a month-long ledger of days when exactly one person wrote is a
@@ -225,28 +226,38 @@ be read before it is built.
 rules already skip a `SUSPENDED` day, and a property test holds that for a run of any
 length. The Bruno collection has not been opened in Bruno.
 
-## Questions that are the owner's
+## Rulings — the owner, 2026-10-06
 
-1. **A deletion that is called off breaks the streak, retroactively.** ADR-0033's second
-   question, no longer hypothetical. While a deletion counts down, no day is written. When
-   it is cancelled the bond is live again, the job writes that month as `EMPTY` days, and
-   C4 evaluates them as missed: a thirty-day streak is zero the morning after the couple
-   changed their minds. Nothing records that the countdown happened, so nothing can tell
-   those days from days the couple simply did not write. The fix is a change to `bond` —
-   keep the interval — after which those days are `SUSPENDED` and decision 5 already does
-   the right thing.
-2. **A rest day keeps a run and does not start one** (decision 5). The spec says a freeze
-   "is consumed on the next missed day", and that a stepped-over date "counts". This reads
-   both as: of a run. On a run of zero the freeze is kept and the date moves nothing.
-3. **The calendar tells a member less than `GET /today` did on the day** (decision 12). A
-   member who looked yesterday knows yesterday was `SOLO`; the calendar says `MISSED`. That
-   is `states.md`'s rule as written. It means the app cannot draw a solo day from this
-   route even if the design later wants to.
+The four questions this record first asked, as ruled. The first three are built in the
+pull request that follows the slice's.
+
+1. **A deletion that is called off: its days are `SUSPENDED`.** `bond` now records the
+   stretch (`bond_write_pauses`, V19) when a countdown is cancelled, including when the
+   cancel archives the bond because a member left meanwhile. The closer's view answers
+   `wasPausedDuring(startsAt, endsAt)`. A missing day that overlaps such a stretch is
+   written `SUSPENDED`, not `EMPTY`, with no `DayClosed`; a day that already had a row and
+   was missed (one member wrote on what was left of the day the deletion was called off)
+   keeps its status and is *evaluated* as suspended. Either way the run goes on. Any part
+   of a day counts: a day the bond refused writes for an hour of is not a day anybody can
+   be said to have missed.
+2. **Solo days are drawn on the calendar.** Decision 12 is reversed in this one respect:
+   the vocabulary is `COMPLETE`, `FROZEN`, `SOLO`, `MISSED`, `OPEN`. A day one of the two
+   wrote on, that ended and was not covered by a freeze, is `SOLO`. `states.md` §7's
+   "Solo is not rendered on the calendar" is withdrawn; the inference it warned of — a
+   member knows their own days, so a solo square names the other's — was weighed and
+   accepted. Today is still only `OPEN` until complete. A solo day a freeze covered is
+   `FROZEN`, and one that moved nothing (after the end, or in a called-off countdown) has
+   no square, as before.
+3. **FR-073 stands over `states.md` §7's Strict-mode paragraph.** Switching Strict mode
+   changes no past day. The backend already did this; the drawn Strict-mode frame, which
+   turns a past rest day into a missed one, is to be redrawn.
+4. **A rest day keeps a run and does not start one** (decision 5): not ruled on, and stands
+   as built.
 
 ## Revisit when
 
-- The owner rules on question 1: the fix is in `bond`, and the days it leaves need a
-  one-off `recalculate`.
+- A bond whose deletion was called off **before V19** has no record of it: those days
+  stay as they were judged. None exists; nothing has been deployed.
 - A second consumer of `StreakExtended` appears: it carries only the bond's id, by design.
 - The number of bonds makes "every bond with an unevaluated day" show in the run's length.
 
