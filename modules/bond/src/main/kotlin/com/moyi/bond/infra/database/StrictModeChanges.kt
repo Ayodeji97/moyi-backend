@@ -18,23 +18,29 @@ internal class StrictModeChanges(
 ) {
     /**
      * Records that [bondId]'s Strict mode became [strictMode] at [at]. The
-     * caller holds the bond's lock. Two changes stamped with one instant are
-     * one change to whichever came last, which is what the bond then holds.
+     * caller holds the bond's lock, and calls this for a real change only.
+     *
+     * **A second change stamped with the same instant removes the first.**
+     * Every row is a flip, so two at one instant are a flip and a flip back:
+     * no change at that instant at all. Keeping the later value in the one
+     * row would leave a row that changed nothing, and the history reads the
+     * setting before its first row as the opposite of that row.
      */
     fun record(
         bondId: BondId,
         at: Instant,
         strictMode: Boolean,
     ) {
-        jdbc.update(
-            """
-            INSERT INTO bond_strict_mode_changes (bond_id, changed_at, strict_mode) VALUES (?, ?, ?)
-            ON CONFLICT (bond_id, changed_at) DO UPDATE SET strict_mode = EXCLUDED.strict_mode
-            """.trimIndent(),
-            bondId.value,
-            Timestamp.from(at),
-            strictMode,
-        )
+        val stamp = Timestamp.from(at)
+        val undone = jdbc.update("DELETE FROM bond_strict_mode_changes WHERE bond_id = ? AND changed_at = ?", bondId.value, stamp)
+        if (undone == 0) {
+            jdbc.update(
+                "INSERT INTO bond_strict_mode_changes (bond_id, changed_at, strict_mode) VALUES (?, ?, ?)",
+                bondId.value,
+                stamp,
+                strictMode,
+            )
+        }
     }
 
     /** The bond's changes, oldest first. */

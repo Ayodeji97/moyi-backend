@@ -93,19 +93,24 @@ internal class EvaluateStreaks(
     @Suppress("TooGenericExceptionCaught") // As `CloseElapsedDays.settle`.
     private fun evaluateOrCount(bondId: UUID): Int? =
         try {
-            checkNotNull(transactions.execute { evaluateBond(bondId) })
+            // `null` from the transaction: the bond's own row is gone. There is
+            // no foreign key from a day to its bond (no key crosses a module),
+            // so such days can exist, and they would be picked up again on
+            // every run. That is counted and said, not passed over as "none".
+            transactions.execute { evaluateBond(bondId) }
+                ?: null.also { log.warn("streak: bond {} has days to evaluate and no bond row; they are left as they are", bondId) }
         } catch (failure: Exception) {
             log.error("streak: bond {} could not be evaluated: {}", bondId, failure.javaClass.simpleName)
             null
         }
 
-    private fun evaluateBond(bondId: UUID): Int {
+    private fun evaluateBond(bondId: UUID): Int? {
         val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
         // The bond's lock first, as the closer takes it (ADR-0033): a change
         // of Strict mode still committing is then in, with its stamp, before
         // a day is judged by it. And before the streak's own lock, which
         // makes a row: a bond whose row is gone should not be given one.
-        val view = access.lockClosingViewOf(bondId) ?: return 0
+        val view = access.lockClosingViewOf(bondId) ?: return null
         var state = streaks.lock(bondId, now)
         val joiningDate = view.activeSince?.let(view.anchorTimeline::dateAt)
         var previous = streaks.lastEvaluatedDate(bondId)

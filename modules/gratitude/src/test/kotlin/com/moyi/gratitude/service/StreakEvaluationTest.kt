@@ -261,6 +261,40 @@ internal class StreakEvaluationTest(
         streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(0, 1, 0) }
     }
 
+    /**
+     * Two changes can carry one instant. Kept as one row holding the later
+     * value, "on then off" would leave a row saying *off from here* on a bond
+     * that was never on, and every earlier day would read as strict.
+     */
+    @Test
+    fun `Strict mode switched on and off again at one instant changes nothing about the days before`() {
+        (1..14).forEach { bothWriteOn(it) }
+        closeThrough(14)
+        clock.set(Instant.parse("${day(16)}T01:00:00Z"))
+        strictMode(true)
+        strictMode(false)
+
+        closer.closeElapsedDays(Instant.parse("${day(16)}T02:00:00Z"), BUDGET).failed shouldBe 0
+
+        // Day 15 ended with Strict mode off, as it had always been: the banked freeze covers it.
+        decisions().last() shouldBe Decision(day(15), "FROZEN", "MISSED", freeze = true)
+        jdbc.queryForObject("SELECT count(*) FROM bond_strict_mode_changes", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `days whose bond row is gone are counted as a failure and said, not passed over`(output: CapturedOutput) {
+        bothWriteOn(0)
+        closeDay.settle(dayId(0), settles(0)) shouldBe CloseDay.Outcome.CLOSED
+        jdbc.update("DELETE FROM bonds WHERE id = ?::uuid", bond)
+
+        val result = streaks.evaluate()
+
+        result.failed shouldBe 1
+        result.days shouldBe 0
+        output.all shouldContain "streak: bond $bond has days to evaluate and no bond row"
+        jdbc.queryForObject("SELECT count(*) FROM streak_states", Int::class.java) shouldBe 0
+    }
+
     @Test
     fun `a freeze is not spent on a day missed with no run to save`() {
         closeThrough(0)
