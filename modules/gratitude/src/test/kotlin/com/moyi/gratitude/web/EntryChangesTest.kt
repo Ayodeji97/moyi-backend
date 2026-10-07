@@ -116,6 +116,7 @@ internal class EntryChangesTest(
         val refused = patchEntry(ada, id, """{"text":"too late"}""")
         refused.status shouldBe 409
         refused.contentAsString shouldContain "ENTRY_IMMUTABLE"
+        refused.contentAsString shouldContain "This entry can no longer be changed."
     }
 
     @Test

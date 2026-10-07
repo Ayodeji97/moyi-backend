@@ -35,60 +35,71 @@ internal class Favourites(
     private val jdbc: JdbcTemplate,
 ) {
     /**
-     * True when a row now exists for the pair; false when the entry is not
-     * one that can be marked: not revealed, erased, or not there.
+     * True when the entry is one that can be marked, in which case the
+     * member's mark is on it when this returns; false when it is not:
+     * not revealed, erased, or not there.
      *
-     * **One statement decides and writes.** The entry is read and the row
-     * inserted together, so there is no moment between a check and an insert
-     * for an erasure to commit in: an entry erased before this runs has
-     * nothing to select, and nothing is inserted. Both marks of an erasure
-     * are asked, as `Entry.isErased` asks both.
+     * **One statement decides, writes and answers.** The entry is read, the
+     * row inserted and the answer given together, and the answer is whether
+     * the entry **qualified**, not whether a row was inserted. A second mark
+     * inserts nothing and is still a success. An earlier form asked
+     * afterwards, in a second statement, whether the row was there; the
+     * member's own unmark committing between the two made a repeat mark on a
+     * whole entry look like a mark on an erased one.
      *
-     * **`FOR KEY SHARE` is what makes that true of an erasure still in
-     * flight.** `EraseEntry` holds the entry's row `FOR UPDATE` from before it
-     * writes until it commits. Without the clause this statement would read
-     * the last committed row, whole, and then wait all the same, in the
-     * foreign-key check on the insert, which takes this very lock; once the
-     * erasure committed the check would pass (the row is kept) and a mark
-     * would land on an erased entry, after `EraseEntry` had already removed
-     * the marks it could see. With it the wait comes first, at the read, and
-     * Postgres evaluates the `WHERE` again on the row as the erasure left it:
-     * no row, no insert. In the other order the erasure waits for this
-     * statement and then removes what it inserted. It is the lock the insert
-     * takes anyway, taken one step earlier; it is held for this statement
-     * alone, and nothing else is held with it, so it adds no edge to the
-     * application's lock order (bond, day, entry).
+     * Both marks of an erasure are asked, as `Entry.isErased` asks both.
+     *
+     * **`FOR SHARE` is what makes the read true of a change still in
+     * flight.** Without a locking clause the statement would read the last
+     * committed row, whole, while an erasure of it was open, and insert a
+     * mark the erasure had already finished removing marks for. With it the
+     * statement waits for that transaction, and Postgres then evaluates the
+     * `WHERE` again on the row as it was left: erased, no row, no insert,
+     * `false`. In the other order the erasure waits for this statement and
+     * removes what it inserted.
+     *
+     * `FOR SHARE` and not the weaker `FOR KEY SHARE`, which is all the
+     * insert's foreign-key check takes: that one waits only for a
+     * transaction that locked the row `FOR UPDATE` or changed its key.
+     * `EraseEntry` does take `FOR UPDATE` first, but an erasure written as a
+     * plain `UPDATE` would not be waited for, and the mark would land on the
+     * erased entry. `FOR SHARE` conflicts with every update of the row, so
+     * this does not rest on how the eraser happens to be written.
+     *
+     * The lock is held for this statement alone and nothing else is held
+     * with it, so it adds no edge to the application's lock order (bond,
+     * day, entry).
      *
      * It does **not** know about a withdrawal that has erased nothing yet:
      * that row is whole. The gate does, and is asked first.
      *
      * A second mark changes nothing, including [now]: the row keeps the time
-     * it was first made. When nothing was inserted the row is looked for,
-     * because "already marked" and "cannot be marked" both insert nothing
-     * and only the first is a success.
-     *
-     * [now] is cut to microseconds here, so `created_at` reads back as written.
+     * it was first made. [now] is cut to microseconds here, so `created_at`
+     * reads back as written.
      */
     fun mark(
         entryId: EntryId,
         memberId: UUID,
         now: Instant,
-    ): Boolean {
-        val inserted =
-            jdbc.update(
-                """
-                INSERT INTO entry_favourites (entry_id, member_id, created_at)
-                SELECT e.id, ?, ? FROM entries e
+    ): Boolean =
+        jdbc.queryForObject(
+            """
+            WITH markable AS (
+                SELECT e.id FROM entries e
                 WHERE e.id = ? AND e.revealed_at IS NOT NULL AND e.deleted_at IS NULL AND e.status <> 'DELETED'
-                FOR KEY SHARE
+                FOR SHARE
+            ), marked AS (
+                INSERT INTO entry_favourites (entry_id, member_id, created_at)
+                SELECT id, ?, ? FROM markable
                 ON CONFLICT DO NOTHING
-                """.trimIndent(),
-                memberId,
-                Timestamp.from(now.truncatedTo(ChronoUnit.MICROS)),
-                entryId.value,
             )
-        return inserted > 0 || isMarked(entryId, memberId)
-    }
+            SELECT count(*) FROM markable
+            """.trimIndent(),
+            Int::class.java,
+            entryId.value,
+            memberId,
+            Timestamp.from(now.truncatedTo(ChronoUnit.MICROS)),
+        ) == 1
 
     /** Removes the member's mark if there is one. No mark is not an error: absent is what was asked for. */
     fun unmark(
@@ -132,15 +143,4 @@ internal class Favourites(
                 RowMapper { row, _ -> EntryId(row.getObject("entry_id", UUID::class.java)) },
             ).toSet()
     }
-
-    private fun isMarked(
-        entryId: EntryId,
-        memberId: UUID,
-    ): Boolean =
-        jdbc.queryForObject(
-            "SELECT EXISTS (SELECT 1 FROM entry_favourites WHERE entry_id = ? AND member_id = ?)",
-            Boolean::class.java,
-            entryId.value,
-            memberId,
-        ) == true
 }

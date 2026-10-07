@@ -190,6 +190,8 @@ internal class FavouritesTest(
 
         refused.status shouldBe 409
         json.readTree(refused.contentAsString)["code"].asString() shouldBe "ENTRY_NOT_REVEALED"
+        // True of every way an entry can be unrevealed: waiting, a pending bond, a solo day that closed after the bond ended.
+        json.readTree(refused.contentAsString)["detail"].asString() shouldBe "This entry has not been revealed."
         refused.contentAsString shouldNotContain ADAS_WORDS
         marks().shouldBeEmpty()
         today(ada, bond)["myEntry"]["favourited"].asBoolean() shouldBe false
@@ -380,6 +382,8 @@ internal class FavouritesTest(
             val refused = favourite(user, day.adas)
             refused.status shouldBe 409
             json.readTree(refused.contentAsString)["code"].asString() shouldBe "ENTRY_IMMUTABLE"
+            // One sentence for an edit and for a bookmark: neither can be made of a tombstone.
+            json.readTree(refused.contentAsString)["detail"].asString() shouldBe "This entry can no longer be changed."
             unfavourite(user, day.adas).status shouldBe 204
         }
         marks() shouldBe listOf(day.beas to day.adaMember)
@@ -594,6 +598,12 @@ internal class FavouritesTest(
      * The request is stopped by a lock on the table, taken as its first
      * resolution returns, and the test waits until Postgres reports its read
      * of `entries` waiting behind that lock before the ending is made.
+     *
+     * A lock on the whole table stalls every reader of `entries` while it is
+     * held. That is safe because this module's test classes run one after
+     * another in one JVM (the build configures no parallel execution), and
+     * the lock is held only while this test's own request waits on it. If
+     * classes are ever run in parallel, this is the test to change first.
      */
     @Test
     fun `who has withdrawn is asked after the entry is read, so an ending that commits during that read refuses the mark`() {
@@ -609,7 +619,8 @@ internal class FavouritesTest(
             await().atMost(Duration.ofSeconds(10)).until { marking.isDone || waitingBehind(holderPid).isNotEmpty() }
             marking.isDone shouldBe false
             interruptible.fired shouldBe true
-            waitingBehind(holderPid).single() shouldContain "entries"
+            // Whatever else may be waiting on that lock, this request is.
+            waitingBehind(holderPid).any { "entries" in it } shouldBe true
 
             rig.block(ada, day.bond)
             holder.commit()
@@ -661,7 +672,7 @@ internal class FavouritesTest(
             val marking = pool.submit(Callable { favourite(bea, day.adas) })
             await().atMost(Duration.ofSeconds(10)).until { marking.isDone || waitingBehind(eraserPid.get()).isNotEmpty() }
             marking.isDone shouldBe false
-            waitingBehind(eraserPid.get()).single() shouldContain "entry_favourites"
+            waitingBehind(eraserPid.get()).any { "entry_favourites" in it } shouldBe true
 
             commit.countDown()
             erasing.get(10, TimeUnit.SECONDS)
@@ -674,6 +685,93 @@ internal class FavouritesTest(
         } finally {
             commit.countDown()
         }
+    }
+
+    /**
+     * A second mark inserts nothing, and that must not be mistaken for an
+     * entry that cannot be marked. Whether the entry qualified is the
+     * statement's own answer; it is not read back afterwards from a row the
+     * member's own unmark, a moment later, can have taken away.
+     *
+     * The store here is the real one over a `JdbcTemplate` that runs the
+     * member's unmark, to its commit, as soon as the store's first statement
+     * returns: the double tap on a toggle, in the order that used to answer
+     * `409` on a whole entry.
+     */
+    @Test
+    fun `a repeat mark is a success whatever the member's own unmark does a moment later`() {
+        val day = revealedDay()
+        val entry = EntryId(UUID.fromString(day.adas))
+        favourites.mark(entry, day.beaMember, clock.instant()) shouldBe true
+        var unmarked = false
+        val racing =
+            Favourites(
+                AfterFirstStatement(dataSource) {
+                    unmarked = true
+                    favourites.unmark(entry, day.beaMember)
+                },
+            )
+
+        racing.mark(entry, day.beaMember, clock.instant()) shouldBe true
+
+        unmarked shouldBe true
+        // The unmark came last, so it is what stands.
+        marks().shouldBeEmpty()
+    }
+
+    /**
+     * The statement's lock must wait for **any** change to the entry's row,
+     * not only for an eraser that takes `FOR UPDATE` first. This eraser is a
+     * plain `UPDATE`, which Postgres locks `FOR NO KEY UPDATE`: `FOR KEY
+     * SHARE` does not conflict with that, read the row whole, and left a
+     * mark on an entry erased under it. `FOR SHARE` does conflict.
+     */
+    @Test
+    fun `a mark waits for an erasure that took no row lock first, and then leaves nothing on the erased entry`() {
+        val day = revealedDay()
+        withAnotherTransaction { eraser ->
+            val eraserPid = backendPidOf(eraser)
+            eraser.createStatement().use {
+                it.executeUpdate("UPDATE entries SET text = NULL, status = 'DELETED', deleted_at = now() WHERE id = '${day.adas}'")
+                it.executeUpdate("DELETE FROM entry_favourites WHERE entry_id = '${day.adas}'")
+            }
+
+            val marking = pool.submit(Callable { favourites.mark(EntryId(UUID.fromString(day.adas)), day.beaMember, clock.instant()) })
+            await().atMost(Duration.ofSeconds(10)).until { marking.isDone || waitingBehind(eraserPid).any { "entry_favourites" in it } }
+            marking.isDone shouldBe false
+
+            eraser.commit()
+            marking.get(10, TimeUnit.SECONDS) shouldBe false
+        }
+        entry(day.adas)["status"] shouldBe "DELETED"
+        marks().shouldBeEmpty()
+    }
+
+    /** A `JdbcTemplate` that runs [then] once, right after the first statement made through it returns. */
+    private class AfterFirstStatement(
+        dataSource: DataSource,
+        private val then: () -> Unit,
+    ) : JdbcTemplate(dataSource) {
+        private var fired = false
+
+        private fun <T> T.andThen(): T {
+            if (!fired) {
+                fired = true
+                then()
+            }
+            return this
+        }
+
+        override fun update(
+            sql: String,
+            vararg args: Any?,
+        ): Int = super.update(sql, *args).andThen()
+
+        override fun <T : Any> queryForObject(
+            sql: String,
+            requiredType: Class<T>,
+            vararg args: Any?,
+        ): T? = super.queryForObject(sql, requiredType, *args).andThen()
     }
 
     // ---- fixtures ----

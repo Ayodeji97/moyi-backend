@@ -210,7 +210,22 @@ internal class ArchiveDaysTest(
         withClue(favourites) {
             favourites shouldNotContain "Seq Scan on bond_days"
             favourites shouldNotContain "Seq Scan on entries"
+            // A member with twenty marks in two thousand days: found from the member, not by walking the days.
+            // This is the query V22's `(member_id, entry_id)` index is for; the primary key starts from the entry.
+            favourites shouldNotContain "Seq Scan on entry_favourites"
+            favourites shouldContain "entry_favourites_by_member_idx"
+            rowsReadFrom("bond_days", favourites) shouldBeLessThan PAGE * 3
         }
+        val marked =
+            jdbc
+                .queryForList(
+                    "EXPLAIN (ANALYZE, BUFFERS) SELECT entry_id FROM entry_favourites WHERE member_id = ? AND entry_id IN " +
+                        "(SELECT id FROM entries WHERE bond_id = ? LIMIT 40)",
+                    String::class.java,
+                    me,
+                    bond,
+                ).joinToString("\n")
+        plans.append("\n== markedBy-shaped lookup\n").append(marked).append('\n')
         File("build").mkdirs()
         File("build/archive-plans.txt").writeText(plans.toString())
     }
@@ -259,6 +274,12 @@ internal class ArchiveDaysTest(
             me,
             bond,
             partner,
+        )
+        // And every other bond's entries are marked by their own authors, so the table is other people's marks, as it will be.
+        jdbc.update(
+            "INSERT INTO entry_favourites (entry_id, member_id, created_at) " +
+                "SELECT id, author_member_id, now() FROM entries WHERE bond_id <> ?",
+            bond,
         )
         jdbc.execute("ANALYZE bond_days")
         jdbc.execute("ANALYZE entries")

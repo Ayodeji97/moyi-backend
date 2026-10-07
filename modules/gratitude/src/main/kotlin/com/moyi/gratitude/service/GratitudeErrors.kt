@@ -85,16 +85,16 @@ internal class DayClosedException :
  * erased them. The sentence says neither: it answers both, and "has been
  * revealed" was false for an entry deleted before anybody else could read it.
  *
- * Also what a bookmark is refused with on a tombstone ([FavouriteEntry]):
- * the sentence is about editing, and a client reads the code. One code for
- * "this entry is settled and takes no more changes" is worth more to it than
- * a second sentence.
+ * Also what a bookmark is refused with on a tombstone ([FavouriteEntry]), so
+ * the sentence says "changed" and not "edited": it has to be true of an edit
+ * and of a mark alike. One code for "this entry is settled and takes no more
+ * changes" is worth more to a client than a second one.
  */
 internal class EntryImmutableException :
     ApiException(
         HttpStatus.CONFLICT,
         ErrorCode.ENTRY_IMMUTABLE,
-        "This entry can no longer be edited.",
+        "This entry can no longer be changed.",
     )
 
 /**
@@ -102,12 +102,17 @@ internal class EntryImmutableException :
  * revealed. Raised only for an entry the caller wrote, by
  * [FavouriteEntry]; a partner's unrevealed entry is [EntryNotFoundException]
  * to them, as it is on every route (`ErrorCode.ENTRY_NOT_REVEALED` has why).
+ *
+ * The sentence says only that, and promises nothing about when: "once both
+ * of you have written" was untrue of an entry on a solo day that closed after
+ * the bond had ended, which never will be revealed, and of a bond still
+ * waiting for its second member.
  */
 internal class EntryNotRevealedException :
     ApiException(
         HttpStatus.CONFLICT,
         ErrorCode.ENTRY_NOT_REVEALED,
-        "This entry can be saved once both of you have written.",
+        "This entry has not been revealed.",
     )
 
 /**

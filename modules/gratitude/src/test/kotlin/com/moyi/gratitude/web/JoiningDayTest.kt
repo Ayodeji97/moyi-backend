@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
 import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpMethod
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
@@ -29,6 +30,7 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -75,6 +77,26 @@ internal class JoiningDayTest(
     }
 
     // --- a legacy joining day: every first operation reconciles it, and the reconcile outlives a refusal ---
+
+    @Test
+    fun `a first favourite PUT by the partner reconciles a legacy joining day, and is then a mark like any other`() {
+        // Without the reconcile the entry is still locked to him, and the answer is the 404 of an entry never shown.
+        val legacy = legacyJoiningDay()
+
+        favourite(HttpMethod.PUT, eve, legacy.caraEntry).status shouldBe 204
+
+        legacy.shouldBeRevealedOnce()
+        jdbc.queryForObject("SELECT count(*) FROM entry_favourites WHERE entry_id = ?::uuid", Int::class.java, legacy.caraEntry) shouldBe 1
+    }
+
+    @Test
+    fun `a first favourite DELETE by the partner reconciles a legacy joining day too`() {
+        val legacy = legacyJoiningDay()
+
+        favourite(HttpMethod.DELETE, eve, legacy.caraEntry).status shouldBe 204
+
+        legacy.shouldBeRevealedOnce()
+    }
 
     @Test
     fun `a refused first PATCH still leaves a legacy joining day revealed`() {
@@ -261,6 +283,19 @@ internal class JoiningDayTest(
         ) shouldBe 2
         jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayRevealed'", Int::class.java) shouldBe 1
     }
+
+    private fun favourite(
+        method: HttpMethod,
+        user: UUID,
+        entryId: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .perform(
+                MockMvcRequestBuilders
+                    .request(method, "/api/v1/entries/$entryId/favourite")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}"),
+            ).andReturn()
+            .response
 
     private fun patchEntry(
         user: UUID,
