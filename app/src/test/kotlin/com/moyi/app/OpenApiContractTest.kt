@@ -16,6 +16,7 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.maps.shouldContainKey
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -113,15 +114,18 @@ class OpenApiContractTest(
         // CurrentUser and ClientContext are resolved from the token and the
         // socket; documented as query parameters they would generate a client
         // that sends them. Path parameters (`/sessions/{id}`) are real.
-        // Query and cookie parameters: none, ever. A resolver type documented as
-        // one would generate a client that sends it.
+        // Cookie parameters: none, ever. Query parameters: the archive feed's
+        // four and no others (slice C5b). A resolver type documented as one
+        // would generate a client that sends it, so the list is exhaustive: a
+        // new query parameter has to be added here by somebody who meant it.
         operations()
-            .flatMap { (_, op) ->
+            .flatMap { (route, op) ->
                 op.parameters
                     .orEmpty()
                     .filter { it.`in` != "path" && it.`in` != "header" }
-                    .map { it.name }
-            }.shouldBeEmpty()
+                    .map { "$route ${it.`in`} ${it.name}" }
+            }.toSet() shouldBe
+            listOf("limit", "cursor", "until", "favourites").map { "GET /api/v1/bonds/{bondId}/days query $it" }.toSet()
         // Headers are not all accidental — `If-Match` is required by doc 06 §1
         // and has to appear, or a generated client cannot send it. The list is
         // exhaustive on purpose: a *new* header parameter should have to be
@@ -404,6 +408,59 @@ class OpenApiContractTest(
         entries.parameters.first { it.name == "Idempotency-Key" }.required shouldBe true
 
         api.paths["/api/v1/bonds/{bondId}/today"]!!.get.responses shouldContainKey "404"
+    }
+
+    @Test
+    fun `the archive feed documents its four parameters with their bounds, its 422 and its 404`() {
+        // The handler takes the four as optional text and reads them after the
+        // membership guard, so springdoc alone would document four strings.
+        // OpenApiConfiguration states what the route enforces.
+        val days = api.paths["/api/v1/bonds/{bondId}/days"]!!.get
+        days.operationId shouldBe "days"
+        days.responses.keys shouldContainAll listOf("200", "401", "404", "422", "429")
+        days.responses.keys shouldNotContain "409"
+        days.requestBody.shouldBeNull()
+
+        val query = days.parameters.filter { it.`in` == "query" }.associateBy { it.name }
+        query.keys shouldBe setOf("limit", "cursor", "until", "favourites")
+        query.values.forEach { it.required shouldBe false }
+
+        fun typesOf(name: String) = query.getValue(name).schema.let { it.types ?: setOf(it.type) }
+
+        val limit = query.getValue("limit").schema
+        typesOf("limit") shouldBe setOf("integer")
+        limit.minimum.toInt() shouldBe 1
+        limit.maximum.toInt() shouldBe 50
+        limit.default.toString() shouldBe "20"
+        typesOf("until") shouldBe setOf("string")
+        query.getValue("until").schema.format shouldBe "date"
+        typesOf("favourites") shouldBe setOf("boolean")
+        query.getValue("favourites").schema.default shouldBe false
+        // Opaque: a string with no format, so no client is generated to take it apart.
+        typesOf("cursor") shouldBe setOf("string")
+        query
+            .getValue("cursor")
+            .schema.format
+            .shouldBeNull()
+    }
+
+    @Test
+    fun `a day of the archive carries the two entry fields exactly as today does, and a page is days and a cursor`() {
+        // One reader for an entry, wherever it is met: the same branches, the
+        // same discriminator, the same null. And no field about the other
+        // person: nothing but a date, the day's status and the two entries.
+        val today = api.components.schemas["TodayResponse"]!!.properties
+        val day = api.components.schemas["DayResponse"]!!
+        day.properties.keys shouldBe setOf("date", "status", "myEntry", "partnerEntry")
+        day.properties["partnerEntry"] shouldBe today["partnerEntry"]
+        day.properties["myEntry"] shouldBe today["myEntry"]
+        day.properties["partnerEntry"]!!.discriminator.shouldNotBeNull()
+        day.properties["partnerEntry"]!!.oneOf.size shouldBe 4
+        day.properties["date"]!!.format shouldBe "date"
+
+        val page = api.components.schemas["DaysResponse"]!!
+        page.properties.keys shouldBe setOf("items", "nextCursor")
+        page.properties["items"]!!.items.`$ref` shouldBe "#/components/schemas/DayResponse"
     }
 
     @Test

@@ -11,6 +11,7 @@ import io.swagger.v3.oas.models.PathItem
 import io.swagger.v3.oas.models.headers.Header
 import io.swagger.v3.oas.models.info.Info
 import io.swagger.v3.oas.models.media.ArraySchema
+import io.swagger.v3.oas.models.media.BooleanSchema
 import io.swagger.v3.oas.models.media.Content
 import io.swagger.v3.oas.models.media.Discriminator
 import io.swagger.v3.oas.models.media.IntegerSchema
@@ -174,6 +175,7 @@ class OpenApiConfiguration {
             discriminatePartnerEntry(api)
             admitAbsentPartnerEntry(api)
             requireDiscriminatorProperty(api)
+            documentDaysQuery(api)
         }
 
     /**
@@ -258,6 +260,8 @@ class OpenApiConfiguration {
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER && it.name == "code" }) {
                 add(HttpStatus.UNPROCESSABLE_ENTITY)
             }
+            // A query parameter is read by the application, which refuses one it cannot read as it refuses a field.
+            if (operation.parameters.orEmpty().any { it.`in` == QUERY_PARAMETER }) add(HttpStatus.UNPROCESSABLE_ENTITY)
             add(HttpStatus.TOO_MANY_REQUESTS)
             add(HttpStatus.INTERNAL_SERVER_ERROR)
         }
@@ -396,6 +400,7 @@ class OpenApiConfiguration {
         private const val FIELD_VIOLATION_REF = "#/components/schemas/$FIELD_VIOLATION"
         private const val PROBLEM_JSON = "application/problem+json"
         private const val PATH_PARAMETER = "path"
+        private const val QUERY_PARAMETER = "query"
         private const val HEADER_PARAMETER = "header"
         private const val ETAG = "ETag"
         private const val IF_MATCH = "If-Match"
@@ -567,6 +572,12 @@ private fun documentBondNamePattern(api: OpenAPI) {
 
 /** `TodayResponse`'s schema name and its `partnerEntry` property — see [discriminatePartnerEntry] and [requireDiscriminatorProperty]. */
 private const val TODAY_RESPONSE = "TodayResponse"
+
+/** A day of the archive (`gratitude.web.DayResponse`): the same two entry fields as [TODAY_RESPONSE], from the same functions. */
+private const val DAY_RESPONSE = "DayResponse"
+
+/** Every schema with a `partnerEntry`: each gets the same discriminator and the same null branch, or a client would need two readers. */
+private val PARTNER_ENTRY_HOLDERS = listOf(TODAY_RESPONSE, DAY_RESPONSE)
 private const val PARTNER_ENTRY_PROPERTY = "partnerEntry"
 private const val DISCRIMINATOR_PROPERTY = "status"
 private const val ENTRY_RESPONSE = "EntryResponse"
@@ -624,22 +635,24 @@ private const val ERASED_ENTRY_RESPONSE_REF = "#/components/schemas/$ERASED_ENTR
  * alone.
  */
 private fun discriminatePartnerEntry(api: OpenAPI) {
-    val partnerEntry =
-        api.components.schemas[TODAY_RESPONSE]
-            ?.properties
-            ?.get(PARTNER_ENTRY_PROPERTY)
-    partnerEntry?.takeIf { it.oneOf.orEmpty().isNotEmpty() }?.discriminator =
-        Discriminator()
-            .propertyName(DISCRIMINATOR_PROPERTY)
-            .mapping(
-                mapOf(
-                    "SUBMITTED" to ENTRY_RESPONSE_REF,
-                    "REVEALED" to ENTRY_RESPONSE_REF,
-                    "DELETED" to ENTRY_RESPONSE_REF,
-                    "LOCKED" to LOCKED_ENTRY_RESPONSE_REF,
-                    "REMOVED" to ERASED_ENTRY_RESPONSE_REF,
-                ),
-            )
+    PARTNER_ENTRY_HOLDERS.forEach { holder ->
+        val partnerEntry =
+            api.components.schemas[holder]
+                ?.properties
+                ?.get(PARTNER_ENTRY_PROPERTY)
+        partnerEntry?.takeIf { it.oneOf.orEmpty().isNotEmpty() }?.discriminator =
+            Discriminator()
+                .propertyName(DISCRIMINATOR_PROPERTY)
+                .mapping(
+                    mapOf(
+                        "SUBMITTED" to ENTRY_RESPONSE_REF,
+                        "REVEALED" to ENTRY_RESPONSE_REF,
+                        "DELETED" to ENTRY_RESPONSE_REF,
+                        "LOCKED" to LOCKED_ENTRY_RESPONSE_REF,
+                        "REMOVED" to ERASED_ENTRY_RESPONSE_REF,
+                    ),
+                )
+    }
 }
 
 /**
@@ -658,13 +671,15 @@ private fun discriminatePartnerEntry(api: OpenAPI) {
  * Idempotent, so a second pass over the same document adds nothing.
  */
 private fun admitAbsentPartnerEntry(api: OpenAPI) {
-    val partnerEntry =
-        api.components.schemas[TODAY_RESPONSE]
-            ?.properties
-            ?.get(PARTNER_ENTRY_PROPERTY)
-            ?.takeIf { it.oneOf.orEmpty().isNotEmpty() } ?: return
-    if (partnerEntry.oneOf.none { NULL_TYPE in it.types.orEmpty() }) {
-        partnerEntry.addOneOfItem(Schema<Any>().apply { types = setOf(NULL_TYPE) })
+    PARTNER_ENTRY_HOLDERS.forEach { holder ->
+        val partnerEntry =
+            api.components.schemas[holder]
+                ?.properties
+                ?.get(PARTNER_ENTRY_PROPERTY)
+                ?.takeIf { it.oneOf.orEmpty().isNotEmpty() } ?: return@forEach
+        if (partnerEntry.oneOf.none { NULL_TYPE in it.types.orEmpty() }) {
+            partnerEntry.addOneOfItem(Schema<Any>().apply { types = setOf(NULL_TYPE) })
+        }
     }
 }
 
@@ -774,3 +789,72 @@ private val ENDING_DESCRIPTIONS =
             "with no body, withdraws what an earlier one kept. " +
             ENDING_BODY_RULES,
     )
+
+/**
+ * States what the four query parameters of the archive feed (`GET
+ * /bonds/{bondId}/days`, operation `days`) are.
+ *
+ * The handler takes each as optional text and reads it itself, after the
+ * membership guard (`gratitude.web.DaysQuery` has why: bound as typed
+ * arguments, a value that does not convert would be refused before the guard
+ * and by a handler that quotes it). So springdoc sees four optional strings,
+ * and a generated client would have no bound on `limit`, no type for
+ * `favourites` and no format for `until`. The document states the rule the
+ * API enforces, as it does for `If-Match` and for an entry's text.
+ *
+ * The literals mirror `gratitude.service.GetDays.MAX_LIMIT` and
+ * `DEFAULT_LIMIT`, which this module cannot see (it names no controller and
+ * depends on no domain module). `OpenApiContractTest` holds the document to
+ * these numbers, and `gratitude`'s `DaysFeedTest` holds the route to them.
+ *
+ * `cursor` stays a string and is described as opaque on purpose: its form is
+ * not part of the contract.
+ */
+private fun documentDaysQuery(api: OpenAPI) {
+    val parameters =
+        api.paths.values
+            .flatMap { it.readOperations() }
+            .filter { it.operationId == DAYS_OPERATION }
+            .flatMap { it.parameters.orEmpty() }
+            .filter { it.`in` == "query" }
+    parameters.forEach { parameter ->
+        when (parameter.name) {
+            "limit" -> {
+                parameter.schema =
+                    IntegerSchema()
+                        .minimum(
+                            DAYS_MIN_LIMIT.toBigDecimal(),
+                        ).maximum(DAYS_MAX_LIMIT.toBigDecimal())
+                        ._default(DAYS_DEFAULT_LIMIT)
+                parameter.description =
+                    "The most days to return. A page can hold fewer: it is also bounded by its size, and with " +
+                    "`favourites=true` a day may be left out after it was counted. Only a null `nextCursor` means the end."
+            }
+
+            "cursor" -> {
+                parameter.description =
+                    "The `nextCursor` of an earlier page, unchanged: the days before that page's last. Opaque; do not " +
+                    "build or alter one. It carries no bond and no caller, only a position, so it grants nothing."
+            }
+
+            "until" -> {
+                parameter.schema = StringSchema().format("date")
+                parameter.description =
+                    "Start at this calendar date (`YYYY-MM-DD`) or the nearest earlier day: for jumping to a month. " +
+                    "With `cursor` as well, both apply."
+            }
+
+            "favourites" -> {
+                parameter.schema = BooleanSchema()._default(false)
+                parameter.description =
+                    "`true` for only the days holding an entry the caller has bookmarked and can still read. " +
+                    "Only the caller's own bookmarks are ever considered."
+            }
+        }
+    }
+}
+
+private const val DAYS_OPERATION = "days"
+private const val DAYS_MIN_LIMIT = 1
+private const val DAYS_MAX_LIMIT = 50
+private const val DAYS_DEFAULT_LIMIT = 20

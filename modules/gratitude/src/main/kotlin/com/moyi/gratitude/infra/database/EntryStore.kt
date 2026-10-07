@@ -70,6 +70,18 @@ internal class EntryStore(
     fun findForDay(bondDayId: BondDayId): List<Entry> = entries.findAllByBondDayId(bondDayId.value).map { it.toDomain() }
 
     /**
+     * [findForDay] for a page of days, in **one** query however many days
+     * there are, and none for no days. Erased rows included, as there. A day
+     * with no entry has no key in the answer.
+     */
+    fun findForDays(bondDayIds: Collection<BondDayId>): Map<BondDayId, List<Entry>> =
+        if (bondDayIds.isEmpty()) {
+            emptyMap()
+        } else {
+            entries.findAllByBondDayIdIn(bondDayIds.map { it.value }).map { it.toDomain() }.groupBy { it.bondDayId }
+        }
+
+    /**
      * [findForDay], with every row read again from the database — for a
      * caller about to **write** what it reads, under the day's lock.
      *

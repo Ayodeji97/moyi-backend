@@ -136,6 +136,9 @@ internal interface EntryRepository : Repository<EntryEntity, UUID> {
 
     fun findAllByBondDayId(bondDayId: UUID): List<EntryEntity>
 
+    /** Every entry of several days at once: the archive's page, which must not ask once a day. */
+    fun findAllByBondDayIdIn(bondDayIds: Collection<UUID>): List<EntryEntity>
+
     /**
      * The id and day id of each entry [authorMemberId] wrote in [bondId] that
      * has not been erased, **oldest day first**: the order a caller must lock

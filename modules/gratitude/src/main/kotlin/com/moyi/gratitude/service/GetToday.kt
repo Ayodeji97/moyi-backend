@@ -142,14 +142,11 @@ internal class GetToday(
             return TodayView(date, status, myEntry = null, partnerEntry = null, streak = unwritten, marked = emptySet())
         }
 
-        val entryList =
-            entries.findForDay(day.id).sortedWith(
-                compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value },
-            )
+        val written = entries.findForDay(day.id).onEachSideOf(membership.memberId)
         // After the entries, never before: the marker is read last.
         val reader = access.readerNow(membership)
-        val mine = entryList.firstOrNull { it.authorMemberId == membership.memberId }?.readBy(reader)
-        val partners = entryList.firstOrNull { it.authorMemberId != membership.memberId }?.readBy(reader)
+        val mine = written.mine?.readBy(reader)
+        val partners = written.partners?.readBy(reader)
         // After the gate, and only for what it answered in full: a tombstone says `false` whatever rows
         // there are, and an entry the caller was never shown has no id here to ask about.
         val readInFull = listOfNotNull(mine, partners).filter { it.readability == Readability.FULL }.mapNotNull { it.disclosed?.id }
