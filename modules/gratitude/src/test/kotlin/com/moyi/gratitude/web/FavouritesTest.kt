@@ -44,6 +44,7 @@ import org.springframework.test.web.servlet.put
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import java.sql.Connection
 import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
@@ -90,7 +91,7 @@ internal class FavouritesTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired directory: UserDirectory,
-    @Autowired dataSource: DataSource,
+    @Autowired private val dataSource: DataSource,
     @Autowired private val clock: MutableClock,
     @Autowired private val json: ObjectMapper,
     @Autowired private val dispatcher: OutboxDispatcher,
@@ -382,9 +383,14 @@ internal class FavouritesTest(
             unfavourite(user, day.adas).status shouldBe 204
         }
         marks() shouldBe listOf(day.beas to day.adaMember)
-        // Deleting again erases nothing and removes nothing.
+
+        // Deleting again is a repeat of nothing: it erases nothing and writes nothing, here included. A row put
+        // on the tombstone by hand, which no request can make, is how a write that should not happen would show.
+        mark(day.adas, day.beaMember)
         rig.delete(ada, day.adas)
-        marks() shouldBe listOf(day.beas to day.adaMember)
+        marks() shouldContainExactlyInAnyOrder listOf(day.adas to day.beaMember, day.beas to day.adaMember)
+        // And nothing shows it: the tombstone says false whatever rows there are.
+        today(bea, day.bond)["partnerEntry"]["favourited"].asBoolean() shouldBe false
     }
 
     @Test
@@ -576,6 +582,48 @@ internal class FavouritesTest(
     }
 
     /**
+     * **The marker is read last** (ADR-0035 decision 12), for this route: the
+     * request reads the entry, and only then asks who has withdrawn. Here an
+     * ending commits while the request is stopped at its read of the entry,
+     * which is after it resolved the caller's membership for the route. A
+     * reader made from that first membership, or one asked for before the
+     * entry was read, says nobody has withdrawn; the row is whole; and the
+     * mark would be made on an entry both people are already being shown as
+     * a tombstone.
+     *
+     * The request is stopped by a lock on the table, taken as its first
+     * resolution returns, and the test waits until Postgres reports its read
+     * of `entries` waiting behind that lock before the ending is made.
+     */
+    @Test
+    fun `who has withdrawn is asked after the entry is read, so an ending that commits during that read refuses the mark`() {
+        val day = revealedDay()
+        withAnotherTransaction { holder ->
+            val holderPid = backendPidOf(holder)
+            interruptible.afterResolution(1) {
+                interruptible.disarm()
+                holder.createStatement().use { it.execute("LOCK TABLE entries IN ACCESS EXCLUSIVE MODE") }
+            }
+
+            val marking = pool.submit(Callable { favourite(bea, day.adas) })
+            await().atMost(Duration.ofSeconds(10)).until { marking.isDone || waitingBehind(holderPid).isNotEmpty() }
+            marking.isDone shouldBe false
+            interruptible.fired shouldBe true
+            waitingBehind(holderPid).single() shouldContain "entries"
+
+            rig.block(ada, day.bond)
+            holder.commit()
+            val refused = marking.get(10, TimeUnit.SECONDS)
+
+            refused.status shouldBe 409
+            json.readTree(refused.contentAsString)["code"].asString() shouldBe "ENTRY_IMMUTABLE"
+            // Nothing was erased: the row is whole, and it is the gate that refused.
+            entry(day.adas)["text"] shouldBe ADAS_WORDS
+            marks().shouldBeEmpty()
+        }
+    }
+
+    /**
      * The two really at once: an erasure that has done everything but
      * commit, and a mark that arrives while it is open. The request reads the
      * entry as it was committed, whole, and its gate says yes; what is left
@@ -677,6 +725,27 @@ internal class FavouritesTest(
 
     private fun entry(id: String): Map<String, Any?> =
         jdbc.queryForMap("SELECT text, status, deleted_at, revealed_at FROM entries WHERE id = ?::uuid", id)
+
+    /** A connection of the test's own with a transaction open on it, rolled back afterwards whatever happened. */
+    private fun withAnotherTransaction(block: (Connection) -> Unit) {
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                block(connection)
+            } finally {
+                connection.rollback()
+                connection.autoCommit = true
+            }
+        }
+    }
+
+    private fun backendPidOf(connection: Connection): Int =
+        connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT pg_backend_pid()").use { rows ->
+                rows.next()
+                rows.getInt(1)
+            }
+        }
 
     /** The statements Postgres reports as waiting on a lock [holderPid] holds. */
     private fun waitingBehind(holderPid: Int): List<String> =
