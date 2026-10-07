@@ -56,6 +56,10 @@ Inside, in this order, and the order is the decision:
    (unless the bond ended first: decision 9, as amended), `PENDING_REVEAL` to `REVEALED`. A day revealed while it was open, and a `SUSPENDED` day,
    gain `closedAt` and nothing else.
 
+*Amended 2026-10-07 (ADR-0035 decision 14).* Between steps 1 and 2 the closer first erases a
+withdrawn author's live entries on the day, by the routine `DELETE` uses, and goes on from
+the day that leaves.
+
 **4. A stored end finds every day that has ended, and decides none of them.** The sweep's
 candidates are unclosed rows whose stored `ends_at` had passed a minute ago (decision 5),
 plus rows pending a reveal time. A day's

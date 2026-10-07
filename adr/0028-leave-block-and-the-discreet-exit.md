@@ -215,6 +215,22 @@ because refusing one while permitting the other would make them distinguishable,
 **8. Nothing anywhere says "block".** No response body, no error code, no log line. The
 service logs "a member ended bond {id}" for both paths and names no user (doc 18 §5).
 
+**Amended 2026-10-07 (slice C5a, ADR-0035 decisions 10 and 11).** Three things.
+
+- **The two routes take an optional body**, `{"withdrawEntries": boolean}` (FR-029a). Absent,
+  it is `true` on block and `false` on leave. The `204` is still byte-identical between the
+  two, with or without a withdrawal, and so is the other member's `GET /bonds/{id}`
+  afterwards (`DiscreetExitTest`). Decision 2's "on an archived bond a block changes nothing
+  visible at all" holds for the bond; a block that withdraws there does change the blocker's
+  entries, to tombstones, which an author's own delete on an ended bond now also produces
+  (ADR-0035 decision 15).
+- **A withdrawal's record does not move the `ETag`.** It is a row in a table of its own
+  (`bond_entry_withdrawals`), never a write to `bonds`, so decision 5 holds.
+- **The log line is now the same for both endings, as this decision always said.** The code
+  had logged "A member left bond {}" for a leave and "A member ended bond {}" for a block
+  since #39. Neither said "block", and the line still told which it was. A review in C5a
+  found it; both paths now write the second, and a test compares the two.
+
 ## Consequences
 
 - **This is not a breaking API change** — the first Phase 2 slice that is not. No new
@@ -268,6 +284,7 @@ service logs "a member ended bond {id}" for both paths and names no user (doc 18
 
 - B5 lands `bond_proposals` — ending a bond must cancel a live proposal, and this ADR is
   where that obligation is recorded.
-- Phase 3 gives entries, and FR-029a's withdrawal option needs a decision.
+- *(Done 2026-10-07, ADR-0035.)* Phase 3 gives entries, and FR-029a's withdrawal option
+  needs a decision.
 - A support tool or a user-facing list ever needs to read blocks by blocker, which no
   query here allows on purpose (T-09, T-10).

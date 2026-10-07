@@ -125,6 +125,8 @@ id that is not a UUID, an entry in a bond the caller is not in, and an entry the
 partner wrote all throw `EntryNotFoundException`. The partner gets `404` and not `403`: they
 are a member, but `403` on an entry id would confirm an id they have never been shown. The
 author on an ended bond gets `409 BOND_ARCHIVED`, decided only after the author check.
+*(Amended 2026-10-07, ADR-0035 decision 15: for a `PATCH` only. The author's `DELETE` on an
+ended bond is `204` — question 1 below, as ruled.)*
 **These two routes are not in the route-driven cross-tenant suite** (spec §9 says every new
 endpoint is): it discovers routes by `{bondId}`. `EntryChangesTest` is their cross-tenant
 test, and it asserts the exact set of `{entryId}` routes so that a third cannot arrive
@@ -196,7 +198,11 @@ step 5).*
 - **A writer that changes an entry must go through `EntryStore.lockAndFind` or
   `findForDayFresh`** (decision 2).
 
-**C5, the outbox's first consumer.**
+**C5, the outbox's first consumer.** *The second and third notes were discharged on
+2026-10-07 by ADR-0035: deliveries are written at publish and claimed by delivery row, so
+nothing keeps a cursor by id (its decisions 1 and 4); `last_error` holds an exception's class
+name and never its message (decision 5). The first note stands for whoever consumes
+`EntrySubmitted`; C5a's consumer subscribes only to `EntriesWithdrawn`.*
 
 - There is **no event for an edit or an erasure**, so a consumer of `EntrySubmitted` will see
   one for an entry since withdrawn, and must read the entry before acting on it.
@@ -216,6 +222,11 @@ Each is built one way, pinned by one test, and cheap to turn.
 1. **An author cannot delete their own entry once the bond has ended** (`409 BOND_ARCHIVED`,
    ADR-0028's rule that an ended bond is read-only). Until C5's withdrawal there is then no
    way to take back words a former partner can still read.
+
+   *Ruled by the owner on 2026-10-06, and built on 2026-10-07 (ADR-0035 decision 15): the
+   author may.* `DELETE /entries/{entryId}` is `204` for its author after the bond has
+   ended, and after leaving it; `PATCH` stays `409 BOND_ARCHIVED`. The test that pinned the
+   `409` was turned (`EntryChangesTest`).
 2. **A delete before the reveal is visible to the partner**: `partnerEntry` becomes
    `{authorMemberId, status: REMOVED}` and the day steps back to `OPEN`. ADR-0031 decision 10
    ruled that shape before any request could produce it. FR-064 forbids disclosing activity;
@@ -225,8 +236,8 @@ Each is built one way, pinned by one test, and cheap to turn.
 ## Revisit when
 
 - *(Done 2026-10-05, ADR-0033.)* C3 lands: everything under "Owed, C3", and decision 5 stops being true.
-- C5 registers the first consumer: `outbox_deliveries` gets its first rows and the three
-  notes above fall due.
+- *(Done 2026-10-07, ADR-0035.)* C5 registers the first consumer: `outbox_deliveries` gets
+  its first rows and the three notes above fall due.
 - A second route by entry id arrives (favourites and reactions, C5): it uses
   `ChangeEntry.authorOf`'s rule or states why not, and joins `EntryChangesTest`'s route set.
 

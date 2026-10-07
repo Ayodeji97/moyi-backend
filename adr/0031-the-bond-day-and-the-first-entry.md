@@ -874,7 +874,11 @@ and 7. The bullets are kept as written, for what they asked.*
   one. In production a stuck bond write parks every submission for that bond with no bound.
   Not a correctness defect; a thing to decide before real traffic.
 
-**C5, withdrawal on block.**
+**C5, withdrawal on block.** *Discharged 2026-10-07, ADR-0035 decision 12. A replay is
+built from `Entry.canBeReadBy`, which treats a withdrawn author's entry as erased from the
+ending's commit. `WithdrawalReadTest` names it: a replay of the withdrawer's `POST` key and of
+their `PATCH` key answers `Idempotency-Replayed: true` with no text, with no dispatcher run
+and the rows asserted still whole.*
 
 - **A replay must consult the withdrawal marker from the moment a block commits** (spec §6.7).
   Between the block's commit and the consumer's erasure, a replay must show no text. This
