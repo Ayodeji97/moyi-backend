@@ -98,7 +98,10 @@ data class ConsumerBacklog(
  * callback: Spring's `TransactionTemplate` logs an exception that passes
  * through it, whole, at DEBUG on every rollback and at ERROR when the rollback
  * itself fails. It is caught inside, the transaction is marked for rollback,
- * and the exception is carried out as a value Spring never sees.
+ * and the exception is carried out as a value the template never sees.
+ * A consumer's transactional proxy can still see it before this catch; the
+ * application pins Spring's TransactionInterceptor logger OFF, including its
+ * rollback-error output (ADR-0035 decision 16).
  *
  * **A delivery has a time limit** ([DeliveryProperties], a minute unless
  * configured), because a handler waiting on a lock that is never released

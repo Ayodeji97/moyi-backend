@@ -5,7 +5,12 @@ import ch.qos.logback.classic.Logger
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.spi.ThrowableProxyUtil
 import ch.qos.logback.core.AppenderBase
+import com.moyi.common.events.EventConsumer
+import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxDispatcher
+import com.moyi.common.events.OutboxEvent
+import com.moyi.common.events.ReceivedEvent
+import com.moyi.common.events.StartFrom
 import com.moyi.common.testing.IntegrationTest
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -15,16 +20,23 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.slf4j.LoggerFactory
+import org.springframework.aop.support.AopUtils
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.logging.LogLevel
 import org.springframework.boot.logging.LoggingSystem
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.transaction.annotation.Propagation
+import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 import java.net.URI
@@ -58,7 +70,7 @@ import javax.sql.DataSource
  * edited, and the partner's), a password, two access tokens and two refresh
  * tokens, across register, sign-in, pairing, submit, read, edit, the reveal,
  * delete, an ending that withdraws, the withdrawal's erasure by the
- * dispatcher, and a refresh.
+ * dispatcher, a failing transactional consumer, and a refresh.
  *
  * **An invite code is held to less**, because it cannot be held to more: see
  * [PRINTS_THE_REQUEST_PATH]. **Not covered at all:** the email verification
@@ -77,8 +89,9 @@ import javax.sql.DataSource
  * against `spring.mvc.log-request-details=true`, which was run once here and
  * put the bearer token in the dispatcher servlet's TRACE line.
  *
- * Each of the six pins was removed in turn and this test failed each time,
- * naming the logger that line holds.
+ * Each of the original six pins was removed in turn and this test failed each time,
+ * naming the logger that line holds. The transactional interceptor regression
+ * was also seen failing before its pin was added.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -102,14 +115,19 @@ import javax.sql.DataSource
         "moyi.security.client-address.trusted-proxies=127.0.0.0/8,::1/128",
     ],
 )
+@Import(SecretsNeverLoggedTest.ConsumerConfiguration::class)
 @ActiveProfiles("test")
 @ExtendWith(OutputCaptureExtension::class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@Suppress("LongParameterList") // The real dispatcher and its proxied failing consumer are both exercised.
 class SecretsNeverLoggedTest(
     @LocalServerPort private val port: Int,
     @Autowired private val dispatcher: OutboxDispatcher,
     @Autowired private val logging: LoggingSystem,
     @Autowired dataSource: DataSource,
+    @Autowired private val publisher: EventPublisher,
+    @Autowired private val transactions: TransactionTemplate,
+    @Autowired private val failingConsumer: FailingConsumer,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
     private val http = HttpClient.newHttpClient()
@@ -181,6 +199,8 @@ class SecretsNeverLoggedTest(
         jdbc.queryForObject("SELECT text IS NULL FROM entries WHERE id = ?::uuid", Boolean::class.java, beaEntry) shouldBe true
         get("/bonds/$bond/today", bea).status shouldBe 200
 
+        failingConsumerDoesNotLogItsException()
+
         // A refresh sends the refresh token back; the pair it returns is watched too.
         val refreshed = send("POST", "/auth/refresh", null, """{"refreshToken":"${ada.refresh}"}""")
         refreshed.status shouldBe 200
@@ -210,6 +230,58 @@ class SecretsNeverLoggedTest(
                 .map { it.first }
                 .shouldBeEmpty()
         }
+    }
+
+    /** The catch in the dispatcher runs after this consumer's transactional interceptor. */
+    private fun failingConsumerDoesNotLogItsException() {
+        AopUtils.isAopProxy(failingConsumer) shouldBe true
+        scan.watch("handler exception", HANDLER_SECRET)
+        val aggregate = UUID.randomUUID()
+        transactions.executeWithoutResult {
+            publisher.publish(OutboxEvent("SecretProbe", aggregate, FailingConsumer.EVENT, emptyMap(), Instant.now()))
+        }
+        dispatcher.dispatchDue(Instant.now(), DISPATCH_BUDGET).failed shouldBe 1
+        // The handler reached the database, but its write was rolled back with the delivery.
+        jdbc.queryForObject(
+            "SELECT aggregate_type FROM outbox_events WHERE aggregate_id = ?",
+            String::class.java,
+            aggregate,
+        ) shouldBe "SecretProbe"
+        jdbc.queryForObject(
+            """
+            SELECT d.last_error FROM outbox_deliveries d JOIN outbox_events e ON e.id = d.event_id
+            WHERE e.aggregate_id = ? AND d.consumer_id = ? AND d.processed_at IS NULL AND d.attempts = 1
+            """.trimIndent(),
+            String::class.java,
+            aggregate,
+            FailingConsumer.ID,
+        ) shouldBe IllegalStateException::class.java.name
+    }
+
+    /** Same transactional proxy as WithdrawEntries, with a synthetic secret in its failure. */
+    open class FailingConsumer(
+        private val jdbc: JdbcTemplate,
+    ) : EventConsumer {
+        override val id = ID
+        override val eventTypes = setOf(EVENT)
+        override val startFrom = StartFrom.NOW
+
+        @Transactional(propagation = Propagation.MANDATORY)
+        override fun handle(event: ReceivedEvent) {
+            jdbc.update("UPDATE outbox_events SET aggregate_type = 'MustRollBack' WHERE id = ?", event.id) shouldBe 1
+            throw IllegalStateException(HANDLER_SECRET)
+        }
+
+        companion object {
+            const val ID = "test.secret-probe"
+            const val EVENT = "SecretProbeFailed"
+        }
+    }
+
+    @TestConfiguration
+    class ConsumerConfiguration {
+        @Bean
+        fun failingConsumer(jdbc: JdbcTemplate): FailingConsumer = FailingConsumer(jdbc)
     }
 
     /** Registers, verifies in the database, signs in. The tokens it is given are watched from then on. */
@@ -353,6 +425,7 @@ class SecretsNeverLoggedTest(
         const val ADA_EDITED = "Ada~edited~it to this"
         const val BEA_TEXT = "Bea~wrote~hers after"
         const val PASSWORD = "seven~green~kettles~at~dawn"
+        const val HANDLER_SECRET = "private~handler~exception"
         const val CONTROL = "control~marker~"
         const val RUN_ID_LENGTH = 8
         const val DISPATCH_BUDGET = 10

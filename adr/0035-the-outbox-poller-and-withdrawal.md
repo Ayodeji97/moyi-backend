@@ -376,13 +376,13 @@ new words. The reason is this slice's: if a single delete were refused on an end
 tombstones appearing after the end could only mean a block (X15). The partner still gets the
 one `404`.
 
-**16. Six loggers are pinned in `application.yml`, so that raising a level above them
+**16. Seven loggers are pinned in `application.yml`, so that raising a level above them
 cannot put an entry in the log.** CLAUDE.md's rule that entry text, passwords and tokens
 never reach a log was held by types that redact their `toString`. That does not bind the
 libraries underneath, which print values of their own accord once their level is lowered.
 The slice's last task saw the first of these; the privacy review proved four; the test
-written for the fix found two more. None is this slice's: each predates it. With
-everything at TRACE, each was seen printing the words of an entry:
+written for the fix found two more. Those original six predate this slice; a later review
+found the transactional consumer's exception path, described below. The seven pins are:
 
 | Logger | Pinned at | What it printed, and at what level |
 |---|---|---|
@@ -392,12 +392,13 @@ everything at TRACE, each was seen printing the words of an entry:
 | `org.hibernate.orm.resource.registry` | INFO | TRACE: the driver's statement, which prints itself with its parameters filled in |
 | `org.postgresql` | INFO | TRACE: the wire protocol's `Bind` message |
 | `org.apache.coyote.http11.Http11InputBuffer` | INFO | DEBUG: the bytes of every request as read, so the bearer token, a password, a refresh token and an entry's text |
+| `org.springframework.transaction.interceptor.TransactionInterceptor` | OFF | TRACE: a proxied handler's exception message and throwable; ERROR: the original exception if rollback fails |
 
 - **What a pin does.** A logger with a level of its own keeps it whatever is set above it.
   So the pins hold against `LOGGING_LEVEL_ROOT`, `logging.level.org.hibernate`, any other
   parent, and Spring Boot's `sql` and `web` groups, at any level. No shipped profile raises
   those; `LOGGING_LEVEL_ROOT=DEBUG` is what gets set during an incident.
-- **What defeats it.** A level set on one of the six exact loggers, or on a name beneath
+- **What defeats it.** A level set on one of the seven exact loggers, or on a name beneath
   `org.postgresql`: an environment variable outranks `application.yml`. And
   `spring.mvc.log-request-details=true`, which is another switch and prints every request
   header at TRACE, the bearer token among them (run once, seen). Neither is guarded.
@@ -418,6 +419,26 @@ everything at TRACE, each was seen printing the words of an entry:
 - *Rejected:* an `AttributeConverter` to a redacting type for `EntryEntity.text`. It would
   fix the entity listing only; the bound value, the fetched value, the driver and the
   socket would print as before.
+
+**The seventh pin closes the transactional proxy's failure path (Codex review).**
+`WithdrawEntries.handle` uses `@Transactional(MANDATORY)`, so its interceptor receives a
+thrown exception before the dispatcher's catch does. Spring 7.0.9 logs its message and
+throwable at TRACE, and at ERROR if rollback itself fails. Catching inside
+`TransactionTemplate` does not protect this inner boundary. The logger
+`org.springframework.transaction.interceptor.TransactionInterceptor` is now OFF: INFO
+would leave the rollback-error path open. The cost is its transaction diagnostics; the
+outbox still records and reports failures by class name and retries them.
+
+`SecretsNeverLoggedTest` now registers a real proxied consumer that updates an event row
+and throws a synthetic private marker. It checks that the write rolls back and the
+unacknowledged delivery records one failure by class name, and scans both logged messages
+and throwables with the shipped configuration at root TRACE. Before the pin, the test
+failed naming `TransactionInterceptor`; with the pin, the marker must be absent. The
+original six pins' successful-operation coverage alone could not exercise this path.
+
+Validation of this correction: the regression failed before the pin and passed after it;
+`./gradlew build` passed; `scripts/smoke.sh --attach` against isolated Postgres and Valkey
+instances passed all 458 checks. The temporary instances were removed afterwards.
 
 ## Consequences
 

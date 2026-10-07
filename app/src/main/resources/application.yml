@@ -93,6 +93,11 @@ logging:
     org.hibernate.orm.resource.registry: INFO
     org.postgresql: INFO
     org.apache.coyote.http11.Http11InputBuffer: INFO
+    # A @Transactional consumer's proxy sees its exception before the outbox
+    # dispatcher can catch it. It logs the message and throwable at TRACE,
+    # and at ERROR if rollback itself fails. INFO is therefore insufficient.
+    # The dispatcher reports the failure by class name and retains the retry.
+    org.springframework.transaction.interceptor.TransactionInterceptor: "OFF"
 
 management:
   endpoints:
