@@ -1,5 +1,6 @@
 package com.moyi.gratitude.service
 
+import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondAnchorTimeline
 import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.BondCalendar
@@ -33,13 +34,51 @@ internal fun BondAnchorTimeline.asCalendar(): BondCalendar =
  *
  * **And who in that bond has withdrawn their entries**
  * ([BondMembership.withdrawnMemberIds]), from the same membership and so as
- * that bond stood when this request resolved it. `bond` records a withdrawal
- * in the transaction that ends the bond; the rows are erased later, by the
- * outbox's consumer. Carried here, the fact reaches the gate with every
- * reader there is, and a read that begins after that commit shows none of the
- * words whether or not anything has been erased yet (spec §6.7). No caller
- * passes the set or decides anything from it: this is the only place it is
- * read, and [com.moyi.gratitude.domain.Entry.canBeReadBy] the only place it
- * is asked.
+ * that bond stood **when that membership was resolved**. `bond` records a
+ * withdrawal in the transaction that ends the bond; the rows are erased
+ * later, by the outbox's consumer. Carried here, the fact reaches the gate
+ * with every reader there is (spec §6.7). No caller passes the set or decides
+ * anything from it: this is the only place it is read, and
+ * [com.moyi.gratitude.domain.Entry.canBeReadBy] the only place it is asked.
+ *
+ * **So the membership this is called on must be one resolved after the
+ * entries were loaded, or one read under the bond's lock.** A write path has
+ * the second (`lockMembershipOf`: the ending needs that lock, so it has
+ * either committed and is in the set, or cannot commit until the writer
+ * does). A read path has neither by default, and takes [readerNow].
  */
 internal fun BondMembership.asReader(): Reader = Reader(memberId = memberId, bondId = bondId, withdrawnAuthors = withdrawnMemberIds)
+
+/**
+ * The reader for a path that holds no lock on the bond: the caller's
+ * membership **resolved again, now**, and the [Reader] that one makes.
+ *
+ * **The marker is read last.** Call this after the entries to be rendered
+ * have been loaded, never before. The reason is an ordering of two reads,
+ * the entries at T1 and the withdrawals at T2, with T1 before T2:
+ *
+ * - If the withdrawal is absent at T2, the ending had not committed at T2,
+ *   and so not at T1 either. The response is one that could have been given
+ *   entirely before the ending.
+ * - If it is present at T2, the words are hidden, whatever the rows held.
+ *
+ * Asked first, the same two reads prove nothing: the set can be stale by as
+ * long as anything waits between them, and `ReconcileJoiningDay.beforeRead`
+ * waits on the bond's row lock, which the ending's own transaction holds.
+ * The read then goes on, after that commit, with a set from before it. (The
+ * consumer erasing rows between T1 and T2 changes nothing: a row only ever
+ * gets emptier.)
+ *
+ * It works inside a caller's transaction as well as outside one: the
+ * transactions here are `READ COMMITTED`, where each statement sees what has
+ * committed by then, and the withdrawals are read by plain JDBC, which no
+ * persistence context answers for.
+ *
+ * It costs a second membership resolution on a read. The port has no
+ * narrower question to ask.
+ *
+ * @throws com.moyi.common.web.NotFoundException the caller is no longer a
+ * member. Member rows are never deleted, so this cannot happen today; if it
+ * ever can, the answer is the `404` the first resolution would have given.
+ */
+internal fun BondAccess.readerNow(membership: BondMembership): Reader = membershipOf(membership.userId, membership.bondId).asReader()

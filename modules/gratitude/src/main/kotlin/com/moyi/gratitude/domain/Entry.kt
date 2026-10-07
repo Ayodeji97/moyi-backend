@@ -110,7 +110,13 @@ internal data class Entry(
      *    function's answer (`GET /today`, a fresh write, a replay): a second
      *    place that asked would be a second copy of the rule, and a response
      *    added later that forgot to ask it would show the words, where one
-     *    that goes through this gate cannot. [isErased] is deliberately not
+     *    that goes through this gate cannot. **What it is told is only as
+     *    current as the [Reader]**: this function cannot know when
+     *    [Reader.withdrawnAuthors] was read. The rule that makes its answer
+     *    safe is the caller's, "the marker is read last": the reader is built
+     *    after this entry was loaded (or under the bond's lock), so a set
+     *    that names nobody means the ending had not committed when the entry
+     *    was read. [isErased] is deliberately not
      *    where it lives: that is the row's own state, which the edit rule and
      *    the reveal also read, and neither has a reader to ask about.
      *    **Which tombstone depends on what the reader could see before**:

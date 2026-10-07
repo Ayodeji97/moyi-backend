@@ -179,7 +179,15 @@ class BondMembership internal constructor(
      * whether or not they have left: the caller's own id may be in it. It is
      * true from the commit of the request that withdrew, which is before
      * anything has been erased, so a read that shows an entry's text must
-     * ask this first (FR-029a, spec §6.7).
+     * ask this (FR-029a, spec §6.7).
+     *
+     * **It is a snapshot, as of the moment this membership was resolved.**
+     * From [BondAccess.lockMembershipOf] that moment is under the lock an
+     * ending needs, and the set stays true for the transaction. From
+     * [BondAccess.membershipOf] it can be out of date a statement later. A
+     * caller that holds no lock must load what it will show first and
+     * resolve the membership after, so that an empty set means the ending
+     * had not committed when the entries were read.
      */
     val withdrawnMemberIds: Set<UUID>,
 ) {

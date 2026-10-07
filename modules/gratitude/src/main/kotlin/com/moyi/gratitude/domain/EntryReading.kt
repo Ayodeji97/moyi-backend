@@ -30,6 +30,14 @@ import java.util.UUID
  * the row says it should not. The reader does. It may name the reader
  * themselves: a withdrawal is total, and its author reads a tombstone too.
  *
+ * **The set is only as good as the moment it was read, so it is read last.**
+ * A Reader that gates an entry must be built after that entry was loaded, or
+ * from a membership read under the bond's lock. Then an absent withdrawal
+ * means the ending had not committed when the entry was read, and the
+ * response is one from before it. Built first, the set can be older than an
+ * ending that commits before the entry is read, and the gate passes words it
+ * exists to hide. `service.readerNow` is how a read path gets one.
+ *
  * It has no default. Whoever builds a Reader has a membership in hand, and
  * must say what that membership says; an empty set written by habit would be
  * a gate that never heard of the withdrawal.

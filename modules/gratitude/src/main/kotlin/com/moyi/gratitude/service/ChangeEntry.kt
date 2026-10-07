@@ -133,7 +133,21 @@ internal class ChangeEntry(
         authorOrNull(userId, entryId, lock = false)?.let { (_, membership) -> joining.beforeRead(membership) }
     }
 
-    /** A replay is a read, including on an archived bond; erasure wins over its original content. */
+    /**
+     * A replay is a read, including on an archived bond; erasure wins over its original content.
+     *
+     * **Who has withdrawn is asked after the entry is read, not before**
+     * ([readerNow], which has the reasoning). The membership [authorOf]
+     * resolves decides who the author is and which joining day to reconcile.
+     * It was taken before that reconcile, which can wait on the bond's lock
+     * while an ending commits, so it does not decide what is shown: the
+     * entry is loaded, and then the membership is resolved again for the
+     * reader. This path holds the bond's lock only when the reconcile had a
+     * day to resume, which is not a thing to rely on.
+     *
+     * A caller whose membership is gone by the second resolution is answered
+     * as [authorOf] answers one who never had it: no such entry.
+     */
     fun read(
         userId: UUID,
         entryId: EntryId,
@@ -141,7 +155,14 @@ internal class ChangeEntry(
         val (entry, membership) = authorOf(userId, entryId, lock = false)
         joining.beforeRead(membership)
         val current = checkNotNull(entries.find(entryId))
-        return EntryView(current.readBy(membership.asReader()), checkNotNull(days.find(entry.bondDayId)))
+        // After the entry, never before: the marker is read last.
+        val reader =
+            try {
+                access.readerNow(membership)
+            } catch (_: NotFoundException) {
+                throw EntryNotFoundException()
+            }
+        return EntryView(current.readBy(reader), checkNotNull(days.find(entry.bondDayId)))
     }
 
     /**
