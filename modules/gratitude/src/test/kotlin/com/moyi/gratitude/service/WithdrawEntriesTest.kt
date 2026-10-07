@@ -51,7 +51,7 @@ import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
- * The outbox's first consumer (spec §6.7, plan C5a decision 12): a member who
+ * The outbox's first consumer (spec §6.7, ADR-0035 decision 13): a member who
  * ended a bond and took their words back has them erased, by the routine a
  * single `DELETE` uses, in the transaction that acknowledges the delivery.
  *

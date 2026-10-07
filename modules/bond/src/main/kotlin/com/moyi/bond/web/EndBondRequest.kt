@@ -46,8 +46,8 @@ internal data class EndBondRequest(
  * - **A key it does not know is ignored.** `{"withdrawEntry": false}`,
  *   `{"withdraw_entries": false}` and `{"WithdrawEntries": false}` were each
  *   an absent flag, and on a block an absent flag withdraws: the caller
- *   declined, in so many words, and was withdrawn from (the review of
- *   Task 4, C5a). Forward compatibility is the usual reason to ignore a
+ *   declined, in so many words, and was withdrawn from (ADR-0035
+ *   decision 11; the review of Task 4, C5a). Forward compatibility is the usual reason to ignore a
  *   key, and it is not worth an erasure nobody asked for.
  * - **A key sent twice is the last one sent.** Which of two contradictory
  *   answers was meant is not this server's to pick.

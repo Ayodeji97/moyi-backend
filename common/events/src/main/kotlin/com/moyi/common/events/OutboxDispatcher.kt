@@ -66,7 +66,7 @@ data class ConsumerBacklog(
 )
 
 /**
- * **One delivery, one transaction** (plan C5a, decision 4). The claim, the
+ * **One delivery, one transaction** (ADR-0035 decision 4). The claim, the
  * handler and the acknowledgement share it, so a handler's work and the record
  * that it was done commit or vanish together: there is no moment at which an
  * entry is erased and the delivery still owed, or the reverse. A handler marked
@@ -517,7 +517,7 @@ internal class JdbcOutboxDispatcher(
     private enum class Recorded { YES, NO, ALREADY_ACKNOWLEDGED }
 
     private companion object {
-        /** Decision 5: a delivery that has failed this many times is counted apart. */
+        /** ADR-0035 decision 5: a delivery that has failed this many times is counted apart. */
         const val FAILING_FROM = 5
 
         /**

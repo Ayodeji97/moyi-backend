@@ -47,7 +47,7 @@ import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
- * Real-Postgres proof of the dispatcher's promises (plan C5a, decisions 4 to 7):
+ * Real-Postgres proof of the dispatcher's promises (ADR-0035 decisions 4 to 7):
  * a delivery is claimed, handled and acknowledged in one transaction; a failure
  * rolls all of that back, is recorded by class name alone, and steps aside for
  * the deliveries behind it; two dispatchers never hand one delivery to a handler twice.

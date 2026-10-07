@@ -40,7 +40,8 @@ interface BondAccess {
      * the only honest option (spec §2.1).
      *
      * **The lock order across this application is bond, then bond-day, then
-     * entry**, on submission, editing, lifecycle reconciliation and closing.
+     * entry**, on submission, editing, lifecycle reconciliation, closing and a
+     * withdrawal's erasure.
      * The close job takes the same bond lock through [lockClosingViewOf]
      * before it locks a day, so a close sees committed pairing and timezone
      * changes and cannot reverse the writer lock order.
@@ -72,8 +73,15 @@ interface BondAccess {
      * It discloses nothing of a bond but dates and a time, and it is still
      * not to be called from a controller: `ArchitectureTest` holds that.
      *
-     * No lock (ADR-0031 decision 18): the closer starts at the bond-day and
-     * never holds the bond's row.
+     * No lock: this is the read for a caller that decides nothing from the
+     * bond's current state under a day's lock. Today that is
+     * `CreateMissingDays`, which only lists a calendar's gaps. A caller that
+     * settles a day, or erases on one, takes [lockClosingViewOf] (ADR-0033
+     * decision 3, which superseded ADR-0031 decision 18 for closing an
+     * existing day).
+     * **[BondClosingView.withdrawnMemberIds] read through this method is not
+     * read under the bond's lock** and must not be used to decide an erasure
+     * or a reveal.
      */
     fun closingViewOf(bondId: UUID): BondClosingView?
 

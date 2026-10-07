@@ -26,7 +26,7 @@ import java.util.UUID
  *
  * **Through [EraseEntry], one entry at a time**, because a withdrawal must
  * leave the entry rows a run of single deletes leaves, and the same answers
- * to every reader (plan C5a, decision 12; ADR-0028 decision 8: nothing may
+ * to every reader (ADR-0035 decision 13; ADR-0028 decision 8: nothing may
  * tell that a withdrawal happened). So no event is published, a settled day
  * is not recounted, and nothing is touched that a `DELETE` would not touch.
  *

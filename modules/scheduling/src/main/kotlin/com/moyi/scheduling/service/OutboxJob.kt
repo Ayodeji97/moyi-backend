@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * The outbox's poller (spec §8; plan C5a, Task 3). It knows the time and six
+ * The outbox's poller (spec §8; ADR-0035 decisions 7 and 8). It knows the time and six
  * meters, and asks `common:events` to do the delivering: what a delivery is,
  * and what a failure does to it, is not written here.
  *
@@ -47,7 +47,7 @@ import java.util.concurrent.atomic.AtomicLong
  * them is said at WARN, once, because a tick that outlasts its interval is
  * either a backlog or a handler that is stuck.
  *
- * **No `@SchedulerLock`, on purpose** (decision 7). The close job takes one
+ * **No `@SchedulerLock`, on purpose** (ADR-0035 decision 7). The close job takes one
  * because two instances closing the same day is work done twice. Here the
  * dispatcher claims each delivery with `FOR UPDATE SKIP LOCKED`: that row lock
  * is the concurrency control, a second instance passes over what the first

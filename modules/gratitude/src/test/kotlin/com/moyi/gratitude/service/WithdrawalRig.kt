@@ -20,8 +20,8 @@ import java.util.UUID
  * way to say that two bonds ended up **the same**.
  *
  * **Why "the same" is a snapshot and not a handful of assertions.** A
- * withdrawal has to leave what a run of single deletes leaves (plan C5a,
- * decision 12), and has to leave it whichever of the close job and the
+ * withdrawal has to leave what a run of single deletes leaves (ADR-0035
+ * decision 13), and has to leave it whichever of the close job and the
  * consumer reached a day first. A test that named the columns it cared about
  * would pass on the column nobody thought of. So [Snapshot] is every row of a
  * bond's entries and days, its streak, the events it published and what both

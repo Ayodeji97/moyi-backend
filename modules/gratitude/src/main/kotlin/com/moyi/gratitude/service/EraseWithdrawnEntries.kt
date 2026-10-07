@@ -29,10 +29,13 @@ import java.util.UUID
  * what an erasure does, to be kept in step with the first. It is the erasure
  * itself, by [EraseEntry], the routine the consumer and `DELETE` use, and
  * the caller then decides from the day as that left it. The close job before
- * the consumer, the consumer before the close job, and the author's own
- * delete at that instant therefore leave the same rows
- * (`WithdrawalRaceTest`). The consumer, arriving second, finds the entry
- * erased and passes over it.
+ * the consumer and the consumer before the close job therefore leave the
+ * same rows, and on a day [CloseDay] reaches so does the author's own delete
+ * at that instant (`WithdrawalRaceTest`). On a legacy joining day there is
+ * no hand-delete twin: a delete reveals that day first (ADR-0035 question
+ * 6). There the test pins that the order of reader, consumer and close job
+ * does not matter and that nothing is shown. The consumer, arriving second,
+ * finds the entry erased and passes over it.
  *
  * **Every caller that reveals or closes a day calls this first**, holding
  * the bond's lock and the day's, with the day as it read under that lock:

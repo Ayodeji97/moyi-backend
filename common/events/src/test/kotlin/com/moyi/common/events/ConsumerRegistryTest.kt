@@ -44,7 +44,7 @@ import javax.sql.DataSource
 /**
  * Real-Postgres proof of what registration writes, and of the one thing it
  * exists to guarantee: a consumer that registers while events are being
- * published misses none of them (plan C5a, decision 2).
+ * published misses none of them (ADR-0035 decision 2).
  *
  * Every test registers under a consumer id and event types of its own, and
  * asserts on those rows only: the database is shared with whatever else ran

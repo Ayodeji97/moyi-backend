@@ -524,7 +524,7 @@ internal class OutboxJobTest(
         // A delay, not a rate, and counted from the hand-over, which is all the call does: a tick still
         // running two seconds later is not joined by another, because the call that would start one is skipped.
         run.getAnnotation(Scheduled::class.java).fixedDelayString shouldBe "\${moyi.scheduling.outbox.delay:PT2S}"
-        // Decision 7: SKIP LOCKED is the concurrency control, and two instances polling is the design.
+        // ADR-0035 decision 7: SKIP LOCKED is the concurrency control, and two instances polling is the design.
         run.getAnnotation(SchedulerLock::class.java).shouldBeNull()
         // The dispatcher opens a transaction per delivery and refuses to run inside another.
         OutboxJob::class.java.getAnnotation(Transactional::class.java).shouldBeNull()

@@ -32,8 +32,9 @@ import javax.sql.DataSource
  * A withdrawal is recorded when the bond ends and its entries are erased
  * afterwards, by the outbox's consumer. In between, the close job or a read
  * can reach one of that author's days first. These tests are about that
- * interval (review of C5a Task 5, finding A1): **whoever reaches the day
- * first must leave what the consumer would have left**, and that in turn is
+ * interval (ADR-0035 decision 14; the review of C5a Task 5, finding A1):
+ * **whoever reaches the day first must leave what the consumer would have
+ * left**, and that in turn is
  * what the author's own `DELETE` at that instant leaves.
  *
  * **Each test runs the same story on several bonds at once and compares them

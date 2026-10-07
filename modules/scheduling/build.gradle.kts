@@ -13,7 +13,7 @@ dependencies {
     // `internal`, and ArchitectureTest fails a declaration there that is not.
     implementation(projects.modules.gratitude)
     // OutboxDispatcher, for the poller: this module owns the trigger and the
-    // meters, `common:events` the delivering (plan C5a, Task 3).
+    // meters, `common:events` the delivering (ADR-0035 decisions 7 and 8).
     implementation(projects.common.events)
 
     implementation("org.springframework.boot:spring-boot-starter-jdbc")

@@ -3,7 +3,7 @@ package com.moyi.common.events
 import java.time.Duration
 
 /**
- * How long a failed delivery waits before it is offered again (plan C5a,
+ * How long a failed delivery waits before it is offered again (ADR-0035
  * decision 5). There is no last attempt, so the count this is asked about has
  * no upper bound; the wait does.
  */
