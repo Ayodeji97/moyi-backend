@@ -15,6 +15,7 @@ import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.BondClosingStore
 import com.moyi.bond.infra.database.BondStore
+import com.moyi.bond.infra.database.EntryWithdrawals
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -46,6 +47,7 @@ internal class BondAccessAdapter(
     private val anchorIntervals: AnchorIntervalStore,
     private val closing: BondClosingStore,
     private val pasts: BondPasts,
+    private val withdrawals: EntryWithdrawals,
 ) : BondAccess {
     @Transactional(readOnly = true)
     override fun membershipOf(
@@ -133,6 +135,10 @@ internal class BondAccessAdapter(
             activeSince = activeSinceOf(bond),
             endedAt = bond.archivedAt,
             anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(membership.bondId)),
+            // Of the bond, not of the caller: the member reading is as often the
+            // one whose partner withdrew as the one who did, and each must be told
+            // the same set. Under `lockMembershipOf` this is read after the lock.
+            withdrawnMemberIds = withdrawals.membersOf(membership.bondId),
         )
 
     /**

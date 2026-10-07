@@ -111,11 +111,11 @@ interface BondAccess {
  * check it.** Do not assume `isOpen` covers it — that assumption is exactly
  * what the second review of PR #41 found in `RequestDeletion.cancel`.
  *
- * Twelve fields, not seven arguments to reorder by accident: every one is
+ * Thirteen fields, not seven arguments to reorder by accident: every one is
  * named at every call site (`BondAccessAdapter`'s one projection, shared by
  * [BondAccess.membershipOf] and [BondAccess.lockMembershipOf]), and the shape
  * is the bond facts above plus the caller's own identifiers, [activeSince],
- * [endedAt] and [anchorTimeline] — splitting it into a nested value would just
+ * [endedAt], [anchorTimeline] and [withdrawnMemberIds] — splitting it into a nested value would just
  * move the count, not reduce it.
  */
 @Suppress("LongParameterList")
@@ -160,6 +160,16 @@ class BondMembership internal constructor(
      * differ for up to one logical day after a change is confirmed (BR-6).
      */
     val anchorTimeline: BondAnchorTimeline,
+    /**
+     * Members of this bond who have withdrawn what they wrote. Their entries are erased, or about to be.
+     *
+     * A fact about the **bond**, the same set whichever member is asking and
+     * whether or not they have left: the caller's own id may be in it. It is
+     * true from the commit of the request that withdrew, which is before
+     * anything has been erased, so a read that shows an entry's text must
+     * ask this first (FR-029a, spec §6.7).
+     */
+    val withdrawnMemberIds: Set<UUID>,
 ) {
     /** Ids only — a bond's name is the couple's words (doc 18 §9). */
     override fun toString(): String = "BondMembership(bondId=$bondId, memberId=$memberId)"

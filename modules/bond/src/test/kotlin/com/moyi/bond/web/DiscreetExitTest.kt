@@ -177,6 +177,77 @@ internal class DiscreetExitTest(
         normalise(afterBlock.contentAsString) shouldBe normalise(afterLeave.contentAsString)
     }
 
+    @Test
+    fun `a block that withdraws and a leave that does not are one answer, and one bond, to the other member`() {
+        // FR-029a adds a second thing an ending may do, and so a second place
+        // for the two to come apart: the withdrawal is recorded in this
+        // module, in the ending's transaction. Whatever it writes, the other
+        // member's view of the bond must not move by a byte or a version.
+        val left = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave", """{"withdrawEntries":false}""") }
+        val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":true}""") }
+        val leftSilently = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave") }
+        val blockedSilently = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block") }
+        val leftWithdrawing = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave", """{"withdrawEntries":true}""") }
+        val blockedKeeping = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":false}""") }
+
+        // What is being compared really differs underneath.
+        withdrawalsIn(left) shouldBe 0
+        withdrawalsIn(blocked) shouldBe 1
+        withdrawalsIn(leftSilently) shouldBe 0
+        withdrawalsIn(blockedSilently) shouldBe 1
+        withdrawalsIn(leftWithdrawing) shouldBe 1
+        withdrawalsIn(blockedKeeping) shouldBe 0
+
+        val leftDetail = getBond(left.other, left.bondId)
+        leftDetail.contentAsString shouldContain "\"status\":\"ARCHIVED\""
+        listOf(blocked, leftSilently, blockedSilently, leftWithdrawing, blockedKeeping).forEach { other ->
+            withClue("the 204 itself") {
+                other.ending.status shouldBe left.ending.status
+                other.ending.contentAsString shouldBe ""
+                left.ending.contentAsString shouldBe ""
+                headersOf(other.ending) shouldBe headersOf(left.ending)
+            }
+            val detail = getBond(other.other, other.bondId)
+            withClue("GET /bonds/{id} as the other member") {
+                detail.status shouldBe leftDetail.status
+                detail.getHeader(HttpHeaders.ETAG)!!.substringBefore('-') shouldBe
+                    leftDetail.getHeader(HttpHeaders.ETAG)!!.substringBefore('-')
+                headersOf(detail).keys shouldBe headersOf(leftDetail).keys
+                normalise(detail.contentAsString) shouldBe normalise(leftDetail.contentAsString)
+            }
+            withClue("GET /bonds as the other member") {
+                normalise(listBonds(other.other).contentAsString) shouldBe normalise(listBonds(left.other).contentAsString)
+            }
+        }
+    }
+
+    @Test
+    fun `a withdrawal made after the other member has already left changes nothing they can see of the bond`() {
+        // The asymmetric order again, now with the withdrawal: Bea leaves, Ada
+        // blocks and takes her entries back. Block is the only thing an ended
+        // bond accepts, so anything of the bond that moved for Bea here could
+        // mean only one thing.
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val created = createBond(ada)
+        val bondId = bondIdOf(created)
+        accept(bea, codeOf(created)).status shouldBe 200
+        post(bea, "/api/v1/bonds/$bondId/leave").status shouldBe 204
+        val before = getBond(bea, bondId)
+        val listedBefore = listBonds(bea)
+
+        post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":true}""").status shouldBe 204
+
+        val after = getBond(bea, bondId)
+        withClue("what Bea sees of the bond after Ada withdrew") {
+            after.status shouldBe before.status
+            after.getHeader(HttpHeaders.ETAG) shouldBe before.getHeader(HttpHeaders.ETAG)
+            after.contentAsString shouldBe before.contentAsString
+            listBonds(bea).contentAsString shouldBe listedBefore.contentAsString
+        }
+        withdrawalsIn(bondId) shouldBe 1
+    }
+
     /**
      * A bond built the same way every time: Ada creates it, Bea joins, and then
      * [ending] finishes it. The display names are fixed so that two of these
@@ -227,7 +298,33 @@ internal class DiscreetExitTest(
     private fun post(
         userId: UUID,
         path: String,
-    ): MockHttpServletResponse = mockMvc.post(path) { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+        body: String? = null,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post(path) {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                if (body != null) {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = body
+                }
+            }.andReturn()
+            .response
+
+    private fun withdrawalsIn(ended: Ended): Int = withdrawalsIn(ended.bondId)
+
+    private fun withdrawalsIn(bondId: String): Int =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM bond_entry_withdrawals WHERE bond_id = ?",
+            Int::class.java,
+            UUID.fromString(bondId),
+        )!!
+
+    /** Every response header, by name. The `ETag` is compared apart: beside the version it digests ids two bonds cannot share. */
+    private fun headersOf(response: MockHttpServletResponse): Map<String, List<String>> =
+        response.headerNames
+            .filter { it != HttpHeaders.ETAG }
+            .associateWith { response.getHeaders(it) }
+            .toSortedMap()
 
     private fun getBond(
         userId: UUID,
