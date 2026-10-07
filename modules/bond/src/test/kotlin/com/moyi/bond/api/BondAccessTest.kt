@@ -125,6 +125,37 @@ internal class BondAccessTest(
         everyReadOf(untouched, ada, bea).forEach { it.withdrawnMemberIds.shouldBeEmpty() }
     }
 
+    @Test
+    fun `the closer's view reports a withdrawal too, by both reads, and only that bond's`() {
+        // The closer reveals entries for nobody's request, so no membership
+        // tells it who withdrew: between the ending's commit and the
+        // erasure it would stamp a withdrawn author's entry as revealed.
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val bondId = bondForTwo(ada, bea)
+        val other = bondForTwo(ada, bea)
+        val adaMember = access.membershipOf(ada, bondId).memberId
+        val beaMember = access.membershipOf(bea, bondId).memberId
+
+        bothClosingViewsOf(bondId).forEach { it.withdrawnMemberIds.shouldBeEmpty() }
+
+        endBond.leave(guard.membershipOf(UserId(ada), BondId(bondId)), withdrawEntries = false)
+        bothClosingViewsOf(bondId).forEach { it.withdrawnMemberIds.shouldBeEmpty() }
+
+        endBond.block(guard.membershipOf(UserId(ada), BondId(bondId)), withdrawEntries = true)
+        bothClosingViewsOf(bondId).forEach { it.withdrawnMemberIds shouldBe setOf(adaMember) }
+
+        endBond.block(guard.membershipOf(UserId(bea), BondId(bondId)), withdrawEntries = true)
+        bothClosingViewsOf(bondId).forEach { it.withdrawnMemberIds shouldBe setOf(adaMember, beaMember) }
+        // The same set a member is told: one fact, two views of it.
+        bothClosingViewsOf(bondId).forEach { it.withdrawnMemberIds shouldBe access.membershipOf(bea, bondId).withdrawnMemberIds }
+
+        bothClosingViewsOf(other).forEach { it.withdrawnMemberIds.shouldBeEmpty() }
+    }
+
+    private fun bothClosingViewsOf(bondId: UUID): List<BondClosingView> =
+        listOf(access.closingViewOf(bondId)!!, transactions.execute { access.lockClosingViewOf(bondId) }!!)
+
     /** Each member's membership, by the plain read and by the locking one: the four answers that must agree. */
     private fun everyReadOf(
         bondId: UUID,

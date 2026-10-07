@@ -81,6 +81,10 @@ interface BondAccess {
      * The closer's view, after taking the bond lock in the current
      * transaction. The closer takes this before a Bond-day lock, preserving
      * the application's bond -> bond-day order while it settles a day.
+     *
+     * Everything in the view is read after the lock is held, so an ending
+     * that committed while this waited, and whatever it withdrew
+     * ([BondClosingView.withdrawnMemberIds]), is in the answer.
      */
     fun lockClosingViewOf(bondId: UUID): BondClosingView?
 
@@ -177,11 +181,13 @@ class BondMembership internal constructor(
 
 /**
  * What the close job may know of a bond ([BondAccess.closingViewOf]): when it
- * became two people, when it ended, when its days reveal, and the timeline
- * its days are cut from. No member, no user, no name — the closer acts for
+ * became two people, when it ended, when its days reveal, the timeline its
+ * days are cut from, and whose entries have been withdrawn. No membership,
+ * no user, no name — the closer acts for
  * nobody, and a type that cannot carry a member cannot be mistaken for
  * permission to act as one.
  */
+@Suppress("LongParameterList") // Seven facts, each named at the one place that builds this (`BondAccessAdapter`), as with [BondMembership].
 class BondClosingView internal constructor(
     val bondId: UUID,
     /** As [BondMembership.activeSince]: the second member's join, `null` while the bond waits for one. */
@@ -201,6 +207,18 @@ class BondClosingView internal constructor(
     val revealTimeLocal: LocalTime?,
     private val past: BondPast,
     val anchorTimeline: BondAnchorTimeline,
+    /**
+     * Members of this bond who have withdrawn what they wrote. Their entries are erased, or about to be.
+     *
+     * The same fact, with the same meaning, as [BondMembership.withdrawnMemberIds]:
+     * of the bond, true from the commit of the request that withdrew, which
+     * is before anything has been erased. It is here because the closer
+     * reveals entries with no member asking, and so has no membership to
+     * learn it from: without it, a day that reaches its reveal between that
+     * commit and the erasure would stamp a withdrawn author's entry as
+     * revealed, and the stamp outlives the erasure (FR-029a, spec §6.7).
+     */
+    val withdrawnMemberIds: Set<UUID>,
 ) {
     /**
      * Whether the bond was in Strict mode up to [instant], not including it

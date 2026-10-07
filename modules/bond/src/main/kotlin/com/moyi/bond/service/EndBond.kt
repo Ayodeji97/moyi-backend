@@ -84,7 +84,7 @@ internal class EndBond(
         val now = clock.instant()
         end(bond.leave(membership.memberId, now), bond)
         if (withdrawEntries) withdraw(membership, now)
-        log.info("A member left bond {}", membership.bondId.value)
+        logEnded(membership)
     }
 
     /**
@@ -104,9 +104,7 @@ internal class EndBond(
      * bond and on one that has ended alike, and by a repeat of a call that
      * declined to the first time.
      *
-     * The log line says "ended", not "blocked", and names no user. Doc 18 §5
-     * keeps personal data out of logs, and which of two people blocked the
-     * other is as personal as this system gets.
+     * What is logged is [logEnded]'s one line, the line [leave] writes.
      */
     @Transactional
     fun block(
@@ -125,6 +123,20 @@ internal class EndBond(
         // ended: that bond is exactly where a member who left earlier, or
         // whose partner left first, comes to take their entries back.
         if (withdrawEntries) withdraw(membership, now)
+        logEnded(membership)
+    }
+
+    /**
+     * The one line both endings write (ADR-0028 decision 8).
+     *
+     * **One call site's worth of text, so the two cannot differ.** They did:
+     * leave said "left" and block said "ended", which never used the word
+     * "block" and told a reader of the log which of the two it was all the
+     * same. It names no user. Doc 18 §5 keeps personal data out of logs, and
+     * which of two people blocked the other is as personal as this system
+     * gets.
+     */
+    private fun logEnded(membership: Membership) {
         log.info("A member ended bond {}", membership.bondId.value)
     }
 

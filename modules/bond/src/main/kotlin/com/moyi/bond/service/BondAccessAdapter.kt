@@ -108,6 +108,10 @@ internal class BondAccessAdapter(
                 revealTimeLocal = bond.revealTimeLocal,
                 past = pasts.of(bond),
                 anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
+                // Read here, with the view's other facts, and so after the
+                // lock when `lockClosingViewOf` is the caller: an ending
+                // that committed while the closer waited is in this set.
+                withdrawnMemberIds = withdrawals.membersOf(id),
             )
         }
     }

@@ -1,5 +1,8 @@
 package com.moyi.bond.web
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.InviteCode
 import com.moyi.bond.domain.UserId
@@ -18,6 +21,7 @@ import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
@@ -275,8 +279,9 @@ internal class BondEndingEndpointTest(
     @Test
     fun `the absent flag means withdraw on a block and keep on a leave, however it is absent`() {
         // No body and no Content-Type (scripts/moyi, the Bruno collection),
-        // a JSON Content-Type and no body (scripts/smoke.sh), `{}`, an
-        // explicit null, and a property this API does not know.
+        // a JSON Content-Type and no body (scripts/smoke.sh), `{}`, and an
+        // explicit null. A property this API does not know is not an
+        // absence: see the refusal below.
         val absences: List<Pair<String?, Boolean>> =
             listOf(
                 null to false,
@@ -284,7 +289,6 @@ internal class BondEndingEndpointTest(
                 "" to true,
                 "{}" to true,
                 """{"withdrawEntries":null}""" to true,
-                """{"somethingElse":1}""" to true,
             )
 
         absences.forEach { (body, json) ->
@@ -472,6 +476,131 @@ internal class BondEndingEndpointTest(
     }
 
     @Test
+    fun `a key this route does not know, or the flag sent twice, is the standing 400 and withdraws nothing`() {
+        // Every one of the first three was a `204` that withdrew on a block:
+        // the caller said "false", spelt the key their own way, and the
+        // default answered for them. A withdrawal cannot be undone, so a
+        // body this route cannot be sure it understood is refused. The
+        // same for a key sent twice, where the last one used to win.
+        val unsure =
+            listOf(
+                """{"withdrawEntry":false}""",
+                """{"withdraw_entries":false}""",
+                """{"WithdrawEntries":false}""",
+                """{"somethingElse":1}""",
+                """{"withdrawEntries":false,"somethingElse":1}""",
+                """{"somethingElse":{"withdrawEntries":false},"withdrawEntries":false}""",
+                """{"withdrawEntries":false,"withdrawEntries":true}""",
+                """{"withdrawEntries":true,"withdrawEntries":false}""",
+                """{"withdrawEntries":false,"withdrawEntries":false}""",
+                """{"withdrawEntries":null,"withdrawEntries":false}""",
+                """{"withdrawEntries":false,"withdrawEntries":null}""",
+            )
+
+        listOf("block", "leave").forEach { ending ->
+            unsure.forEach { body ->
+                withClue("$ending $body") {
+                    val pair = pairedBond()
+                    val response = send(pair.ada, pair.id, ending, body, json = true)
+
+                    response.status shouldBe 400
+                    response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+                    // The standing sentence, and nothing of what was sent.
+                    response.contentAsString shouldContain "\"detail\":\"The request body could not be read.\""
+                    response.contentAsString shouldNotContain "ithdraw"
+                    response.contentAsString shouldNotContain "somethingElse"
+                    getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+                    withdrawnMembers(pair.id).shouldBeEmpty()
+                    withdrawalEvents(pair.id).shouldBeEmpty()
+                }
+                clear()
+            }
+        }
+    }
+
+    @Test
+    fun `the refusal of a body is the same bytes for a member, a stranger and a bond that does not exist`() {
+        // The body is read before the guard runs, so its refusal must not
+        // depend on who is asking or on whether there is a bond to ask
+        // about: a `400` for a member beside a `404` for a stranger would
+        // be the membership oracle with an extra step. One malformed body
+        // and one of each new refusal, on an open bond and an ended one.
+        val refused =
+            listOf(
+                """{"withdrawEntries": """,
+                """{"withdrawEntry":false}""",
+                """{"withdrawEntries":false,"withdrawEntries":true}""",
+            )
+        val open = pairedBond()
+        val ended = pairedBond(names = "Cy" to "Di")
+        leave(ended.bea, ended.id).status shouldBe 204
+        val eve = users.verified("Eve")
+        val ghost = UUID.randomUUID().toString()
+
+        listOf("block", "leave").forEach { ending ->
+            refused.forEach { body ->
+                withClue("$ending $body") {
+                    val member = send(open.ada, open.id, ending, body, json = true)
+                    member.status shouldBe 400
+                    member.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+
+                    val others =
+                        listOf(
+                            open.id to send(eve, open.id, ending, body, json = true),
+                            ended.id to send(ended.ada, ended.id, ending, body, json = true),
+                            ended.id to send(ended.bea, ended.id, ending, body, json = true),
+                            ended.id to send(eve, ended.id, ending, body, json = true),
+                            ghost to send(eve, ghost, ending, body, json = true),
+                            ghost to send(open.ada, ghost, ending, body, json = true),
+                            "not-a-uuid" to send(eve, "not-a-uuid", ending, body, json = true),
+                        )
+                    others.forEach { (id, response) ->
+                        response.status shouldBe member.status
+                        // The path the caller asked for is echoed in
+                        // `instance`; it is theirs already. Nothing else differs.
+                        response.contentAsString.replace(id, open.id) shouldBe member.contentAsString
+                        headersOf(response) shouldBe headersOf(member)
+                    }
+                }
+            }
+        }
+        withdrawnMembers(open.id).shouldBeEmpty()
+        withdrawnMembers(ended.id).shouldBeEmpty()
+        getBond(open.ada, open.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+    }
+
+    @Test
+    fun `a leave and a block write the same log line`() {
+        // ADR-0028 decision 8: "The service logs "a member ended bond {id}"
+        // for both paths and names no user." A line that says "left" for one
+        // and "ended" for the other tells whoever reads the log which of two
+        // people blocked the other, without the word ever appearing. Ada
+        // leaves and then blocks the same bond, so even the argument agrees.
+        val pair = pairedBond()
+        val logger = LoggerFactory.getLogger(EndBond::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().also { it.start() }
+        logger.addAppender(appender)
+        try {
+            leave(pair.ada, pair.id).status shouldBe 204
+            val afterLeave = appender.list.toList()
+            block(pair.ada, pair.id).status shouldBe 204
+            val afterBlock = appender.list.drop(afterLeave.size)
+
+            afterLeave shouldHaveSize 1
+            afterBlock shouldHaveSize 1
+            val (left, blocked) = afterLeave.single() to afterBlock.single()
+            left.message shouldBe blocked.message
+            left.argumentArray.toList() shouldBe blocked.argumentArray.toList()
+            left.argumentArray.toList() shouldBe listOf(UUID.fromString(pair.id))
+            left.level shouldBe blocked.level
+            left.formattedMessage shouldBe blocked.formattedMessage
+            left.formattedMessage shouldBe "A member ended bond ${pair.id}"
+        } finally {
+            logger.detachAppender(appender)
+        }
+    }
+
+    @Test
     fun `a stranger learns nothing from the body they send`() {
         // The guard is the handler's first statement, so whatever a readable
         // body says, a non-member gets the one 404 and nothing is written.
@@ -601,6 +730,9 @@ internal class BondEndingEndpointTest(
             .response
 
     // ---- helpers ------------------------------------------------------------
+
+    private fun headersOf(response: MockHttpServletResponse): Map<String, List<String>> =
+        response.headerNames.sorted().associateWith { response.getHeaders(it) }
 
     private fun createBond(userId: UUID): MockHttpServletResponse =
         mockMvc

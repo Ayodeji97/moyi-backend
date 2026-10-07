@@ -198,6 +198,69 @@ internal class BondAccessLockingTest(
         }
     }
 
+    @Test
+    fun `lockMembershipOf reads who has withdrawn after it holds the lock, not before`() {
+        // What `gratitude`'s writes depend on: a write serialised behind an
+        // ending must see the withdrawal that ending made. Read the marker
+        // before `lockBond` and this waiter answers with the empty set it
+        // saw while the holder had not yet written. Raw JDBC for the holder,
+        // which stands exactly where `EndBond.withdraw` does.
+        val bond = bondForTwo()
+        val adaMember = access.membershipOf(bond.ada, bond.id).memberId
+        val pool = Executors.newFixedThreadPool(1)
+        try {
+            withBondRowLocked(bond.id) { holder, pid ->
+                val waiter = pool.submit<BondMembership> { transactions.execute { access.lockMembershipOf(bond.bea, bond.id) } }
+                await().atMost(Duration.ofSeconds(10)).until { waiter.isDone || blockedBy(pid) }
+                waiter.isDone shouldBe false
+
+                withdraw(holder, bond.id, adaMember)
+                holder.commit()
+
+                waiter.get(10, TimeUnit.SECONDS).withdrawnMemberIds shouldBe setOf(adaMember)
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `lockClosingViewOf reads who has withdrawn after it holds the lock, not before`() {
+        // The same property for the closer and, later, the consumer that
+        // erases: both decide what to do with an entry by this set, under
+        // this lock, and an ending that committed first must be in it.
+        val bond = bondForTwo()
+        val adaMember = access.membershipOf(bond.ada, bond.id).memberId
+        val pool = Executors.newFixedThreadPool(1)
+        try {
+            withBondRowLocked(bond.id) { holder, pid ->
+                val waiter = pool.submit<BondClosingView?> { transactions.execute { access.lockClosingViewOf(bond.id) } }
+                await().atMost(Duration.ofSeconds(10)).until { waiter.isDone || blockedBy(pid) }
+                waiter.isDone shouldBe false
+
+                withdraw(holder, bond.id, adaMember)
+                holder.commit()
+
+                waiter.get(10, TimeUnit.SECONDS).shouldNotBeNull().withdrawnMemberIds shouldBe setOf(adaMember)
+            }
+        } finally {
+            pool.shutdownNow()
+        }
+    }
+
+    private fun withdraw(
+        holder: Connection,
+        bondId: UUID,
+        memberId: UUID,
+    ) {
+        holder.prepareStatement("INSERT INTO bond_entry_withdrawals (bond_id, member_id, withdrawn_at) VALUES (?, ?, ?)").use {
+            it.setObject(1, bondId)
+            it.setObject(2, memberId)
+            it.setTimestamp(3, Timestamp.from(ENDED))
+            it.executeUpdate()
+        }
+    }
+
     /** A transaction on its own connection holding `lockRow`'s exact statement on [bondId]; rolled back unless [block] commits. */
     private fun withBondRowLocked(
         bondId: UUID,

@@ -131,7 +131,9 @@ internal class BondsController(
      * that sends none, as every client did before there was one, leaves as
      * before and keeps their entries: on leaving, withdrawal is *offered*.
      * A body that is there and cannot be read is the same `400` any
-     * unreadable body gets, before the guard, for member and stranger alike.
+     * unreadable body gets, before the guard, for member and stranger alike;
+     * so is one with a key this route does not know, or the flag twice
+     * ([EndBondRequestReader] has why).
      */
     @PostMapping("/{bondId}/leave")
     @ResponseStatus(HttpStatus.NO_CONTENT)
