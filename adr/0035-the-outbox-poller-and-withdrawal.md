@@ -268,15 +268,38 @@ for a reader who could read the entry before, `{authorMemberId, status: REMOVED}
 partner it was never revealed to. `Entry.isErased` does not change; it is the row's own
 state, which the edit rule and the reveal read.
 
+**The marker is read last.** A path that renders an entry without holding the bond's lock
+loads the entries first, then asks `bond` who has withdrawn, and builds its `Reader` from
+that later answer (`BondAccess.readerNow`, which resolves the membership again; `asReader`
+is still the one place a `Reader` is constructed). The reason is the order of two reads,
+the entries at T1 and the marker at T2. If the marker is absent at T2, the ending had not
+committed at T2, so not at T1, and the response is one that could have been given entirely
+before the ending. If it is present, the words are hidden. The consumer erasing rows
+between the two only makes a row emptier. Asked first, the marker can be stale by as long
+as anything waits between the two reads, and something does: `ReconcileJoiningDay.beforeRead`
+waits on the bond's row lock, which the ending's transaction holds.
+
+As first built, each read path resolved the membership once, before the joining-day
+reconcile and before the entries, and built its `Reader` from that. Codex's review of the
+pull request found it (question 5 has what had been accepted, and why that was wrong).
+
 Every path that returns entry content goes through the gate:
 
-| Path | Where its `Reader` comes from |
-|---|---|
-| `GET /bonds/{id}/today` | `membershipOf`, in the controller |
-| `POST /bonds/{id}/entries`, fresh | `lockMembershipOf`, in the write's transaction |
-| `POST …/entries`, replay | `membershipOf` |
-| `PATCH /entries/{id}`, fresh | `lockMembershipOf` |
-| `PATCH /entries/{id}`, replay | `membershipOf` |
+| Path | Where its `Reader` comes from | Holds the bond's lock |
+|---|---|---|
+| `GET /bonds/{id}/today` | a second `membershipOf`, in `GetToday`, after the day's entries are loaded | no |
+| `POST /bonds/{id}/entries`, fresh | `lockMembershipOf`, in the write's transaction | yes |
+| `POST …/entries`, replay | a second `membershipOf`, after the entry is loaded | no |
+| `PATCH /entries/{id}`, fresh | `lockMembershipOf` | yes |
+| `PATCH /entries/{id}`, replay | a second `membershipOf`, after the entry is loaded | only if the reconcile had a day to resume |
+
+A path under `lockMembershipOf` reads the marker under the lock the ending needs: the
+ending has committed and is in the set, or cannot commit before the writer does. On the
+read paths the first membership still decides everything that is not the marker: the
+guard, the calendar and date, the status of a day with no row, which entry is the caller's
+own, the streak's inputs. The cost is one more membership resolution on each of the three
+reads. A port method that returned only the withdrawn set would be narrower; none was
+added.
 
 `DELETE` returns no body and `GET /streak` no entry content. A fresh write cannot meet a
 marker over HTTP: a marker exists only on an ended bond, where a write is `409`.
@@ -469,6 +492,21 @@ everything at TRACE, each was seen printing the words of an entry:
   that depends on no response ever carrying a tombstone's `deletedAt` or `updatedAt`:
   `EntryResponse` carries neither today (Owed, C5b).
 
+- **A consumer must not ship in the release that first lets publishers fan out to it.**
+  Deliveries are written by the publisher (decision 1), so an instance still running a
+  publisher from before this change writes an event and no delivery row, and registration
+  backfills once, when the subscription row is first written (decision 3). In a rolling
+  deploy an old instance can publish after that backfill, and that event is delivered to
+  nobody, with no row for a gauge to count. Codex's review of the pull request raised it.
+  **It cannot happen in this release:** the only subscribed type is `EntriesWithdrawn`,
+  published from one place (`EndBond`), which does not exist on `main`, so no instance from
+  before this change can publish it. From the next release on, every running instance has
+  the fan-out publisher. **The rule to keep:** when a consumer subscribes to an event type
+  that already-deployed code publishes, either every running instance already has the
+  fan-out publisher (true from the release after this one), or its registration backfills
+  again once the old instances are gone. Nothing in the code enforces this. No code was
+  changed for it.
+
 ## Owed
 
 **ADR-0032's "Owed, C5" and ADR-0031's "Owed — C5, withdrawal on block" are discharged**:
@@ -558,9 +596,23 @@ Each is built one way and cheap to turn.
    `REMOVED` beside a day that still counts the entry, and the status changes when the
    consumer runs, normally within two seconds. Accepted, so that a read never rewrites a
    day. A reviewer's twin-bond comparison; `WithdrawalReadTest` pins `PARTIAL`.
-5. **`GET /today` resolves the caller's membership before it reads the entries**, in two
-   steps with no lock. An ending that commits between them is missed by that one response.
-   The replays have the same shape. Read by a reviewer, not run.
+5. **A read that began before an ending can answer as if the ending had not happened.**
+   `GET /today` and the two replays read the entries and then the marker, as two
+   statements at `READ COMMITTED`, and those are two instants. A response whose marker
+   read precedes the ending's commit is a response from before the ending, even if it is
+   delivered after. That is the whole remaining window, and it is not a leak: nothing in it
+   was read after the withdrawal committed. Closing it would mean a read taking the bond's
+   lock. Left as it is.
+
+   *What this question said before, and what was wrong with it.* It read: "`GET /today`
+   resolves the caller's membership before it reads the entries, in two steps with no
+   lock. An ending that commits between them is missed by that one response. The replays
+   have the same shape. Read by a reviewer, not run." That order was accepted as a window
+   of microseconds. It was not one. With the marker read first, an ending that commits
+   between the two reads is followed by a read of whole rows, gated by a set from before
+   it: the withdrawn words, in a response read after the withdrawal. And the gap between
+   the two reads holds a lock wait, on the very lock the ending holds. Fixed by decision
+   12's rule; `MarkerReadLastTest`.
 6. **On a legacy joining day, a withdrawal and a manual delete differ.** A day `SUSPENDED`
    with two entries, which no request can produce now. A withdrawal leaves it unrevealed in
    every order. The author's own `DELETE` is itself a gratitude operation, so it resumes and
@@ -691,6 +743,11 @@ are the corpus's at `docs/phase-3-daily-loop`, `9be5149`.
   nothing has only run in a test, and a type that is dropped needs its migration.
 - A second event type is delivered: the poller's line could then go back to INFO without
   saying what was delivered (decision 14), if it still says nothing of whose.
+- A consumer is added for an event type that is already being published (`EntrySubmitted`
+  and the rest, for Phase 4's notifications): check the Consequences rule on mixed
+  versions against what is then deployed.
+- A read path is added that renders an entry: it reads the marker last (decision 12), or
+  holds the bond's lock.
 - A second instance is deployed: `SKIP LOCKED` and the guarded failure record have only met
   a second dispatcher in tests.
 - A handler talks to anything but this database: decision 7's limit stops bounding it.
@@ -902,6 +959,26 @@ their own checkout; reviewers wrote probes that assert nothing and print what th
   from decision 14 and a fresh write from decision 12; the lock order of every new path
   (bond, day, entry, days oldest first), with one edge held by a test (the handler waits for
   a held bond row); registration running before the port opens, which is Spring's ordering;
-  the exported meter names, there being no registry to export them; question 5.
+  the exported meter names, there being no registry to export them. (Question 5 stood in
+  this list, read and not run. Running it is what the next entry is about.)
+- **Found by Codex's review of the pull request**, after three briefed whole-branch
+  reviews and the automated Claude review had passed it: the read paths asked who had
+  withdrawn before they read the entries (decision 12, question 5). One of those reviews
+  had recorded the narrow form as accepted, without seeing that a lock wait widens it.
+  `MarkerReadLastTest` was written first and seen to fail: seven of its eight tests, each
+  on the withdrawn words in a response. The eighth, a read that waits on the lock for a
+  joining day that is today, passed before the fix: there the reconcile erases what was
+  withdrawn on that day, under the lock, from the membership it reads there. So over HTTP
+  the wait leaked only where today is not the joining day and the joining day is still
+  `SUSPENDED`, a state the test has to restore by SQL (a day as C1 left it); the window
+  with no wait in it needed no such state. Three mutations, each putting the marker first
+  again in one path: `GetToday` failed five tests, `ChangeEntry.read` the replayed edit,
+  `SubmitEntry.replay` the replayed submission. The replay tests place a real `/block`
+  right after the path's last membership resolution before its entry read, through a
+  wrapper around `BondAccess`; nothing else in them is simulated.
+- **Read, not run, for the mixed-version consequence:** that `main`'s publisher writes no
+  delivery row, that `EntriesWithdrawn` is published only by `EndBond` and appears nowhere
+  on `main`, and that a backfill runs once per subscription. That nothing has been deployed
+  is the owner's statement.
 - **Corrected by a reviewer:** the Task 7 report said V8 and V13 hold deferred constraints.
   They do not; no migration declares one.

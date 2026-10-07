@@ -2165,3 +2165,7 @@ Wrong about: where a rule is held. I held "withdrawn means erased" in the read g
          two tasks earlier for the same case, two builds running side by side. Each was
          right when read alone. I had checked the text of a line and not how often it is
          written, and each task against its own tests and not against the task before it.
+         And then Codex's review of the pull request found the read gate asking who had
+         withdrawn before it read the entries, which I had written down as accepted. An
+         "accepted" window was accepted at the width I imagined, not the width a lock wait
+         gives it. Read the marker last.
