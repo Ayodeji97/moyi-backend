@@ -92,17 +92,48 @@ internal class ArchiveDays(
         return jdbc.query(
             sql,
             PreparedStatementSetter { statement -> arguments.forEachIndexed { index, value -> statement.setObject(index + 1, value) } },
+            ROW,
+        )
+    }
+
+    /**
+     * The day of [bondId] dated [date], **if it is one [memberId] has
+     * something to see on**, and `null` otherwise: the archive's rule asked
+     * of one date.
+     *
+     * The same statement [candidates] runs, with the date pinned where that
+     * one bounds it: [SEEN] is written once and both read it, so a day can be
+     * fetched here exactly when the feed would list it. `null` does not say
+     * why. No row for the date, and a row holding only what the other person
+     * wrote and this member has not been shown, are one answer from one
+     * query, which is what lets the route above give them one response.
+     */
+    fun on(
+        bondId: UUID,
+        memberId: UUID,
+        date: LocalDate,
+    ): ArchiveDay? =
+        jdbc
+            .query(
+                listOf(SELECT, "WHERE d.bond_id = ?", "AND d.date = ?", SEEN).joinToString("\n"),
+                PreparedStatementSetter { statement ->
+                    listOf(bondId, date, memberId).forEachIndexed { index, value -> statement.setObject(index + 1, value) }
+                },
+                ROW,
+            ).firstOrNull()
+
+    internal companion object {
+        private const val SELECT = "SELECT d.id, d.date, d.status FROM bond_days d"
+
+        private val ROW =
             RowMapper { row, _ ->
                 ArchiveDay(
                     BondDayId(row.getObject("id", UUID::class.java)),
                     row.getObject("date", LocalDate::class.java),
                     BondDayStatus.valueOf(row.getString("status")),
                 )
-            },
-        )
-    }
+            }
 
-    internal companion object {
         private const val SEEN =
             "AND EXISTS (SELECT 1 FROM entries e WHERE e.bond_day_id = d.id AND (e.author_member_id = ? OR e.revealed_at IS NOT NULL))"
 
@@ -129,7 +160,7 @@ internal class ArchiveDays(
         ): Pair<String, List<Any>> {
             val sql =
                 listOfNotNull(
-                    "SELECT d.id, d.date, d.status FROM bond_days d",
+                    SELECT,
                     "WHERE d.bond_id = ?",
                     before?.let { "AND d.date < ?" },
                     until?.let { "AND d.date <= ?" },

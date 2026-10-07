@@ -131,13 +131,14 @@ class OpenApiContractTest(
         // exhaustive on purpose: a *new* header parameter should have to be
         // justified here, which is what this assertion makes someone do.
         // `Idempotency-Key` joined it in C1 (`submitEntry`), and `patchEntry` carries it since C2.
+        // `If-None-Match` in C5b: the archive's two reads are conditional, and a client has to be able to send its tag.
         operations()
             .flatMap { (_, op) ->
                 op.parameters
                     .orEmpty()
                     .filter { it.`in` == "header" }
                     .map { it.name }
-            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH, IdempotencyInterceptor.HEADER)
+            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH, HttpHeaders.IF_NONE_MATCH, IdempotencyInterceptor.HEADER)
         api.components.schemas.keys
             .filter { it in setOf("CurrentUser", "ClientContext") }
             .shouldBeEmpty()
@@ -461,6 +462,62 @@ class OpenApiContractTest(
         val page = api.components.schemas["DaysResponse"]!!
         page.properties.keys shouldBe setOf("items", "nextCursor")
         page.properties["items"]!!.items.`$ref` shouldBe "#/components/schemas/DayResponse"
+    }
+
+    @Test
+    fun `one day of the archive is the feed's day, at a date, with the one 404 and no parameter but its path`() {
+        val day = api.paths["/api/v1/bonds/{bondId}/days/{date}"]!!.get
+        day.operationId shouldBe "day"
+        day.requestBody.shouldBeNull()
+        // The body is a `Representation<DayResponse>` in the handler: the document must say DayResponse, not the holder.
+        day.responses["200"]!!
+            .content[MediaType.APPLICATION_JSON_VALUE]!!
+            .schema.`$ref` shouldBe "#/components/schemas/DayResponse"
+        api.paths["/api/v1/bonds/{bondId}/days"]!!
+            .get.responses["200"]!!
+            .content[MediaType.APPLICATION_JSON_VALUE]!!
+            .schema.`$ref` shouldBe "#/components/schemas/DaysResponse"
+        api.components.schemas.keys
+            .filter { it.contains("Representation") }
+            .shouldBeEmpty()
+        day.responses.keys shouldContainAll listOf("200", "304", "401", "404", "429")
+        day.responses.keys shouldNotContain "422"
+        day.responses.keys shouldNotContain "409"
+        day.parameters.filter { it.`in` == "query" }.shouldBeEmpty()
+        val date = day.parameters.single { it.`in` == "path" && it.name == "date" }
+        date.required shouldBe true
+        date.schema.format shouldBe "date"
+        (
+            api.components.schemas["ProblemDetail"]!!
+                .properties["code"]!!
+                .enum
+                .map { it.toString() }
+        ) shouldContain "DAY_NOT_FOUND"
+    }
+
+    @Test
+    fun `both archive reads document the ETag they send, the If-None-Match they take and the 304 they may answer`() {
+        // The header is set on the ResponseEntity and the 304 is the framework's, so springdoc sees neither.
+        val reads = listOf("/api/v1/bonds/{bondId}/days", "/api/v1/bonds/{bondId}/days/{date}").map { api.paths[it]!!.get }
+
+        reads.forEach { read ->
+            withClue(read.operationId) {
+                read.responses["200"]!!.headers.orEmpty() shouldContainKey "ETag"
+                val condition = read.parameters.single { it.name == HttpHeaders.IF_NONE_MATCH }
+                condition.`in` shouldBe "header"
+                condition.required shouldBe false
+                val notModified = read.responses["304"].shouldNotBeNull()
+                notModified.content.shouldBeNull()
+                notModified.headers.orEmpty() shouldContainKey "ETag"
+                // Nothing here is a condition on a write.
+                read.parameters.map { it.name } shouldNotContain HttpHeaders.IF_MATCH
+                read.responses.keys shouldNotContain "412"
+                read.responses.keys shouldNotContain "428"
+            }
+        }
+        // And only they: a 304 documented on a route that cannot give one is a branch a client is generated to handle for nothing.
+        operations().filter { (_, op) -> op.responses.containsKey("304") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
+            listOf("days", "day")
     }
 
     @Test

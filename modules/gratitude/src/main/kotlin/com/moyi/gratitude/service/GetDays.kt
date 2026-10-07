@@ -129,19 +129,59 @@ internal class GetDays(
         require(limit in 1..MAX_LIMIT) { "a page of the archive is 1 to $MAX_LIMIT days" }
         // One more than the page: its presence is how "there is more" is known without a second query.
         val candidates = archive.candidates(membership.bondId, membership.memberId, before, until, favouritesOnly, limit + 1)
-        val window = candidates.take(limit)
-        val written = entries.findForDays(window.map { it.id })
+        val read = read(membership, candidates.take(limit))
+        return read.paged(marksOf(membership, read), favouritesOnly, textOctets, more = candidates.size > read.size)
+    }
+
+    /**
+     * `GET /bonds/{bondId}/days/{date}`: that one day as the feed would give
+     * it, or `null` when the feed would not list it for this member.
+     *
+     * **Not a second reading of a day.** The day is found by the feed's own
+     * rule ([ArchiveDays.on]), its entries are read by [read] and it becomes
+     * a [DayView] by [Read.shown], which are what [page] uses: the marker is
+     * read last here because it is read last there, and a day cannot look
+     * one way in the feed and another alone.
+     *
+     * **`null` has one meaning to a caller and many causes**, deliberately
+     * not told apart: no row for the date, a day nobody wrote on, a day
+     * holding only an entry the other person wrote and this member has not
+     * been shown. Above all the last: to answer it differently would be to
+     * say that they wrote.
+     */
+    @Transactional(readOnly = true)
+    fun day(
+        membership: BondMembership,
+        date: LocalDate,
+    ): DayView? {
+        val day = archive.on(membership.bondId, membership.memberId, date) ?: return null
+        val read = read(membership, listOf(day))
+        val marked = marksOf(membership, read)
+        return read.single().let { it.shown(it.keptOf(marked)) }
+    }
+
+    /**
+     * Each of [days] after the gate, in order: its entries loaded in one
+     * query, **then** who has withdrawn asked, then each side read.
+     */
+    private fun read(
+        membership: BondMembership,
+        days: List<ArchiveDay>,
+    ): List<Read> {
+        val written = entries.findForDays(days.map { it.id })
         // After the entries, never before: the marker is read last.
         val reader = access.readerNow(membership)
-        val read =
-            window.map { day ->
-                val sides = written[day.id].orEmpty().onEachSideOf(membership.memberId)
-                Read(day, sides.mine?.readBy(reader), sides.partners?.readBy(reader))
-            }
-        // After the gate, and only for what it answered in full.
-        val marked = favourites.markedBy(membership.memberId, read.flatMap { it.readInFull })
-        return read.paged(marked, favouritesOnly, textOctets, more = candidates.size > window.size)
+        return days.map { day ->
+            val sides = written[day.id].orEmpty().onEachSideOf(membership.memberId)
+            Read(day, sides.mine?.readBy(reader), sides.partners?.readBy(reader))
+        }
     }
+
+    /** The caller's own marks among [read]: asked after the gate, and only of what it answered in full. */
+    private fun marksOf(
+        membership: BondMembership,
+        read: List<Read>,
+    ): Set<EntryId> = favourites.markedBy(membership.memberId, read.flatMap { it.readInFull })
 
     /**
      * Takes days in order until the text bound is reached, and says where
@@ -159,7 +199,7 @@ internal class GetDays(
         var taken = 0
         var full = false
         for (day in this) {
-            val kept = day.readInFull.filter { it in marked }.toSet()
+            val kept = day.keptOf(marked)
             // With favourites only, a day on which nothing marked can be read any more is taken from the archive and not shown.
             val shown = !favouritesOnly || kept.isNotEmpty()
             // The first day shown is always taken. Once a day does not fit, nothing after it is taken either.
@@ -167,7 +207,7 @@ internal class GetDays(
             if (!full) {
                 taken++
                 if (shown) {
-                    days += DayView(day.day.date, day.day.status, day.mine, day.partners, kept)
+                    days += day.shown(kept)
                     octets += day.octets
                 }
             }
@@ -185,6 +225,12 @@ internal class GetDays(
         private val readings = listOfNotNull(mine, partners)
 
         val readInFull: List<EntryId> = readings.filter { it.readability == Readability.FULL }.mapNotNull { it.disclosed?.id }
+
+        /** Which of [marked] are entries of this day read in full: the only ones that may say they are kept. */
+        fun keptOf(marked: Set<EntryId>): Set<EntryId> = readInFull.filter { it in marked }.toSet()
+
+        /** This day as a caller is given it, in the feed and alone. */
+        fun shown(kept: Set<EntryId>): DayView = DayView(day.date, day.status, mine, partners, kept)
 
         /** The octets of text this day will send to this caller. A reading that discloses no text sends none. */
         val octets: Int =

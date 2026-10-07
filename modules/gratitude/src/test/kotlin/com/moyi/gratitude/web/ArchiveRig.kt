@@ -7,6 +7,7 @@ import org.springframework.http.HttpHeaders
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.put
 import tools.jackson.databind.JsonNode
@@ -36,11 +37,31 @@ internal class ArchiveRig(
         user: UUID,
         bond: String,
         parameters: Map<String, String> = emptyMap(),
+        headers: Map<String, String> = emptyMap(),
     ): MockHttpServletResponse =
         mockMvc
             .get("/api/v1/bonds/$bond/days") {
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}")
                 parameters.forEach { (name, value) -> param(name, value) }
+                headers.forEach { (name, value) -> header(name, value) }
+            }.andReturn()
+            .response
+
+    /**
+     * `GET /bonds/{bond}/days/{date}`, whatever it answers. Both are URI
+     * template variables, so a [date] that is not a date at all (a space, a
+     * percent sign, four hundred characters) is sent as one path segment.
+     */
+    fun day(
+        user: UUID,
+        bond: String,
+        date: String,
+        headers: Map<String, String> = emptyMap(),
+    ): MockHttpServletResponse =
+        mockMvc
+            .get("/api/v1/bonds/{bond}/days/{date}", bond, date) {
+                header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}")
+                headers.forEach { (name, value) -> header(name, value) }
             }.andReturn()
             .response
 
@@ -87,6 +108,16 @@ internal class ArchiveRig(
     ) {
         mockMvc
             .put("/api/v1/entries/$entryId/favourite") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}") }
+            .andReturn()
+            .response.status shouldBe 204
+    }
+
+    fun unfavourite(
+        user: UUID,
+        entryId: String,
+    ) {
+        mockMvc
+            .delete("/api/v1/entries/$entryId/favourite") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}") }
             .andReturn()
             .response.status shouldBe 204
     }

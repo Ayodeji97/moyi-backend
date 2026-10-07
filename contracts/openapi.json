@@ -1243,6 +1243,14 @@
             "type" : "boolean",
             "default" : false
           }
+        }, {
+          "description" : "The `ETag` of a response to this same request that the client still holds (RFC 9110 §13.1.2). If it is still current the answer is `304` with no body. A value that is not current, or is not a tag, is ignored and the whole response is sent.",
+          "in" : "header",
+          "name" : "If-None-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
         } ],
         "responses" : {
           "200" : {
@@ -1253,7 +1261,26 @@
                 }
               }
             },
-            "description" : "OK"
+            "description" : "OK",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "304" : {
+            "description" : "Not Modified: what the client holds under the `If-None-Match` it sent is still exactly what would be sent. No body.",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
           },
           "401" : {
             "content" : {
@@ -1294,6 +1321,118 @@
               }
             },
             "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "days-controller" ]
+      }
+    },
+    "/api/v1/bonds/{bondId}/days/{date}" : {
+      "get" : {
+        "operationId" : "day",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "description" : "A calendar date, `YYYY-MM-DD`. A date that is not in the caller's archive is `404 DAY_NOT_FOUND`, whatever the reason, and so is a value that is not a date.",
+          "in" : "path",
+          "name" : "date",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "description" : "The `ETag` of a response to this same request that the client still holds (RFC 9110 §13.1.2). If it is still current the answer is `304` with no body. A value that is not current, or is not a tag, is ignored and the whole response is sent.",
+          "in" : "header",
+          "name" : "If-None-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DayResponse"
+                }
+              }
+            },
+            "description" : "OK",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "304" : {
+            "description" : "Not Modified: what the client holds under the `If-None-Match` it sent is still exactly what would be sent. No body.",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
           },
           "429" : {
             "content" : {
@@ -3826,7 +3965,7 @@
         "properties" : {
           "code" : {
             "type" : "string",
-            "enum" : [ "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"

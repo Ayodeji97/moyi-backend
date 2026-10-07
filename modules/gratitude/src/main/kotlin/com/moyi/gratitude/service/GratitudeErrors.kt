@@ -124,3 +124,19 @@ internal class EntryNotRevealedException :
  * (`bond.service.BondNotFoundException`'s own shape).
  */
 internal class EntryNotFoundException : NotFoundException("That entry was not found.")
+
+/**
+ * The one answer for a date that is not in the caller's archive
+ * (`ErrorCode.DAY_NOT_FOUND` has the reasons, and why they are one).
+ *
+ * One class with no argument, so that every way of getting here is the same
+ * object's bytes: the route cannot come to say more for one reason than for
+ * another. The sentence is true of all of them, a string that is not a date
+ * included, and it does not repeat what was asked.
+ */
+internal class DayNotFoundException :
+    ApiException(
+        HttpStatus.NOT_FOUND,
+        ErrorCode.DAY_NOT_FOUND,
+        "That day was not found.",
+    )

@@ -1,5 +1,6 @@
 package com.moyi.common.security
 
+import com.moyi.common.web.RepresentationDigest
 import com.moyi.common.web.idempotency.RequestFingerprint
 import com.nimbusds.jose.jwk.JWKSet
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet
@@ -101,6 +102,13 @@ class SecurityConfiguration {
      */
     @Bean
     fun requestFingerprint(hasher: PersonalDataHasher): RequestFingerprint = HmacRequestFingerprint(hasher)
+
+    /**
+     * `common:web`'s [RepresentationDigest] port, provided here for the
+     * reason [requestFingerprint] is: the secret is here.
+     */
+    @Bean
+    fun representationDigest(hasher: PersonalDataHasher): RepresentationDigest = HmacRepresentationDigest(hasher)
 
     @Bean
     fun jwtEncoder(keys: SigningKeys): JwtEncoder = NimbusJwtEncoder(ImmutableJWKSet<SecurityContext>(JWKSet(keys.rsaKey)))

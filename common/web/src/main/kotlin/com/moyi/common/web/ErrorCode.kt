@@ -258,6 +258,22 @@ enum class ErrorCode {
      */
     MEDIA_NOT_YET_SUPPORTED,
 
+    /**
+     * `GET /bonds/{bondId}/days/{date}` for a date that is not in the
+     * caller's archive. 404.
+     *
+     * **One code for every reason, on purpose**: no day was ever opened for
+     * that date, nobody wrote on it, it has not come yet, it is before the
+     * bond, the value is not a date at all, or the day holds only what the
+     * other person wrote and the caller has not been shown. The last is why
+     * the rest may not differ from it: any answer of its own would say that
+     * the other person has written, on a route that is not `today`.
+     *
+     * Only ever told to a member. A caller who is not one gets [NOT_FOUND]
+     * about the bond, before the date is looked at.
+     */
+    DAY_NOT_FOUND,
+
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,
 

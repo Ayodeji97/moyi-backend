@@ -4,6 +4,7 @@ import com.moyi.common.security.ClientContext
 import com.moyi.common.security.CurrentUser
 import com.moyi.common.security.SecurityConfiguration
 import com.moyi.common.web.ErrorCode
+import com.moyi.common.web.Representation
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.Operation
@@ -136,6 +137,8 @@ import org.springframework.http.HttpStatus
 class OpenApiConfiguration {
     init {
         SpringDocUtils.getConfig().addRequestWrapperToIgnore(CurrentUser::class.java, ClientContext::class.java)
+        // A `Representation<T>` is `T` already serialised (common:web): what the response carries is `T`, as with `ResponseEntity<T>`.
+        SpringDocUtils.getConfig().addResponseWrapperToIgnore(Representation::class.java)
     }
 
     @Bean
@@ -176,6 +179,7 @@ class OpenApiConfiguration {
             admitAbsentPartnerEntry(api)
             requireDiscriminatorProperty(api)
             documentDaysQuery(api)
+            documentRevalidation(api)
         }
 
     /**
@@ -858,3 +862,78 @@ private const val DAYS_OPERATION = "days"
 private const val DAYS_MIN_LIMIT = 1
 private const val DAYS_MAX_LIMIT = 50
 private const val DAYS_DEFAULT_LIMIT = 20
+
+/**
+ * States what a **conditional read** is on the operations that are one
+ * ([REVALIDATED_OPERATIONS]: the archive's feed and its one day).
+ *
+ * The `ETag` and `Cache-Control` are set on the `ResponseEntity`, and the
+ * `304` is Spring MVC's own answer to `If-None-Match`, made after the
+ * handler returns (`common.web.Representations`). springdoc can see none of
+ * the three, so a client generated without this has no typed way to keep
+ * the tag, no parameter to send it back in, and a `304` it was never told
+ * could come. Added by rule for the listed operations, as `ETag` is for a
+ * versioned resource and `If-Match` for a conditional update.
+ *
+ * This is not `If-Match`'s `ETag`. A bond's tag is echoed to make a write
+ * conditional, and its description says so; these are echoed only to ask
+ * "has what I was shown changed?", and say that.
+ *
+ * `If-None-Match` is optional, and is documented as a string: it is one tag,
+ * or several separated by commas, exactly as RFC 9110 writes them.
+ *
+ * Also here, to stay one function: the `date` of the one day is a path
+ * segment taken as text (the handler reads it after the guard), so springdoc
+ * documents a bare string. It is a calendar date, and anything else is the
+ * same `404` as a date with nothing on it.
+ */
+private fun documentRevalidation(api: OpenAPI) {
+    api.paths.values
+        .flatMap { it.readOperations() }
+        .filter { it.operationId in REVALIDATED_OPERATIONS }
+        .forEach { operation ->
+            operation.addParametersItem(
+                Parameter()
+                    .`in`("header")
+                    .name(IF_NONE_MATCH)
+                    .required(false)
+                    .description(
+                        "The `ETag` of a response to this same request that the client still holds (RFC 9110 §13.1.2). " +
+                            "If it is still current the answer is `304` with no body. A value that is not current, or " +
+                            "is not a tag, is ignored and the whole response is sent.",
+                    ).schema(StringSchema()),
+            )
+            operation.responses[OK]?.addHeaderObject(REVALIDATION_ETAG, revalidationTag())
+            operation.responses.addApiResponse(
+                NOT_MODIFIED,
+                ApiResponse()
+                    .description(
+                        "Not Modified: what the client holds under the `If-None-Match` it sent is still exactly what " +
+                            "would be sent. No body.",
+                    ).addHeaderObject(REVALIDATION_ETAG, revalidationTag()),
+            )
+            operation.parameters
+                .filter { it.`in` == "path" && it.name == "date" }
+                .forEach { date ->
+                    date.schema = StringSchema().format("date")
+                    date.description =
+                        "A calendar date, `YYYY-MM-DD`. A date that is not in the caller's archive is `404 DAY_NOT_FOUND`, " +
+                        "whatever the reason, and so is a value that is not a date."
+                }
+        }
+}
+
+private fun revalidationTag(): Header =
+    Header()
+        .description(
+            "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: " +
+                "keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body " +
+                "would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+        ).schema(StringSchema())
+
+/** The operations answered as conditional reads: `gratitude.web.DaysController`'s two, by operation id. */
+private val REVALIDATED_OPERATIONS = setOf("days", "day")
+private const val IF_NONE_MATCH = "If-None-Match"
+private const val REVALIDATION_ETAG = "ETag"
+private const val OK = "200"
+private const val NOT_MODIFIED = "304"
