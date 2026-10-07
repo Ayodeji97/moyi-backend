@@ -4,10 +4,13 @@ import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
+import com.moyi.gratitude.api.DayCloser
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
+import io.kotest.assertions.withClue
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -30,6 +33,7 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import tools.jackson.databind.ObjectMapper
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -53,6 +57,7 @@ import javax.sql.DataSource
 @AutoConfigureMockMvc
 @Import(EntryChangesTest.TimeConfiguration::class)
 @org.junit.jupiter.api.extension.ExtendWith(org.springframework.boot.test.system.OutputCaptureExtension::class)
+@Suppress("LongParameterList") // What Spring hands the test; each is used, and there is nothing to bundle them into.
 internal class EntryChangesTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
@@ -60,6 +65,8 @@ internal class EntryChangesTest(
     @Autowired dataSource: DataSource,
     @Autowired private val clock: MutableClock,
     @Autowired private val routes: org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping,
+    @Autowired private val json: ObjectMapper,
+    @Autowired private val closer: DayCloser,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -91,7 +98,10 @@ internal class EntryChangesTest(
     @AfterEach
     fun clear() {
         jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
-        jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
+        jdbc.execute(
+            "TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_entry_withdrawals, " +
+                "bond_invites, bond_members, bonds CASCADE",
+        )
         users.clear()
     }
 
@@ -168,12 +178,17 @@ internal class EntryChangesTest(
     }
 
     /**
-     * ADR-0028: an ended bond is read-only for both. The author is told so —
-     * it is their entry, and `404` would be a lie about that — and is told
-     * only after the author check, so the `409` never answers anybody else.
+     * ADR-0028 made an ended bond read-only for both, and until 2026-10-06
+     * this test pinned `409 BOND_ARCHIVED` for the delete as well (it was `an
+     * ended bond's entries cannot be edited or deleted, by the member who
+     * left or the one who stayed`, the one test ADR-0032 question 1 said
+     * pinned the rule). The owner's ruling on that question turned the
+     * delete: an author may always take their own words back. The edit is
+     * still refused, and the author is still told so only after the author
+     * check, so the `409` never answers anybody else.
      */
     @Test
-    fun `an ended bond's entries cannot be edited or deleted, by the member who left or the one who stayed`() {
+    fun `an ended bond's entries cannot be edited but can be deleted by their author, the member who left or the one who stayed`() {
         val adas = entryId(submit(ada, bondId, """{"text":"hers"}"""))
         clock.set(NOW.plusSeconds(86_400))
         val beas = entryId(submit(bea, bondId, """{"text":"his"}"""))
@@ -183,11 +198,157 @@ internal class EntryChangesTest(
             val edit = patchEntry(author, id, """{"text":"changed"}""")
             edit.status shouldBe 409
             edit.contentAsString shouldContain "BOND_ARCHIVED"
-            val delete = deleteEntry(author, id)
-            delete.status shouldBe 409
-            delete.contentAsString shouldContain "BOND_ARCHIVED"
         }
         jdbc.queryForObject("SELECT count(*) FROM entries WHERE text IN ('hers', 'his') AND deleted_at IS NULL", Int::class.java) shouldBe 2
+
+        for ((author, id) in listOf(ada to adas, bea to beas)) {
+            val delete = deleteEntry(author, id)
+            delete.status shouldBe 204
+            delete.contentAsString shouldBe ""
+        }
+        jdbc.queryForObject(
+            "SELECT count(*) FROM entries WHERE text IS NULL AND status = 'DELETED' AND deleted_at IS NOT NULL",
+            Int::class.java,
+        ) shouldBe 2
+    }
+
+    /**
+     * The owner's ruling of 2026-10-06 (ADR-0032 question 1), in every way a
+     * bond stops taking writes and for each of the two people in it.
+     *
+     * **This is what keeps a withdrawal discreet.** A withdrawal erases its
+     * author's entries after the bond has ended. Were a single delete
+     * impossible there, a tombstone appearing after the end could only mean
+     * the one thing nothing is allowed to say (ADR-0028 decision 8).
+     *
+     * Bea is the one who ends it each time, so each ending is tried for the
+     * member who left (her) and the one who stayed (Ada); and each for an
+     * entry the partner had read and for one they never had, because what
+     * the partner is left with differs: the wide tombstone, or `REMOVED`
+     * and nothing else.
+     */
+    @Test
+    fun `an author deletes their own entry after the bond has ended, however it ended, and nobody else can`() {
+        for (ending in Ending.entries) {
+            for (writers in listOf(listOf("Ada", "Bea"), listOf("Ada"), listOf("Bea"))) {
+                withClue("$ending, written by $writers") {
+                    clear()
+                    setUp()
+                    val written =
+                        writers.map { name ->
+                            val author = if (name == "Ada") ada else bea
+                            author to entryId(submit(author, bondId, """{"text":"words of $name"}"""))
+                        }
+                    end(ending)
+
+                    written.forEach { (author, id) -> onlyTheAuthorDeletes(author, id, revealed = writers.size == 2) }
+
+                    jdbc.queryForObject("SELECT count(*) FROM entries WHERE text IS NOT NULL", Int::class.java) shouldBe 0
+                }
+            }
+        }
+    }
+
+    /** On a bond that has ended: the edit refused, everybody else's delete the one `404`, the author's a `204` that erases. */
+    private fun onlyTheAuthorDeletes(
+        author: UUID,
+        id: String,
+        revealed: Boolean,
+    ) {
+        val partner = if (author == ada) bea else ada
+        archivedToAnEdit(author, id)
+        val refusals = listOf(deleteEntry(partner, id), deleteEntry(eve, id), deleteEntry(author, UUID.randomUUID().toString()))
+        refusals.forEach { it.status shouldBe 404 }
+        refusals.map(::comparable).toSet().size shouldBe 1
+        val before = rowOf(id)
+        before["text"].shouldNotBeNull()
+        before["deleted_at"].shouldBeNull()
+        val dayBefore = dayOf(id)
+
+        val deleted = deleteEntry(author, id)
+        deleted.status shouldBe 204
+        deleted.contentAsString shouldBe ""
+
+        val row = rowOf(id)
+        row["text"].shouldBeNull()
+        row["status"] shouldBe "DELETED"
+        row["deleted_at"].shouldNotBeNull()
+        row["revealed_at"] shouldBe before["revealed_at"]
+        (row["revealed_at"] != null) shouldBe revealed
+
+        // Repeatable, and the repeat is a repeat of nothing.
+        clock.set(clock.instant().plusSeconds(1))
+        deleteEntry(author, id).status shouldBe 204
+        rowOf(id) shouldBe row
+
+        // An unsettled day steps back, once; a revealed one is history and stays.
+        val day = dayOf(id)
+        if (revealed) {
+            day shouldBe dayBefore
+            day["status"] shouldBe "REVEALED"
+        } else {
+            day["entry_count"] shouldBe 0
+            day["status"] shouldBe "OPEN"
+        }
+        tombstoneIsWhatBothRead(author, partner, id, revealed)
+        // Refused for the bond, before anything is asked about the entry.
+        archivedToAnEdit(author, id)
+    }
+
+    private fun archivedToAnEdit(
+        author: UUID,
+        id: String,
+    ) {
+        val edit = patchEntry(author, id, """{"text":"changed"}""")
+        edit.status shouldBe 409
+        edit.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+    }
+
+    /** The wide tombstone for a partner who had read the entry; an author and `REMOVED`, and nothing else, for one who never had. */
+    private fun tombstoneIsWhatBothRead(
+        author: UUID,
+        partner: UUID,
+        id: String,
+        revealed: Boolean,
+    ) {
+        val partners = today(partner)
+        partners.contentAsString shouldNotContain "words of ${if (author == ada) "Ada" else "Bea"}"
+        val theirs = json.readTree(partners.contentAsString)["partnerEntry"]
+        if (revealed) {
+            theirs["id"].asString() shouldBe id
+            theirs["status"].asString() shouldBe "DELETED"
+            theirs["text"].isNull shouldBe true
+        } else {
+            theirs.propertyNames().toList().sorted() shouldBe listOf("authorMemberId", "status")
+            theirs["status"].asString() shouldBe "REMOVED"
+        }
+        val own = json.readTree(today(author).contentAsString)["myEntry"]
+        own["id"].asString() shouldBe id
+        own["status"].asString() shouldBe "DELETED"
+        own["text"].isNull shouldBe true
+    }
+
+    @Test
+    fun `a delete on an ended bond leaves a day the close job has settled exactly as it was`() {
+        // Ada writes alone, the day ends and is closed with her entry shown
+        // (`SOLO`), and then the bond ends. Her delete erases the words and
+        // nothing else: settled history is not recounted (BR-10).
+        val id = entryId(submit(ada, bondId, """{"text":"hers alone"}"""))
+        clock.set(DAY_AFTER)
+        closer.closeElapsedDays(DAY_AFTER, 1_000).closed shouldBe 1
+        val settled = dayOf(id)
+        settled["status"] shouldBe "SOLO"
+        settled["closed_at"].shouldNotBeNull()
+        rowOf(id)["revealed_at"].shouldNotBeNull()
+        leave(bea).status shouldBe 204
+
+        deleteEntry(ada, id).status shouldBe 204
+
+        dayOf(id) shouldBe settled
+        val row = rowOf(id)
+        row["text"].shouldBeNull()
+        row["status"] shouldBe "DELETED"
+        row["revealed_at"].shouldNotBeNull()
     }
 
     @Test
@@ -277,6 +438,64 @@ internal class EntryChangesTest(
         replay.contentAsString shouldContain "\"status\":\"DELETED\""
         replay.contentAsString shouldNotContain "changed"
     }
+
+    /** The ways a bond stops taking writes. Bea is the one who acts in each. */
+    private enum class Ending { LEAVE, BLOCK_KEEPING_ENTRIES, BLOCK_WITHDRAWING, DELETION_COUNTDOWN }
+
+    private fun end(ending: Ending) {
+        when (ending) {
+            Ending.LEAVE -> {
+                leave(bea).status shouldBe 204
+            }
+
+            Ending.BLOCK_KEEPING_ENTRIES -> {
+                block(bea, """{"withdrawEntries":false}""").status shouldBe 204
+            }
+
+            // The default: Bea's entries are withdrawn and, with no poller
+            // in this context, not yet erased. Her own delete erases them now.
+            Ending.BLOCK_WITHDRAWING -> {
+                block(bea, null).status shouldBe 204
+                jdbc.queryForObject("SELECT count(*) FROM bond_entry_withdrawals", Int::class.java) shouldBe 1
+            }
+
+            Ending.DELETION_COUNTDOWN -> {
+                listOf(ada, bea).forEach { member ->
+                    mockMvc
+                        .post("/api/v1/bonds/$bondId/deletion-request") {
+                            header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(member).token}")
+                        }.andReturn()
+                        .response.status shouldBe 202
+                }
+                jdbc.queryForObject("SELECT status FROM bonds WHERE id = ?::uuid", String::class.java, bondId) shouldBe "PENDING_DELETION"
+            }
+        }
+    }
+
+    private fun block(
+        userId: UUID,
+        body: String?,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/block") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(userId).token}")
+                if (body != null) {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = body
+                }
+            }.andReturn()
+            .response
+
+    /** The entry's row, as stored. The text is asked for only so it can be seen to be gone. */
+    private fun rowOf(id: String): Map<String, Any?> =
+        jdbc.queryForMap("SELECT text, status, deleted_at, revealed_at, updated_at FROM entries WHERE id = ?::uuid", id)
+
+    private fun dayOf(entryId: String): Map<String, Any?> =
+        jdbc.queryForMap(
+            "SELECT d.status, d.entry_count, d.closed_at, d.revealed_at, d.version FROM bond_days d " +
+                "JOIN entries e ON e.bond_day_id = d.id WHERE e.id = ?::uuid",
+            entryId,
+        )
 
     private fun entryId(response: MockHttpServletResponse): String = bondIdOf(response)
 
@@ -386,5 +605,8 @@ internal class EntryChangesTest(
 
         /** Two days before [NOW] — see [setUp]. */
         val BOND_CREATED: Instant = Instant.parse("2026-09-13T10:00:00Z")
+
+        /** The 15th has ended in Lagos (23:00Z) by more than the closer's margin. */
+        val DAY_AFTER: Instant = Instant.parse("2026-09-16T10:00:00Z")
     }
 }

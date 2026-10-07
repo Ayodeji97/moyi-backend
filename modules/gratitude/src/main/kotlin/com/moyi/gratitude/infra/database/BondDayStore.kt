@@ -115,7 +115,7 @@ internal class BondDayStore(
     /**
      * Holds the day's row for the rest of the transaction, then reads it back
      * fresh under that lock (fix round 1, I3). Every writer of a day comes
-     * through here first — `SubmitEntry`, `ChangeEntry` and
+     * through here first — `SubmitEntry`, `ChangeEntry`, `EraseEntry` and
      * `ReconcileJoiningDay` — and `SubmitEntry`'s use is the one that shows
      * why: `entry_count`/`status` is a read-modify-write — [BondDay.withEntry] is
      * computed in application code from whatever was last read, then [update]

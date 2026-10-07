@@ -12,10 +12,13 @@ import org.springframework.http.HttpStatus
 // own.
 
 /**
- * BR-9: every write on a bond that has ended, whether by a leave or a block
- * (doc 26 §2.1 requires the two be indistinguishable from the other side) —
- * `bond.service.BondArchivedException`'s own wording, copied verbatim so the
- * two modules give one answer for one fact.
+ * BR-9: a new entry or an edit on a bond that has ended, whether by a leave
+ * or a block (doc 26 §2.1 requires the two be indistinguishable from the
+ * other side) — `bond.service.BondArchivedException`'s own wording, copied
+ * verbatim so the two modules give one answer for one fact.
+ *
+ * **Not an author's delete of their own entry**, which [ChangeEntry] allows
+ * on an ended bond and says why.
  *
  * [SubmitEntry] and [ChangeEntry] check `membership.hasLeft` explicitly
  * rather than leaning on `membership.isOpen` alone to cover it — the second
