@@ -90,8 +90,20 @@ every retained event of the type; `NOW` receives only events published after it 
 It is asked once per (consumer, event type), when the subscription row is first written, so a
 restart cannot repeat a backfill. Backfilled deliveries are due at once, stamped from the
 injected clock and not SQL `now()`: the dispatcher compares against that clock, and tests pin
-it. `gratitude.withdrawal` starts from `BEGINNING`. A type a consumer stops declaring loses
-its subscription and keeps the deliveries already owed.
+it. `gratitude.withdrawal` starts from `BEGINNING`.
+
+**A starting build never removes a subscription.** Registration adds what a consumer
+declares and the database lacks. A type that is stored and not declared is left alone and
+named in one INFO line (the consumer's id and the type names). As first built, registration
+deleted it. The concurrency review of the branch showed what that did beside decision 4's
+claim rule, which exists because two builds of one consumer run side by side in a rolling
+deploy: an older build that starts second (a rollback, a crash and restart mid-deploy)
+deleted the newer build's subscription, and every publisher, on the newer build too, then
+fanned that type out to nobody. There was no delivery row, so no gauge moved and nothing
+was logged; with `NOW` those events were lost for good. It could not happen in this deploy
+(one consumer, one type) and would have the first time a consumer gained a second type. A
+start-up cannot know that no other build declares a type, so retiring one is a migration
+(Owed).
 
 **4. One delivery, one transaction: claim, handle, acknowledge.** `JdbcOutboxDispatcher`
 claims one due delivery with `FOR UPDATE OF d SKIP LOCKED`, calls the consumer, and sets
@@ -434,10 +446,13 @@ no index.
 
 **Not assigned.**
 
-- **Retiring a consumer is a migration.** A consumer whose bean is removed keeps its
-  subscriptions; publishers go on writing deliveries nobody claims, and the pending and age
-  gauges for it never return to zero. The same holds for the outstanding deliveries of a
-  type a consumer has dropped.
+- **Retiring a consumer, or one event type of a consumer, is a migration.** A consumer
+  whose bean is removed keeps its subscriptions, and so does a type a consumer stops
+  declaring (decision 3): publishers go on writing deliveries nobody claims, and they stay
+  pending. The pending and age gauges for that consumer never return to zero until a
+  migration deletes the subscription and the deliveries left unprocessed. That standing
+  number is the reminder, and it is also noise in the alert until it is acted on. Each
+  start of a build that does not declare a stored type says so in one INFO line.
 - **Nothing removes old `outbox_events` or processed deliveries.** Doc 07's "30 days after
   processing" has no meaning now that processing is per consumer (X9), and a `BEGINNING`
   consumer needs the history.

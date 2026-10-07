@@ -43,6 +43,21 @@ import java.time.temporal.ChronoUnit
  * exception leaves [afterSingletonsInstantiated], the context does not start,
  * and no instance ever runs with a consumer it has not registered.
  *
+ * **Why a starting build never removes a subscription.** Registration adds
+ * the types a consumer declares and are not stored. A type that is stored and
+ * not declared here is left alone, and said in one line. It may belong to a
+ * newer build of the same consumer that is running beside this one: a
+ * rollback, or a crash and restart half-way through a deploy, starts the older
+ * build second. The dispatcher's claim rule exists for that case (it claims
+ * only the types its own build declares, [OutboxDispatcher]), and a delete here
+ * would undo it: every publisher, on the newer build too, would fan that type
+ * out to nobody from then on, with no delivery row to show in a gauge and no
+ * line in a log. As first built, registration did delete. A start-up cannot
+ * know that no other build declares the type, so retiring one is a migration
+ * (ADR-0035, Owed), as retiring a consumer is. Until that migration runs,
+ * deliveries of the type go on being written and nobody claims them: they show
+ * in the pending and age gauges, which is the reminder.
+ *
  * A context with no consumers touches nothing, so this bean costs the contexts
  * that only publish (or have no outbox tables at all) no statement.
  */
@@ -93,12 +108,20 @@ internal class ConsumerRegistry(
                 registration.subscribed,
                 registration.backfilled,
             )
+            if (registration.undeclared.isNotEmpty()) {
+                log.info(
+                    "Event consumer has subscriptions this build does not declare, and they are kept: consumer={} undeclared={}",
+                    consumer.id,
+                    registration.undeclared,
+                )
+            }
         }
     }
 
     /**
-     * Brings the stored subscriptions of [consumer] into line with what it
-     * declares, and answers what was new. **The caller owns the transaction**:
+     * Adds to the stored subscriptions of [consumer] whatever it declares and
+     * they lack, and answers what was new and what was found undeclared. It
+     * removes nothing. **The caller owns the transaction**:
      * the lock taken here is held until that transaction ends, and is the
      * whole of the guarantee. (Postgres refuses `LOCK TABLE` outside a
      * transaction, so calling this without one fails rather than registering
@@ -131,18 +154,20 @@ internal class ConsumerRegistry(
         val declared = consumer.eventTypes
         val added = (declared - stored).sorted()
         val backfilled = added.sumOf { eventType -> subscribe(consumer, eventType, now) }
-        // What it no longer declares stops being fanned out to it. Deliveries
-        // already owed are kept: they were promised when their events were published.
-        (stored - declared).forEach { eventType ->
-            jdbc.update("DELETE FROM outbox_subscriptions WHERE consumer_id = ? AND event_type = ?", consumer.id, eventType)
-        }
-        return Registration(subscribed = added, backfilled = backfilled)
+        // What is stored and not declared here is left alone: see the class's note.
+        return Registration(subscribed = added, backfilled = backfilled, undeclared = (stored - declared).sorted())
     }
 
-    /** What one registration added: the event types newly subscribed, and the deliveries written for events already published. */
+    /**
+     * What one registration found: the event types newly [subscribed], the
+     * deliveries [backfilled] for events already published, and the types
+     * stored for this consumer that this build does not declare
+     * ([undeclared]), which it left as they were.
+     */
     data class Registration(
         val subscribed: List<String>,
         val backfilled: Int,
+        val undeclared: List<String>,
     )
 
     /**

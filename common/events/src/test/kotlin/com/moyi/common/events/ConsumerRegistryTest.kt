@@ -123,17 +123,50 @@ internal class ConsumerRegistryTest(
     }
 
     @Test
-    fun `a type the consumer no longer declares loses its subscription and keeps its deliveries`() {
+    fun `a type the consumer no longer declares keeps its subscription and its deliveries, and one line says so`() {
         registryOf(consumer(setOf(typeA, typeB))).afterSingletonsInstantiated()
+        val subscribedAt = clock.instant()
+        val a = publish(typeA)
+        val b = publish(typeB)
+        clock.advance(Duration.ofDays(1))
+
+        val lines = registryLines { registryOf(consumer(setOf(typeA))).afterSingletonsInstantiated() }
+        val publishedAfterwards = publish(typeB)
+
+        subscriptions() shouldContainExactly listOf(typeA to subscribedAt, typeB to subscribedAt)
+        deliveredEvents() shouldContainExactlyInAnyOrder listOf(a, b, publishedAfterwards)
+        lines.map { it.level }.distinct() shouldContainExactly listOf(Level.INFO)
+        val undeclared = lines.map { it.formattedMessage }.single { "does not declare" in it }
+        undeclared shouldContain "consumer=$consumerId"
+        undeclared shouldContain "undeclared=[$typeB]"
+    }
+
+    @Test
+    fun `an older build that starts after a newer one leaves the newer build's subscription alone`() {
+        // ADR-0035 decisions 3 and 4. The dispatcher claims only the types its
+        // own build declares, because in a rolling deploy two builds of one
+        // consumer run side by side. Registration used to undo that: the
+        // older build, started second (a rollback, a crash and restart
+        // mid-deploy), deleted the subscription it did not declare, and from
+        // then on every publisher, on the newer build too, fanned that type
+        // out to nobody. No delivery row, so no gauge and no log line.
+        val newer = consumer(setOf(typeA, typeB))
+        val older = consumer(setOf(typeA))
+        registryOf(newer).afterSingletonsInstantiated()
+        registryOf(older).afterSingletonsInstantiated()
+
         val a = publish(typeA)
         val b = publish(typeB)
 
-        registryOf(consumer(setOf(typeA))).afterSingletonsInstantiated()
-        val unsubscribed = publish(typeB)
+        subscriptions().map { it.first } shouldContainExactly listOf(typeA, typeB)
+        deliveriesOf(a) shouldContainExactly listOf(consumerId)
+        deliveriesOf(b) shouldContainExactly listOf(consumerId)
 
-        subscriptions().map { it.first } shouldContainExactly listOf(typeA)
-        deliveredEvents() shouldContainExactlyInAnyOrder listOf(a, b)
-        deliveriesOf(unsubscribed).shouldBeEmpty()
+        // The newer build restarting finds its subscription as it left it: nothing to backfill, nothing new.
+        val again = transactions.execute { registryOf(newer).register(newer) }!!
+        again.subscribed.shouldBeEmpty()
+        again.backfilled shouldBe 0
+        again.undeclared.shouldBeEmpty()
     }
 
     @Test
@@ -458,6 +491,19 @@ internal class ConsumerRegistryTest(
         jdbc
             .queryForObject("SELECT next_attempt_at FROM outbox_deliveries WHERE consumer_id = ?", Timestamp::class.java, consumerId)!!
             .toInstant() shouldBe truncated
+    }
+
+    /** What `ConsumerRegistry` logged during [action]. */
+    private fun registryLines(action: () -> Unit): List<ILoggingEvent> {
+        val logger = LoggerFactory.getLogger(ConsumerRegistry::class.java) as Logger
+        val appender = ListAppender<ILoggingEvent>().also { it.start() }
+        logger.addAppender(appender)
+        try {
+            action()
+        } finally {
+            logger.detachAppender(appender)
+        }
+        return appender.list.toList()
     }
 
     /** Runs [block] with a data source that is one connection and nothing else, and gives the connection back. */
