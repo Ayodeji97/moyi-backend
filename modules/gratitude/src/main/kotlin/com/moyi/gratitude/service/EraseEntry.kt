@@ -15,14 +15,23 @@ import java.time.temporal.ChronoUnit
  * tombstone, and a day that was still being written is counted again
  * without it (BR-10).
  *
- * **One routine, because two things must leave the same rows.** An author
- * deleting their own entry (`DELETE /entries/{entryId}`, [ChangeEntry]) and
- * a withdrawal erasing every entry of a member who took their words back
- * (FR-029a) are told apart by nothing a reader of the database, or of the
- * API, can see: that is what keeps a withdrawal discreet (ADR-0028 decision
- * 8). Two implementations would agree until one of them was changed. So the
- * withdrawal calls this, once per entry, and a withdrawal is then a run of
- * single deletes by construction.
+ * **One routine, because two things must leave the same entries.** An
+ * author deleting their own entry (`DELETE /entries/{entryId}`,
+ * [ChangeEntry]) and a withdrawal erasing every entry of a member who took
+ * their words back (FR-029a) leave the same entry rows and the same answer
+ * to every reader: that is what keeps a withdrawal discreet (ADR-0028
+ * decision 8). Two implementations would agree until one of them was
+ * changed. So the withdrawal calls this, once per entry, and its erasures
+ * are single deletes by construction.
+ *
+ * **What the two do not share is what a `DELETE` does before it erases.**
+ * It reconciles the couple's joining day first, as every request does; the
+ * withdrawal's consumer is not a request and does not. So a joining day
+ * nobody has met since the pairing (one wrote while waiting, the other
+ * accepted, neither has opened the app) is still `SUSPENDED` after a
+ * withdrawal and has been resumed after a delete. It stays as it would have
+ * with no withdrawal at all, until the next read or the close reconciles
+ * it, and no answer differs meanwhile (`WithdrawEntriesTest`).
  *
  * **The caller holds the bond's lock**, taken through `BondAccess`, inside
  * a transaction. This takes the day's lock and

@@ -198,6 +198,10 @@ internal class EntryChangesTest(
             val edit = patchEntry(author, id, """{"text":"changed"}""")
             edit.status shouldBe 409
             edit.contentAsString shouldContain "BOND_ARCHIVED"
+            // The ending is answered before the media is: on an open bond this body is a 422.
+            val withMedia = patchEntry(author, id, """{"text":"changed","imageMediaId":"${UUID.randomUUID()}"}""")
+            withMedia.status shouldBe 409
+            withMedia.contentAsString shouldContain "BOND_ARCHIVED"
         }
         jdbc.queryForObject("SELECT count(*) FROM entries WHERE text IN ('hers', 'his') AND deleted_at IS NULL", Int::class.java) shouldBe 2
 

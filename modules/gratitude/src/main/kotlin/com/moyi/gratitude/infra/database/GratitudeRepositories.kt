@@ -140,6 +140,15 @@ internal interface EntryRepository : Repository<EntryEntity, UUID> {
      * The id and day id of each entry [authorMemberId] wrote in [bondId] that
      * has not been erased, **oldest day first**: the order a caller must lock
      * days in. Ids only; the caller reads each entry again under its lock.
+     *
+     * **`bond_id` is defence in depth, and no test can make it matter.**
+     * `author_member_id` is a `bond_members.id`, a key minted for each
+     * membership row: one person in two bonds is two member ids, so the
+     * author predicate alone already selects one bond's entries. The bond
+     * predicate is kept so that an erasure, which cannot be undone, stays
+     * inside the bond its event named even if a member id were ever reused
+     * or an event were wrong. Dropping it changes no result that today's
+     * schema can produce.
      */
     @Query(
         nativeQuery = true,

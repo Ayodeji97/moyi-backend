@@ -153,7 +153,7 @@ internal class WithdrawEntriesTest(
         written.adas.map { after.getValue(it)["revealed_at"] != null } shouldContainExactly listOf(true, true, false)
         // The partner withdrew nothing: her row is the row it was, every column.
         after.getValue(written.beas) shouldBe before.getValue(written.beas)
-        after.getValue(written.beas)["text"] shouldBe "bea-13"
+        after.getValue(written.beas)["text"] shouldBe "${BEAS}13"
 
         // A settled day is a record. The one still being written is counted again without the entry.
         val daysAfter = rig.wholeDays(bond).associateBy { it["date"].toString() }
@@ -189,7 +189,7 @@ internal class WithdrawEntriesTest(
         rig.snapshot(withdrawn, ada, bea) shouldBe twin
         // Not vacuous: the day that was still open stepped back, in both.
         twin.days.last().contains("status=OPEN, ") shouldBe true
-        twin.read.forEach { it shouldNotContain "ada-" }
+        twin.read.forEach { it shouldNotContain ADAS }
         // The days' versions too: the same number of writes reached each day.
         rig.wholeDays(withdrawn).map { it["version"] } shouldBe rig.wholeDays(deleted).map { it["version"] }
 
@@ -207,6 +207,103 @@ internal class WithdrawEntriesTest(
             Int::class.java,
             Timestamp.from(at(15)),
         ) shouldBe 0
+    }
+
+    /**
+     * The one place a withdrawal and a run of deletes do **not** leave the
+     * same rows, and how far the difference goes.
+     *
+     * A `DELETE` reconciles the couple's joining day before it erases
+     * (`ChangeEntry`); the consumer does not, and is not meant to: it does
+     * what an erasure does and nothing a read would do. So where one member
+     * wrote while waiting, the other accepted, and nobody has opened the
+     * app since, the day is still `SUSPENDED` after a withdrawal and has
+     * been resumed after a delete. That is a day nobody has met since the
+     * pairing, left as it would be with no withdrawal at all.
+     *
+     * What must hold, and does: the entries are the same rows, both members
+     * are answered the same bytes, and the read that answers them
+     * reconciles the day, after which the days are the same rows too.
+     */
+    @Test
+    fun `a joining day nobody has met since pairing is all that differs from a delete, and the first read removes the difference`() {
+        clock.set(at(15))
+
+        fun writtenWhileWaiting(): Pair<String, String> {
+            val created = rig.create(ada)
+            val bond = rig.idOf(created)
+            val entry = rig.submit(ada, bond, "${ADAS}15")
+            rig.accept(bea, rig.codeOf(created))
+            return bond to entry
+        }
+        val (withdrawn, _) = writtenWhileWaiting()
+        val (deleted, adasEntry) = writtenWhileWaiting()
+        for (bond in listOf(withdrawn, deleted)) {
+            rig.wholeDays(bond).map { "${it["status"]} ${it["entry_count"]}" } shouldBe listOf("SUSPENDED 1")
+        }
+
+        rig.delete(ada, adasEntry)
+        rig.block(ada, deleted, withdraw = false)
+        rig.block(ada, withdrawn)
+        dispatcher.dispatchDue(clock.instant(), 10) shouldBe DispatchResult(1, 0, false)
+
+        // A snapshot reads the rows first and asks the two members afterwards, so these days are as the endings left them.
+        val afterWithdrawal = rig.snapshot(withdrawn, ada, bea)
+        val afterDelete = rig.snapshot(deleted, ada, bea)
+        afterWithdrawal.entries shouldBe afterDelete.entries
+        afterWithdrawal.read shouldBe afterDelete.read
+        afterWithdrawal.read.forEach { it shouldNotContain ADAS }
+        // The difference this test is about; were it gone, the sentences above would be out of date.
+        afterWithdrawal.days.single().contains("status=SUSPENDED, ") shouldBe true
+        afterDelete.days.single().contains("status=OPEN, ") shouldBe true
+
+        // Both have now been read, by both members: nothing tells the two bonds apart.
+        val read = rig.snapshot(deleted, ada, bea)
+        rig.snapshot(withdrawn, ada, bea) shouldBe read
+        read.days.single().contains("status=OPEN, ") shouldBe true
+        rig.wholeDays(withdrawn).map { it["version"] } shouldBe rig.wholeDays(deleted).map { it["version"] }
+    }
+
+    /**
+     * [EraseEntry] passes over an entry that is already erased, which is
+     * what lets the author's own `DELETE` and the withdrawal meet at one
+     * entry. Both orders, on bonds that both recorded a withdrawal: the day
+     * that was still open is stepped back once, whoever came second wrote
+     * nothing, and the two bonds cannot be told apart.
+     */
+    @Test
+    fun `the author's own delete and the withdrawal reach the same entry in either order and leave the same rows`() {
+        val deleteFirst = rig.pair(ada, bea)
+        val consumerFirst = rig.pair(ada, bea)
+        val written = threeDays(deleteFirst, consumerFirst)
+        listOf(deleteFirst, consumerFirst).forEach { rig.block(ada, it) }
+        rig.postpone(deleteFirst, clock.instant().plusSeconds(60))
+
+        // One: her delete of the entry on the open day, then the consumer, which finds two of three still live.
+        rig.delete(ada, written.getValue(deleteFirst).adas.last())
+        rig.wholeDays(deleteFirst).last()["entry_count"].toString() shouldBe "0"
+        // The other: the consumer, then her delete of an entry it has already erased.
+        dispatcher.dispatchDue(clock.instant(), 10) shouldBe DispatchResult(1, 0, false)
+        val erased = rig.wholeEntries(consumerFirst) to rig.wholeDays(consumerFirst)
+        rig.delete(ada, written.getValue(consumerFirst).adas.last())
+        (rig.wholeEntries(consumerFirst) to rig.wholeDays(consumerFirst)) shouldBe erased
+
+        clock.set(clock.instant().plusSeconds(60))
+        val deletedOnly = rig.wholeEntries(deleteFirst) to rig.wholeDays(deleteFirst)
+        dispatcher.dispatchDue(clock.instant(), 10) shouldBe DispatchResult(1, 0, false)
+        // The consumer passed over the entry she had deleted: its row is the row her delete left, `deleted_at` and all.
+        val deletedId = written.getValue(deleteFirst).adas.last()
+        val itsRow = { rows: List<Map<String, Any?>> -> rows.single { it["id"].toString() == deletedId } }
+        itsRow(rig.wholeEntries(deleteFirst)) shouldBe itsRow(deletedOnly.first)
+        // And no day moved: the open one had its step back from her delete, and the settled ones are history.
+        rig.wholeDays(deleteFirst) shouldBe deletedOnly.second
+
+        rig.snapshot(deleteFirst, ada, bea) shouldBe rig.snapshot(consumerFirst, ada, bea)
+        rig.wholeDays(deleteFirst).map { it["version"] } shouldBe rig.wholeDays(consumerFirst).map { it["version"] }
+        rig.wholeDays(deleteFirst).last()["status"] shouldBe "OPEN"
+        rig.wholeDays(deleteFirst).last()["entry_count"].toString() shouldBe "0"
+        val adas = rig.memberId(deleteFirst, ada)
+        rig.wholeEntries(deleteFirst).filter { it["author_member_id"] == adas }.map { it["text"] } shouldBe List(3) { null }
     }
 
     @Test
@@ -237,7 +334,7 @@ internal class WithdrawEntriesTest(
         val rows = rig.wholeEntries(bond).associateBy { it["id"].toString() }
         rows.getValue(written.beas)["text"].shouldBeNull()
         rows.getValue(written.beas)["status"] shouldBe "DELETED"
-        written.adas.map { rows.getValue(it)["text"] } shouldContainExactly listOf("ada-13", "ada-14", "ada-15")
+        written.adas.map { rows.getValue(it)["text"] } shouldContainExactly listOf("${ADAS}13", "${ADAS}14", "${ADAS}15")
     }
 
     // --- an event that should not exist ---
@@ -326,7 +423,7 @@ internal class WithdrawEntriesTest(
 
         // The handler had erased all five by then: every one of them is back.
         (rig.wholeEntries(bond) to rig.wholeDays(bond)) shouldBe before
-        before.first.map { it["text"] } shouldContainExactly listOf("ada-11", "ada-12", "ada-13", "ada-14", "ada-15")
+        before.first.map { it["text"] } shouldContainExactly listOf("${ADAS}11", "${ADAS}12", "${ADAS}13", "${ADAS}14", "${ADAS}15")
         val failed = rig.delivery(bond)
         failed["processed_at"].shouldBeNull()
         failed["attempts"] shouldBe 1
@@ -363,9 +460,9 @@ internal class WithdrawEntriesTest(
         failed["processed_at"].shouldBeNull()
         failed["attempts"] shouldBe 1
         failed["last_error"].toString() shouldMatch CLASS_NAME
-        failed["last_error"].toString() shouldNotContain "ada-"
+        failed["last_error"].toString() shouldNotContain ADAS
         // The leak first, so that a failure here names the line that carried it.
-        said.filter { it.contains("ada-") || it.contains("Failing row") }.map { it.take(160) }.shouldBeEmpty()
+        said.filter { it.contains(ADAS) || it.contains("Failing row") }.map { it.take(160) }.shouldBeEmpty()
         // And not vacuous: the transaction machinery was heard at DEBUG while it failed.
         said.count { it.contains("org.springframework.orm.jpa.JpaTransactionManager") } shouldBeGreaterThan 0
     }
@@ -383,13 +480,13 @@ internal class WithdrawEntriesTest(
                 dispatcher.dispatchDue(clock.instant(), 10) shouldBe DispatchResult(1, 0, false)
             }
 
-        said.filter { it.contains("ada-") || it.contains("bea-") }.map { it.take(160) }.shouldBeEmpty()
+        said.filter { it.contains(ADAS) || it.contains(BEAS) }.map { it.take(160) }.shouldBeEmpty()
         // Not vacuous: the handler's own statements were heard.
         said.count { it.contains("entries") } shouldBeGreaterThan 0
         val payloads = jdbc.queryForList("SELECT payload::text FROM outbox_events", String::class.java)
         payloads.forEach {
-            it shouldNotContain "ada-"
-            it shouldNotContain "bea-"
+            it shouldNotContain ADAS
+            it shouldNotContain BEAS
         }
         jdbc.queryForObject("SELECT payload::text FROM outbox_events WHERE event_type = 'EntriesWithdrawn'", String::class.java) shouldMatch
             Regex("""\{"bondId": "$UUID_PATTERN", "memberId": "$UUID_PATTERN"}""")
@@ -475,7 +572,7 @@ internal class WithdrawEntriesTest(
         jdbc.update(
             """
             INSERT INTO entries (id, bond_day_id, bond_id, author_member_id, text, status, created_at, intended_at, updated_at, revealed_at)
-            SELECT gen_random_uuid(), d.id, d.bond_id, ?, 'ada-' || d.date, 'REVEALED', d.starts_at, d.starts_at, d.closed_at, d.closed_at
+            SELECT gen_random_uuid(), d.id, d.bond_id, ?, '$ADAS' || d.date, 'REVEALED', d.starts_at, d.starts_at, d.closed_at, d.closed_at
             FROM bond_days d WHERE d.bond_id = ?::uuid
             """.trimIndent(),
             author,
@@ -514,14 +611,14 @@ internal class WithdrawEntriesTest(
      */
     private fun threeDays(vararg bonds: String): Map<String, Written> {
         clock.set(at(13))
-        val a13 = bonds.associateWith { rig.submit(ada, it, "ada-13") }
-        val b13 = bonds.associateWith { rig.submit(bea, it, "bea-13") }
+        val a13 = bonds.associateWith { rig.submit(ada, it, "${ADAS}13") }
+        val b13 = bonds.associateWith { rig.submit(bea, it, "${BEAS}13") }
         clock.set(at(14))
-        val a14 = bonds.associateWith { rig.submit(ada, it, "ada-14") }
+        val a14 = bonds.associateWith { rig.submit(ada, it, "${ADAS}14") }
         clock.set(Instant.parse("2026-09-14T23:01:00Z"))
         closer.closeElapsedDays(clock.instant(), 1_000).failed shouldBe 0
         clock.set(at(15))
-        val a15 = bonds.associateWith { rig.submit(ada, it, "ada-15") }
+        val a15 = bonds.associateWith { rig.submit(ada, it, "${ADAS}15") }
         return bonds.associateWith { Written(listOf(a13.getValue(it), a14.getValue(it), a15.getValue(it)), b13.getValue(it)) }
     }
 
@@ -536,7 +633,7 @@ internal class WithdrawEntriesTest(
         return bond to
             (11..15).map { day ->
                 clock.set(at(day))
-                rig.submit(ada, bond, "ada-$day")
+                rig.submit(ada, bond, "${ADAS}$day")
             }
     }
 
@@ -595,6 +692,19 @@ internal class WithdrawEntriesTest(
     private fun at(day: Int): Instant = Instant.parse("2026-09-${day}T10:00:00Z")
 
     private companion object {
+        /**
+         * What every entry of Ada's, and of Bea's, begins with, and what the
+         * logs, the payloads and `last_error` are searched for.
+         *
+         * **Not spellable in hexadecimal, on purpose.** These were `ada-` and
+         * `bea-`: three hex digits and a hyphen, which is how a group of a
+         * UUID ends about once in five hundred ids. A DEBUG line that printed
+         * such an id was then "entry text in a log", and two tests here
+         * failed once for it. A capital, letters past `f` and a tilde occur
+         * in no id, class name or statement.
+         */
+        const val ADAS = "Ada~wrote~"
+        const val BEAS = "Bea~wrote~"
         const val MANY = 2_000
         const val TRIGGER = "withdraw_entries_test_refusal"
         const val FUNCTION = "withdraw_entries_test_refuse"

@@ -25,10 +25,20 @@ import java.util.UUID
  * gone.
  *
  * **Through [EraseEntry], one entry at a time**, because a withdrawal must
- * leave exactly what a run of single deletes leaves (plan C5a, decision 12;
- * ADR-0028 decision 8: nothing may tell that a withdrawal happened). So no
- * event is published, a settled day is not recounted, and nothing is touched
- * that a `DELETE` would not touch.
+ * leave the entry rows a run of single deletes leaves, and the same answers
+ * to every reader (plan C5a, decision 12; ADR-0028 decision 8: nothing may
+ * tell that a withdrawal happened). So no event is published, a settled day
+ * is not recounted, and nothing is touched that a `DELETE` would not touch.
+ *
+ * **A `DELETE` touches one thing more, and this deliberately does not.** A
+ * request reconciles the couple's joining day before it does anything else;
+ * this is not a request. A joining day nobody has met since the pairing is
+ * therefore left `SUSPENDED` here, counted again without the entry, where a
+ * delete would have resumed it first. It is the day as it would stand with
+ * no withdrawal at all, the next read or the close reconciles it, and both
+ * members are answered the same in the meantime (`WithdrawEntriesTest`).
+ * Reconciling here would be this consumer doing a read's work, and one more
+ * thing to keep in step with it.
  *
  * **The lock order is the application's: bond, day, entry.** The bond's row
  * is taken first, which holds off the close job, a read that reconciles the

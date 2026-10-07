@@ -315,6 +315,14 @@ internal class JdbcOutboxDispatcher(
      * JPA session. `SET CONSTRAINTS` lasts for the transaction, which ends
      * with the next statement. What can still fail at the commit after this
      * is the connection or the server, and neither quotes a row.
+     *
+     * **The two halves are not one mechanism.** `SET CONSTRAINTS` is a JDBC
+     * statement, and JDBC does not make Hibernate flush, so the flush is
+     * needed even with it (`UnflushedHandlerTest`, in `gratitude`). And no
+     * migration declares a constraint `DEFERRABLE` today: against the
+     * schema as it stands `SET CONSTRAINTS` checks nothing, and is here for
+     * the consumer that first adds one (the tests build theirs with a
+     * constraint trigger).
      */
     private fun failNowWhatWouldFailAtCommit(status: TransactionStatus) {
         status.flush()
