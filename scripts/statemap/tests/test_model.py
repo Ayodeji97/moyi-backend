@@ -1,0 +1,91 @@
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+from fixture import refusal, row, tiny
+from statemap.model import load, validate
+
+
+class ValidateTests(unittest.TestCase):
+    def problems(self, model):
+        return "\n".join(validate(model))
+
+    def test_the_fixture_is_well_formed(self):
+        self.assertEqual(validate(tiny()), [])
+
+    def test_a_missing_key_is_named(self):
+        broken = row()
+        del broken["rule"]
+        self.assertIn("row lamp-off-press: missing rule", self.problems(tiny([broken])))
+
+    def test_only_an_ok_row_may_change_state(self):
+        self.assertIn("only an 'ok' row may change state", self.problems(tiny([row(), refusal(to="OFF")])))
+
+    def test_an_unknown_state_is_refused(self):
+        self.assertIn("'to' is 'DIM'", self.problems(tiny([row(to="DIM")])))
+
+    def test_a_row_may_not_touch_an_unbuilt_state(self):
+        self.assertIn("'to' is 'BROKEN'", self.problems(tiny([row(to="BROKEN")])))
+
+    def test_the_system_acts_through_events_only(self):
+        self.assertIn("the system acts through events", self.problems(tiny([row(actor="system")])))
+
+    def test_your_own_action_is_an_endpoint(self):
+        mine = row(action="event:timer", status=None)
+        self.assertIn("your own actions are endpoints", self.problems(tiny([mine])))
+
+    def test_an_event_has_no_status(self):
+        event = row(id="lamp-on-timer", **{"from": "ON"}, to="OFF", action="event:timer", actor="system")
+        self.assertIn("an event has no HTTP status", self.problems(tiny([event])))
+
+    def test_a_refusal_needs_a_status_and_a_code(self):
+        self.assertIn("a refusal needs", self.problems(tiny([row(), refusal(code=None)])))
+
+    def test_an_unknown_action_is_refused(self):
+        self.assertIn("neither an endpoint card nor an event", self.problems(tiny([row(action="GET /api/v1/nope")])))
+
+    def test_executed_evidence_needs_a_reference(self):
+        self.assertIn("says what ran it", self.problems(tiny([row(evidence="smoke")])))
+
+    def test_two_rows_in_one_cell_need_distinct_when(self):
+        twice = [row(), row(id="lamp-off-press-again")]
+        self.assertIn("more than one row and no 'when'", self.problems(tiny(twice)))
+        told_apart = [row(when="the bulb is new"), row(id="lamp-off-press-again", when="the bulb is old")]
+        self.assertEqual(validate(tiny(told_apart)), [])
+
+    def test_a_guard_names_another_region(self):
+        guarded = row(guards=[{"region": "lamp", "states": ["ON"]}])
+        self.assertIn("guard names region 'lamp'", self.problems(tiny([guarded])))
+
+    def test_a_curl_line_may_not_carry_a_token(self):
+        model = tiny()
+        fake_token = "ey" + "JhbGciOi"
+        model.endpoints[0]["curl"] = "curl -H 'Authorization: Bearer " + fake_token + "'"
+        self.assertIn("looks like a real token", self.problems(model))
+
+    def test_a_journey_step_must_be_a_row(self):
+        journey = {"id": "J1", "title": "On", "steps": [{"row": "nope", "note": ""}]}
+        self.assertIn("journey J1: step 1 names no row 'nope'", self.problems(tiny(journeys=[journey])))
+
+    def test_two_rows_may_not_share_an_id(self):
+        self.assertIn("two rows share the id", self.problems(tiny([row(when="a"), row(when="b")])))
+
+
+class LoadTests(unittest.TestCase):
+    def test_rows_come_from_every_machine_file_that_exists(self):
+        model = tiny()
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            base = {k: getattr(model, k) for k in ("stamp", "machines", "events", "everywhere", "pending")}
+            (data / "model.json").write_text(json.dumps(base))
+            (data / "endpoints.json").write_text(json.dumps(model.endpoints))
+            (data / "day.json").write_text(json.dumps(model.rows))
+            loaded = load(data)
+        self.assertEqual(loaded.rows, model.rows)
+        self.assertEqual(loaded.journeys, [])
+        self.assertEqual(validate(loaded), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

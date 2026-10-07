@@ -72,7 +72,8 @@ States are read from the code, not invented.
 
 - Main states: `no bond`, `PENDING_MEMBER`, `ACTIVE`, `PENDING_DELETION`,
   `ARCHIVED`, `DELETED` (`BondStatus`).
-- Substates, invite: created, looked up, accepted, revoked, not usable.
+- Substates, invite: created, accepted, revoked, not usable. Looking an invite
+  up is an action that leaves it created.
 - Substates, proposal: none, proposed, confirmed, withdrawn. One mechanism
   serves the timezone change and the deletion (`ProposalKind`, ADR-0030).
 
@@ -131,23 +132,34 @@ All five are drawn from the data in section 6.
 
 ## 6. The data
 
-One file, `docs/state-map/transitions.json`. Each row is one fact:
+Six hand-written files under `docs/state-map/data/`:
+
+| File | Holds |
+|---|---|
+| `model.json` | The machines, regions and states; the events; the errors that apply everywhere; the `pending` list; the stamp |
+| `endpoints.json` | One card per endpoint: summary, auth, headers, request errors, a curl line |
+| `day.json`, `bond.json`, `account.json` | The rows of each machine |
+| `journeys.json` | Each journey as an ordered list of row references |
+
+**The row, field by field** (every key is required; use `""`, `[]` or `null`, never omit):
 
 | Field | Content |
 |---|---|
-| `machine` | account, bond or day |
-| `from` | the state, or substate |
-| `action` | endpoint (`POST /bonds/{bondId}/entries`) or a named system or partner event |
-| `actor` | you, partner, system |
-| `guards` | states required in the other machines |
-| `to` | resulting state; equal to `from` for a refusal |
-| `status`, `code` | HTTP status and error code, if any |
+| `id` | unique, kebab-case: `day-open-write` |
+| `region` | a region id from `model.json`: `day`, `day.entry`, `bond`, ... |
+| `from` | a built state of that region |
+| `action` | an endpoint id exactly as the contract spells it (`POST /api/v1/bonds/{bondId}/entries`) or an event id (`event:day-ends`) |
+| `actor` | `you`, `partner` or `system`. Your actions are endpoints; the system's are events |
+| `when` | the condition that picks this row when a cell has more than one; else `""` |
+| `guards` | `[{"region": "bond", "states": ["PENDING_MEMBER", "ACTIVE"]}]`: states required elsewhere |
+| `outcome` | `ok`, `refused` or `unreachable` |
+| `to` | resulting state; equal to `from` unless the outcome is `ok` |
+| `status`, `code` | HTTP status and error code; `null` where there is none |
 | `reason` | one plain sentence |
-| `rule` | BR, FR or ADR reference |
-| `source` | `smoke`, `test`, `code` or `never-run`, with a pointer |
-
-A second file, `docs/state-map/journeys.json`, lists each journey as an
-ordered list of row references.
+| `rule` | `BR-2`, `FR-062`, `ADR-0031 §4`; `""` if none |
+| `evidence` | `smoke` (asserted by `scripts/smoke.sh`), `test` (asserted by an automated test), `hand` (seen with curl, by a person), `never-run` (read from code only) |
+| `evidenceRef` | smoke: text of the probe's label. test: `ClassName#text of the test name`. hand: who and when. never-run: `""` |
+| `codeRef` | `path/from/repo/root.kt#text found in that file`. Text, not a line number, so it survives edits above it |
 
 ### Generated from the data
 
@@ -171,10 +183,10 @@ A script, `scripts/state-map-check`, run in CI:
 - Every grid cell is filled.
 - The generated Mermaid matches the data.
 
-Sources are labelled honestly. A row observed in `scripts/smoke.sh` says
-`smoke`. A row never exercised by anyone says `never-run`; the page shows
-a count of these. At the time of writing the known ones include
-`IDEMPOTENCY_KEY_IN_FLIGHT` and `DAY_CLOSED`.
+Every row cites the code it was read from (`codeRef`) and says what executed it (`evidence`):
+`smoke`, `test`, `hand` or `never-run`. The check confirms each citation still resolves.
+A `pending` list in `model.json` names what is not yet mapped; the check fails when an
+entry on it has been mapped, and in strict mode when the list is not empty.
 
 The grid is also a test-design artefact: in state transition testing,
 covering every cell, valid and invalid, is the strongest coverage level.
@@ -197,6 +209,9 @@ Built in this order, each a reviewable step:
 3. Account machine.
 4. Journeys J1–J5.
 5. The published page.
+
+Steps 1 to 4 are one implementation plan. Step 5 has
+its own, written once the data exists.
 
 ## 9. Out of scope
 

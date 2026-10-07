@@ -1,0 +1,381 @@
+{
+  "stamp": "174b474",
+  "machines": [
+    {
+      "id": "account",
+      "label": "Account",
+      "regions": [
+        {
+          "id": "account",
+          "label": "The account",
+          "states": [
+            {
+              "id": "ANONYMOUS",
+              "label": "anonymous"
+            },
+            {
+              "id": "PENDING_VERIFICATION",
+              "label": "PENDING_VERIFICATION"
+            },
+            {
+              "id": "ACTIVE_SIGNED_OUT",
+              "label": "ACTIVE, signed out"
+            },
+            {
+              "id": "SIGNED_IN",
+              "label": "signed in"
+            },
+            {
+              "id": "SUSPENDED",
+              "label": "SUSPENDED",
+              "built": false
+            },
+            {
+              "id": "PENDING_DELETION",
+              "label": "PENDING_DELETION",
+              "built": false
+            },
+            {
+              "id": "DELETED",
+              "label": "DELETED",
+              "built": false
+            }
+          ]
+        },
+        {
+          "id": "account.session",
+          "label": "The session",
+          "states": [
+            {
+              "id": "NO_SESSION",
+              "label": "no session"
+            },
+            {
+              "id": "ACCESS_VALID",
+              "label": "access token valid"
+            },
+            {
+              "id": "ACCESS_EXPIRED",
+              "label": "access token expired"
+            },
+            {
+              "id": "REVOKED",
+              "label": "revoked"
+            }
+          ]
+        },
+        {
+          "id": "account.reset",
+          "label": "The password reset",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none"
+            },
+            {
+              "id": "REQUESTED",
+              "label": "requested"
+            },
+            {
+              "id": "USED",
+              "label": "token used"
+            },
+            {
+              "id": "EXPIRED",
+              "label": "token expired"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bond",
+      "label": "Bond",
+      "regions": [
+        {
+          "id": "bond",
+          "label": "The bond",
+          "states": [
+            {
+              "id": "NO_BOND",
+              "label": "no bond"
+            },
+            {
+              "id": "PENDING_MEMBER",
+              "label": "PENDING_MEMBER"
+            },
+            {
+              "id": "ACTIVE",
+              "label": "ACTIVE"
+            },
+            {
+              "id": "PENDING_DELETION",
+              "label": "PENDING_DELETION"
+            },
+            {
+              "id": "ARCHIVED",
+              "label": "ARCHIVED"
+            },
+            {
+              "id": "DELETED",
+              "label": "DELETED"
+            }
+          ]
+        },
+        {
+          "id": "bond.invite",
+          "label": "The invite",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none"
+            },
+            {
+              "id": "CREATED",
+              "label": "created"
+            },
+            {
+              "id": "ACCEPTED",
+              "label": "accepted"
+            },
+            {
+              "id": "REVOKED",
+              "label": "revoked"
+            },
+            {
+              "id": "NOT_USABLE",
+              "label": "not usable"
+            }
+          ]
+        },
+        {
+          "id": "bond.proposal",
+          "label": "The proposal",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none"
+            },
+            {
+              "id": "PROPOSED",
+              "label": "proposed"
+            },
+            {
+              "id": "CONFIRMED",
+              "label": "confirmed"
+            },
+            {
+              "id": "WITHDRAWN",
+              "label": "withdrawn"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day",
+      "label": "Day",
+      "regions": [
+        {
+          "id": "day",
+          "label": "The day",
+          "states": [
+            {
+              "id": "OPEN",
+              "label": "OPEN"
+            },
+            {
+              "id": "PARTIAL",
+              "label": "PARTIAL"
+            },
+            {
+              "id": "PENDING_REVEAL",
+              "label": "PENDING_REVEAL"
+            },
+            {
+              "id": "REVEALED",
+              "label": "REVEALED"
+            },
+            {
+              "id": "SOLO",
+              "label": "SOLO"
+            },
+            {
+              "id": "EMPTY",
+              "label": "EMPTY"
+            },
+            {
+              "id": "FROZEN",
+              "label": "FROZEN"
+            },
+            {
+              "id": "SUSPENDED",
+              "label": "SUSPENDED"
+            }
+          ]
+        },
+        {
+          "id": "day.entry",
+          "label": "Your entry",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none"
+            },
+            {
+              "id": "SUBMITTED",
+              "label": "SUBMITTED"
+            },
+            {
+              "id": "REVEALED",
+              "label": "REVEALED"
+            },
+            {
+              "id": "DELETED",
+              "label": "DELETED"
+            }
+          ]
+        },
+        {
+          "id": "day.partnerEntry",
+          "label": "What you see of your partner's entry",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "nothing yet"
+            },
+            {
+              "id": "LOCKED",
+              "label": "LOCKED"
+            },
+            {
+              "id": "VISIBLE",
+              "label": "the text"
+            },
+            {
+              "id": "REMOVED",
+              "label": "REMOVED"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "events": [],
+  "everywhere": [
+    {
+      "status": 400,
+      "code": "MALFORMED_REQUEST",
+      "reason": "The body could not be read as what the endpoint expects.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.MALFORMED_REQUEST"
+    },
+    {
+      "status": 401,
+      "code": "UNAUTHENTICATED",
+      "reason": "No access token, or one that is expired or not valid.",
+      "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.UNAUTHENTICATED"
+    },
+    {
+      "status": 403,
+      "code": "FORBIDDEN",
+      "reason": "A valid token that lacks the authority this action needs.",
+      "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.FORBIDDEN"
+    },
+    {
+      "status": 405,
+      "code": "METHOD_NOT_ALLOWED",
+      "reason": "The path exists; this verb does not.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.METHOD_NOT_ALLOWED"
+    },
+    {
+      "status": 415,
+      "code": "UNSUPPORTED_MEDIA_TYPE",
+      "reason": "A Content-Type this endpoint does not read.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.UNSUPPORTED_MEDIA_TYPE"
+    },
+    {
+      "status": 422,
+      "code": "VALIDATION_FAILED",
+      "reason": "The request parsed but a field or a required header is missing or not valid.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.VALIDATION_FAILED"
+    },
+    {
+      "status": 429,
+      "code": "RATE_LIMITED",
+      "reason": "A rate-limit bucket is empty; Retry-After says when to try again.",
+      "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.RATE_LIMITED"
+    },
+    {
+      "status": 500,
+      "code": "INTERNAL_ERROR",
+      "reason": "Anything unanticipated. It never carries the underlying message.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.INTERNAL_ERROR"
+    }
+  ],
+  "pending": {
+    "endpoints": [
+      "DELETE /api/v1/auth/sessions/{id}",
+      "DELETE /api/v1/bonds/{bondId}/deletion-request",
+      "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+      "DELETE /api/v1/bonds/{bondId}/timezone",
+      "DELETE /api/v1/entries/{entryId}",
+      "GET /api/v1/auth/sessions",
+      "GET /api/v1/bonds",
+      "GET /api/v1/bonds/{bondId}",
+      "GET /api/v1/bonds/{bondId}/members/me/settings",
+      "GET /api/v1/bonds/{bondId}/streak",
+      "GET /api/v1/bonds/{bondId}/today",
+      "GET /api/v1/invites/{code}",
+      "GET /api/v1/me",
+      "PATCH /api/v1/bonds/{bondId}",
+      "PATCH /api/v1/bonds/{bondId}/timezone",
+      "PATCH /api/v1/entries/{entryId}",
+      "POST /api/v1/auth/forgot-password",
+      "POST /api/v1/auth/login",
+      "POST /api/v1/auth/logout",
+      "POST /api/v1/auth/logout-all",
+      "POST /api/v1/auth/refresh",
+      "POST /api/v1/auth/register",
+      "POST /api/v1/auth/resend-verification",
+      "POST /api/v1/auth/reset-password",
+      "POST /api/v1/auth/verify-email",
+      "POST /api/v1/bonds",
+      "POST /api/v1/bonds/{bondId}/block",
+      "POST /api/v1/bonds/{bondId}/deletion-request",
+      "POST /api/v1/bonds/{bondId}/entries",
+      "POST /api/v1/bonds/{bondId}/invites",
+      "POST /api/v1/bonds/{bondId}/leave",
+      "POST /api/v1/bonds/{bondId}/timezone/confirm",
+      "POST /api/v1/invites/{code}/accept",
+      "PUT /api/v1/bonds/{bondId}/members/me/settings"
+    ],
+    "codes": [
+      "HASHING_CAPACITY_EXCEEDED",
+      "VERIFICATION_TOKEN_INVALID",
+      "VERIFICATION_TOKEN_EXPIRED",
+      "INVALID_CREDENTIALS",
+      "REFRESH_TOKEN_INVALID",
+      "TOKEN_REUSE_DETECTED",
+      "PASSWORD_RESET_TOKEN_INVALID",
+      "PASSWORD_RESET_TOKEN_EXPIRED",
+      "EMAIL_NOT_VERIFIED",
+      "BOND_LIMIT_REACHED",
+      "BOND_FULL",
+      "BOND_ARCHIVED",
+      "ALREADY_MEMBER",
+      "INVITE_NOT_USABLE",
+      "PRECONDITION_REQUIRED",
+      "PRECONDITION_FAILED",
+      "PROPOSAL_PENDING",
+      "PROPOSAL_NEEDS_OTHER_MEMBER",
+      "TIMEZONE_CHANGE_TOO_SOON",
+      "IDEMPOTENCY_KEY_REUSED",
+      "IDEMPOTENCY_KEY_IN_FLIGHT",
+      "ENTRY_ALREADY_EXISTS",
+      "ENTRY_IMMUTABLE",
+      "DAY_CLOSED",
+      "MEDIA_NOT_YET_SUPPORTED",
+      "NOT_FOUND"
+    ]
+  }
+}
