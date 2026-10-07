@@ -1,16 +1,27 @@
 package com.moyi.bond.web
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
+import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.InviteCode
+import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.BondTestApplication
 import com.moyi.bond.infra.FakeUserDirectory
+import com.moyi.bond.service.BondAccessGuard
+import com.moyi.bond.service.EndBond
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.api.UserDirectory
+import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
@@ -23,6 +34,8 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import org.springframework.transaction.support.TransactionTemplate
+import java.sql.Timestamp
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -36,9 +49,15 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [BondTestApplication::class])
 @AutoConfigureMockMvc
+// LongParameterList: a test's collaborators, each named; nothing to bundle them into.
+// LargeClass: every answer of the two ending routes, over helpers they share; split, each half would need the other's.
+@Suppress("LongParameterList", "LargeClass")
 internal class BondEndingEndpointTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
+    @Autowired private val guard: BondAccessGuard,
+    @Autowired private val endBond: EndBond,
+    @Autowired private val transactions: TransactionTemplate,
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
@@ -228,6 +247,537 @@ internal class BondEndingEndpointTest(
         jdbc.queryForObject("SELECT anchor_timezone FROM bonds", String::class.java) shouldBe "Africa/Lagos"
     }
 
+    // ---- FR-029a: taking one's own entries back ------------------------------
+    //
+    // Every assertion below is on the rows of the bond the test made, by its
+    // id: the module's tests share one database, and `outbox_events` is never
+    // truncated.
+
+    @Test
+    fun `blocking with no body withdraws - one marker for the caller, one event, both stamped alike`() {
+        val pair = pairedBond()
+
+        block(pair.ada, pair.id).status shouldBe 204
+
+        withdrawnMembers(pair.id) shouldBe listOf(memberIdOf(pair.id, pair.ada))
+        val events = withdrawalEvents(pair.id)
+        events shouldHaveSize 1
+        events.single()["aggregate_type"] shouldBe "Bond"
+        // The payload is exactly the two ids, and nothing that says which
+        // of the two endings this was.
+        payloadOf(events.single()) shouldBe mapOf("bondId" to pair.id, "memberId" to memberIdOf(pair.id, pair.ada).toString())
+        // One instant for both, cut to microseconds before either is stored:
+        // this context's clock ticks finer than Postgres keeps, and Postgres
+        // rounds, so an uncut marker would land a microsecond after its event.
+        val markedAt =
+            jdbc.queryForObject(
+                "SELECT withdrawn_at FROM bond_entry_withdrawals WHERE bond_id = ?",
+                Timestamp::class.java,
+                UUID.fromString(pair.id),
+            )!!
+        (events.single()["occurred_at"] as Timestamp).toInstant() shouldBe markedAt.toInstant()
+    }
+
+    @Test
+    fun `the absent flag means withdraw on a block and keep on a leave, however it is absent`() {
+        // No body and no Content-Type (scripts/moyi, the Bruno collection),
+        // a JSON Content-Type and no body (scripts/smoke.sh), `{}`, and an
+        // explicit null. A property this API does not know is not an
+        // absence: see the refusal below.
+        val absences: List<Pair<String?, Boolean>> =
+            listOf(
+                null to false,
+                null to true,
+                "" to true,
+                "{}" to true,
+                """{"withdrawEntries":null}""" to true,
+            )
+
+        absences.forEach { (body, json) ->
+            withClue("body=$body json=$json") {
+                val blocked = pairedBond()
+                send(blocked.ada, blocked.id, "block", body, json).status shouldBe 204
+                withdrawnMembers(blocked.id) shouldHaveSize 1
+                withdrawalEvents(blocked.id) shouldHaveSize 1
+
+                val left = pairedBond()
+                send(left.ada, left.id, "leave", body, json).status shouldBe 204
+                withdrawnMembers(left.id).shouldBeEmpty()
+                withdrawalEvents(left.id).shouldBeEmpty()
+            }
+            clear()
+        }
+    }
+
+    @Test
+    fun `blocking with the flag off ends the bond and withdraws nothing`() {
+        val pair = pairedBond()
+
+        block(pair.ada, pair.id, """{"withdrawEntries":false}""").status shouldBe 204
+
+        getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ARCHIVED\""
+        jdbc.queryForObject("SELECT count(*) FROM blocks WHERE bond_id = ?", Int::class.java, UUID.fromString(pair.id)) shouldBe 1
+        withdrawnMembers(pair.id).shouldBeEmpty()
+        withdrawalEvents(pair.id).shouldBeEmpty()
+    }
+
+    @Test
+    fun `leaving with the flag on withdraws, exactly as a block does`() {
+        val pair = pairedBond()
+
+        leave(pair.ada, pair.id, """{"withdrawEntries":true}""").status shouldBe 204
+
+        withdrawnMembers(pair.id) shouldBe listOf(memberIdOf(pair.id, pair.ada))
+        val events = withdrawalEvents(pair.id)
+        events shouldHaveSize 1
+        payloadOf(events.single()) shouldBe mapOf("bondId" to pair.id, "memberId" to memberIdOf(pair.id, pair.ada).toString())
+    }
+
+    @Test
+    fun `a second block with the flag on writes nothing more`() {
+        val pair = pairedBond()
+        block(pair.ada, pair.id, """{"withdrawEntries":true}""").status shouldBe 204
+        val first = jdbc.queryForMap("SELECT * FROM bond_entry_withdrawals WHERE bond_id = ?", UUID.fromString(pair.id))
+
+        block(pair.ada, pair.id, """{"withdrawEntries":true}""").status shouldBe 204
+        block(pair.ada, pair.id).status shouldBe 204
+
+        jdbc.queryForMap("SELECT * FROM bond_entry_withdrawals WHERE bond_id = ?", UUID.fromString(pair.id)) shouldBe first
+        withdrawalEvents(pair.id) shouldHaveSize 1
+    }
+
+    @Test
+    fun `a block that declined to withdraw can be repeated to withdraw after all`() {
+        val pair = pairedBond()
+        block(pair.ada, pair.id, """{"withdrawEntries":false}""").status shouldBe 204
+        withdrawnMembers(pair.id).shouldBeEmpty()
+
+        block(pair.ada, pair.id, """{"withdrawEntries":true}""").status shouldBe 204
+
+        withdrawnMembers(pair.id) shouldBe listOf(memberIdOf(pair.id, pair.ada))
+        withdrawalEvents(pair.id) shouldHaveSize 1
+    }
+
+    @Test
+    fun `a member who left, and one whose partner left first, each withdraw by blocking afterwards`() {
+        val pair = pairedBond()
+        leave(pair.ada, pair.id).status shouldBe 204
+        withdrawnMembers(pair.id).shouldBeEmpty()
+
+        // Ada left earlier and kept her words; Bea never left at all.
+        block(pair.ada, pair.id).status shouldBe 204
+        block(pair.bea, pair.id).status shouldBe 204
+
+        withdrawnMembers(pair.id).toSet() shouldBe setOf(memberIdOf(pair.id, pair.ada), memberIdOf(pair.id, pair.bea))
+        withdrawalEvents(pair.id).map { payloadOf(it)["memberId"] }.toSet() shouldBe
+            setOf(memberIdOf(pair.id, pair.ada).toString(), memberIdOf(pair.id, pair.bea).toString())
+    }
+
+    @Test
+    fun `leaving an ended bond with the flag on is still 409 and withdraws nothing`() {
+        val pair = pairedBond()
+        leave(pair.bea, pair.id).status shouldBe 204
+
+        val refused = leave(pair.ada, pair.id, """{"withdrawEntries":true}""")
+
+        refused.status shouldBe 409
+        refused.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
+        withdrawnMembers(pair.id).shouldBeEmpty()
+        withdrawalEvents(pair.id).shouldBeEmpty()
+    }
+
+    @Test
+    fun `a bond with only its creator is withdrawn from like any other`() {
+        // Leave and block treat a bond nobody joined as they treat any open
+        // bond: it ends. Its creator may have written in it while waiting
+        // (doc 04 §8.3a), so there can be words to take back.
+        val ada = users.verified("Ada")
+        val blocked = bondIdOf(createBond(ada))
+        val left = bondIdOf(createBond(ada))
+        val kept = bondIdOf(createBond(ada))
+
+        block(ada, blocked).status shouldBe 204
+        leave(ada, left, """{"withdrawEntries":true}""").status shouldBe 204
+        leave(ada, kept).status shouldBe 204
+
+        withdrawnMembers(blocked) shouldBe listOf(memberIdOf(blocked, ada))
+        withdrawalEvents(blocked) shouldHaveSize 1
+        withdrawnMembers(left) shouldBe listOf(memberIdOf(left, ada))
+        withdrawalEvents(left) shouldHaveSize 1
+        withdrawnMembers(kept).shouldBeEmpty()
+        withdrawalEvents(kept).shouldBeEmpty()
+    }
+
+    @Test
+    fun `a withdrawal moves neither the bond's version nor its ETag, for either member`() {
+        // A bond's ETag is its row version (ADR-0028 decision 5). A marker
+        // that touched the row would hand the other member a counter.
+        val pair = pairedBond()
+        leave(pair.bea, pair.id).status shouldBe 204
+        val version = versionOf(pair.id)
+        val before = listOf(pair.ada, pair.bea).map { getBond(it, pair.id) }
+
+        block(pair.ada, pair.id).status shouldBe 204
+
+        withdrawnMembers(pair.id) shouldHaveSize 1
+        versionOf(pair.id) shouldBe version
+        listOf(pair.ada, pair.bea).map { getBond(it, pair.id) }.zip(before).forEach { (after, earlier) ->
+            after.getHeader(HttpHeaders.ETAG) shouldBe earlier.getHeader(HttpHeaders.ETAG)
+            after.contentAsString shouldBe earlier.contentAsString
+        }
+
+        // And on a bond that was still open, a block that withdraws moves the
+        // version exactly as far as one that does not.
+        val withdrawn = pairedBond(names = "Cy" to "Di")
+        val notWithdrawn = pairedBond(names = "Ed" to "Flo")
+        block(withdrawn.ada, withdrawn.id, """{"withdrawEntries":true}""").status shouldBe 204
+        block(notWithdrawn.ada, notWithdrawn.id, """{"withdrawEntries":false}""").status shouldBe 204
+        versionOf(withdrawn.id) shouldBe versionOf(notWithdrawn.id)
+    }
+
+    @Test
+    fun `a body that cannot be read is the standing 400, and nothing is ended`() {
+        // Not JSON, not an object, and every value that is not a JSON true,
+        // false or null. The last group is refused on purpose: left to its
+        // defaults the JSON library reads "true", 1 and 2 as true and "" as
+        // absent, and what this flag asks for cannot be undone.
+        val unreadable =
+            listOf(
+                "not json",
+                """{"withdrawEntries": """,
+                "[]",
+                "true",
+                """{"withdrawEntries":"perhaps"}""",
+                """{"withdrawEntries":"true"}""",
+                """{"withdrawEntries":"false"}""",
+                """{"withdrawEntries":""}""",
+                """{"withdrawEntries":1}""",
+                """{"withdrawEntries":0}""",
+                """{"withdrawEntries":1.0}""",
+                """{"withdrawEntries":[true]}""",
+                """{"withdrawEntries":{}}""",
+            )
+
+        listOf("block", "leave").forEach { ending ->
+            unreadable.forEach { body ->
+                withClue("$ending $body") {
+                    val pair = pairedBond()
+                    val response = send(pair.ada, pair.id, ending, body, json = true)
+
+                    response.status shouldBe 400
+                    response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+                    // The standing sentence, and nothing of what was sent.
+                    response.contentAsString shouldContain "\"detail\":\"The request body could not be read.\""
+                    getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+                    withdrawnMembers(pair.id).shouldBeEmpty()
+                    withdrawalEvents(pair.id).shouldBeEmpty()
+                }
+                clear()
+            }
+        }
+    }
+
+    @Test
+    fun `a key this route does not know, or the flag sent twice, is the standing 400 and withdraws nothing`() {
+        // Every one of the first three was a `204` that withdrew on a block:
+        // the caller said "false", spelt the key their own way, and the
+        // default answered for them. A withdrawal cannot be undone, so a
+        // body this route cannot be sure it understood is refused. The
+        // same for a key sent twice, where the last one used to win.
+        val unsure =
+            listOf(
+                """{"withdrawEntry":false}""",
+                """{"withdraw_entries":false}""",
+                """{"WithdrawEntries":false}""",
+                """{"somethingElse":1}""",
+                """{"withdrawEntries":false,"somethingElse":1}""",
+                """{"somethingElse":{"withdrawEntries":false},"withdrawEntries":false}""",
+                """{"withdrawEntries":false,"withdrawEntries":true}""",
+                """{"withdrawEntries":true,"withdrawEntries":false}""",
+                """{"withdrawEntries":false,"withdrawEntries":false}""",
+                """{"withdrawEntries":null,"withdrawEntries":false}""",
+                """{"withdrawEntries":false,"withdrawEntries":null}""",
+            )
+
+        listOf("block", "leave").forEach { ending ->
+            unsure.forEach { body ->
+                withClue("$ending $body") {
+                    val pair = pairedBond()
+                    val response = send(pair.ada, pair.id, ending, body, json = true)
+
+                    response.status shouldBe 400
+                    response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+                    // The standing sentence, and nothing of what was sent.
+                    response.contentAsString shouldContain "\"detail\":\"The request body could not be read.\""
+                    response.contentAsString shouldNotContain "ithdraw"
+                    response.contentAsString shouldNotContain "somethingElse"
+                    getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+                    withdrawnMembers(pair.id).shouldBeEmpty()
+                    withdrawalEvents(pair.id).shouldBeEmpty()
+                }
+                clear()
+            }
+        }
+    }
+
+    @Test
+    fun `the refusal of a body is the same bytes for a member, a stranger and a bond that does not exist`() {
+        // The body is read before the guard runs, so its refusal must not
+        // depend on who is asking or on whether there is a bond to ask
+        // about: a `400` for a member beside a `404` for a stranger would
+        // be the membership oracle with an extra step. One malformed body
+        // and one of each new refusal, on an open bond and an ended one.
+        val refused =
+            listOf(
+                """{"withdrawEntries": """,
+                """{"withdrawEntry":false}""",
+                """{"withdrawEntries":false,"withdrawEntries":true}""",
+            )
+        val open = pairedBond()
+        val ended = pairedBond(names = "Cy" to "Di")
+        leave(ended.bea, ended.id).status shouldBe 204
+        val eve = users.verified("Eve")
+        val ghost = UUID.randomUUID().toString()
+
+        listOf("block", "leave").forEach { ending ->
+            refused.forEach { body ->
+                withClue("$ending $body") {
+                    val member = send(open.ada, open.id, ending, body, json = true)
+                    member.status shouldBe 400
+                    member.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+
+                    val others =
+                        listOf(
+                            open.id to send(eve, open.id, ending, body, json = true),
+                            ended.id to send(ended.ada, ended.id, ending, body, json = true),
+                            ended.id to send(ended.bea, ended.id, ending, body, json = true),
+                            ended.id to send(eve, ended.id, ending, body, json = true),
+                            ghost to send(eve, ghost, ending, body, json = true),
+                            ghost to send(open.ada, ghost, ending, body, json = true),
+                            "not-a-uuid" to send(eve, "not-a-uuid", ending, body, json = true),
+                        )
+                    others.forEach { (id, response) ->
+                        response.status shouldBe member.status
+                        // The path the caller asked for is echoed in
+                        // `instance`; it is theirs already. Nothing else differs.
+                        response.contentAsString.replace(id, open.id) shouldBe member.contentAsString
+                        headersOf(response) shouldBe headersOf(member)
+                    }
+                }
+            }
+        }
+        withdrawnMembers(open.id).shouldBeEmpty()
+        withdrawnMembers(ended.id).shouldBeEmpty()
+        getBond(open.ada, open.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+    }
+
+    @Test
+    fun `an ending is logged once, when the bond ends, and the line is the same whichever route ended it`() {
+        // ADR-0028 decision 8: "The service logs "a member ended bond {id}"
+        // for both paths and names no user." The words were made the same
+        // first, and the count still told: a block logged whether or not it
+        // ended anything, while a leave of an ended bond is refused before it
+        // logs. So a second line for one bond could only be a block, and in a
+        // bond of two the database then says whose.
+        val (left, blocked) = pairedBond() to pairedBond()
+        linesNaming(left.id) { leave(left.ada, left.id).status shouldBe 204 } shouldBe
+            listOf("INFO ${EndBond::class.java.name}: A member ended bond BOND")
+        linesNaming(blocked.id) { block(blocked.ada, blocked.id).status shouldBe 204 } shouldBe
+            listOf("INFO ${EndBond::class.java.name}: A member ended bond BOND")
+
+        // The case the route exists for: the other member left first.
+        val leftFirst = pairedBond()
+        linesNaming(leftFirst.id) {
+            leave(leftFirst.ada, leftFirst.id).status shouldBe 204
+            block(leftFirst.bea, leftFirst.id, """{"withdrawEntries":false}""").status shouldBe 204
+        } shouldHaveSize 1
+
+        // A repeat.
+        val repeated = pairedBond()
+        linesNaming(repeated.id) {
+            block(repeated.ada, repeated.id).status shouldBe 204
+            block(repeated.ada, repeated.id).status shouldBe 204
+        } shouldHaveSize 1
+
+        // A withdrawal recorded on a bond that had already ended: the marker
+        // and the event are written, and no line says so.
+        val withdrawnLater = pairedBond()
+        linesNaming(withdrawnLater.id) {
+            leave(withdrawnLater.ada, withdrawnLater.id).status shouldBe 204
+            block(withdrawnLater.bea, withdrawnLater.id, """{"withdrawEntries":true}""").status shouldBe 204
+            block(withdrawnLater.ada, withdrawnLater.id).status shouldBe 204
+        } shouldHaveSize 1
+        withdrawnMembers(withdrawnLater.id) shouldHaveSize 2
+        withdrawalEvents(withdrawnLater.id) shouldHaveSize 2
+
+        // A refused leave was never logged, and still is not.
+        linesNaming(leftFirst.id) { leave(leftFirst.bea, leftFirst.id).status shouldBe 409 }.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a stranger learns nothing from the body they send`() {
+        // The guard is the handler's first statement, so whatever a readable
+        // body says, a non-member gets the one 404 and nothing is written.
+        val pair = pairedBond()
+        val eve = users.verified("Eve")
+
+        listOf("block", "leave").forEach { ending ->
+            val response = send(eve, pair.id, ending, """{"withdrawEntries":true}""", json = true)
+            response.status shouldBe 404
+            response.contentAsString shouldContain "\"code\":\"NOT_FOUND\""
+        }
+        getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+        withdrawnMembers(pair.id).shouldBeEmpty()
+        withdrawalEvents(pair.id).shouldBeEmpty()
+    }
+
+    @Test
+    fun `a content type that is not JSON with no body is 415 on both endings, the same for a stranger as for a member`() {
+        // ADR-0035 decision 11. Before the routes took a body this was `204`:
+        // `curl -X POST -d ''` sends a form content type and nothing else.
+        // The body's reader is chosen before the guard runs, so the answer
+        // must not depend on who asks: a `415` for a member beside a `404`
+        // for a stranger would be the membership oracle again.
+        val pair = pairedBond()
+        val eve = users.verified("Eve")
+
+        listOf("block", "leave").forEach { ending ->
+            listOf(MediaType.APPLICATION_FORM_URLENCODED, MediaType.TEXT_PLAIN).forEach { type ->
+                withClue("$ending $type") {
+                    val member = sendEmpty(pair.ada, pair.id, ending, type)
+                    member.status shouldBe 415
+                    member.contentAsString shouldContain "\"code\":\"UNSUPPORTED_MEDIA_TYPE\""
+
+                    val stranger = sendEmpty(eve, pair.id, ending, type)
+                    stranger.status shouldBe member.status
+                    stranger.contentAsString shouldBe member.contentAsString
+                    headersOf(stranger) shouldBe headersOf(member)
+                }
+            }
+        }
+        getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+        withdrawnMembers(pair.id).shouldBeEmpty()
+        withdrawalEvents(pair.id).shouldBeEmpty()
+    }
+
+    @Test
+    fun `an ending that rolls back leaves no marker and no event`() {
+        // The marker and the event are the ending's own transaction, not
+        // statements beside it: undo the ending and both are gone with it.
+        val pair = pairedBond()
+        val membership = guard.membershipOf(UserId(pair.ada), BondId(UUID.fromString(pair.id)))
+
+        transactions.execute { status ->
+            endBond.block(membership, withdrawEntries = true)
+            // Seen inside the transaction, so what vanishes below was really written.
+            withdrawnMembers(pair.id) shouldHaveSize 1
+            withdrawalEvents(pair.id) shouldHaveSize 1
+            status.setRollbackOnly()
+        }
+
+        getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+        withdrawnMembers(pair.id).shouldBeEmpty()
+        withdrawalEvents(pair.id).shouldBeEmpty()
+    }
+
+    private data class PairedBond(
+        val id: String,
+        val ada: UUID,
+        val bea: UUID,
+    )
+
+    /**
+     * Every line any logger wrote during [action] that carries [bondId], as
+     * level, logger and message with the id replaced. Read at the root, so a
+     * line from a class other than `EndBond` would be counted too.
+     */
+    private fun linesNaming(
+        bondId: String,
+        action: () -> Unit,
+    ): List<String> {
+        val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
+        val appender = ListAppender<ILoggingEvent>().also { it.start() }
+        root.addAppender(appender)
+        try {
+            action()
+        } finally {
+            root.detachAppender(appender)
+        }
+        return appender.list
+            .filter { bondId in it.formattedMessage }
+            .map { "${it.level} ${it.loggerName}: ${it.formattedMessage.replace(bondId, "BOND")}" }
+    }
+
+    private fun pairedBond(names: Pair<String, String> = "Ada" to "Bea"): PairedBond {
+        val ada = users.verified(names.first)
+        val bea = users.verified(names.second)
+        val created = createBond(ada)
+        accept(bea, codeOf(created)).status shouldBe 200
+        return PairedBond(bondIdOf(created), ada, bea)
+    }
+
+    private fun withdrawnMembers(bondId: String): List<UUID> =
+        jdbc
+            .queryForList(
+                "SELECT member_id FROM bond_entry_withdrawals WHERE bond_id = ? ORDER BY withdrawn_at, member_id",
+                UUID::class.java,
+                UUID.fromString(bondId),
+            ).filterNotNull()
+
+    private fun withdrawalEvents(bondId: String): List<Map<String, Any?>> =
+        jdbc.queryForList(
+            "SELECT aggregate_type, event_type, payload::text AS payload, occurred_at FROM outbox_events " +
+                "WHERE aggregate_id = ? AND event_type = 'EntriesWithdrawn' ORDER BY id",
+            UUID.fromString(bondId),
+        )
+
+    private fun payloadOf(event: Map<String, Any?>): Map<String, String> =
+        Regex(""""([A-Za-z]+)"\s*:\s*"([^"]+)"""").findAll(event["payload"] as String).associate { it.groupValues[1] to it.groupValues[2] }
+
+    private fun memberIdOf(
+        bondId: String,
+        userId: UUID,
+    ): UUID =
+        jdbc.queryForObject(
+            "SELECT id FROM bond_members WHERE bond_id = ? AND user_id = ?",
+            UUID::class.java,
+            UUID.fromString(bondId),
+            userId,
+        )!!
+
+    private fun versionOf(bondId: String): Long =
+        jdbc.queryForObject("SELECT version FROM bonds WHERE id = ?", Long::class.java, UUID.fromString(bondId))!!
+
+    /** An ending sent as a client would send it: [body] null is no body at all, [json] says whether a Content-Type goes with it. */
+    private fun send(
+        userId: UUID,
+        bondId: String,
+        ending: String,
+        body: String?,
+        json: Boolean,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/$ending") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                if (json) contentType = MediaType.APPLICATION_JSON
+                if (body != null) content = body
+            }.andReturn()
+            .response
+
+    /** An ending with a Content-Type and no body, which is what a form post of nothing is. */
+    private fun sendEmpty(
+        userId: UUID,
+        bondId: String,
+        ending: String,
+        type: MediaType,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/$ending") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = type
+            }.andReturn()
+            .response
+
     private fun proposeTimezone(
         userId: UUID,
         bondId: String,
@@ -260,6 +810,9 @@ internal class BondEndingEndpointTest(
 
     // ---- helpers ------------------------------------------------------------
 
+    private fun headersOf(response: MockHttpServletResponse): Map<String, List<String>> =
+        response.headerNames.sorted().associateWith { response.getHeaders(it) }
+
     private fun createBond(userId: UUID): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/bonds") {
@@ -281,14 +834,14 @@ internal class BondEndingEndpointTest(
     private fun leave(
         userId: UUID,
         bondId: String,
-    ): MockHttpServletResponse =
-        mockMvc.post("/api/v1/bonds/$bondId/leave") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+        body: String? = null,
+    ): MockHttpServletResponse = send(userId, bondId, "leave", body, json = body != null)
 
     private fun block(
         userId: UUID,
         bondId: String,
-    ): MockHttpServletResponse =
-        mockMvc.post("/api/v1/bonds/$bondId/block") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+        body: String? = null,
+    ): MockHttpServletResponse = send(userId, bondId, "block", body, json = body != null)
 
     private fun createInvite(
         userId: UUID,

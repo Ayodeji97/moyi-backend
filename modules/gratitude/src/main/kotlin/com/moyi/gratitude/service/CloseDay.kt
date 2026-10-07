@@ -33,32 +33,43 @@ import java.time.temporal.ChronoUnit
  *
  * 1. Lock the row and read it again. Nothing is decided from a day read
  *    before the lock: a submission may have been writing it.
- * 2. Bring its span up to the bond's timeline ([BondDay.extendedTo]). A row
+ * 2. Erase what a member who withdrew still has live on it
+ *    ([EraseWithdrawnEntries]), and go on from the day that leaves. The
+ *    bond records a withdrawal before the outbox's consumer erases
+ *    anything; a reveal or a close decided in between, from a day that
+ *    still counted the entry, would stamp it revealed for good. This is the
+ *    one step that writes on a day the job may then leave ("not yet"). It
+ *    is inside this day's transaction, so it is undone with it and a
+ *    failure is counted as this day's; it is not counted against the run's
+ *    budget, and cannot wear it down, because it happens to a day once.
+ *    Nor is it reported: a count of them would say that somebody withdrew.
+ * 3. Bring its span up to the bond's timeline ([BondDay.extendedTo]). A row
  *    opened before a westward zone change still ends where the calendar said
  *    then; asked "has it ended?" on that stored value, a day the couple is
  *    still writing on closes up to a day early.
- * 3. Resume it if it is the joining day ([BondDay.resumeJoiningDay]) and
+ * 4. Resume it if it is the joining day ([BondDay.resumeJoiningDay]) and
  *    apply the reveal rule ([RevealDay]) — the same two steps, by the same
  *    code, that the first request to meet the day would have taken. A
  *    joining day stamped closed before this would never be evaluated at all.
  *    This is also the second sweep of spec §6.3: a `PENDING_REVEAL` day
  *    whose time has come is revealed here, ended or not.
- * 4. Only now ask whether the day has ended. If not, keep what steps 2 and 3
+ * 5. Only now ask whether the day has ended. If not, keep what steps 2 to 4
  *    changed and stop.
- * 5. Close it ([BondDay.close]). A day both wrote on that was still waiting
+ * 6. Close it ([BondDay.close]). A day both wrote on that was still waiting
  *    for its time is revealed first, as a reveal; on a `SOLO` day the lone
  *    entry is revealed (FR-063), read fresh under the lock — unless the bond
  *    stopped taking writes before the day ended (ADR-0033 decision 9).
  */
 @Service
-// Seven collaborators: what settling one day touches — the bond's view, the day, its
-// entries, the reveal, the outbox, a transaction and the clock.
+// Eight collaborators: what settling one day touches — the bond's view, the day, its
+// entries, the reveal, a withdrawal's erasure, the outbox, a transaction and the clock.
 @Suppress("LongParameterList")
 internal class CloseDay(
     private val access: BondAccess,
     private val days: BondDayStore,
     private val entries: EntryStore,
     private val reveal: RevealDay,
+    private val withdrawals: EraseWithdrawnEntries,
     private val events: EventPublisher,
     private val transactions: TransactionTemplate,
     private val clock: Clock,
@@ -117,17 +128,20 @@ internal class CloseDay(
             log.warn("close: bond {} of day {} was not found; the day is left as it is", initial.bondId, dayId)
             return Outcome.ALREADY_CLOSED
         }
-        val locked = days.lockAndFind(dayId)
-        if (locked.closedAt != null) return Outcome.ALREADY_CLOSED
-        val window =
-            checkNotNull(view.anchorTimeline.asCalendar().dayAt(locked.startsAt)) {
-                "a bond-day starts no earlier than its bond's timeline: $dayId"
-            }
+        val found = days.lockAndFind(dayId)
+        if (found.closedAt != null) return Outcome.ALREADY_CLOSED
         // What is written as "when": read under the lock, never earlier
         // than the caller's `now`. A run reads the time once and may take
         // minutes; stamped from that reading, a day could be closed "before"
         // an entry written on it while the run was under way.
         val at = maxOf(now, clock.instant()).truncatedTo(ChronoUnit.MICROS)
+        // Before the reveal rule and the close are asked anything: an entry
+        // its author withdrew is erased, and the day is the day without it.
+        val locked = withdrawals.on(found, view.withdrawnMemberIds, at)
+        val window =
+            checkNotNull(view.anchorTimeline.asCalendar().dayAt(locked.startsAt)) {
+                "a bond-day starts no earlier than its bond's timeline: $dayId"
+            }
         val current = reveal.apply(locked.extendedTo(window).resumeJoiningDay(view.activeSince), view.revealTimeLocal, at)
         return if (endedAsOf.isBefore(current.endsAt)) {
             if (locked.revealedAt == null && current.revealedAt != null) Outcome.REVEALED else Outcome.NOT_YET

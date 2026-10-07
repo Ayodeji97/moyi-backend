@@ -25,8 +25,21 @@ import java.util.UUID
  * bond, day and entry are read under the locks, in C1 order. The day lock
  * serializes editing against reveal, including the close job's
  * close sweep, which takes the same bond-then-day lock order.
+ *
+ * **An edit needs a bond that still takes writes; a delete does not.** Once
+ * a bond has ended, or its member has left, or it is counting down to
+ * deletion, the author's `PATCH` is `409 BOND_ARCHIVED` (ADR-0028: an ended
+ * bond takes no new words) and the author's `DELETE` is still `204` (the
+ * owner's ruling of 2026-10-06 on ADR-0032 question 1). Taking one's own
+ * words back adds nothing to a record that is closed, and it is what a
+ * withdrawal does to every entry at once: if a single delete were refused
+ * there, a tombstone appearing after the end could only have come from a
+ * withdrawal, and nothing is allowed to say that one happened (ADR-0028
+ * decision 8). The erasure itself is [EraseEntry]'s, shared with the
+ * withdrawal so the two cannot leave different rows.
  */
 @Service
+@Suppress("LongParameterList") // What changing an entry touches, each named.
 internal class ChangeEntry(
     private val access: BondAccess,
     private val days: BondDayStore,
@@ -34,6 +47,7 @@ internal class ChangeEntry(
     private val transactions: TransactionTemplate,
     private val clock: Clock,
     private val joining: ReconcileJoiningDay,
+    private val eraser: EraseEntry,
 ) {
     fun change(
         userId: UUID,
@@ -51,6 +65,19 @@ internal class ChangeEntry(
      * ([PatchEntry], for the key): run again in there, the reconcile would
      * join that transaction — rolled back with a refusal after all — and
      * could lock the joining day before an older day this then locks.
+     *
+     * **The refusals, in the order a caller can meet them:** not the author
+     * (`404`, the one answer everybody else gets); for an edit only, a bond
+     * that takes no writes (`409 BOND_ARCHIVED`); media (`422`); and, under
+     * the entry's lock, an entry that can no longer be edited (`409
+     * ENTRY_IMMUTABLE`). A delete by its author meets none after the first.
+     *
+     * **Both paths lock through [lockDays] first**, which is what orders the
+     * entry's day against the joining day. For a delete [EraseEntry] then
+     * asks for the day's lock again: this transaction already holds it, so
+     * the second request waits for nobody and changes no order. It costs
+     * one statement, and it is the price of [EraseEntry] being safe for the
+     * withdrawal, which has no joining day to order and calls it directly.
      */
     fun changeUnderLocks(
         userId: UUID,
@@ -62,22 +89,31 @@ internal class ChangeEntry(
             checkNotNull(
                 transactions.execute {
                     val (initial, membership) = authorOf(userId, entryId, lock = true)
-                    if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
+                    if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()
                     if (unsupportedMedia) throw MediaNotYetSupportedException()
                     val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
                     val day = lockDays(membership, initial.bondDayId, now)
-                    val entry = entries.lockAndFind(entryId)
-                    if (replacement != null && !entry.isEditable) throw EntryImmutableException()
-                    val changed = if (replacement == null) entry.erase(now) else entry.edit(replacement, now)
-                    val nextDay = if (replacement == null && !entry.isErased) day.withoutEntry() else day
-                    if (changed != entry) entries.update(changed)
-                    if (nextDay != day) days.update(nextDay)
+                    val (changed, nextDay) =
+                        if (replacement == null) eraser.erase(entryId, day.id, now) else edit(entryId, replacement, now) to day
                     EntryView(changed.readBy(membership.asReader()), nextDay)
                 },
             )
         } catch (violation: DataIntegrityViolationException) {
             throw violation.redacted()
         }
+
+    /** Under the day's lock, which the caller took. The entry is read again under its own before BR-7 is asked. */
+    private fun edit(
+        entryId: EntryId,
+        replacement: EntryText,
+        now: Instant,
+    ): Entry {
+        val entry = entries.lockAndFind(entryId)
+        if (!entry.isEditable) throw EntryImmutableException()
+        val changed = entry.edit(replacement, now)
+        if (changed != entry) entries.update(changed)
+        return changed
+    }
 
     /**
      * Spec §12.4's "first gratitude operation", committed on its own before
@@ -97,7 +133,21 @@ internal class ChangeEntry(
         authorOrNull(userId, entryId, lock = false)?.let { (_, membership) -> joining.beforeRead(membership) }
     }
 
-    /** A replay is a read, including on an archived bond; erasure wins over its original content. */
+    /**
+     * A replay is a read, including on an archived bond; erasure wins over its original content.
+     *
+     * **Who has withdrawn is asked after the entry is read, not before**
+     * ([readerNow], which has the reasoning). The membership [authorOf]
+     * resolves decides who the author is and which joining day to reconcile.
+     * It was taken before that reconcile, which can wait on the bond's lock
+     * while an ending commits, so it does not decide what is shown: the
+     * entry is loaded, and then the membership is resolved again for the
+     * reader. This path holds the bond's lock only when the reconcile had a
+     * day to resume, which is not a thing to rely on.
+     *
+     * A caller whose membership is gone by the second resolution is answered
+     * as [authorOf] answers one who never had it: no such entry.
+     */
     fun read(
         userId: UUID,
         entryId: EntryId,
@@ -105,7 +155,14 @@ internal class ChangeEntry(
         val (entry, membership) = authorOf(userId, entryId, lock = false)
         joining.beforeRead(membership)
         val current = checkNotNull(entries.find(entryId))
-        return EntryView(current.readBy(membership.asReader()), checkNotNull(days.find(entry.bondDayId)))
+        // After the entry, never before: the marker is read last.
+        val reader =
+            try {
+                access.readerNow(membership)
+            } catch (_: NotFoundException) {
+                throw EntryNotFoundException()
+            }
+        return EntryView(current.readBy(reader), checkNotNull(days.find(entry.bondDayId)))
     }
 
     /**

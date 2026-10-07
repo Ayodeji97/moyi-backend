@@ -126,15 +126,24 @@ internal class BondsController(
      *
      * `POST` rather than `DELETE`: nothing is deleted. The bond becomes a record
      * both members keep (`states.md` §9).
+     *
+     * **The body is optional, and so is everything in it** (FR-029a). A client
+     * that sends none, as every client did before there was one, leaves as
+     * before and keeps their entries: on leaving, withdrawal is *offered*.
+     * A body that is there and cannot be read is the same `400` any
+     * unreadable body gets, before the guard, for member and stranger alike;
+     * so is one with a key this route does not know, or the flag twice
+     * ([EndBondRequestReader] has why).
      */
     @PostMapping("/{bondId}/leave")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun leaveBond(
         caller: CurrentUser,
         @PathVariable bondId: String,
+        @RequestBody(required = false) request: EndBondRequest?,
     ) {
         val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
-        endBond.leave(membership)
+        endBond.leave(membership, withdrawEntries = request?.withdrawEntries ?: false)
     }
 
     /**
@@ -143,15 +152,20 @@ internal class BondsController(
      *
      * Unlike leave it is accepted on a bond that has already ended: blocking
      * somebody who left first is what the requirement is for.
+     *
+     * The same optional body as [leaveBond], with the other default: here
+     * withdrawal is *given* unless the caller declines it (FR-029a). Repeating
+     * the call with the flag on withdraws what an earlier one kept.
      */
     @PostMapping("/{bondId}/block")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun blockBond(
         caller: CurrentUser,
         @PathVariable bondId: String,
+        @RequestBody(required = false) request: EndBondRequest?,
     ) {
         val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
-        endBond.block(membership)
+        endBond.block(membership, withdrawEntries = request?.withdrawEntries ?: true)
     }
 
     private fun bondIdOrNotFound(raw: String): BondId =

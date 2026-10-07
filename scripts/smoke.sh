@@ -25,9 +25,16 @@
 # the close job for real, on a five-second schedule, and checks it took its
 # lock, failed on nothing and left no ended day unclosed. Since slice C4 it
 # reads the streak: one on the first day both have written, and on today's
-# payload, and zero while a day waits on its reveal time. Last run on
-# 2026-10-05, against a database of its own (MOYI_DB, below): 398 passed,
-# 0 failed. The pull request that last changed this file names the commit the
+# payload, and zero while a day waits on its reveal time. Since slice C5a it
+# ends bonds with the outbox poller running: a block with no body and a leave
+# that asks for it have their author's entries erased within ten seconds, a
+# block told to keep them leaves them readable, an author deletes on an ended
+# bond, and a misspelt flag ends nothing; and the poller announces no delivery
+# in the log. Last run on 2026-10-07, against a database of its own (MOYI_DB,
+# below): 458 passed, 0 failed. An earlier run that day, with the poller held
+# idle, failed the four probes that then depended on it; three do now, and
+# that run has not been repeated. The pull request
+# that last changed this file names the commit the
 # jar was built from; a later commit is unproven until it is run again.
 #
 # If the application refuses to start on a Flyway checksum mismatch: V11, V12
@@ -963,6 +970,167 @@ else
   INTERVALS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT string_agg(zone || CASE WHEN effective_to IS NULL THEN ':open' ELSE ':closed' END || CASE WHEN effective_from > now() THEN ':future' ELSE ':past' END, ',' ORDER BY effective_from) FROM bond_anchor_intervals WHERE bond_id='$HANDOFF_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
   case "$INTERVALS" in psql-unavailable) echo "  skip the timeline check";; "Africa/Lagos:closed:past,$NEW_ZONE:open:future") pass "…and the timeline hands over later: $INTERVALS";; *) fail "timeline" "expected Africa/Lagos:closed:past,$NEW_ZONE:open:future, got '$INTERVALS'";; esac
 fi
+
+echo; echo "withdrawal — ending a bond and taking one's words back, with the poller running (FR-029a, spec §6.7, ADR-0035)"
+flush_buckets
+LOG_LINES_BEFORE_WITHDRAWAL="$(wc -l < "$MOYI_LOG" | tr -d ' ')"
+# What this section is for: the two halves of a withdrawal meeting in the real
+# process. `bond` records it and publishes an event in the ending's transaction;
+# the outbox poller, on its own thread every two seconds, hands the event to
+# `gratitude`, which erases the rows. The tests run the dispatcher by hand; here
+# nothing does, and an entry is only erased if the poller, the registration at
+# start-up and the consumer are all really wired in the jar.
+
+# sql <query> — one value from the run's database, whitespace removed, or
+# "psql-unavailable". The checks that read it skip on that, as the others do.
+sql() { docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "$1" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable; }
+new_key() { python3 -c 'import uuid; print(uuid.uuid4())'; }
+
+# revealed_bond <label> <a's token> <b's token> <a's text> <b's text> — a bond
+# both have written in today, so each has read the other. Leaves its id in
+# RB_BOND and the two entries' ids in RB_A_ENTRY and RB_B_ENTRY.
+revealed_bond() {
+  local label="$1" a="$2" b="$3" a_text="$4" b_text="$5" code
+  expect "$label: a bond" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $a" -d "$(bond_body "Us")"
+  RB_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+  code="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+  expect "$label: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$code/accept" -H "Authorization: Bearer $b"
+  expect "$label: one writes" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$RB_BOND/entries" -H "Authorization: Bearer $a" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"$a_text\"}"
+  RB_A_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+  expect "$label: the other writes" 201 "\"text\":\"$b_text\"" -- -X POST "$API/bonds/$RB_BOND/entries" -H "Authorization: Bearer $b" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"$b_text\"}"
+  RB_B_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+  expect "$label: the day is REVEALED and the second reads the first" 200 "\"text\":\"$a_text\"" -- "$API/bonds/$RB_BOND/today" -H "Authorization: Bearer $b"
+  [[ "$LAST_BODY" == *'"status":"REVEALED"'* ]] || fail "$label: reveal" "${LAST_BODY:0:250}"
+}
+
+# today_field <myEntry|partnerEntry> <field> — from LAST_BODY: the value, "null"
+# for a JSON null, "absent" for a key that is not there.
+today_field() {
+  python3 -c "
+import json, sys
+entry = json.load(sys.stdin).get('$1') or {}
+value = entry.get('$2', 'absent')
+print('null' if value is None else value)" <<<"$LAST_BODY"
+}
+
+# await_erased <entry id> — asks the database once a second, for at most ten
+# seconds, whether that entry's row has lost its words, and leaves what it last
+# saw in ERASED_ROW ("1|DELETED" when it has) and the seconds it took in
+# ERASED_AFTER. This is the one wait in the script that is the point: the
+# erasure is the poller's, two seconds apart, and nothing in the request that
+# ended the bond does it. Bounded, and it stops the moment the row is erased.
+await_erased() {
+  local entry="$1" started; started="$(date +%s)"
+  for _ in $(seq 1 10); do
+    ERASED_ROW="$(sql "SELECT (text IS NULL)::int || '|' || status FROM entries WHERE id='$entry'")"
+    if [ "$ERASED_ROW" = "1|DELETED" ] || [ "$ERASED_ROW" = "psql-unavailable" ]; then break; fi
+    sleep 1
+  done
+  ERASED_AFTER="$(( $(date +%s) - started ))"
+}
+
+# erased_check <label> — the verdict on what await_erased last saw.
+erased_check() {
+  case "$ERASED_ROW" in
+    psql-unavailable) echo "  skip $1 (psql not reachable through docker compose)" ;;
+    "1|DELETED") pass "$1 (the row has no text and is DELETED, within ${ERASED_AFTER}s)" ;;
+    *) fail "$1" "ten seconds on, the row is '$ERASED_ROW', not '1|DELETED': the poller has not erased it" ;;
+  esac
+}
+
+verified_account "withdrawer" "203.0.113.80"; TAKER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "reader" "203.0.113.81";     READER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "keeper" "203.0.113.82";     KEEPER_ACCESS="$ACCOUNT_ACCESS"
+verified_account "other" "203.0.113.83";      OTHER_ACCESS="$ACCOUNT_ACCESS"
+
+# Three bonds, each with a day both have written and read. No two of these
+# texts are the same, so each can be looked for by itself.
+TAKEN_TEXT="thank you for waiting up for me"
+READER_TEXT="thank you for the long way home"
+KEPT_TEXT="thank you for the seat by the window"
+OTHER_TEXT="thank you for remembering the umbrella"
+LEFT_TEXT="thank you for the last of the oranges"
+STAYED_TEXT="thank you for holding the door"
+revealed_bond "to be withdrawn from" "$TAKER_ACCESS" "$READER_ACCESS" "$TAKEN_TEXT" "$READER_TEXT"
+TAKEN_BOND="$RB_BOND"; TAKEN_ENTRY="$RB_A_ENTRY"; READER_ENTRY="$RB_B_ENTRY"
+revealed_bond "to be ended keeping the words" "$KEEPER_ACCESS" "$OTHER_ACCESS" "$KEPT_TEXT" "$OTHER_TEXT"
+KEPT_BOND="$RB_BOND"; KEPT_ENTRY="$RB_A_ENTRY"; OTHER_ENTRY="$RB_B_ENTRY"
+revealed_bond "to be left" "$TAKER_ACCESS" "$OTHER_ACCESS" "$LEFT_TEXT" "$STAYED_TEXT"
+LEAVE_BOND="$RB_BOND"; LEFT_ENTRY="$RB_A_ENTRY"
+
+# A body the route cannot read is refused before anything is decided: a
+# misspelt flag must not fall through to the default, which on this route
+# erases. And it is refused the same for somebody who is not in the bond, who
+# would otherwise learn from a 404 against a 400 that the bond exists.
+expect "a misspelt flag to /block is 400 MALFORMED_REQUEST" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/bonds/$KEPT_BOND/block" -H "Authorization: Bearer $KEEPER_ACCESS" -d '{"withdrawEntry": false}'
+MEMBER_REFUSAL="$LAST_BODY"
+expect "…and the same body from a stranger is the same 400" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/bonds/$KEPT_BOND/block" -H "Authorization: Bearer $READER_ACCESS" -d '{"withdrawEntry": false}'
+[ "$LAST_BODY" = "$MEMBER_REFUSAL" ] && pass "…byte for byte, so it says nothing of who is in the bond" || fail "malformed-body oracle" "member: ${MEMBER_REFUSAL:0:160} stranger: ${LAST_BODY:0:160}"
+expect "…and the bond is still open" 200 '"status":"ACTIVE"' -- "$API/bonds/$KEPT_BOND" -H "Authorization: Bearer $OTHER_ACCESS"
+REFUSED_ROWS="$(sql "SELECT (SELECT count(*) FROM blocks WHERE bond_id='$KEPT_BOND') + (SELECT count(*) FROM bond_entry_withdrawals WHERE bond_id='$KEPT_BOND')")"
+case "$REFUSED_ROWS" in psql-unavailable) echo "  skip the refused-ending row check";; 0) pass "…with nothing recorded against it";; *) fail "refused ending" "expected no block and no withdrawal, got '$REFUSED_ROWS' rows";; esac
+
+# The ending that keeps the words goes FIRST, on purpose. It publishes no
+# event, so there is nothing of its own to wait for; but every erasure seen
+# below is the poller having run after this bond ended, and its text is read
+# again at the end of the section, ten seconds or more from here.
+expect "a block that says to keep the entries is 204" 204 "" -- -X POST "$API/bonds/$KEPT_BOND/block" -H "Authorization: Bearer $KEEPER_ACCESS" -d '{"withdrawEntries": false}'
+KEPT_SINCE="$(date +%s)"
+
+# The default. No body: a block withdraws unless it is told not to (FR-029a).
+expect "a block with no body is 204" 204 "" -- -X POST "$API/bonds/$TAKEN_BOND/block" -H "Authorization: Bearer $TAKER_ACCESS"
+# At once, and before any poller has run: the read is gated on the record `bond` wrote in that request.
+expect "the partner's very next read no longer carries the words" 200 '"status":"DELETED"' -- "$API/bonds/$TAKEN_BOND/today" -H "Authorization: Bearer $READER_ACCESS"
+[[ "$LAST_BODY" != *"$TAKEN_TEXT"* ]] && pass "…not anywhere in the body" || fail "withdrawn text read" "${LAST_BODY:0:300}"
+await_erased "$TAKEN_ENTRY"
+erased_check "the poller erases the withdrawn entry"
+expect "the partner's today, once it is erased" 200 '"status":"REVEALED"' -- "$API/bonds/$TAKEN_BOND/today" -H "Authorization: Bearer $READER_ACCESS"
+[ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "null|DELETED" ] && pass "…the withdrawn entry is a tombstone: text null, DELETED" || fail "tombstone" "${LAST_BODY:0:300}"
+[ "$(today_field myEntry text)" = "$READER_TEXT" ] && pass "…and the partner's own entry is whole" || fail "partner's own entry" "${LAST_BODY:0:300}"
+READER_ROW="$(sql "SELECT (text = '$READER_TEXT')::int || '|' || status FROM entries WHERE id='$READER_ENTRY'")"
+case "$READER_ROW" in psql-unavailable) echo "  skip the partner's row check";; "1|REVEALED") pass "…in the database too: her row is untouched";; *) fail "partner's row" "expected 1|REVEALED, got '$READER_ROW'";; esac
+expect "the one who withdrew reads their own tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$TAKEN_BOND/today" -H "Authorization: Bearer $TAKER_ACCESS"
+[ "$(today_field myEntry text)|$(today_field myEntry status)" = "null|DELETED" ] && pass "…as myEntry, with no text" || fail "own tombstone" "${LAST_BODY:0:300}"
+
+# A leave keeps the entries unless it is asked to take them. Asked, it erases as a block does.
+expect "a leave that takes the entries back is 204" 204 "" -- -X POST "$API/bonds/$LEAVE_BOND/leave" -H "Authorization: Bearer $TAKER_ACCESS" -d '{"withdrawEntries": true}'
+await_erased "$LEFT_ENTRY"
+erased_check "the poller erases the entry of the member who left"
+expect "the one who stayed sees the tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$LEAVE_BOND/today" -H "Authorization: Bearer $OTHER_ACCESS"
+[ "$(today_field partnerEntry text)" = "null" ] && [ "$(today_field myEntry text)" = "$STAYED_TEXT" ] && pass "…beside their own entry, whole" || fail "leave tombstone" "${LAST_BODY:0:300}"
+
+# The bond ended keeping its words: ten seconds of the poller, and at least two
+# erasures elsewhere, have passed over it. The loop only waits out what is left
+# of the ten; nothing is published for this bond, so there is no event to wait on.
+while [ "$(( $(date +%s) - KEPT_SINCE ))" -lt 10 ]; do sleep 1; done
+expect "ten seconds on, the kept words are still read by the other member" 200 "\"text\":\"$KEPT_TEXT\"" -- "$API/bonds/$KEPT_BOND/today" -H "Authorization: Bearer $OTHER_ACCESS"
+[ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "$KEPT_TEXT|REVEALED" ] && pass "…as the partner's entry, REVEALED" || fail "kept entry" "${LAST_BODY:0:300}"
+KEPT_ROW="$(sql "SELECT (text = '$KEPT_TEXT')::int || '|' || status FROM entries WHERE id='$KEPT_ENTRY'")"
+case "$KEPT_ROW" in psql-unavailable) echo "  skip the kept row check";; "1|REVEALED") pass "…and the row still holds them";; *) fail "kept row" "expected 1|REVEALED, got '$KEPT_ROW'";; esac
+
+# An ended bond takes no new words, and an author may still take their own
+# back (ADR-0032, question 1): were that refused, a tombstone appearing after
+# the end could only mean a withdrawal.
+expect "PATCH on an ended bond is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X PATCH "$API/entries/$OTHER_ENTRY" -H "Authorization: Bearer $OTHER_ACCESS" -d '{"text":"too late to change"}'
+expect "DELETE of one's own entry on an ended bond is 204" 204 "" -- -X DELETE "$API/entries/$KEPT_ENTRY" -H "Authorization: Bearer $KEEPER_ACCESS"
+expect "…and the partner sees the tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$KEPT_BOND/today" -H "Authorization: Bearer $OTHER_ACCESS"
+[ "$(today_field partnerEntry text)" = "null" ] && [[ "$LAST_BODY" != *"$KEPT_TEXT"* ]] && pass "…with the words gone" || fail "delete on an ended bond" "${LAST_BODY:0:300}"
+expect "…while the partner cannot delete it for them" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$OTHER_ENTRY" -H "Authorization: Bearer $KEEPER_ACCESS"
+
+# The outbox, after a whole run: every ending above and in the sections before
+# it published or did not, and nothing published is still owed or has failed.
+OWED="$(sql "SELECT count(*) FILTER (WHERE processed_at IS NULL) || '|' || count(*) FILTER (WHERE last_error IS NOT NULL) || '|' || (count(*) FILTER (WHERE processed_at IS NOT NULL) > 0)::int FROM outbox_deliveries WHERE consumer_id = 'gratitude.withdrawal'")"
+case "$OWED" in psql-unavailable) echo "  skip the delivery check";; "0|0|1") pass "every withdrawal was delivered: none owed, none ever failed";; *) fail "outbox deliveries" "expected owed|failed|any-delivered = 0|0|1, got '$OWED'";; esac
+WITHDRAWN_LOG="$(tail -n "+$((LOG_LINES_BEFORE_WITHDRAWAL + 1))" "$MOYI_LOG")"
+# The poller says nothing at INFO when it delivers: the line would sit two seconds after
+# "A member ended bond …" and say that ending took its entries back (ADR-0035 decision 11).
+# That it was the poller is what the erasures above showed; nothing else runs here.
+if grep -qE "outbox: delivered" <<<"$WITHDRAWN_LOG"; then fail "outbox poller" "the poller announced a delivery in the log"; else pass "…and the poller did not announce one in the log"; fi
+if grep -qE "Outbox delivery failed|outbox: .*(could not|did not finish|still running|more is waiting)" <<<"$WITHDRAWN_LOG"; then fail "outbox poller" "the poller or the dispatcher logged a failure"; else pass "…and neither it nor the dispatcher logged a failure"; fi
+LEAKED=""
+for words in "$TAKEN_TEXT" "$READER_TEXT" "$KEPT_TEXT" "$OTHER_TEXT" "$LEFT_TEXT" "$STAYED_TEXT"; do grep -qF "$words" "$MOYI_LOG" && LEAKED="$LEAKED [$words]"; done
+[ -z "$LEAKED" ] && pass "no entry of this section is anywhere in the log" || fail "text in log" "found:$LEAKED"
+if grep -qiE '\bblock' <<<"$WITHDRAWN_LOG"; then fail "block in log" "the log says block"; else pass "…and the log does not say which ending was a block"; fi
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

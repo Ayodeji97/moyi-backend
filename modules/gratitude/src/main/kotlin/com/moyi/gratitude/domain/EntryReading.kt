@@ -20,10 +20,32 @@ import java.util.UUID
  * Reader for a bond nobody checked, from inside the one file allowed to build
  * one or from any holder of one. Nothing compares or destructures a Reader,
  * so it needs none of what `data` would add.
+ *
+ * **[withdrawnAuthors] is the third thing that one membership says**: the
+ * members of that bond who have withdrawn what they wrote (FR-029a). It is a
+ * fact about the bond and not about the entry, which is why it arrives with
+ * the reader: `bond` records a withdrawal the moment the request that makes
+ * it commits, and the entries themselves are erased afterwards, by the
+ * outbox's consumer. In between, a row still holds its words and nothing on
+ * the row says it should not. The reader does. It may name the reader
+ * themselves: a withdrawal is total, and its author reads a tombstone too.
+ *
+ * **The set is only as good as the moment it was read, so it is read last.**
+ * A Reader that gates an entry must be built after that entry was loaded, or
+ * from a membership read under the bond's lock. Then an absent withdrawal
+ * means the ending had not committed when the entry was read, and the
+ * response is one from before it. Built first, the set can be older than an
+ * ending that commits before the entry is read, and the gate passes words it
+ * exists to hide. `service.readerNow` is how a read path gets one.
+ *
+ * It has no default. Whoever builds a Reader has a membership in hand, and
+ * must say what that membership says; an empty set written by habit would be
+ * a gate that never heard of the withdrawal.
  */
 internal class Reader(
     val memberId: UUID,
     val bondId: UUID,
+    val withdrawnAuthors: Set<UUID>,
 )
 
 /** What BR-1 lets a [Reader] have of one [Entry] — [Entry.canBeReadBy]'s answer. */
@@ -35,6 +57,13 @@ internal enum class Readability {
      * Deleted or withdrawn, for a reader who **could read it before it was**:
      * its author, or a partner it had been revealed to. The row without its
      * words — they already know when it was written; only the text is gone.
+     *
+     * **Withdrawn means from the withdrawal's commit, not from the erasure.**
+     * This is the answer for an entry whose row is still whole, when its
+     * author is among [Reader.withdrawnAuthors]; the reading built from it
+     * carries no text although the entry has some. Nothing downstream can
+     * tell the two cases apart, and nothing should: the response a withdrawal
+     * gives before the consumer has run is the one it gives after.
      */
     TOMBSTONE,
 
@@ -42,7 +71,9 @@ internal enum class Readability {
      * Deleted or withdrawn, for a partner it was **never revealed to**. That
      * reader was only ever entitled to BR-8's locked shape, and an erasure
      * does not entitle them to more: who wrote it and that it is gone,
-     * nothing else — no id, no timestamps.
+     * nothing else — no id, no timestamps. A withdrawal is held to the same
+     * line, from the same moment as above: it hides words, and must not be
+     * the thing that tells a partner when the words were written.
      */
     TOMBSTONE_UNSEEN,
 

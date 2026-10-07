@@ -40,7 +40,8 @@ interface BondAccess {
      * the only honest option (spec §2.1).
      *
      * **The lock order across this application is bond, then bond-day, then
-     * entry**, on submission, editing, lifecycle reconciliation and closing.
+     * entry**, on submission, editing, lifecycle reconciliation, closing and a
+     * withdrawal's erasure.
      * The close job takes the same bond lock through [lockClosingViewOf]
      * before it locks a day, so a close sees committed pairing and timezone
      * changes and cannot reverse the writer lock order.
@@ -72,8 +73,15 @@ interface BondAccess {
      * It discloses nothing of a bond but dates and a time, and it is still
      * not to be called from a controller: `ArchitectureTest` holds that.
      *
-     * No lock (ADR-0031 decision 18): the closer starts at the bond-day and
-     * never holds the bond's row.
+     * No lock: this is the read for a caller that decides nothing from the
+     * bond's current state under a day's lock. Today that is
+     * `CreateMissingDays`, which only lists a calendar's gaps. A caller that
+     * settles a day, or erases on one, takes [lockClosingViewOf] (ADR-0033
+     * decision 3, which superseded ADR-0031 decision 18 for closing an
+     * existing day).
+     * **[BondClosingView.withdrawnMemberIds] read through this method is not
+     * read under the bond's lock** and must not be used to decide an erasure
+     * or a reveal.
      */
     fun closingViewOf(bondId: UUID): BondClosingView?
 
@@ -81,6 +89,10 @@ interface BondAccess {
      * The closer's view, after taking the bond lock in the current
      * transaction. The closer takes this before a Bond-day lock, preserving
      * the application's bond -> bond-day order while it settles a day.
+     *
+     * Everything in the view is read after the lock is held, so an ending
+     * that committed while this waited, and whatever it withdrew
+     * ([BondClosingView.withdrawnMemberIds]), is in the answer.
      */
     fun lockClosingViewOf(bondId: UUID): BondClosingView?
 
@@ -111,11 +123,11 @@ interface BondAccess {
  * check it.** Do not assume `isOpen` covers it — that assumption is exactly
  * what the second review of PR #41 found in `RequestDeletion.cancel`.
  *
- * Twelve fields, not seven arguments to reorder by accident: every one is
+ * Thirteen fields, not seven arguments to reorder by accident: every one is
  * named at every call site (`BondAccessAdapter`'s one projection, shared by
  * [BondAccess.membershipOf] and [BondAccess.lockMembershipOf]), and the shape
  * is the bond facts above plus the caller's own identifiers, [activeSince],
- * [endedAt] and [anchorTimeline] — splitting it into a nested value would just
+ * [endedAt], [anchorTimeline] and [withdrawnMemberIds] — splitting it into a nested value would just
  * move the count, not reduce it.
  */
 @Suppress("LongParameterList")
@@ -160,6 +172,24 @@ class BondMembership internal constructor(
      * differ for up to one logical day after a change is confirmed (BR-6).
      */
     val anchorTimeline: BondAnchorTimeline,
+    /**
+     * Members of this bond who have withdrawn what they wrote. Their entries are erased, or about to be.
+     *
+     * A fact about the **bond**, the same set whichever member is asking and
+     * whether or not they have left: the caller's own id may be in it. It is
+     * true from the commit of the request that withdrew, which is before
+     * anything has been erased, so a read that shows an entry's text must
+     * ask this (FR-029a, spec §6.7).
+     *
+     * **It is a snapshot, as of the moment this membership was resolved.**
+     * From [BondAccess.lockMembershipOf] that moment is under the lock an
+     * ending needs, and the set stays true for the transaction. From
+     * [BondAccess.membershipOf] it can be out of date a statement later. A
+     * caller that holds no lock must load what it will show first and
+     * resolve the membership after, so that an empty set means the ending
+     * had not committed when the entries were read.
+     */
+    val withdrawnMemberIds: Set<UUID>,
 ) {
     /** Ids only — a bond's name is the couple's words (doc 18 §9). */
     override fun toString(): String = "BondMembership(bondId=$bondId, memberId=$memberId)"
@@ -167,11 +197,13 @@ class BondMembership internal constructor(
 
 /**
  * What the close job may know of a bond ([BondAccess.closingViewOf]): when it
- * became two people, when it ended, when its days reveal, and the timeline
- * its days are cut from. No member, no user, no name — the closer acts for
+ * became two people, when it ended, when its days reveal, the timeline its
+ * days are cut from, and whose entries have been withdrawn. No membership,
+ * no user, no name — the closer acts for
  * nobody, and a type that cannot carry a member cannot be mistaken for
  * permission to act as one.
  */
+@Suppress("LongParameterList") // Seven facts, each named at the one place that builds this (`BondAccessAdapter`), as with [BondMembership].
 class BondClosingView internal constructor(
     val bondId: UUID,
     /** As [BondMembership.activeSince]: the second member's join, `null` while the bond waits for one. */
@@ -191,6 +223,18 @@ class BondClosingView internal constructor(
     val revealTimeLocal: LocalTime?,
     private val past: BondPast,
     val anchorTimeline: BondAnchorTimeline,
+    /**
+     * Members of this bond who have withdrawn what they wrote. Their entries are erased, or about to be.
+     *
+     * The same fact, with the same meaning, as [BondMembership.withdrawnMemberIds]:
+     * of the bond, true from the commit of the request that withdrew, which
+     * is before anything has been erased. It is here because the closer
+     * reveals entries with no member asking, and so has no membership to
+     * learn it from: without it, a day that reaches its reveal between that
+     * commit and the erasure would stamp a withdrawn author's entry as
+     * revealed, and the stamp outlives the erasure (FR-029a, spec §6.7).
+     */
+    val withdrawnMemberIds: Set<UUID>,
 ) {
     /**
      * Whether the bond was in Strict mode up to [instant], not including it

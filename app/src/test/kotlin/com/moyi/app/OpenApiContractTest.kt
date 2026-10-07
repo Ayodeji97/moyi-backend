@@ -18,6 +18,8 @@ import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.maps.shouldContainKey
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContainIgnoringCase
 import io.kotest.matchers.string.shouldStartWith
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.Operation
@@ -209,6 +211,43 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `each ending says what an absent flag does to the caller's entries, and neither says which ending it is`() {
+        // One request type serves both routes and its flag has opposite
+        // defaults: absent, it erases on one and keeps on the other, and an
+        // erasure cannot be undone. The generated type is an optional nullable
+        // boolean, so the document is the only place a person writing a
+        // client can learn that leaving it out destroys something. Found by
+        // the privacy and contract review of the C5a branch.
+        val leave =
+            api.paths["/api/v1/bonds/{bondId}/leave"]!!
+                .post.description
+                .shouldNotBeNull()
+        val other =
+            api.paths["/api/v1/bonds/{bondId}/block"]!!
+                .post.description
+                .shouldNotBeNull()
+        val flag =
+            api.components.schemas["EndBondRequest"]!!
+                .properties["withdrawEntries"]!!
+                .description
+                .shouldNotBeNull()
+
+        leave shouldContain "absent"
+        leave shouldContain "are kept"
+        leave shouldContain "cannot be undone"
+        other shouldContain "absent"
+        other shouldContain "are ERASED"
+        other shouldContain "cannot be undone"
+        other shouldContain """{"withdrawEntries": false}"""
+        // The shared type cannot state a default that is right for both.
+        flag shouldContain "depends on the route"
+        // ADR-0028 decision 8: nothing says which ending is which. The path
+        // is the route's own name; its prose, and the other route's, do not
+        // repeat it.
+        listOf(leave, other, flag).forEach { it shouldNotContainIgnoringCase "block" }
+    }
+
+    @Test
     fun `the conditional update documents its If-Match, its 428 and its 412`() {
         // Doc 06 §1. A generated client has to be able to *send* the condition
         // and to model both ways it can fail, or the concurrency control is
@@ -311,7 +350,11 @@ class OpenApiContractTest(
 
         // 409 is ENTRY_IMMUTABLE and BOND_ARCHIVED; 413 is the body bound, key or no key.
         patch.responses.keys shouldContainAll listOf("200", "404", "409", "413", "415", "422")
-        delete.responses.keys shouldContainAll listOf("204", "404", "409")
+        // A delete cannot conflict. Its author may take an entry back on any bond, ended or not
+        // (the ruling on ADR-0032 question 1; it was BOND_ARCHIVED before), it takes no key, and
+        // a repeat is a 204. A client modelling a 409 here would model an answer never given.
+        delete.responses.keys shouldContainAll listOf("204", "404")
+        delete.responses.keys shouldNotContain "409"
     }
 
     @Test

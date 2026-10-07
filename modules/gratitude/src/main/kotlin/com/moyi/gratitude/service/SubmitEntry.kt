@@ -351,6 +351,14 @@ internal class SubmitEntry(
      * names [bondId], and its caller wrote the entry), so each answers as "no
      * such thing" rather than trusting a row that does not fit. The entry is
      * handed on as BR-1 answers for this caller ([Entry.readBy]), never raw.
+     *
+     * **Who has withdrawn is asked after the entry is read, not before**
+     * ([readerNow], which has the reasoning). The first membership says who
+     * the caller is in this bond and which joining day to reconcile; it was
+     * taken before that reconcile, which can wait on the bond's lock while
+     * an ending commits. The reader is made from a second resolution, once
+     * the entry is in hand. This runs inside the key's transaction and holds
+     * no lock on the bond.
      */
     private fun replay(
         userId: UUID,
@@ -366,7 +374,8 @@ internal class SubmitEntry(
             entries
                 .find(entryId)
                 ?.takeIf { it.authorMemberId == membership.memberId }
-                ?.readBy(membership.asReader())
+                // After the entry, never before: the marker is read last.
+                ?.let { it.readBy(access.readerNow(membership)) }
         // The day is found only for a reading that discloses which day it is
         // on: the author's own entry, in full or as its tombstone. Anything
         // else — an entry of another bond, above all — has none to give.

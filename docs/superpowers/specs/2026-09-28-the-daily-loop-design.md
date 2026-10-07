@@ -61,8 +61,8 @@ Four modules gain code; `common:events` is new. `bond` also gains the public acc
 | Module | What lands here |
 |---|---|
 | `modules/gratitude` | Bond-days, entries, the reveal, streaks, prompts, search. The phase's centre. |
-| `modules/scheduling` | The close job: the fifteen-minute trigger and the ShedLock guard. *(Amended 2026-10-05, ADR-0033 decision 1: there is no timezone selection — see §2.2.)* Doc 05 §2.1 puts it here and it stays here. |
-| `common:events` | **New.** `outbox_events`, the publishing port and the poller. |
+| `modules/scheduling` | The close job: the fifteen-minute trigger and the ShedLock guard. *(Amended 2026-10-05, ADR-0033 decision 1: there is no timezone selection — see §2.2.)* Doc 05 §2.1 puts it here and it stays here. *(Amended 2026-10-07: and the outbox poller's timer, which takes no ShedLock.)* |
+| `common:events` | **New.** `outbox_events`, the publishing port and the poller. *(Amended 2026-10-07, ADR-0035 decision 7: the dispatcher is here; the two-second timer and the meters are `modules/scheduling`'s `OutboxJob`.)* |
 | `common:web` | `Idempotency-Key` — doc 05 §2.1 already lists "idempotency filter" here. |
 
 ### 2.1 How `gratitude` asks `bond` a question
@@ -416,6 +416,12 @@ for agreement, which is a second way to be wrong.
 - **On an ended bond both are `409 BOND_ARCHIVED`** for the author (ADR-0028), decided only
   after the author check. *Open with the owner: this means an author cannot withdraw their
   words from an ended bond until C5.*
+
+  *Amended 2026-10-07 (ADR-0035 decision 15) — ruled by the owner on 2026-10-06, and built
+  in C5a.* **`DELETE` is `204` for its author on an ended bond**, however it ended, for the
+  member who left and the one who stayed, and during a deletion countdown. `PATCH` is still
+  `409 BOND_ARCHIVED` there. The partner still gets the one `404`. The reason is §6.7's:
+  refused, a tombstone appearing after the end could only have come from a withdrawal.
 - **`Idempotency-Key` is optional on `PATCH` and not accepted on `DELETE`** (§5.4).
 
 ### 5.3 New `ErrorCode` values (`common:web`)
@@ -826,6 +832,45 @@ not acknowledged and silently deferred. No outbox payload contains entry text or
 Bond-day statuses are **not** recomputed afterwards. BR-10 again: the timeline is authoritative,
 and the surviving member's streak history is not a thing the blocker gets to rewrite.
 
+**Amended 2026-10-07 — what slice C5a built (ADR-0035).** The section above stands for what a
+withdrawal means. Six things in it were built differently, or were not said.
+
+- **The event is `EntriesWithdrawn {bondId, memberId}` on aggregate `Bond`**, not
+  `BondBlocked { withdrawEntries }` (decision 9). A payload is a map of name to UUID and
+  cannot hold a boolean, and ADR-0028 decision 8 lets nothing say "block": an event type is
+  read by every consumer and written into log lines. The consumer's id is
+  `gratitude.withdrawal`.
+- **Leave as well as block** (decision 11). FR-029a requires the offer on leaving; this
+  section covered only block. One mechanism serves both, and it is the destructive one.
+- **The request.** `POST /bonds/{bondId}/leave` and `POST /bonds/{bondId}/block` take an
+  optional body `{"withdrawEntries": boolean}`. Absent, it is `true` on block and `false`
+  on leave (FR-029a: "given by default", "offered"). Only JSON `true`, `false` or `null` is
+  accepted for the value; an unknown key or the key sent twice is `400 MALFORMED_REQUEST`,
+  because a misspelt key on `/block` would otherwise be an absent flag and withdraw. A
+  repeat block may withdraw what the first declined.
+- **The marker** is a row in `bond_entry_withdrawals` (V21), insert-only, written in the
+  ending's transaction (decision 10). It does not move `bonds.version`, so the `ETag` both
+  members hold does not change. The "public read-access port" is `withdrawnMemberIds` on
+  `BondMembership` and on `BondClosingView`.
+- **"As soon as the block transaction commits" is built as a read gate** (decision 12).
+  `Entry.canBeReadBy` treats an entry whose author is in the reader's `withdrawnAuthors` as
+  erased, for both people, the author included. Every response that carries an entry is
+  built from that function: `GET /today`, a fresh `POST` or `PATCH`, and a replay of either.
+  `WithdrawalReadTest` holds it with no dispatcher run. Search, favourites and caches do not
+  exist yet; each must go through the same gate and be cleared by `EraseEntry` when it does.
+- **Whoever reaches a day first erases** (decision 14). The gate hides the words and does
+  not stop the code that writes. A close or a reveal that ran between the ending's commit
+  and the erasure revealed the day: the partner gained the withdrawn entry's id and
+  timestamps, the withdrawer read the partner's words, and the streak counted the day. So
+  `CloseDay` and the joining-day reconcile first erase a withdrawn author's live entries on
+  the day, through the routine `DELETE` uses, and decide from the day that leaves. "Not
+  recomputed afterwards" above is unchanged for a settled day; a day not yet settled is
+  stepped back by the erasure exactly as a delete steps it.
+
+The consumer erases through that same routine, one entry at a time, oldest day first, under
+the bond's lock, in the delivery's transaction, and refuses an event with no marker behind
+it (decision 13). What is not built: an export before the destructive act (Phase 5).
+
 ## 7. Data
 
 Migration versions are global — one Flyway history across modules — so they are allocated in
@@ -842,12 +887,19 @@ slice order. `V10` is the last one Phase 2 uses.
 | C4 | `V17__gratitude_streaks.sql` | `modules:gratitude` | `streak_states`, `streak_events`, four decision columns on `bond_days` |
 | C4 | `V18__bond_strict_mode_changes.sql` | `modules:bond` | `bond_strict_mode_changes` |
 | C4 | `V19__bond_write_pauses.sql` | `modules:bond` | `bond_write_pauses` (a deletion called off) |
-| C5 | `V20__gratitude_reactions_and_favourites.sql` | `modules:gratitude` | `reactions`, `entry_favourites` |
-| C6 | `V21__gratitude_prompts.sql` | `modules:gratitude` | `prompts`, `prompt_impressions` |
+| C5a | `V20__common_outbox_consumers.sql` | `common:events` | `outbox_consumers`, `outbox_subscriptions`, a foreign key on `outbox_deliveries` |
+| C5a | `V21__bond_entry_withdrawals.sql` | `modules:bond` | `bond_entry_withdrawals` (§6.7's marker) |
+| C5b | `V22` | `modules:gratitude` | `entry_favourites` |
+| C5c | `V23` | `modules:gratitude` | `reactions` |
+| C6 | `V24` | `modules:gratitude` | `prompts`, `prompt_impressions` |
 
 C1 owns V11–V13. The first draft of this table gave C1 two versions and C2 `V13`; see §12.5.
 *(Amended 2026-10-05, ADR-0033: C3 took two versions, V15 and V16, so C4 to C6 each moved one later.
-Amended again the same day, ADR-0034: C4 took two, V17 and V18, so C5 and C6 moved one more.)*
+Amended again the same day, ADR-0034: C4 took two, V17 and V18, so C5 and C6 moved one more.
+Amended 2026-10-07, ADR-0035: the table gave C5 one version, `V20__gratitude_reactions_and_favourites.sql`,
+and C6 `V21__gratitude_prompts.sql`. C5 is three pull requests (§10), and §6.7's marker is a
+`bond` table, which a `gratitude` migration cannot hold. C5a takes V20 and V21, C5b V22, C5c
+V23, and C6 moves to V24. V22 to V24 are not written; their file names are their slices'.)*
 
 Doc 07 §2 carries the column lists and this document does not restate them, with four
 exceptions recorded in §12 because doc 07 is wrong about them.
@@ -892,6 +944,40 @@ handlers deduplicate by event id. External effects require their own idempotent 
 The pending gauge is per consumer and counts due registered deliveries, not events with no
 consumer yet. These guarantees apply across process restarts and concurrent pollers.
 
+**Amended 2026-10-07 — the poller as slice C5a built it (ADR-0035 decisions 1 to 8).**
+
+- **Deliveries are written at publish** (decision 1): one row per subscribed consumer, in
+  the publisher's transaction. Nothing scans for events with no delivery, so nothing depends
+  on event ids being in commit order. "Backfill delivery rows when a new consumer is
+  registered" happens once, at registration, for a consumer that starts from `BEGINNING`;
+  one that starts from `NOW` gets none (decision 3).
+- **A consumer registers at start-up under `LOCK TABLE outbox_events IN SHARE ROW EXCLUSIVE
+  MODE`**, with the wait bounded by `moyi.events.registration.lock-timeout` (ten seconds), so
+  a stuck publisher fails the start loudly (decision 2). No event falls between a publisher
+  and a registration. The publisher refuses any isolation stricter than READ COMMITTED,
+  where that guarantee does not hold.
+- **Claim, handle, acknowledge: one delivery, one transaction** (decision 4). The claim is
+  `FOR UPDATE SKIP LOCKED` and takes only (consumer, event type) pairs this process
+  declares. "Handlers deduplicate by event id" is the handler's duty and is not enforced:
+  the one handler there is repeats harmlessly.
+- **A failure is recorded by the exception's class name only** (decision 5), never its
+  message, in `last_error` and in the log. Backoff is 2 s doubling to a cap of 15 minutes.
+  There is no last attempt and no dead-letter queue; a gauge counts deliveries unprocessed
+  after five failures.
+- **No ordering is promised** (decision 6).
+- **"Every two seconds" is `modules/scheduling`'s `OutboxJob`, not `common:events`'**
+  (decision 7), as the close job's timer is. It takes no ShedLock: `SKIP LOCKED` is the
+  concurrency control and two instances share the queue. It runs on a thread of its own, so
+  a held handler cannot stop the close job, and a delivery has a time limit
+  (`moyi.outbox.delivery-timeout`, sixty seconds).
+- **The meters** (decision 8). Per consumer: `gratitude.outbox.pending` (this section's
+  gauge), `gratitude.outbox.age.seconds.max` (doc 11's second gauge, which this section did
+  not name: the age of the oldest *event* with an unprocessed delivery, due or not) and
+  `gratitude.outbox.failing`. Untagged: the counters `gratitude.outbox.delivered` and
+  `gratitude.outbox.failed`, and `gratitude.outbox.last.success.timestamp`.
+- **Not built:** anything that removes an old event or a processed delivery, and any way to
+  retire a consumer (ADR-0035, Owed).
+
 ## 9. Testing
 
 Beyond the project's standing bar — TDD, Testcontainers, 80% JaCoCo, Konsist, mutation-testing
@@ -908,7 +994,7 @@ the load-bearing assertions:
 | **Consent and lifecycle races** | Submit versus leave/block/deletion/zone confirmation; lock order prevents post-end writes or duplicate date labels. |
 | **Idempotency recovery** | Same key across bonds/routes is 422; concurrent requests execute once; crash before commit rolls back both entry and key; replay after erasure contains no old text. |
 | **Reveal persistence** | A revealed solo entry stays readable after freezing; joining on the current suspended day resumes it; prior suspended days stay private. *(Amended 2026-10-03, ADR-0031 decision 4: "joining … resumes it" is **C2's** to build and test — see §12.4. C1 leaves the day `SUSPENDED`.)* |
-| **Withdrawal and outbox** | With poller stopped, committed withdrawal immediately hides content; independent consumers and crash retries do not lose events. |
+| **Withdrawal and outbox** | With poller stopped, committed withdrawal immediately hides content; independent consumers and crash retries do not lose events. *(Amended 2026-10-07, ADR-0035: as built these are `WithdrawalReadTest` (the gate, with no dispatcher run and the rows asserted still whole), `WithdrawEntriesTest` (the consumer: the twin bond against a run of deletes, redelivery, a failure on the third entry, a failure at commit), `WithdrawalRaceTest` (closer first, consumer first and a delete by hand end alike), `ConsumerRegistryTest` and `EventPublisherTest` (registration against a publisher, both orders, synchronised on a blocked lock), `OutboxDispatcherTest` (two dispatchers, one delivery; the failure record), `OutboxJobTest` and `PollerIndependenceTest` (the poller and its meters; a held handler does not stop the close job). "Independent consumers" is held by tests with test consumers; the application has one consumer.)* |
 | **Streak properties** | Randomised timelines; the four invariants in §6.5. |
 | **Cross-tenant** | The existing route-driven suite picks up every new endpoint automatically (ADR-0026), and a route added without a fixture fails the build. *(Amended 2026-10-05, ADR-0032 decision 9: true of routes that carry `{bondId}`. The suite cannot see `/entries/{entryId}`; `EntryChangesTest` is those routes' cross-tenant test and asserts their exact set.)* |
 | **Grapheme counting** | A ZWJ family emoji, a flag, a combining sequence; 500 accepted only within the independent 8192-byte cap; 501 refused; large emoji strings exercise the byte cap. |
@@ -922,7 +1008,14 @@ the load-bearing assertions:
 | **C3** | `modules/scheduling`, the fifteen-minute job, ShedLock, `DayCloser`, `SOLO`/`EMPTY`/second sweep, the timezone matrix, the two counters | The loop runs without anyone submitting |
 | **C4** | Streaks, freezes, Strict mode, `FROZEN`, `recalculate`, `GET /streak`, property tests | **M3** — the loop is complete |
 | **C5** | The outbox poller, withdrawal on block (§6.7), the archive feed, per-caller favourites, reactions | The archive exists |
+| **C5a** *(2026-10-07)* | The outbox poller, withdrawal on leave and on block, an author's delete on an ended bond | A member can take their words back |
+| **C5b** *(2026-10-07)* | The archive feed and per-caller favourites | The archive exists |
+| **C5c** *(2026-10-07)* | Reactions | |
 | **C6** | Search, prompts and `prompt_impressions`, on-this-day, milestones | Phase 3 closes |
+
+*(Amended 2026-10-07, ADR-0035: C5 is built as three pull requests, the three rows under it.
+A read of the corpus against this document found 22 contradictions in what C5 touches, and
+one pull request holding all of it would have been too large to review.)*
 
 **M3 is "the loop runs live for a week between two real people via the HTTP API"** and it needs
 two things beyond code, both named in doc 15 §4 and neither of them free: a Bruno or Insomnia
@@ -1056,6 +1149,10 @@ the tombstone protection BR-10 exists for. FR-074's phrasing is corrected.
 The outbox has a table, a port, a poller and — from Phase 4 — two consumers in different modules.
 Doc 05 §2.1 lists `analytics/` as "outbox consumer, event store", which is the Phase 10 reader,
 not the writer every module needs. A `common/events` sibling is added to the tree.
+
+*(Amended 2026-10-07, ADR-0035 decisions 7 and 8: the poller's two halves are in two modules.
+The dispatcher, which claims and delivers, is in `common:events`; the timer that calls it and
+the meters are `modules/scheduling`'s `OutboxJob`.)*
 
 ### 12.8 Decisions recorded, not corrections
 

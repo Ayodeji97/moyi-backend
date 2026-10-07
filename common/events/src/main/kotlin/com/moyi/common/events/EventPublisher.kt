@@ -5,8 +5,9 @@ import java.util.UUID
 
 /**
  * An event is recorded inside the caller's transaction, never after commit.
- * Payloads name resources by identity, never retain their content. C5 adds
- * consumer registration and delivery; no acknowledgement exists at publication.
+ * Payloads name resources by identity, never retain their content. Publication
+ * also records what is owed: one delivery for each [EventConsumer] subscribed to
+ * the event's type at that moment. Nothing is acknowledged at publication.
  */
 interface EventPublisher {
     fun publish(event: OutboxEvent)

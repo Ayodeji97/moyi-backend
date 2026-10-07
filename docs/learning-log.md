@@ -2084,3 +2084,88 @@ Wrong about: the solo ruling, in a useful way. I had treated `states.md` as a ru
          And reviewers are not interchangeable. Three readers I briefed found what I
          pointed them at. The fourth I had not briefed, and found what I had not thought
          to point at.
+
+## 2026-10-07 · Phase 3 · Withdrawal — a gate that hid the words while the job still stamped the row
+
+Expected: the hard part was the outbox: a table lock at start-up, `SKIP LOCKED`, at least
+         once. Withdrawal looked like the easy half. `bond` writes a marker in the block's
+         transaction, the one read gate treats a withdrawn author as erased from that
+         commit, and a consumer erases the rows two seconds later through the routine
+         `DELETE` already uses. "It cannot be told apart from a delete" was a sentence in
+         the plan.
+Reality: the outbox held. Every review of it found something, and none of what it found
+         lost an event. Withdrawal was wrong in the way I had planned it.
+         The gate is asked by code that reads. The close job does not read, it writes: it
+         looks at the day's count and the row's own state, and the marker changes neither.
+         So a day waiting for its reveal time, on a bond one of them had just blocked, was
+         revealed. The partner's view of the withdrawn entry gained its id and timestamps.
+         The one who took her words back read the other's. The streak went from 0 to 1.
+         The words stayed hidden the whole time, which is why every test I had was green.
+         The fix is not a rule about withdrawn entries in the reveal. Whoever gets to the
+         day first does the erasure, with the same routine, and decides after.
+         "Cannot be told apart from a delete" was false in three places, and each was found
+         by putting a twin bond beside it and deleting by hand. The reveal above. A lone
+         entry withdrawn just after midnight, closed `SOLO` where a delete leaves `EMPTY`.
+         And, after the twin test existed and passed, a joining day nobody had read: the
+         delete reconciles it first and the consumer does not, so the day rows differ
+         until the next read. That one is accepted and the claim is now narrower: the same
+         entry rows and the same answers, not the same rows.
+         A bare block withdraws, because FR-029a says "given by default". The first
+         reader made the value strict because Jackson took `"true"`, `1` and `""`. It left
+         the key lenient, and Jackson ignores a key it does not know. So
+         `{"withdrawEntry": false}` was an absent flag, and the caller who said no in
+         writing lost everything they had written, for both people, for good. A default
+         that destroys and a parser that forgives are each defensible. Together they make
+         a typo irreversible.
+         Three tests claimed more than they checked. One was named "at any level" and
+         raised two packages to DEBUG; a `log.debug` of the exception's message in our own
+         code left it green. One said counters were moved pass by pass and passed with
+         them moved after the loop. One WARN had no reader. A fourth searched log lines for
+         `ada-` to prove no entry text leaked. `ada-` is three hex digits and a hyphen. It
+         failed once, under an unrelated mutation, and not in thirty runs after. A UUID
+         can spell `ada-`; that is the reviewer's reasoning for the failure, not something
+         anyone reproduced. The markers are now `Ada~wrote~`, which no UUID can spell.
+         A stuck handler could not stop the close job, and that was true because of a line
+         in `application.yml` that turns virtual threads on for the web server. With it
+         off the scheduler has one thread, and a reviewer watched the close job's cron not
+         fire at all while a handler waited on a lock. Nobody had tied the one to the
+         other. The poller has a thread of its own now.
+         The gauges were set at the end of a tick that finished. A dispatcher throwing on
+         every tick, or a tick that hung, left them at their last quiet values: pending 0,
+         age 0, with five thousand waiting. They went quiet exactly when the thing they
+         watch was stuck. And the age gauge measured how long a delivery had been due,
+         which for one retrying every fifteen minutes is never more than fifteen minutes.
+Wrong about: where a rule is held. I held "withdrawn means erased" in the read gate and
+         called it held. A rule in a gate binds whoever goes through the gate. The closer,
+         the reconcile and the consumer do not, and two of them write the stamp the gate
+         later reads.
+         What "indistinguishable" needs. I argued it from the shared routine. It is a
+         claim about two histories, and it was only ever tested by building the other
+         history and comparing rows and bodies. Each time the comparison was widened it
+         found another difference.
+         What a guarantee rests on. I checked that the poller could not starve the close
+         job and it could not, on my machine, with that setting. I did not ask what made
+         it so.
+         And the session itself. Six agents were cut off by the network during this slice
+         (the controller's count; the reports show four of them). What saved the work was
+         dull: small commits, a report written as the task went and not at its end, and
+         pushing early, so a successor could read where the last one stopped. One took
+         over a finished, uncommitted diff, re-ran its seven mutations and committed it.
+         What it cost: two commits went in green with no mutation run by their authors.
+         A reviewer ran twenty-five on them afterwards. Thirteen were caught and three
+         were equivalent. Of the other nine, two were held only by a test in a
+         neighbouring class and seven by no test at all.
+         Five of the nine have a test now, and so has one of the three called
+         equivalent, which was not. Four are left: an optimisation in two forms, a
+         redundant predicate, and a lock order no test can show to be needed.
+         Three reviews of the whole branch followed, and two of what they found were mine
+         twice over. The block could still be told from the log after I had made the two
+         endings' lines the same word for word: one of them logged when it ended nothing,
+         so the reader only had to count. And a delete at start-up undid a rule written
+         two tasks earlier for the same case, two builds running side by side. Each was
+         right when read alone. I had checked the text of a line and not how often it is
+         written, and each task against its own tests and not against the task before it.
+         And then Codex's review of the pull request found the read gate asking who had
+         withdrawn before it read the entries, which I had written down as accepted. An
+         "accepted" window was accepted at the width I imagined, not the width a lock wait
+         gives it. Read the marker last.

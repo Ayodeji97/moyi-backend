@@ -52,6 +52,52 @@ logging:
     # holds this line in place; modules/identity's test config carries the
     # same one for its own context.
     org.hibernate.orm.jdbc.error: "OFF"
+    # CLAUDE.md: entry text, passwords and tokens never reach a log. The six
+    # loggers below print them of their own accord once their level is
+    # lowered, whatever the application's own types redact, and
+    # LOGGING_LEVEL_ROOT=DEBUG is what gets set during an incident. Each was
+    # seen printing the words of an entry, with everything at TRACE, on
+    # 2026-10-07 (ADR-0035 decision 16):
+    #   - orm.core, at DEBUG: "Listing entities" prints every field of every
+    #     managed entity at each flush, EntryEntity.text included. This is
+    #     the logger most of Hibernate writes through, so its other DEBUG
+    #     output is given up with it;
+    #   - orm.jdbc.bind and orm.jdbc.extract, at TRACE: each value bound to a
+    #     statement and each value read from a result;
+    #   - orm.resource.registry, at TRACE: the driver's statement, which
+    #     prints itself with its parameters filled in;
+    #   - org.postgresql, at TRACE: the wire protocol's Bind message;
+    #   - Tomcat's Http11InputBuffer, at DEBUG: the bytes of every request as
+    #     read, so the Authorization header, a password, a refresh token and
+    #     an entry's text.
+    #
+    # What a pin does: a logger with a level of its own keeps it, whatever
+    # is set above it. So these hold against LOGGING_LEVEL_ROOT,
+    # logging.level.org.hibernate, org.hibernate.orm.jdbc, org.apache and
+    # Spring Boot's `sql` and `web` groups, at any level.
+    #
+    # What it does not do. Setting the level of one of these exact loggers
+    # (LOGGING_LEVEL_ORG_HIBERNATE_ORM_JDBC_BIND=TRACE, or a name beneath
+    # org.postgresql) overrides the line here: an environment variable
+    # outranks this file. `spring.mvc.log-request-details=true` is another
+    # switch altogether and prints every request header at TRACE, the bearer
+    # token among them: leave it off. And an invite code is part of the path
+    # (/invites/{code}/accept), so every logger that prints a request line
+    # prints it at DEBUG; those are not pinned (ADR-0035, question 10).
+    #
+    # SecretsNeverLoggedTest raises every level above these by property and
+    # fails if any one of the six lines is removed.
+    org.hibernate.orm.core: INFO
+    org.hibernate.orm.jdbc.bind: "OFF"
+    org.hibernate.orm.jdbc.extract: "OFF"
+    org.hibernate.orm.resource.registry: INFO
+    org.postgresql: INFO
+    org.apache.coyote.http11.Http11InputBuffer: INFO
+    # A @Transactional consumer's proxy sees its exception before the outbox
+    # dispatcher can catch it. It logs the message and throwable at TRACE,
+    # and at ERROR if rollback itself fails. INFO is therefore insufficient.
+    # The dispatcher reports the failure by class name and retains the retry.
+    org.springframework.transaction.interceptor.TransactionInterceptor: "OFF"
 
 management:
   endpoints:

@@ -27,9 +27,9 @@ import java.util.UUID
  */
 internal class EntryRenderingTest {
     private val bondId = UUID.randomUUID()
-    private val author = Reader(memberId = UUID.randomUUID(), bondId = bondId)
-    private val partner = Reader(memberId = UUID.randomUUID(), bondId = bondId)
-    private val stranger = Reader(memberId = UUID.randomUUID(), bondId = UUID.randomUUID())
+    private val author = Reader(memberId = UUID.randomUUID(), bondId = bondId, withdrawnAuthors = emptySet())
+    private val partner = Reader(memberId = UUID.randomUUID(), bondId = bondId, withdrawnAuthors = emptySet())
+    private val stranger = Reader(memberId = UUID.randomUUID(), bondId = UUID.randomUUID(), withdrawnAuthors = emptySet())
     private val now = Instant.parse("2026-09-15T08:00:00Z")
     private val date = LocalDate.of(2026, 9, 15)
 
@@ -104,6 +104,25 @@ internal class EntryRenderingTest {
         // A view literal: distinct from the wide tombstone's DELETED, so `status` discriminates.
         ErasedEntryStatus.entries.map { it.name } shouldBe listOf("REMOVED")
         EntryResponse.of(unseen, date).shouldBeNull()
+    }
+
+    @Test
+    fun `a withdrawn author's entry renders as the tombstone its reader is owed, while the row still holds its words`() {
+        // No renderer asks about a withdrawal: each shape follows from the gate's answer, as it does for a delete.
+        val withdrawn = setOf(author.memberId)
+        val authorNow = Reader(author.memberId, bondId, withdrawn)
+        val partnerNow = Reader(partner.memberId, bondId, withdrawn)
+        val revealed = entry.copy(status = EntryStatus.REVEALED, revealedAt = now)
+
+        val own = EntryResponse.of(entry.readBy(authorNow), date).shouldNotBeNull()
+        own.text.shouldBeNull()
+        own.status shouldBe EntryStatus.DELETED
+        val read = PartnerEntryResponse.of(revealed.readBy(partnerNow), date) as EntryResponse
+        read.text.shouldBeNull()
+        read.status shouldBe EntryStatus.DELETED
+        PartnerEntryResponse.of(entry.readBy(partnerNow), date) shouldBe ErasedEntryResponse(author.memberId, ErasedEntryStatus.REMOVED)
+        EntryResponse.of(entry.readBy(partnerNow), date).shouldBeNull()
+        entry.text.shouldNotBeNull()
     }
 
     /**

@@ -16,6 +16,14 @@
 #   moyi bond new <name> <timezone>          prints the invite code to send your partner
 #   moyi bond join <code>
 #   moyi bond use <bondId>                   which bond the commands below mean
+#   moyi bond leave [--withdraw-entries | --keep-entries]
+#                                            end the bond in use. Your entries are KEPT unless you say
+#                                            --withdraw-entries, which erases them for both of you, for good
+#   moyi bond block (--withdraw-entries | --keep-entries)
+#                                            end it, and the two of you cannot be paired again. One of the
+#                                            two flags is required: --withdraw-entries erases your entries
+#                                            for both of you, for good; --keep-entries leaves them readable.
+#                                            It may be repeated, to withdraw what an earlier one kept
 #   moyi write "<text>"                      or: moyi write -   (the text from stdin)
 #   moyi today
 #   moyi edit <entryId> "<text>"             until your partner has written
@@ -255,6 +263,28 @@ case "$cmd" in
         [ $# -eq 1 ] || die "usage: moyi bond use <bondId>"
         need_uuid "$1" "$1"
         session_set bondId "$1"; echo "Using bond $1."
+        ;;
+      leave|block)
+        if [ "$sub" = leave ]; then
+          usage="usage: moyi bond leave [--withdraw-entries | --keep-entries]   (with neither, your entries are kept)"
+        else
+          usage="usage: moyi bond block (--withdraw-entries | --keep-entries)   (say which: withdrawing erases your entries for both of you, for good)"
+        fi
+        [ $# -le 1 ] || die "$usage"
+        # The flag is always sent, never left to the server's default. The two routes' defaults are opposite,
+        # and the server's for this one erases: a bare command would destroy what was written without a word
+        # typed or printed about it. So that one asks which, and a bare leave says "keep" in so many words;
+        # what is printed afterwards is then what was asked for, whatever the server's defaults become.
+        case "$sub ${1:-}" in
+          *" --withdraw-entries") withdraw=true ;;
+          *" --keep-entries")     withdraw=false ;;
+          "leave ")               withdraw=false ;;
+          *) die "$usage" ;;
+        esac
+        signed_in; BOND="$(bond)"
+        authed POST "/bonds/$BOND/$sub" "{\"withdrawEntries\":$withdraw}"; show 204
+        if [ "$withdraw" = true ]; then echo "Bond ended. Your entries were withdrawn."; else echo "Bond ended. Your entries were kept."; fi
+        [ "$sub" = leave ] || echo "You will not be paired with its other member again."
         ;;
       list|"") authed GET /bonds; show 200 ;;
       *) die "unknown: moyi bond $sub" ;;

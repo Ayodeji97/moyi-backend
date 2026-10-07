@@ -13,6 +13,12 @@ dependencies {
     // module answers in (doc 06 §2).
     implementation(projects.common.web)
 
+    // The outbox: an ending that withdraws its member's entries says so in an
+    // event, written in the ending's own transaction (FR-029a). `gratitude`
+    // owns the entries and depends on this module, so it cannot be called
+    // from here; it is told.
+    implementation(projects.common.events)
+
     // `com.moyi.identity.api` only — is this user verified, what is their
     // display name. Everything else in that module is `internal`, so the
     // module boundary is the compiler's to hold rather than a convention's

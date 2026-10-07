@@ -22,7 +22,13 @@ import org.springframework.web.bind.annotation.ResponseStatus
 import org.springframework.web.bind.annotation.RestController
 import java.util.UUID
 
-/** Content changes route by entry identity; a stranger and a missing entry both get 404. */
+/**
+ * Content changes route by entry identity; a stranger and a missing entry both get 404.
+ *
+ * The two routes part ways once the bond has ended: the edit is `409
+ * BOND_ARCHIVED`, the delete is still the author's to make (`ChangeEntry`
+ * has why).
+ */
 @RestController
 @RequestMapping("/api/v1/entries")
 internal class EntryChangesController(
@@ -50,6 +56,11 @@ internal class EntryChangesController(
         return response.body(checkNotNull(EntryResponse.from(view.view)))
     }
 
+    /**
+     * `204` for the author, whatever has become of the bond since: ended,
+     * left, or counting down to deletion. Repeating it is `204` again and
+     * changes nothing. Everybody else gets the one `404`.
+     */
     @DeleteMapping("/{entryId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun deleteEntry(

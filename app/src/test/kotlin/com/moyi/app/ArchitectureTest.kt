@@ -123,11 +123,14 @@ class ArchitectureTest {
          */
         private val TRANSACTION_APIS = listOf("org.springframework.transaction.", "jakarta.transaction.")
 
-        /** `bond.api.BondAccess`'s close-job methods run no membership guard. */
+        /** The methods of `bond.api.BondAccess` that run no membership guard: written for the close job, and used by work like it. */
         private val UNGUARDED_BOND_READS = listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep")
 
-        /** The classes that are the close job's three steps (`gratitude.service`): each reads a bond with no caller to ask about. */
-        private val THE_CLOSER = setOf("CloseDay.kt", "CreateMissingDays.kt", "EvaluateStreaks.kt")
+        /**
+         * The work nobody asked for (`gratitude.service`): the close job's three steps and the
+         * withdrawal's consumer. Each reads a bond with no caller whose membership could be checked.
+         */
+        private val WORK_WITH_NO_CALLER = setOf("CloseDay.kt", "CreateMissingDays.kt", "EvaluateStreaks.kt", "WithdrawEntries.kt")
 
         private data class Location(
             val module: String,
@@ -339,9 +342,10 @@ class ArchitectureTest {
     }
 
     @Test
-    fun `the closer's unguarded view of a bond is asked for by the closer and nobody else`() {
+    fun `the unguarded view of a bond is asked for by the work that has no caller, and by nobody else`() {
         // The closing-view methods and `bondsToSweep` run no membership
-        // guard: the close job has no caller to ask about (ADR-0031, Owed,
+        // guard: the close job has no caller to ask about, nor has the
+        // consumer that erases a withdrawal's entries (ADR-0031, Owed,
         // C3). Every other way into a bond from outside `bond` begins with
         // the guard, so these are the only ones a request must never
         // reach — and a request reaches a service as easily as a controller,
@@ -354,9 +358,12 @@ class ArchitectureTest {
                 .filterNot { locationOf(it.packagee?.name)?.module == "bond" }
                 .filter { file -> UNGUARDED_BOND_READS.any { it in file.text } }
                 .map { it.normalisedProjectPath.substringAfterLast('/') }
-                .filterNot { it in THE_CLOSER }
+                .filterNot { it in WORK_WITH_NO_CALLER }
 
-        assertTrue(violations.isEmpty(), "Only the close job may call BondAccess's unguarded reads. Found in: $violations")
+        assertTrue(
+            violations.isEmpty(),
+            "Only the close job and the withdrawal's consumer may call BondAccess's unguarded reads. Found in: $violations",
+        )
     }
 
     @Test

@@ -136,6 +136,35 @@ internal interface EntryRepository : Repository<EntryEntity, UUID> {
 
     fun findAllByBondDayId(bondDayId: UUID): List<EntryEntity>
 
+    /**
+     * The id and day id of each entry [authorMemberId] wrote in [bondId] that
+     * has not been erased, **oldest day first**: the order a caller must lock
+     * days in. Ids only; the caller reads each entry again under its lock.
+     *
+     * **`bond_id` is defence in depth, and no test can make it matter.**
+     * `author_member_id` is a `bond_members.id`, a key minted for each
+     * membership row: one person in two bonds is two member ids, so the
+     * author predicate alone already selects one bond's entries. The bond
+     * predicate is kept so that an erasure, which cannot be undone, stays
+     * inside the bond its event named even if a member id were ever reused
+     * or an event were wrong. Dropping it changes no result that today's
+     * schema can produce.
+     */
+    @Query(
+        nativeQuery = true,
+        value = """
+            SELECT e.id, e.bond_day_id
+            FROM entries e JOIN bond_days d ON d.id = e.bond_day_id
+            WHERE e.bond_id = :bondId AND e.author_member_id = :authorMemberId
+              AND e.deleted_at IS NULL AND e.status <> 'DELETED'
+            ORDER BY d.date, e.created_at, e.id
+            """,
+    )
+    fun findLiveOfAuthor(
+        bondId: UUID,
+        authorMemberId: UUID,
+    ): List<Array<Any>>
+
     /** One entry by id — a replay's re-read, a route by entry id, and the row `EntryStore` updates or refreshes. */
     fun findById(id: UUID): EntryEntity?
 }

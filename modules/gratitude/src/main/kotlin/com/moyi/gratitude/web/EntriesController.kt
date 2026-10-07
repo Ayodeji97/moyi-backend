@@ -124,6 +124,9 @@ internal class EntriesController(
         caller: CurrentUser,
         @PathVariable bondId: String,
     ): TodayResponse {
+        // The guard, and the calendar the read answers from. Not who has
+        // withdrawn: the reconcile below can wait on the bond's lock while an
+        // ending commits, so GetToday asks that again after it has the entries.
         val membership = access.membershipOf(caller.id, bondIdOrNotFound(bondId))
         joining.beforeRead(membership)
         return TodayResponse.from(getToday.today(membership))

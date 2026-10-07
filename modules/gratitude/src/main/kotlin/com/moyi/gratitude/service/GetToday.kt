@@ -1,5 +1,6 @@
 package com.moyi.gratitude.service
 
+import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.DayAssignment
@@ -74,6 +75,18 @@ internal data class TodayView(
  * author too. **The day's status plays no part**: BR-1 keys on the entry's
  * own `revealedAt` (spec §4), so [today] hands the gate no day to consult.
  *
+ * **Who has withdrawn is asked after the entries are read, not before**
+ * ([readerNow], which has the reasoning). The [BondMembership] this is
+ * handed was resolved by the controller before the joining-day reconcile,
+ * and that reconcile can wait on the bond's row lock while an ending
+ * commits. So [today] loads the day's entries first and only then resolves
+ * the membership again, for the one thing that must not be stale: the set of
+ * members who have withdrawn. Everything else comes from the membership it
+ * was handed, so that one request answers from one calendar: the date, the
+ * status of a day with no row (`awaitingSecondMember`), which entry is
+ * "mine" (`memberId`, which never changes) and the streak's inputs. None of
+ * those can show anybody words.
+ *
  * **Nothing here is cached.** Every call re-reads the row and the entries
  * fresh; the day this returns is only ever as current as the transaction
  * that reads it. A cache in front of this method would have to be reasoned
@@ -96,6 +109,7 @@ internal class GetToday(
     private val entries: EntryStore,
     private val clock: Clock,
     private val streak: GetStreak,
+    private val access: BondAccess,
 ) {
     @Transactional(readOnly = true)
     fun today(membership: BondMembership): TodayView {
@@ -113,11 +127,12 @@ internal class GetToday(
             return TodayView(date, status, myEntry = null, partnerEntry = null, streak = unwritten)
         }
 
-        val reader = membership.asReader()
         val entryList =
             entries.findForDay(day.id).sortedWith(
                 compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value },
             )
+        // After the entries, never before: the marker is read last.
+        val reader = access.readerNow(membership)
         return TodayView(
             date = date,
             status = day.status,
