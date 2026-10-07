@@ -169,6 +169,7 @@ class OpenApiConfiguration {
                 }
             }
             documentEntryTextLimits(api)
+            documentEndingDefaults(api)
             documentBondNamePattern(api)
             discriminatePartnerEntry(api)
             admitAbsentPartnerEntry(api)
@@ -701,3 +702,68 @@ private fun requireDiscriminatorProperty(api: OpenAPI) {
             .forEach(fields::addRequiredItem)
     }
 }
+
+/**
+ * Says, on each of the two routes that end a bond, what an absent
+ * `withdrawEntries` does there (ADR-0035 decision 11).
+ *
+ * One request type serves both and the flag's default is opposite on the
+ * two: absent, the caller's entries are erased on one and kept on the
+ * other, and an erasure cannot be undone. Generated, the type is an
+ * optional nullable boolean with nothing beside it, so a person writing a
+ * client from this document could not learn that leaving the field out
+ * destroys something. The default is stated on each operation, because a
+ * `default` on the shared schema would be right for one route and wrong
+ * for the other; the schema's own description says only that it depends.
+ *
+ * **Neither description names the ending** (ADR-0028 decision 8). Each
+ * route's path already is its name; the prose calls the other one "the
+ * other route that takes this body", so nothing here adds to what tells
+ * the two apart. `OpenApiContractTest` holds both points.
+ *
+ * By operation id and schema name, as the configuration's own lists of
+ * operations are and for their reason: this module names no controller.
+ *
+ * A function of the file and not of [OpenApiConfiguration], which already
+ * holds as many as one class should.
+ */
+private fun documentEndingDefaults(api: OpenAPI) {
+    api.paths.values.flatMap { it.readOperations() }.forEach { operation ->
+        ENDING_DESCRIPTIONS[operation.operationId]?.let { operation.description = it }
+    }
+    api.components.schemas[END_BOND_REQUEST]
+        ?.properties
+        ?.get(WITHDRAW_ENTRIES_PROPERTY)
+        ?.description =
+        "Whether to withdraw the caller's own entries in this bond: every one is erased, for both members, and this " +
+        "cannot be undone. What an absent or null value means depends on the route; each operation's description " +
+        "says. Only JSON true, false or null is accepted."
+}
+
+/** `EndBondRequest`'s schema name and its one property: see [documentEndingDefaults]. */
+private const val END_BOND_REQUEST = "EndBondRequest"
+private const val WITHDRAW_ENTRIES_PROPERTY = "withdrawEntries"
+
+private const val ENDING_BODY_RULES =
+    "A body with any other key, with the key twice, or with a value that is not JSON true, false or null is " +
+        "`400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body."
+
+/** What each ending does with an absent flag, by operation id: see [documentEndingDefaults]. */
+private val ENDING_DESCRIPTIONS =
+    mapOf(
+        "leaveBond" to
+            "Ends the bond for both members. It stays readable to both, and takes no further entries. " +
+            "The body is optional. **When `withdrawEntries` is absent or null, or there is no body, the caller's " +
+            "entries are kept.** When it is `true`, every entry the caller wrote in this bond is erased, for both " +
+            "members, and this cannot be undone. The other route that takes this body has the opposite default. " +
+            "`409 BOND_ARCHIVED` on a bond that has already ended, and nothing is withdrawn then. " +
+            ENDING_BODY_RULES,
+        "blockBond" to
+            "Ends the bond for both members, with the same `204` as `POST /bonds/{bondId}/leave`, and keeps the " +
+            "two accounts from being paired again. Also accepted on a bond that has already ended, and may be " +
+            "repeated. The body is optional. **When `withdrawEntries` is absent or null, or there is no body, every " +
+            "entry the caller wrote in this bond is withdrawn: the entries are ERASED, for both members, and this " +
+            "cannot be undone.** Send `{\"withdrawEntries\": false}` to keep them. A later call with `true`, or " +
+            "with no body, withdraws what an earlier one kept. " +
+            ENDING_BODY_RULES,
+    )

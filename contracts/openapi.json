@@ -1098,6 +1098,7 @@
     },
     "/api/v1/bonds/{bondId}/block" : {
       "post" : {
+        "description" : "Ends the bond for both members, with the same `204` as `POST /bonds/{bondId}/leave`, and keeps the two accounts from being paired again. Also accepted on a bond that has already ended, and may be repeated. The body is optional. **When `withdrawEntries` is absent or null, or there is no body, every entry the caller wrote in this bond is withdrawn: the entries are ERASED, for both members, and this cannot be undone.** Send `{\"withdrawEntries\": false}` to keep them. A later call with `true`, or with no body, withdraws what an earlier one kept. A body with any other key, with the key twice, or with a value that is not JSON true, false or null is `400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body.",
         "operationId" : "blockBond",
         "parameters" : [ {
           "in" : "path",
@@ -1684,6 +1685,7 @@
     },
     "/api/v1/bonds/{bondId}/leave" : {
       "post" : {
+        "description" : "Ends the bond for both members. It stays readable to both, and takes no further entries. The body is optional. **When `withdrawEntries` is absent or null, or there is no body, the caller's entries are kept.** When it is `true`, every entry the caller wrote in this bond is erased, for both members, and this cannot be undone. The other route that takes this body has the opposite default. `409 BOND_ARCHIVED` on a bond that has already ended, and nothing is withdrawn then. A body with any other key, with the key twice, or with a value that is not JSON true, false or null is `400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body.",
         "operationId" : "leaveBond",
         "parameters" : [ {
           "in" : "path",
@@ -3105,7 +3107,8 @@
         "type" : "object",
         "properties" : {
           "withdrawEntries" : {
-            "type" : [ "boolean", "null" ]
+            "type" : [ "boolean", "null" ],
+            "description" : "Whether to withdraw the caller's own entries in this bond: every one is erased, for both members, and this cannot be undone. What an absent or null value means depends on the route; each operation's description says. Only JSON true, false or null is accepted."
           }
         }
       },
