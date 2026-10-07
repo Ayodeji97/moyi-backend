@@ -109,7 +109,14 @@ internal class GetDays(
      * @throws IllegalArgumentException [limit] is outside 1..[MAX_LIMIT]. The
      * web layer has already refused such a request; this is the same bound,
      * asked here, so that no other caller can read a bond's history in one go.
+     *
+     * [textOctets] is the page's bound on text and is [PAGE_TEXT_OCTETS] for
+     * every caller there is. It is a parameter only so that a test can make
+     * it smaller than one day: no entry can be large enough to reach the
+     * real one alone, and the rule that the first day is always taken would
+     * otherwise be a line nothing could show to be needed.
      */
+    @Suppress("LongParameterList") // The page's own bounds, each a separate fact of the request.
     @Transactional(readOnly = true)
     fun page(
         membership: BondMembership,
@@ -117,6 +124,7 @@ internal class GetDays(
         until: LocalDate?,
         limit: Int,
         favouritesOnly: Boolean,
+        textOctets: Int = PAGE_TEXT_OCTETS,
     ): DaysPage {
         require(limit in 1..MAX_LIMIT) { "a page of the archive is 1 to $MAX_LIMIT days" }
         // One more than the page: its presence is how "there is more" is known without a second query.
@@ -132,7 +140,7 @@ internal class GetDays(
             }
         // After the gate, and only for what it answered in full.
         val marked = favourites.markedBy(membership.memberId, read.flatMap { it.readInFull })
-        return read.paged(marked, favouritesOnly, more = candidates.size > window.size)
+        return read.paged(marked, favouritesOnly, textOctets, more = candidates.size > window.size)
     }
 
     /**
@@ -143,6 +151,7 @@ internal class GetDays(
     private fun List<Read>.paged(
         marked: Set<EntryId>,
         favouritesOnly: Boolean,
+        textOctets: Int,
         more: Boolean,
     ): DaysPage {
         val days = mutableListOf<DayView>()
@@ -154,7 +163,7 @@ internal class GetDays(
             // With favourites only, a day on which nothing marked can be read any more is taken from the archive and not shown.
             val shown = !favouritesOnly || kept.isNotEmpty()
             // The first day shown is always taken. Once a day does not fit, nothing after it is taken either.
-            full = full || (shown && days.isNotEmpty() && octets + day.octets > PAGE_TEXT_OCTETS)
+            full = full || (shown && days.isNotEmpty() && octets + day.octets > textOctets)
             if (!full) {
                 taken++
                 if (shown) {

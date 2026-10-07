@@ -11,6 +11,7 @@ import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.gratitude.service.CloseDay
 import com.moyi.gratitude.service.GetDays
 import com.moyi.identity.api.UserDirectory
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -320,6 +321,17 @@ internal class DaysFeedTest(
     }
 
     @Test
+    fun `the service holds the page's bound itself, whoever calls it`() {
+        val bond = pair()
+        val membership = access.membershipOf(ada, UUID.fromString(bond))
+
+        listOf(0, -1, 51).forEach { limit ->
+            shouldThrow<IllegalArgumentException> { getDays.page(membership, null, null, limit, false) }
+        }
+        getDays.page(membership, null, null, 50, false).days.shouldBeEmpty()
+    }
+
+    @Test
     fun `a stranger who sends a parameter that cannot be read gets the bond's 404, exactly as with one that can`() {
         val bond = pair()
         bothWrite(bond, DAY_ONE)
@@ -392,6 +404,25 @@ internal class DaysFeedTest(
         responses.forEach { it.contentAsByteArray.size shouldBeLessThan MAX_RESPONSE }
         responses.size shouldBe 2
         responses.flatMap { rig.datesOf(json.readTree(it.contentAsString)["items"].toList()) } shouldBe dates
+    }
+
+    @Test
+    fun `a day larger than a whole page's text is still given, alone, so the walk cannot stall on it`() {
+        val bond = pair()
+        val dates = (0L until 3).map { DAY_ONE.plusDays(it) }.onEach { bothWrite(bond, it) }.reversed()
+        val membership = access.membershipOf(ada, UUID.fromString(bond))
+
+        // No entry can be this large against the real bound, so the bound is made small: one octet.
+        val seen = mutableListOf<LocalDate>()
+        var before: LocalDate? = null
+        do {
+            val page = getDays.page(membership, before, null, 50, false, textOctets = 1)
+            page.days.size shouldBe 1
+            seen += page.days.single().date
+            before = page.next
+        } while (before != null && seen.size < 10)
+
+        seen shouldBe dates
     }
 
     // ---- between two pages ----
@@ -743,6 +774,10 @@ internal class DaysFeedTest(
                     rig.encoded("v1:2026-09-16\n"),
                     good + "A",
                     good + "=",
+                    // The same bytes spelt another way: padded, and with the unused bits of the last character set.
+                    "$good==",
+                    good.dropLast(1) + URL_ALPHABET[URL_ALPHABET.indexOf(good.last()) xor 1],
+                    rig.encoded("v1:+12026-09-16"),
                     "$good,$good",
                 ),
             "until" to
@@ -753,6 +788,7 @@ internal class DaysFeedTest(
                     "",
                     "2026-09-15T00:00:00Z",
                     "+2026-09-15",
+                    "+12026-09-15",
                     "20260915",
                     " 2026-09-15",
                     "2026-13-01",
@@ -843,6 +879,8 @@ internal class DaysFeedTest(
 
         /** NFR-008. */
         const val MAX_RESPONSE = 262_144
+
+        const val URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
         /** One user-perceived character, twenty-five octets. */
         const val FAMILY = "👨‍👩‍👧‍👦"
