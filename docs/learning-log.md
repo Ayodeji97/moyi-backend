@@ -2122,7 +2122,9 @@ Reality: the outbox held. Every review of it found something, and none of what i
          code left it green. One said counters were moved pass by pass and passed with
          them moved after the loop. One WARN had no reader. A fourth searched log lines for
          `ada-` to prove no entry text leaked. `ada-` is three hex digits and a hyphen. It
-         failed once, on a UUID, under an unrelated mutation, and not in thirty runs after.
+         failed once, under an unrelated mutation, and not in thirty runs after. A UUID
+         can spell `ada-`; that is the reviewer's reasoning for the failure, not something
+         anyone reproduced. The markers are now `Ada~wrote~`, which no UUID can spell.
          A stuck handler could not stop the close job, and that was true because of a line
          in `application.yml` that turns virtual threads on for the web server. With it
          off the scheduler has one thread, and a reviewer watched the close job's cron not
@@ -2153,3 +2155,6 @@ Wrong about: where a rule is held. I held "withdrawn means erased" in the read g
          A reviewer ran twenty-five on them afterwards. Thirteen were caught and three
          were equivalent. Of the other nine, two were held only by a test in a
          neighbouring class and seven by no test at all.
+         Five of the nine have a test now, and so has one of the three called
+         equivalent, which was not. Four are left: an optimisation in two forms, a
+         redundant predicate, and a lock order no test can show to be needed.

@@ -218,6 +218,9 @@ changes serialize with close. The one-minute margin absorbs ordinary clock skew.
    author. This does not change ADR-0032's first question (an author cannot delete on an
    ended bond), which stays open.
 
+   *(Amended 2026-10-07: ADR-0032's first question was ruled on 2026-10-06 and built in
+   ADR-0035 decision 15: the author may delete.)*
+
    *Still the owner's, and wider than the ruling:* "ended" includes a deletion that is
    counting down. A lone entry on a day that ends inside a countdown is not revealed, and
    if the deletion is then called off the couple are still together and that entry stays

@@ -215,8 +215,8 @@ One call cannot be made that way. Ending a bond is `bond`'s and the
 entries are `gratitude`'s, and `gratitude` already depends on `bond`, so
 a call back would be a cycle. `bond` records the fact and publishes an
 event in the same transaction; `common/events` holds it in a
-transactional outbox, and `scheduling`'s second job, the outbox poller,
-hands it to `gratitude`'s consumer every two seconds (ADR-0035).
+transactional outbox, and `scheduling`'s outbox poller hands it to
+`gratitude`'s consumer every two seconds (ADR-0035).
 
 ### Layers inside a single module
 

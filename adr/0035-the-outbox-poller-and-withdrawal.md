@@ -15,7 +15,7 @@ and not when the erasure happens.
 
 Before the slice was planned, the product corpus was read against the spec for everything C5
 touches. That read found 22 contradictions (X1 to X22) and 26 things the corpus is silent on.
-Eleven of the contradictions concern this record and are listed under "The corpus" below.
+Twelve of the contradictions concern this record and are listed under "The corpus" below.
 Four changed the design: the spec's event `BondBlocked {withdrawEntries}` broke two built
 rules at once (X8); FR-029a requires the offer on leaving too, and the spec covered only block
 (X6); a member who had already left had no way to take words back at all (X6, X15); and the
@@ -27,8 +27,10 @@ review. This is **C5a**, the poller and withdrawal. C5b is the archive and favou
 reactions. The migrations follow: **V20** (`common:events`) and **V21** (`bond`) here, V22
 for C5b, V23 for C5c, and C6 moves to V24.
 
-The slice was built in seven tasks, each by an implementing agent and then read by an
-independent reviewer who ran the code. The plan
+The slice was built in eight tasks (the seventh in two parts), each by an implementing
+agent. Tasks 1 to 7 were each then read by an independent reviewer who ran the code; the
+branch as a whole was then read against the spec, and that review's corrections are in this
+record. The plan
 (`docs/superpowers/plans/2026-10-06-outbox-and-withdrawal-c5a.md`) made thirteen decisions.
 Fifteen are recorded here. Where one differs from the plan, it says what changed and which
 review caused it; "How this was checked" lists them.
@@ -129,14 +131,17 @@ of Task 2: between the rollback and this statement the delivery is unlocked and 
 another instance may run it. As first built, a delivery acknowledged in that gap was then
 marked failed, and two instances failing together both waited the first step.
 
-Backoff is 2 s, doubling to a cap of 15 minutes (`Backoff`; the tenth failure reaches the
-cap). **There is no last attempt and no dead-letter queue**: a withdrawal must never be
-given up on. A delivery unprocessed after five failures or more is counted by a gauge of its
-own (decision 8), and that gauge is the dead-letter queue.
+Backoff is 2 s, doubling to a cap of 15 minutes, with no jitter (`Backoff`; the tenth
+failure reaches the cap). **There is no last attempt and no dead-letter queue**: a
+withdrawal must never be given up on. A delivery unprocessed after five failures or more is
+counted by a gauge of its own (decision 8), and that gauge is the dead-letter queue.
 
 **6. No ordering is promised.** A failed delivery steps aside and later ones proceed. A
 handler must give the same result in any order and tolerate the same event twice
-(`EventConsumer`'s contract).
+(`EventConsumer`'s contract). Spec §8 says handlers deduplicate by event id; nothing
+enforces it and the one consumer does not: it is idempotent by the state it leaves, and
+nothing stores the ids it has handled. A consumer with an external effect (Phase 4) will
+need the id.
 
 **7. No ShedLock on the poller; it runs on a thread of its own; a delivery has a time
 limit.** The close job takes a ShedLock because two instances closing a day is work done
@@ -218,11 +223,13 @@ requires and the spec did not cover.
   irreversibly. `EndBondRequestReader` is a reader for the whole type, because the two
   lenient behaviours are mapper-wide settings.
 - **A non-JSON `Content-Type` with an empty body is now `415`**; it was `204`. The smoke
-  script and the CLI send JSON or no content type.
+  script and the CLI send JSON or no content type. `BondEndingEndpointTest` pins it on both
+  routes, with the same answer for a stranger as for a member.
 - **Parsing before the guard is not an existence oracle.** The reviewer sent 154 requests
   across malformed, non-JSON and readable bodies as a member, a stranger, to a bond that
   does not exist and to an id that is not a UUID: each refusal was the same bytes for all of
-  them. A test now pins that for three bodies on both routes.
+  them, but for the caller's own path echoed in `instance`. A test now pins that for three
+  bodies on both routes.
 - **A repeat block may withdraw what the first declined.** `leave` on an ended bond is still
   `409` and withdraws nothing.
 - **Both endings write the same log line**, "A member ended bond {id}". The code had logged
@@ -290,9 +297,13 @@ the bond's lock first.
 So every path that reveals or settles a day first erases a withdrawn author's live entries
 on it, through the same `EraseEntry` (`EraseWithdrawnEntries.on`), and decides from the day
 that leaves: `CloseDay` (the reveal rule, the reveal at the day's end and the `SOLO` close
-are one transaction after it) and `ReconcileJoiningDay.underBondLock`. Closer first,
-consumer first, and the author deleting by hand end in identical rows and identical answers
-(`WithdrawalRaceTest`, compared against a twin bond).
+are one transaction after it) and `ReconcileJoiningDay.underBondLock`. Closer first and
+consumer first end in identical rows and identical answers in every case. The author
+deleting by hand ends in the same rows and answers in the two `CloseDay` cases (a day
+waiting for its reveal time; a lone entry at midnight), each compared against a twin bond
+in `WithdrawalRaceTest`. On a legacy `SUSPENDED` joining day there is no delete twin
+(question 6): there the test pins that reader first, consumer first and closer first agree
+with each other and that nothing is shown. Decision 13's exception stands.
 
 - *Rejected:* teaching the reveal to skip a withdrawn author's entry. That is a second
   account of what an erasure does, to be kept in step with the first.
@@ -314,13 +325,17 @@ one `404`.
 
 - **Migrations V20 (`common:events`) and V21 (`bond`).** Neither has been applied to a
   shared database.
-- **The API gains two optional request bodies** and a `400` on the two routes. Additive: no
-  new error code. Two behaviours change for an existing client: a non-JSON content type with
-  an empty body is `415`, and an author's `DELETE` on an ended bond is `204` where it was
-  `409`.
-- **The application now does a second thing on its own**, every two seconds, on every
+- **The API gains two optional request bodies; the contract gains `400` and `422` on the two
+  routes and loses the `409` on `DELETE /entries/{entryId}`.** Additive by oasdiff's
+  reading: no new error code. **The contract documents a `422` on `/leave` and `/block`
+  that nothing answers**: the generator adds `400` and `422` to any route with a body, and
+  `EndBondRequestReader` refuses every unreadable body as `400`. Left as generated. Two
+  behaviours change for an existing client: a non-JSON content type with an empty body is
+  `415` (answered, and not in the contract: the generator documents `415` only on
+  idempotent routes), and an author's `DELETE` on an ended bond is `204` where it was `409`.
+- **The application now does one more thing on its own**, every two seconds, on every
   instance, and start-up now takes a table lock for a moment. `moyi.scheduling.enabled=false`
-  turns the poller off with the close job.
+  turns the poller off with the close job and the hourly reap of idempotency keys.
 - **A publisher must run at READ COMMITTED.** A `@Transactional(isolation = …)` on any path
   that publishes fails at the publish, by design.
 - **The text outlives a withdrawal on disk** until the consumer runs: two seconds normally,
@@ -328,8 +343,9 @@ one `404`.
   through the API in that time (decision 12), and a day that is closed or revealed in that
   time is erased first (decision 14).
 - **A withdrawal holds the bond's row lock for the whole erasure**, and every row lock of
-  the member's history at once. The bond has ended; only an author's own delete and a
-  joining-day reconcile wait on it.
+  the member's history at once. The bond has ended; only the close job's work on that bond
+  (its unsettled days and their streak), an author's own delete, a joining-day reconcile and
+  a repeat ending wait on it.
 - **Backoff counts from the start of the pass, not from the failure.** A delivery that fails
   by its 60 s limit has already outlived the first steps, so it is retried on the next tick
   about six times before the wait is felt, and holds the one poller thread for a minute each
@@ -360,16 +376,48 @@ consumes `EntrySubmitted`: there is no event for an erasure, so read the entry b
   14 at once.
 - The default page of 20 days can exceed NFR-008's 256 KB: 20 days, two entries, 8,192 bytes
   each is 327,680 bytes of text alone (X11).
-- The second route by entry id joins `EntryChangesTest`'s route set (ADR-0032).
+- Whether a day's page may say `SOLO` (ADR-0034, "Owed, C5, the archive": the same question
+  its decision 12 answered for the calendar). The owner ruled on 2026-10-06 that an archive
+  day carries its status; ADR-0034's Rulings, 2, records the calendar's half, where a solo
+  day is now drawn. Still owed before it is built: read `states.md` §6, which by the
+  corpus read draws no solo day card.
 
-**C6.** Whatever search data an entry gains must be cleared by `EraseEntry` too (spec §6.7:
-"search data").
+**C5b and C5c.** Each new route by entry id (favourites in C5b, reactions in C5c) uses
+`ChangeEntry.authorOf`'s rule or states why not, and joins `EntryChangesTest`'s route set
+(ADR-0032, Revisit).
+
+**C6.** `entries.text_search` exists (V12) and nothing writes it: no entity maps it and no
+statement sets it, so an erasure leaves it `NULL` only because it was never anything else.
+The slice that first writes it, or replaces it with a generated `tsvector`, must have
+`EraseEntry` clear it (spec §6.7, "search data"; doc 07, BR-10). And a search must go
+through `Entry.canBeReadBy`: a withdrawn author's row keeps its text, and so its vector,
+until the consumer runs. A generated column would be cleared with the text by the erasure
+and still not hidden by the marker before it.
 
 **The deploy slice.** Export the meters; alert on the pending and age gauges (doc 11), on
 `failing` above zero, and on the last-success timestamp going stale; a Prometheus registry,
 which decides the exported names. Keep `org.springframework.transaction`, `.jdbc` and
 `.orm.jpa` off TRACE in production: a `MANDATORY` handler's exception is printed there by
 Spring's interceptor.
+
+**`org.hibernate.orm.core` must stay above DEBUG, and nothing pins it.** At DEBUG,
+Hibernate's "Listing entities" prints every field of every managed entity at each flush,
+`EntryEntity.text` included. Run and seen by the last task: `UnflushedHandlerTest` raises
+every logger to DEBUG and asserts on Postgres's "Failing row", not on the words, for this
+reason. **It predates this slice**: every flush of a live entry prints the same, on the
+request paths too. **Not fixed here.**
+
+No configuration in the repository sets that level. Read, not run:
+`app/src/main/resources/application.yml` sets one logger, `org.hibernate.orm.jdbc.error`,
+to `OFF`; `application-local.yml` has no logging block; there is no logback or log4j file;
+no script, compose file or workflow passes a logging level. Two test configurations
+(`identity`, `gratitude`) repeat the one `OFF` line and set nothing else. So the default
+stands, which is Spring Boot's root at INFO, and "entry text never reaches a log" holds
+only while nobody raises `org.hibernate.orm.core`, a parent of it or the root to DEBUG.
+A property or an environment variable at deploy could; the deploy's environment is not in
+this repository. Either pin the logger at INFO in `application.yml`, with a test that
+raises it and finds no text, or keep the text out of what Hibernate prints of the entity.
+Question 10.
 
 **Phase 4.** The notification consumer. It registers with `NOW` or accepts a backfill of
 every event since C2 under the table lock; the backfill scans `outbox_events` by type with
@@ -431,6 +479,12 @@ Each is built one way and cheap to turn.
    T-20 says leaving "revokes access to *new* content", and these words become readable
    after the leaving. Built: revealed. The reviewer ran it at `6de2a67`; no test pins it
    either way.
+10. **Hibernate prints an entry's text when `org.hibernate.orm.core` is at DEBUG.** Found by
+    this slice's last task and older than the slice (Owed, the deploy slice, has what was
+    seen and what was read). No shipped configuration sets that level and nothing prevents
+    it. CLAUDE.md's rule that entry text never reaches a log is conditional on it. Whether
+    to pin the level now, in a pull request of its own, or leave it to the deploy slice is
+    the owner's.
 
 ### The corpus
 
@@ -447,7 +501,8 @@ documents are not edited here.
 - **X10** — doc 11 has two unlabelled gauges, the spec one per consumer and no age gauge.
   *Resolved, decision 8:* both, per consumer. The withdrawal consumer's backfill is of an
   event type with no history, so it cannot trip the pending alert; a later `BEGINNING`
-  consumer of `EntrySubmitted` would.
+  consumer of `EntrySubmitted` would, and would trip the age alert at once, since the age
+  is the event's.
 - **X15** — on an ended bond only a block could cause tombstones. *Narrowed, decisions 10
   and 15:* a single delete now can too, and the marker moves no `ETag`. What remains: the
   defaults differ, so every entry turning to a tombstone at the moment of ending is still
@@ -458,6 +513,8 @@ documents are not edited here.
   (ADR-0033 decision 9); a withdrawn entry on that day is decision 14. Doc 04's "closed
   immediately" is still not what is built: the day closes at its end.
 - **X18** — "export first" ships before export. *Left; question 2.*
+- **X19** — doc 07 §7 and doc 02 J5 say each member keeps read access and export,
+  unqualified. *Left for the corpus:* both owe the exception `states.md` §9 got.
 - **X20** — one migration for C5, and a `bond` change. *Resolved:* V20 and V21.
 - **X21** — doc 05 and ADR-0008 say the outbox's first handlers are notifications. *Left
   for the corpus.*
@@ -465,8 +522,52 @@ documents are not edited here.
 The silences it named for withdrawal and the outbox (S16 to S26) are decided above: the
 request and its defaults (11); scope, every live entry of that member in that bond and no
 other bond (13); what is read in between (12); the marker is not reversible (10); budget,
-backoff and no last attempt (5, 7); no ordering (6); the starting position (3); meter names
-and `last_error` (8, 5); no ShedLock (7). Retention is Owed.
+backoff with no jitter and no last attempt (5, 7); no ordering (6); the starting position
+(3); meter names and `last_error` (8, 5); no ShedLock (7). Retention is Owed.
+
+## What the corpus now says that is false
+
+For the owner to carry into the corpus repository, which is not edited here. Line numbers
+are the corpus's at `docs/phase-3-daily-loop`, `9be5149`.
+
+1. **Doc 11:86, the "Outbox stuck" alert** (`outbox_pending` > 100 for 10 min, or oldest
+   event > 15 min). The meters are `gratitude.outbox.pending` and
+   `gratitude.outbox.age.seconds.max`, each tagged `consumer`. No registry exports them, so
+   the alert cannot be built yet. When it is, the rule is per consumer and takes the
+   maximum across instances, not the sum. It needs two conditions doc 11 lacks:
+   `gratitude.outbox.failing` above zero, and the last-success timestamp gone stale.
+   `pending` counts only due deliveries, so one delivery in backoff never shows in it; the
+   age and `failing` do. A retired consumer's deliveries hold both gauges up for ever.
+2. **Doc 11:51-52, the two gauges.** They are unlabelled there. Pending is per consumer and
+   due-only; the age is the event's, due or not. Four meters are missing from the table:
+   `failing`, `delivered`, `failed` and `last.success.timestamp`.
+3. **Doc 07:271, the index** `outbox_events (next_attempt_at) where processed_at is null`.
+   Those columns have been on `outbox_deliveries` since V14, and the claim's `ORDER BY`
+   cannot use V14's index anyway (Consequences).
+4. **Doc 07:312, "`outbox_events` | 30 days after processing".** It has no meaning per
+   consumer, nothing removes anything, and a `BEGINNING` consumer needs the history (X9).
+5. **Doc 07 §2** lacks `outbox_consumers`, `outbox_subscriptions`, the foreign key on
+   `outbox_deliveries.consumer_id` (V20) and `bond_entry_withdrawals` (V21). **Doc 07:319**
+   (BR-10) lists `text_search` and `author_deleted_account` among what an erasure sets; a
+   withdrawal sets neither (X16). **Doc 07:308**, retention unqualified (X19).
+6. **Doc 05:155, "dispatches to handlers: notifications in v1".** The first handler is the
+   withdrawal (X21). **Doc 05:34** puts the poller in `events/`: the dispatcher is in
+   `common/events`, the timer and the meters are `modules/scheduling`'s. Doc 05 does not
+   say: deliveries written at publish; registration under a table lock; READ COMMITTED
+   only; no ShedLock; no ordering; no last attempt.
+7. **Doc 06:105-106, `/leave` and `/block` have no body** (X6). They owe
+   `{"withdrawEntries": boolean}`, the opposite defaults, `400` for an unknown or repeated
+   key, and `415`. **Doc 06:155, `DELETE /entries/{id}`** owes "`204` for its author on an
+   ended bond". Doc 06:106's "byte-identical … same `ETag`" stays true.
+8. **Doc 04, BR-9**, "all write operations … return `409`, except export and deletion": an
+   author's entry `DELETE` is now excepted too. **BR-10a** says "the blocker's"; it is
+   built for a leaver too. **Doc 04:249**, "closed immediately" (X17). **Doc 04:186**,
+   "offers an export first" (X18).
+9. **Doc 26 §5 and the strings**: the leave confirm's "you keep your archive" (X7).
+   **Doc 02:145** (X19). **ADR-0008** in the corpus (X21).
+10. **Doc 12:41, "outbox publish-and-consume"**, is now true. Nothing to carry.
+11. **Doc 09, T-20**, "revokes access to *new* content": question 9 is against it, and is
+    the owner's.
 
 ## Revisit when
 
@@ -487,17 +588,48 @@ and `last_error` (8, 5); no ShedLock (7). Retention is Owed.
 their own checkout; reviewers wrote probes that assert nothing and print what they saw.
 
 - **Run by the implementing agents:** each task's tests were seen to fail before the code
-  existed, and `./gradlew build` was green at each commit but one. Tests in the build's
+  existed, and `./gradlew build` was green at each code commit a report covers. Two have
+  no count of their own: `d420edf` and `6de2a67`, whose authors were cut off; the next
+  task's build started from them (1199 at `6de2a67`, by that task's arithmetic). Tests in
+  the build's
   result files: 1089 at `4f8a842`, 1113 at `c495d1f`, 1131 at `b3db2e4`, 1135 at `99694e1`
   (`--rerun-tasks`, all 217 tasks), 1153 at `294e940`, 1166 at `176949c`, 1179 at `d77c076`,
   1185 at `26cfb2d`, 1202 at `f236d73`, 1204 at `7fad97a`. At `6a06bcf` only
   `:common:events:build` was run (45 tests). Except at `99694e1`, modules whose inputs had
   not changed were up to date and not re-executed.
-- **Not run by any task before the last:** `scripts/smoke.sh`. The smoke run, the rerun of
-  the whole build at the head of the branch and the CI contract check are recorded on the
-  pull request, with the commit they ran at. One implementer ran oasdiff locally at
-  `294e940` (0 errors, 0 warnings, 6 informational changes); CI uses a different packaging
-  of it, and that verdict was not run by anyone during the tasks.
+- **Run at the end, by the last task** (after this record was first written; commits
+  `5d2a889`, `88f7e13`, `33351ad`):
+  - `./gradlew build` green at `5d2a889`, 1210 tests in the result files (1204 at
+    `7fad97a`), and green again at `88f7e13`. The report does not say `--rerun-tasks`.
+    `33351ad` changed `scripts/` and `tools/bruno`, and nothing the build compiles.
+  - `scripts/smoke.sh` against a database of its own (`MOYI_DB=moyi_c5a_smoke`, the jar of
+    `88f7e13`, dropped afterwards), with the poller running: 458 passed, 0 failed, 18
+    sections, no skips. The two erasures were seen within 2 s and 1 s of the request. Run
+    again with the poller held idle (`--moyi.scheduling.outbox.delay=3600000`): 454 passed,
+    4 failed, and the four are the probes that depend on it (the two "the poller erases",
+    the owed-deliveries count, the poller's own log line). Every API probe stayed green
+    there: that is the read gate with no consumer. The next boot delivered the five
+    deliveries that run left owed.
+  - The CLI's `bond leave` and `bond block`, with each flag and with none, against a jar:
+    kept, kept, erased, erased, kept, erased, as the defaults say. The Bruno requests were
+    written and not opened in Bruno.
+  - The contract: oasdiff 1.11.7 (the `tufin/oasdiff` image) against `origin/main`: 7
+    changes, 0 error, 0 warning, 7 info; `breaking` exits 0 at both `--fail-on ERR` and
+    `--fail-on WARN`. The seven: an optional request body on `/leave` and on `/block`;
+    `400` and `422` added to each; the `409` removed from `DELETE /entries/{entryId}`.
+    **CI's own action (`oasdiff-action/breaking@v0.1.17`) was not run by anyone**; by this
+    verdict it will not ask for `breaking-api-change`.
+  - **The stale `409` on `DELETE /entries/{entryId}` is out of the contract** (`88f7e13`):
+    decision 15 removed the only conflict a delete answered. `OpenApiContractTest`
+    asserted the `409`; it was turned to assert its absence and seen red before the
+    contract was regenerated.
+- **Run after the branch's conformance review** (2026-10-07, commits `936f6f4` and
+  `abd1928`): `./gradlew build` green, 1211 tests in the result files. Modules whose
+  inputs had not changed were up to date and not re-executed. The smoke run was not
+  repeated: the two commits change comments and add one test.
+- **Run by a reviewer, and pinned by a test only since `936f6f4`:** the `415` for a
+  non-JSON content type with an empty body (decision 11). The test was written and run
+  green. It pins behaviour that already existed, so no mutation was run against it.
 - **Found by review, not by a test written first.** Each was proved by the reviewer running
   it, and each now has a test seen to fail with its fix removed:
   - the reveal between a withdrawal and its erasure, in both forms (decision 14);
@@ -510,6 +642,10 @@ their own checkout; reviewers wrote probes that assert nothing and print what th
   - the age gauge blind to a delivery that keeps failing (decision 8);
   - an `Error` at hand-over stopping the poller for good (`7fad97a`);
   - the two endings' different log lines (decision 11).
+
+  One finding of the last task is in that list's company and has no fix: Hibernate printing
+  entity fields at DEBUG, entry text included (`org.hibernate.orm.core`, "Listing
+  entities"). It is older than this slice. Owed, the deploy slice; question 10.
 - **Found by the consumer's own test:** the commit-time exception logged at DEBUG with the
   row (decision 4).
 - **Mutations.** Each is a mechanism removed, a named test seen to fail, the file restored.
@@ -532,32 +668,53 @@ their own checkout; reviewers wrote probes that assert nothing and print what th
   by the commits' own tests, among them: the ended-bond refusal restored, the day not
   stepped back, the partner let through, `PATCH` allowed, the bond lock removed, the marker
   check skipped, the author predicate dropped, a bulk `UPDATE` in place of `EraseEntry`,
-  `SET CONSTRAINTS` removed, a gone bond made to throw. Three survivors are equivalent to
-  the code. **The rest survived, at `6de2a67`:**
-  - `EraseEntry` reading the entry without taking its lock or reading it fresh, in two
-    forms: caught only by a neighbouring class, `CloseRaceTest`, and by neither commit's
-    tests.
-  - `status.flush()` in the dispatcher: no test. No handler in the build leaves a write
-    unflushed.
-  - the `forgetLoaded()` call, and its flush: no test, not even the 2,000-entry one, which
-    is still inside its bound at 9 s. An optimisation.
+  `SET CONSTRAINTS` removed, a gone bond made to throw. Twelve stayed green. The reviewer
+  judged three of them equivalent to the code and **nine survivors, at `6de2a67`**.
+
+  **Six were closed at `5d2a889`**, each by a test seen to fail under the mutation: five of
+  the nine, and one of the three called equivalent.
+  - `EraseEntry` reading the entry without taking its lock, and `EntryStore.lockAndFind`
+    without its refresh (two of the nine): `EraseFreshReadTest`, "a delete that waited
+    while its entry was erased elsewhere does not step the day back a second time".
+    Before, only a neighbouring class (`CloseRaceTest`) caught them.
+  - `status.flush()` in the dispatcher: `UnflushedHandlerTest`, in `gratitude`, with a
+    handler that leaves a JPA write unflushed. Without the flush, Spring's "Initiating
+    transaction rollback after commit exception" line carried the row.
+  - `EraseEntry`'s check that the entry is filed on the day it was given:
+    `EraseFreshReadTest`, "an entry is not erased against a day it is not filed on, and
+    nothing is written".
+  - The order of `PATCH`'s refusals on an ended bond (`409` before `422`): an assertion
+    added to `EntryChangesTest`, "an ended bond's entries cannot be edited but can be
+    deleted by their author…".
+  - The day read without its lock in `EraseEntry`, which the reviewer had judged
+    equivalent because every other writer of a day takes the bond's lock first:
+    `EraseFreshReadTest`, "a withdrawal waits for the day's own lock…", fails under it.
+    Two of the twelve are still held equivalent.
+
+  One mutation the commits' tests already caught has a second test since the same commit:
+  the day stepped back for an entry already erased now also fails `WithdrawEntriesTest`,
+  "the author's own delete and the withdrawal reach the same entry in either order…".
+
+  **Open at `33351ad`**, four of the nine, in three kinds:
+  - the `forgetLoaded()` call, and its flush (two mutations): no test, not even the
+    2,000-entry one, which is still inside its bound at 9 s. An optimisation.
   - newest day first in place of oldest: no test, and none can show it, because no other
     holder of two days can run beside the consumer.
   - the `bond_id` predicate in the consumer's query: no test. It is redundant: a member id
     belongs to one bond.
-  - `EraseEntry`'s check that the entry is filed on the day it was given, and the order of
-    `PATCH`'s refusals on an ended bond (`409` before `422`): no test.
 
-  **All of these are open at `7fad97a`,** the head this record was written at. Tests for the
-  first two were being written then; whether they landed is on the pull request.
+  A joining-day twin was added to `WithdrawEntriesTest` at the same commit and pins
+  decision 13's qualification: answers identical, entries identical, the day `SUSPENDED`
+  against `OPEN` until the first read, then identical.
 - **Found by review after the twin test had passed:** decision 13's qualification. The twin
   test compared a withdrawal with a run of deletes and was green; the reviewer's probe put
   both on an unread `SUSPENDED` joining day, which the twin test had not, and the day rows
   differed.
 - **Seen once and not reproduced:** two log-leak tests in `WithdrawEntriesTest` failed on a
-  reviewer's run and passed on thirty more. They search log lines for `ada-` and `bea-`,
+  reviewer's run and passed on thirty more. They searched log lines for `ada-` and `bea-`,
   which are hexadecimal digits and a hyphen, so a UUID can spell them. The mechanism is the
-  reviewer's reasoning, not a reproduction.
+  reviewer's reasoning, not a reproduction. The markers are `Ada~wrote~` and `Bea~wrote~`
+  since `5d2a889`, which no UUID can spell.
 - **Read, not run:** that no path renders an entry except through the gate (two readers,
   by search); that a marker exists only on an ended bond, which is what excuses `SubmitEntry`
   from decision 14 and a fresh write from decision 12; the lock order of every new path

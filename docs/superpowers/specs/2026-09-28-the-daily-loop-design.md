@@ -61,8 +61,8 @@ Four modules gain code; `common:events` is new. `bond` also gains the public acc
 | Module | What lands here |
 |---|---|
 | `modules/gratitude` | Bond-days, entries, the reveal, streaks, prompts, search. The phase's centre. |
-| `modules/scheduling` | The close job: the fifteen-minute trigger and the ShedLock guard. *(Amended 2026-10-05, ADR-0033 decision 1: there is no timezone selection — see §2.2.)* Doc 05 §2.1 puts it here and it stays here. |
-| `common:events` | **New.** `outbox_events`, the publishing port and the poller. |
+| `modules/scheduling` | The close job: the fifteen-minute trigger and the ShedLock guard. *(Amended 2026-10-05, ADR-0033 decision 1: there is no timezone selection — see §2.2.)* Doc 05 §2.1 puts it here and it stays here. *(Amended 2026-10-07: and the outbox poller's timer, which takes no ShedLock.)* |
+| `common:events` | **New.** `outbox_events`, the publishing port and the poller. *(Amended 2026-10-07, ADR-0035 decision 7: the dispatcher is here; the two-second timer and the meters are `modules/scheduling`'s `OutboxJob`.)* |
 | `common:web` | `Idempotency-Key` — doc 05 §2.1 already lists "idempotency filter" here. |
 
 ### 2.1 How `gratitude` asks `bond` a question
@@ -1149,6 +1149,10 @@ the tombstone protection BR-10 exists for. FR-074's phrasing is corrected.
 The outbox has a table, a port, a poller and — from Phase 4 — two consumers in different modules.
 Doc 05 §2.1 lists `analytics/` as "outbox consumer, event store", which is the Phase 10 reader,
 not the writer every module needs. A `common/events` sibling is added to the tree.
+
+*(Amended 2026-10-07, ADR-0035 decisions 7 and 8: the poller's two halves are in two modules.
+The dispatcher, which claims and delivers, is in `common:events`; the timer that calls it and
+the meters are `modules/scheduling`'s `OutboxJob`.)*
 
 ### 12.8 Decisions recorded, not corrections
 

@@ -2,7 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox
-> (`- [ ]`) syntax for tracking.
+> (`- [x]`) syntax for tracking.
+
+**As built (2026-10-07).** The slice is built and ADR-0035 is its record. The build changed
+several things this plan says; they are listed at the end, under "As built — where the
+slice left this plan". From decision 8 on, this plan's decision numbers are not the ADR's.
+The text below is the plan as written, with the steps ticked and a note where a step was
+done differently.
 
 **Goal:** A member who blocks (or leaves) can take their own words back for both people:
 the words stop being readable the moment the request commits, and are erased shortly after
@@ -187,13 +193,13 @@ SELECT ?, consumer_id, ? FROM outbox_subscriptions WHERE event_type = ?
 
 `next_attempt_at` is the event's `occurredAt`, truncated.
 
-- [ ] **Step 1: failing tests.** `ConsumerRegistryTest`: a new consumer gets its two tables'
+- [x] **Step 1: failing tests.** `ConsumerRegistryTest`: a new consumer gets its two tables'
   rows; `BEGINNING` backfills an event published before it registered, `NOW` does not;
   registering twice writes nothing new; a dropped event type loses its subscription and
   keeps its deliveries; duplicate ids refuse to start. `EventPublisherTest`: publishing an
   event of a subscribed type writes one delivery per subscriber and none for an
   unsubscribed type; a rolled-back publisher leaves neither event nor delivery.
-- [ ] **Step 2: the race, as a test that synchronises on a blocked statement.** Connection
+- [x] **Step 2: the race, as a test that synchronises on a blocked statement.** Connection
   A opens a transaction and publishes an event (does not commit). Start registration on
   another thread; poll `pg_stat_activity`/`pg_locks` until it is waiting on the table lock.
   Commit A. Assert the consumer has a delivery for A's event. Then the mirror: hold
@@ -201,9 +207,9 @@ SELECT ?, consumer_id, ? FROM outbox_subscriptions WHERE event_type = ?
   test controls), start a publisher, see it blocked, commit registration, assert the
   publisher's event has a delivery. **Mutation:** remove the `LOCK TABLE`; the first test
   must fail.
-- [ ] **Step 3: implement; run** `./gradlew :common:events:test`.
-- [ ] **Step 4:** update the migration-contiguity assertion to V20. Run it.
-- [ ] **Step 5: commit** `feat(events): consumers register under a lock; deliveries are written at publish`.
+- [x] **Step 3: implement; run** `./gradlew :common:events:test`.
+- [x] **Step 4:** update the migration-contiguity assertion to V20. Run it.
+- [x] **Step 5: commit** `feat(events): consumers register under a lock; deliveries are written at publish`.
 
 ### Task 2: The dispatcher
 
@@ -255,7 +261,7 @@ event type, attempt count and the class name — **not the message, not the stac
 message** — and the loop goes on. `failing` counts unprocessed deliveries with
 `attempts >= 5`.
 
-- [ ] **Step 1: failing tests.** Delivered once and acknowledged; the handler's write and
+- [x] **Step 1: failing tests.** Delivered once and acknowledged; the handler's write and
   the acknowledgement commit together (handler writes a probe row, then a second handler
   throws after writing: no probe row, delivery unprocessed, `attempts = 1`,
   `next_attempt_at = now + 2 s`, `last_error` is the class name and does not contain the
@@ -264,13 +270,13 @@ message** — and the loop goes on. `failing` counts unprocessed deliveries with
   `more` is true when work remains; a delivery for an unknown consumer id is left alone;
   `backlog` counts per consumer. `BackoffTest`: 1→2 s, 2→4 s, 10→15 min, 1000→15 min (no
   overflow).
-- [ ] **Step 2: concurrency.** Two dispatchers, one event, a handler that blocks on a latch
+- [x] **Step 2: concurrency.** Two dispatchers, one event, a handler that blocks on a latch
   the test holds: the second `dispatchDue` returns `delivered = 0` while the first is
   inside the handler (it skipped the locked row). Release; the handler ran once.
   **Mutation:** remove `SKIP LOCKED`'s row lock (`FOR UPDATE`); the handler runs twice or
   the second call blocks — the test must fail.
-- [ ] **Step 3: implement; run** `./gradlew :common:events:build`.
-- [ ] **Step 4: commit** `feat(events): the dispatcher — claim, handle and acknowledge in one transaction`.
+- [x] **Step 3: implement; run** `./gradlew :common:events:build`.
+- [x] **Step 4: commit** `feat(events): the dispatcher — claim, handle and acknowledge in one transaction`.
 
 ### Task 3: The poller
 
@@ -290,12 +296,12 @@ Meters, registered once, refreshed from `OutboxDispatcher.backlog` after each ru
 `gratitude.outbox.delivered` and `gratitude.outbox.failed`. A run that throws (the database
 is away) is logged at `WARN` and does not kill the schedule.
 
-- [ ] **Step 1: failing tests**: `dispatchOnce` delivers a due event through a test
+- [x] **Step 1: failing tests**: `dispatchOnce` delivers a due event through a test
   consumer and moves the counters; the pending gauge reads 1 before and 0 after; the
   failing gauge reads 1 for a delivery with five attempts; a dispatcher that throws does
   not propagate.
-- [ ] **Step 2: implement; run** `./gradlew :modules:scheduling:build`.
-- [ ] **Step 3: commit** `feat(scheduling): the outbox poller, every two seconds, and its meters`.
+- [x] **Step 2: implement; run** `./gradlew :modules:scheduling:build`.
+- [x] **Step 3: commit** `feat(scheduling): the outbox poller, every two seconds, and its meters`.
 
 ### Task 4: `bond` records a withdrawal
 
@@ -341,21 +347,21 @@ The request body is optional (`@RequestBody(required = false)`); `withdrawEntrie
 nullable `Boolean`; a body that is not JSON, or a non-boolean value, is the standing `422`.
 The log lines do not change.
 
-- [ ] **Step 1: failing tests.** Block with no body writes the marker and one event; block
+- [x] **Step 1: failing tests.** Block with no body writes the marker and one event; block
   with `false` writes neither; leave with no body writes neither; leave with `true` writes
   both; a second block with `true` writes nothing more; block `false` then block `true`
   writes both; leave `true` on an ended bond is `409` with no marker; the marker leaves
   `bonds.version` and the `ETag` unchanged; `membershipOf` and `lockMembershipOf` report
   the withdrawn member to **both** members; the event's payload is exactly the two ids;
   a block that rolls back leaves no marker and no event.
-- [ ] **Step 2: `DiscreetExitTest`** — a block with withdrawal and a leave without answer
+- [x] **Step 2: `DiscreetExitTest`** — a block with withdrawal and a leave without answer
   the same status, headers and (empty) body, and `GET /bonds/{id}` afterwards is
   byte-identical with the same `ETag`, read as the other member.
-- [ ] **Step 3: implement.** Regenerate the contract with the command `OpenApiContractTest`
+- [x] **Step 3: implement.** Regenerate the contract with the command `OpenApiContractTest`
   prints; read the diff (two optional request bodies, nothing else).
-- [ ] **Step 4: mutation**: publish outside the `if (inserted)`; "a second block writes
+- [x] **Step 4: mutation**: publish outside the `if (inserted)`; "a second block writes
   nothing more" must fail.
-- [ ] **Step 5: run** `./gradlew :modules:bond:build`; **commit**
+- [x] **Step 5: run** `./gradlew :modules:bond:build`; **commit**
   `feat(bond): a member may withdraw their entries when leaving or blocking (FR-029a)`.
 
 ### Task 5: The read gate honours the marker at once
@@ -377,11 +383,11 @@ val erased = isErased || authorMemberId in reader.withdrawnAuthors
 read. `Entry.isErased` itself does **not** change (it is the row's own state, and the edit
 rule and the reveal use it).
 
-- [ ] **Step 1: domain tests** in `EntryReadabilityTest`: a withdrawn author's live entry is
+- [x] **Step 1: domain tests** in `EntryReadabilityTest`: a withdrawn author's live entry is
   `TOMBSTONE` to its author, `TOMBSTONE` to a partner it was revealed to,
   `TOMBSTONE_UNSEEN` to a partner it was not; the other member's entries are untouched;
   membership still comes first.
-- [ ] **Step 2: `WithdrawalReadTest`, with no dispatcher run at all** (the poller stopped):
+- [x] **Step 2: `WithdrawalReadTest`, with no dispatcher run at all** (the poller stopped):
   two members write and the day reveals; A blocks. Then, for **both** A and B:
   `GET /today` shows A's entry with `text: null`, `status: DELETED`, and B's entry whole;
   a replay of A's original `POST /entries` key answers `Idempotency-Replayed: true` with
@@ -389,8 +395,8 @@ rule and the reveal use it).
   (never revealed): B sees `{authorMemberId, status: REMOVED}` and nothing else — assert
   the exact key set. Assert the rows still hold their text (nothing was erased yet), so
   the test proves the gate and not the consumer.
-- [ ] **Step 3: mutation**: drop the `in reader.withdrawnAuthors` clause; Step 2 must fail.
-- [ ] **Step 4: run** `./gradlew :modules:gratitude:build`; **commit**
+- [x] **Step 3: mutation**: drop the `in reader.withdrawnAuthors` clause; Step 2 must fail.
+- [x] **Step 4: run** `./gradlew :modules:gratitude:build`; **commit**
   `feat(gratitude): a withdrawal hides its author's words from the commit on`.
 
 ### Task 6: An author may delete their own entry after the bond has ended
@@ -418,15 +424,17 @@ internal class EraseEntry(private val days: BondDayStore, private val entries: E
 `ChangeEntry` keeps the joining-day ordering it has (`lockDays`) and calls this for a
 delete. The archived/left refusal becomes: `if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()`.
 
-- [ ] **Step 1: failing tests** in `EntryChangesTest`: `DELETE` by the author is `204` on a
+- [x] **Step 1: failing tests** in `EntryChangesTest`: `DELETE` by the author is `204` on a
   bond that ended by leave, by block, and by the *other* member leaving, for the member
   who left and the one who stayed; the partner then sees the tombstone; repeatable;
   `PATCH` on the same bonds is still `409 BOND_ARCHIVED`; the partner's `DELETE` is still
   the one `404`; a delete during a deletion countdown (`PENDING_DELETION`) is `204`.
   Find and turn the existing test that pinned the `409` (ADR-0032 question 1 says one
   test pins it).
-- [ ] **Step 2: implement; mutation**: restore the unconditional refusal; the new tests fail.
-- [ ] **Step 3: run** `./gradlew :modules:gratitude:build`; **commit**
+- [x] **Step 2: implement; mutation**: restore the unconditional refusal; the new tests fail.
+  *As built:* the author was cut off by the network before running it. A reviewer ran it
+  afterwards, among twenty-five on this commit and Task 7's: red, three tests.
+- [x] **Step 3: run** `./gradlew :modules:gratitude:build`; **commit**
   `feat(gratitude): an author can delete their own entry after the bond has ended`.
 
 ### Task 7: The withdrawal consumer
@@ -458,7 +466,7 @@ internal class WithdrawEntries(/* BondAccess, EntryStore, EraseEntry, Clock */) 
 author's live entries oldest day first; `EraseEntry.erase` each. No event is published, no
 day status is recomputed for a settled day, `author_deleted_account` is not touched.
 
-- [ ] **Step 1: failing tests** (each publishes through a real block, then calls
+- [x] **Step 1: failing tests** (each publishes through a real block, then calls
   `OutboxDispatcher.dispatchDue`): every live entry of the withdrawing member in that bond
   has `text` null, `status = DELETED`, `deleted_at` set; the other member's entries, and
   the same member's entries in **another bond**, are untouched; `revealed_at` survives;
@@ -468,12 +476,13 @@ day status is recomputed for a settled day, `author_deleted_account` is not touc
   for column except the timestamps, what a run of `DELETE /entries/{id}` leaves on a twin
   bond; the delivery is acknowledged; with the handler made to throw on the third entry,
   none is erased and the delivery is retried.
-- [ ] **Step 2: the race** — hold the bond's row lock from another connection; the
+- [x] **Step 2: the race** — hold the bond's row lock from another connection; the
   dispatcher's handler is seen blocked on it; release; it completes. **Mutation:** remove
   the bond lock; this test fails.
-- [ ] **Step 3: implement; run** `./gradlew build` (the whole build: the architecture test
-  is in `app`).
-- [ ] **Step 4: commit** `feat(gratitude): the outbox's first consumer erases withdrawn entries`.
+- [x] **Step 3: implement; run** `./gradlew build` (the whole build: the architecture test
+  is in `app`). *As built:* no report gives a count at this commit (`6de2a67`); its author
+  was cut off. The next task's build started from it and was green.
+- [x] **Step 4: commit** `feat(gratitude): the outbox's first consumer erases withdrawn entries`.
 
 ### Task 8: Smoke, the tools, and the record
 
@@ -496,14 +505,52 @@ destructive act (export is Phase 5); nothing ever removes old `outbox_events` (d
 "30 days after processing" has no meaning now delivery is per consumer); withdrawal on
 leave uses the same destructive mechanism.
 
-- [ ] **Step 1:** smoke section; run `MOYI_DB=moyi_c5a_smoke scripts/smoke.sh`; record the
+- [x] **Step 1:** smoke section; run `MOYI_DB=moyi_c5a_smoke scripts/smoke.sh`; record the
   counts; drop the database.
-- [ ] **Step 2:** tools; run the CLI block against the jar once.
-- [ ] **Step 3:** ADR, spec, logs. `./gradlew build --rerun-tasks`; record the test count.
-- [ ] **Step 4: commit** `docs: ADR-0035 and what slice C5a makes of the spec`.
+- [x] **Step 2:** tools; run the CLI block against the jar once. *As built:* `scripts/moyi`
+  had no `leave` or `block` and `tools/bruno` no such requests; both were added. The CLI
+  was run against a jar with each flag and with none. The Bruno requests were not opened
+  in Bruno.
+- [x] **Step 3:** ADR, spec, logs. `./gradlew build --rerun-tasks`; record the test count.
+  *As built:* the build was green with 1210 tests at `5d2a889`; the report does not say
+  `--rerun-tasks`.
+- [x] **Step 4: commit** `docs: ADR-0035 and what slice C5a makes of the spec`. *As built:*
+  several commits, the ADR's own being `84d25c1`.
 
 ## After the tasks
 
 Whole-branch review by three readers (concurrency; privacy and contract; spec conformance),
 fixes test-first, then a draft pull request with the concept brief, labelled
 `breaking-api-change` if the contract check asks for it.
+
+## As built — where the slice left this plan (ADR-0035)
+
+Seven reviews of the built slice changed what this plan says. ADR-0035 is the record. Its
+decisions are numbered differently from this plan's from 8 on: plan 8 to 13 are ADR 9, 10,
+11, 12, 13 and 15, and ADR 8 and 14 are new.
+
+- The branch's base is `f5a65ba`, not `9c8eb31`.
+- Registration's wait for the table lock is bounded, and the publisher refuses any
+  isolation above READ COMMITTED (ADR decision 2). Backfilled deliveries are stamped from
+  the injected clock, not SQL `now()` (decision 3).
+- The claim matches (consumer, declared event type) pairs, not `consumer_id = ANY(?)`. The
+  handler's exception never leaves the transaction callback (decision 4). The failure
+  record is guarded by `processed_at IS NULL` and can only move the next attempt later
+  (decision 5).
+- The poller runs on a thread of its own, not the scheduler's, goes round up to ten times
+  while a pass fills its budget, and a delivery has a sixty-second limit (decision 7).
+- There are six meters, not five. The two counters carry no `consumer` tag, and the age
+  gauge is the event's age (decision 8).
+- A body that cannot be read is `400 MALFORMED_REQUEST`, not `422`, and the body is read
+  strictly: an unknown key or a repeated one is refused (decision 11).
+- The contract's diff was not "two optional request bodies, nothing else": the generator
+  added `400` and `422` to both routes, and the `409` on `DELETE /entries/{entryId}` was
+  later removed.
+- The log lines did change. A leave and a block now write one line (decision 11).
+- The marker is also on `BondClosingView`; this plan's decision 9 put it on the membership
+  only (ADR decisions 10 and 14).
+- This plan's decision 12, "the same rows", is narrower: the same entry rows and the same
+  answers (ADR decision 13). The consumer requires the marker and fails without it.
+- New, and in no task here: whoever reaches a day first erases (`EraseWithdrawnEntries`,
+  ADR decision 14). It was built as a second part of Task 7.
+- Thirteen decisions became fifteen, and the seventh task was built in two parts.
