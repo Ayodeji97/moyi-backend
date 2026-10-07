@@ -16,6 +16,11 @@ import java.time.LocalTime
  * lock before reading the aggregate. `CloseDay` uses this same transition
  * without taking the bond lock; the closer owns when to sweep, never a second
  * reveal rule.
+ *
+ * **On a bond that has ended, the caller has first erased what was
+ * withdrawn** ([EraseWithdrawnEntries]) and hands this the day as that left
+ * it. This asks only the day and its rows, and neither knows that a
+ * withdrawal is waiting for its erasure.
  */
 @Service
 internal class RevealDay(

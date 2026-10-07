@@ -24,6 +24,7 @@ internal class ReconcileJoiningDay(
     private val access: BondAccess,
     private val days: BondDayStore,
     private val reveal: RevealDay,
+    private val withdrawals: EraseWithdrawnEntries,
     private val transactions: TransactionTemplate,
     private val clock: Clock,
 ) {
@@ -47,7 +48,11 @@ internal class ReconcileJoiningDay(
         }
     }
 
-    /** Writers call in chronological day order, after taking the bond lock. */
+    /**
+     * Writers call in chronological day order, after taking the bond lock.
+     * [membership] is the one read under that lock: what it says was
+     * withdrawn is what is erased here first ([EraseWithdrawnEntries]).
+     */
     fun underBondLock(
         membership: BondMembership,
         now: Instant,
@@ -57,7 +62,9 @@ internal class ReconcileJoiningDay(
             days
                 .findByBondAndDate(membership.bondId, joining.date)
                 ?.takeIf { it.status == BondDayStatus.SUSPENDED && it.closedAt == null } ?: return
-        val locked = days.lockAndFind(initial.id)
+        // An entry its author withdrew is erased before the day resumes: with
+        // both entries still counted, resuming it would reveal them.
+        val locked = withdrawals.on(days.lockAndFind(initial.id), membership.withdrawnMemberIds, now)
         val resumed = locked.extendedTo(joining).resumeJoiningDay(membership.activeSince)
         if (resumed != locked) reveal.apply(resumed, membership.revealTimeLocal, now)
     }
