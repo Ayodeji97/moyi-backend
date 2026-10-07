@@ -23,4 +23,13 @@ internal object Backoff {
         val doublings = (attempts.coerceAtLeast(1) - 1).coerceAtMost(DOUBLINGS_TO_CAP)
         return minOf(CAP, FIRST.multipliedBy(1L shl doublings))
     }
+
+    /**
+     * The same schedule as a list: the wait after the first failure, the
+     * second, and so on up to the first that reaches the cap. Every failure
+     * past the end waits as long as the last entry. It exists so that the
+     * statement recording a failure can pick the wait from the count it finds
+     * in the row, without the doubling being written a second time in SQL.
+     */
+    fun steps(): List<Duration> = (1..DOUBLINGS_TO_CAP + 1).map(::delayAfter)
 }

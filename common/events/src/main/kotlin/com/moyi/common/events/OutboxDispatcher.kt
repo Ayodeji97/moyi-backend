@@ -8,7 +8,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.core.type.TypeReference
 import tools.jackson.databind.ObjectMapper
-import java.lang.reflect.UndeclaredThrowableException
 import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
@@ -85,11 +84,20 @@ data class ConsumerBacklog(
  * because the rollback that undoes the handler's work would undo the record
  * too. Until that statement lands the delivery is unlocked and still due, so
  * another dispatcher may try it once more first: at least once, never exactly.
+ * The record is written to survive that: it touches only a delivery nobody has
+ * acknowledged since, it counts from the attempts it finds in the row and not
+ * from what this dispatcher read, and it can move the next attempt later but
+ * never earlier.
  *
  * **What an exception says never leaves it.** A handler works on entries, and
  * an exception raised while doing so may quote one. So `last_error` and the
  * log line carry the exception's class name and nothing else: no message, and
  * no throwable handed to the logger, whose stack trace would print the message.
+ * For the same reason the handler's exception never leaves the transaction's
+ * callback: Spring's `TransactionTemplate` logs an exception that passes
+ * through it, whole, at DEBUG on every rollback and at ERROR when the rollback
+ * itself fails. It is caught inside, the transaction is marked for rollback,
+ * and the exception is carried out as a value Spring never sees.
  *
  * The clock is the caller's: every instant written or compared here is the
  * `now` handed in, which is what lets a test move time and a poller meter it.
@@ -130,10 +138,13 @@ internal class JdbcOutboxDispatcher(
         var failed = 0
         var drained = false
         // Failures count towards the budget, which is what ends a run in which everything fails.
+        // A delivery acknowledged elsewhere counts as neither: it was delivered, but not by this
+        // run. It cannot be claimed again, so passing over it uncounted still ends the loop.
         while (!drained && delivered + failed < budget) {
             when (deliverOne(run)) {
                 Outcome.DELIVERED -> delivered++
                 Outcome.FAILED -> failed++
+                Outcome.ACKNOWLEDGED_ELSEWHERE -> Unit
                 Outcome.NOTHING_DUE -> drained = true
             }
         }
@@ -144,38 +155,59 @@ internal class JdbcOutboxDispatcher(
     }
 
     /**
-     * Catches `Throwable`, on purpose. A delivery whose handler throws anything
-     * at all has been rolled back (`TransactionTemplate` rolls back on every
-     * throwable, checked ones and `Error`s included) and must step aside with a
-     * later `next_attempt_at`; left as it was, it would be the first row claimed
-     * by every run from then on, and nothing behind it would ever be delivered.
+     * Catches `Throwable`, twice, on purpose.
+     *
+     * **Inside the callback**, whatever the handler throws (or the reading of
+     * the payload, or the acknowledgement) is kept, the transaction is marked
+     * rollback-only, and the callback returns normally. A delivery whose
+     * handler throws anything at all must be rolled back and must step aside
+     * with a later `next_attempt_at`; left as it was, it would be the first
+     * row claimed by every run from then on, and nothing behind it would ever
+     * be delivered. And it is kept in here, not allowed out through the
+     * template, so that no logger of Spring's is ever handed it.
+     *
+     * **Outside**, what is caught is the transaction machinery's own: the
+     * claim could not be made, or the commit or the rollback failed. With
+     * nothing claimed there is no delivery to blame, and that is the caller's
+     * to hear about. With a claim, the delivery failed: for the handler's
+     * reason if it had one (a rollback that then failed too changes nothing
+     * about why), and otherwise for the commit's.
      */
     @Suppress("TooGenericExceptionCaught")
     private fun deliverOne(run: Run): Outcome {
         var claimed: Claim? = null
-        try {
-            return transactions.execute {
-                val claim = claim(run) ?: return@execute Outcome.NOTHING_DUE
-                claimed = claim
-                // Read only now, with the claim known: an unreadable payload is
-                // this delivery's failure, to be recorded, not the run's.
-                val consumer = checkNotNull(registry.consumer(claim.consumerId)) { "Claimed a delivery for a consumer this process lacks." }
-                consumer.handle(claim.toEvent())
-                acknowledge(claim, run)
-                Outcome.DELIVERED
+        var handlerFailure: Throwable? = null
+        val failure: Throwable =
+            try {
+                val outcome =
+                    transactions.execute { status ->
+                        val claim = claim(run) ?: return@execute Outcome.NOTHING_DUE
+                        claimed = claim
+                        try {
+                            // Read only now, with the claim known: an unreadable payload is
+                            // this delivery's failure, to be recorded, not the run's.
+                            val consumer = registry.consumer(claim.consumerId)
+                            checkNotNull(consumer) { "Claimed a delivery for a consumer this process lacks." }
+                            consumer.handle(claim.toEvent())
+                            acknowledge(claim, run)
+                            Outcome.DELIVERED
+                        } catch (thrown: Throwable) {
+                            handlerFailure = thrown
+                            status.setRollbackOnly()
+                            Outcome.FAILED
+                        }
+                    }
+                handlerFailure ?: return outcome
+            } catch (thrown: Throwable) {
+                handlerFailure ?: thrown
             }
-        } catch (thrown: Throwable) {
-            // Nothing was claimed, so there is no delivery to blame: the
-            // database could not be asked. That is the caller's to hear about.
-            val claim = claimed ?: throw thrown
-            // A checked exception comes out of the transaction wrapped; the handler's own is the one to name.
-            val failure = (thrown as? UndeclaredThrowableException)?.undeclaredThrowable ?: thrown
-            if (!recordFailure(claim, failure, run)) run.setAside += claim
-            // Recorded first, so the delivery backs off; then let go, because
-            // a process out of memory or stack should not be told all is well.
-            if (failure is VirtualMachineError) throw failure
-            return Outcome.FAILED
-        }
+        val claim = claimed ?: throw failure
+        val recorded = recordFailure(claim, failure, run)
+        if (recorded == Recorded.NO) run.setAside += claim
+        // Recorded first, so the delivery backs off; then let go, because
+        // a process out of memory or stack should not be told all is well.
+        if (failure is VirtualMachineError) throw failure
+        return if (recorded == Recorded.ALREADY_ACKNOWLEDGED) Outcome.ACKNOWLEDGED_ELSEWHERE else Outcome.FAILED
     }
 
     private fun claim(run: Run): Claim? =
@@ -229,57 +261,92 @@ internal class JdbcOutboxDispatcher(
     }
 
     /**
-     * One statement outside any transaction, so a transaction of its own. It
-     * touches only a delivery nobody has acknowledged since: if another
-     * dispatcher got there in the gap, or the first transaction's commit did
-     * land after all, there is no failure left to record.
+     * One statement outside any transaction, so a transaction of its own, and
+     * written for the company it may have: between the rollback and this
+     * statement the delivery was unlocked and due, and another dispatcher may
+     * have tried it too.
      *
-     * Answers whether the record was made. When it was not, the delivery is
-     * exactly as it was (still due, nothing lost) and the caller keeps it out
-     * of the rest of this run, or the run would spend its whole budget on it.
+     * - **`AND processed_at IS NULL`.** If the other dispatcher succeeded, or
+     *   this one's own commit landed before it reported failing, the delivery
+     *   is acknowledged and there is no failure left to record. Nothing is
+     *   written, and the caller is told so.
+     * - **The wait is chosen by the count in the row**, `attempts + 1` as the
+     *   statement finds it, not by what this dispatcher read when it claimed.
+     *   Two dispatchers that both read zero are the first and second failure,
+     *   and the second waits the second step. The steps are [Backoff]'s, handed
+     *   in as a list so that the doubling is written once.
+     * - **`greatest`.** Whoever writes last cannot bring the next attempt
+     *   forward of what is already there.
+     *
+     * When the record cannot be made at all, the delivery is exactly as it was
+     * (still due, nothing lost) and the caller keeps it out of the rest of this
+     * run, or the run would spend its whole budget on it.
      */
     @Suppress("TooGenericExceptionCaught")
     private fun recordFailure(
         claim: Claim,
         failure: Throwable,
         run: Run,
-    ): Boolean {
-        val attempts = claim.attempts + 1
+    ): Recorded {
         val errorClass = failure.javaClass.name
-        try {
-            jdbc.update(
-                """
-                UPDATE outbox_deliveries SET attempts = attempts + 1, next_attempt_at = ?, last_error = ?
-                WHERE event_id = ? AND consumer_id = ? AND processed_at IS NULL
-                """.trimIndent(),
-                Timestamp.from(run.now.plus(Backoff.delayAfter(attempts))),
-                errorClass,
-                claim.eventId,
+        val attempts =
+            try {
+                jdbc
+                    .query(
+                        """
+                        UPDATE outbox_deliveries AS d
+                        SET attempts = d.attempts + 1,
+                            next_attempt_at = greatest(
+                                d.next_attempt_at,
+                                ?::timestamptz
+                                    + backoff.seconds[least(d.attempts + 1, cardinality(backoff.seconds))] * interval '1 second'
+                            ),
+                            last_error = ?
+                        FROM (SELECT ?::bigint[] AS seconds) AS backoff
+                        WHERE d.event_id = ? AND d.consumer_id = ? AND d.processed_at IS NULL
+                        RETURNING d.attempts
+                        """.trimIndent(),
+                        { row, _ -> row.getInt("attempts") },
+                        Timestamp.from(run.now),
+                        errorClass,
+                        BACKOFF_SECONDS,
+                        claim.eventId,
+                        claim.consumerId,
+                    ).firstOrNull()
+            } catch (recording: Exception) {
+                // The class names only, here too: a driver's message may quote the statement's values.
+                log.warn(
+                    "Outbox delivery failed and the failure could not be recorded; it stays due: " +
+                        "consumer={} event={} type={} error={} recording={}",
+                    claim.consumerId,
+                    claim.eventId,
+                    claim.eventType,
+                    errorClass,
+                    recording.javaClass.name,
+                )
+                return Recorded.NO
+            }
+        if (attempts == null) {
+            // Not a failure that will be retried, and not said to be one: the delivery is done.
+            log.info(
+                "Outbox delivery failed here but was acknowledged before that could be recorded; nothing is owed: " +
+                    "consumer={} event={} type={} error={}",
                 claim.consumerId,
+                claim.eventId,
+                claim.eventType,
+                errorClass,
             )
-        } catch (recording: Exception) {
-            // The class names only, here too: a driver's message may quote the statement's values.
+        } else {
             log.warn(
-                "Outbox delivery failed and the failure could not be recorded; it stays due: " +
-                    "consumer={} event={} type={} attempts={} error={} recording={}",
+                "Outbox delivery failed and will be retried: consumer={} event={} type={} attempts={} error={}",
                 claim.consumerId,
                 claim.eventId,
                 claim.eventType,
                 attempts,
                 errorClass,
-                recording.javaClass.name,
             )
-            return false
         }
-        log.warn(
-            "Outbox delivery failed and will be retried: consumer={} event={} type={} attempts={} error={}",
-            claim.consumerId,
-            claim.eventId,
-            claim.eventType,
-            attempts,
-            errorClass,
-        )
-        return true
+        return if (attempts == null) Recorded.ALREADY_ACKNOWLEDGED else Recorded.YES
     }
 
     /**
@@ -361,7 +428,10 @@ internal class JdbcOutboxDispatcher(
         fun toEvent() = ReceivedEvent(eventId, aggregateType, aggregateId, eventType, mapper.readValue(payload, REFERENCES), occurredAt)
     }
 
-    private enum class Outcome { DELIVERED, FAILED, NOTHING_DUE }
+    private enum class Outcome { DELIVERED, FAILED, ACKNOWLEDGED_ELSEWHERE, NOTHING_DUE }
+
+    /** What became of the attempt to record a failure. */
+    private enum class Recorded { YES, NO, ALREADY_ACKNOWLEDGED }
 
     private companion object {
         /** Decision 5: a delivery that has failed this many times is counted apart. */
@@ -381,5 +451,8 @@ internal class JdbcOutboxDispatcher(
             "EXISTS (SELECT 1 FROM unnest(?::text[], ?::text[]) AS ours (consumer_id, event_type) " +
                 "WHERE ours.consumer_id = d.consumer_id AND ours.event_type = e.event_type)"
         val REFERENCES = object : TypeReference<Map<String, UUID>>() {}
+
+        /** [Backoff]'s schedule in seconds, as the failure record reads it: entry n is the wait after the nth failure. */
+        val BACKOFF_SECONDS: Array<Long> = Backoff.steps().map { it.seconds }.toTypedArray()
     }
 }

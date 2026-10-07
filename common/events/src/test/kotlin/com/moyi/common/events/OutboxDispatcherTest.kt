@@ -24,6 +24,9 @@ import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.TransactionStatus
+import org.springframework.transaction.TransactionSystemException
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 import java.io.IOException
@@ -191,7 +194,9 @@ internal class OutboxDispatcherTest(
         val failing = TestConsumer(id = FAILING) { throw IllegalStateException(ENTRY_LIKE) }
         val healthy = TestConsumer()
         val dispatcher = dispatcherFor(failing, healthy)
-        // The failing consumer's delivery sorts first: same instant, and it is claimed by (time, event, consumer).
+        // Claimed by (time, event, consumer), and the healthy consumer's id sorts first: so the order is
+        // first/healthy, first/failing, second/healthy, second/failing. The first event's failure is
+        // followed by both deliveries of the second, and that is the stepping aside.
         val first = publish()
         val second = publish(at = now.plusMillis(1))
 
@@ -474,6 +479,119 @@ internal class OutboxDispatcherTest(
     }
 
     @Test
+    fun `nothing a handler's exception says reaches any log, at any level, even when the rollback fails too`() {
+        // Everything this JVM logs while the dispatcher runs, with the transaction
+        // and JDBC machinery at DEBUG: Spring's own TransactionTemplate logs an
+        // "application exception" whole, message and causes, at DEBUG on every
+        // rollback and at ERROR when the rollback itself throws. So the handler's
+        // exception must never be Spring's to hold.
+        val everything = ListAppender<ILoggingEvent>().also { it.start() }
+        val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
+        val chatty = listOf("org.springframework.transaction", "org.springframework.jdbc").map { LoggerFactory.getLogger(it) as Logger }
+        val levels = chatty.map { it.level }
+        root.addAppender(everything)
+        chatty.forEach { it.level = Level.DEBUG }
+        val (first, second) =
+            try {
+                val quoting = TestConsumer { throw IllegalStateException(ENTRY_LIKE, RuntimeException(NESTED_ENTRY_LIKE)) }
+                val registry = registered(quoting)
+                val first = publish()
+                JdbcOutboxDispatcher(registry, jdbc, manager, mapper).dispatchDue(now, 10) shouldBe DispatchResult(0, 1, false)
+
+                // The connection drops mid-handler: the likeliest reason a handler fails at all.
+                val second = publish(at = now.plusMillis(1))
+                val later = now.plusMillis(1)
+                JdbcOutboxDispatcher(registry, jdbc, RollbackThatFails(manager), mapper).dispatchDue(later, 10) shouldBe
+                    DispatchResult(0, 1, false)
+
+                first to second
+            } finally {
+                chatty.zip(levels).forEach { (logger, level) -> logger.level = level }
+                root.detachAppender(everything)
+            }
+
+        // The leak first, so that a failure here names the line that carried it.
+        everything.list.filter { said(it).contains(ENTRY_LIKE) || said(it).contains(NESTED_ENTRY_LIKE) }.map {
+            "${it.level} ${it.loggerName}: ${it.formattedMessage.take(60)}"
+        } shouldBe emptyList()
+        // And not vacuous: the machinery was heard at DEBUG, and it spoke of both rollbacks.
+        everything.list.count { it.level == Level.DEBUG && it.formattedMessage == "Transactional code has requested rollback" } shouldBe 2
+
+        // And the failure is recorded all the same, as the handler's own, both times.
+        delivery(first).lastError shouldBe "java.lang.IllegalStateException"
+        delivery(second).lastError shouldBe "java.lang.IllegalStateException"
+        delivery(second).attempts shouldBe 1
+    }
+
+    @Test
+    fun `a failure is not recorded over an acknowledgement that landed first, and is not called a failure`() {
+        // Between a handler's rollback and the record of its failure the delivery
+        // is unlocked and due. Here another instance takes it in that gap and
+        // succeeds. The record must then leave the row exactly as acknowledged,
+        // and the first run must not report a failure that will be retried.
+        var calls = 0
+        val consumer = TestConsumer { if (calls++ == 0) throw IllegalStateException(ENTRY_LIKE) }
+        val registry = registered(consumer)
+        val other = JdbcOutboxDispatcher(registry, jdbc, manager, mapper)
+        var inTheGap: DispatchResult? = null
+        val gap = InTheGap(dataSource, before = "last_error = ?") { inTheGap = other.dispatchDue(now.plusSeconds(1), 10) }
+        val event = publish()
+
+        val result = JdbcOutboxDispatcher(registry, gap, manager, mapper).dispatchDue(now, 10)
+
+        // The row first: this is what the guard on the record protects.
+        inTheGap shouldBe DispatchResult(delivered = 1, failed = 0, more = false)
+        consumer.received shouldHaveSize 2
+        val acknowledged = delivery(event)
+        acknowledged.processedAt shouldBe now.plusSeconds(1)
+        acknowledged.attempts shouldBe 1
+        acknowledged.lastError.shouldBeNull()
+        acknowledged.nextAttemptAt shouldBe now
+        // Then what the run says of it: a record that changed nothing is not a failure to be retried.
+        result shouldBe DispatchResult(delivered = 0, failed = 0, more = false)
+        appender.list.filter { it.level == Level.WARN }.shouldBeEmpty()
+        val said = appender.list.single()
+        said.level shouldBe Level.INFO
+        said.formattedMessage shouldContain event.toString()
+        said.formattedMessage shouldContain "java.lang.IllegalStateException"
+        said.formattedMessage shouldNotContain "retried"
+        said.formattedMessage shouldNotContain ENTRY_LIKE
+        said.throwableProxy.shouldBeNull()
+    }
+
+    @Test
+    fun `two instances failing one delivery count both failures, and the later record cannot shorten the wait`() {
+        // Each instance read `attempts = 0` when it claimed. Were the wait worked
+        // out from what each had read, both would write the first step, and the
+        // one that wrote last would decide when the delivery is next due.
+        val consumer = TestConsumer { throw IllegalStateException(ENTRY_LIKE) }
+        val registry = registered(consumer)
+        val other = JdbcOutboxDispatcher(registry, jdbc, manager, mapper)
+
+        // The other instance fails it half a second later and records first. This one's record is then
+        // the second failure: the second step, four seconds, from this one's own `now`.
+        val soon = publish()
+        val closeBehind = InTheGap(dataSource, before = "last_error = ?") { other.dispatchDue(now.plusMillis(500), 10) }
+        JdbcOutboxDispatcher(registry, closeBehind, manager, mapper).dispatchDue(now, 10) shouldBe DispatchResult(0, 1, false)
+        delivery(soon).attempts shouldBe 2
+        delivery(soon).nextAttemptAt shouldBe now.plusSeconds(4)
+        // Each line reports the count its own record left in the row.
+        appender.list
+            .map { it.formattedMessage }
+            .filter { it.contains(soon.toString()) }
+            .map { it.substringAfter("attempts=").take(1) } shouldBe listOf("1", "2")
+
+        // The other instance's clock is a minute ahead, so what it wrote is later than anything this
+        // one would write. Writing last must not bring the delivery forward.
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries")
+        val late = publish()
+        val farAhead = InTheGap(dataSource, before = "last_error = ?") { other.dispatchDue(now.plusSeconds(60), 10) }
+        JdbcOutboxDispatcher(registry, farAhead, manager, mapper).dispatchDue(now, 10) shouldBe DispatchResult(0, 1, false)
+        delivery(late).attempts shouldBe 2
+        delivery(late).nextAttemptAt shouldBe now.plusSeconds(62)
+    }
+
+    @Test
     fun `two dispatchers at once hand one delivery to its handler once`() {
         // The first dispatcher is held inside the handler, so it holds the
         // delivery's row lock. The second must skip that row and come back
@@ -582,6 +700,69 @@ internal class OutboxDispatcherTest(
         }
     }
 
+    /** Everything one log event would print: its message, and its throwable's class, message and causes. */
+    private fun said(event: ILoggingEvent): String =
+        event.formattedMessage + generateSequence(event.throwableProxy) { it.cause }.joinToString { " ${it.className}: ${it.message}" }
+
+    /**
+     * A transaction manager on which undoing a transaction succeeds and then
+     * reports that it did not: the connection lost as the rollback was sent.
+     * A template rolls back either by `rollback` or, for a transaction marked
+     * rollback-only, by `commit`; both are covered.
+     */
+    private class RollbackThatFails(
+        private val real: PlatformTransactionManager,
+    ) : PlatformTransactionManager {
+        override fun getTransaction(definition: TransactionDefinition?): TransactionStatus = real.getTransaction(definition)
+
+        override fun commit(status: TransactionStatus) {
+            val undoing = status.isRollbackOnly
+            real.commit(status)
+            if (undoing) throw TransactionSystemException("connection reset during rollback")
+        }
+
+        override fun rollback(status: TransactionStatus) {
+            real.rollback(status)
+            throw TransactionSystemException("connection reset during rollback")
+        }
+    }
+
+    /**
+     * A [JdbcTemplate] on the same data source that runs [action] once, just
+     * before the first statement containing [before]: something else getting
+     * in between two particular statements, with no sleep and no luck.
+     */
+    private class InTheGap(
+        dataSource: DataSource,
+        private val before: String,
+        private val action: () -> Unit,
+    ) : JdbcTemplate(dataSource) {
+        private var done = false
+
+        override fun update(
+            sql: String,
+            vararg args: Any?,
+        ): Int {
+            intervene(sql)
+            return super.update(sql, *args)
+        }
+
+        override fun <T : Any?> query(
+            sql: String,
+            rowMapper: RowMapper<T>,
+            vararg args: Any?,
+        ): List<T> {
+            intervene(sql)
+            return super.query(sql, rowMapper, *args)
+        }
+
+        private fun intervene(sql: String) {
+            if (done || !sql.contains(before)) return
+            done = true
+            action()
+        }
+    }
+
     /**
      * A [JdbcTemplate] on the same data source (so the same transactions) that
      * refuses any statement containing [failOn]: the database going away between
@@ -623,6 +804,7 @@ internal class OutboxDispatcherTest(
         const val FAILING = "test.dispatcher.failing"
         const val ELSEWHERE = "test.dispatcher.elsewhere"
         const val ENTRY_LIKE = "Thank you for the tea this morning"
+        const val NESTED_ENTRY_LIKE = "and for walking home with me"
         const val WAIT_SECONDS = 10L
     }
 }

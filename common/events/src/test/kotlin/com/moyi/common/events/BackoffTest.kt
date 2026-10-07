@@ -33,4 +33,16 @@ internal class BackoffTest {
         Backoff.delayAfter(0) shouldBe Duration.ofSeconds(2)
         Backoff.delayAfter(Int.MIN_VALUE) shouldBe Duration.ofSeconds(2)
     }
+
+    @Test
+    fun `the schedule handed to the database is this one, step for step, and ends on the cap`() {
+        val steps = Backoff.steps()
+
+        steps.forEachIndexed { index, step -> step shouldBe Backoff.delayAfter(index + 1) }
+        steps.first() shouldBe Duration.ofSeconds(2)
+        steps.last() shouldBe Duration.ofMinutes(15)
+        // Every failure past the end of the list waits as long as its last entry, which is how the list is read.
+        Backoff.delayAfter(steps.size + 1) shouldBe steps.last()
+        steps.dropLast(1).forEach { (it < Duration.ofMinutes(15)) shouldBe true }
+    }
 }
