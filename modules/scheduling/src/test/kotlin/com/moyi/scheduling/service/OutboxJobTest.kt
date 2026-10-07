@@ -18,11 +18,13 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -40,13 +42,20 @@ import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The poller, not the delivering: that a tick drains what is due, that its
  * meters say what the queue holds, and that nothing a tick meets can stop the
  * next one. `common:events`' own tests hold what a delivery is.
  *
- * The timer is off here, as it is for the close job; each test calls the job.
+ * The timer is off here, as it is for the close job; each test calls the job,
+ * and calls the tick itself ([OutboxJob.dispatchOnce]) so that it is over when
+ * the call returns. What the timer calls only hands a tick over; the tests of
+ * that say so, and [PollerIndependenceTest] runs the timer for real.
  * The first tests go through the bean Spring made, against the real outbox and
  * a consumer this context registered at start-up; the rest hand the job a
  * dispatcher that answers what the test tells it to, for the things a real one
@@ -95,7 +104,7 @@ internal class OutboxJobTest(
         val failed = count(OutboxJob.FAILED)
         val event = publish()
 
-        job.run()
+        job.dispatchOnce()
 
         consumer.received.map { it.aggregateId } shouldContainExactly listOf(event)
         count(OutboxJob.DELIVERED) - delivered shouldBe 1.0
@@ -109,7 +118,7 @@ internal class OutboxJobTest(
         consumer.next = { throw IllegalStateException(ENTRY_LIKE) }
         publish()
 
-        job.run()
+        job.dispatchOnce()
 
         consumer.received shouldHaveSize 1
         count(OutboxJob.DELIVERED) - delivered shouldBe 0.0
@@ -126,7 +135,7 @@ internal class OutboxJobTest(
         gauge(OutboxJob.PENDING) shouldBe 2.0
         gauge(OutboxJob.AGE) shouldBe 120.0
 
-        job.run()
+        job.dispatchOnce()
         gauge(OutboxJob.PENDING) shouldBe 0.0
         gauge(OutboxJob.AGE) shouldBe 0.0
 
@@ -146,7 +155,7 @@ internal class OutboxJobTest(
             RecordingConsumer.ID,
         )
 
-        job.run()
+        job.dispatchOnce()
 
         consumer.received.shouldBeEmpty()
         gauge(OutboxJob.FAILING) shouldBe 1.0
@@ -168,7 +177,7 @@ internal class OutboxJobTest(
         thrown.forEach { failure ->
             val away = Scripted(dispatch = { throw failure })
 
-            OutboxJob(away, clock, registry).run()
+            OutboxJob(away, clock, registry).dispatchOnce()
 
             away.dispatched shouldHaveSize 1
         }
@@ -190,7 +199,7 @@ internal class OutboxJobTest(
         val registry = SimpleMeterRegistry()
         val halfAway = Scripted(dispatch = { DispatchResult(delivered = 3, failed = 1, more = false) }, backlog = { error(ENTRY_LIKE) })
 
-        OutboxJob(halfAway, clock, registry).run()
+        OutboxJob(halfAway, clock, registry).dispatchOnce()
 
         registry.get(OutboxJob.DELIVERED).counter().count() shouldBe 3.0
         registry.get(OutboxJob.FAILED).counter().count() shouldBe 1.0
@@ -210,7 +219,7 @@ internal class OutboxJobTest(
                 DispatchResult(delivered = OutboxJob.BUDGET, failed = 0, more = pass < 3)
             })
 
-        OutboxJob(busy, clock, registry).run()
+        OutboxJob(busy, clock, registry).dispatchOnce()
 
         busy.dispatched shouldContainExactly
             listOf(now to OutboxJob.BUDGET, now.plusSeconds(1) to OutboxJob.BUDGET, now.plusSeconds(2) to OutboxJob.BUDGET)
@@ -220,17 +229,222 @@ internal class OutboxJobTest(
     }
 
     @Test
-    fun `a dispatcher that always says more is waiting still lets the tick end`() {
-        // It can: `more` stays true for as long as a failure cannot be recorded,
-        // and a tick that never ended would be a thread spinning on one delivery.
+    fun `a dispatcher whose every pass fills its budget still lets the tick end, and the tick says more is waiting`() {
+        // A tick that looped for as long as there was more would never pause, and a
+        // queue fed faster than it drains would hold the poller's thread for good.
         val registry = SimpleMeterRegistry()
-        val endless = Scripted(dispatch = { DispatchResult(delivered = 0, failed = 1, more = true) })
+        val endless = Scripted(dispatch = { DispatchResult(delivered = OutboxJob.BUDGET - 1, failed = 1, more = true) })
 
-        OutboxJob(endless, clock, registry).run()
+        OutboxJob(endless, clock, registry).dispatchOnce()
 
         endless.dispatched shouldHaveSize OutboxJob.MAX_PASSES
         registry.get(OutboxJob.FAILED).counter().count() shouldBe OutboxJob.MAX_PASSES.toDouble()
         endless.backlogsAsked shouldBe 1
+        // A backlog is something to be told about, as the close job's is.
+        val said = appender.list.single()
+        said.level shouldBe Level.WARN
+        said.formattedMessage shouldContain "more is waiting after ${OutboxJob.MAX_PASSES} passes"
+        said.formattedMessage shouldContain "delivered ${(OutboxJob.BUDGET - 1) * OutboxJob.MAX_PASSES}"
+        said.formattedMessage shouldContain "failed ${OutboxJob.MAX_PASSES}"
+    }
+
+    @Test
+    fun `a pass that ended short of its budget is not followed by another, though more is waiting`() {
+        // What a failure that cannot be recorded looks like from here: the pass
+        // set its delivery aside and stopped with nothing else to do, and the
+        // delivery is still due. Going round again would run that handler again,
+        // ten times a tick, with no backoff, and deliver nothing.
+        val registry = SimpleMeterRegistry()
+        val unrecordable = Scripted(dispatch = { DispatchResult(delivered = 0, failed = 1, more = true) })
+
+        OutboxJob(unrecordable, clock, registry).dispatchOnce()
+
+        unrecordable.dispatched shouldHaveSize 1
+        registry.get(OutboxJob.FAILED).counter().count() shouldBe 1.0
+        // Still said: it is waiting, and the next tick is two seconds off.
+        appender.list.single().formattedMessage shouldContain "more is waiting after 1 passes"
+    }
+
+    @Test
+    fun `what a pass delivered is counted before the next pass begins, so a pass that throws loses nothing`() {
+        val registry = SimpleMeterRegistry()
+        var countedWhenTheSecondPassBegan: Double? = null
+        val failsOnTheSecondPass =
+            Scripted(dispatch = { pass ->
+                if (pass == 2) {
+                    countedWhenTheSecondPassBegan = registry.get(OutboxJob.DELIVERED).counter().count()
+                    error(ENTRY_LIKE)
+                }
+                DispatchResult(delivered = OutboxJob.BUDGET - 2, failed = 2, more = true)
+            })
+
+        OutboxJob(failsOnTheSecondPass, clock, registry).dispatchOnce()
+
+        failsOnTheSecondPass.dispatched shouldHaveSize 2
+        countedWhenTheSecondPassBegan shouldBe (OutboxJob.BUDGET - 2).toDouble()
+        registry.get(OutboxJob.DELIVERED).counter().count() shouldBe (OutboxJob.BUDGET - 2).toDouble()
+        registry.get(OutboxJob.FAILED).counter().count() shouldBe 2.0
+    }
+
+    @Test
+    fun `the gauges say what the queue holds after a tick that threw, tick after tick`() {
+        // The poller is stuck exactly when its dispatcher throws every time, and
+        // that is when the gauges are read by whoever was paged. Set only by a
+        // tick that finished, they would show the last quiet moment for ever.
+        val registry = SimpleMeterRegistry()
+        var dispatch: () -> DispatchResult = { DispatchResult(0, 0, false) }
+        var backlog = listOf(ConsumerBacklog("test.scheduling.first", pending = 0, failing = 0, oldestAgeSeconds = 0))
+        val job = OutboxJob(Scripted(dispatch = { dispatch() }, backlog = { backlog }), clock, registry)
+        job.dispatchOnce()
+
+        dispatch = { error(ENTRY_LIKE) }
+        backlog =
+            listOf(
+                ConsumerBacklog("test.scheduling.first", pending = 5_000, failing = 40, oldestAgeSeconds = 86_400),
+                // First seen only once the trouble had begun.
+                ConsumerBacklog("test.scheduling.second", pending = 7, failing = 0, oldestAgeSeconds = 60),
+            )
+        repeat(3) { job.dispatchOnce() }
+
+        gauge(OutboxJob.PENDING, "test.scheduling.first", registry) shouldBe 5_000.0
+        gauge(OutboxJob.FAILING, "test.scheduling.first", registry) shouldBe 40.0
+        gauge(OutboxJob.AGE, "test.scheduling.first", registry) shouldBe 86_400.0
+        gauge(OutboxJob.PENDING, "test.scheduling.second", registry) shouldBe 7.0
+        // One line a tick, the tick's own: reading the backlog afterwards added nothing and quoted nothing.
+        appender.list shouldHaveSize 3
+        appender.list.forEach {
+            it.formattedMessage shouldContain "the tick did not finish"
+            it.formattedMessage shouldNotContain ENTRY_LIKE
+        }
+    }
+
+    @Test
+    fun `the last-success meter moves with every tick whose backlog was read, and stops when it cannot be`() {
+        val registry = SimpleMeterRegistry()
+        var backlog: () -> List<ConsumerBacklog> = { listOf(ConsumerBacklog("test.scheduling.first", 3, 0, 30)) }
+        var dispatch: () -> DispatchResult = { DispatchResult(0, 0, false) }
+        val job = OutboxJob(Scripted(dispatch = { dispatch() }, backlog = { backlog() }), clock, registry)
+        // Before any tick it says so: zero is 1970, which no alert on staleness can miss.
+        lastSuccess(registry) shouldBe 0.0
+
+        job.dispatchOnce()
+        lastSuccess(registry) shouldBe now.epochSecond.toDouble()
+
+        // A tick whose dispatcher threw still read the backlog, so the gauges are true and this says they are.
+        clock.advance(Duration.ofSeconds(2))
+        dispatch = { error(ENTRY_LIKE) }
+        job.dispatchOnce()
+        lastSuccess(registry) shouldBe now.plusSeconds(2).epochSecond.toDouble()
+
+        // The backlog cannot be read: the gauges keep what they had, and only this meter shows that they are old.
+        clock.advance(Duration.ofSeconds(2))
+        dispatch = { DispatchResult(0, 0, false) }
+        backlog = { error(ENTRY_LIKE) }
+        appender.list.clear()
+        job.dispatchOnce()
+
+        lastSuccess(registry) shouldBe now.plusSeconds(2).epochSecond.toDouble()
+        gauge(OutboxJob.PENDING, "test.scheduling.first", registry) shouldBe 3.0
+        val said = appender.list.single()
+        said.level shouldBe Level.WARN
+        said.formattedMessage shouldContain "the backlog could not be read"
+        said.formattedMessage shouldContain "java.lang.IllegalStateException"
+        said.formattedMessage shouldNotContain ENTRY_LIKE
+        said.throwableProxy.shouldBeNull()
+
+        // Readable again, and it catches up.
+        clock.advance(Duration.ofSeconds(2))
+        backlog = { emptyList() }
+        job.dispatchOnce()
+        lastSuccess(registry) shouldBe now.plusSeconds(6).epochSecond.toDouble()
+    }
+
+    @Test
+    fun `the timer's call hands the tick to the job's own thread and returns, and skips while that tick is running`() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val threads = CopyOnWriteArrayList<Thread>()
+        val held =
+            Scripted(dispatch = { pass ->
+                threads += Thread.currentThread()
+                if (pass == 1) {
+                    entered.countDown()
+                    check(release.await(WAIT_SECONDS, TimeUnit.SECONDS)) { "the test never released the tick" }
+                }
+                DispatchResult(0, 0, false)
+            })
+        val job = OutboxJob(held, clock, SimpleMeterRegistry())
+        try {
+            // Returns although the tick it started cannot: were the tick run here, this line would not be passed.
+            job.run()
+            entered.await(WAIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+            threads.single() shouldNotBe Thread.currentThread()
+            threads.single().name shouldBe OutboxJob.WORKER_THREAD
+
+            // Ticks that fall due meanwhile are dropped, not queued behind it; and it is said once, not every two seconds.
+            repeat(3) { job.run() }
+            held.dispatched shouldHaveSize 1
+            appender.list.map { it.level to it.formattedMessage } shouldContainExactly
+                listOf(Level.WARN to "outbox: the last tick is still running; none is started until it ends")
+
+            release.countDown()
+            // The tick is over when its thread says so; until then the timer's calls are still skipped.
+            await().atMost(Duration.ofSeconds(WAIT_SECONDS)).until {
+                job.run()
+                held.dispatched.size >= 2
+            }
+            threads.map { it.name }.toSet() shouldContainExactly setOf(OutboxJob.WORKER_THREAD)
+        } finally {
+            release.countDown()
+            job.destroy()
+        }
+    }
+
+    @Test
+    fun `stopping interrupts the tick in flight, waits for it to end, and starts no other`() {
+        val entered = CountDownLatch(1)
+        val never = CountDownLatch(1)
+        val worker = AtomicReference<Thread>()
+        val held =
+            Scripted(dispatch = {
+                worker.set(Thread.currentThread())
+                entered.countDown()
+                // Interruptible, as a handler waiting on the database is; the dispatcher passes the interrupt on as a failure.
+                never.await(WAIT_SECONDS, TimeUnit.SECONDS)
+                DispatchResult(delivered = OutboxJob.BUDGET, failed = 0, more = true)
+            })
+        val job = OutboxJob(held, clock, SimpleMeterRegistry())
+        job.run()
+        entered.await(WAIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+
+        job.destroy()
+
+        // Over by the time `destroy` returns: the connection pool is closed next, and the tick must not still be using it.
+        worker.get().isAlive shouldBe false
+        held.dispatched shouldHaveSize 1
+        appender.list.single().formattedMessage shouldContain "error=java.lang.InterruptedException"
+
+        // The timer may fire once more as the context goes down: nothing runs, and nothing is thrown at the scheduler.
+        job.run()
+        held.dispatched shouldHaveSize 1
+    }
+
+    @Test
+    fun `a job told to stop begins no further pass, however much is waiting`() {
+        val registry = SimpleMeterRegistry()
+        lateinit var job: OutboxJob
+        val busy =
+            Scripted(dispatch = {
+                // Told to stop while this pass was running.
+                job.destroy()
+                DispatchResult(delivered = OutboxJob.BUDGET, failed = 0, more = true)
+            })
+        job = OutboxJob(busy, clock, registry)
+
+        job.dispatchOnce()
+
+        busy.dispatched shouldHaveSize 1
+        registry.get(OutboxJob.DELIVERED).counter().count() shouldBe OutboxJob.BUDGET.toDouble()
     }
 
     @Test
@@ -243,14 +457,14 @@ internal class OutboxJobTest(
             )
         val job = OutboxJob(Scripted(backlog = { backlog }), clock, registry)
 
-        job.run()
+        job.dispatchOnce()
         gauge(OutboxJob.PENDING, "test.scheduling.first", registry) shouldBe 4.0
         gauge(OutboxJob.FAILING, "test.scheduling.first", registry) shouldBe 1.0
         gauge(OutboxJob.AGE, "test.scheduling.first", registry) shouldBe 900.0
         gauge(OutboxJob.PENDING, "test.scheduling.second", registry) shouldBe 0.0
 
         backlog = listOf(ConsumerBacklog("test.scheduling.second", pending = 2, failing = 0, oldestAgeSeconds = 5))
-        job.run()
+        job.dispatchOnce()
         gauge(OutboxJob.PENDING, "test.scheduling.first", registry) shouldBe 0.0
         gauge(OutboxJob.FAILING, "test.scheduling.first", registry) shouldBe 0.0
         gauge(OutboxJob.AGE, "test.scheduling.first", registry) shouldBe 0.0
@@ -289,6 +503,8 @@ internal class OutboxJobTest(
 
     private fun count(name: String): Double = meters.get(name).counter().count()
 
+    private fun lastSuccess(registry: MeterRegistry): Double = registry.get(OutboxJob.LAST_SUCCESS).gauge().value()
+
     private fun gauge(
         name: String,
         consumerId: String = RecordingConsumer.ID,
@@ -305,7 +521,7 @@ internal class OutboxJobTest(
         private val dispatch: (pass: Int) -> DispatchResult = { DispatchResult(0, 0, false) },
         private val backlog: () -> List<ConsumerBacklog> = { emptyList() },
     ) : OutboxDispatcher {
-        val dispatched = mutableListOf<Pair<Instant, Int>>()
+        val dispatched = CopyOnWriteArrayList<Pair<Instant, Int>>()
         var backlogsAsked = 0
 
         override fun dispatchDue(
@@ -324,5 +540,6 @@ internal class OutboxJobTest(
 
     private companion object {
         const val ENTRY_LIKE = "Thank you for the tea this morning"
+        const val WAIT_SECONDS = 10L
     }
 }

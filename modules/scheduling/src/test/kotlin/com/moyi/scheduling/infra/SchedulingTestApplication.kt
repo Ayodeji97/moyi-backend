@@ -88,7 +88,8 @@ internal class RecordingConsumer : EventConsumer {
 }
 
 internal class RecordingCloser : DayCloser {
-    val calls = mutableListOf<Pair<Instant, Int>>()
+    /** Written by whichever thread runs the job; under [com.moyi.scheduling.service.PollerIndependenceTest] that is the timer's. */
+    val calls = CopyOnWriteArrayList<Pair<Instant, Int>>()
 
     @Volatile
     var next: () -> CloseResult = { NOTHING }

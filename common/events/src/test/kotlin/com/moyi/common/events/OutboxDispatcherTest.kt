@@ -20,13 +20,18 @@ import org.junit.jupiter.api.Test
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.dao.DataAccessResourceFailureException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
+import org.springframework.jdbc.datasource.DataSourceTransactionManager
+import org.springframework.jdbc.datasource.DataSourceUtils
+import org.springframework.jdbc.datasource.SingleConnectionDataSource
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.TransactionDefinition
 import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.TransactionSystemException
+import org.springframework.transaction.TransactionTimedOutException
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.ObjectMapper
 import java.io.IOException
@@ -52,6 +57,7 @@ import javax.sql.DataSource
  * so truncating the registration tables loses nothing that would not come back.
  */
 @SpringBootTest(classes = [EventsTestApplication::class])
+@Suppress("LongParameterList") // What Spring hands the test; each is used, and there is nothing to bundle them into.
 internal class OutboxDispatcherTest(
     @Autowired private val publisher: EventPublisher,
     @Autowired private val jdbc: JdbcTemplate,
@@ -59,6 +65,7 @@ internal class OutboxDispatcherTest(
     @Autowired private val manager: PlatformTransactionManager,
     @Autowired private val mapper: ObjectMapper,
     @Autowired private val wired: OutboxDispatcher,
+    @Autowired private val bound: DeliveryProperties,
 ) : PostgresIntegrationTest() {
     private val transactions = TransactionTemplate(manager)
     private val now: Instant = Instant.parse("2026-10-06T12:00:00.123456Z")
@@ -479,29 +486,37 @@ internal class OutboxDispatcherTest(
     }
 
     @Test
-    fun `nothing a handler's exception says reaches any log, at any level, even when the rollback fails too`() {
+    fun `nothing a handler's exception says reaches any log, ours at TRACE or Spring's at DEBUG, even when the rollback fails too`() {
         // Everything this JVM logs while the dispatcher runs, with the transaction
         // and JDBC machinery at DEBUG: Spring's own TransactionTemplate logs an
         // "application exception" whole, message and causes, at DEBUG on every
         // rollback and at ERROR when the rollback itself throws. So the handler's
         // exception must never be Spring's to hold.
+        //
+        // And with everything of ours at TRACE: a `log.debug(failure.message)`
+        // in the dispatcher is silent at the default level and would be heard
+        // the day somebody turned `com.moyi` up to find a fault. What Spring
+        // says at TRACE is not claimed here; it is not the dispatcher's to keep.
         val everything = ListAppender<ILoggingEvent>().also { it.start() }
         val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
-        val chatty = listOf("org.springframework.transaction", "org.springframework.jdbc").map { LoggerFactory.getLogger(it) as Logger }
+        val ours = LoggerFactory.getLogger("com.moyi") as Logger
+        val springs = listOf("org.springframework.transaction", "org.springframework.jdbc").map { LoggerFactory.getLogger(it) as Logger }
+        val chatty = springs + ours
         val levels = chatty.map { it.level }
         root.addAppender(everything)
-        chatty.forEach { it.level = Level.DEBUG }
+        springs.forEach { it.level = Level.DEBUG }
+        ours.level = Level.TRACE
         val (first, second) =
             try {
                 val quoting = TestConsumer { throw IllegalStateException(ENTRY_LIKE, RuntimeException(NESTED_ENTRY_LIKE)) }
                 val registry = registered(quoting)
                 val first = publish()
-                JdbcOutboxDispatcher(registry, jdbc, manager, mapper).dispatchDue(now, 10) shouldBe DispatchResult(0, 1, false)
+                dispatcherOver(registry).dispatchDue(now, 10) shouldBe DispatchResult(0, 1, false)
 
                 // The connection drops mid-handler: the likeliest reason a handler fails at all.
                 val second = publish(at = now.plusMillis(1))
                 val later = now.plusMillis(1)
-                JdbcOutboxDispatcher(registry, jdbc, RollbackThatFails(manager), mapper).dispatchDue(later, 10) shouldBe
+                dispatcherOver(registry, manager = RollbackThatFails(manager)).dispatchDue(later, 10) shouldBe
                     DispatchResult(0, 1, false)
 
                 first to second
@@ -532,12 +547,12 @@ internal class OutboxDispatcherTest(
         var calls = 0
         val consumer = TestConsumer { if (calls++ == 0) throw IllegalStateException(ENTRY_LIKE) }
         val registry = registered(consumer)
-        val other = JdbcOutboxDispatcher(registry, jdbc, manager, mapper)
+        val other = dispatcherOver(registry)
         var inTheGap: DispatchResult? = null
         val gap = InTheGap(dataSource, before = "last_error = ?") { inTheGap = other.dispatchDue(now.plusSeconds(1), 10) }
         val event = publish()
 
-        val result = JdbcOutboxDispatcher(registry, gap, manager, mapper).dispatchDue(now, 10)
+        val result = dispatcherOver(registry, through = gap).dispatchDue(now, 10)
 
         // The row first: this is what the guard on the record protects.
         inTheGap shouldBe DispatchResult(delivered = 1, failed = 0, more = false)
@@ -566,13 +581,13 @@ internal class OutboxDispatcherTest(
         // one that wrote last would decide when the delivery is next due.
         val consumer = TestConsumer { throw IllegalStateException(ENTRY_LIKE) }
         val registry = registered(consumer)
-        val other = JdbcOutboxDispatcher(registry, jdbc, manager, mapper)
+        val other = dispatcherOver(registry)
 
         // The other instance fails it half a second later and records first. This one's record is then
         // the second failure: the second step, four seconds, from this one's own `now`.
         val soon = publish()
         val closeBehind = InTheGap(dataSource, before = "last_error = ?") { other.dispatchDue(now.plusMillis(500), 10) }
-        JdbcOutboxDispatcher(registry, closeBehind, manager, mapper).dispatchDue(now, 10) shouldBe DispatchResult(0, 1, false)
+        dispatcherOver(registry, through = closeBehind).dispatchDue(now, 10) shouldBe DispatchResult(0, 1, false)
         delivery(soon).attempts shouldBe 2
         delivery(soon).nextAttemptAt shouldBe now.plusSeconds(4)
         // Each line reports the count its own record left in the row.
@@ -586,9 +601,126 @@ internal class OutboxDispatcherTest(
         jdbc.execute("TRUNCATE TABLE outbox_deliveries")
         val late = publish()
         val farAhead = InTheGap(dataSource, before = "last_error = ?") { other.dispatchDue(now.plusSeconds(60), 10) }
-        JdbcOutboxDispatcher(registry, farAhead, manager, mapper).dispatchDue(now, 10) shouldBe DispatchResult(0, 1, false)
+        dispatcherOver(registry, through = farAhead).dispatchDue(now, 10) shouldBe DispatchResult(0, 1, false)
         delivery(late).attempts shouldBe 2
         delivery(late).nextAttemptAt shouldBe now.plusSeconds(62)
+    }
+
+    @Test
+    fun `a handler still at work when the delivery's time is up fails the delivery, and what it wrote goes with it`() {
+        // The handler writes, then outlasts the delivery's one second away from
+        // the database, where nothing can stop it. The next statement of that
+        // transaction, the acknowledgement, is refused: a delivery that ran out
+        // of time is a failed delivery, recorded and backed off like any other.
+        val probe = UUID.randomUUID()
+        val never = CountDownLatch(1)
+        val slow =
+            TestConsumer {
+                publishProbe(probe)
+                // The wait is the thing on trial: there is no event to synchronise on but the deadline passing.
+                never.await(OUTLASTING_ONE_SECOND_MS, TimeUnit.MILLISECONDS) shouldBe false
+            }
+        val dispatcher = dispatcherOver(registered(slow), within = ONE_SECOND)
+        val event = publish()
+
+        dispatcher.dispatchDue(now, 10) shouldBe DispatchResult(delivered = 0, failed = 1, more = false)
+
+        probes(probe) shouldBe 0
+        val delivery = delivery(event)
+        delivery.processedAt.shouldBeNull()
+        delivery.attempts shouldBe 1
+        delivery.nextAttemptAt shouldBe now.plusSeconds(2)
+        delivery.lastError shouldBe TransactionTimedOutException::class.java.name
+        appender.list.single().formattedMessage shouldContain "will be retried"
+    }
+
+    @Test
+    fun `a handler waiting for a lock is cut off by the database when the delivery's time is up, whoever made the statement`() {
+        // Another session holds a row and will not let go. The handler asks for
+        // it through the connection itself and not through JdbcTemplate, so the
+        // statement carries no timeout of Spring's: only the bound the dispatcher
+        // gave the transaction on the server can end the wait. Without it this
+        // delivery, and the run, and the poller's thread, wait for as long as
+        // the other session does.
+        val heldEvent = publish(ofType = otherType)
+        val holding = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val waiting =
+            TestConsumer {
+                DataSourceUtils.getConnection(dataSource).createStatement().use { statement ->
+                    statement.execute("SELECT 1 FROM outbox_events WHERE id = '$heldEvent' FOR UPDATE")
+                }
+            }
+        val dispatcher = dispatcherOver(registered(waiting), within = ONE_SECOND)
+        val event = publish()
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val holder =
+                pool.submit {
+                    transactions.executeWithoutResult {
+                        jdbc.queryForList("SELECT 1 FROM outbox_events WHERE id = ? FOR UPDATE", heldEvent)
+                        holding.countDown()
+                        check(release.await(2 * WAIT_SECONDS, TimeUnit.SECONDS)) { "the test never released the row" }
+                    }
+                }
+            holding.await(WAIT_SECONDS, TimeUnit.SECONDS) shouldBe true
+
+            val dispatching = pool.submit<DispatchResult> { dispatcher.dispatchDue(now, 10) }
+
+            // Well inside the time the row is held for: the wait was ended, not outlasted.
+            dispatching.get(WAIT_SECONDS, TimeUnit.SECONDS) shouldBe DispatchResult(delivered = 0, failed = 1, more = false)
+            holder.isDone shouldBe false
+        } finally {
+            release.countDown()
+            pool.shutdownNow()
+        }
+
+        waiting.received shouldHaveSize 1
+        val delivery = delivery(event)
+        delivery.processedAt.shouldBeNull()
+        delivery.attempts shouldBe 1
+        delivery.nextAttemptAt shouldBe now.plusSeconds(2)
+        // The driver's own exception, by name: the handler made the statement, so nothing of Spring's translated it.
+        delivery.lastError shouldBe "org.postgresql.util.PSQLException"
+    }
+
+    @Test
+    fun `the bound on a delivery's statements is its transaction's, and is gone from the session after it`() {
+        // One connection throughout, so that "after" is asked of the very session the delivery ran on.
+        dataSource.connection.use { connection ->
+            val single = SingleConnectionDataSource(connection, true)
+            val singleJdbc = JdbcTemplate(single)
+            val sessionDefault = singleJdbc.queryForObject("SHOW statement_timeout", String::class.java)
+            var during: String? = null
+            val asking = TestConsumer { during = singleJdbc.queryForObject("SHOW statement_timeout", String::class.java) }
+            val properties = DeliveryProperties(deliveryTimeout = Duration.ofMillis(7_500))
+            val onThatSession = DataSourceTransactionManager(single)
+            val dispatcher = dispatcherOver(registered(asking), through = singleJdbc, manager = onThatSession, within = properties)
+            publish()
+
+            dispatcher.dispatchDue(now, 10) shouldBe DispatchResult(1, 0, false)
+
+            during shouldBe "7500ms"
+            singleJdbc.queryForObject("SHOW statement_timeout", String::class.java) shouldBe sessionDefault
+        }
+    }
+
+    @Test
+    fun `a delivery has a minute unless a property says otherwise, and never less than the second a transaction can count`() {
+        // The context sets nothing, so this is the default every context gets.
+        bound.deliveryTimeout shouldBe Duration.ofSeconds(60)
+
+        ApplicationContextRunner()
+            .withUserConfiguration(EventsConfiguration::class.java)
+            .withPropertyValues("moyi.outbox.delivery-timeout=5s")
+            .run { it.getBean(DeliveryProperties::class.java).deliveryTimeout shouldBe Duration.ofSeconds(5) }
+
+        // Zero would mean no limit, to Spring and to Postgres alike.
+        shouldThrow<IllegalArgumentException> { DeliveryProperties(deliveryTimeout = Duration.ZERO) }
+        shouldThrow<IllegalArgumentException> { DeliveryProperties(deliveryTimeout = Duration.ofMillis(999)) }
+        // A transaction's deadline is counted in whole seconds: part of one is a whole one, never none.
+        DeliveryProperties(deliveryTimeout = Duration.ofMillis(1_001)).transactionSeconds shouldBe 2
+        DeliveryProperties(deliveryTimeout = Duration.ofSeconds(60)).transactionSeconds shouldBe 60
     }
 
     @Test
@@ -605,8 +737,8 @@ internal class OutboxDispatcherTest(
                 check(release.await(WAIT_SECONDS, TimeUnit.SECONDS)) { "the test never released the handler" }
             }
         val registry = registered(consumer)
-        val first = JdbcOutboxDispatcher(registry, jdbc, manager, mapper)
-        val second = JdbcOutboxDispatcher(registry, jdbc, manager, mapper)
+        val first = dispatcherOver(registry)
+        val second = dispatcherOver(registry)
         val event = publish()
         val pool = Executors.newFixedThreadPool(2)
         try {
@@ -633,7 +765,15 @@ internal class OutboxDispatcherTest(
     private fun dispatcherFor(
         vararg consumers: EventConsumer,
         through: JdbcTemplate = jdbc,
-    ): OutboxDispatcher = JdbcOutboxDispatcher(registered(*consumers), through, manager, mapper)
+    ): OutboxDispatcher = dispatcherOver(registered(*consumers), through = through)
+
+    /** The dispatcher itself over [registry], with whichever of its collaborators a test replaces. */
+    private fun dispatcherOver(
+        registry: ConsumerRegistry,
+        through: JdbcTemplate = jdbc,
+        manager: PlatformTransactionManager = this.manager,
+        within: DeliveryProperties = DeliveryProperties(),
+    ) = JdbcOutboxDispatcher(registry, through, manager, mapper, within)
 
     private fun registered(vararg consumers: EventConsumer): ConsumerRegistry =
         registryOf(*consumers).also { it.afterSingletonsInstantiated() }
@@ -806,5 +946,7 @@ internal class OutboxDispatcherTest(
         const val ENTRY_LIKE = "Thank you for the tea this morning"
         const val NESTED_ENTRY_LIKE = "and for walking home with me"
         const val WAIT_SECONDS = 10L
+        const val OUTLASTING_ONE_SECOND_MS = 1_300L
+        val ONE_SECOND = DeliveryProperties(deliveryTimeout = Duration.ofSeconds(1))
     }
 }

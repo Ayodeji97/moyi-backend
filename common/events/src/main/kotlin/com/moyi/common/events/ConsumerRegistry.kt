@@ -178,14 +178,21 @@ internal class ConsumerRegistry(
      * The start-up failure, in words an operator can act on. The message
      * carries the consumer's id and the configured bound; the driver's own
      * exception rides along as the cause.
+     *
+     * It says what is known and no more. `SHARE ROW EXCLUSIVE` waits for a
+     * publisher that has not committed, but also for another instance's
+     * registration (the mode conflicts with itself) and for maintenance on the
+     * table; Postgres reports only that the lock was not granted, so the
+     * message lists who might hold it and does not pick one.
      */
     private fun notRegistered(
         consumer: EventConsumer,
         refused: DataAccessException,
     ) = IllegalStateException(
         "Event consumer '${consumer.id}' was not registered: the lock on outbox_events was not granted within " +
-            "${properties.lockTimeout}. A session that has published an event and not committed is holding it. " +
-            "The application will not start with a consumer it has not registered.",
+            "${properties.lockTimeout}. Some other session holds a lock on that table that conflicts with it: " +
+            "a transaction that has published an event and not committed, another instance registering, " +
+            "or maintenance on the table. The application will not start with a consumer it has not registered.",
         refused,
     )
 

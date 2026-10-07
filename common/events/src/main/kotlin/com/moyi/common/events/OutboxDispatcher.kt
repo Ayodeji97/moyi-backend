@@ -99,8 +99,37 @@ data class ConsumerBacklog(
  * itself fails. It is caught inside, the transaction is marked for rollback,
  * and the exception is carried out as a value Spring never sees.
  *
+ * **A delivery has a time limit** ([DeliveryProperties], a minute unless
+ * configured), because a handler waiting on a lock that is never released
+ * would otherwise hold its run, and the poller behind the run, for ever. It is
+ * kept twice, since neither keeper sees everything:
+ *
+ * - *The transaction's deadline.* Every statement made through Spring's JDBC
+ *   or JPA support in the delivery's transaction is given what is left of the
+ *   limit as its query timeout, and the driver cancels it when that runs out;
+ *   a statement begun after the deadline is refused unsent. That last is what
+ *   catches a handler that spent the time away from the database: its next
+ *   statement fails, and if it makes none, the acknowledgement does.
+ * - *`statement_timeout`, set on the server for the transaction.* It ends a
+ *   statement, or its wait for a lock, whoever made the statement and whether
+ *   or not the client is still able to ask for a cancel.
+ *
+ * Either way the delivery has failed like any other: rolled back, recorded
+ * under the exception's class name, backed off, retried.
+ *
+ * **What the limit does not bound** is a handler that is neither at a
+ * statement nor returning: parked, computing, or waiting on something that is
+ * not this database. Nothing here interrupts a thread. Until such a handler
+ * returns, its transaction stays open and holds the delivery's row lock and
+ * whatever locks the handler took; only then does the acknowledgement fail.
+ * Nor is the statement that records a failure bounded: it runs after the
+ * rollback, outside the transaction, and can wait only on another dispatcher
+ * holding the same delivery, which is itself bounded.
+ *
  * The clock is the caller's: every instant written or compared here is the
  * `now` handed in, which is what lets a test move time and a poller meter it.
+ * The time limit is the exception, and has to be: it is real time that a stuck
+ * handler uses up, whatever a test's clock says.
  */
 @Component
 internal class JdbcOutboxDispatcher(
@@ -108,8 +137,9 @@ internal class JdbcOutboxDispatcher(
     private val jdbc: JdbcTemplate,
     transactionManager: PlatformTransactionManager,
     private val mapper: ObjectMapper,
+    private val properties: DeliveryProperties,
 ) : OutboxDispatcher {
-    private val transactions = TransactionTemplate(transactionManager)
+    private val transactions = TransactionTemplate(transactionManager).apply { timeout = properties.transactionSeconds }
     private val log = LoggerFactory.getLogger(javaClass)
 
     override fun dispatchDue(
@@ -184,6 +214,7 @@ internal class JdbcOutboxDispatcher(
                         val claim = claim(run) ?: return@execute Outcome.NOTHING_DUE
                         claimed = claim
                         try {
+                            boundStatements()
                             // Read only now, with the claim known: an unreadable payload is
                             // this delivery's failure, to be recorded, not the run's.
                             val consumer = registry.consumer(claim.consumerId)
@@ -245,6 +276,24 @@ internal class JdbcOutboxDispatcher(
                 run.setAside.map { it.eventId.toString() }.toTypedArray(),
                 run.setAside.map { it.consumerId }.toTypedArray(),
             ).firstOrNull()
+
+    /**
+     * The server's half of the delivery's time limit: no statement of this
+     * transaction may run, or wait for a lock, longer than the whole delivery
+     * is allowed. `set_config(…, true)` is `SET LOCAL` with a parameter, so the
+     * bound ends with the transaction and a pooled connection goes back as it came.
+     *
+     * Set once a delivery is claimed and not before, so a run that finds
+     * nothing due pays no statement for it. The claim itself needs no bound of
+     * this kind: it passes over what is locked and never waits.
+     */
+    private fun boundStatements() {
+        jdbc.queryForObject(
+            "SELECT set_config('statement_timeout', ?, true)",
+            String::class.java,
+            "${properties.deliveryTimeout.toMillis()}ms",
+        )
+    }
 
     private fun acknowledge(
         claim: Claim,

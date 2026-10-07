@@ -6,22 +6,45 @@ import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.DisposableBean
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * The outbox's poller (spec §8; plan C5a, Task 3). It knows the time and five
+ * The outbox's poller (spec §8; plan C5a, Task 3). It knows the time and six
  * meters, and asks `common:events` to do the delivering: what a delivery is,
  * and what a failure does to it, is not written here.
  *
- * **Two seconds after the last tick finished**, a delay and not a rate: a tick
- * that takes long is followed by a pause, not by the ticks it overran. A
- * withdrawal is unreadable from the moment its request commits (the read gate
- * sees to that), so these two seconds are how long the text outlives it on
- * disk, not how long it can be read.
+ * **Every two seconds, on a thread of its own.** A withdrawal is unreadable
+ * from the moment its request commits (the read gate sees to that), so these
+ * two seconds are how long the text outlives it on disk, not how long it can
+ * be read.
+ *
+ * **The timer only hands the tick over** ([run]); the tick runs on one thread
+ * this job owns ([dispatchOnce]). A handler can hang: on a lock nobody
+ * releases, for as long as its delivery is allowed, and for longer on anything
+ * that is not the database. Run on the scheduler's thread, that tick would
+ * keep the thread, and the scheduler Spring Boot builds when virtual threads
+ * are off has exactly one: the close job's trigger would stop firing, and no
+ * couple's day would close, without a line in any log. That the application
+ * turns virtual threads on (for its web server) is not something a day's
+ * closing should rest on. A thread of this job's own makes it true whatever
+ * the scheduler is, including one somebody configures later; a larger pool for
+ * the scheduler would only have moved the number at which it stops being true.
+ *
+ * **While a tick is running the timer's ticks are skipped**, not queued: a
+ * tick that takes long is followed by the next one within two seconds of its
+ * end, never by a burst of the ticks it overran. The first skip of a run of
+ * them is said at WARN, once, because a tick that outlasts its interval is
+ * either a backlog or a handler that is stuck.
  *
  * **No `@SchedulerLock`, on purpose** (decision 7). The close job takes one
  * because two instances closing the same day is work done twice. Here the
@@ -34,13 +57,12 @@ import java.util.concurrent.atomic.AtomicLong
  * transaction per delivery, so that one handler's failure rolls back that
  * delivery alone, and it refuses to run inside a caller's.
  *
- * **A tick goes round again while more is waiting, at most [MAX_PASSES]
- * times.** A queue longer than one budget should not sit for two seconds
- * between budgets. The bound is there because "more" can stay true without
- * anything being drained: a failure that cannot be recorded leaves its
- * delivery due, and a tick that looped until "more" was false would spin on it
- * for as long as that lasted. Bounded, a tick always ends, the pause follows,
- * and the next tick takes up what is left.
+ * **A tick goes round again while its passes fill their budget and more is
+ * waiting, at most [MAX_PASSES] times.** A queue longer than one budget should
+ * not sit for two seconds between budgets. The bound is there because a queue
+ * can be fed as fast as it is drained, and a tick that looped until nothing
+ * was waiting might never pause. Bounded, a tick always ends, the pause
+ * follows, and the next tick takes up what is left.
  *
  * **Nothing a tick meets may stop the next one, and nothing it meets may be
  * quoted.** Whatever is thrown (the database is away, mostly) is caught here
@@ -52,10 +74,18 @@ import java.util.concurrent.atomic.AtomicLong
  * **The gauges are per consumer and registered once each.** The consumers are
  * whoever the backlog reports, so they are met at run time, not at
  * construction. Each gets its three gauges the first time it is seen, backed
- * by numbers this object keeps and overwrites after every tick. The map holds
+ * by numbers this object keeps and overwrites after every tick, **including a
+ * tick that threw**: the dispatcher failing on every tick is the poller stuck,
+ * and that is when these numbers are read. The map holds
  * those numbers for the life of the job, which matters: a Micrometer gauge
  * keeps only a weak reference to what it reads, and a number nobody else held
  * would be collected and the gauge would read NaN.
+ *
+ * **A sixth meter says when the others were last true** (as the close job's
+ * does, and for its reason: one cannot tell healthy from stopped without it).
+ * When the backlog cannot be read, or a tick hangs and none follows, the
+ * gauges keep their last values and look like a quiet queue;
+ * [LAST_SUCCESS] stops moving, and that is what an alert can see.
  *
  * The two counters carry no consumer tag, because a run reports its totals
  * and not whose deliveries they were; the per-consumer picture is the gauges'.
@@ -65,9 +95,19 @@ internal class OutboxJob(
     private val dispatcher: OutboxDispatcher,
     private val clock: Clock,
     private val meters: MeterRegistry,
-) {
+) : DisposableBean {
     private val log = LoggerFactory.getLogger(javaClass)
     private val queues = ConcurrentHashMap<String, Queue>()
+    private val lastSuccess = AtomicLong(0)
+
+    /** The one thread ticks run on. It is started by the first tick handed over, so a job nobody times never has one. */
+    private val worker: ExecutorService =
+        Executors.newSingleThreadExecutor { tick -> Thread(tick, WORKER_THREAD).apply { isDaemon = true } }
+    private val tickRunning = AtomicBoolean(false)
+    private val skipping = AtomicBoolean(false)
+
+    @Volatile
+    private var stopping = false
     private val delivered: Counter =
         Counter
             .builder(DELIVERED)
@@ -79,17 +119,72 @@ internal class OutboxJob(
             .description("Outbox deliveries whose handler failed; each is retried, so one delivery can be counted many times")
             .register(meters)
 
-    @Scheduled(fixedDelayString = "\${moyi.scheduling.outbox.delay:$EVERY_TWO_SECONDS}")
-    fun run() {
-        dispatchOnce()
+    init {
+        Gauge
+            .builder(LAST_SUCCESS) { lastSuccess.get().toDouble() }
+            .description("Epoch seconds of the outbox poller's last tick that could read the backlog its gauges show")
+            .register(meters)
     }
 
     /**
-     * One tick, without the timer — what [run] does. Never throws.
+     * What the timer calls. It returns at once, whatever the tick does: the
+     * thread it is called on is the scheduler's, and may be the only one the
+     * close job has.
+     */
+    @Scheduled(fixedDelayString = "\${moyi.scheduling.outbox.delay:$EVERY_TWO_SECONDS}")
+    fun run() {
+        if (!tickRunning.compareAndSet(false, true)) {
+            if (!skipping.getAndSet(true)) log.warn("outbox: the last tick is still running; none is started until it ends")
+            return
+        }
+        try {
+            worker.execute {
+                try {
+                    dispatchOnce()
+                } finally {
+                    skipping.set(false)
+                    tickRunning.set(false)
+                }
+            }
+        } catch (_: RejectedExecutionException) {
+            // The job is stopping, and a tick that will not run needs no line.
+            tickRunning.set(false)
+        }
+    }
+
+    /**
+     * Stops the worker with the context, and before the connection pool goes:
+     * no further pass is begun, the handler in flight is interrupted (its
+     * delivery rolls back and stays due, which at-least-once allows), and the
+     * tick is given a few seconds to end so that it ends against a database
+     * that is still there. A handler that ignores the interrupt is left
+     * behind; the thread is a daemon and holds nothing up.
+     */
+    override fun destroy() {
+        stopping = true
+        worker.shutdownNow()
+        try {
+            if (!worker.awaitTermination(STOP_WAIT_SECONDS, TimeUnit.SECONDS)) {
+                log.warn("outbox: a tick was still running {} seconds after it was told to stop", STOP_WAIT_SECONDS)
+            }
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+    }
+
+    /**
+     * One tick, on the caller's thread and over when it returns: what [run]
+     * hands to the worker. Never throws.
      *
      * `Throwable`, on purpose: the dispatcher rethrows a `VirtualMachineError`
      * once it has recorded the delivery that raised it, and that too must be
-     * named here rather than printed by the scheduler.
+     * named here rather than printed by whoever runs the thread.
+     *
+     * **Another pass only when the budget cut the last one short.** "More is
+     * waiting" alone is not a reason: a pass that stopped under its budget ran
+     * out of deliveries it could take, and what it reports as waiting is what
+     * it set aside, a failure it could not record. Going round again would run
+     * that handler again, as many times as a tick has passes, with no backoff.
      */
     @Suppress("TooGenericExceptionCaught")
     fun dispatchOnce() {
@@ -98,6 +193,7 @@ internal class OutboxJob(
             var deliveredNow = 0
             var failedNow = 0
             var more: Boolean
+            var again: Boolean
             do {
                 // The clock is read for each pass: what fell due while the last one ran is due now.
                 val result = dispatcher.dispatchDue(clock.instant(), BUDGET)
@@ -108,29 +204,49 @@ internal class OutboxJob(
                 failedNow += result.failed
                 passes++
                 more = result.more
-            } while (more && passes < MAX_PASSES)
-            refreshMeters()
+                val cutShort = result.delivered + result.failed >= BUDGET
+                again = more && cutShort && passes < MAX_PASSES
+            } while (again && !stopping)
             if (more) {
-                // Still more after every pass a tick allows: a backlog, or a delivery that cannot be set aside.
+                // Still more when the tick ends: a backlog, or a delivery that cannot be set aside.
                 log.warn("outbox: delivered {}, failed {}, and more is waiting after {} passes", deliveredNow, failedNow, passes)
             } else if (deliveredNow + failedNow > 0) {
                 log.info("outbox: delivered {}, failed {}", deliveredNow, failedNow)
             }
         } catch (thrown: Throwable) {
             log.warn("outbox: the tick did not finish and the next one will try again: error={}", thrown.javaClass.name)
+        } finally {
+            // Whatever the tick met: a dispatcher that throws every time is when the gauges matter most.
+            refreshMetersOrSayWhyNot()
         }
     }
 
     /**
-     * Sets every gauge from the backlog as it stands. A consumer the backlog
-     * has stopped reporting reads zero from then on: its gauges cannot be left
-     * showing the last thing that was true of it.
+     * A backlog that cannot be read leaves every gauge as it was, and
+     * [LAST_SUCCESS] with them, which is how anyone can tell. By class name
+     * alone, like everything else a tick meets.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun refreshMetersOrSayWhyNot() {
+        try {
+            refreshMeters()
+        } catch (thrown: Throwable) {
+            log.warn("outbox: the backlog could not be read, so the gauges are as the last tick left them: error={}", thrown.javaClass.name)
+        }
+    }
+
+    /**
+     * Sets every gauge from the backlog as it stands, and the time they were
+     * set. A consumer the backlog has stopped reporting reads zero from then
+     * on: its gauges cannot be left showing the last thing that was true of it.
      */
     fun refreshMeters() {
-        val backlog = dispatcher.backlog(clock.instant())
+        val now = clock.instant()
+        val backlog = dispatcher.backlog(now)
         backlog.forEach { queues.computeIfAbsent(it.consumerId, ::register).set(it) }
         val reported = backlog.mapTo(mutableSetOf()) { it.consumerId }
         queues.forEach { (consumerId, queue) -> if (consumerId !in reported) queue.clear() }
+        lastSuccess.set(now.epochSecond)
     }
 
     /** Called once per consumer, by the map: a second registration under the same name and tag would be ignored anyway. */
@@ -176,7 +292,7 @@ internal class OutboxJob(
     internal companion object {
         /**
          * The pause between ticks, unless `moyi.scheduling.outbox.delay` says
-         * otherwise. Nothing sets it: two seconds is what the smoke run sees too.
+         * otherwise. Only `PollerIndependenceTest` sets it: two seconds is what the smoke run sees too.
          */
         const val EVERY_TWO_SECONDS = "PT2S"
 
@@ -195,5 +311,16 @@ internal class OutboxJob(
         const val DELIVERED = "gratitude.outbox.delivered"
         const val FAILED = "gratitude.outbox.failed"
         const val CONSUMER_TAG = "consumer"
+
+        /**
+         * `gratitude_outbox_last_success_timestamp` once exported. Not "the last tick that
+         * delivered": the last one whose reading of the backlog is what the gauges now show.
+         */
+        const val LAST_SUCCESS = "gratitude.outbox.last.success.timestamp"
+
+        const val WORKER_THREAD = "outbox-poller"
+
+        /** How long [destroy] waits for the tick in flight before it leaves it behind. */
+        const val STOP_WAIT_SECONDS = 5L
     }
 }

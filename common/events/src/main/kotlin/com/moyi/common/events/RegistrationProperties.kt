@@ -42,5 +42,5 @@ data class RegistrationProperties(
  * properties: the module test contexts scan `com.moyi.common` and have no such scan.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(RegistrationProperties::class)
+@EnableConfigurationProperties(RegistrationProperties::class, DeliveryProperties::class)
 internal class EventsConfiguration

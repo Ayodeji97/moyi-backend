@@ -13,6 +13,7 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.BeforeEach
@@ -345,6 +346,11 @@ internal class ConsumerRegistryTest(
                 refused.shouldBeInstanceOf<IllegalStateException>()
                 refused.message shouldContain consumerId
                 refused.message shouldContain "PT2S"
+                // What it knows is that the lock was not granted; who held it, it cannot see, and
+                // an uncommitted publisher is one of several. It names them all and accuses none.
+                refused.message shouldContain "Some other session holds a lock on that table"
+                refused.message shouldContain "another instance registering"
+                refused.message shouldNotContain "is holding it"
                 // Postgres' own "lock not available", so no other failure is mistaken for this one.
                 causes(refused).filterIsInstance<SQLException>().map { it.sqlState } shouldContainExactly listOf("55P03")
 
