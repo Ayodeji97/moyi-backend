@@ -41,6 +41,40 @@ internal class EntryReadabilityTest {
         )
     private val revealed = unrevealed.copy(status = EntryStatus.REVEALED, revealedAt = now)
 
+    /**
+     * FR-093, as a table over the same readers: the gate's answer and one
+     * thing more, whether the entry has been revealed. `FavouritesTest` holds
+     * what each answer becomes over HTTP.
+     */
+    @Test
+    fun `who may bookmark an entry is the gate's answer for that reader, and a full reading must also be revealed`() {
+        // Either member, of a revealed entry: the author's own included.
+        revealed.canBeFavouritedBy(author) shouldBe Favouriting.ALLOWED
+        revealed.canBeFavouritedBy(partner) shouldBe Favouriting.ALLOWED
+        // The author's own, still waiting: told so. The partner asking of the same entry was never shown it.
+        unrevealed.canBeFavouritedBy(author) shouldBe Favouriting.NOT_YET_REVEALED
+        unrevealed.canBeFavouritedBy(partner) shouldBe Favouriting.NEVER_SHOWN
+        // A status that says REVEALED with no timestamp reveals nothing here either.
+        unrevealed.copy(status = EntryStatus.REVEALED).canBeFavouritedBy(author) shouldBe Favouriting.NOT_YET_REVEALED
+
+        // A tombstone to a reader who could read it; nothing to one who never could.
+        for (erased in listOf(revealed.copy(deletedAt = now), revealed.copy(status = EntryStatus.DELETED))) {
+            erased.canBeFavouritedBy(author) shouldBe Favouriting.ERASED
+            erased.canBeFavouritedBy(partner) shouldBe Favouriting.ERASED
+        }
+        unrevealed.copy(deletedAt = now).canBeFavouritedBy(author) shouldBe Favouriting.ERASED
+        unrevealed.copy(deletedAt = now).canBeFavouritedBy(partner) shouldBe Favouriting.NEVER_SHOWN
+
+        // A withdrawal counts from its commit, while the row is still whole.
+        revealed.canBeFavouritedBy(authorAfterWithdrawing) shouldBe Favouriting.ERASED
+        revealed.canBeFavouritedBy(partnerAfterWithdrawal) shouldBe Favouriting.ERASED
+        unrevealed.canBeFavouritedBy(partnerAfterWithdrawal) shouldBe Favouriting.NEVER_SHOWN
+
+        // Another bond's member: nothing, revealed or not, erased or not.
+        revealed.canBeFavouritedBy(stranger) shouldBe Favouriting.NEVER_SHOWN
+        revealed.copy(deletedAt = now).canBeFavouritedBy(stranger) shouldBe Favouriting.NEVER_SHOWN
+    }
+
     @Test
     fun `an author reads their own entry in full, revealed or not`() {
         unrevealed.canBeReadBy(author) shouldBe Readability.FULL

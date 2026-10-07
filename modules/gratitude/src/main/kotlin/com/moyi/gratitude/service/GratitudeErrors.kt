@@ -84,12 +84,30 @@ internal class DayClosedException :
  * BR-7: the partner may already have read these words — or the author has
  * erased them. The sentence says neither: it answers both, and "has been
  * revealed" was false for an entry deleted before anybody else could read it.
+ *
+ * Also what a bookmark is refused with on a tombstone ([FavouriteEntry]):
+ * the sentence is about editing, and a client reads the code. One code for
+ * "this entry is settled and takes no more changes" is worth more to it than
+ * a second sentence.
  */
 internal class EntryImmutableException :
     ApiException(
         HttpStatus.CONFLICT,
         ErrorCode.ENTRY_IMMUTABLE,
         "This entry can no longer be edited.",
+    )
+
+/**
+ * FR-093: the caller's own entry cannot be bookmarked before it has been
+ * revealed. Raised only for an entry the caller wrote, by
+ * [FavouriteEntry]; a partner's unrevealed entry is [EntryNotFoundException]
+ * to them, as it is on every route (`ErrorCode.ENTRY_NOT_REVEALED` has why).
+ */
+internal class EntryNotRevealedException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.ENTRY_NOT_REVEALED,
+        "This entry can be saved once both of you have written.",
     )
 
 /**

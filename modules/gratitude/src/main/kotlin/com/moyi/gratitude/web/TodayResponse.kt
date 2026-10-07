@@ -71,8 +71,8 @@ internal data class TodayResponse(
         fun from(view: TodayView): TodayResponse =
             TodayResponse(
                 bondDay = BondDayResponse(date = view.date, status = view.status),
-                myEntry = view.myEntry?.let { EntryResponse.of(it, view.date) },
-                partnerEntry = view.partnerEntry?.let { PartnerEntryResponse.of(it, view.date) },
+                myEntry = view.myEntry?.let { EntryResponse.of(it, view.date, it.disclosed?.id in view.marked) },
+                partnerEntry = view.partnerEntry?.let { PartnerEntryResponse.of(it, view.date, it.disclosed?.id in view.marked) },
                 streak = TodayStreakResponse.from(view.streak),
             )
     }
@@ -119,13 +119,19 @@ internal sealed interface PartnerEntryResponse {
          * before it was ever revealed: [ErasedEntryResponse]. Both of those
          * are given the author and nothing else — the reading has nothing
          * else to give them. A non-member: nothing.
+         *
+         * [favourited], the caller's own bookmark, goes to the one branch
+         * that has a field for it. The two narrow shapes are not given it
+         * and could not carry it: an entry the caller was never shown has
+         * nothing of the caller's on it either.
          */
         fun of(
             reading: EntryReading,
             date: LocalDate,
+            favourited: Boolean,
         ): PartnerEntryResponse? =
             when (reading.readability) {
-                Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date)
+                Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date, favourited)
                 Readability.LOCKED -> reading.authorMemberId?.let { LockedEntryResponse(it) }
                 Readability.TOMBSTONE_UNSEEN -> reading.authorMemberId?.let { ErasedEntryResponse(it) }
                 Readability.NOT_A_MEMBER -> null

@@ -46,7 +46,7 @@ internal class EntryChangesController(
         val view =
             patch.patch(
                 caller.id,
-                idOrNotFound(entryId),
+                entryIdOrNotFound(entryId),
                 EntryText.of(checkNotNull(request.text)),
                 request.imageMediaId != null || request.voiceMediaId != null,
                 IdempotencyInterceptor.requestOrNull(http),
@@ -67,12 +67,19 @@ internal class EntryChangesController(
         caller: CurrentUser,
         @PathVariable entryId: String,
     ) {
-        changes.change(caller.id, idOrNotFound(entryId), null)
+        changes.change(caller.id, entryIdOrNotFound(entryId), null)
     }
-
-    private fun idOrNotFound(raw: String): EntryId =
-        runCatching { EntryId(UUID.fromString(raw)) }.getOrElse { throw EntryNotFoundException() }
 }
+
+/**
+ * The `{entryId}` of a path, or the one `404`: a value that is not a UUID
+ * cannot name an entry, and is answered exactly as a UUID that names nobody's.
+ * Taken as text and parsed here for that reason, by every route that carries
+ * one ([EntryChangesController], [FavouritesController]), so the routes
+ * cannot come to differ in it.
+ */
+internal fun entryIdOrNotFound(raw: String): EntryId =
+    runCatching { EntryId(UUID.fromString(raw)) }.getOrElse { throw EntryNotFoundException() }
 
 /** Text is the only editable content in C2; validation delegates to the same domain factory as submission. */
 internal data class PatchEntryRequest(

@@ -407,6 +407,41 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `a favourite is put and deleted with no body, and only putting one can conflict`() {
+        val favourite = api.paths["/api/v1/entries/{entryId}/favourite"]!!
+        favourite.readOperationsMap().keys.map { it.name } shouldContainExactlyInAnyOrder listOf("PUT", "DELETE")
+
+        // 409 is ENTRY_NOT_REVEALED and ENTRY_IMMUTABLE. No body goes in, so no 400 or 422, and none comes out.
+        favourite.put.operationId shouldBe "favouriteEntry"
+        favourite.put.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "409", "429", "500")
+        favourite.put.requestBody shouldBe null
+        favourite.put.responses["204"]!!.content shouldBe null
+        favourite.put.parameters.map { it.name } shouldBe listOf("entryId")
+
+        // Taking a mark off is never a conflict: absent is success, on a tombstone too.
+        favourite.delete.operationId shouldBe "unfavouriteEntry"
+        favourite.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "429", "500")
+        favourite.delete.responses["204"]!!.content shouldBe null
+        favourite.delete.parameters.map { it.name } shouldBe listOf("entryId")
+    }
+
+    @Test
+    fun `an entry says whether its reader kept it, and the two shapes for an entry never shown have no such field`() {
+        val full =
+            api.components.schemas["EntryResponse"]!!
+                .allOf
+                .last()
+        full.properties["favourited"]!!.types shouldBe setOf("boolean")
+        full.required shouldContain "favourited"
+        listOf("LockedEntryResponse", "ErasedEntryResponse").forEach { name ->
+            api.components.schemas[name]!!
+                .allOf
+                .last()
+                .properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+        }
+    }
+
+    @Test
     fun `partnerEntry is one of three branches, discriminated on status with no value naming two`() {
         // springdoc resolves the sealed interface to a `oneOf` of its
         // branches; OpenApiConfiguration adds the `discriminator`, which is

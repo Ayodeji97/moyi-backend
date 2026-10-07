@@ -229,6 +229,19 @@ enum class ErrorCode {
     ENTRY_IMMUTABLE,
 
     /**
+     * `PUT /entries/{entryId}/favourite` on the caller's **own** entry while
+     * it still waits for the partner (FR-093, spec §6.6: only a revealed
+     * entry can be kept). 409: a fact about the entry's state, and one that
+     * changes by itself when the day reveals.
+     *
+     * Only ever the answer about an entry the caller wrote. A partner's
+     * unrevealed entry is locked to them and its id was never shown, so that
+     * request is the `404` every other unknown entry gets: this code there
+     * would confirm that the id names an entry, and that it was written.
+     */
+    ENTRY_NOT_REVEALED,
+
+    /**
      * `POST /bonds/{bondId}/entries` for a day that has already closed
      * (BR-10). 409: the day this entry would have landed on is no longer
      * open to writes — a fact about the day's own state, the same shape of

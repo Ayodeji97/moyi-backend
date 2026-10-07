@@ -450,6 +450,13 @@ class OpenApiConfiguration {
                 // only conflict a delete ever answered. It takes no
                 // idempotency key, an erased entry deleted again is a `204`,
                 // and nothing translates a database refusal into a `409`.
+                //
+                // Slice C5b. ENTRY_NOT_REVEALED (the caller's own entry, before
+                // the partner has written) and ENTRY_IMMUTABLE (a tombstone).
+                // `unfavouriteEntry` is deliberately absent: taking a mark off
+                // is `204` whether or not there was one and whatever has become
+                // of the entry, so the only refusal it has is the `404`.
+                "favouriteEntry",
             )
 
         /**

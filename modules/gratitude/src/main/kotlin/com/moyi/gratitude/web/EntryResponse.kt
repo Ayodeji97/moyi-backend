@@ -2,6 +2,7 @@ package com.moyi.gratitude.web
 
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryStatus
+import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.service.EntryView
 import java.time.Instant
 import java.time.LocalDate
@@ -55,6 +56,14 @@ internal data class EntryResponse private constructor(
     val status: EntryStatus,
     val createdAt: Instant,
     val intendedAt: Instant,
+    /**
+     * Whether **the caller** has bookmarked this entry (FR-093). The
+     * caller's own mark and never the partner's: nothing in this response,
+     * or any other, says whether the other person kept an entry (spec §6.6:
+     * that would be the read receipt FR-064 forbids). `true` only on an entry
+     * read in full; a tombstone says `false`, whatever was marked before.
+     */
+    val favourited: Boolean,
 ) : PartnerEntryResponse {
     /**
      * Never the words (doc 18 §5/§9): this is the one object in the module
@@ -65,11 +74,12 @@ internal data class EntryResponse private constructor(
      */
     override fun toString(): String =
         "EntryResponse(id=$id, bondId=$bondId, date=$date, authorMemberId=$authorMemberId, " +
-            "text=${if (text == null) "null" else "(redacted)"}, status=$status, createdAt=$createdAt, intendedAt=$intendedAt)"
+            "text=${if (text == null) "null" else "(redacted)"}, status=$status, createdAt=$createdAt, intendedAt=$intendedAt, " +
+            "favourited=$favourited)"
 
     companion object {
         /** `null` exactly when [of] is: BR-1 did not grant the caller this shape. */
-        fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date)
+        fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date, view.favourited)
 
         /**
          * **The only way to build this response** — the constructor is
@@ -85,10 +95,19 @@ internal data class EntryResponse private constructor(
          * **not this shape at all**: [PartnerEntryResponse.of] gives the
          * first two their own minimal types, and a non-member is shown
          * nothing.
+         *
+         * [favourited] is the caller's own mark on this entry, as the caller
+         * of this function found it. **It is rendered only on a `FULL`
+         * reading and forced `false` on a tombstone**, here, so that no
+         * route has to remember to: a mark can outlive the gate's answer (a
+         * withdrawal hides an entry before anything is erased, and the mark
+         * is removed with the erasure), and a tombstone that said `true`
+         * would be the one thing still kept of an entry its author took back.
          */
         fun of(
             reading: EntryReading,
             date: LocalDate,
+            favourited: Boolean,
         ): EntryResponse? =
             reading.disclosed?.let { entry ->
                 EntryResponse(
@@ -100,6 +119,7 @@ internal data class EntryResponse private constructor(
                     status = entry.status,
                     createdAt = entry.createdAt,
                     intendedAt = entry.intendedAt,
+                    favourited = favourited && reading.readability == Readability.FULL,
                 )
             }
     }

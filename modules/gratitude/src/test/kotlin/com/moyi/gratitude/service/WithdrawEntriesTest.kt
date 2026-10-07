@@ -578,6 +578,12 @@ internal class WithdrawEntriesTest(
             author,
             bond,
         ) shouldBe MANY
+        // And the partner kept every one of them: each erasure has a bookmark to remove (slice C5b).
+        jdbc.update(
+            "INSERT INTO entry_favourites (entry_id, member_id, created_at) SELECT id, ?, created_at FROM entries WHERE bond_id = ?::uuid",
+            rig.memberId(bond, bea),
+            bond,
+        ) shouldBe MANY
         rig.block(ada, bond)
 
         val started = System.nanoTime()
@@ -591,6 +597,7 @@ internal class WithdrawEntriesTest(
             bond,
         ) shouldBe
             MANY
+        jdbc.queryForObject("SELECT count(*) FROM entry_favourites", Int::class.java) shouldBe 0
         took shouldBeLessThan Duration.ofSeconds(30)
     }
 

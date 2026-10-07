@@ -150,6 +150,37 @@ internal data class Entry(
         }
     }
 
+    /**
+     * FR-093: may [reader] bookmark this entry? **The read gate's answer for
+     * that reader, and one thing more**, so that there is no second account
+     * of who may see what:
+     *
+     * - [Readability.FULL] and revealed: yes. Either member, of either entry,
+     *   their own included. A favourite is a member's private bookmark on
+     *   something they can read (doc 04, `EntryFavourite`), not a change to
+     *   the entry, so this is deliberately **not** the author-only rule that
+     *   editing and deleting go by.
+     * - [Readability.FULL] and not revealed: only ever the reader's own
+     *   entry, still waiting. Not yet (spec §6.6: you can keep only what
+     *   both of you can see).
+     * - [Readability.TOMBSTONE]: there is nothing left to keep. That includes
+     *   an entry whose author has withdrawn and whose row is still whole,
+     *   because the gate says so from the withdrawal's commit.
+     * - Anything the reader was never shown ([Readability.LOCKED],
+     *   [Readability.TOMBSTONE_UNSEEN], [Readability.NOT_A_MEMBER]): no, and
+     *   not in a way that says the entry exists. Its id was never given to
+     *   this reader; they can only have guessed it or been handed it.
+     *
+     * As current as the [Reader], like [canBeReadBy]: the caller builds the
+     * reader after loading this entry.
+     */
+    fun canBeFavouritedBy(reader: Reader): Favouriting =
+        when (canBeReadBy(reader)) {
+            Readability.FULL -> if (revealedAt != null) Favouriting.ALLOWED else Favouriting.NOT_YET_REVEALED
+            Readability.TOMBSTONE -> Favouriting.ERASED
+            Readability.LOCKED, Readability.TOMBSTONE_UNSEEN, Readability.NOT_A_MEMBER -> Favouriting.NEVER_SHOWN
+        }
+
     /** This entry as [reader] may see it — the only form an entry is rendered from ([EntryReading]). */
     fun readBy(reader: Reader): EntryReading = EntryReading.of(this, reader)
 

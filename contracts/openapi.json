@@ -2671,6 +2671,152 @@
         "tags" : [ "entry-changes-controller" ]
       }
     },
+    "/api/v1/entries/{entryId}/favourite" : {
+      "delete" : {
+        "operationId" : "unfavouriteEntry",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "entryId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "favourites-controller" ]
+      },
+      "put" : {
+        "operationId" : "favouriteEntry",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "entryId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "favourites-controller" ]
+      }
+    },
     "/api/v1/invites/{code}" : {
       "get" : {
         "operationId" : "resolve",
@@ -3134,6 +3280,9 @@
               "type" : "string",
               "format" : "date"
             },
+            "favourited" : {
+              "type" : "boolean"
+            },
             "id" : {
               "type" : "string",
               "format" : "uuid"
@@ -3150,7 +3299,7 @@
               "type" : [ "string", "null" ]
             }
           },
-          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "id", "intendedAt", "status", "text" ]
+          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "intendedAt", "status", "text" ]
         } ]
       },
       "ErasedEntryResponse" : {
@@ -3498,7 +3647,7 @@
         "properties" : {
           "code" : {
             "type" : "string",
-            "enum" : [ "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"
