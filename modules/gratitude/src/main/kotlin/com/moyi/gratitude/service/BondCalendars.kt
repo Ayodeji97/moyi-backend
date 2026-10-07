@@ -30,5 +30,16 @@ internal fun BondAnchorTimeline.asCalendar(): BondCalendar =
  * `bond.api.BondAccess` resolved — which is what makes the gate's
  * "membership first" a check against a membership somebody actually verified,
  * not against a bond id a request named.
+ *
+ * **And who in that bond has withdrawn their entries**
+ * ([BondMembership.withdrawnMemberIds]), from the same membership and so as
+ * that bond stood when this request resolved it. `bond` records a withdrawal
+ * in the transaction that ends the bond; the rows are erased later, by the
+ * outbox's consumer. Carried here, the fact reaches the gate with every
+ * reader there is, and a read that begins after that commit shows none of the
+ * words whether or not anything has been erased yet (spec §6.7). No caller
+ * passes the set or decides anything from it: this is the only place it is
+ * read, and [com.moyi.gratitude.domain.Entry.canBeReadBy] the only place it
+ * is asked.
  */
-internal fun BondMembership.asReader(): Reader = Reader(memberId = memberId, bondId = bondId)
+internal fun BondMembership.asReader(): Reader = Reader(memberId = memberId, bondId = bondId, withdrawnAuthors = withdrawnMemberIds)

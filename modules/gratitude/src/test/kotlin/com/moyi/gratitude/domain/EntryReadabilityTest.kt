@@ -20,9 +20,13 @@ import java.util.UUID
  */
 internal class EntryReadabilityTest {
     private val bondId = UUID.randomUUID()
-    private val author = Reader(memberId = UUID.randomUUID(), bondId = bondId)
-    private val partner = Reader(memberId = UUID.randomUUID(), bondId = bondId)
-    private val stranger = Reader(memberId = UUID.randomUUID(), bondId = UUID.randomUUID())
+    private val author = Reader(memberId = UUID.randomUUID(), bondId = bondId, withdrawnAuthors = emptySet())
+    private val partner = Reader(memberId = UUID.randomUUID(), bondId = bondId, withdrawnAuthors = emptySet())
+    private val stranger = Reader(memberId = UUID.randomUUID(), bondId = UUID.randomUUID(), withdrawnAuthors = emptySet())
+
+    /** The same two members, asking once the author has withdrawn: the bond's fact, so both readers carry it. */
+    private val authorAfterWithdrawing = Reader(author.memberId, bondId, withdrawnAuthors = setOf(author.memberId))
+    private val partnerAfterWithdrawal = Reader(partner.memberId, bondId, withdrawnAuthors = setOf(author.memberId))
     private val now = Instant.parse("2026-09-15T08:00:00Z")
 
     private val unrevealed =
@@ -105,7 +109,76 @@ internal class EntryReadabilityTest {
         revealed.canBeReadBy(stranger) shouldBe Readability.NOT_A_MEMBER
         revealed.copy(deletedAt = now).canBeReadBy(stranger) shouldBe Readability.NOT_A_MEMBER
         // Even with the author's own member id, if the membership is of another bond.
-        revealed.canBeReadBy(Reader(memberId = author.memberId, bondId = stranger.bondId)) shouldBe Readability.NOT_A_MEMBER
+        val authorsIdInAnotherBond = Reader(memberId = author.memberId, bondId = stranger.bondId, withdrawnAuthors = emptySet())
+        revealed.canBeReadBy(authorsIdInAnotherBond) shouldBe Readability.NOT_A_MEMBER
+    }
+
+    @Test
+    fun `a withdrawn author's live entry is a tombstone to its author and to a partner it was revealed to`() {
+        // Nothing has been erased: the rows are whole, and stay so until the
+        // outbox's consumer gets to them. The gate answers as if it had.
+        unrevealed.isErased shouldBe false
+        revealed.isErased shouldBe false
+
+        unrevealed.canBeReadBy(authorAfterWithdrawing) shouldBe Readability.TOMBSTONE
+        revealed.canBeReadBy(authorAfterWithdrawing) shouldBe Readability.TOMBSTONE
+        revealed.canBeReadBy(partnerAfterWithdrawal) shouldBe Readability.TOMBSTONE
+    }
+
+    @Test
+    fun `a withdrawn author's entry that was never revealed is an unseen tombstone to the partner`() {
+        // The withdrawal must not hand the partner the id and timestamps BR-8 withheld while the entry was live.
+        unrevealed.canBeReadBy(partnerAfterWithdrawal) shouldBe Readability.TOMBSTONE_UNSEEN
+
+        val unseen = unrevealed.readBy(partnerAfterWithdrawal)
+        unseen.disclosed.shouldBeNull()
+        unseen.authorMemberId shouldBe author.memberId
+    }
+
+    @Test
+    fun `a withdrawal leaves the other member's entries as they were`() {
+        // A withdrawal is its author's, of their own words: the set names
+        // authors, and an entry whose author is not in it is not touched.
+        val partnersUnrevealed = unrevealed.copy(id = EntryId(UUID.randomUUID()), authorMemberId = partner.memberId)
+        val partnersRevealed = revealed.copy(id = EntryId(UUID.randomUUID()), authorMemberId = partner.memberId)
+
+        partnersUnrevealed.canBeReadBy(partnerAfterWithdrawal) shouldBe Readability.FULL
+        partnersRevealed.canBeReadBy(partnerAfterWithdrawal) shouldBe Readability.FULL
+        partnersRevealed.canBeReadBy(authorAfterWithdrawing) shouldBe Readability.FULL
+        partnersUnrevealed.canBeReadBy(authorAfterWithdrawing) shouldBe Readability.LOCKED
+        partnersRevealed
+            .readBy(authorAfterWithdrawing)
+            .disclosed
+            .shouldNotBeNull()
+            .text shouldBe revealed.text
+    }
+
+    @Test
+    fun `membership is still asked before a withdrawal is`() {
+        // A reader of another bond learns nothing, not even that something was
+        // withdrawn: neither tombstone is theirs. The set travels with a
+        // membership of ITS bond, so it could only name this author by accident.
+        val outsider = Reader(memberId = UUID.randomUUID(), bondId = UUID.randomUUID(), withdrawnAuthors = setOf(author.memberId))
+        val authorsIdElsewhere = Reader(memberId = author.memberId, bondId = outsider.bondId, withdrawnAuthors = setOf(author.memberId))
+
+        unrevealed.canBeReadBy(outsider) shouldBe Readability.NOT_A_MEMBER
+        revealed.canBeReadBy(outsider) shouldBe Readability.NOT_A_MEMBER
+        revealed.canBeReadBy(authorsIdElsewhere) shouldBe Readability.NOT_A_MEMBER
+        revealed.readBy(outsider).authorMemberId.shouldBeNull()
+    }
+
+    @Test
+    fun `a withdrawn entry's reading hands on no words, though the entry still has them`() {
+        val authors = unrevealed.readBy(authorAfterWithdrawing).disclosed.shouldNotBeNull()
+        authors.text.shouldBeNull()
+        authors.status shouldBe EntryStatus.DELETED
+        // The author could always see when they wrote it; only the words are gone.
+        authors.id shouldBe unrevealed.id
+
+        val partners = revealed.readBy(partnerAfterWithdrawal).disclosed.shouldNotBeNull()
+        partners.text.shouldBeNull()
+        partners.status shouldBe EntryStatus.DELETED
+        revealed.text.shouldNotBeNull()
     }
 
     @Test

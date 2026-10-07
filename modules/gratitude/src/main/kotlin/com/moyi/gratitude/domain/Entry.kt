@@ -99,6 +99,20 @@ internal data class Entry(
      *    of the text and BR-10a makes the erasure total. Either mark of an
      *    erasure counts, [deletedAt] or [EntryStatus.DELETED]: an erasure
      *    that has set one and not yet the other is already an erasure.
+     *    **And so does a withdrawal that has erased nothing yet**: an entry
+     *    whose author is among [Reader.withdrawnAuthors] is answered exactly
+     *    as an erased one. `bond` records a withdrawal in the transaction
+     *    that ends the bond, and the outbox's consumer erases the rows some
+     *    seconds later, or much later if the poller is stopped. Spec §6.7
+     *    does not allow the words to be read in that interval, so the gate
+     *    does not wait for the rows. It is asked **here and nowhere else**
+     *    because every response that carries an entry is built from this
+     *    function's answer (`GET /today`, a fresh write, a replay): a second
+     *    place that asked would be a second copy of the rule, and a response
+     *    added later that forgot to ask it would show the words, where one
+     *    that goes through this gate cannot. [isErased] is deliberately not
+     *    where it lives: that is the row's own state, which the edit rule and
+     *    the reveal also read, and neither has a reader to ask about.
      *    **Which tombstone depends on what the reader could see before**:
      *    [Readability.TOMBSTONE] for a reader the entry was ever readable to
      *    (clause 3), [Readability.TOMBSTONE_UNSEEN] for a partner it was
@@ -119,7 +133,7 @@ internal data class Entry(
      * the entry it was given for.
      */
     fun canBeReadBy(reader: Reader): Readability {
-        val erased = isErased
+        val erased = isErased || authorMemberId in reader.withdrawnAuthors
         val everReadable = authorMemberId == reader.memberId || revealedAt != null
         return when {
             reader.bondId != bondId -> Readability.NOT_A_MEMBER
@@ -137,6 +151,10 @@ internal data class Entry(
      * Either mark of an erasure counts ([canBeReadBy], clause 2). Asked here
      * by everything that needs to know — the read gate, the edit rule, the
      * reveal — so the three cannot come to disagree about a half-erased row.
+     *
+     * **The row's own state, and only that.** A withdrawal that has not yet
+     * reached this row does not make it erased; the read gate adds that
+     * itself, from its reader ([canBeReadBy]).
      */
     val isErased: Boolean get() = deletedAt != null || status == EntryStatus.DELETED
 
