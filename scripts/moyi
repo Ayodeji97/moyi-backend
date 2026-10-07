@@ -16,6 +16,14 @@
 #   moyi bond new <name> <timezone>          prints the invite code to send your partner
 #   moyi bond join <code>
 #   moyi bond use <bondId>                   which bond the commands below mean
+#   moyi bond leave [--withdraw-entries | --keep-entries]
+#                                            end the bond in use. With no flag no body is sent, and the
+#                                            server's default for a leave applies: your entries are KEPT
+#   moyi bond block [--withdraw-entries | --keep-entries]
+#                                            end it, and the two of you cannot be paired again. With no
+#                                            flag no body is sent, and the server's default for a block
+#                                            applies: your entries are WITHDRAWN, which erases them for
+#                                            good. Say --keep-entries to leave them readable
 #   moyi write "<text>"                      or: moyi write -   (the text from stdin)
 #   moyi today
 #   moyi edit <entryId> "<text>"             until your partner has written
@@ -255,6 +263,21 @@ case "$cmd" in
         [ $# -eq 1 ] || die "usage: moyi bond use <bondId>"
         need_uuid "$1" "$1"
         session_set bondId "$1"; echo "Using bond $1."
+        ;;
+      leave|block)
+        usage="usage: moyi bond $sub [--withdraw-entries | --keep-entries]"
+        [ $# -le 1 ] || die "$usage"
+        # No flag, no body: what happens to the entries is then the server's default for that route, and
+        # the two routes' defaults are opposite. This script holds neither; the help text only reports them.
+        case "${1:-}" in
+          "")                 ending="" ;;
+          --withdraw-entries) ending='{"withdrawEntries":true}' ;;
+          --keep-entries)     ending='{"withdrawEntries":false}' ;;
+          *) die "$usage" ;;
+        esac
+        signed_in; BOND="$(bond)"
+        authed POST "/bonds/$BOND/$sub" "$ending"; show 204
+        if [ "$sub" = leave ]; then echo "You have left this bond."; else echo "This bond is ended, and you will not be paired with its other member again."; fi
         ;;
       list|"") authed GET /bonds; show 200 ;;
       *) die "unknown: moyi bond $sub" ;;

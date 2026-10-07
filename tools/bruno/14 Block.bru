@@ -1,0 +1,29 @@
+meta {
+  name: Block
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{api}}/bonds/{{bondId}}/block
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "withdrawEntries": true
+  }
+}
+
+docs {
+  Ends the bond as Leave does, and the two of you cannot be paired again. 204, also on a bond that has already ended. Your partner is told nothing that a leave would not tell them.
+
+  The body is optional. Sent with no body at all, a block WITHDRAWS your entries, which is what the example here says out loud: your partner stops reading them at once and the rows are erased within seconds. That cannot be undone. Set "withdrawEntries" to false to end the bond and leave what you wrote readable.
+
+  The default is the opposite of Leave's, which keeps the entries unless asked to take them. A misspelt key is 400 and ends nothing.
+}

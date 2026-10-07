@@ -1,0 +1,29 @@
+meta {
+  name: Leave bond
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{api}}/bonds/{{bondId}}/leave
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "withdrawEntries": false
+  }
+}
+
+docs {
+  Ends the bond for both of you: 204, and it is ARCHIVED from then on. Leaving twice is 409 BOND_ARCHIVED.
+
+  The body is optional. Sent with no body at all, a leave KEEPS your entries, which is what the example here says out loud. Set "withdrawEntries" to true to take them back: your partner stops reading them at once and the rows are erased within seconds. That cannot be undone.
+
+  The default is the opposite of Block's, which withdraws unless told not to. A misspelt key is 400 and ends nothing.
+}
