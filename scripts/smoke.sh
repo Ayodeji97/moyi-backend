@@ -1120,8 +1120,11 @@ expect "…while the partner cannot delete it for them" 404 '"code":"NOT_FOUND"'
 OWED="$(sql "SELECT count(*) FILTER (WHERE processed_at IS NULL) || '|' || count(*) FILTER (WHERE last_error IS NOT NULL) || '|' || (count(*) FILTER (WHERE processed_at IS NOT NULL) > 0)::int FROM outbox_deliveries WHERE consumer_id = 'gratitude.withdrawal'")"
 case "$OWED" in psql-unavailable) echo "  skip the delivery check";; "0|0|1") pass "every withdrawal was delivered: none owed, none ever failed";; *) fail "outbox deliveries" "expected owed|failed|any-delivered = 0|0|1, got '$OWED'";; esac
 WITHDRAWN_LOG="$(tail -n "+$((LOG_LINES_BEFORE_WITHDRAWAL + 1))" "$MOYI_LOG")"
-if grep -qE "outbox: delivered [1-9][0-9]*, failed 0" <<<"$WITHDRAWN_LOG"; then pass "…by the poller, which says so itself"; else fail "outbox poller" "no 'outbox: delivered N, failed 0' line since this section began"; fi
-if grep -qE "Outbox delivery failed|outbox: delivered [0-9]+, failed [1-9]|outbox: .*(could not|did not finish|still running)" <<<"$WITHDRAWN_LOG"; then fail "outbox poller" "the poller or the dispatcher logged a failure"; else pass "…and neither it nor the dispatcher logged a failure"; fi
+# The poller says nothing at INFO when it delivers: the line would sit two seconds after
+# "A member ended bond …" and say that ending took its entries back (ADR-0035 decision 11).
+# That it was the poller is what the erasures above showed; nothing else runs here.
+if grep -qE "outbox: delivered" <<<"$WITHDRAWN_LOG"; then fail "outbox poller" "the poller announced a delivery in the log"; else pass "…and the poller did not announce one in the log"; fi
+if grep -qE "Outbox delivery failed|outbox: .*(could not|did not finish|still running|more is waiting)" <<<"$WITHDRAWN_LOG"; then fail "outbox poller" "the poller or the dispatcher logged a failure"; else pass "…and neither it nor the dispatcher logged a failure"; fi
 LEAKED=""
 for words in "$TAKEN_TEXT" "$READER_TEXT" "$KEPT_TEXT" "$OTHER_TEXT" "$LEFT_TEXT" "$STAYED_TEXT"; do grep -qF "$words" "$MOYI_LOG" && LEAKED="$LEAKED [$words]"; done
 [ -z "$LEAKED" ] && pass "no entry of this section is anywhere in the log" || fail "text in log" "found:$LEAKED"

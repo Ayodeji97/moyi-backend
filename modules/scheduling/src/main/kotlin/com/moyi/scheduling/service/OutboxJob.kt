@@ -90,6 +90,16 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * The two counters carry no consumer tag, because a run reports its totals
  * and not whose deliveries they were; the per-consumer picture is the gauges'.
+ *
+ * **A tick that delivered says so at DEBUG, and nothing at INFO.** The only
+ * event there is to deliver is a withdrawal's. A line at INFO two seconds
+ * after "A member ended bond …" would tell a reader of the log that this
+ * ending took its entries back, and the two endings have opposite defaults,
+ * so that it was probably a block (ADR-0028 decision 8). The close job
+ * declines to report its own erasures for the same reason (ADR-0035 decision
+ * 14). What an operator needs is still there: the counters and the gauges,
+ * which name no bond, and every failure, which the dispatcher logs at WARN by
+ * class name and this job logs at WARN when a tick ends with more waiting.
  */
 @Component
 internal class OutboxJob(
@@ -232,7 +242,8 @@ internal class OutboxJob(
                 // Still more when the tick ends: a backlog, or a delivery that cannot be set aside.
                 log.warn("outbox: delivered {}, failed {}, and more is waiting after {} passes", deliveredNow, failedNow, passes)
             } else if (deliveredNow + failedNow > 0) {
-                log.info("outbox: delivered {}, failed {}", deliveredNow, failedNow)
+                // DEBUG, not INFO: see the class's note on what a delivery says.
+                log.debug("outbox: delivered {}, failed {}", deliveredNow, failedNow)
             }
         } catch (thrown: Throwable) {
             log.warn("outbox: the tick did not finish and the next one will try again: error={}", thrown.javaClass.name)

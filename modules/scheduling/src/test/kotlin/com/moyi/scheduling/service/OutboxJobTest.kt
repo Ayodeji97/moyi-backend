@@ -114,6 +114,29 @@ internal class OutboxJobTest(
     }
 
     @Test
+    fun `a tick that delivered says so at DEBUG and at no level a production log keeps`() {
+        // The only event type there is to deliver is a withdrawal's, and the
+        // two endings have opposite defaults. A line at INFO saying that one
+        // was delivered, two seconds after the line that says a bond ended,
+        // tells whoever reads the log that this ending took its entries back,
+        // and so that it was probably a block. The close job declines to
+        // report its own erasures for the same reason (ADR-0035 decision 14).
+        val before = logger.level
+        logger.level = Level.DEBUG
+        try {
+            publish()
+
+            job.dispatchOnce()
+
+            consumer.received shouldHaveSize 1
+            appender.list.map { it.level to it.formattedMessage } shouldContainExactly
+                listOf(Level.DEBUG to "outbox: delivered 1, failed 0")
+        } finally {
+            logger.level = before
+        }
+    }
+
+    @Test
     fun `a delivery whose handler throws is counted apart, and the tick ends quietly`() {
         val delivered = count(OutboxJob.DELIVERED)
         val failed = count(OutboxJob.FAILED)
