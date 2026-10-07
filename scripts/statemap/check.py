@@ -12,6 +12,7 @@ from statemap.model import Model
 
 METHODS = ("get", "post", "put", "patch", "delete")
 SOURCE_ROOTS = ("app", "common", "modules")
+PROBE = re.compile(r'^\s*(?:expect|header_is)\s+"((?:[^"\\]|\\.)*)"', re.M)
 
 
 def operations(openapi: dict) -> dict:
@@ -27,6 +28,10 @@ def operations(openapi: dict) -> dict:
 def error_codes(kotlin_source: str) -> list:
     body = kotlin_source.split("enum class ErrorCode", 1)[1]
     return re.findall(r"^\s+([A-Z][A-Z0-9_]+),?\s*$", body, re.M)
+
+
+def probe_labels(smoke_source: str) -> list:
+    return PROBE.findall(smoke_source)
 
 
 def check_contract(model: Model, operations: dict, strict: bool) -> list:
@@ -106,6 +111,7 @@ def check_grid(model: Model, strict: bool) -> list:
 def check_refs(model: Model, root: Path) -> list:
     smoke_path = root / "scripts/smoke.sh"
     smoke = smoke_path.read_text(encoding="utf-8") if smoke_path.exists() else ""
+    labels = probe_labels(smoke)
 
     cited = [(f"row {r['id']}", r) for r in model.rows if r["outcome"] != "unreachable"]
     cited += [
@@ -116,8 +122,12 @@ def check_refs(model: Model, root: Path) -> list:
     problems = []
     for name, item in cited:
         problems += _code_ref(name, item["codeRef"], root)
-        if item["evidence"] == "smoke" and item["evidenceRef"] not in smoke:
-            problems.append(f"{name}: no probe in scripts/smoke.sh is labelled '{item['evidenceRef']}'")
+        if item["evidence"] != "never-run" and not item["evidenceRef"].strip():
+            problems.append(f"{name}: evidence is '{item['evidence']}' but no evidenceRef says what ran it")
+            continue
+        if item["evidence"] == "smoke":
+            if item["evidenceRef"].strip() not in labels:
+                problems.append(f"{name}: no probe in scripts/smoke.sh is labelled '{item['evidenceRef']}'")
         if item["evidence"] == "test":
             problems += _test_ref(name, item["evidenceRef"], root)
     for entry in model.everywhere:

@@ -10,6 +10,7 @@ from statemap.check import (
     check_refs,
     error_codes,
     operations,
+    probe_labels,
 )
 
 LAMP = {"POST /api/v1/lamp": {200, 401, 409}}
@@ -25,6 +26,15 @@ enum class ErrorCode {
     LAMP_ALREADY_ON,
 }
 """
+
+
+def with_card_error(**over):
+    model = tiny()
+    model.endpoints[0]["requestErrors"] = [{
+        "status": 422, "code": "LAMP_NO_BULB", "reason": "No bulb was named.",
+        "evidence": "never-run", "evidenceRef": "", "codeRef": "src/Lamp.kt#fun press(", **over,
+    }]
+    return model
 
 
 class ParsingTests(unittest.TestCase):
@@ -70,6 +80,17 @@ class ContractTests(unittest.TestCase):
 
     def test_a_card_with_no_row_of_your_own(self):
         self.assertIn("has a card and no row", self.problems(tiny(rows=[])))
+
+    def test_a_card_error_explains_a_documented_status(self):
+        ops = {"POST /api/v1/lamp": {200, 401, 409, 422}}
+        self.assertEqual(check_contract(with_card_error(), ops, True), [])
+
+    def test_a_card_error_not_in_the_contract(self):
+        self.assertIn("answers 422, which the contract does not document", self.problems(with_card_error()))
+
+    def test_a_card_error_code_is_counted_as_used(self):
+        codes = ["UNAUTHENTICATED", "LAMP_ALREADY_ON", "LAMP_NO_BULB"]
+        self.assertEqual(check_error_codes(with_card_error(), codes, True), [])
 
 
 class ErrorCodeTests(unittest.TestCase):
@@ -117,7 +138,7 @@ class RefTests(unittest.TestCase):
         (root / "src").mkdir()
         (root / "src/Lamp.kt").write_text("class Lamp {\n    fun press() {}\n}\n")
         (root / "scripts").mkdir()
-        (root / "scripts/smoke.sh").write_text('expect "pressing an off lamp turns it on" 200 -- "$BASE/lamp"\n')
+        (root / "scripts/smoke.sh").write_text('# a probe nobody wrote, mentioned in a comment\nexpect "pressing an off lamp turns it on" 200 -- "$BASE/lamp"\n')
         tests = root / "modules/lamp/src/test/kotlin"
         tests.mkdir(parents=True)
         (tests / "LampTest.kt").write_text("class LampTest {\n    fun `a lamp that is on refuses`() {}\n}\n")
@@ -153,6 +174,26 @@ class RefTests(unittest.TestCase):
         model = tiny()
         model.everywhere[0]["codeRef"] = "src/Lamp.kt#fun toggle("
         self.assertIn("everywhere 401 UNAUTHENTICATED", self.problems(model))
+
+    def test_card_error_code_ref_is_validated(self):
+        problems = self.problems(with_card_error(codeRef="src/Lamp.kt#fun toggle("))
+        self.assertIn("POST /api/v1/lamp 422 LAMP_NO_BULB", problems)
+        self.assertIn("'fun toggle(' is not in src/Lamp.kt", problems)
+
+    def test_comment_text_does_not_match_probe_labels(self):
+        self.assertIn("no probe in scripts/smoke.sh", self.problems(tiny([row(evidence="smoke", evidenceRef="a probe nobody wrote"), refusal()])))
+
+    def test_card_error_with_empty_evidence_ref(self):
+        problems = self.problems(with_card_error(evidence="smoke", evidenceRef=""))
+        self.assertIn("POST /api/v1/lamp 422 LAMP_NO_BULB", problems)
+        self.assertIn("no evidenceRef says what ran it", problems)
+
+    def test_probe_labels_regex(self):
+        source = """# a probe nobody wrote, mentioned in a comment
+expect "a \\"quoted\\" label" 200
+  header_is "the ETag is quoted" ETag x
+"""
+        self.assertEqual(probe_labels(source), ['a \\"quoted\\" label', 'the ETag is quoted'])
 
 
 if __name__ == "__main__":
