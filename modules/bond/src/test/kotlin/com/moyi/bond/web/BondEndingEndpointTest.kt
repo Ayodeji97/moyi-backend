@@ -49,7 +49,9 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [BondTestApplication::class])
 @AutoConfigureMockMvc
-@Suppress("LongParameterList") // A test's collaborators, each named; nothing to bundle them into.
+// LongParameterList: a test's collaborators, each named; nothing to bundle them into.
+// LargeClass: every answer of the two ending routes, over helpers they share; split, each half would need the other's.
+@Suppress("LongParameterList", "LargeClass")
 internal class BondEndingEndpointTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
@@ -618,6 +620,35 @@ internal class BondEndingEndpointTest(
     }
 
     @Test
+    fun `a content type that is not JSON with no body is 415 on both endings, the same for a stranger as for a member`() {
+        // ADR-0035 decision 11. Before the routes took a body this was `204`:
+        // `curl -X POST -d ''` sends a form content type and nothing else.
+        // The body's reader is chosen before the guard runs, so the answer
+        // must not depend on who asks: a `415` for a member beside a `404`
+        // for a stranger would be the membership oracle again.
+        val pair = pairedBond()
+        val eve = users.verified("Eve")
+
+        listOf("block", "leave").forEach { ending ->
+            listOf(MediaType.APPLICATION_FORM_URLENCODED, MediaType.TEXT_PLAIN).forEach { type ->
+                withClue("$ending $type") {
+                    val member = sendEmpty(pair.ada, pair.id, ending, type)
+                    member.status shouldBe 415
+                    member.contentAsString shouldContain "\"code\":\"UNSUPPORTED_MEDIA_TYPE\""
+
+                    val stranger = sendEmpty(eve, pair.id, ending, type)
+                    stranger.status shouldBe member.status
+                    stranger.contentAsString shouldBe member.contentAsString
+                    headersOf(stranger) shouldBe headersOf(member)
+                }
+            }
+        }
+        getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+        withdrawnMembers(pair.id).shouldBeEmpty()
+        withdrawalEvents(pair.id).shouldBeEmpty()
+    }
+
+    @Test
     fun `an ending that rolls back leaves no marker and no event`() {
         // The marker and the event are the ending's own transaction, not
         // statements beside it: undo the ending and both are gone with it.
@@ -696,6 +727,20 @@ internal class BondEndingEndpointTest(
                 header(HttpHeaders.AUTHORIZATION, bearer(userId))
                 if (json) contentType = MediaType.APPLICATION_JSON
                 if (body != null) content = body
+            }.andReturn()
+            .response
+
+    /** An ending with a Content-Type and no body, which is what a form post of nothing is. */
+    private fun sendEmpty(
+        userId: UUID,
+        bondId: String,
+        ending: String,
+        type: MediaType,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/$ending") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = type
             }.andReturn()
             .response
 
