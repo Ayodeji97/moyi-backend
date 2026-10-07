@@ -572,34 +572,46 @@ internal class BondEndingEndpointTest(
     }
 
     @Test
-    fun `a leave and a block write the same log line`() {
+    fun `an ending is logged once, when the bond ends, and the line is the same whichever route ended it`() {
         // ADR-0028 decision 8: "The service logs "a member ended bond {id}"
-        // for both paths and names no user." A line that says "left" for one
-        // and "ended" for the other tells whoever reads the log which of two
-        // people blocked the other, without the word ever appearing. Ada
-        // leaves and then blocks the same bond, so even the argument agrees.
-        val pair = pairedBond()
-        val logger = LoggerFactory.getLogger(EndBond::class.java) as Logger
-        val appender = ListAppender<ILoggingEvent>().also { it.start() }
-        logger.addAppender(appender)
-        try {
-            leave(pair.ada, pair.id).status shouldBe 204
-            val afterLeave = appender.list.toList()
-            block(pair.ada, pair.id).status shouldBe 204
-            val afterBlock = appender.list.drop(afterLeave.size)
+        // for both paths and names no user." The words were made the same
+        // first, and the count still told: a block logged whether or not it
+        // ended anything, while a leave of an ended bond is refused before it
+        // logs. So a second line for one bond could only be a block, and in a
+        // bond of two the database then says whose.
+        val (left, blocked) = pairedBond() to pairedBond()
+        linesNaming(left.id) { leave(left.ada, left.id).status shouldBe 204 } shouldBe
+            listOf("INFO ${EndBond::class.java.name}: A member ended bond BOND")
+        linesNaming(blocked.id) { block(blocked.ada, blocked.id).status shouldBe 204 } shouldBe
+            listOf("INFO ${EndBond::class.java.name}: A member ended bond BOND")
 
-            afterLeave shouldHaveSize 1
-            afterBlock shouldHaveSize 1
-            val (left, blocked) = afterLeave.single() to afterBlock.single()
-            left.message shouldBe blocked.message
-            left.argumentArray.toList() shouldBe blocked.argumentArray.toList()
-            left.argumentArray.toList() shouldBe listOf(UUID.fromString(pair.id))
-            left.level shouldBe blocked.level
-            left.formattedMessage shouldBe blocked.formattedMessage
-            left.formattedMessage shouldBe "A member ended bond ${pair.id}"
-        } finally {
-            logger.detachAppender(appender)
-        }
+        // The case the route exists for: the other member left first.
+        val leftFirst = pairedBond()
+        linesNaming(leftFirst.id) {
+            leave(leftFirst.ada, leftFirst.id).status shouldBe 204
+            block(leftFirst.bea, leftFirst.id, """{"withdrawEntries":false}""").status shouldBe 204
+        } shouldHaveSize 1
+
+        // A repeat.
+        val repeated = pairedBond()
+        linesNaming(repeated.id) {
+            block(repeated.ada, repeated.id).status shouldBe 204
+            block(repeated.ada, repeated.id).status shouldBe 204
+        } shouldHaveSize 1
+
+        // A withdrawal recorded on a bond that had already ended: the marker
+        // and the event are written, and no line says so.
+        val withdrawnLater = pairedBond()
+        linesNaming(withdrawnLater.id) {
+            leave(withdrawnLater.ada, withdrawnLater.id).status shouldBe 204
+            block(withdrawnLater.bea, withdrawnLater.id, """{"withdrawEntries":true}""").status shouldBe 204
+            block(withdrawnLater.ada, withdrawnLater.id).status shouldBe 204
+        } shouldHaveSize 1
+        withdrawnMembers(withdrawnLater.id) shouldHaveSize 2
+        withdrawalEvents(withdrawnLater.id) shouldHaveSize 2
+
+        // A refused leave was never logged, and still is not.
+        linesNaming(leftFirst.id) { leave(leftFirst.bea, leftFirst.id).status shouldBe 409 }.shouldBeEmpty()
     }
 
     @Test
@@ -673,6 +685,28 @@ internal class BondEndingEndpointTest(
         val ada: UUID,
         val bea: UUID,
     )
+
+    /**
+     * Every line any logger wrote during [action] that carries [bondId], as
+     * level, logger and message with the id replaced. Read at the root, so a
+     * line from a class other than `EndBond` would be counted too.
+     */
+    private fun linesNaming(
+        bondId: String,
+        action: () -> Unit,
+    ): List<String> {
+        val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
+        val appender = ListAppender<ILoggingEvent>().also { it.start() }
+        root.addAppender(appender)
+        try {
+            action()
+        } finally {
+            root.detachAppender(appender)
+        }
+        return appender.list
+            .filter { bondId in it.formattedMessage }
+            .map { "${it.level} ${it.loggerName}: ${it.formattedMessage.replace(bondId, "BOND")}" }
+    }
 
     private fun pairedBond(names: Pair<String, String> = "Ada" to "Bea"): PairedBond {
         val ada = users.verified(names.first)

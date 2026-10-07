@@ -232,9 +232,16 @@ requires and the spec did not cover.
   bodies on both routes.
 - **A repeat block may withdraw what the first declined.** `leave` on an ended bond is still
   `409` and withdraws nothing.
-- **Both endings write the same log line**, "A member ended bond {id}". The code had logged
-  "left" for a leave and "ended" for a block since #39, against ADR-0028 decision 8, which
-  says one line. Neither said "block"; the line still told which it was.
+- **An ending is logged once, when the bond ends, by one line**, "A member ended bond
+  {id}", written in `EndBond.end` after its check that something changed. Two things told
+  a reader of the log which ending was a block, and both were found by review. The words:
+  the code had logged "left" for a leave and "ended" for a block since #39, against
+  ADR-0028 decision 8. Neither said "block". The count: with the words made the same, a
+  block still logged whether or not it ended anything, and a leave of an ended bond is
+  refused before it logs, so a second line for one bond could only be a block. The
+  privacy review of the branch counted two lines on 15 bonds of 15. Now a block of a bond
+  that has already ended writes no line, with or without a withdrawal, and nothing else
+  logs the bond's id (`BondEndingEndpointTest` reads the root logger).
 
 **12. The read gate treats a withdrawn author's entry as erased.** `Reader` carries
 `withdrawnAuthors`, with no default, built only from a `BondMembership`. `Entry.canBeReadBy`

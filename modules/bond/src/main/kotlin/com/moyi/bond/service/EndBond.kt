@@ -84,7 +84,6 @@ internal class EndBond(
         val now = clock.instant()
         end(bond.leave(membership.memberId, now), bond)
         if (withdrawEntries) withdraw(membership, now)
-        logEnded(membership)
     }
 
     /**
@@ -104,7 +103,9 @@ internal class EndBond(
      * bond and on one that has ended alike, and by a repeat of a call that
      * declined to the first time.
      *
-     * What is logged is [logEnded]'s one line, the line [leave] writes.
+     * Nothing is logged here. [end] writes the one line when the bond ends,
+     * as it does for [leave]; a block of a bond that had already ended ends
+     * nothing and writes no line, with or without a withdrawal.
      */
     @Transactional
     fun block(
@@ -123,21 +124,6 @@ internal class EndBond(
         // ended: that bond is exactly where a member who left earlier, or
         // whose partner left first, comes to take their entries back.
         if (withdrawEntries) withdraw(membership, now)
-        logEnded(membership)
-    }
-
-    /**
-     * The one line both endings write (ADR-0028 decision 8).
-     *
-     * **One call site's worth of text, so the two cannot differ.** They did:
-     * leave said "left" and block said "ended", which never used the word
-     * "block" and told a reader of the log which of the two it was all the
-     * same. It names no user. Doc 18 §5 keeps personal data out of logs, and
-     * which of two people blocked the other is as personal as this system
-     * gets.
-     */
-    private fun logEnded(membership: Membership) {
-        log.info("A member ended bond {}", membership.bondId.value)
     }
 
     private fun lockAndLoad(membership: Membership): Bond {
@@ -156,6 +142,22 @@ internal class EndBond(
      * the same values back and, while Hibernate's dirty check spares the bond
      * row, the invite revocation is an unconditional statement. Doing nothing is
      * also the honest answer, because nothing happened.
+     *
+     * **The one log line of an ending is written here, after that check, and
+     * nowhere else** (ADR-0028 decision 8; ADR-0035 decision 11). Two things
+     * could tell a reader of the log which ending was a block, and both did:
+     *
+     * - *The words.* Leave said "left" and block said "ended". Neither said
+     *   "block". One text for both, written in one place, cannot differ.
+     * - *The count.* Block logged whether or not it ended anything, and a
+     *   leave of an ended bond is refused before it logs. So a second line
+     *   for one bond could only be a block: the member whose partner had
+     *   already left, which is the case the route exists for, or a repeat.
+     *   Logged only when the bond ends, a bond that ended has one line,
+     *   whoever asked and however often.
+     *
+     * It names no user. Doc 18 §5 keeps personal data out of logs, and which
+     * of two people blocked the other is as personal as this system gets.
      */
     private fun end(
         ended: Bond,
@@ -174,6 +176,7 @@ internal class EndBond(
         // nobody can write to. Both are refused at the endpoint as well; this is
         // the half that stops the pending state being shown at all.
         proposals.cancelLiveOf(ended.id, at)
+        log.info("A member ended bond {}", ended.id.value)
     }
 
     /**

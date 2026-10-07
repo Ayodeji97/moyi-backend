@@ -229,7 +229,10 @@ service logs "a member ended bond {id}" for both paths and names no user (doc 18
 - **The log line is now the same for both endings, as this decision always said.** The code
   had logged "A member left bond {}" for a leave and "A member ended bond {}" for a block
   since #39. Neither said "block", and the line still told which it was. A review in C5a
-  found it; both paths now write the second, and a test compares the two.
+  found it; both paths now write the second, and a test compares the two. A later review
+  found that the count still told: a block logged on a bond that had already ended and a
+  refused leave did not. The line is now written once, when the bond ends, and not
+  otherwise (ADR-0035 decision 11).
 
 ## Consequences
 
