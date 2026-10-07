@@ -28,11 +28,12 @@ reactions. The migrations follow: **V20** (`common:events`) and **V21** (`bond`)
 for C5b, V23 for C5c, and C6 moves to V24.
 
 The slice was built in eight tasks (the seventh in two parts), each by an implementing
-agent. Tasks 1 to 7 were each then read by an independent reviewer who ran the code; the
-branch as a whole was then read against the spec, and that review's corrections are in this
-record. The plan
+agent. Tasks 1 to 7 were each then read by an independent reviewer who ran the code. The
+branch as a whole was then read three times, by three reviewers with one concern each:
+conformance to the spec, concurrency and failure, and privacy with the API contract. Their
+corrections are in this record. The plan
 (`docs/superpowers/plans/2026-10-06-outbox-and-withdrawal-c5a.md`) made thirteen decisions.
-Fifteen are recorded here. Where one differs from the plan, it says what changed and which
+Sixteen are recorded here. Where one differs from the plan, it says what changed and which
 review caused it; "How this was checked" lists them.
 
 Two terms. A **delivery** is one row of `outbox_deliveries`: one event owed to one consumer.
@@ -108,8 +109,12 @@ start-up cannot know that no other build declares a type, so retiring one is a m
 **4. One delivery, one transaction: claim, handle, acknowledge.** `JdbcOutboxDispatcher`
 claims one due delivery with `FOR UPDATE OF d SKIP LOCKED`, calls the consumer, and sets
 `processed_at` in the same transaction. A handler marked `@Transactional(MANDATORY)` joins
-it. There is no moment at which an entry is erased and the delivery still owed, or the
-reverse.
+it. So what a handler does and the record that it was done commit or vanish together: no
+delivery is acknowledged with its handler's work undone, and no handler's work is kept with
+its delivery still owed. That is a statement about the handler. It is no longer true that
+an entry is never erased while the delivery is owed: since decision 14 the close job and
+the joining-day reconcile erase a withdrawn author's entries on the day they reach, in
+their own transactions, and the delivery that follows finds those already erased.
 
 - **Only (consumer, declared event type) pairs this process has are claimed.** The plan
   matched on the consumer id alone. The review of Task 1 showed what that does in a rolling
@@ -331,6 +336,14 @@ with each other and that nothing is shown. Decision 13's exception stands.
   must call it.
 - The erasure is in the day's transaction and is neither counted against the close job's
   budget nor reported: a count would say that somebody withdrew.
+- **The poller does not report it at INFO either.** `OutboxJob` logged "outbox: delivered
+  N, failed M" at INFO for any tick that delivered. `EntriesWithdrawn` is the only event
+  type, so that line within two seconds of "A member ended bond {id}" said this ending took
+  its entries back, and with the two endings' opposite defaults, that it was probably a
+  block. Read, not run, by the privacy review. The line is at DEBUG. Failures stay at WARN
+  by class name, the dispatcher's failure line still names the event's type and id, a tick
+  that ends with more waiting still warns with its counts, and the two counters carry the
+  same totals with no bond beside them.
 
 **15. An author may delete their own entry after the bond has ended, and after leaving it.**
 The owner's ruling of 2026-10-06 on ADR-0032 question 1. `DELETE /entries/{id}` is `204` for
@@ -339,6 +352,49 @@ and during a deletion countdown. `PATCH` stays `409 BOND_ARCHIVED`: an ended bon
 new words. The reason is this slice's: if a single delete were refused on an ended bond,
 tombstones appearing after the end could only mean a block (X15). The partner still gets the
 one `404`.
+
+**16. Six loggers are pinned in `application.yml`, so that raising a level above them
+cannot put an entry in the log.** CLAUDE.md's rule that entry text, passwords and tokens
+never reach a log was held by types that redact their `toString`. That does not bind the
+libraries underneath, which print values of their own accord once their level is lowered.
+The slice's last task saw the first of these; the privacy review proved four; the test
+written for the fix found two more. None is this slice's: each predates it. With
+everything at TRACE, each was seen printing the words of an entry:
+
+| Logger | Pinned at | What it printed, and at what level |
+|---|---|---|
+| `org.hibernate.orm.core` | INFO | DEBUG: "Listing entities", every field of every managed entity at each flush, `EntryEntity.text` included |
+| `org.hibernate.orm.jdbc.bind` | OFF | TRACE: each value bound to a statement |
+| `org.hibernate.orm.jdbc.extract` | OFF | TRACE: each value read from a result |
+| `org.hibernate.orm.resource.registry` | INFO | TRACE: the driver's statement, which prints itself with its parameters filled in |
+| `org.postgresql` | INFO | TRACE: the wire protocol's `Bind` message |
+| `org.apache.coyote.http11.Http11InputBuffer` | INFO | DEBUG: the bytes of every request as read, so the bearer token, a password, a refresh token and an entry's text |
+
+- **What a pin does.** A logger with a level of its own keeps it whatever is set above it.
+  So the pins hold against `LOGGING_LEVEL_ROOT`, `logging.level.org.hibernate`, any other
+  parent, and Spring Boot's `sql` and `web` groups, at any level. No shipped profile raises
+  those; `LOGGING_LEVEL_ROOT=DEBUG` is what gets set during an incident.
+- **What defeats it.** A level set on one of the six exact loggers, or on a name beneath
+  `org.postgresql`: an environment variable outranks `application.yml`. And
+  `spring.mvc.log-request-details=true`, which is another switch and prints every request
+  header at TRACE, the bearer token among them (run once, seen). Neither is guarded.
+- **What it costs.** `org.hibernate.orm.core` is the logger most of Hibernate writes
+  through, so its other DEBUG output is given up unless that logger is named, which also
+  brings the entity listing back.
+- **What the test covers.** `SecretsNeverLoggedTest` boots the application with the
+  shipped `application.yml`, over a real socket, with the root, every parent of a pin and
+  the two groups raised to TRACE by property before the context starts. It registers two
+  accounts, signs in, pairs them, submits, reads, edits, reveals, deletes, ends the bond
+  with a withdrawal, runs the dispatcher and refreshes a session, then searches every
+  event that reached the root logger, and the console, for three entries' text, a
+  password, two access tokens and two refresh tokens. It also proves it can see: a TRACE
+  line of its own is found, and each library is seen logging below INFO. Removing any one
+  of the six pins fails it, naming that pin's logger.
+- **What it does not cover.** The email verification and password reset tokens, which the
+  `test` and `local` profiles print on purpose. And invite codes: question 10.
+- *Rejected:* an `AttributeConverter` to a redacting type for `EntryEntity.text`. It would
+  fix the entity listing only; the bound value, the fetched value, the driver and the
+  socket would print as before.
 
 ## Consequences
 
@@ -352,6 +408,14 @@ one `404`.
   behaviours change for an existing client: a non-JSON content type with an empty body is
   `415` (answered, and not in the contract: the generator documents `415` only on
   idempotent routes), and an author's `DELETE` on an ended bond is `204` where it was `409`.
+- **The contract says what an absent flag does.** `leaveBond` and `blockBond` each carry a
+  description stating that route's default and that an erasure cannot be undone; the
+  shared `EndBondRequest` says only that the default depends on the route. Before, the
+  generated type was an optional nullable boolean and nothing said that omitting it on one
+  route destroys what the caller wrote. Neither description uses the other route's name
+  (ADR-0028 decision 8). `scripts/moyi bond block` now requires `--withdraw-entries` or
+  `--keep-entries`: bare, it had sent no body, the server's default had erased, and the
+  output had not said so. The server's default is unchanged, and is still question 1.
 - **The application now does one more thing on its own**, every two seconds, on every
   instance, and start-up now takes a table lock for a moment. `moyi.scheduling.enabled=false`
   turns the poller off with the close job and the hourly reap of idempotency keys.
@@ -362,9 +426,29 @@ one `404`.
   through the API in that time (decision 12), and a day that is closed or revealed in that
   time is erased first (decision 14).
 - **A withdrawal holds the bond's row lock for the whole erasure**, and every row lock of
-  the member's history at once. The bond has ended; only the close job's work on that bond
-  (its unsettled days and their streak), an author's own delete, a joining-day reconcile and
-  a repeat ending wait on it.
+  the member's history at once. The bond has ended, and things still wait on that lock:
+  - **Every write either member attempts on that bond**, including the ones that are then
+    refused. Proved by the privacy review with the lock held from a second connection: the
+    partner's `POST /entries` (`409`), `PATCH` of their own entry (`409`), `PATCH` and
+    `DELETE` of the author's entry (`404`), `POST /leave` (`409`) and `DELETE` of their own
+    entry (`204`) all waited, and so does the author's own `DELETE` and a repeat ending.
+    **The partner's reads do not wait**: `GET` of today, the streak, the bond and the list
+    answered at once, except a read that has a joining day to reconcile. A stranger's
+    requests do not wait.
+  - **The close job and the streak evaluation, for that bond and for every bond sorted
+    after it.** Both take the same lock with no timeout, and a run is sequential, ordered
+    by bond id, under one ShedLock. Measured by the concurrency review with the delivery
+    limit set to 3 s and 4,000 entries: the consumer held the lock from 0 to 3,008 ms; the
+    close job started at 600 ms; the three bonds sorted before the withdrawn one closed at
+    about 0.7 s and the three sorted after it at about 3.0 s. So one long withdrawal delays
+    later bonds' days by up to the delivery limit, sixty seconds by default, and again on
+    each retry of a delivery that keeps reaching it.
+  - **What that can tell the partner.** A withdrawal of N entries holds the lock for about
+    2.5 ms × N in one piece (a year of entries, under a second); a run of single deletes
+    holds it a few milliseconds at a time. A write of the partner's that lands in that
+    window stalls before its `409`. It tells a withdrawal from deleting by hand, not one
+    ending from the other. Reasoned from the measured rate, not run. The cure is the one
+    decision 13 names for the limit: erase in batches that each commit.
 - **Backoff counts from the start of the pass, not from the failure.** A delivery that fails
   by its 60 s limit has already outlived the first steps, so it is retried on the next tick
   about six times before the wait is felt, and holds the one poller thread for a minute each
@@ -375,8 +459,15 @@ one `404`.
 - **None of the meters can be read by anyone yet**, as with the close job's (ADR-0033).
   Every instance reports the same database-wide numbers, so an alert takes the maximum
   across instances, not the sum.
-- **A reader of the database can tell a withdrawal from a delete on one kind of day, for a
-  while**: the unread `SUSPENDED` joining day of decision 13. A reader of the API cannot.
+- **A reader of the database can always tell that a member withdrew.** Three rows are
+  permanent: the marker in `bond_entry_withdrawals`, the `EntriesWithdrawn` event, and its
+  delivery. And every entry of one withdrawal carries the same `deleted_at` and
+  `updated_at`, from the one reading of the clock in `WithdrawEntries.handle`, where
+  deletes by hand carry many. By design: the marker is the bond's record, and nothing
+  removes events. On top of that, the day rows differ for a while on one kind of day, the
+  unread `SUSPENDED` joining day of decision 13. **A reader of the API cannot tell**, and
+  that depends on no response ever carrying a tombstone's `deletedAt` or `updatedAt`:
+  `EntryResponse` carries neither today (Owed, C5b).
 
 ## Owed
 
@@ -393,6 +484,11 @@ consumes `EntrySubmitted`: there is no event for an erasure, so read the entry b
 - A delete keeps the row, so no foreign-key cascade will ever remove a favourite (X5).
   Favourites are removed in `EraseEntry`, which serves `DELETE`, the withdrawal and decision
   14 at once.
+- **No response may carry a tombstone's `deletedAt` or `updatedAt`.** A withdrawal stamps
+  every entry it erases with one instant (Consequences), so the first response to show
+  either field would let the partner tell a withdrawal from a run of deletes, and from
+  there, by the defaults, guess at a block. The archive is the first route that returns
+  many tombstones at once.
 - The default page of 20 days can exceed NFR-008's 256 KB: 20 days, two entries, 8,192 bytes
   each is 327,680 bytes of text alone (X11).
 - Whether a day's page may say `SOLO` (ADR-0034, "Owed, C5, the archive": the same question
@@ -419,24 +515,8 @@ which decides the exported names. Keep `org.springframework.transaction`, `.jdbc
 `.orm.jpa` off TRACE in production: a `MANDATORY` handler's exception is printed there by
 Spring's interceptor.
 
-**`org.hibernate.orm.core` must stay above DEBUG, and nothing pins it.** At DEBUG,
-Hibernate's "Listing entities" prints every field of every managed entity at each flush,
-`EntryEntity.text` included. Run and seen by the last task: `UnflushedHandlerTest` raises
-every logger to DEBUG and asserts on Postgres's "Failing row", not on the words, for this
-reason. **It predates this slice**: every flush of a live entry prints the same, on the
-request paths too. **Not fixed here.**
-
-No configuration in the repository sets that level. Read, not run:
-`app/src/main/resources/application.yml` sets one logger, `org.hibernate.orm.jdbc.error`,
-to `OFF`; `application-local.yml` has no logging block; there is no logback or log4j file;
-no script, compose file or workflow passes a logging level. Two test configurations
-(`identity`, `gratitude`) repeat the one `OFF` line and set nothing else. So the default
-stands, which is Spring Boot's root at INFO, and "entry text never reaches a log" holds
-only while nobody raises `org.hibernate.orm.core`, a parent of it or the root to DEBUG.
-A property or an environment variable at deploy could; the deploy's environment is not in
-this repository. Either pin the logger at INFO in `application.yml`, with a test that
-raises it and finds no text, or keep the text out of what Hibernate prints of the entity.
-Question 10.
+Keep `spring.mvc.log-request-details` off, and set no level on any of decision 16's six
+loggers: either one puts a token or an entry in the log.
 
 **Phase 4.** The notification consumer. It registers with `NOW` or accepts a backfill of
 every event since C2 under the table lock; the backfill scans `outbox_events` by type with
@@ -499,14 +579,25 @@ Each is built one way and cheap to turn.
    `SOLO` branch, and the reveal of a `PENDING_REVEAL` day does not ask whether the bond has
    ended. Both wrote for a bond that was still theirs, so revealing may be right. Doc 09
    T-20 says leaving "revokes access to *new* content", and these words become readable
-   after the leaving. Built: revealed. The reviewer ran it at `6de2a67`; no test pins it
-   either way.
-10. **Hibernate prints an entry's text when `org.hibernate.orm.core` is at DEBUG.** Found by
-    this slice's last task and older than the slice (Owed, the deploy slice, has what was
-    seen and what was read). No shipped configuration sets that level and nothing prevents
-    it. CLAUDE.md's rule that entry text never reaches a log is conditional on it. Whether
-    to pin the level now, in a pull request of its own, or leave it to the deploy slice is
-    the owner's.
+   after the leaving. Built: revealed. The reviewer ran it at `6de2a67`, and the privacy
+   review saw it again at `33351ad` (the closer reported two entries revealed on a bond
+   that had ended eight and a half hours earlier); no test pins it either way.
+10. **An invite code reaches the log at DEBUG, and CLAUDE.md says it never does.** The
+    code is part of the path (`GET /invites/{code}`, `POST /invites/{code}/accept`), so
+    every logger that prints a request line prints it: Spring Security's `FilterChainProxy`
+    at DEBUG, its authorization manager, the dispatcher servlet and the handler's arguments
+    at TRACE, Tomcat's authenticator valve at DEBUG. Found by decision 16's test, run and
+    seen. Those lines are what an operator lowers a level to read, so they are not pinned,
+    and the test holds only that no other logger prints a code. At the default level
+    nothing prints one (the smoke run checks). A code is short-lived and spent on accept.
+    The choices: accept it and narrow CLAUDE.md's sentence to the default level for invite
+    codes; move the code out of the path into a body, which changes the contract; or pin
+    the five loggers and lose the request line at DEBUG. Built: none of them. CLAUDE.md is
+    not edited here.
+11. **Question 1 again, now that the contract says it.** The bare `POST /block` still
+    erases. The contract states it and the CLI refuses to send it; a client that ignores
+    the description still destroys by omission. Requiring the flag on that route would be
+    a `400` where there is a `204` today.
 
 ### The corpus
 
@@ -596,6 +687,10 @@ are the corpus's at `docs/phase-3-daily-loop`, `9be5149`.
 - A second consumer registers. Decisions 2 to 6 have run for one consumer and one event
   type; the backfill under the table lock and the untagged counters get their first real
   use.
+- A consumer gains or loses an event type. Decision 3's rule that a start-up removes
+  nothing has only run in a test, and a type that is dropped needs its migration.
+- A second event type is delivered: the poller's line could then go back to INFO without
+  saying what was delivered (decision 14), if it still says nothing of whose.
 - A second instance is deployed: `SKIP LOCKED` and the guarded failure record have only met
   a second dispatcher in tests.
 - A handler talks to anything but this database: decision 7's limit stops bounding it.
@@ -663,11 +758,76 @@ their own checkout; reviewers wrote probes that assert nothing and print what th
   - the handler's exception logged whole by Spring when the rollback failed (decision 4);
   - the age gauge blind to a delivery that keeps failing (decision 8);
   - an `Error` at hand-over stopping the poller for good (`7fad97a`);
-  - the two endings' different log lines (decision 11).
+  - the two endings' different log lines, and then their different counts (decision 11);
+  - the libraries' own loggers printing an entry's text once a level is raised
+    (decision 16). The last task saw the first of them and left it; the privacy review
+    proved four; the fix's test found two more.
 
-  One finding of the last task is in that list's company and has no fix: Hibernate printing
-  entity fields at DEBUG, entry text included (`org.hibernate.orm.core`, "Listing
-  entities"). It is older than this slice. Owed, the deploy slice; question 10.
+  One was found by reading two rules together and has a test, though nobody ran the
+  failure first: the older build deleting the newer build's subscription (decision 3).
+- **Three reviews of the whole branch** (2026-10-07, at `33351ad`), each by a reviewer
+  with one concern, in a checkout of its own, with probes that assert nothing and print
+  what they saw. What each proved by running, what it found, and what followed:
+  - **Conformance to the spec and the record.** Read, clause by clause, against the spec,
+    the earlier ADRs' "Owed" lists and the task reports; by its own account it ran
+    nothing. Twenty
+    findings, nearly all of them sentences in this record, the spec or a KDoc that had
+    stopped being true. Corrected at `936f6f4`, `abd1928` and `f02cc3f`.
+  - **Concurrency, transactions and failure.** Proved clean: five rounds of five bonds with
+    the dispatcher (two at once in one scenario), the close job, both members' reads and
+    the author's deletes all started together, on a legacy `SUSPENDED` joining day and on a
+    bond with five closed days and one waiting for its reveal time. No deadlock, every
+    delivery attempted once, nothing revealed, and rows equal to a twin bond processed one
+    step at a time. `WithdrawalRaceTest` runs those orders one after another; this is the
+    overlap it does not run. Proved: registration waiting behind an uncommitted publisher
+    gives up at its bound and lets the publishers go, and the one cycle that passes
+    through registration is resolved by Postgres reordering the queue, with no `40P01`.
+    Proved, with the delivery limit at 3 s and 4,000 entries: the handler was stopped at
+    the limit, nothing was erased, and the next attempt was two seconds on. Found: the
+    close job's wait behind a withdrawal (Consequences), measured in that run; the
+    subscription delete (decision 3), reasoned from the branch's own test; `destroy`'s
+    KDoc claiming an interrupt that a JDBC read does not take; decision 4's sentence.
+  - **Privacy, the discreet exit and the contract.** Proved: 14 bodies on each ending
+    route, from a stranger, against an open bond, an ended one, an id that does not exist
+    and one that is not a UUID, gave one byte-identical answer per body and wrote nothing.
+    Proved: fifteen bonds (five endings: leave or block, each keeping or withdrawing, and
+    delete-by-hand-then-leave; three shapes of the day) read by both members through five
+    routes at four moments. A leave and a block were identical everywhere; a withdrawal
+    and deleting by hand were identical from the consumer's run on, and before it differed
+    only as question 4 says. The `ETag` never moved after the ending. Proved: which
+    requests wait on the bond's lock (Consequences). Found, by running: entry text in the
+    log at DEBUG and TRACE (decision 16), and the second log line that only a block could
+    write, on 15 bonds of 15 (decision 11). Found, by reading: the poller's INFO line
+    (decision 14), the contract's silence about the default, and the CLI erasing on a bare
+    command (Consequences).
+- **Run after those reviews** (2026-10-07, six commits, `d47956a` to `c3a9c17`), by the
+  agent that made the fixes. Each fix had a test seen to fail first for the reason given,
+  and where a mechanism was added, the mechanism was removed again and the test seen to
+  fail:
+  - `SecretsNeverLoggedTest` failed with no pin, naming six loggers; each pin was then
+    removed in turn and the test failed each time, naming that pin's logger.
+  - The ending's log line: failed with two lines for a leave followed by the partner's
+    block; failed again with the unconditional line restored.
+  - The poller's line: failed at INFO.
+  - The registry: both tests failed with the subscription deleted, and again with the
+    delete restored.
+  - The contract: `OpenApiContractTest` failed with no description. The regenerated
+    document differs by three descriptions and nothing else. oasdiff 1.11.7 against
+    `origin/main` is as before: 7 changes, 0 error, 0 warning, 7 info; `breaking` exits 0
+    at both levels. CI's own action is still not run by anyone.
+  - The CLI, against a booted jar on a database of its own, dropped afterwards: a bare
+    `bond block` refused and ended nothing; `bond leave` bare and with each flag, and
+    `bond block` with each flag, repeated, and on an ended bond, kept and erased as
+    printed. In that run six endings on three bonds wrote three "A member ended bond"
+    lines, and three deliveries wrote no "outbox: delivered" line.
+  - `./gradlew build` green before each of the five code commits: 1215 tests in the
+    result files at `c3a9c17` (1211 at `f02cc3f`). Parts 2 and 3 (`3249f82`, `02f0ba8`)
+    were built once, together. Modules whose inputs had not changed were up to date and
+    not re-executed.
+  - `scripts/smoke.sh` at `c3a9c17`, on a database of its own (`moyi_c5a_smoke2`, dropped
+    afterwards), with the poller running: 458 passed, 0 failed, no skips. One probe
+    changed: it looked for the poller's "delivered" line and now fails if there is one.
+    The run with the poller held idle was not repeated.
 - **Found by the consumer's own test:** the commit-time exception logged at DEBUG with the
   row (decision 4).
 - **Mutations.** Each is a mechanism removed, a named test seen to fail, the file restored.

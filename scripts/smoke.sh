@@ -29,9 +29,11 @@
 # ends bonds with the outbox poller running: a block with no body and a leave
 # that asks for it have their author's entries erased within ten seconds, a
 # block told to keep them leaves them readable, an author deletes on an ended
-# bond, and a misspelt flag ends nothing. Last run on 2026-10-07, against a
-# database of its own (MOYI_DB, below): 458 passed, 0 failed, and with the
-# poller held idle the four probes that depend on it failed. The pull request
+# bond, and a misspelt flag ends nothing; and the poller announces no delivery
+# in the log. Last run on 2026-10-07, against a database of its own (MOYI_DB,
+# below): 458 passed, 0 failed. An earlier run that day, with the poller held
+# idle, failed the four probes that then depended on it; three do now, and
+# that run has not been repeated. The pull request
 # that last changed this file names the commit the
 # jar was built from; a later commit is unproven until it is run again.
 #

@@ -185,11 +185,24 @@ internal class OutboxJob(
 
     /**
      * Stops the worker with the context, and before the connection pool goes:
-     * no further pass is begun, the handler in flight is interrupted (its
-     * delivery rolls back and stays due, which at-least-once allows), and the
-     * tick is given a few seconds to end so that it ends against a database
-     * that is still there. A handler that ignores the interrupt is left
-     * behind; the thread is a daemon and holds nothing up.
+     * no further pass is begun, and the tick in flight is given a few seconds
+     * to end so that it ends against a database that is still there.
+     *
+     * **The handler in flight is not stopped.** `shutdownNow` interrupts the
+     * worker's thread, and that reaches only code that is waiting somewhere an
+     * interrupt is noticed. A handler is nearly always waiting on the
+     * database, in the driver's read of a socket, which is not such a place;
+     * and a pass, once begun, has no check of its own between deliveries: the
+     * `stopping` flag is read between passes. So the tick ends when its pass
+     * does, up to a budget of deliveries later, or when the pool is closed
+     * under it, whichever comes first. If these few seconds are not enough it
+     * is left behind, with one WARN; the thread is a daemon and holds nothing
+     * up.
+     *
+     * **What is left is still right.** A delivery cut off by the pool closing
+     * was never acknowledged: its transaction is rolled back by the server
+     * with its connection, the handler's work with it, and the delivery stays
+     * due for the next start. At-least-once allows that.
      */
     override fun destroy() {
         stopping = true

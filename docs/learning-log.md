@@ -2158,3 +2158,10 @@ Wrong about: where a rule is held. I held "withdrawn means erased" in the read g
          Five of the nine have a test now, and so has one of the three called
          equivalent, which was not. Four are left: an optimisation in two forms, a
          redundant predicate, and a lock order no test can show to be needed.
+         Three reviews of the whole branch followed, and two of what they found were mine
+         twice over. The block could still be told from the log after I had made the two
+         endings' lines the same word for word: one of them logged when it ended nothing,
+         so the reader only had to count. And a delete at start-up undid a rule written
+         two tasks earlier for the same case, two builds running side by side. Each was
+         right when read alone. I had checked the text of a line and not how often it is
+         written, and each task against its own tests and not against the task before it.
