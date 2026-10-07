@@ -4,6 +4,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionStatus
 import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.core.type.TypeReference
@@ -221,6 +222,7 @@ internal class JdbcOutboxDispatcher(
                             checkNotNull(consumer) { "Claimed a delivery for a consumer this process lacks." }
                             consumer.handle(claim.toEvent())
                             acknowledge(claim, run)
+                            failNowWhatWouldFailAtCommit(status)
                             Outcome.DELIVERED
                         } catch (thrown: Throwable) {
                             handlerFailure = thrown
@@ -293,6 +295,30 @@ internal class JdbcOutboxDispatcher(
             String::class.java,
             "${properties.deliveryTimeout.toMillis()}ms",
         )
+    }
+
+    /**
+     * Makes the database say, inside the callback, anything it would
+     * otherwise say only at the commit: writes a JPA handler has not yet
+     * flushed, and constraints declared `DEFERRED`.
+     *
+     * **Why, when the commit would refuse them anyway.** Refused at the
+     * commit, the exception is the transaction manager's, raised outside the
+     * callback where nothing here can keep it: Spring logs it whole at DEBUG
+     * ("Initiating transaction rollback after commit exception"), and
+     * Postgres words a violated constraint with the row that violated it,
+     * which for this outbox's first consumer is an entry. Refused here, it
+     * is one more failure of the handler: kept from Spring, rolled back,
+     * recorded by its class.
+     *
+     * `flush` is the transaction's own and does nothing where there is no
+     * JPA session. `SET CONSTRAINTS` lasts for the transaction, which ends
+     * with the next statement. What can still fail at the commit after this
+     * is the connection or the server, and neither quotes a row.
+     */
+    private fun failNowWhatWouldFailAtCommit(status: TransactionStatus) {
+        status.flush()
+        jdbc.execute("SET CONSTRAINTS ALL IMMEDIATE")
     }
 
     private fun acknowledge(

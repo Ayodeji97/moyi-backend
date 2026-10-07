@@ -1,6 +1,5 @@
 package com.moyi.gratitude.web
 
-import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
@@ -44,10 +43,11 @@ import javax.sql.DataSource
  * and an `Idempotency-Key` replay of `POST /entries` and of `PATCH`.
  *
  * **Nothing here erases anything, and each test says so.** This context has
- * no poller and no consumer of `EntriesWithdrawn`, and no test calls the
- * dispatcher. So when a response comes back without the words, the words are
- * still in the row: [nothingWasErased] reads them there after the last
- * response of every scenario. What hid them is the read gate
+ * the consumer of `EntriesWithdrawn` but no poller, and no test calls the
+ * dispatcher, so the delivery stays owed. When a response comes back without
+ * the words, the words are still in the row: [nothingWasErased] reads them
+ * there after the last response of every scenario, and finds the delivery
+ * unmade. What hid them is the read gate
  * ([com.moyi.gratitude.domain.Entry.canBeReadBy]) and nothing else. A test of
  * the consumer would pass with the gate removed; these would not.
  *
@@ -71,7 +71,6 @@ internal class WithdrawalReadTest(
     @Autowired private val clock: MutableClock,
     @Autowired private val json: ObjectMapper,
     @Autowired private val context: ApplicationContext,
-    @Autowired private val dispatcher: OutboxDispatcher,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -250,7 +249,6 @@ internal class WithdrawalReadTest(
         before[0] shouldContain ADAS_WORDS
         before[1] shouldContain ADAS_WORDS
         json.readTree(submit(ada, ADAS_WORDS, key = adasKey).contentAsString)["text"].asString() shouldBe ADAS_WORDS
-        jdbc.queryForObject("SELECT count(*) FROM bond_entry_withdrawals", Int::class.java) shouldBe 0
         nothingWasErased(adas.id to ADAS_WORDS, beas.id to BEAS_WORDS, withdrawals = 0)
     }
 
@@ -324,13 +322,23 @@ internal class WithdrawalReadTest(
             (row["status"] in setOf("SUBMITTED", "REVEALED")) shouldBe true
             row["deleted_at"].shouldBeNull()
         }
-        jdbc.queryForObject("SELECT count(*) FROM bond_entry_withdrawals", Int::class.java) shouldBe withdrawals
-        val published = jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'EntriesWithdrawn'", Int::class.java)
-        published shouldBe withdrawals
-        jdbc.queryForObject("SELECT count(*) FROM outbox_deliveries WHERE processed_at IS NOT NULL", Int::class.java) shouldBe 0
-        // No timer in this context, so no poller; and no consumer, so a dispatcher run by hand would have nothing to claim.
+        // This bond's rows, not the tables' totals: the database is shared with other test classes.
+        jdbc.queryForObject("SELECT count(*) FROM bond_entry_withdrawals WHERE bond_id = ?::uuid", Int::class.java, bondId) shouldBe
+            withdrawals
+        val deliveries =
+            jdbc.queryForList(
+                """
+                SELECT d.consumer_id, d.processed_at, d.attempts
+                FROM outbox_events e LEFT JOIN outbox_deliveries d ON d.event_id = e.id
+                WHERE e.event_type = 'EntriesWithdrawn' AND e.aggregate_id = ?::uuid
+                """.trimIndent(),
+                bondId,
+            )
+        // Published once, owed to the one consumer, and not delivered: nothing has run that could erase.
+        deliveries.map { "${it["consumer_id"]} ${it["processed_at"]} ${it["attempts"]}" } shouldBe
+            List(withdrawals) { "gratitude.withdrawal null 0" }
+        // No timer in this context, so no poller.
         context.getBeanNamesForType(ScheduledAnnotationBeanPostProcessor::class.java).toList().shouldBeEmpty()
-        dispatcher.backlog(clock.instant()).filter { it.consumerId.startsWith("gratitude") }.shouldBeEmpty()
     }
 
     private data class Written(
