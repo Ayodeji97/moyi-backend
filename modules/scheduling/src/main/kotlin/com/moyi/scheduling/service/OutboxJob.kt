@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.DisposableBean
+import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.time.Clock
@@ -95,14 +96,20 @@ internal class OutboxJob(
     private val dispatcher: OutboxDispatcher,
     private val clock: Clock,
     private val meters: MeterRegistry,
+    /** What ticks are handed to. The application's is [ownThread]; a test hands in one that fails as a machine can. */
+    private val worker: ExecutorService,
 ) : DisposableBean {
+    /**
+     * The constructor the application uses, and says so: with two, Spring
+     * must be told which. The worker is this job's own and never a bean, so
+     * that no executor somebody else declares can become the poller's.
+     */
+    @Autowired
+    constructor(dispatcher: OutboxDispatcher, clock: Clock, meters: MeterRegistry) : this(dispatcher, clock, meters, ownThread())
+
     private val log = LoggerFactory.getLogger(javaClass)
     private val queues = ConcurrentHashMap<String, Queue>()
     private val lastSuccess = AtomicLong(0)
-
-    /** The one thread ticks run on. It is started by the first tick handed over, so a job nobody times never has one. */
-    private val worker: ExecutorService =
-        Executors.newSingleThreadExecutor { tick -> Thread(tick, WORKER_THREAD).apply { isDaemon = true } }
     private val tickRunning = AtomicBoolean(false)
     private val skipping = AtomicBoolean(false)
 
@@ -130,7 +137,17 @@ internal class OutboxJob(
      * What the timer calls. It returns at once, whatever the tick does: the
      * thread it is called on is the scheduler's, and may be the only one the
      * close job has.
+     *
+     * **Whatever the hand-over throws, the tick is no longer "running".** A
+     * tick that was never begun has no `finally` of its own to say it ended,
+     * and an executor can refuse with more than a refusal: asked for a thread
+     * the machine cannot give, it throws an `Error`. Were the flag left set,
+     * every later call would be skipped as "the last tick is still running",
+     * for the life of the process, with one line in the log to show for it.
+     * So `Throwable`, as in [dispatchOnce], and named by its class for the
+     * same reason: left to escape, the scheduler would print it whole.
      */
+    @Suppress("TooGenericExceptionCaught")
     @Scheduled(fixedDelayString = "\${moyi.scheduling.outbox.delay:$EVERY_TWO_SECONDS}")
     fun run() {
         if (!tickRunning.compareAndSet(false, true)) {
@@ -149,6 +166,10 @@ internal class OutboxJob(
         } catch (_: RejectedExecutionException) {
             // The job is stopping, and a tick that will not run needs no line.
             tickRunning.set(false)
+        } catch (thrown: Throwable) {
+            // Never begun, so not running: see above.
+            tickRunning.set(false)
+            log.warn("outbox: a tick could not be handed over and the next one will try again: error={}", thrown.javaClass.name)
         }
     }
 
@@ -290,6 +311,10 @@ internal class OutboxJob(
     }
 
     internal companion object {
+        /** The one thread ticks run on. It is started by the first tick handed over, so a job nobody times never has one. */
+        fun ownThread(): ExecutorService =
+            Executors.newSingleThreadExecutor { tick -> Thread(tick, WORKER_THREAD).apply { isDaemon = true } }
+
         /**
          * The pause between ticks, unless `moyi.scheduling.outbox.delay` says
          * otherwise. Only `PollerIndependenceTest` sets it: two seconds is what the smoke run sees too.

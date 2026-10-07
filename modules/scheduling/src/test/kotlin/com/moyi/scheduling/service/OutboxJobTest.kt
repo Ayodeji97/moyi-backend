@@ -42,9 +42,11 @@ import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -401,6 +403,50 @@ internal class OutboxJobTest(
     }
 
     @Test
+    fun `an Error as the tick is handed over is named and not thrown at the scheduler, and the next tick runs`() {
+        // What `ThreadPoolExecutor.execute` does when the machine has no thread to give: an Error, not a refusal.
+        val handOvers = AtomicInteger()
+        val noThreadOnce =
+            object : AbstractExecutorService() {
+                override fun execute(tick: Runnable) {
+                    if (handOvers.incrementAndGet() == 1) throw OutOfMemoryError(ENTRY_LIKE)
+                    tick.run()
+                }
+
+                override fun shutdown() = Unit
+
+                override fun shutdownNow(): MutableList<Runnable> = mutableListOf()
+
+                override fun isShutdown() = false
+
+                override fun isTerminated() = true
+
+                override fun awaitTermination(
+                    timeout: Long,
+                    unit: TimeUnit,
+                ) = true
+            }
+        val scripted = Scripted()
+        val job = OutboxJob(scripted, clock, SimpleMeterRegistry(), noThreadOnce)
+
+        // Caught here and not left to JUnit, which treats an escaping OutOfMemoryError as the end of the run.
+        runCatching { job.run() }.exceptionOrNull().shouldBeNull()
+
+        scripted.dispatched.shouldBeEmpty()
+        val warning = appender.list.single()
+        warning.level shouldBe Level.WARN
+        warning.formattedMessage shouldContain "error=java.lang.OutOfMemoryError"
+        warning.formattedMessage shouldNotContain ENTRY_LIKE
+        warning.throwableProxy.shouldBeNull()
+
+        // The tick that never began is not "still running": the next one is handed over and runs.
+        job.run()
+        job.run()
+        scripted.dispatched shouldHaveSize 2
+        appender.list shouldHaveSize 1
+    }
+
+    @Test
     fun `stopping interrupts the tick in flight, waits for it to end, and starts no other`() {
         val entered = CountDownLatch(1)
         val never = CountDownLatch(1)
@@ -473,9 +519,10 @@ internal class OutboxJobTest(
     }
 
     @Test
-    fun `the poller runs two seconds after it last finished, under no lock and in no transaction of its own`() {
+    fun `the poller is called two seconds after its last call returned, under no lock and in no transaction of its own`() {
         val run = OutboxJob::class.java.getMethod("run")
-        // A delay, not a rate: a tick that takes long is not followed by a burst of the ticks it overran.
+        // A delay, not a rate, and counted from the hand-over, which is all the call does: a tick still
+        // running two seconds later is not joined by another, because the call that would start one is skipped.
         run.getAnnotation(Scheduled::class.java).fixedDelayString shouldBe "\${moyi.scheduling.outbox.delay:PT2S}"
         // Decision 7: SKIP LOCKED is the concurrency control, and two instances polling is the design.
         run.getAnnotation(SchedulerLock::class.java).shouldBeNull()

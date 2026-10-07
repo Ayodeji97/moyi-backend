@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import org.springframework.dao.DataAccessResourceFailureException
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.jdbc.datasource.DataSourceTransactionManager
@@ -57,7 +58,9 @@ import javax.sql.DataSource
  * so truncating the registration tables loses nothing that would not come back.
  */
 @SpringBootTest(classes = [EventsTestApplication::class])
-@Suppress("LongParameterList") // What Spring hands the test; each is used, and there is nothing to bundle them into.
+// LongParameterList: what Spring hands the test; each is used, and there is nothing to bundle them into.
+// LargeClass: every promise of one class, over helpers they share; split, each half would need the other's.
+@Suppress("LongParameterList", "LargeClass")
 internal class OutboxDispatcherTest(
     @Autowired private val publisher: EventPublisher,
     @Autowired private val jdbc: JdbcTemplate,
@@ -539,6 +542,74 @@ internal class OutboxDispatcherTest(
     }
 
     @Test
+    fun `a constraint deferred to the commit is made to answer inside the delivery, and what it says of the row reaches no log`() {
+        // A constraint the database checks only when the transaction commits: by then the handler has
+        // returned and the acknowledgement is written, and the refusal would be raised inside the
+        // transaction manager, which logs it whole at DEBUG. It words the refusal as Postgres words a
+        // violated constraint, with the row.
+        jdbc.execute("CREATE TABLE $DEFERRED_TABLE (words text NOT NULL)")
+        jdbc.execute(
+            """
+            CREATE FUNCTION $DEFERRED_REFUSAL() RETURNS trigger LANGUAGE plpgsql AS ${'$'}${'$'}
+            BEGIN
+                RAISE EXCEPTION 'Failing row contains (%)', NEW.words USING ERRCODE = 'check_violation';
+            END ${'$'}${'$'}
+            """.trimIndent(),
+        )
+        jdbc.execute(
+            """
+            CREATE CONSTRAINT TRIGGER $DEFERRED_REFUSAL AFTER INSERT ON $DEFERRED_TABLE DEFERRABLE INITIALLY DEFERRED
+            FOR EACH ROW EXECUTE FUNCTION $DEFERRED_REFUSAL()
+            """.trimIndent(),
+        )
+        val everything = ListAppender<ILoggingEvent>().also { it.start() }
+        val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
+        val level = root.level
+        try {
+            val probe = UUID.randomUUID()
+            var rowsSeenByTheHandler = 0
+            val consumer =
+                TestConsumer {
+                    publishProbe(probe)
+                    jdbc.update("INSERT INTO $DEFERRED_TABLE (words) VALUES (?)", ENTRY_LIKE)
+                    // Deferred: the insert is taken, and the handler ends without having heard a word against it.
+                    rowsSeenByTheHandler = jdbc.queryForObject("SELECT count(*) FROM $DEFERRED_TABLE", Int::class.java)!!
+                }
+            val dispatcher = dispatcherFor(consumer)
+            val event = publish()
+            root.addAppender(everything)
+            root.level = Level.DEBUG
+
+            dispatcher.dispatchDue(now, 10) shouldBe DispatchResult(delivered = 0, failed = 1, more = false)
+
+            root.level = level
+            consumer.received shouldHaveSize 1
+            rowsSeenByTheHandler shouldBe 1
+            // Everything the handler wrote went with the delivery.
+            jdbc.queryForObject("SELECT count(*) FROM $DEFERRED_TABLE", Int::class.java) shouldBe 0
+            probes(probe) shouldBe 0
+            // A failure of the delivery like any other: by class name, counted, due again.
+            val delivery = delivery(event)
+            delivery.processedAt.shouldBeNull()
+            delivery.attempts shouldBe 1
+            delivery.nextAttemptAt shouldBe now.plusSeconds(2)
+            delivery.lastError shouldBe DataIntegrityViolationException::class.java.name
+
+            // The leak first, so that a failure here names the line that carried it.
+            everything.list.filter { said(it).contains(ENTRY_LIKE) || said(it).contains("Failing row") }.map {
+                "${it.level} ${it.loggerName}: ${it.formattedMessage.take(60)}"
+            } shouldBe emptyList()
+            // And not vacuous: the transaction manager was heard at DEBUG, undoing this delivery.
+            everything.list.count { it.level == Level.DEBUG && it.formattedMessage.startsWith("Rolling back JDBC transaction") } shouldBe 1
+        } finally {
+            root.level = level
+            root.detachAppender(everything)
+            jdbc.execute("DROP TABLE IF EXISTS $DEFERRED_TABLE")
+            jdbc.execute("DROP FUNCTION IF EXISTS $DEFERRED_REFUSAL()")
+        }
+    }
+
+    @Test
     fun `a failure is not recorded over an acknowledgement that landed first, and is not called a failure`() {
         // Between a handler's rollback and the record of its failure the delivery
         // is unlocked and due. Here another instance takes it in that gap and
@@ -946,6 +1017,8 @@ internal class OutboxDispatcherTest(
         const val ENTRY_LIKE = "Thank you for the tea this morning"
         const val NESTED_ENTRY_LIKE = "and for walking home with me"
         const val WAIT_SECONDS = 10L
+        const val DEFERRED_TABLE = "dispatcher_test_deferred"
+        const val DEFERRED_REFUSAL = "dispatcher_test_deferred_refusal"
         const val OUTLASTING_ONE_SECOND_MS = 1_300L
         val ONE_SECOND = DeliveryProperties(deliveryTimeout = Duration.ofSeconds(1))
     }
