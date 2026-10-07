@@ -2150,6 +2150,6 @@ Wrong about: where a rule is held. I held "withdrawn means erased" in the read g
          pushing early, so a successor could read where the last one stopped. One took
          over a finished, uncommitted diff, re-ran its seven mutations and committed it.
          What it cost: two commits went in green with no mutation run by their authors.
-         A reviewer ran twenty-five on them afterwards. Thirteen were caught. Of the rest,
-         one was held only by a test in a neighbouring class, and four lines had no test
-         at all.
+         A reviewer ran twenty-five on them afterwards. Thirteen were caught and three
+         were equivalent. Of the other nine, two were held only by a test in a
+         neighbouring class and seven by no test at all.
