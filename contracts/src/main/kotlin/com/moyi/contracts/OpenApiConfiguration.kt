@@ -443,7 +443,12 @@ class OpenApiConfiguration {
                 // this entry.
                 "submitEntry",
                 "patchEntry",
-                "deleteEntry",
+                // `deleteEntry` is deliberately absent, since slice C5a: an
+                // author may delete their own entry on a bond that has ended
+                // (the owner's ruling on ADR-0032 question 1), which was the
+                // only conflict a delete ever answered. It takes no
+                // idempotency key, an erased entry deleted again is a `204`,
+                // and nothing translates a database refusal into a `409`.
             )
 
         /**

@@ -311,7 +311,11 @@ class OpenApiContractTest(
 
         // 409 is ENTRY_IMMUTABLE and BOND_ARCHIVED; 413 is the body bound, key or no key.
         patch.responses.keys shouldContainAll listOf("200", "404", "409", "413", "415", "422")
-        delete.responses.keys shouldContainAll listOf("204", "404", "409")
+        // A delete cannot conflict. Its author may take an entry back on any bond, ended or not
+        // (the ruling on ADR-0032 question 1; it was BOND_ARCHIVED before), it takes no key, and
+        // a repeat is a 204. A client modelling a 409 here would model an answer never given.
+        delete.responses.keys shouldContainAll listOf("204", "404")
+        delete.responses.keys shouldNotContain "409"
     }
 
     @Test
