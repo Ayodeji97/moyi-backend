@@ -4,6 +4,12 @@
 > or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox
 > (`- [ ]`) syntax for tracking.
 
+**As built (2026-10-09).** The slice is built and ADR-0036 is its record. The build changed
+several things this plan says; they are listed at the end, under "As built — where the
+slice left this plan". The ADR has sixteen decisions; its 1 to 14 are this plan's 1 to 14,
+and 15 and 16 are new. The text below is the plan as written, with the steps ticked and a
+note where a step was done differently.
+
 **Goal:** A member can page back through the days of a bond, newest first, read both entries
 of a day they are entitled to read, and privately bookmark an entry.
 
@@ -150,7 +156,7 @@ the reading is `FULL`. `FavouriteEntry.mark/unmark(userId, entryId)` resolve the
 the membership (`NotFoundException` → the one `404`), then build the reader **after** the
 entry is loaded and decide by decision 11.
 
-- [ ] **Step 1: failing tests** (`FavouritesTest`): mark and unmark, each twice, `204`;
+- [x] **Step 1: failing tests** (`FavouritesTest`): mark and unmark, each twice, `204`;
   `favourited` then shows on `GET /today` for the caller and **not** for the partner; either
   member may mark either revealed entry; own unrevealed entry `409 ENTRY_NOT_REVEALED`;
   partner's locked entry, a stranger, a missing id and a non-UUID are byte-identical `404`s
@@ -159,14 +165,19 @@ entry is loaded and decide by decision 11.
   an ended bond and for a member who left; a delete, a withdrawal and the closer's pre-step
   each leave no `entry_favourites` row for the entry; the partner marking and unmarking
   changes no byte of the other member's `GET /today`.
-- [ ] **Step 2: the race.** Hold the entry's row in a transaction that erases it; start a
+- [x] **Step 2: the race.** Hold the entry's row in a transaction that erases it; start a
   `PUT`; see the insert's statement blocked or, if it does not block, see that after the
   erasure commits no favourite row exists and the `PUT` answered `409`. Assert on rows.
-- [ ] **Step 3: implement.** `EntryChangesTest`'s route set gains the two routes.
+  *As built:* it blocks, and with the statement as decision 12 wrote it the row **did**
+  exist afterwards and the `PUT` answered `204`. The statement now takes `FOR SHARE`
+  (ADR-0036 decision 12).
+- [x] **Step 3: implement.** `EntryChangesTest`'s route set gains the two routes.
   Regenerate the contract; read the diff.
-- [ ] **Step 4: mutations**: drop `revealed_at IS NOT NULL` from the insert; skip
+- [x] **Step 4: mutations**: drop `revealed_at IS NOT NULL` from the insert; skip
   `removeAllOf` in `EraseEntry`; render `favourited` from any member's row.
-- [ ] **Step 5: `./gradlew build`; commit**
+  *As built:* fourteen were run by the author and seventeen by the reviewer. Three
+  survivors were answered with tests (ADR-0036, How this was checked).
+- [x] **Step 5: `./gradlew build`; commit**
   `feat(gratitude): a member can privately bookmark an entry (FR-093)`.
 
 ### Task 2: The archive feed
@@ -209,30 +220,34 @@ unerased entry of that day. Entries for the page's days are loaded in one query,
 who-has-withdrawn is asked (`readerNow`), then each entry is read. Which row is "mine" and
 which the partner's follows `GetToday`'s rule (live before erased, newest first).
 
-- [ ] **Step 1: failing tests.** `DaysFeedTest`: newest first; `limit` default, bounds and
+- [x] **Step 1: failing tests.** `DaysFeedTest`: newest first; `limit` default, bounds and
   `422`s; a cursor walks every listed day once and ends with `nextCursor: null`; a tampered
   or foreign cursor is `422`; `until` starts at the date or the nearest earlier day; the
   byte budget cuts a page of large entries short and the walk still visits every day once
   (assert the response is under 256 KB); `favourites=true`; an ended bond and a member who
   left can read; a day added or erased between two pages is neither skipped nor repeated.
-- [ ] **Step 2: `ArchiveGateTest`**, the matrix (decision 2): every day status × each
+- [x] **Step 2: `ArchiveGateTest`**, the matrix (decision 2): every day status × each
   member's entry state (none, live unrevealed, revealed, erased before reveal, erased
   after) × reader (each member). For each: listed or not, and the exact JSON shape of each
   entry (`FULL` with text; wide tombstone; `{authorMemberId, status: LOCKED}`;
   `{authorMemberId, status: REMOVED}` — assert the exact key set). Includes the closed
   `SOLO` day with no `revealedAt` (#57): listed for its author, absent for the partner.
   And the cross-check: listed ⇔ the gate answers `FULL` or `TOMBSTONE` for some entry.
-- [ ] **Step 3: withdrawal.** With no dispatcher run: a withdrawn author's entries are
+- [x] **Step 3: withdrawal.** With no dispatcher run: a withdrawn author's entries are
   tombstones in the feed for both members. With a membership taken before a block that
   then commits: still tombstones (the marker is read last).
-- [ ] **Step 4: cross-tenant fixtures**; the suite fails until they exist.
-- [ ] **Step 5: the plan of the query.** `EXPLAIN` on a bond with 2,000 days: an index scan
+- [x] **Step 4: cross-tenant fixtures**; the suite fails until they exist.
+- [x] **Step 5: the plan of the query.** `EXPLAIN` on a bond with 2,000 days: an index scan
   on `(bond_id, date)`, no sort, no scan of the whole table. Add the index doc 07 names
   (`bond_days (bond_id, date DESC)`) to V22 only if the unique `(bond_id, date)` does not
   already serve it; say what `EXPLAIN` showed.
-- [ ] **Step 6: mutations**: drop the `EXISTS`; render from day status instead of the gate
+  *As built:* no index added. `bond_days_feed_idx` has existed since V12, and Postgres
+  chose the unique `(bond_id, date)` backwards. The guard was rewritten on
+  `EXPLAIN (ANALYZE, FORMAT JSON)` after review, to assert rows read and not planner
+  choice.
+- [x] **Step 6: mutations**: drop the `EXISTS`; render from day status instead of the gate
   for a `SOLO` day; marker read first; no byte budget.
-- [ ] **Step 7: `./gradlew build`; commit**
+- [x] **Step 7: `./gradlew build`; commit**
   `feat(gratitude): the archive feed — days a member may see, newest first (FR-090)`.
 
 ### Task 3: One day, and conditional requests
@@ -241,19 +256,22 @@ which the partner's follows `GetToday`'s rule (live before erased, newest first)
 `gratitude/service/GetDays.kt`, `GratitudeErrors.kt`, `ErrorCode` (`DAY_NOT_FOUND`);
 tests `gratitude/web/DayViewTest.kt`, `gratitude/web/DaysConditionalTest.kt`.
 
-- [ ] **Step 1: failing tests.** `GET /bonds/{bondId}/days/{date}`: the same `DayResponse`
+- [x] **Step 1: failing tests.** `GET /bonds/{bondId}/days/{date}`: the same `DayResponse`
   as the feed gives for that day (byte-identical); `404 DAY_NOT_FOUND`, one body, for a date
   with no row, an `EMPTY` day, a day holding only the partner's unrevealed entry, a future
   date, `2026-02-30`, `yesterday`; and the bond-level `404` for a stranger is the bond's,
   as everywhere.
-- [ ] **Step 2: conditional.** Both routes: `ETag` present and quoted; `If-None-Match` equal
+- [x] **Step 2: conditional.** Both routes: `ETag` present and quoted; `If-None-Match` equal
   → `304`, no body, same `ETag`; changes when the caller marks a favourite, when an entry
   is erased, when a day reveals; **does not change** when the partner marks a favourite;
   differs between the two members for the same day; `Cache-Control: private, no-cache`.
-- [ ] **Step 3: implement; cross-tenant fixture; contract regenerated.**
-- [ ] **Step 4: mutations**: digest only `date` and `status`; include the partner's marks in
+- [x] **Step 3: implement; cross-tenant fixture; contract regenerated.**
+- [x] **Step 4: mutations**: digest only `date` and `status`; include the partner's marks in
   the digest input; answer `404` only for a missing row (the locked-partner day then leaks).
-- [ ] **Step 5: `./gradlew build`; commit**
+  *As built:* the author stalled before reporting them. A second agent re-ran 31; four
+  survived and are pinned by `ArchiveReadOrderTest` and a loose-date test in
+  `DayViewTest`.
+- [x] **Step 5: `./gradlew build`; commit**
   `feat(gratitude): one day of the archive, and conditional reads of both`.
 
 ### Task 4: Smoke, the tools, and the record
@@ -264,15 +282,60 @@ tests `gratitude/web/DayViewTest.kt`, `gratitude/web/DaysConditionalTest.kt`.
   `MOYI_DB`; record totals; drop the database.
 - [ ] `scripts/moyi`: `days`, `day <date>`, `favourite <entryId>`, `unfavourite <entryId>`.
   `tools/bruno`: the four requests.
-- [ ] `adr/0036-the-archive-and-favourites.md` (the fourteen decisions; Consequences; Owed;
+- [x] `adr/0036-the-archive-and-favourites.md` (the fourteen decisions; Consequences; Owed;
   Questions that are the owner's; How this was checked). Spec §5.2, §6.6, §7, §11 amended in
   place, dated. `docs/learning-log.md`. Label the PR `breaking-api-change` (two new error
   codes).
-- [ ] Figma alignment (`states.md` §6): each endpoint has a screen, an adaptation, or a
+- [x] Figma alignment (`states.md` §6): each endpoint has a screen, an adaptation, or a
   recorded gap. Known gaps to record: no author display name on an archive entry; a solo
   day card is not drawn; the month jump's `until`.
+  *As built:* ADR-0036 question 5 has the table, and spec §11 the summary.
 
 ## After the tasks
 
 Whole-branch review by three readers (concurrency; privacy and contract; conformance),
 fixes test-first, then a draft pull request with the concept brief.
+
+## As built — where the slice left this plan (ADR-0036)
+
+Three per-task reviews and the build itself changed what this plan says. ADR-0036 is the
+record. Its decisions 1 to 14 are this plan's; 15 (the marker is read last on all three
+new read paths, and the test that orders the reads) and 16 (no `Idempotency-Key`, no
+bucket) are new.
+
+- **Decision 1.** "`EMPTY` days … are absent" is false of one case. A day that closed
+  `EMPTY` after its author deleted their only entry holds that author's tombstone, so the
+  rule lists it for them, as `status: EMPTY`. The rule won over the prose.
+- **Decision 5.** A foreign cursor is not `422`. A cursor is only a date and is accepted
+  from anyone; a tampered one is `422`. `limit` has one spelling (`007` is refused), a
+  cursor longer than 32 characters is refused unread, and every parameter is parsed after
+  the membership guard, so a stranger's bad cursor gets the bond's `404`.
+- **Decision 6.** The budget counts text as JSON carries it, not raw octets. "Twenty days
+  of two full entries would be 327,680 bytes" assumed 8 KB an entry on the wire; an entry
+  of control characters is 49,147 octets there, a day about 98 KB, and the worst page was
+  built and measured at 229,063 octets. `GetDays.page` gained a `textOctets` parameter so
+  the first-day rule could be tested.
+- **Decision 9.** The tag is not "the SHA-256 of the response body". It is HMAC-SHA256
+  under the personal-data secret, with a domain label, of the bytes sent. The body is
+  serialised once into a `Representation` in `common:web`; the plan's `DayEntityTag.kt`
+  was not written. `If-None-Match: *` is not honoured. What was done about `Accept` is in
+  the ADR.
+- **Decision 12.** "No lock is taken" is false. The statement takes `FOR SHARE` on the
+  entry's row, is a CTE, and reports whether the entry qualified, not whether a row was
+  inserted.
+- **Decision 11.** The rule lives in the domain as `Entry.canBeFavouritedBy`. Both `409`
+  sentences were reworded. `DELETE` on a tombstone does delete.
+- **The favourite routes reconcile the joining day** (`ReconcileJoiningDay.beforeRead`),
+  which this plan did not mention, so a `PUT` can take the bond's lock and write. Both
+  archive routes do the same.
+- The filter for `favourites=true` is applied a second time after the gate, so a page can
+  be empty and still carry a `nextCursor` (decision 7).
+- "Which row is mine" was extracted from `GetToday` into `DayEntries.kt` so `today` and
+  the archive share one copy. `DaysQuery.kt` is new and holds the parameter parsing.
+- `RevealGateTest` and `WithdrawalRaceTest` needed no change. `JoiningDayTest`,
+  `ArchiveReadOrderTest`, `EntryReadabilityTest`, `EntryRenderingTest` and
+  `HmacRepresentationDigestTest` were added to or created, and are not in this plan's
+  file lists.
+- The branch was rebased onto `main` at `174b474` when #58 merged, during Task 2.
+- Task 1's review fixes were made in Task 2's last commit (`a194778`), and Task 2's in
+  Task 3's (`a20dc2b`). Task 3 was finished by a second agent after the first stalled.
