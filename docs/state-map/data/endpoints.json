@@ -527,5 +527,97 @@
       }
     ],
     "curl": "curl -X DELETE \"$API/bonds/$BOND/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/auth/register",
+    "summary": "register",
+    "auth": "none",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Three registrations an hour per client address, one back every twenty minutes; the limit is spent before the body is checked, so a 422 uses one too. The fourth is 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank or over 80 characters; locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created.",
+        "evidence": "smoke",
+        "evidenceRef": "a 422 spends a token too (validation runs after the limiter)",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/RegisterRequest.kt#@field:AssertTrue(message = \"must be confirmed\")"
+      },
+      {
+        "status": 503,
+        "code": "HASHING_CAPACITY_EXCEEDED",
+        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again.",
+        "evidence": "test",
+        "evidenceRef": "HashingCapacityResponseTest#saturation is 503 with a Retry-After, not 500",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/register\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"displayName\\\": \\\"Ada\\\", \\\"acceptedTermsVersion\\\": \\\"2026-09-01\\\", \\\"over18\\\": true}\""
+  },
+  {
+    "id": "POST /api/v1/auth/verify-email",
+    "summary": "verify your email",
+    "auth": "none",
+    "headers": [
+      "Content-Type (application/json. The token travels in the body of a POST, never in a GET: a GET on this path without a bearer is the everywhere 401, so a mail scanner that fetches the link cannot spend it. No rate limit of its own)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "token is blank or longer than 256 characters. It is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID.",
+        "evidence": "smoke",
+        "evidenceRef": "blank token is 422 VALIDATION_FAILED",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/VerificationController.kt#internal data class VerifyEmailRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/verify-email\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$VERIFY_TOKEN\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/resend-verification",
+    "summary": "ask for a new verification link",
+    "auth": "none",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, spent before the body is checked. Beside it, one a minute per email address as typed, counted for every address whether or not it has an account, so the 429 says nothing either: a second request inside the minute is 429 with Retry-After: 60)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "email is blank or not shaped like an address. This says nothing about whether the address has an account.",
+        "evidence": "smoke",
+        "evidenceRef": "resend for a malformed address is 422",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/VerificationController.kt#internal data class ResendVerificationRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/resend-verification\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/login",
+    "summary": "sign in",
+    "auth": "none",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Two limits, both 429 with Retry-After and neither the lockout. Five attempts per fifteen minutes per email address as typed, one back every three minutes, counted for an address with no account too and spent before any password is checked: the sixth attempt is 429. And twenty an hour per client address. The lockout is separate and silent: five wrong passwords in a row lock the account for a minute, then longer, and a locked account answers 401 INVALID_CREDENTIALS, not 429. With both in force the 429 comes first)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "email is blank or over 254 characters; password is blank or over 512 characters; or device is sent and its platform is not ANDROID, IOS or WEAR, or its appVersion or osVersion is blank or over 40 characters. device may be left out. An address that is merely not shaped like one is not a 422: it is the 401 an unknown address gets. No password is checked for a 422.",
+        "evidence": "smoke",
+        "evidenceRef": "an oversized password is 422, not work",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/LoginController.kt#internal data class LoginRequest("
+      },
+      {
+        "status": 503,
+        "code": "HASHING_CAPACITY_EXCEEDED",
+        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. (the test of this answer drives register, not sign-in)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/login\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"device\\\": {\\\"platform\\\": \\\"ANDROID\\\", \\\"appVersion\\\": \\\"1.0\\\", \\\"osVersion\\\": \\\"16\\\"}}\""
   }
 ]

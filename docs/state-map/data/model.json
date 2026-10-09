@@ -422,20 +422,12 @@
       "GET /api/v1/auth/sessions",
       "GET /api/v1/me",
       "POST /api/v1/auth/forgot-password",
-      "POST /api/v1/auth/login",
       "POST /api/v1/auth/logout",
       "POST /api/v1/auth/logout-all",
       "POST /api/v1/auth/refresh",
-      "POST /api/v1/auth/register",
-      "POST /api/v1/auth/resend-verification",
-      "POST /api/v1/auth/reset-password",
-      "POST /api/v1/auth/verify-email"
+      "POST /api/v1/auth/reset-password"
     ],
     "codes": [
-      "HASHING_CAPACITY_EXCEEDED",
-      "VERIFICATION_TOKEN_INVALID",
-      "VERIFICATION_TOKEN_EXPIRED",
-      "INVALID_CREDENTIALS",
       "REFRESH_TOKEN_INVALID",
       "TOKEN_REUSE_DETECTED",
       "PASSWORD_RESET_TOKEN_INVALID",
@@ -482,6 +474,46 @@
       "endpoint": "POST /api/v1/bonds/{bondId}/timezone/confirm",
       "status": 415,
       "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/register",
+      "status": 503,
+      "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/register",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/verify-email",
+      "status": 410,
+      "note": "410 VERIFICATION_TOKEN_EXPIRED for a verification link that is past its 24 hours or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/verify-email",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/resend-verification",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/login",
+      "status": 401,
+      "note": "401 INVALID_CREDENTIALS for every refused sign-in: a wrong password, an unknown address, a locked account. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/login",
+      "status": 503,
+      "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; sign-in checks the password under the same limit as registration. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/login",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
     }
   ]
 }
