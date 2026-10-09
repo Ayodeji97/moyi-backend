@@ -29,6 +29,15 @@
 #   moyi edit <entryId> "<text>"             until your partner has written
 #   moyi delete <entryId>
 #   moyi streak
+#   moyi days [--limit N] [--until YYYY-MM-DD] [--favourites] [--cursor <nextCursor>]
+#                                            the archive, newest day first: one page of it. --until starts
+#                                            at that date or the nearest earlier one; --favourites keeps to
+#                                            the days holding an entry you have marked; --cursor asks for
+#                                            the page after one whose nextCursor you were given
+#   moyi day <YYYY-MM-DD>                    one day of the archive
+#   moyi favourite <entryId>                 mark a revealed entry, yours or your partner's. The mark is
+#                                            yours alone: your partner is never shown it
+#   moyi unfavourite <entryId>
 #   moyi whoami
 #
 # The session (two tokens and the bond in use) is kept in
@@ -70,6 +79,8 @@ UUID='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{1
 # These become part of a URL. Anything that is not what the server issues is refused here, not sent.
 need_uuid() { [[ "$2" =~ $UUID ]] || die "$1 is not an id: it should look like 019a0c1e-7b2a-7c3d-8e4f-5a6b7c8d9e0f"; }
 need_code() { [[ "$1" =~ ^[A-Za-z0-9_-]{4,64}$ ]] || die "that is not an invite code"; }
+# The shape only, so that it is safe in a URL. Whether it is a date, and one of yours, is the server's to say.
+need_date() { [[ "$1" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || die "that is not a date: it should look like 2026-10-09"; }
 
 # Request bodies and headers are written here: a directory only you can read, gone when this exits.
 TMP="$(umask 077; mktemp -d)"
@@ -298,6 +309,43 @@ case "$cmd" in
     ;;
   today)  signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/today";  show 200 ;;
   streak) signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/streak"; show 200 ;;
+  days)
+    usage="usage: moyi days [--limit N] [--until YYYY-MM-DD] [--favourites] [--cursor <nextCursor>]"
+    query=""
+    # Each value is checked for what may sit in a URL and no further: 0, 51 and 007 are digits, and are sent,
+    # and it is the server that refuses them.
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --limit)      [ $# -ge 2 ] && [[ "$2" =~ ^[0-9]{1,9}$ ]] || die "$usage"; query="$query&limit=$2"; shift 2 ;;
+        --until)      [ $# -ge 2 ] || die "$usage"; need_date "$2"; query="$query&until=$2"; shift 2 ;;
+        --cursor)     [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || die "$usage"; query="$query&cursor=$2"; shift 2 ;;
+        --favourites) query="$query&favourites=true"; shift ;;
+        *) die "$usage" ;;
+      esac
+    done
+    signed_in; BOND="$(bond)"
+    authed GET "/bonds/$BOND/days${query:+?${query#&}}"; show 200
+    # One page, as the server cut it. Nothing here follows the cursor: it is printed, to be given back.
+    next="$(printf '%s' "$BODY" | field nextCursor)"
+    [ -z "$next" ] || echo "There are earlier days. For the next page, the same command with: --cursor $next"
+    ;;
+  day)
+    [ $# -eq 1 ] || die "usage: moyi day <YYYY-MM-DD>"
+    need_date "$1"
+    signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/days/$1"; show 200
+    ;;
+  favourite)
+    [ $# -eq 1 ] || die "usage: moyi favourite <entryId>"
+    need_uuid "$1" "$1"
+    authed PUT "/entries/$1/favourite"; show 204
+    echo "Marked."
+    ;;
+  unfavourite)
+    [ $# -eq 1 ] || die "usage: moyi unfavourite <entryId>"
+    need_uuid "$1" "$1"
+    authed DELETE "/entries/$1/favourite"; show 204
+    echo "Unmarked."
+    ;;
   edit)
     [ $# -eq 2 ] || die 'usage: moyi edit <entryId> "<text>"'
     need_uuid "$1" "$1"

@@ -1,0 +1,19 @@
+meta {
+  name: Unfavourite
+  type: http
+  seq: 16
+}
+
+delete {
+  url: {{api}}/entries/{{partnerEntryId}}/favourite
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Takes the mark off: 204, and 204 again if there was none. An entry you were never shown is 404.
+}

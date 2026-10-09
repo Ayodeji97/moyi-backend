@@ -1,0 +1,21 @@
+meta {
+  name: Favourite
+  type: http
+  seq: 15
+}
+
+put {
+  url: {{api}}/entries/{{partnerEntryId}}/favourite
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Marks an entry as a favourite: 204, and 204 again if it already was. The mark is yours alone; your partner is never shown it, on any route.
+
+  Run Days first, which keeps your partner's entry of the newest day as partnerEntryId. Your own entry can be marked too: put entryId in the URL. Only a revealed entry can be marked. Your own, while it waits for your partner, is 409 ENTRY_NOT_REVEALED; one that has been deleted is 409 ENTRY_IMMUTABLE; anything you were never shown is 404.
+}
