@@ -1,1 +1,844 @@
-[]
+[
+  {
+    "id": "day-open-write",
+    "region": "day",
+    "from": "OPEN",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 201,
+    "code": null,
+    "reason": "Yours is the first entry of the day. Your partner sees that you wrote, and nothing of what you wrote.",
+    "rule": "BR-1",
+    "evidence": "smoke",
+    "evidenceRef": "the first entry is 201, SUBMITTED",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status = if (status == BondDayStatus.SUSPENDED) BondDayStatus.SUSPENDED else BondDayStatus.PARTIAL,"
+  },
+  {
+    "id": "day-partial-write-again",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "you have already written today",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PARTIAL",
+    "status": 409,
+    "code": "ENTRY_ALREADY_EXISTS",
+    "reason": "One entry per member per day. The database's unique index refuses the second; the first is untouched.",
+    "rule": "BR-2",
+    "evidence": "smoke",
+    "evidenceRef": "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#throw EntryAlreadyExistsException()"
+  },
+  {
+    "id": "day-partial-write-reveals",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "your partner has written, you have not, and the bond has no reveal time or it has passed",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 201,
+    "code": null,
+    "reason": "Yours is the second entry, so both are revealed in the same transaction and each of you can read the other.",
+    "rule": "BR-1, ADR-0032 §1",
+    "evidence": "smoke",
+    "evidenceRef": "an entry with typographic characters is 201, and echoes them",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#copy(status = BondDayStatus.REVEALED, revealedAt = revealedAt ?: now.truncatedTo(ChronoUnit.MICROS))"
+  },
+  {
+    "id": "day-partial-write-waits",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "your partner has written, you have not, and the bond's reveal time is still ahead",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_REVEAL",
+    "status": 201,
+    "code": null,
+    "reason": "Yours is the second entry, but the bond has a reveal time that has not come, so both entries stay locked until it does.",
+    "rule": "FR-062",
+    "evidence": "smoke",
+    "evidenceRef": "the second writes, and is not shown a reveal",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#copy(status = BondDayStatus.PENDING_REVEAL)"
+  },
+  {
+    "id": "day-pending-reveal-write",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_REVEAL",
+    "status": 409,
+    "code": "ENTRY_ALREADY_EXISTS",
+    "reason": "Both of you have written and the day is only waiting for its time, so any write here is a second entry from its author.",
+    "rule": "BR-2",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!violation.violates(GratitudeConstraints.ENTRY_ONE_PER_MEMBER_PER_DAY)) throw violation.redacted()"
+  },
+  {
+    "id": "day-revealed-write",
+    "region": "day",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the day is today",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "REVEALED",
+    "status": 409,
+    "code": "DAY_CLOSED",
+    "reason": "A revealed day is settled: its words have been read. The day is checked before the entry is inserted, so this is the answer whether you still have an entry on it or deleted yours, which is what stops delete-then-rewrite replacing words already read.",
+    "rule": "BR-10, ADR-0032 §8",
+    "evidence": "test",
+    "evidenceRef": "RevealTest#after a post-reveal delete the author cannot write that day again, and the day stands as it was revealed",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#redirectOnce(membership, claimed, calendar, now) ?: throw DayClosedException()"
+  },
+  {
+    "id": "day-revealed-write-offline",
+    "region": "day",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the day is an earlier one, named by an offline draft's intendedAt",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 201,
+    "code": null,
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's.",
+    "rule": "BR-3a, ADR-0031 §20",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/DayAssignment.kt#isSettled(claimedDay.date) -> Claim.DAY_SETTLED"
+  },
+  {
+    "id": "day-solo-write",
+    "region": "day",
+    "from": "SOLO",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "an offline draft's intendedAt names this day",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SOLO",
+    "status": 201,
+    "code": null,
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's.",
+    "rule": "BR-3a, ADR-0031 §20",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/DayAssignment.kt#isSettled(claimedDay.date) -> Claim.DAY_SETTLED"
+  },
+  {
+    "id": "day-empty-write",
+    "region": "day",
+    "from": "EMPTY",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "an offline draft's intendedAt names this day",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "EMPTY",
+    "status": 201,
+    "code": null,
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's.",
+    "rule": "BR-3a, ADR-0031 §20",
+    "evidence": "test",
+    "evidenceRef": "MissingDaysTest#an offline entry aimed at a day the job wrote EMPTY is filed on today, and that day stays empty",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/DayAssignment.kt#isSettled(claimedDay.date) -> Claim.DAY_SETTLED"
+  },
+  {
+    "id": "day-frozen-write",
+    "region": "day",
+    "from": "FROZEN",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "an offline draft's intendedAt names this day",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "FROZEN",
+    "status": 201,
+    "code": null,
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's.",
+    "rule": "BR-3a, ADR-0031 §20",
+    "evidence": "test",
+    "evidenceRef": "SubmitEntrySettledDayTest#a claimed day that is already stamped closed sends the draft to today, whatever its status",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/DayAssignment.kt#isSettled(claimedDay.date) -> Claim.DAY_SETTLED"
+  },
+  {
+    "id": "day-suspended-write-waiting",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the bond is still waiting for its second member, and you have not written today",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 201,
+    "code": null,
+    "reason": "The creator may write before the invitee joins. The entry is kept and the day stays suspended: it is private, and the streak never counts it.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "smoke",
+    "evidenceRef": "writing before a partner has joined is still 201",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val openStatus = if (beforeThePairing) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
+    "id": "day-suspended-write-again",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the bond is still waiting for its second member, and you have already written today",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "SUSPENDED",
+    "status": 409,
+    "code": "ENTRY_ALREADY_EXISTS",
+    "reason": "One entry per member per day holds on a suspended day as on any other.",
+    "rule": "BR-2",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#throw EntryAlreadyExistsException()"
+  },
+  {
+    "id": "day-suspended-write-before-pairing",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "your partner has since joined, the day ended before they did and is not yet stamped closed, and an offline draft's intendedAt names it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 201,
+    "code": null,
+    "reason": "An offline draft may be filed on a day that ended before the bond became two people, while the close job has not yet stamped it. The entry is kept there and the day stays suspended, so nothing on it is ever revealed.",
+    "rule": "ADR-0032 §7",
+    "evidence": "test",
+    "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had a row",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val beforeThePairing = activeSince == null || !activeSince.isBefore(window.endsAt)"
+  },
+  {
+    "id": "day-suspended-write-closed",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the close job has stamped the day closed, and an offline draft's intendedAt names it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 201,
+    "code": null,
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's. A suspended day is closed once the close job has stamped it: one that ended while the bond waited for its second member, or one that ended during a deletion countdown since called off.",
+    "rule": "BR-3a, ADR-0031 §20",
+    "evidence": "test",
+    "evidenceRef": "SubmitEntrySettledDayTest#a claimed day that is already stamped closed sends the draft to today, whatever its status",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#val isSettled: Boolean get() = closedAt != null || status.isClosed"
+  },
+  {
+    "id": "entry-none-write",
+    "region": "day.entry",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "your partner has not written, or the bond's reveal time is still ahead",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 201,
+    "code": null,
+    "reason": "Your entry is stored and is yours alone to read until the day is revealed.",
+    "rule": "BR-1",
+    "evidence": "smoke",
+    "evidenceRef": "the first entry is 201, SUBMITTED",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#status = EntryStatus.SUBMITTED,"
+  },
+  {
+    "id": "entry-none-write-revealed",
+    "region": "day.entry",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "your partner has already written, and the bond has no reveal time or it has passed",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 201,
+    "code": null,
+    "reason": "Yours is the second entry and nothing holds the reveal back, so it is revealed in the transaction that stores it.",
+    "rule": "BR-1, ADR-0032 §1",
+    "evidence": "test",
+    "evidenceRef": "EntriesEndpointTest#the second submission reveals both entries and records one content-free event",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/RevealDay.kt#val revealed = entry.reveal(next.revealedAt)"
+  },
+  {
+    "id": "entry-submitted-write",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "SUBMITTED",
+    "status": 409,
+    "code": "ENTRY_ALREADY_EXISTS",
+    "reason": "You have a live entry for today. Edit it, or delete it and write again; a second one is refused.",
+    "rule": "BR-2",
+    "evidence": "smoke",
+    "evidenceRef": "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#throw EntryAlreadyExistsException()"
+  },
+  {
+    "id": "entry-revealed-write",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "REVEALED",
+    "status": 409,
+    "code": "DAY_CLOSED",
+    "reason": "Your entry has been revealed, so its day is settled. The day is checked before the insert, so the answer is DAY_CLOSED and not ENTRY_ALREADY_EXISTS.",
+    "rule": "BR-10",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!claimedDay.isSettled) {"
+  },
+  {
+    "id": "entry-deleted-write",
+    "region": "day.entry",
+    "from": "DELETED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "you deleted it before the reveal, and your partner has not written or the reveal time is still ahead",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 201,
+    "code": null,
+    "reason": "Deleting before the reveal freed your place for the day. The replacement is a new entry with a new id; the deleted one stays as its tombstone, and today shows the live one.",
+    "rule": "BR-2, ADR-0032 §8",
+    "evidence": "smoke",
+    "evidenceRef": "the author can write a replacement on the same day",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#fun erase(now: Instant): Entry ="
+  },
+  {
+    "id": "entry-deleted-write-revealed",
+    "region": "day.entry",
+    "from": "DELETED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "you deleted it before the reveal, your partner has written, and the bond has no reveal time or it has passed",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 201,
+    "code": null,
+    "reason": "The replacement is the day's second live entry, so it meets the reveal rule afresh and both are revealed.",
+    "rule": "ADR-0032 §8",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/RevealDay.kt#val revealed = entry.reveal(next.revealedAt)"
+  },
+  {
+    "id": "entry-deleted-write-closed",
+    "region": "day.entry",
+    "from": "DELETED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "you deleted it after the reveal",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "DELETED",
+    "status": 409,
+    "code": "DAY_CLOSED",
+    "reason": "The day was revealed before you deleted, and a revealed day is a record: your place is free but the day takes no new entry.",
+    "rule": "BR-10, ADR-0032 §8",
+    "evidence": "test",
+    "evidenceRef": "RevealTest#after a post-reveal delete the author cannot write that day again, and the day stands as it was revealed",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#ErrorCode.DAY_CLOSED,"
+  },
+  {
+    "id": "partner-none-write",
+    "region": "day.partnerEntry",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "you have not yet written today",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NONE",
+    "status": 201,
+    "code": null,
+    "reason": "Your partner has written nothing, so your write changes nothing you see of theirs.",
+    "rule": "",
+    "evidence": "smoke",
+    "evidenceRef": "the first entry is 201, SUBMITTED",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#fun withEntry(): BondDay ="
+  },
+  {
+    "id": "partner-locked-write-reveals",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "you have not yet written today, and the bond has no reveal time or it has passed",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "VISIBLE",
+    "status": 201,
+    "code": null,
+    "reason": "Writing your own entry is what unlocks your partner's: both are revealed together.",
+    "rule": "BR-1",
+    "evidence": "smoke",
+    "evidenceRef": "an entry with typographic characters is 201, and echoes them",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/RevealDay.kt#val revealed = entry.reveal(next.revealedAt)"
+  },
+  {
+    "id": "partner-locked-write-waits",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "you have not yet written today, and the bond's reveal time is still ahead",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "LOCKED",
+    "status": 201,
+    "code": null,
+    "reason": "Both of you have now written, but the bond's reveal time has not come, so your partner's entry stays locked.",
+    "rule": "FR-062",
+    "evidence": "smoke",
+    "evidenceRef": "the second writes, and is not shown a reveal",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#return if (due != null && now.isBefore(due)) {"
+  },
+  {
+    "id": "partner-visible-write",
+    "region": "day.partnerEntry",
+    "from": "VISIBLE",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "VISIBLE",
+    "status": 409,
+    "code": "DAY_CLOSED",
+    "reason": "You can read your partner's words only on a revealed day, and a revealed day takes no new entry.",
+    "rule": "BR-10",
+    "evidence": "test",
+    "evidenceRef": "RevealTest#after a post-reveal delete the author cannot write that day again, and the day stands as it was revealed",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#redirectOnce(membership, claimed, calendar, now) ?: throw DayClosedException()"
+  },
+  {
+    "id": "partner-removed-write",
+    "region": "day.partnerEntry",
+    "from": "REMOVED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "you have not yet written today",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REMOVED",
+    "status": 201,
+    "code": null,
+    "reason": "Your partner deleted their entry before the reveal. Your write is accepted and their removed entry stays as it is; nothing is revealed until they write again.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value },"
+  },
+  {
+    "id": "partner-deleted-write",
+    "region": "day.partnerEntry",
+    "from": "DELETED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "DELETED",
+    "status": 409,
+    "code": "DAY_CLOSED",
+    "reason": "A tombstone with its id and dates is shown only for an entry you could once read, so the day was revealed, and a revealed day takes no new entry.",
+    "rule": "BR-10",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#redirectOnce(membership, claimed, calendar, now) ?: throw DayClosedException()"
+  }
+]
