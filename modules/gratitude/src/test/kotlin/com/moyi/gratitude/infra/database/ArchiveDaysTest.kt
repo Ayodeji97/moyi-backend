@@ -6,14 +6,14 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.string.shouldContain
-import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.json.JsonMapper
 import java.io.File
 import java.sql.Timestamp
 import java.time.Instant
@@ -21,6 +21,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 import javax.sql.DataSource
+import kotlin.math.ceil
 
 /**
  * The archive's query on its own: which days it picks (decision 1 of the
@@ -164,18 +165,50 @@ internal class ArchiveDaysTest(
     // ---- the plan ----
 
     /**
-     * A bond of 2,000 days among twenty others of 200, analysed. The first
-     * page and a page 1,500 days in must each be read off `(bond_id, date)`
-     * in order: no sort, no pass over the table, and about a page's worth of
-     * days touched however old the bond is.
+     * A bond of 2,000 days among twenty others of 200, analysed: the first
+     * page, a page 1,500 days in, and a page from a date.
      *
-     * The assertions are on the plan's text, loosely: which node types must
-     * not appear and which index must. That is as much as can be pinned
-     * without a test that fails on a minor version's cost model. The plans
-     * themselves are written to `build/archive-plans.txt` for a person.
+     * **What is asserted is what the feed needs, not how this version of
+     * Postgres chose to give it.** Two things, read from the executor's own
+     * counts (`EXPLAIN (ANALYZE, FORMAT JSON)`): no table is read from end
+     * to end, and the rows taken from `bond_days` and from `entries` are
+     * about a page, not the bond's two thousand days. The second carries the
+     * weight. A plan that sorted the bond's days, or walked its history to
+     * find a page, would have to take every one of them first, and the count
+     * says so whatever the node is called. No index and no node other than
+     * the sequential scan is named, because a newer planner may reach the
+     * same cost by another road (a bitmap scan, an incremental sort of a few
+     * rows, the other of the two indexes on `(bond_id, date)`), and that
+     * would be no regression.
+     *
+     * Rows "taken" are the rows a scan returned and the rows it read and
+     * discarded by a filter, over all its loops: a scan that reads the whole
+     * bond and keeps a page of it is counted as the whole bond.
+     *
+     * **If this fails after a Postgres upgrade**, read
+     * `build/archive-plans.txt`, which this test writes for a person.
+     *
+     * - A `Seq Scan` on `bond_days` or `entries`: an index the statement
+     *   depends on is no longer chosen, or no longer there
+     *   (`bond_days (bond_id, date)` unique, `bond_days_feed_idx`,
+     *   `entries_bond_day_idx`). With these row counts that is real. The
+     *   repair is in the schema or the statement, not here.
+     * - A row count over the bound and no sequential scan: the read of
+     *   `bond_days` no longer stops at the limit. Look for a `Sort` above a
+     *   scan of the whole bond, and check that the statement still orders by
+     *   the bare `date` of an index that leads with `bond_id`.
+     * - On `entry_favourites`, a sequential scan or a count near the size of
+     *   the table: V22's `(member_id, entry_id)` index has stopped serving
+     *   the favourites filter, and every member's page reads everybody's
+     *   marks.
+     *
+     * The guarantee is re-established when the three pages again take about
+     * a page of rows from each table on this seeded history. If a new plan
+     * does that by a road these counts misread, change how the count is
+     * taken, not the bound.
      */
     @Test
-    fun `a page is read off the bond-and-date index, without a sort and without walking the bond's history`() {
+    fun `a page takes about a page of rows from each table and scans none whole, however long the bond's history`() {
         seedHistory()
 
         val plans = StringBuilder()
@@ -184,37 +217,33 @@ internal class ArchiveDaysTest(
             "deep page" to ArchiveDays.query(bond, me, FIRST.plusDays(500), null, false, PAGE),
             "until" to ArchiveDays.query(bond, me, null, FIRST.plusDays(1_000), false, PAGE),
         ).forEach { (name, query) ->
-            val plan = explain(query)
+            val text = explain(query)
             plans
                 .append("== ")
                 .append(name)
                 .append('\n')
-                .append(plan)
+                .append(text)
                 .append("\n\n")
-            withClue("$name\n$plan") {
-                plan shouldNotContain "Seq Scan on bond_days"
-                plan shouldNotContain "Sort"
-                plan shouldNotContain "Seq Scan on entries"
-                Regex("""Index (Only )?Scan( Backward)? using (bond_days_bond_date_key|bond_days_feed_idx) on bond_days""")
-                    .containsMatchIn(plan) shouldBe true
-                // Rows the scan of bond_days actually produced: a page's worth, not the bond's 2,000.
-                rowsReadFrom("bond_days", plan) shouldBeLessThan PAGE * 3
-                // Each day's entries are found by its id.
-                plan shouldContain "on entries"
-                Regex("""Index (Only )?Scan using \w+ on entries""").containsMatchIn(plan) shouldBe true
+            val scans = scansOf(query)
+            withClue("$name\n$text") {
+                scans.filter { it.node == SEQUENTIAL }.map { it.table } shouldBe emptyList()
+                // A page's worth of days, not the bond's 2,000; and their entries found a day at a time.
+                scans.rowsTakenFrom("bond_days") shouldBeLessThan PAGE * 3
+                scans.rowsTakenFrom("entries") shouldBeLessThan PAGE * 3
             }
         }
 
-        val favourites = explain(ArchiveDays.query(bond, me, null, null, true, PAGE))
+        val favouritesQuery = ArchiveDays.query(bond, me, null, null, true, PAGE)
+        val favourites = explain(favouritesQuery)
         plans.append("== favourites, first page\n").append(favourites).append('\n')
+        val scans = scansOf(favouritesQuery)
         withClue(favourites) {
-            favourites shouldNotContain "Seq Scan on bond_days"
-            favourites shouldNotContain "Seq Scan on entries"
-            // A member with twenty marks in two thousand days: found from the member, not by walking the days.
-            // This is the query V22's `(member_id, entry_id)` index is for; the primary key starts from the entry.
-            favourites shouldNotContain "Seq Scan on entry_favourites"
-            favourites shouldContain "entry_favourites_by_member_idx"
-            rowsReadFrom("bond_days", favourites) shouldBeLessThan PAGE * 3
+            // A member with twenty marks in two thousand days, in a table of eight thousand marks: found from the member,
+            // not by reading every mark or every day. This is the query V22's `(member_id, entry_id)` index is for (the
+            // primary key starts from the entry); the index is not named, and what it buys is counted.
+            scans.filter { it.node == SEQUENTIAL }.map { it.table } shouldBe emptyList()
+            scans.rowsTakenFrom("entry_favourites") shouldBeLessThan MARKS * 3
+            scans.rowsTakenFrom("bond_days") shouldBeLessThan PAGE * 3
         }
         val marked =
             jdbc
@@ -251,14 +280,39 @@ internal class ArchiveDaysTest(
             .queryForList("EXPLAIN (ANALYZE, BUFFERS) ${query.first}", String::class.java, *query.second.toTypedArray())
             .joinToString("\n")
 
-    /** `actual … rows=N` of the scan node on [table]: what the executor really read from it, per loop times loops. */
-    private fun rowsReadFrom(
-        table: String,
-        plan: String,
-    ): Int {
-        val node = Regex("""on $table .*?actual [^)]*?rows=([0-9.]+) loops=(\d+)""").find(plan)
-        val (rows, loops) = checkNotNull(node) { "no scan of $table in the plan" }.destructured
-        return (rows.toDouble() * loops.toInt()).toInt()
+    /** One read of a table in an executed plan: what kind of node, and how many rows it took from the table over all its loops. */
+    private data class Scan(
+        val node: String,
+        val table: String,
+        val rowsTaken: Long,
+    )
+
+    /**
+     * Every node of [query]'s executed plan that reads a table. Read from
+     * the JSON form, whose keys are the executor's own and do not change
+     * with how a release prints a plan.
+     */
+    private fun scansOf(query: Pair<String, List<Any>>): List<Scan> {
+        val statement = "EXPLAIN (ANALYZE, FORMAT JSON) ${query.first}"
+        val document = jdbc.queryForObject(statement, String::class.java, *query.second.toTypedArray())!!
+        return scansIn(JSON.readTree(document).single()["Plan"])
+    }
+
+    private fun scansIn(node: JsonNode): List<Scan> {
+        val own =
+            node["Relation Name"]?.let { table ->
+                // Returned, and read but dropped by a filter or a recheck: each is a row the scan had to take.
+                val perLoop = TAKEN.sumOf { node[it]?.asDouble() ?: 0.0 }
+                Scan(node["Node Type"].asString(), table.asString(), ceil(perLoop * node["Actual Loops"].asDouble()).toLong())
+            }
+        return listOfNotNull(own) + node["Plans"]?.flatMap(::scansIn).orEmpty()
+    }
+
+    /** All rows taken from [table], by however many nodes read it. A plan that never reads it is not this query's. */
+    private fun List<Scan>.rowsTakenFrom(table: String): Int {
+        val reads = filter { it.table == table }
+        check(reads.isNotEmpty()) { "no read of $table in the plan" }
+        return reads.sumOf { it.rowsTaken }.toInt()
     }
 
     private fun seedHistory() {
@@ -395,5 +449,16 @@ internal class ArchiveDaysTest(
 
         /** A page and the one row more that says whether another follows. */
         const val PAGE = 21
+
+        /** The marks [seedHistory] gives the member the plan is read for: one every hundred days of 2,000. */
+        const val MARKS = 20
+
+        /** The one node type named: reading a table from end to end has been called this in every release. */
+        const val SEQUENTIAL = "Seq Scan"
+
+        val JSON: JsonMapper = JsonMapper.builder().build()
+
+        /** A node's counts of rows it had to take, per loop: the ones it returned and the ones it read and dropped. */
+        val TAKEN = listOf("Actual Rows", "Rows Removed by Filter", "Rows Removed by Index Recheck")
     }
 }

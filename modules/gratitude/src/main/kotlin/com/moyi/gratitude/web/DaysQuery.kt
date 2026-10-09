@@ -24,6 +24,13 @@ import java.time.LocalDate
  * request body.
  *
  * The bounds of [limit] are [GetDays]'s constants, not restated.
+ *
+ * **Each value has one spelling**, as a cursor and a date have. A `limit` is
+ * a decimal number as anybody writes one: `7`, not `007`, `+7` or ` 7`. A
+ * generated client never sends anything else, so nothing is lost; and a
+ * padded number that is read here as seven is read somewhere else as octal,
+ * or as a different cache key for the same page. Refusing it says so at the
+ * first place it could matter.
  */
 internal data class DaysQuery(
     val limit: Int,
@@ -34,7 +41,8 @@ internal data class DaysQuery(
     val favouritesOnly: Boolean,
 ) {
     companion object {
-        private val WHOLE_NUMBER = Regex("[0-9]{1,9}")
+        /** Canonical decimal: no sign, no space, no leading zero, and short enough to be an `Int`. Nought is out of range anyway. */
+        private val WHOLE_NUMBER = Regex("[1-9][0-9]{0,8}")
 
         /** @throws DaysQueryNotValidException naming each parameter that is present and cannot be read. */
         fun parse(

@@ -418,6 +418,13 @@ class OpenApiContractTest(
         // OpenApiConfiguration states what the route enforces.
         val days = api.paths["/api/v1/bonds/{bondId}/days"]!!.get
         days.operationId shouldBe "days"
+        // Two things the schema cannot say and a client gets wrong by guessing (the review of slice C5b): an empty page
+        // is not the end, and a day whose status is EMPTY can hold the caller's own tombstone.
+        val told = days.description.shouldNotBeNull()
+        told shouldContain "Only a null `nextCursor` means the end"
+        told shouldContain "`items` can be empty"
+        told shouldContain "`status: EMPTY`"
+        told shouldContain "tombstone"
         days.responses.keys shouldContainAll listOf("200", "401", "404", "422", "429")
         days.responses.keys shouldNotContain "409"
         days.requestBody.shouldBeNull()

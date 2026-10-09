@@ -67,13 +67,17 @@ internal data class DaysPage(
  * of the page, whatever the rows still hold.
  *
  * **A page has two bounds.** The count the caller asked for, and
- * [PAGE_TEXT_OCTETS] of entry text: two full entries a day are 16 KB, and
- * the largest page by count would be several times the 256 KB a response may
- * be (NFR-008). Days are taken in order while the text **this caller will be
- * sent** stays within the bound; a tombstone and a locked entry send none.
- * The first day is always taken, so a page is never empty for its size. Text
- * is measured as JSON will carry it ([octetsAsJson]), because that is what
- * the limit is on.
+ * [PAGE_TEXT_OCTETS] of entry text **as it will be sent**. An entry is at
+ * most 8,192 octets as it arrives and can be six times that as JSON: the
+ * largest there can be is 49,147 octets on the wire ([octetsAsJson] has
+ * how). So one day can be 98 KB, and the largest page by count would be
+ * nearly nineteen times the 256 KB a response may be (NFR-008). Days are
+ * taken in order while the text **this caller will be sent** stays within
+ * the bound; a tombstone and a locked entry send none. The first day is
+ * always taken, so a page is never empty for its size. Text is measured as
+ * JSON will carry it, because that is what the limit is on: measured as it
+ * arrived, two of the largest days would count as 32 KB and be sent as
+ * 197 KB.
  *
  * **`favouritesOnly`** asks the query for days holding an entry the caller
  * has marked, and then **drops a day on which nothing marked can be read in
@@ -112,9 +116,10 @@ internal class GetDays(
      *
      * [textOctets] is the page's bound on text and is [PAGE_TEXT_OCTETS] for
      * every caller there is. It is a parameter only so that a test can make
-     * it smaller than one day: no entry can be large enough to reach the
-     * real one alone, and the rule that the first day is always taken would
-     * otherwise be a line nothing could show to be needed.
+     * it smaller than one day: no day can be large enough to reach the
+     * real one alone (the largest is 98,294 octets of text, half of it), and
+     * the rule that the first day is always taken would otherwise be a line
+     * nothing could show to be needed.
      */
     @Suppress("LongParameterList") // The page's own bounds, each a separate fact of the request.
     @Transactional(readOnly = true)
@@ -248,9 +253,17 @@ internal class GetDays(
         const val DEFAULT_LIMIT = 20
 
         /**
-         * 192 KiB of entry text in a page. With the most a page can carry
-         * besides text (fifty days of two entries is about 35 KB of ids,
-         * dates and names) that leaves a response under 256 KB.
+         * 192 KiB (196,608 octets) of entry text in a page, counted as
+         * JSON carries it. Two of the largest days there can be fit in it
+         * (196,588 octets) and a third does not. With the most a page can
+         * carry besides text (fifty days of two entries are about 32.5 KB
+         * of ids, dates and field names) the largest response there can be
+         * is about 229 KB, under the 262,144 a response may be.
+         * `DaysFeedTest` builds that page and measures it: 229,063 octets.
+         *
+         * The margin is 33 KB and is what a new field on an entry spends:
+         * a hundred entries a page, so every thirty octets added to one are
+         * 3 KB off it.
          */
         const val PAGE_TEXT_OCTETS = 192 * 1024
 
@@ -265,11 +278,14 @@ internal class GetDays(
          * count (it has shorter forms for a few), which is the safe side: a
          * page may be a little smaller than it had to be, never larger.
          *
-         * It matters because an entry is bounded by octets as sent to us and
-         * by 500 characters, not by octets as we send it: five hundred
-         * control characters are 500 octets in and 3,000 out, and a page of
-         * such entries counted raw would be past the limit while looking a
-         * sixth of the way to it.
+         * It matters because an entry is bounded by octets as sent to us
+         * (8,192), not by octets as we send it, and its limit of 500
+         * characters does not make up the difference. That limit is counted
+         * on the text trimmed, and U+001C to U+001F are trimmed as space
+         * and escaped as controls. So `a` followed by 8,191 of them is
+         * accepted as one character, is 8,192 octets in and 49,147 out, and
+         * a page of such entries counted raw would be past the limit while
+         * looking a sixth of the way to it.
          */
         fun octetsAsJson(text: String): Int =
             text.toByteArray(Charsets.UTF_8).size +

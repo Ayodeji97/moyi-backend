@@ -813,12 +813,18 @@ private val ENDING_DESCRIPTIONS =
  *
  * `cursor` stays a string and is described as opaque on purpose: its form is
  * not part of the contract.
+ *
+ * The operation itself is given [DAYS_DESCRIPTION] here too, as the two
+ * endings are given theirs: what a page and a day's status do not mean.
  */
 private fun documentDaysQuery(api: OpenAPI) {
-    val parameters =
+    val operations =
         api.paths.values
             .flatMap { it.readOperations() }
             .filter { it.operationId == DAYS_OPERATION }
+    operations.forEach { it.description = DAYS_DESCRIPTION }
+    val parameters =
+        operations
             .flatMap { it.parameters.orEmpty() }
             .filter { it.`in` == "query" }
     parameters.forEach { parameter ->
@@ -859,6 +865,24 @@ private fun documentDaysQuery(api: OpenAPI) {
 }
 
 private const val DAYS_OPERATION = "days"
+
+/**
+ * What a client of the feed has to be told, because the schema cannot say it
+ * and a guess gets it wrong. Both were found by the review of slice C5b: a
+ * client that stops at an empty page never reaches the days after it, and
+ * one that draws nothing for `EMPTY` hides a member's own tombstone from
+ * them.
+ */
+private const val DAYS_DESCRIPTION =
+    "The days of the bond on which the caller has something to see, newest first. A day is listed when it holds an " +
+        "entry the caller wrote, or one that has been revealed to them; an erased entry still counts, and is returned " +
+        "as its tombstone.\n\n" +
+        "**Only a null `nextCursor` means the end.** A page's `items` can be empty, or shorter than `limit`, while " +
+        "`nextCursor` is not null: a page is also bounded by its size, and with `favourites=true` a day can be left " +
+        "out after it was counted. Keep asking with the cursor until it is null.\n\n" +
+        "**A day's `status` does not say whether there is anything to draw.** A day whose author deleted their only " +
+        "entry is still listed, for that author alone, with their tombstone as `myEntry`; once that day has closed " +
+        "it carries `status: EMPTY`. Draw a day from its entries, not from its status."
 private const val DAYS_MIN_LIMIT = 1
 private const val DAYS_MAX_LIMIT = 50
 private const val DAYS_DEFAULT_LIMIT = 20

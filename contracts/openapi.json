@@ -1197,6 +1197,7 @@
     },
     "/api/v1/bonds/{bondId}/days" : {
       "get" : {
+        "description" : "The days of the bond on which the caller has something to see, newest first. A day is listed when it holds an entry the caller wrote, or one that has been revealed to them; an erased entry still counts, and is returned as its tombstone.\n\n**Only a null `nextCursor` means the end.** A page's `items` can be empty, or shorter than `limit`, while `nextCursor` is not null: a page is also bounded by its size, and with `favourites=true` a day can be left out after it was counted. Keep asking with the cursor until it is null.\n\n**A day's `status` does not say whether there is anything to draw.** A day whose author deleted their only entry is still listed, for that author alone, with their tombstone as `myEntry`; once that day has closed it carries `status: EMPTY`. Draw a day from its entries, not from its status.",
         "operationId" : "days",
         "parameters" : [ {
           "in" : "path",

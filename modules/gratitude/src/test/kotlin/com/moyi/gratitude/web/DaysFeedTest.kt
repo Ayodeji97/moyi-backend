@@ -15,6 +15,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.ints.shouldBeLessThan
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -36,6 +37,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import java.io.File
 import java.sql.Connection
 import java.time.Duration
 import java.time.Instant
@@ -288,11 +290,32 @@ internal class DaysFeedTest(
                         .propertyNames()
                         .toList() shouldContainExactlyInAnyOrder
                         listOf("field", "code", "message")
-                    if (value.length > 2) response.contentAsString shouldNotContain value
+                    // Not asked of a value that could be part of the bond's id, which `instance` carries.
+                    if (value.length > 2 && !value.all { it in HEX }) response.contentAsString shouldNotContain value
                     response.contentAsString shouldNotContain "zqw"
                 }
             }
         }
+    }
+
+    /**
+     * A cursor is measured before it is decoded, and the test above cannot
+     * tell: a value that long is refused after decoding too, with the same
+     * answer. What can be held is the other side of the bound, that it
+     * refuses nothing this API issues, for any date there can be, and that
+     * it is small.
+     */
+    @Test
+    fun `the length a cursor is measured against admits every cursor the API can issue, and little else`() {
+        val issued = listOf("0000-01-01", "2026-09-16", "9999-12-31").map { DayCursor(LocalDate.parse(it)).encode() }
+
+        issued.forEach {
+            it.length shouldBe 18
+            it.length shouldBeLessThan DayCursor.MAX_LENGTH + 1
+            DayCursor.parse(it).shouldNotBeNull().encode() shouldBe it
+        }
+        DayCursor.MAX_LENGTH shouldBeLessThan 65
+        DayCursor.parse("A".repeat(DayCursor.MAX_LENGTH + 1)).shouldBeNull()
     }
 
     @Test
@@ -315,7 +338,7 @@ internal class DaysFeedTest(
         val bond = pair()
         bothWrite(bond, DAY_ONE)
 
-        listOf("limit" to "1", "limit" to "50", "limit" to "07", "favourites" to "true", "favourites" to "false").forEach { (name, value) ->
+        listOf("limit" to "1", "limit" to "7", "limit" to "50", "favourites" to "true", "favourites" to "false").forEach { (name, value) ->
             withClue("$name=$value") { rig.days(ada, bond, mapOf(name to value)).status shouldBe 200 }
         }
     }
@@ -404,6 +427,80 @@ internal class DaysFeedTest(
         responses.forEach { it.contentAsByteArray.size shouldBeLessThan MAX_RESPONSE }
         responses.size shouldBe 2
         responses.flatMap { rig.datesOf(json.readTree(it.contentAsString)["items"].toList()) } shouldBe dates
+    }
+
+    /**
+     * The largest page there can be, built and measured. Found by the review
+     * of this slice, which proved the arithmetic first written beside the
+     * bound wrong by five times.
+     *
+     * An entry is bounded at 8,192 octets as it arrives. `a` followed by
+     * 8,191 U+001F is that; it is one character to the limit of 500, which
+     * is counted on the text trimmed, and a trailing U+001F is trimmed; and
+     * it is 49,147 octets as JSON, where each control is six. Two such days
+     * are 196,588 octets of text, twenty short of the page's bound, so both
+     * fit in one page and no third can. What can still join them is a day
+     * that sends no text at all: forty-eight days on which both wrote and
+     * both erased, two wide tombstones each. Fifty days, the most a page may
+     * be asked for, carrying all the text a page may carry.
+     *
+     * The size is written to `build/archive-largest-page.txt` for a person.
+     */
+    @Test
+    fun `the largest page there can be - two days of the largest entries among forty-eight of tombstones - is under 256 KB`() {
+        val bond = pair()
+        val largest = "a" + "\\u001f".repeat(8_191)
+        val heavy = setOf(DAY_ONE.plusDays(20), DAY_ONE.plusDays(40))
+        val dates =
+            (0L until 50)
+                .map { DAY_ONE.plusDays(it) }
+                .onEach { date ->
+                    clock.set(at(date))
+                    if (date in heavy) {
+                        rig.bonds.submit(ada, bond, largest)
+                        rig.bonds.submit(bea, bond, largest)
+                    } else {
+                        val written = bothWrite(bond, date)
+                        rig.bonds.delete(ada, written.adas)
+                        rig.bonds.delete(bea, written.beas)
+                    }
+                }.map { it.toString() }
+                .reversed()
+        // What was accepted and stored is what was meant: four entries of 8,192 octets ending in the control.
+        jdbc.queryForObject(
+            "SELECT count(*) FROM entries WHERE bond_id = ?::uuid AND octet_length(text) = 8192 AND right(text, 1) = chr(31)",
+            Int::class.java,
+            bond,
+        ) shouldBe 4
+
+        val sizes =
+            listOf(ada, bea).map { reader ->
+                val response = rig.days(reader, bond, mapOf("limit" to "50"))
+
+                response.status shouldBe 200
+                val page = json.readTree(response.getContentAsString(Charsets.UTF_8))
+                // All fifty in the one response: this is the page the bound has to hold for.
+                rig.datesOf(page["items"].toList()) shouldBe dates
+                page["nextCursor"].isNull shouldBe true
+                val size = response.contentAsByteArray.size
+                // Four entries of 49,147 octets each on the wire, and forty-eight days of tombstones around them.
+                size shouldBeGreaterThan 4 * 49_147 + 48 * 400
+                size shouldBeLessThan MAX_RESPONSE
+                size
+            }
+        File("build").mkdirs()
+        File("build/archive-largest-page.txt").writeText("${sizes.max()} octets, of the $MAX_RESPONSE a response may be\n")
+
+        // One more day with any text at all, and the page must stop short of a heavy day: the walk still visits each day once.
+        bothWrite(bond, DAY_ONE.plusDays(50))
+        for (reader in listOf(ada, bea)) {
+            val responses = responsesOfWalk(reader, bond, mapOf("limit" to "50"))
+            responses.forEach { it.contentAsByteArray.size shouldBeLessThan MAX_RESPONSE }
+            val pages = responses.map { rig.datesOf(json.readTree(it.getContentAsString(Charsets.UTF_8))["items"].toList()) }
+            pages.flatten() shouldBe listOf("2026-11-04") + dates
+            // The 4th of November back to the 6th of October, then the 5th (the older heavy day) and the rest.
+            pages.map { it.size } shouldBe listOf(30, 21)
+        }
     }
 
     @Test
@@ -764,7 +861,7 @@ internal class DaysFeedTest(
     private fun unreadable(): List<Pair<String, List<String>>> {
         val good = rig.cursorBefore("2026-09-16")
         return listOf(
-            "limit" to listOf("0", "51", "-1", "zqwlimit", "", " 5", "5 ", "1.5", "1e1", "+5", "٥", "99999999999999999999"),
+            "limit" to UNREADABLE_LIMITS,
             "cursor" to
                 listOf(
                     "zqw!!notbase64",
@@ -786,6 +883,11 @@ internal class DaysFeedTest(
                     good.dropLast(1) + URL_ALPHABET[URL_ALPHABET.indexOf(good.last()) xor 1],
                     rig.encoded("v1:+12026-09-16"),
                     "$good,$good",
+                    // Longer than any cursor is: one character over the bound, a real cursor with a tail, and 100 KB twice.
+                    "A".repeat(DayCursor.MAX_LENGTH + 1),
+                    good + "A".repeat(DayCursor.MAX_LENGTH),
+                    rig.encoded("v1:2026-09-16" + "9".repeat(75_000)),
+                    "zqw".repeat(33_334),
                 ),
             "until" to
                 listOf(
@@ -886,6 +988,13 @@ internal class DaysFeedTest(
 
         /** NFR-008. */
         const val MAX_RESPONSE = 262_144
+
+        const val HEX = "0123456789abcdef"
+
+        /** From `007` on: a number has one spelling, so one written another way is not read (`007` was once a 7). */
+        val UNREADABLE_LIMITS =
+            listOf("0", "51", "-1", "zqwlimit", "", " 5", "5 ", "1.5", "1e1", "+5", "٥", "99999999999999999999") +
+                listOf("007", "07", "050", "00", "+50", "5\t", "５", "0x5", "5.0")
 
         const val URL_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 
