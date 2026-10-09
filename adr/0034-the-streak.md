@@ -1,6 +1,9 @@
 # ADR-0034 — The streak
 
-**Status:** Proposed · **Date:** 2026-10-05 · **Deciders:** Daniel
+**Status:** Accepted · **Date:** 2026-10-05 · **Deciders:** Daniel
+**Amended:** 2026-10-09 (the status; "Owed — C5, the archive" discharged — ADR-0036)
+
+*(2026-10-09: the status read "Proposed" until this date, though the slice merged as #55, and its rulings as #56, on 2026-10-06. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
 ## Context
 
@@ -218,6 +221,11 @@ states.
 **C5, the archive.** A day's page will show its status. Whether a `SOLO` day may say so
 there is the same question decision 12 answers for the calendar, and `states.md` §6 should
 be read before it is built.
+
+*(Discharged 2026-10-09, ADR-0036 decision 3.)* An archive day carries its own status,
+`SOLO` included, by the owner's ruling of 2026-10-06. `states.md` §6 was read: it draws no
+solo day card, which ADR-0036 records as a gap in the design (its question 5), not in the
+response.
 
 **C6.** `MilestoneReached` and the milestones endpoint.
 

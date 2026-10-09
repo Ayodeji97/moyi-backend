@@ -1,7 +1,9 @@
 # ADR-0032 — The reveal, and the first events
 
-**Status:** Proposed · **Date:** 2026-10-05 · **Deciders:** Daniel
-**Amended:** 2026-10-05 (C3: the "Owed, C3" list discharged, decision 5 superseded — ADR-0033)
+**Status:** Accepted · **Date:** 2026-10-05 · **Deciders:** Daniel
+**Amended:** 2026-10-05 (C3: the "Owed, C3" list discharged, decision 5 superseded — ADR-0033) · 2026-10-09 (the status; and the Revisit note on a second route by entry id, answered for favourites — ADR-0036)
+
+*(2026-10-09: the status read "Proposed" until this date, though the slice merged as #53 on 2026-10-05. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
 ## Context
 
@@ -240,6 +242,11 @@ Each is built one way, pinned by one test, and cheap to turn.
   its first rows and the three notes above fall due.
 - A second route by entry id arrives (favourites and reactions, C5): it uses
   `ChangeEntry.authorOf`'s rule or states why not, and joins `EntryChangesTest`'s route set.
+  *(Answered for favourites 2026-10-09, ADR-0036 decision 11: the favourite routes do not
+  use `authorOf`'s rule and say why. A favourite changes nothing of the entry, so either
+  member may mark either entry the read gate shows them in full; what the two rules share
+  is the one `404` for everyone the entry was never shown to. Both routes are in
+  `EntryChangesTest`'s set. Still open for reactions, C5c.)*
 
 ## How this was checked
 
