@@ -1,5 +1,67 @@
 [
   {
+    "id": "day-not-opened-write",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the bond is two people",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 201,
+    "code": null,
+    "reason": "Yours is the first entry of the day, and this write is what opens the day's row. The row is inserted OPEN and counted to PARTIAL in the same transaction, so OPEN is never what this write commits. Your partner sees that you wrote, and nothing of what you wrote.",
+    "rule": "BR-1",
+    "evidence": "smoke",
+    "evidenceRef": "the first entry is 201, SUBMITTED",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val opened = days.openOrGet(membership.bondId, window, zone, now, openStatus)"
+  },
+  {
+    "id": "day-not-opened-write-waiting",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the bond is still waiting for its second member",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 201,
+    "code": null,
+    "reason": "The creator may write before the invitee joins. This write opens the day's row, and opens it SUSPENDED: private, and never counted by the streak.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "smoke",
+    "evidenceRef": "writing before a partner has joined is still 201",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val openStatus = if (beforeThePairing) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
     "id": "day-open-write",
     "region": "day",
     "from": "OPEN",
@@ -24,10 +86,10 @@
     "to": "PARTIAL",
     "status": 201,
     "code": null,
-    "reason": "Yours is the first entry of the day. Your partner sees that you wrote, and nothing of what you wrote.",
+    "reason": "The day has a row and no live entry: an entry was deleted from it, or the joining day resumed empty. Yours is counted as its first.",
     "rule": "BR-1",
-    "evidence": "smoke",
-    "evidenceRef": "the first entry is 201, SUBMITTED",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#delete frees the live slot and today picks the replacement",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status = if (status == BondDayStatus.SUSPENDED) BondDayStatus.SUSPENDED else BondDayStatus.PARTIAL,"
   },
   {
@@ -36,7 +98,7 @@
     "from": "PARTIAL",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you have already written today",
+    "when": "a new request, and you have already written today",
     "guards": [
       {
         "region": "account",
@@ -129,7 +191,7 @@
     "from": "PENDING_REVEAL",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "",
+    "when": "a new request",
     "guards": [
       {
         "region": "account",
@@ -160,7 +222,7 @@
     "from": "REVEALED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the day is today",
+    "when": "a new request, and the day is today",
     "guards": [
       {
         "region": "account",
@@ -315,7 +377,7 @@
     "from": "SUSPENDED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the bond is still waiting for its second member, and you have not written today",
+    "when": "the bond is still waiting for its second member, and you have no live entry on the day",
     "guards": [
       {
         "region": "account",
@@ -334,11 +396,11 @@
     "to": "SUSPENDED",
     "status": 201,
     "code": null,
-    "reason": "The creator may write before the invitee joins. The entry is kept and the day stays suspended: it is private, and the streak never counts it.",
+    "reason": "A suspended day has a row because its creator wrote on it. With that entry deleted, a new one is accepted and counted, and the day stays suspended.",
     "rule": "doc 04 §8.3a",
     "evidence": "smoke",
-    "evidenceRef": "writing before a partner has joined is still 201",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val openStatus = if (beforeThePairing) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+    "evidenceRef": "the author can write a replacement on the same day",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status = if (status == BondDayStatus.SUSPENDED) BondDayStatus.SUSPENDED else BondDayStatus.PARTIAL,"
   },
   {
     "id": "day-suspended-write-again",
@@ -346,7 +408,7 @@
     "from": "SUSPENDED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the bond is still waiting for its second member, and you have already written today",
+    "when": "a new request, the bond is still waiting for its second member, and you have a live entry on the day",
     "guards": [
       {
         "region": "account",
@@ -503,7 +565,7 @@
     "from": "SUBMITTED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "",
+    "when": "a new request",
     "guards": [
       {
         "region": "account",
@@ -530,12 +592,37 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#throw EntryAlreadyExistsException()"
   },
   {
+    "id": "entry-submitted-write-replay",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 201,
+    "code": null,
+    "reason": "A replay runs nothing again. It answers the first request's 201 with Idempotency-Replayed: true and the entry read as it stands now, so none of a new write's refusals apply, on a revealed day or an ended bond alike.",
+    "rule": "ADR-0031 §8",
+    "evidence": "smoke",
+    "evidenceRef": "replaying the same key with the same body is 201 again",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))"
+  },
+  {
     "id": "entry-revealed-write",
     "region": "day.entry",
     "from": "REVEALED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "",
+    "when": "a new request, and the entry's day is today",
     "guards": [
       {
         "region": "account",
@@ -559,6 +646,62 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!claimedDay.isSettled) {"
+  },
+  {
+    "id": "entry-revealed-write-replay",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 201,
+    "code": null,
+    "reason": "A replay runs nothing again. It answers the first request's 201 with Idempotency-Replayed: true and the entry read as it stands now, so none of a new write's refusals apply, on a revealed day or an ended bond alike. The body shows the entry as REVEALED.",
+    "rule": "ADR-0031 §8",
+    "evidence": "test",
+    "evidenceRef": "JoiningDayTest#a first POST replay reconciles a legacy joining day and reads the entry as revealed",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))"
+  },
+  {
+    "id": "entry-revealed-write-offline",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "a new request whose intendedAt names the entry's day, and that day is an earlier one",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 201,
+    "code": null,
+    "reason": "The entry's day is settled, so the claim is not used: the new entry is filed on today, and this one is untouched. If today cannot take it, the answer is today's.",
+    "rule": "BR-3a, ADR-0031 §20",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/DayAssignment.kt#isSettled(claimedDay.date) -> Claim.DAY_SETTLED"
   },
   {
     "id": "entry-deleted-write",
@@ -590,7 +733,7 @@
     "rule": "BR-2, ADR-0032 §8",
     "evidence": "smoke",
     "evidenceRef": "the author can write a replacement on the same day",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#fun erase(now: Instant): Entry ="
+    "codeRef": "modules/gratitude/src/main/resources/db/migration/V12__gratitude_bond_days_and_entries.sql#CREATE UNIQUE INDEX entries_one_per_member_per_day ON entries (bond_day_id, author_member_id) WHERE deleted_at IS NULL;"
   },
   {
     "id": "entry-deleted-write-revealed",
@@ -629,7 +772,7 @@
     "from": "DELETED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you deleted it after the reveal",
+    "when": "a new request, and you deleted it after the reveal",
     "guards": [
       {
         "region": "account",
@@ -653,6 +796,31 @@
     "evidence": "test",
     "evidenceRef": "RevealTest#after a post-reveal delete the author cannot write that day again, and the day stands as it was revealed",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#ErrorCode.DAY_CLOSED,"
+  },
+  {
+    "id": "entry-deleted-write-replay",
+    "region": "day.entry",
+    "from": "DELETED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 201,
+    "code": null,
+    "reason": "A replay runs nothing again. It answers the first request's 201 with Idempotency-Replayed: true and the entry read as it stands now, so none of a new write's refusals apply, on a revealed day or an ended bond alike. The body is the tombstone: there is no second copy of the words to answer from.",
+    "rule": "ADR-0031 §8",
+    "evidence": "smoke",
+    "evidenceRef": "POST replay after DELETE returns its tombstone",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))"
   },
   {
     "id": "partner-none-write",
@@ -754,7 +922,7 @@
     "from": "VISIBLE",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "",
+    "when": "a new request",
     "guards": [
       {
         "region": "account",
@@ -816,7 +984,7 @@
     "from": "DELETED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "",
+    "when": "a new request",
     "guards": [
       {
         "region": "account",
@@ -840,6 +1008,24 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#redirectOnce(membership, claimed, calendar, now) ?: throw DayClosedException()"
+  },
+  {
+    "id": "day-not-opened-delete",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "unreachable",
+    "to": "NOT_OPENED",
+    "status": null,
+    "code": null,
+    "reason": "An entry always belongs to a day's row, and the first entry is what opens it. A day with no row has no entry whose id could be sent.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": ""
   },
   {
     "id": "day-open-delete",
@@ -922,7 +1108,7 @@
     "from": "PENDING_REVEAL",
     "action": "DELETE /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "",
+    "when": "the entry is your live one",
     "guards": [
       {
         "region": "account",
@@ -940,6 +1126,31 @@
     "evidence": "test",
     "evidenceRef": "RevealTest#deleting on a PENDING_REVEAL day returns it to PARTIAL, and a rewrite follows the reveal rule again",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> BondDayStatus.PARTIAL"
+  },
+  {
+    "id": "day-pending-reveal-delete-again",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "you repeat the delete of an entry you already deleted",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_REVEAL",
+    "status": 204,
+    "code": null,
+    "reason": "You deleted, wrote again, and still hold the first entry's id. That entry was already erased, so the day is not stepped back a second time.",
+    "rule": "ADR-0032 §8",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/EraseEntry.kt#val nextDay = if (entry.isErased) day else day.withoutEntry()"
   },
   {
     "id": "day-revealed-delete",
@@ -1092,6 +1303,70 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#val isSettled: Boolean get() = closedAt != null || status.isClosed"
   },
   {
+    "id": "day-not-opened-today",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "the bond is two people, or was",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NOT_OPENED",
+    "status": 200,
+    "code": null,
+    "reason": "The response says OPEN with both entries null. Reading does not open the day: no row is written, so OPEN here is what the day would open as.",
+    "rule": "",
+    "evidence": "test",
+    "evidenceRef": "RevealGateTest#a day nobody has written to yet is never created by reading it",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
+    "id": "day-not-opened-today-waiting",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "the bond is still waiting for its second member",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NOT_OPENED",
+    "status": 200,
+    "code": null,
+    "reason": "The response says SUSPENDED, which is what the day would open as on a bond of one. No row is written.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "test",
+    "evidenceRef": "RevealGateTest#a still-solo bond reports SUSPENDED before anybody has written, not OPEN",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
     "id": "day-open-today",
     "region": "day",
     "from": "OPEN",
@@ -1118,11 +1393,11 @@
     "to": "OPEN",
     "status": 200,
     "code": null,
-    "reason": "Nobody has a live entry today. A day nobody has written on has no row, and reading it does not create one.",
+    "reason": "The day has a row and no live entry, after a delete or an empty joining day. The response says OPEN, as it does for a day with no row; a member whose partner deleted is also shown that an entry was removed.",
     "rule": "",
     "evidence": "test",
-    "evidenceRef": "RevealGateTest#a day nobody has written to yet is OPEN with two absent entries",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+    "evidenceRef": "RevealTest#a delete before the reveal shows the partner an author and that it is gone, and nothing else",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
   },
   {
     "id": "day-partial-today",
@@ -1235,7 +1510,7 @@
     "to": "SOLO",
     "status": null,
     "code": null,
-    "reason": "GET /today reads the day the clock is in. A day becomes SOLO only when the close job settles it, at least a minute after it ended, and by then today is the next date.",
+    "reason": "GET /today reads the day the clock is in. A day becomes SOLO only when the close job settles it, at least a minute after it ended, and by then today is the next date. The one way in is a clock that differs between instances by more than the close job's one-minute margin.",
     "rule": "",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -1253,7 +1528,7 @@
     "to": "EMPTY",
     "status": null,
     "code": null,
-    "reason": "GET /today reads the day the clock is in. A day becomes EMPTY only once it has ended, and by then today is the next date.",
+    "reason": "GET /today reads the day the clock is in. A day becomes EMPTY only once it has ended, and by then today is the next date. The one way in is a clock that differs between instances by more than the close job's one-minute margin.",
     "rule": "",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -1271,7 +1546,7 @@
     "to": "FROZEN",
     "status": null,
     "code": null,
-    "reason": "GET /today reads the day the clock is in. A FROZEN day is either a date the calendar stepped over, which has no hours, or a past day a freeze covered.",
+    "reason": "GET /today reads the day the clock is in. A FROZEN day is either a date the calendar stepped over, which has no hours, or a past day a freeze covered. The one way in is a clock that differs between instances by more than the close job's one-minute margin.",
     "rule": "",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -1302,19 +1577,19 @@
     "to": "SUSPENDED",
     "status": 200,
     "code": null,
-    "reason": "The bond is still waiting for its second member, so today is suspended whether or not you have written on it. The other kind of suspended day, one the close job stamped, is never today.",
+    "reason": "The day has a row because the creator wrote on it, and it stays suspended while the bond waits for its second member. The other kind of suspended day, one the close job stamped, is never today.",
     "rule": "doc 04 §8.3a",
     "evidence": "smoke",
     "evidenceRef": "…and the day it landed on opens SUSPENDED, not OPEN",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
   },
   {
-    "id": "day-open-streak",
+    "id": "day-not-opened-streak",
     "region": "day",
-    "from": "OPEN",
+    "from": "NOT_OPENED",
     "action": "GET /api/v1/bonds/{bondId}/streak",
     "actor": "you",
-    "when": "",
+    "when": "the bond takes entries, and is two people",
     "guards": [
       {
         "region": "account",
@@ -1325,7 +1600,131 @@
       {
         "region": "bond",
         "states": [
-          "ACTIVE",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NOT_OPENED",
+    "status": 200,
+    "code": null,
+    "reason": "Today has no row, and is on the calendar as an OPEN square all the same, so that the square's presence does not say somebody has written. The numbers are the run up to the last day the close job evaluated.",
+    "rule": "FR-071",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#a bond nobody has written in has a streak of nothing, and a calendar of today, open",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val unwritten = last == today && !from.isAfter(today) && membership.isOpen && stored.lastOrNull()?.date != today"
+  },
+  {
+    "id": "day-not-opened-streak-ended",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "the bond has ended or is counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NOT_OPENED",
+    "status": 200,
+    "code": null,
+    "reason": "Nobody can write in a bond that has stopped taking entries, so today is not drawn as open: the calendar ends at the last day that has a square.",
+    "rule": "ADR-0034 §12",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#a bond that ended today has no open square, for nobody can write in it",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val unwritten = last == today && !from.isAfter(today) && membership.isOpen && stored.lastOrNull()?.date != today"
+  },
+  {
+    "id": "day-not-opened-streak-waiting",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "the bond is still waiting for its second member",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NOT_OPENED",
+    "status": 200,
+    "code": null,
+    "reason": "A bond of one has no joining day, so its calendar is empty and every number is zero.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val from = maxOf(last.minusDays(CALENDAR_DAYS - 1), joiningDate(membership) ?: last.plusDays(1))"
+  },
+  {
+    "id": "day-open-streak",
+    "region": "day",
+    "from": "OPEN",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "the bond takes entries",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "OPEN",
+    "status": 200,
+    "code": null,
+    "reason": "A day with a row and no live entry is an OPEN square while it is today, exactly as a day with no row is.",
+    "rule": "ADR-0034 §12",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
+  },
+  {
+    "id": "day-open-streak-ended",
+    "region": "day",
+    "from": "OPEN",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "the bond has ended or is counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
           "PENDING_DELETION",
           "ARCHIVED"
         ]
@@ -1335,11 +1734,11 @@
     "to": "OPEN",
     "status": 200,
     "code": null,
-    "reason": "Today is on the calendar as an OPEN square, and the numbers are the run up to the last day the close job evaluated.",
-    "rule": "FR-071",
-    "evidence": "test",
-    "evidenceRef": "StreakEndpointTest#a bond nobody has written in has a streak of nothing, and a calendar of today, open",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val days = if (unwritten) stored + StreakDay(today, StreakCell.OPEN) else stored"
+    "reason": "Nobody can write in a bond that has stopped taking entries, so today is not drawn as open: the calendar ends at the last day that has a square.",
+    "rule": "ADR-0034 §12",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#.filter { membership.isOpen || it.cell != StreakCell.OPEN }"
   },
   {
     "id": "day-partial-streak",
@@ -1347,7 +1746,7 @@
     "from": "PARTIAL",
     "action": "GET /api/v1/bonds/{bondId}/streak",
     "actor": "you",
-    "when": "",
+    "when": "the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -1358,9 +1757,7 @@
       {
         "region": "bond",
         "states": [
-          "ACTIVE",
-          "PENDING_DELETION",
-          "ARCHIVED"
+          "ACTIVE"
         ]
       }
     ],
@@ -1375,12 +1772,12 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
   },
   {
-    "id": "day-pending-reveal-streak",
+    "id": "day-partial-streak-ended",
     "region": "day",
-    "from": "PENDING_REVEAL",
+    "from": "PARTIAL",
     "action": "GET /api/v1/bonds/{bondId}/streak",
     "actor": "you",
-    "when": "",
+    "when": "the bond has ended or is counting down to deletion",
     "guards": [
       {
         "region": "account",
@@ -1391,9 +1788,39 @@
       {
         "region": "bond",
         "states": [
-          "ACTIVE",
           "PENDING_DELETION",
           "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 200,
+    "code": null,
+    "reason": "Nobody can write in a bond that has stopped taking entries, so today is not drawn as open: the calendar ends at the last day that has a square. The day's row stays unsettled until midnight all the same.",
+    "rule": "ADR-0034 §12",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#a bond that ended today after one had written has no open square either",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#.filter { membership.isOpen || it.cell != StreakCell.OPEN }"
+  },
+  {
+    "id": "day-pending-reveal-streak",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "the bond takes entries",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
         ]
       }
     ],
@@ -1406,6 +1833,38 @@
     "evidence": "smoke",
     "evidenceRef": "a day still waiting on its reveal time is not in the streak yet",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
+  },
+  {
+    "id": "day-pending-reveal-streak-ended",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "the bond has ended or is counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_REVEAL",
+    "status": 200,
+    "code": null,
+    "reason": "Nobody can write in a bond that has stopped taking entries, so today is not drawn as open: the calendar ends at the last day that has a square.",
+    "rule": "ADR-0034 §12",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#.filter { membership.isOpen || it.cell != StreakCell.OPEN }"
   },
   {
     "id": "day-revealed-streak",
@@ -1500,7 +1959,7 @@
     "to": "EMPTY",
     "status": 200,
     "code": null,
-    "reason": "Once the close job has evaluated it, a day nobody wrote on is a MISSED square and is not in the run. It has no square if it moved nothing: missed after the bond had ended.",
+    "reason": "Once the close job has evaluated it, a day nobody wrote on is a MISSED square and is not in the run. It has no square if it moved nothing: missed after the bond had ended, or during a deletion countdown since called off.",
     "rule": "BR-4",
     "evidence": "test",
     "evidenceRef": "StreakEndpointTest#the calendar is a square a day, oldest first, with a solo day drawn as one",
@@ -1624,7 +2083,6 @@
       {
         "region": "bond",
         "states": [
-          "PENDING_MEMBER",
           "ACTIVE",
           "PENDING_DELETION",
           "ARCHIVED"
@@ -1658,7 +2116,6 @@
       {
         "region": "bond",
         "states": [
-          "PENDING_MEMBER",
           "ACTIVE",
           "PENDING_DELETION",
           "ARCHIVED"
@@ -1692,7 +2149,6 @@
       {
         "region": "bond",
         "states": [
-          "PENDING_MEMBER",
           "ACTIVE",
           "PENDING_DELETION",
           "ARCHIVED"
@@ -1726,7 +2182,6 @@
       {
         "region": "bond",
         "states": [
-          "PENDING_MEMBER",
           "ACTIVE",
           "PENDING_DELETION",
           "ARCHIVED"
@@ -1774,7 +2229,7 @@
     "from": "SUBMITTED",
     "action": "PATCH /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "",
+    "when": "a new request",
     "guards": [
       {
         "region": "account",
@@ -1801,12 +2256,37 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#return if (text == replacement) this else copy(text = replacement, updatedAt = now)"
   },
   {
+    "id": "entry-submitted-edit-replay",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 200,
+    "code": null,
+    "reason": "A replay of a keyed edit applies nothing again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now.",
+    "rule": "ADR-0032 §10",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/PatchEntry.kt#val view = outcome.value ?: changes.read(userId, EntryId(outcome.resultId))"
+  },
+  {
     "id": "entry-revealed-edit",
     "region": "day.entry",
     "from": "REVEALED",
     "action": "PATCH /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "",
+    "when": "a new request",
     "guards": [
       {
         "region": "account",
@@ -1817,7 +2297,6 @@
       {
         "region": "bond",
         "states": [
-          "PENDING_MEMBER",
           "ACTIVE"
         ]
       }
@@ -1833,12 +2312,37 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (!entry.isEditable) throw EntryImmutableException()"
   },
   {
+    "id": "entry-revealed-edit-replay",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 200,
+    "code": null,
+    "reason": "A replay of a keyed edit applies nothing again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. An edit made before the reveal and repeated after it is not refused.",
+    "rule": "ADR-0032 §10",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/PatchEntry.kt#val view = outcome.value ?: changes.read(userId, EntryId(outcome.resultId))"
+  },
+  {
     "id": "entry-deleted-edit",
     "region": "day.entry",
     "from": "DELETED",
     "action": "PATCH /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "",
+    "when": "a new request",
     "guards": [
       {
         "region": "account",
@@ -1865,6 +2369,31 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val isEditable: Boolean get() = !isErased && revealedAt == null && status != EntryStatus.REVEALED"
   },
   {
+    "id": "entry-deleted-edit-replay",
+    "region": "day.entry",
+    "from": "DELETED",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 200,
+    "code": null,
+    "reason": "A replay of a keyed edit applies nothing again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. The body is the tombstone, without the words the edit wrote.",
+    "rule": "ADR-0032 §10",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#a keyed patch replays the current tombstone and never re-applies the edit",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/PatchEntry.kt#val view = outcome.value ?: changes.read(userId, EntryId(outcome.resultId))"
+  },
+  {
     "id": "entry-none-delete",
     "region": "day.entry",
     "from": "NONE",
@@ -1885,8 +2414,8 @@
     "code": "NOT_FOUND",
     "reason": "You have no entry behind the id you sent. Your partner's entry, a stranger's and an id nobody has all get this one answer.",
     "rule": "ADR-0032 §9",
-    "evidence": "test",
-    "evidenceRef": "EntryChangesTest#entry routes hide another author and another tenant exactly like a missing id",
+    "evidence": "smoke",
+    "evidenceRef": "the partner cannot delete the author's entry",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#return if (entry != null && membership != null && entry.authorMemberId == membership.memberId) entry to membership else null"
   },
   {
@@ -1895,12 +2424,19 @@
     "from": "SUBMITTED",
     "action": "DELETE /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "",
+    "when": "the bond takes entries",
     "guards": [
       {
         "region": "account",
         "states": [
           "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
         ]
       }
     ],
@@ -1915,12 +2451,44 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#status = EntryStatus.DELETED,"
   },
   {
+    "id": "entry-submitted-delete-ended",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the bond has ended or is counting down to deletion, or you have left it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "An author may always take their own words back, also after the bond has ended and after leaving it. Only an edit is refused there.",
+    "rule": "ADR-0032 q1, ADR-0035 §15",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#an author deletes their own entry after the bond has ended, however it ended, and nobody else can",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
+  },
+  {
     "id": "entry-revealed-delete",
     "region": "day.entry",
     "from": "REVEALED",
     "action": "DELETE /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "the bond is live",
+    "when": "the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -1951,7 +2519,7 @@
     "from": "REVEALED",
     "action": "DELETE /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "the bond has ended, or you have left it",
+    "when": "the bond has ended or is counting down to deletion, or you have left it",
     "guards": [
       {
         "region": "account",
@@ -2111,12 +2679,30 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> copy(closedAt = at)"
   },
   {
+    "id": "day-not-opened-joined",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "event:second-member-joins",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "NOT_OPENED",
+    "status": null,
+    "code": null,
+    "reason": "Nothing is stored for a day nobody has written on, so the pairing changes no row. What changes is the answer: GET /today reported SUSPENDED and now reports OPEN, and the first write opens the row OPEN instead of SUSPENDED.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
     "id": "day-suspended-joined-open",
     "region": "day",
     "from": "SUSPENDED",
     "action": "event:second-member-joins",
     "actor": "partner",
-    "when": "nobody has a live entry on the joining day",
+    "when": "the joining day has a row and no live entry: the creator wrote on it and deleted",
     "guards": [],
     "outcome": "ok",
     "to": "OPEN",
@@ -2140,34 +2726,34 @@
     "to": "PARTIAL",
     "status": null,
     "code": null,
-    "reason": "What the creator wrote while waiting counts from the pairing on: the joining day resumes with one entry, locked to the member who has just joined.",
+    "reason": "What the creator wrote while waiting counts from the pairing on: the joining day resumes with one entry, locked to the member who has just joined. A joining day left with both entries on it by the first build of this slice resumes straight to REVEALED or PENDING_REVEAL; nothing the current code writes can be in that state.",
     "rule": "ADR-0032 §6",
     "evidence": "test",
     "evidenceRef": "JoiningDayTest#pairing on a day one member wrote on makes it PARTIAL at the first read, and locks nothing open",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#fun resumeJoiningDay(activeSince: Instant?): BondDay {"
   },
   {
-    "id": "day-open-missed-empty",
+    "id": "day-not-opened-missed-empty",
     "region": "day",
-    "from": "OPEN",
+    "from": "NOT_OPENED",
     "action": "event:missed-day-recorded",
     "actor": "system",
-    "when": "the bond was taking entries when the day ended",
+    "when": "the day did not end inside a deletion countdown that was later called off",
     "guards": [],
     "outcome": "ok",
     "to": "EMPTY",
     "status": null,
     "code": null,
-    "reason": "A day nobody wrote on has no row while it runs; GET /today reports it OPEN. Once it has ended the close job writes its row, already closed as EMPTY.",
+    "reason": "Nobody wrote, so the day never had a row. Once it has ended the close job writes one, already closed as EMPTY. That includes a day on which the bond ended or began a countdown: it began while the bond took entries.",
     "rule": "ADR-0033 §6",
     "evidence": "test",
     "evidenceRef": "MissingDaysTest#a couple who paired and never wrote get every day that has ended, closed EMPTY, and not today",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CreateMissingDays.kt#yield(Gap(window, zone, if (paused) BondDayStatus.SUSPENDED else BondDayStatus.EMPTY))"
   },
   {
-    "id": "day-open-missed-suspended",
+    "id": "day-not-opened-missed-suspended",
     "region": "day",
-    "from": "OPEN",
+    "from": "NOT_OPENED",
     "action": "event:missed-day-recorded",
     "actor": "system",
     "when": "the day ended while a deletion was counting down, and the deletion was later called off",
@@ -2183,9 +2769,9 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CreateMissingDays.kt#val paused = view.wasPausedAt(window.endsAt)"
   },
   {
-    "id": "day-open-missed-frozen",
+    "id": "day-not-opened-missed-frozen",
     "region": "day",
-    "from": "OPEN",
+    "from": "NOT_OPENED",
     "action": "event:missed-day-recorded",
     "actor": "system",
     "when": "the date is one a zone change stepped over",
@@ -2255,6 +2841,24 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
   },
   {
+    "id": "day-partial-partner-withdraws-yours",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "event:partner-withdraws",
+    "actor": "partner",
+    "when": "the day's one live entry is yours",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": null,
+    "code": null,
+    "reason": "A withdrawal erases its author's live entries and no one else's. Your partner has none on this day, so the day and your entry stay as they are.",
+    "rule": "FR-029a, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#entries.liveOf(bondId, memberId).forEach {"
+  },
+  {
     "id": "day-pending-reveal-partner-withdraws",
     "region": "day",
     "from": "PENDING_REVEAL",
@@ -2273,6 +2877,24 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
   },
   {
+    "id": "day-not-opened-partner-writes",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "partner",
+    "when": "the bond is two people",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 201,
+    "code": null,
+    "reason": "Your partner wrote first, and their write opened the day's row. You can see that they have, because the day's status is shared, and nothing of what they wrote.",
+    "rule": "BR-1, BR-8",
+    "evidence": "test",
+    "evidenceRef": "RevealGateTest#the day's status IS returned, because it is deliberately shared",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val opened = days.openOrGet(membership.bondId, window, zone, now, openStatus)"
+  },
+  {
     "id": "day-open-partner-writes",
     "region": "day",
     "from": "OPEN",
@@ -2284,10 +2906,10 @@
     "to": "PARTIAL",
     "status": 201,
     "code": null,
-    "reason": "Your partner wrote first. You can see that they have, because the day's status is shared, and nothing of what they wrote.",
+    "reason": "The day had a row and no live entry, and your partner's entry is counted as its first.",
     "rule": "BR-1, BR-8",
-    "evidence": "test",
-    "evidenceRef": "RevealGateTest#the day's status IS returned, because it is deliberately shared",
+    "evidence": "never-run",
+    "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status = if (status == BondDayStatus.SUSPENDED) BondDayStatus.SUSPENDED else BondDayStatus.PARTIAL,"
   },
   {
@@ -2379,6 +3001,24 @@
     "evidence": "test",
     "evidenceRef": "RevealTest#a reveal time already passed reveals at once, and the day, both entries and the event share one instant",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#copy(status = EntryStatus.REVEALED, revealedAt = now, updatedAt = now)"
+  },
+  {
+    "id": "entry-submitted-partner-writes-waits",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "partner",
+    "when": "the bond's reveal time is still ahead",
+    "guards": [],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 201,
+    "code": null,
+    "reason": "Both of you have written, but the reveal time has not come. Your entry stays SUBMITTED, and so stays editable.",
+    "rule": "FR-062, BR-7",
+    "evidence": "test",
+    "evidenceRef": "RevealTest#a timed reveal holds both entries in PENDING_REVEAL until the bond's time",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#copy(status = BondDayStatus.PENDING_REVEAL)"
   },
   {
     "id": "entry-submitted-reveal-time",
@@ -2561,6 +3201,24 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value },"
   },
   {
+    "id": "partner-removed-partner-rewrites-revealed",
+    "region": "day.partnerEntry",
+    "from": "REMOVED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "partner",
+    "when": "you have written, and the bond has no reveal time or it has passed",
+    "guards": [],
+    "outcome": "ok",
+    "to": "VISIBLE",
+    "status": 201,
+    "code": null,
+    "reason": "Your partner wrote again after deleting, and you had written meanwhile. Theirs is the day's second live entry, so both are revealed and you read it.",
+    "rule": "BR-1, ADR-0032 §8",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/RevealDay.kt#val revealed = entry.reveal(next.revealedAt)"
+  },
+  {
     "id": "partner-locked-reveal-time",
     "region": "day.partnerEntry",
     "from": "LOCKED",
@@ -2584,7 +3242,7 @@
     "from": "LOCKED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "the bond had not ended before the day did",
+    "when": "your partner alone wrote, and the bond had not ended before the day did",
     "guards": [],
     "outcome": "ok",
     "to": "VISIBLE",
@@ -2595,6 +3253,42 @@
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day one member wrote on closes SOLO and their entry is revealed",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#if (closed.status == BondDayStatus.SOLO && !bondEndedFirst) {"
+  },
+  {
+    "id": "partner-locked-ends-pending",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "event:day-ends",
+    "actor": "system",
+    "when": "both of you wrote, and the reveal time had not come when the day ended",
+    "guards": [],
+    "outcome": "ok",
+    "to": "VISIBLE",
+    "status": null,
+    "code": null,
+    "reason": "The day's own end outranks a reveal time later than it, so both entries are revealed as the day closes.",
+    "rule": "ADR-0033 §3",
+    "evidence": "test",
+    "evidenceRef": "CloseDayTest#a day still pending at its end is revealed once and closed, in one run",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val day = if (ended.status == BondDayStatus.PENDING_REVEAL) reveal.apply(ended, null, now) else ended"
+  },
+  {
+    "id": "partner-locked-ends-bond-ended",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "event:day-ends",
+    "actor": "system",
+    "when": "your partner alone wrote, and the bond ended, or began counting down to deletion, before the day did",
+    "guards": [],
+    "outcome": "ok",
+    "to": "LOCKED",
+    "status": null,
+    "code": null,
+    "reason": "The day closes SOLO, but the lone entry is not unlocked: it was written for a bond that was still its author's, and stays theirs alone.",
+    "rule": "ADR-0033 §9",
+    "evidence": "test",
+    "evidenceRef": "CloseDayTest#a lone entry on a bond that ended before the day did is never revealed, and the day still closes SOLO",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val bondEndedFirst = bondEndedAt != null && bondEndedAt.isBefore(closed.endsAt)"
   },
   {
     "id": "partner-locked-partner-withdraws",

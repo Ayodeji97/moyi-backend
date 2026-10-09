@@ -181,6 +181,10 @@
           "label": "The day",
           "states": [
             {
+              "id": "NOT_OPENED",
+              "label": "no row yet"
+            },
+            {
               "id": "OPEN",
               "label": "OPEN"
             },
