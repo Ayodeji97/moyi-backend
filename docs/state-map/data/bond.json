@@ -615,7 +615,7 @@
     "to": "PENDING_DELETION",
     "status": 204,
     "code": null,
-    "reason": "Your membership ends and the bond goes on counting down: the two of you agreed to delete it, and walking away does not undo that. From here you cannot call the deletion off; if your partner does, the bond becomes ARCHIVED. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11).",
+    "reason": "Your membership ends and the bond goes on counting down: the deletion was agreed, and walking away does not undo that. From here you cannot call the deletion off; if your partner does, the bond becomes ARCHIVED. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11).",
     "rule": "ADR-0030 §4a",
     "evidence": "smoke",
     "evidenceRef": "one of them leaves mid-cooling-off: 204",
@@ -1827,7 +1827,7 @@
     "from": "ACTIVE",
     "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
     "actor": "you",
-    "when": "your partner's zone change is waiting, and the proposalId you send is its id",
+    "when": "your partner's zone change is waiting, the proposalId you send is its id, and the zone has not moved in the last 30 days",
     "guards": [
       {
         "region": "account",
@@ -2415,7 +2415,7 @@
     "to": "ACTIVE",
     "status": 204,
     "code": null,
-    "reason": "Either of you may call the deletion off at any point in the 30 days. The bond is ACTIVE again and takes writes. The days that ended during the countdown are recorded as paused, not missed.",
+    "reason": "Either of you may call the deletion off at any point in the 30 days. The bond is ACTIVE again and takes writes. What becomes of the days that ended during the countdown is the day machine's: they are SUSPENDED, not missed.",
     "rule": "FR-028, ADR-0030 §5",
     "evidence": "smoke",
     "evidenceRef": "either member calls it off: 204",
@@ -2792,8 +2792,8 @@
     "code": "BOND_ARCHIVED",
     "reason": "A bond counting down to deletion takes no new words. The author is told so only after it is settled that the entry is theirs, and before anything is asked about the entry itself. Deleting it is still allowed.",
     "rule": "BR-9, ADR-0035 §15",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#an author deletes their own entry after the bond has ended, however it ended, and nobody else can",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
   },
   {
@@ -3205,7 +3205,7 @@
     "to": "PENDING_DELETION",
     "status": null,
     "code": null,
-    "reason": "Your partner blocks you during the countdown. Their membership ends and the bond goes on counting down. You can still call the deletion off, and then the bond becomes ARCHIVED, not ACTIVE.",
+    "reason": "Your partner blocks you during the countdown. Their membership ends and the bond goes on counting down. You can still call the deletion off, and then the bond becomes ARCHIVED, not ACTIVE. The test cited asserts that what you then read is the same as after a leave.",
     "rule": "ADR-0030 §4a",
     "evidence": "test",
     "evidenceRef": "BondDeletionEndpointTest#leaving during the cooling-off is allowed, and looks exactly like blocking",

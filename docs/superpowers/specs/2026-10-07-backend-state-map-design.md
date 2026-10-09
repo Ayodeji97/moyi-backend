@@ -71,11 +71,16 @@ States are read from the code, not invented.
 ### 3.2 Bond (17 endpoints)
 
 - Main states: `no bond`, `PENDING_MEMBER`, `ACTIVE`, `PENDING_DELETION`,
-  `ARCHIVED`, `DELETED` (`BondStatus`).
-- Substates, invite: created, accepted, revoked, not usable. Looking an invite
-  up is an action that leaves it created.
-- Substates, proposal: none, proposed, confirmed, withdrawn. One mechanism
-  serves the timezone change and the deletion (`ProposalKind`, ADR-0030).
+  `ARCHIVED` (`BondStatus`).
+- Drawn grey, with nothing reaching it yet: `DELETED`. The enum has the value and no
+  code sets it; the job that would, when a deletion's countdown ends, is Phase 5.
+- Substates, invite: none, live, accepted, revoked, expired. Looking an invite up is an
+  action that leaves it live. "Not usable" is not a state: it is the one answer a code
+  gets when it is anything but live (ADR-0027).
+- Substates, proposal: none, waiting, confirmed, cancelled, lapsed. One mechanism
+  serves the timezone change and the deletion (`ProposalKind`, ADR-0030). An invite's
+  expiry and a proposal's lapse are stored nowhere: each is a question every read asks
+  of the clock.
 
 ### 3.3 Day (5 endpoints, and most of the system's own transitions)
 
