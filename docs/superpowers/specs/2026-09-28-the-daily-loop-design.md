@@ -424,6 +424,28 @@ for agreement, which is a second way to be wrong.
   refused, a tombstone appearing after the end could only have come from a withdrawal.
 - **`Idempotency-Key` is optional on `PATCH` and not accepted on `DELETE`** (§5.4).
 
+**Amended 2026-10-09 — the archive and favourite rows as slice C5b built them (ADR-0036).**
+The table's four C5 rows are three of C5b's and one of C5c's (reactions, not built).
+
+| Method | Path | As built |
+|---|---|---|
+| GET | `/bonds/{bondId}/days` | `limit` (1 to 50, default 20, a plain decimal), `cursor` (opaque; only a date, so one from another bond is accepted), `until` (`YYYY-MM-DD`: start at that date or the nearest earlier day, the month jump), `favourites` (`true` or `false`). `200` `{items, nextCursor}` with a strong `ETag` and `Cache-Control: private, no-cache`; `304` with no body; `404` for a non-member; `422 VALIDATION_FAILED` for any parameter that cannot be read, decided after the membership guard (decisions 5, 6, 7, 9) |
+| GET | `/bonds/{bondId}/days/{date}` | `200`, one day exactly as the feed gives it, with the same `ETag` and `304`; `404 DAY_NOT_FOUND` for every date that is not in the caller's archive, a value that is not a date included; the bond's `404` for a non-member (decisions 8, 9) |
+| PUT | `/entries/{entryId}/favourite` | `204`, repeatable. `409 ENTRY_NOT_REVEALED` for the caller's **own** entry that has no `revealedAt`; `409 ENTRY_IMMUTABLE` for a tombstone; the one `404` for an entry the caller was never shown, a partner's locked entry included. No `Idempotency-Key` (decisions 11, 12, 16) |
+| DELETE | `/entries/{entryId}/favourite` | `204`, repeatable, absent is success, on a tombstone too; the same `404` (decision 11) |
+
+- **A page may be shorter than `limit`, or empty, and still have a `nextCursor`.** It is
+  also bounded by bytes (§6.6), and with `favourites=true` a day can be dropped after the
+  gate. Only a null `nextCursor` means the end.
+- **"`409 ENTRY_NOT_REVEALED` before reveal" is true only of the caller's own entry**
+  (decision 11). For a partner's unrevealed entry the `409` would confirm an id the caller
+  was never shown, which is why the two routes above this section answer `404` there.
+- **The two favourite routes are allowed on an ended bond, and to a member who has left**
+  (decision 14; the owner's to turn). Both archive routes read on an ended bond, as
+  `GET /today` does.
+- **All four reconcile the joining day first** (§12.4), so each can take the bond's lock
+  and write once, when that day is still `SUSPENDED`.
+
 ### 5.3 New `ErrorCode` values (`common:web`)
 
 `ENTRY_ALREADY_EXISTS` (409) · `ENTRY_IMMUTABLE` (409) · `ENTRY_NOT_REVEALED` (409) ·
@@ -440,6 +462,14 @@ slices that can return them.
 Every one of these makes its slice a **breaking API change** under ADR-0024's 2026-09-24
 amendment — doc 06 §2 generates the codes into the client as an exhaustive sealed class, so an
 addition is source-breaking there. Each slice carries the `breaking-api-change` label.
+
+**Amended 2026-10-09 (ADR-0036 decisions 8 and 11).** C5b adds two codes.
+**`ENTRY_NOT_REVEALED` (409)**, listed above, arrives now and is only ever told to the
+author of the entry it is about. **`DAY_NOT_FOUND` (404)** is new and was not in the list:
+`GET /bonds/{bondId}/days/{date}` for a date that is not in the caller's archive, one code
+for every reason. It is only ever told to a member; a non-member gets the bond's
+`NOT_FOUND` before the date is looked at. A favourite on a tombstone reuses
+`ENTRY_IMMUTABLE`, whose sentence now reads "This entry can no longer be changed."
 
 ### 5.4 Idempotency (FR-049, doc 06 §1)
 
@@ -800,6 +830,44 @@ a real `PATCH` between a day's end and the job.
 - Search is `tsvector` + GIN over **revealed entries in the caller's own Bond only**, which is
   one more surface the cross-tenant suite must cover.
 
+**Amended 2026-10-09 — what slice C5b built (ADR-0036).** Search is C6's and is untouched.
+
+- **Which days** (decision 1). Not "days with revealed entries": a day is listed for a
+  member when it holds an entry they wrote, or one that has been revealed, and an erased
+  row counts. So a revealed day is listed for both, tombstones included; a `SOLO` day whose
+  entry never revealed (ADR-0033 decision 9) for its author only; a pre-join `SUSPENDED`
+  day for the creator only; a day holding only the partner's unrevealed entry for nobody
+  but the partner. A day that closed `EMPTY` after its author deleted their only entry
+  **is** listed for that author, as `status: EMPTY` with their tombstone. Today is on the
+  same rule.
+- **The filter and the gate** (decision 2). The SQL picks days by that rule and reads no
+  column of the day. Every entry is then rendered through `Entry.canBeReadBy`, as on
+  `today`. `ArchiveGateTest` holds the two together: listed if and only if the gate
+  answers `FULL` or `TOMBSTONE` for an entry of the day.
+- **A day is `{date, status, myEntry, partnerEntry}`** (decision 3). `status` is the day's
+  own, by the owner's ruling of 2026-10-06. No shape carries `deletedAt` or `updatedAt`.
+- **Favourites** (decisions 4, 7, 10 to 14). The first bullet above stands. "Only a
+  `REVEALED` entry can be favourited" is asked of the entry's `revealedAt` through the
+  gate, not of a status. "Deleting an entry cascades to its favourites" is done by
+  `EraseEntry`, in the erasure's transaction, because a delete keeps the row and no
+  foreign-key cascade fires; that serves the author's delete, the withdrawal and the
+  close job's pre-step at once. The mark is one statement that takes a `FOR SHARE` lock on
+  the entry's row, so a mark and an erasure cannot pass each other. `favourites=true`
+  lists days holding an entry the caller has marked and can read in full now, filtered
+  again after the gate.
+- **ETags** (decision 9). The second sentence of the first bullet stands and is built as a
+  **keyed digest**: HMAC-SHA256, under the personal-data secret, of a domain label and the
+  exact bytes sent. Not a plain hash: a tag is a header, a header reaches logs, and a bare
+  hash of a body whose every other field is known confirms a guess at a short entry
+  (ADR-0031 decision 8's reasoning). Strong; `304` with no body; `Cache-Control: private,
+  no-cache` on these two routes only. The partner's favourites move neither the body nor
+  the tag.
+- **A page is bounded by bytes as well as by `limit`** (decision 6): 192 KiB of entry text
+  counted as JSON carries it, the first day always taken. An entry can be 49,147 octets on
+  the wire, so the worst page is about 229 KB against NFR-008's 262,144.
+- **The marker is read last** on the feed, the day and the favourite routes (decision 15,
+  §6.7's rule).
+
 ### 6.7 Withdrawal on block (FR-029a, doc 26 §5.1)
 
 **Decided 2026-09-28: the destructive reading.** BR-10's erasure is total. Withdrawing content-
@@ -889,7 +957,7 @@ slice order. `V10` is the last one Phase 2 uses.
 | C4 | `V19__bond_write_pauses.sql` | `modules:bond` | `bond_write_pauses` (a deletion called off) |
 | C5a | `V20__common_outbox_consumers.sql` | `common:events` | `outbox_consumers`, `outbox_subscriptions`, a foreign key on `outbox_deliveries` |
 | C5a | `V21__bond_entry_withdrawals.sql` | `modules:bond` | `bond_entry_withdrawals` (§6.7's marker) |
-| C5b | `V22` | `modules:gratitude` | `entry_favourites` |
+| C5b | `V22` *(2026-10-09: `V22__gratitude_entry_favourites.sql`)* | `modules:gratitude` | `entry_favourites` |
 | C5c | `V23` | `modules:gratitude` | `reactions` |
 | C6 | `V24` | `modules:gratitude` | `prompts`, `prompt_impressions` |
 
@@ -899,7 +967,10 @@ Amended again the same day, ADR-0034: C4 took two, V17 and V18, so C5 and C6 mov
 Amended 2026-10-07, ADR-0035: the table gave C5 one version, `V20__gratitude_reactions_and_favourites.sql`,
 and C6 `V21__gratitude_prompts.sql`. C5 is three pull requests (§10), and §6.7's marker is a
 `bond` table, which a `gratitude` migration cannot hold. C5a takes V20 and V21, C5b V22, C5c
-V23, and C6 moves to V24. V22 to V24 are not written; their file names are their slices'.)*
+V23, and C6 moves to V24. V22 to V24 are not written; their file names are their slices'.
+Amended 2026-10-09, ADR-0036 decision 10: V22 is written,
+`V22__gratitude_entry_favourites.sql`, and holds favourites only: one table,
+`entry_favourites`, and one index. Reactions are V23's, with C5c.)*
 
 Doc 07 §2 carries the column lists and this document does not restate them, with four
 exceptions recorded in §12 because doc 07 is wrong about them.
@@ -918,6 +989,12 @@ partial index so the close job's scan stays small; a GIN index on `entries.searc
 `entry_favourites (member_id, created_at DESC)` for the favourites filter; and
 `outbox_deliveries (consumer_id, next_attempt_at) WHERE processed_at IS NULL`, partial so it stays small as the
 table grows.
+
+*(Amended 2026-10-09, ADR-0036 decision 10. `entry_favourites`' uniqueness is its primary
+key, `(entry_id, member_id)`; the table has no `id`. Its second index is
+`(member_id, entry_id)`, not `(member_id, created_at DESC)`: the favourites filter returns
+days in date order and nothing orders by when a mark was made. The archive feed needed no
+new index: `bond_days_feed_idx (bond_id, date DESC)` has existed since V12.)*
 
 ## 8. The outbox
 
@@ -985,7 +1062,7 @@ the load-bearing assertions:
 
 | What | Why it is named here |
 |---|---|
-| **The reveal-gate matrix** | Every day status × caller state, asserting a locked entry is exactly `{authorMemberId, status: LOCKED}` and that `bondDay.status` **is** present. Doc 12: the most important test file in the repository. A failure is a P0 (doc 11). |
+| **The reveal-gate matrix** | Every day status × caller state, asserting a locked entry is exactly `{authorMemberId, status: LOCKED}` and that `bondDay.status` **is** present. Doc 12: the most important test file in the repository. A failure is a P0 (doc 11). *(Amended 2026-10-09, ADR-0036 decision 2: the matrix has an archive counterpart, `ArchiveGateTest`: every day status × each member's entry state (none, live and unrevealed, revealed, erased before the reveal, erased after) × each reader, 200 days, asserting whether the day is listed, the exact JSON of each entry, and that the day is listed exactly when the gate shows the reader something on it. It is run a second time after a withdrawal with no dispatcher.)* |
 | **Cache poisoning** | Prime `today` as A, read as B before B has written, assert none of A's content. Doc 12 names it as a bypass no authorisation layer sees. |
 | **Concurrent submission** | Both members submit at once; exactly one `DayRevealed`. Must fail with the lock removed. *(Amended 2026-10-05, ADR-0032 decision 3: two tests — see §6.3.)* |
 | **The timezone matrix** | Spring forward, fall back, Kathmandu, Chatham, members ≥12 h apart, a date-line crossing. |
@@ -996,7 +1073,7 @@ the load-bearing assertions:
 | **Reveal persistence** | A revealed solo entry stays readable after freezing; joining on the current suspended day resumes it; prior suspended days stay private. *(Amended 2026-10-03, ADR-0031 decision 4: "joining … resumes it" is **C2's** to build and test — see §12.4. C1 leaves the day `SUSPENDED`.)* |
 | **Withdrawal and outbox** | With poller stopped, committed withdrawal immediately hides content; independent consumers and crash retries do not lose events. *(Amended 2026-10-07, ADR-0035: as built these are `WithdrawalReadTest` (the gate, with no dispatcher run and the rows asserted still whole), `WithdrawEntriesTest` (the consumer: the twin bond against a run of deletes, redelivery, a failure on the third entry, a failure at commit), `WithdrawalRaceTest` (closer first, consumer first and a delete by hand end alike), `ConsumerRegistryTest` and `EventPublisherTest` (registration against a publisher, both orders, synchronised on a blocked lock), `OutboxDispatcherTest` (two dispatchers, one delivery; the failure record), `OutboxJobTest` and `PollerIndependenceTest` (the poller and its meters; a held handler does not stop the close job). "Independent consumers" is held by tests with test consumers; the application has one consumer.)* |
 | **Streak properties** | Randomised timelines; the four invariants in §6.5. |
-| **Cross-tenant** | The existing route-driven suite picks up every new endpoint automatically (ADR-0026), and a route added without a fixture fails the build. *(Amended 2026-10-05, ADR-0032 decision 9: true of routes that carry `{bondId}`. The suite cannot see `/entries/{entryId}`; `EntryChangesTest` is those routes' cross-tenant test and asserts their exact set.)* |
+| **Cross-tenant** | The existing route-driven suite picks up every new endpoint automatically (ADR-0026), and a route added without a fixture fails the build. *(Amended 2026-10-05, ADR-0032 decision 9: true of routes that carry `{bondId}`. The suite cannot see `/entries/{entryId}`; `EntryChangesTest` is those routes' cross-tenant test and asserts their exact set. Amended 2026-10-09, ADR-0036: the two bond-scoped routes, `GET /bonds/{bondId}/days` and `GET /bonds/{bondId}/days/{date}`, joined the route-driven suite with a fixture each (`GratitudeCrossTenantTest`); the two favourite routes joined `EntryChangesTest`'s set, which now asserts four.)* |
 | **Grapheme counting** | A ZWJ family emoji, a flag, a combining sequence; 500 accepted only within the independent 8192-byte cap; 501 refused; large emoji strings exercise the byte cap. |
 
 ## 10. Slices
@@ -1009,7 +1086,7 @@ the load-bearing assertions:
 | **C4** | Streaks, freezes, Strict mode, `FROZEN`, `recalculate`, `GET /streak`, property tests | **M3** — the loop is complete |
 | **C5** | The outbox poller, withdrawal on block (§6.7), the archive feed, per-caller favourites, reactions | The archive exists |
 | **C5a** *(2026-10-07)* | The outbox poller, withdrawal on leave and on block, an author's delete on an ended bond | A member can take their words back |
-| **C5b** *(2026-10-07)* | The archive feed and per-caller favourites | The archive exists |
+| **C5b** *(2026-10-07)* | The archive feed and per-caller favourites *(built 2026-10-09, ADR-0036: the feed, one day, conditional reads of both, and favourites; V22)* | The archive exists |
 | **C5c** *(2026-10-07)* | Reactions | |
 | **C6** | Search, prompts and `prompt_impressions`, on-this-day, milestones | Phase 3 closes |
 
@@ -1029,7 +1106,8 @@ otherwise was an error in its first draft. They are built in C4.
 | `GET /today` | §3 *Today — the whole product*, and §3a's ambient-surface candidate (out of v1) |
 | `POST /entries` | §4 *Compose* |
 | the reveal | §5 *Reveal — the one animation* |
-| `GET /days`, `/days/{date}` | §6 *Archive* |
+| `GET /days`, `/days/{date}` | §6 *Archive*. *(Amended 2026-10-09, ADR-0036, question 5, which has the full table. Served: the list, the day view, both entries, whose entry is whose. Adaptations: the list's two-line truncation is the client's, the server sends full text; the month jump is `until`, a parameter doc 06 does not name; a short or empty page with a `nextCursor` is not the end; today's day view before the caller has written is `GET /today`. Recorded gaps: the partner's display name is not obtainable; nothing says which months hold days; §6 draws no solo day card, no emptied day and no pre-join day, and §9 still owes the day of tombstones.)* |
+| `PUT`/`DELETE /entries/{id}/favourite`, `favourites=true` | §6 *Archive*: the `FavouriteToggle` in the day view, the day card's mark, the Favourites chip and its empty state. *(Added 2026-10-09, ADR-0036: this table had no row for favourites. Served by `favourited` on each entry, the caller's own. Adaptation: no field says an entry can be marked; the toggle is shown on an entry whose `status` is `REVEALED`. Whether the toggle shows on an archived bond is ADR-0036 question 1.)* |
 | `GET /streak`, `/milestones` | §7 *Streak*. *(Amended 2026-10-05, ADR-0034: three gaps recorded there — no field tells a freeze-covered day from a stepped-over date; the length of a run that just broke ("ended at 23 days") is not sent; §7's Strict-mode paragraph reads as clearing banked freezes, which FR-073 forbids.)* |
 | withdrawal on block | §9 *Ending*, whose retained-access line §6.7 qualifies |
 | `PATCH`/`DELETE /entries/{id}` | §4 and §10 *Failure, offline and sync* |
