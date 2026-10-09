@@ -118,7 +118,8 @@
             },
             {
               "id": "DELETED",
-              "label": "DELETED"
+              "label": "DELETED",
+              "built": false
             }
           ]
         },
@@ -132,7 +133,7 @@
             },
             {
               "id": "CREATED",
-              "label": "created"
+              "label": "live"
             },
             {
               "id": "ACCEPTED",
@@ -143,8 +144,8 @@
               "label": "revoked"
             },
             {
-              "id": "NOT_USABLE",
-              "label": "not usable"
+              "id": "EXPIRED",
+              "label": "expired"
             }
           ]
         },
@@ -158,15 +159,19 @@
             },
             {
               "id": "PROPOSED",
-              "label": "proposed"
+              "label": "waiting for the other member"
             },
             {
               "id": "CONFIRMED",
               "label": "confirmed"
             },
             {
-              "id": "WITHDRAWN",
-              "label": "withdrawn"
+              "id": "CANCELLED",
+              "label": "cancelled"
+            },
+            {
+              "id": "LAPSED",
+              "label": "lapsed, unanswered"
             }
           ]
         }
@@ -299,6 +304,41 @@
       "id": "event:partner-withdraws",
       "label": "your partner takes their entries back",
       "actor": "partner"
+    },
+    {
+      "id": "event:partner-leaves",
+      "label": "your partner leaves",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-blocks",
+      "label": "your partner blocks you",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-proposes",
+      "label": "your partner proposes a change",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-confirms",
+      "label": "your partner agrees to your proposal",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-cancels",
+      "label": "your partner calls a proposal or the deletion off",
+      "actor": "partner"
+    },
+    {
+      "id": "event:invite-expires",
+      "label": "the invite expires, seven days on",
+      "actor": "system"
+    },
+    {
+      "id": "event:proposal-lapses",
+      "label": "the proposal lapses, seven days unanswered",
+      "actor": "system"
     }
   ],
   "everywhere": [
@@ -354,17 +394,8 @@
   "pending": {
     "endpoints": [
       "DELETE /api/v1/auth/sessions/{id}",
-      "DELETE /api/v1/bonds/{bondId}/deletion-request",
-      "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
-      "DELETE /api/v1/bonds/{bondId}/timezone",
       "GET /api/v1/auth/sessions",
-      "GET /api/v1/bonds",
-      "GET /api/v1/bonds/{bondId}",
-      "GET /api/v1/bonds/{bondId}/members/me/settings",
-      "GET /api/v1/invites/{code}",
       "GET /api/v1/me",
-      "PATCH /api/v1/bonds/{bondId}",
-      "PATCH /api/v1/bonds/{bondId}/timezone",
       "POST /api/v1/auth/forgot-password",
       "POST /api/v1/auth/login",
       "POST /api/v1/auth/logout",
@@ -373,15 +404,7 @@
       "POST /api/v1/auth/register",
       "POST /api/v1/auth/resend-verification",
       "POST /api/v1/auth/reset-password",
-      "POST /api/v1/auth/verify-email",
-      "POST /api/v1/bonds",
-      "POST /api/v1/bonds/{bondId}/block",
-      "POST /api/v1/bonds/{bondId}/deletion-request",
-      "POST /api/v1/bonds/{bondId}/invites",
-      "POST /api/v1/bonds/{bondId}/leave",
-      "POST /api/v1/bonds/{bondId}/timezone/confirm",
-      "POST /api/v1/invites/{code}/accept",
-      "PUT /api/v1/bonds/{bondId}/members/me/settings"
+      "POST /api/v1/auth/verify-email"
     ],
     "codes": [
       "HASHING_CAPACITY_EXCEEDED",
@@ -398,8 +421,6 @@
       "BOND_ARCHIVED",
       "ALREADY_MEMBER",
       "INVITE_NOT_USABLE",
-      "PRECONDITION_REQUIRED",
-      "PRECONDITION_FAILED",
       "PROPOSAL_PENDING",
       "PROPOSAL_NEEDS_OTHER_MEMBER",
       "TIMEZONE_CHANGE_TOO_SOON"

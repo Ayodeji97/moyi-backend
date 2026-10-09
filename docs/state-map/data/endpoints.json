@@ -175,5 +175,349 @@
       }
     ],
     "curl": "curl \"$API/bonds/$BOND/streak\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds",
+    "summary": "list your bonds",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [],
+    "curl": "curl \"$API/bonds\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/bonds",
+    "summary": "create a bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "name is missing, blank once trimmed, or over 60 characters; type is not COUPLE, FRIENDS, FAMILY or PARENT_CHILD; anchorTimezone is missing or is not a region time zone (a fixed offset such as Etc/GMT+3 is refused); revealTimeLocal is not a time such as 21:00; or reminderTimezone is not a region time zone. (the tests and the smoke script assert the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/CreateBondRequest.kt#@field:ValidBondType"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"name\": \"Us\", \"type\": \"COUPLE\", \"anchorTimezone\": \"Africa/Lagos\"}'"
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}",
+    "summary": "read a bond",
+    "auth": "bearer",
+    "headers": [
+      "If-None-Match (optional. Sent with the ETag you already hold, the answer is 304 with no body for as long as what you would be shown has not changed. The contract does not document the 304)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -i \"$API/bonds/$BOND\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PATCH /api/v1/bonds/{bondId}",
+    "summary": "change the bond's settings",
+    "auth": "bearer",
+    "headers": [
+      "If-Match (required: the complete ETag of the bond as you last read it. The answer carries the new ETag; a patch that changes nothing keeps the old one)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      },
+      {
+        "status": 412,
+        "code": "PRECONDITION_FAILED",
+        "reason": "The If-Match you sent is not the bond's current ETag: somebody changed the bond since you read it, the tag is a weak one (W/\"...\"), or it cannot be parsed. Nothing is written. Read the bond again and retry. A bond that has ended or is counting down answers 409 BOND_ARCHIVED before the tag is compared.",
+        "evidence": "smoke",
+        "evidenceRef": "a stale If-Match is 412",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!ifMatch.matches(views.of(bond, membership.userId).entityTag())) throw PreconditionFailedException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The body names no setting at all; or names anchorTimezone, which only moves through /timezone with your partner's agreement; or name is blank or over 60 characters, type is unknown, or revealTimeLocal is not a time such as 21:00. The body is checked before membership is, so a stranger gets this too.",
+        "evidence": "smoke",
+        "evidenceRef": "an empty patch is 422",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/PatchBondRequest.kt#@get:AssertTrue(message = \"must name at least one setting to change\")"
+      },
+      {
+        "status": 428,
+        "code": "PRECONDITION_REQUIRED",
+        "reason": "No If-Match header, a blank one, or If-Match: *. The update must be conditional, so that two people editing at once cannot silently overwrite each other. It is checked after membership and before the bond's state is read.",
+        "evidence": "smoke",
+        "evidenceRef": "a PATCH with no If-Match is 428",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/Preconditions.kt#if (header.isNullOrBlank() || header.trim() == \"*\") throw PreconditionRequiredException()"
+      }
+    ],
+    "curl": "curl -X PATCH \"$API/bonds/$BOND\" -H \"Authorization: Bearer $TOKEN\" -H \"If-Match: $ETAG\" -H 'Content-Type: application/json' -d '{\"name\": \"Us two\"}'"
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/leave",
+    "summary": "leave the bond",
+    "auth": "bearer",
+    "headers": [
+      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a leave keeps them)"
+    ],
+    "requestErrors": [
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "A body was sent and it is not exactly {\"withdrawEntries\": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn.",
+        "evidence": "test",
+        "evidenceRef": "BondEndingEndpointTest#a key this route does not know, or the flag sent twice, is the standing 400 and withdraws nothing",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/EndBondRequest.kt#context.reportInputMismatch<Nothing>(EndBondRequest::class.java, \"one key, once\")"
+      },
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/leave\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"withdrawEntries\": false}'"
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/block",
+    "summary": "block your partner",
+    "auth": "bearer",
+    "headers": [
+      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back)"
+    ],
+    "requestErrors": [
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "A body was sent and it is not exactly {\"withdrawEntries\": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn.",
+        "evidence": "smoke",
+        "evidenceRef": "a misspelt flag to /block is 400 MALFORMED_REQUEST",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/EndBondRequest.kt#context.reportInputMismatch<Nothing>(EndBondRequest::class.java, \"one key, once\")"
+      },
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/block\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"withdrawEntries\": true}'"
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/invites",
+    "summary": "issue a new invite",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/invites\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "summary": "revoke an invite",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/bonds/$BOND/invites/$INVITE\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/invites/{code}",
+    "summary": "look up an invite code",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The code in the path is not six characters of the invite alphabet. It is upper-cased and trimmed first, so a lowercase code is not an error. This says nothing about any bond, which is why it is not the invite's 404. (the tests and the smoke script assert the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/InvitesController.kt#errorCode = ErrorCode.VALIDATION_FAILED,"
+      }
+    ],
+    "curl": "curl \"$API/invites/$INVITE_CODE\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/invites/{code}/accept",
+    "summary": "accept an invite",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The code in the path is not six characters of the invite alphabet. It is upper-cased and trimmed first, so a lowercase code is not an error. This says nothing about any bond, which is why it is not the invite's 404. (the tests and the smoke script assert the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/InvitesController.kt#errorCode = ErrorCode.VALIDATION_FAILED,"
+      }
+    ],
+    "curl": "curl -X POST \"$API/invites/$INVITE_CODE/accept\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/members/me/settings",
+    "summary": "read your own member settings",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/members/me/settings\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PUT /api/v1/bonds/{bondId}/members/me/settings",
+    "summary": "replace your own member settings",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "reminderTimeLocal is missing or is not a time such as 21:00; one of quietHoursStart and quietHoursEnd is sent without the other; nicknameForOther is blank or over 40 characters; or reminderTimezone is not a region time zone. (the smoke script asserts the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/MemberSettingsRequest.kt#@get:AssertTrue(message = \"need both a start and an end, or neither\")"
+      }
+    ],
+    "curl": "curl -X PUT \"$API/bonds/$BOND/members/me/settings\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"reminderTimeLocal\": \"20:00\"}'"
+  },
+  {
+    "id": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "summary": "propose a new time zone",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "anchorTimezone is missing, blank, or not a region time zone; a fixed offset such as Etc/GMT+3 is refused. (the tests and the smoke script assert the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/ChangeTimezoneRequest.kt#@field:ValidRegionZone"
+      }
+    ],
+    "curl": "curl -X PATCH \"$API/bonds/$BOND/timezone\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"anchorTimezone\": \"Europe/London\"}'"
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "summary": "agree to the time zone change",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/timezone/confirm\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"proposalId\": \"'\"$PROPOSAL\"'\"}'"
+  },
+  {
+    "id": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "summary": "call off the time zone change",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/bonds/$BOND/timezone\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "summary": "ask for the bond's deletion, or agree to it",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "summary": "call off the deletion",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/bonds/$BOND/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
   }
 ]
