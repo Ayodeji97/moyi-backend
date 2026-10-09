@@ -296,16 +296,39 @@ serialisation, and the tag cannot be a digest of one attached to another.
   `Vary: Authorization`: `private` already keeps the response out of any cache that serves
   two people, and access tokens are short-lived, so a client cache that honoured it would
   discard its copy at most of the times it would have been of use.
-- **`Accept`.** As first built, the converter claimed a `Representation` for
+- **`Accept` is settled by the mapping, and the response is its own bytes whatever was
+  asked for.** As first built, the converter claimed a `Representation` for
   `application/json` only. The reviewer of Task 3 proved what that left. For
   `Accept: application/problem+json`, alone or listed before `application/json`, Spring
   chose a `+json` type the converter did not claim, and Jackson serialised the holder
   itself: a `200` whose body was `{"entityTag": …, "bytes…": <base64 of the real body>}`,
   under an `ETag` that was not the digest of the bytes sent. No privacy leak, since it was
-  the caller's own body, and a broken response all the same (F1). And for `Accept:
-  text/plain` the routes answered `406` carrying the day's `ETag` and `Cache-Control:
-  private, no-cache` where a refusal is `no-store` (F2). No test sent an `Accept` header.
-  **The fix is in the slice's last commits and is recorded under "How this was checked".**
+  the caller's own body, and a broken response all the same (F1). And for
+  `Accept: text/plain` the routes answered `406` after the read, carrying the day's `ETag`
+  and `Cache-Control: private, no-cache` where a refusal is `no-store` (F2). No test sent
+  an `Accept` header. Fixed at `50166ec`, in three parts:
+  - **Both mappings declare `produces`: `application/json` and `application/*+json`.** The
+    review prescribed `application/json` alone. Run, that made `Accept:
+    application/problem+json` a `406`, and it is the type of this API's errors, so a thing
+    its clients send. With the wildcard a client that lists it is answered.
+  - **The converter claims a `Representation` for every media type and names the bytes
+    itself**: `Content-Type: application/json`, whatever was negotiated. Left to the
+    framework, `Accept: application/json;charset=ISO-8859-1` had been answered with that
+    charset over UTF-8 bytes.
+  - **Jackson refuses the holder.** A serializer on `Representation` throws, so a response
+    that ever reaches the JSON converter is a `500` somebody sees and not a `200` carrying
+    the holder's fields.
+
+  **A request that will take no JSON is now `406` before the handler runs, and so before
+  the membership guard.** It carries no `ETag` and the default `no-store`. It is decided
+  from the request's own header and is the same whole response, but for the caller's own
+  path in `instance`, for a member, a member with a current `If-None-Match`, a stranger,
+  an unknown bond and a value that is not a UUID (run by the fixer over twelve askers), so
+  it is not an oracle; but on these two
+  routes a stranger who sends `Accept: text/plain` gets `406` and not the bond's `404`. On
+  `GET /today` and the rest the `406` still comes after the handler. The contract is
+  unchanged: the generator's copy of the wildcard is removed for the two operations, so
+  the `200` documents `application/json` only.
 
 **10. A favourite is a row `entry_favourites (entry_id, member_id, created_at)`** (V22,
 `V22__gratitude_entry_favourites.sql`), and not a flag on `entries`: an entry is shared, so
@@ -519,8 +542,12 @@ passes (S15). A mark is one small statement and an id that was never shown is th
 - **A date with a dot in it gets one more header on its `404`.** `GET …/days/2026.09.15`
   answers the same `404 DAY_NOT_FOUND` body with Spring's
   `Content-Disposition: inline;filename=f.txt`, its guard against a path that looks like a
-  file name. It depends only on what the caller typed and says nothing about the partner.
-  Found while writing the loose-date test; not changed.
+  file name (`.json` and `.txt` get none). It depends only on what the caller typed: the
+  response is the same whether the value resembles the caller's day or nobody's, and a
+  stranger gets the bond's `404` with the same header. Found while writing the loose-date
+  test; accepted, not suppressed, and pinned by a test in `DayViewTest` since `50166ec`.
+- **A `406` on the two archive routes comes before the guard** (decision 9). Everywhere
+  else it comes after.
 - **The plan test asserts shape, not planner choice.** `ArchiveDaysTest` reads
   `EXPLAIN (ANALYZE, FORMAT JSON)`: no sequential scan, and fewer than 63 rows taken from
   `bond_days` and from `entries` for a first, a deep and an `until` page on a 2,000-day
@@ -811,15 +838,35 @@ predate the rebase onto `174b474`: `32fa875` is `4826528` and `a15bf57` is `46c1
   orphaned. Proved by mutation: with Spring Security's cache header switched off for every
   route, every test stayed green; nothing in the repository asserted `no-store` (F4).
   Reasoned: why the lock tests order nothing (F5), which `f1737f3` had by then pinned.
-- **The last task: F1 to F4, the smoke run, the tools.** In progress when this record was
-  first written. `KnownAnswerTest` (F3) existed uncommitted, with three literals computed
-  by openssl and two mutations of the hasher each failing it. **The final test count, the
-  fixes for F1, F2 and F4, the smoke run's totals and the contract check are recorded on
-  the pull request** until this section is amended.
+- **The last task: the review's F1 to F5** (`50166ec`, 2026-10-09). Run by the fixer,
+  tests first and seen red: the holder as a body for `problem+json`, and the `406`
+  carrying the day's `ETag`.
+  - F1 and F2 (decision 9): `DaysConditionalTest` sends twelve `Accept` values JSON can
+    answer to both routes and requires the bytes of a plain read, `Content-Type` exactly
+    `application/json`, a tag that is the keyed digest of the bytes received, and a
+    working `304`; and five values it cannot, from twelve askers, and requires one `406`
+    with no `ETag` and `no-store`. `RepresentationTest` holds the converter and the
+    mapper's refusal. `produces` with `application/json` alone was run and seen to refuse
+    `problem+json`. Six mutations, all caught; with the converter claiming JSON only the
+    answer is now a `500`, which is the serializer's refusal working.
+  - F3: `KnownAnswerTest`, three literals (the hash, the request fingerprint, the tag),
+    each computed with openssl outside the JVM. The algorithm changed to HmacSHA3-256, and
+    a byte added to the MAC's input, each fail it; before, only a test about the tag would
+    have.
+  - F4: `CacheHeadersTest`, in `app` with the real configuration, asserts the exact
+    default (`no-cache, no-store, max-age=0, must-revalidate`, `Pragma`, `Expires`) on a
+    login, a write, four reads, and the archive's `404`, `401`, `422` and `406`; and
+    exactly `private, no-cache` on the archive's `200`, `304` and stale-tag `200`. The
+    reviewer's mutation, the security default switched off, now fails it.
+  - F5 needed nothing: the swap inside `GetDays.read` fails `ArchiveReadOrderTest`, four
+    of four.
+  - **Not in the reports when this was written:** the whole-build test count at
+    `50166ec`, the smoke run's totals, the CLI and Bruno additions, and the contract
+    check against `main`. They are recorded on the pull request.
 - **Read, not run:** that every erasure goes through `EraseEntry` (by search: three
   callers); the unreachable cell (decision 2); the lock order of the mark (it holds
   nothing else); rate limiting on the four routes (the test context has the limiter off);
   that the contract change is additive but for the two codes (oasdiff was not run by
-  anyone named above); the bond route's `406`.
+  anyone whose report was read for this record); the bond route's `406`.
 - **Not run by anyone:** NFR-003's p95, a 500k-entry dataset, V22 against a shared
   database, CI's own contract action.

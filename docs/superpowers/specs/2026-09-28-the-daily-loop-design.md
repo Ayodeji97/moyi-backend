@@ -445,6 +445,10 @@ The table's four C5 rows are three of C5b's and one of C5c's (reactions, not bui
   `GET /today` does.
 - **All four reconcile the joining day first** (§12.4), so each can take the bond's lock
   and write once, when that day is still `SUSPENDED`.
+- **The two archive routes produce `application/json` for any `Accept` that takes JSON**,
+  `application/problem+json` included, and answer the standing `406` to one that takes
+  none. That `406` is decided at the mapping, before the membership guard, and carries no
+  `ETag` (decision 9).
 
 ### 5.3 New `ErrorCode` values (`common:web`)
 
