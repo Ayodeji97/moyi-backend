@@ -1460,6 +1460,38 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
   },
   {
+    "id": "day-not-opened-today-ended-alone",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "the bond ended, or began counting down to deletion, while it still had one member",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NOT_OPENED",
+    "status": 200,
+    "code": null,
+    "reason": "The response says OPEN, not SUSPENDED, though nobody ever joined: the placeholder for a day with no row is SUSPENDED only while the bond's status is PENDING_MEMBER, and this bond's no longer is. Nothing can be written on it either way.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessAdapter.kt#awaitingSecondMember = bond.status == BondStatus.PENDING_MEMBER,"
+  },
+  {
     "id": "day-open-today",
     "region": "day",
     "from": "OPEN",
@@ -1674,6 +1706,38 @@
     "rule": "doc 04 §8.3a",
     "evidence": "smoke",
     "evidenceRef": "…and the day it landed on opens SUSPENDED, not OPEN",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+  },
+  {
+    "id": "day-suspended-today-ended",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "the bond ended, or began counting down to deletion, while it still had one member",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 200,
+    "code": null,
+    "reason": "The creator wrote today and then left the bond, or asked for its deletion, before anybody joined. The day has a row, and it reads SUSPENDED as it was stored.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "never-run",
+    "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
   },
   {
@@ -3389,7 +3453,7 @@
     "from": "LOCKED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "your partner alone wrote, and the bond had not ended before the day did",
+    "when": "your partner alone wrote, the day is not suspended, and the bond had not ended before the day did",
     "guards": [],
     "outcome": "ok",
     "to": "VISIBLE",
@@ -3407,7 +3471,7 @@
     "from": "LOCKED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "both of you wrote, and the reveal time had not come when the day ended",
+    "when": "both of you wrote, the day is not suspended, and the reveal time had not come when the day ended",
     "guards": [],
     "outcome": "ok",
     "to": "VISIBLE",
@@ -3425,7 +3489,7 @@
     "from": "LOCKED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "your partner alone wrote, and the bond ended, or began counting down to deletion, before the day did",
+    "when": "your partner alone wrote, the day is not suspended, and the bond ended, or began counting down to deletion, before the day did",
     "guards": [],
     "outcome": "ok",
     "to": "LOCKED",
@@ -3436,6 +3500,24 @@
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a lone entry on a bond that ended before the day did is never revealed, and the day still closes SOLO",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val bondEndedFirst = bondEndedAt != null && bondEndedAt.isBefore(closed.endsAt)"
+  },
+  {
+    "id": "partner-locked-ends-suspended",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "event:day-ends",
+    "actor": "system",
+    "when": "the day is suspended",
+    "guards": [],
+    "outcome": "ok",
+    "to": "LOCKED",
+    "status": null,
+    "code": null,
+    "reason": "The close job stamps a suspended day closed and reveals nothing on it: it unlocks a lone entry only on a day that closes SOLO. Your partner's entry stays locked to you. The test cited asserts that nothing is revealed on a bond of one, where the entry is the author's own.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "test",
+    "evidenceRef": "CloseDayTest#a day on a bond still waiting for its partner is closed suspended, its entry still its author's alone",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#if (closed.status == BondDayStatus.SOLO && !bondEndedFirst) {"
   },
   {
     "id": "partner-locked-partner-withdraws",
@@ -3472,5 +3554,1122 @@
     "evidence": "smoke",
     "evidenceRef": "the partner's very next read no longer carries the words",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val erased = isErased || authorMemberId in reader.withdrawnAuthors"
+  },
+  {
+    "id": "entry-none-leave",
+    "region": "day.entry",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NONE",
+    "status": 204,
+    "code": null,
+    "reason": "You have no entry on this day, so there is nothing to keep and nothing to take back. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
+    "rule": "FR-029a, ADR-0035 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "entry-submitted-leave-withdraws",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "the body says withdrawEntries: true",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased some seconds later.",
+    "rule": "FR-029a, ADR-0035 §11, §12",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val erased = isErased || authorMemberId in reader.withdrawnAuthors"
+  },
+  {
+    "id": "entry-submitted-leave-keeps",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "the body is absent, or does not say withdrawEntries: true",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 204,
+    "code": null,
+    "reason": "Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is still revealed at that time or at the day's end, ended bond or not (ADR-0035, owner question 9; no test pins it). You may still delete it yourself.",
+    "rule": "FR-029a, ADR-0035 §11, ADR-0033 §9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "entry-revealed-leave-withdraws",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "the body says withdrawEntries: true",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased some seconds later. Your partner's own entries are untouched.",
+    "rule": "FR-029a, ADR-0035 §11, §12",
+    "evidence": "test",
+    "evidenceRef": "WithdrawalReadTest#leaving and withdrawing hides the leaver's entries from both, as a block does",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val erased = isErased || authorMemberId in reader.withdrawnAuthors"
+  },
+  {
+    "id": "entry-revealed-leave-keeps",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "the body is absent, or does not say withdrawEntries: true",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 204,
+    "code": null,
+    "reason": "Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself.",
+    "rule": "FR-029a, ADR-0035 §11, §15",
+    "evidence": "test",
+    "evidenceRef": "WithdrawalReadTest#leaving without withdrawing changes nothing either of them reads",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "entry-deleted-leave",
+    "region": "day.entry",
+    "from": "DELETED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "An entry you already deleted has no words left to take back; it stays the tombstone it was. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
+    "rule": "FR-029a, ADR-0035 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#entries.liveOf(bondId, memberId).forEach {"
+  },
+  {
+    "id": "day-not-opened-leave",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NOT_OPENED",
+    "status": 204,
+    "code": null,
+    "reason": "The day has no row, and ending the bond writes none. Whether your entries are taken back makes no difference to it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
+    "rule": "FR-029a, ADR-0035 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
+  },
+  {
+    "id": "day-open-leave",
+    "region": "day",
+    "from": "OPEN",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "OPEN",
+    "status": 204,
+    "code": null,
+    "reason": "A day with a row and no live entry has nothing of yours on it to take back. It stays OPEN until the close job settles it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
+    "rule": "FR-029a, ADR-0035 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
+  },
+  {
+    "id": "day-partial-leave-withdraws",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "the body says withdrawEntries: true, and the day's one live entry is yours",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "OPEN",
+    "status": 204,
+    "code": null,
+    "reason": "Right after the call the day still reads PARTIAL. Some seconds later your entry is erased by the routine a delete uses, and a day still running steps back exactly as it would for a delete.",
+    "rule": "FR-029a, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
+  },
+  {
+    "id": "day-partial-leave-keeps",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "the body is absent, or does not say withdrawEntries: true; or the day's one live entry is your partner's",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 204,
+    "code": null,
+    "reason": "Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond stopped taking writes first.",
+    "rule": "FR-029a, ADR-0033 §9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "day-pending-reveal-leave-withdraws",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "the body says withdrawEntries: true",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 204,
+    "code": null,
+    "reason": "Some seconds after the call your entry is erased, before anything was revealed, so the day steps back to your partner's entry alone and the reveal never happens.",
+    "rule": "FR-029a, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
+  },
+  {
+    "id": "day-pending-reveal-leave-keeps",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "the body is absent, or does not say withdrawEntries: true",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_REVEAL",
+    "status": 204,
+    "code": null,
+    "reason": "Both entries stay, and the day goes on waiting. Ending the bond does not stop the reveal: at the reveal time, or at the day's end, the close job reveals both entries all the same. ADR-0035 records this as an open question for the owner, and no test pins it.",
+    "rule": "FR-029a, ADR-0035 owner question 9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "day-revealed-leave",
+    "region": "day",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 204,
+    "code": null,
+    "reason": "A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
+    "rule": "BR-10, ADR-0035 §13",
+    "evidence": "test",
+    "evidenceRef": "WithdrawalReadTest#leaving and withdrawing hides the leaver's entries from both, as a block does",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (isSettled) {"
+  },
+  {
+    "id": "day-solo-leave",
+    "region": "day",
+    "from": "SOLO",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SOLO",
+    "status": 204,
+    "code": null,
+    "reason": "A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
+    "rule": "BR-10, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (isSettled) {"
+  },
+  {
+    "id": "day-empty-leave",
+    "region": "day",
+    "from": "EMPTY",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "EMPTY",
+    "status": 204,
+    "code": null,
+    "reason": "A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
+    "rule": "BR-10, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (isSettled) {"
+  },
+  {
+    "id": "day-frozen-leave",
+    "region": "day",
+    "from": "FROZEN",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "FROZEN",
+    "status": 204,
+    "code": null,
+    "reason": "A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
+    "rule": "BR-10, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (isSettled) {"
+  },
+  {
+    "id": "day-suspended-leave",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 204,
+    "code": null,
+    "reason": "A suspended day stays suspended, with your entry or without it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.SUSPENDED -> status"
+  },
+  {
+    "id": "entry-none-block",
+    "region": "day.entry",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NONE",
+    "status": 204,
+    "code": null,
+    "reason": "You have no entry on this day, so there is nothing to keep and nothing to take back.",
+    "rule": "FR-029a, ADR-0035 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "entry-submitted-block-withdraws",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "the body is absent, or does not say withdrawEntries: false",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased some seconds later.",
+    "rule": "FR-029a, ADR-0035 §11, §12",
+    "evidence": "test",
+    "evidenceRef": "WithdrawalReadTest#an entry withdrawn before it was ever revealed is author and REMOVED to the partner, and nothing else",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val erased = isErased || authorMemberId in reader.withdrawnAuthors"
+  },
+  {
+    "id": "entry-submitted-block-keeps",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "the body says withdrawEntries: false",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 204,
+    "code": null,
+    "reason": "Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is still revealed at that time or at the day's end, ended bond or not (ADR-0035, owner question 9; no test pins it). You may still delete it yourself.",
+    "rule": "FR-029a, ADR-0035 §11, ADR-0033 §9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "entry-revealed-block-withdraws",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "the body is absent, or does not say withdrawEntries: false",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased some seconds later. Your partner's own entries are untouched.",
+    "rule": "FR-029a, ADR-0035 §11, §12",
+    "evidence": "test",
+    "evidenceRef": "WithdrawalReadTest#a block hides the blocker's revealed entry from both, on today, and leaves the partner's whole",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val erased = isErased || authorMemberId in reader.withdrawnAuthors"
+  },
+  {
+    "id": "entry-revealed-block-keeps",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "the body says withdrawEntries: false",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 204,
+    "code": null,
+    "reason": "Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. Repeating the block without the flag takes it back after all.",
+    "rule": "FR-029a, ADR-0035 §11, §15",
+    "evidence": "smoke",
+    "evidenceRef": "a block that says to keep the entries is 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "entry-deleted-block",
+    "region": "day.entry",
+    "from": "DELETED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "An entry you already deleted has no words left to take back; it stays the tombstone it was.",
+    "rule": "FR-029a, ADR-0035 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#entries.liveOf(bondId, memberId).forEach {"
+  },
+  {
+    "id": "day-not-opened-block",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NOT_OPENED",
+    "status": 204,
+    "code": null,
+    "reason": "The day has no row, and ending the bond writes none. Whether your entries are taken back makes no difference to it.",
+    "rule": "FR-029a, ADR-0035 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
+  },
+  {
+    "id": "day-open-block",
+    "region": "day",
+    "from": "OPEN",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "OPEN",
+    "status": 204,
+    "code": null,
+    "reason": "A day with a row and no live entry has nothing of yours on it to take back. It stays OPEN until the close job settles it.",
+    "rule": "FR-029a, ADR-0035 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
+  },
+  {
+    "id": "day-partial-block-withdraws",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "the body is absent, or does not say withdrawEntries: false, and the day's one live entry is yours",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "OPEN",
+    "status": 204,
+    "code": null,
+    "reason": "Right after the call the day still reads PARTIAL. Some seconds later your entry is erased by the routine a delete uses, and a day still running steps back exactly as it would for a delete.",
+    "rule": "FR-029a, ADR-0035 §13",
+    "evidence": "test",
+    "evidenceRef": "WithdrawEntriesTest#a withdrawal leaves the rows and the answers that a run of single deletes leaves, and the close job then settles both alike",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
+  },
+  {
+    "id": "day-partial-block-keeps",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "the body says withdrawEntries: false; or the day's one live entry is your partner's",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 204,
+    "code": null,
+    "reason": "Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond stopped taking writes first.",
+    "rule": "FR-029a, ADR-0033 §9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "day-pending-reveal-block-withdraws",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "the body is absent, or does not say withdrawEntries: false",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 204,
+    "code": null,
+    "reason": "Some seconds after the call your entry is erased, before anything was revealed, so the day steps back to your partner's entry alone and the reveal never happens.",
+    "rule": "FR-029a, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
+  },
+  {
+    "id": "day-pending-reveal-block-keeps",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "the body says withdrawEntries: false",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_REVEAL",
+    "status": 204,
+    "code": null,
+    "reason": "Both entries stay, and the day goes on waiting. Ending the bond does not stop the reveal: at the reveal time, or at the day's end, the close job reveals both entries all the same. ADR-0035 records this as an open question for the owner, and no test pins it.",
+    "rule": "FR-029a, ADR-0035 owner question 9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
+  },
+  {
+    "id": "day-revealed-block",
+    "region": "day",
+    "from": "REVEALED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 204,
+    "code": null,
+    "reason": "A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status.",
+    "rule": "BR-10, ADR-0035 §13",
+    "evidence": "test",
+    "evidenceRef": "WithdrawalReadTest#a block hides the blocker's revealed entry from both, on today, and leaves the partner's whole",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (isSettled) {"
+  },
+  {
+    "id": "day-solo-block",
+    "region": "day",
+    "from": "SOLO",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SOLO",
+    "status": 204,
+    "code": null,
+    "reason": "A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status.",
+    "rule": "BR-10, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (isSettled) {"
+  },
+  {
+    "id": "day-empty-block",
+    "region": "day",
+    "from": "EMPTY",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "EMPTY",
+    "status": 204,
+    "code": null,
+    "reason": "A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status.",
+    "rule": "BR-10, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (isSettled) {"
+  },
+  {
+    "id": "day-frozen-block",
+    "region": "day",
+    "from": "FROZEN",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "FROZEN",
+    "status": 204,
+    "code": null,
+    "reason": "A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status.",
+    "rule": "BR-10, ADR-0035 §13",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (isSettled) {"
+  },
+  {
+    "id": "day-suspended-block",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 204,
+    "code": null,
+    "reason": "A suspended day stays suspended, with your entry or without it.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.SUSPENDED -> status"
   }
 ]
