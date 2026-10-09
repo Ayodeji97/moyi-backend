@@ -205,17 +205,49 @@
     "from": "PENDING_MEMBER",
     "action": "POST /api/v1/bonds",
     "actor": "you",
-    "when": "",
-    "guards": [],
-    "outcome": "unreachable",
+    "when": "you are in fewer than three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
     "to": "PENDING_MEMBER",
-    "status": null,
+    "status": 201,
     "code": null,
-    "reason": "POST /bonds never acts on a bond you already have: it makes a new one, and a new bond starts from no bond. The bonds you already hold matter only as the count toward the limit of three.",
-    "rule": "",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": ""
+    "reason": "A separate new bond is made, waiting for its second member; this one is untouched. This one counts toward your three. Holding a bond means your email is verified, so the 403 cannot happen here.",
+    "rule": "FR-020, FR-025",
+    "evidence": "smoke",
+    "evidenceRef": "second bond is 201",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#val (bond, invite) = factory.create(draft)"
+  },
+  {
+    "id": "bond-pending-member-create-limit",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "you are already in three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "No bond is made and this one is untouched. This one counts toward your three.",
+    "rule": "FR-025, ADR-0030 §4c",
+    "evidence": "smoke",
+    "evidenceRef": "a fourth open bond is 409 BOND_LIMIT_REACHED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
   },
   {
     "id": "bond-active-create",
@@ -223,17 +255,49 @@
     "from": "ACTIVE",
     "action": "POST /api/v1/bonds",
     "actor": "you",
-    "when": "",
-    "guards": [],
-    "outcome": "unreachable",
+    "when": "you are in fewer than three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
     "to": "ACTIVE",
-    "status": null,
+    "status": 201,
     "code": null,
-    "reason": "POST /bonds never acts on a bond you already have: it makes a new one, and a new bond starts from no bond. The bonds you already hold matter only as the count toward the limit of three.",
-    "rule": "",
+    "reason": "A separate new bond is made, waiting for its second member; this one is untouched. This one counts toward your three. Holding a bond means your email is verified, so the 403 cannot happen here.",
+    "rule": "FR-020, FR-025",
+    "evidence": "smoke",
+    "evidenceRef": "a second bond for the joiner",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#val (bond, invite) = factory.create(draft)"
+  },
+  {
+    "id": "bond-active-create-limit",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "you are already in three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "No bond is made and this one is untouched. This one counts toward your three.",
+    "rule": "FR-025, ADR-0030 §4c",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": ""
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
   },
   {
     "id": "bond-pending-deletion-create",
@@ -241,17 +305,49 @@
     "from": "PENDING_DELETION",
     "action": "POST /api/v1/bonds",
     "actor": "you",
-    "when": "",
-    "guards": [],
-    "outcome": "unreachable",
+    "when": "you are in fewer than three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
     "to": "PENDING_DELETION",
-    "status": null,
+    "status": 201,
     "code": null,
-    "reason": "POST /bonds never acts on a bond you already have: it makes a new one, and a new bond starts from no bond. The bonds you already hold matter only as the count toward the limit of three.",
-    "rule": "",
+    "reason": "A separate new bond is made, waiting for its second member; this one is untouched. This one still counts toward your three, because its countdown can be called off. Holding a bond means your email is verified, so the 403 cannot happen here.",
+    "rule": "FR-020, FR-025",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": ""
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#val (bond, invite) = factory.create(draft)"
+  },
+  {
+    "id": "bond-pending-deletion-create-limit",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "you are already in three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "No bond is made and this one is untouched. This one still counts toward your three, because its countdown can be called off. (a test asserts the status, not the code)",
+    "rule": "FR-025, ADR-0030 §4c",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
   },
   {
     "id": "bond-archived-create",
@@ -259,17 +355,49 @@
     "from": "ARCHIVED",
     "action": "POST /api/v1/bonds",
     "actor": "you",
-    "when": "",
-    "guards": [],
-    "outcome": "unreachable",
+    "when": "you are in fewer than three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
     "to": "ARCHIVED",
-    "status": null,
+    "status": 201,
     "code": null,
-    "reason": "POST /bonds never acts on a bond you already have: it makes a new one, and a new bond starts from no bond. The bonds you already hold matter only as the count toward the limit of three.",
-    "rule": "",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": ""
+    "reason": "A separate new bond is made, waiting for its second member; this one is untouched. This one does not count toward your three: it has ended. Holding a bond means your email is verified, so the 403 cannot happen here.",
+    "rule": "FR-020, FR-025",
+    "evidence": "smoke",
+    "evidenceRef": "the blocker starts a new bond",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#val (bond, invite) = factory.create(draft)"
+  },
+  {
+    "id": "bond-archived-create-limit",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "you are already in three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "No bond is made and this one is untouched. This one does not count toward your three: it has ended.",
+    "rule": "FR-025, ADR-0030 §4c",
+    "evidence": "smoke",
+    "evidenceRef": "…and a fourth is 409 BOND_LIMIT_REACHED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
   },
   {
     "id": "bond-none-read",
@@ -3382,17 +3510,74 @@
     "from": "CREATED",
     "action": "POST /api/v1/bonds",
     "actor": "you",
-    "when": "",
-    "guards": [],
-    "outcome": "unreachable",
+    "when": "your email is verified, and you are in fewer than three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
     "to": "CREATED",
-    "status": null,
+    "status": 201,
     "code": null,
-    "reason": "POST /bonds never acts on an invite that exists: it makes a new bond with a new invite, which starts from none.",
-    "rule": "",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": ""
+    "reason": "A new bond is made with a new invite of its own. This invite is untouched: creating a bond never looks at an invite that already exists.",
+    "rule": "FR-020, FR-022",
+    "evidence": "smoke",
+    "evidenceRef": "second bond is 201",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#invites.insert(invite)"
+  },
+  {
+    "id": "invite-created-create-bond-unverified",
+    "region": "bond.invite",
+    "from": "CREATED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is not verified",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CREATED",
+    "status": 403,
+    "code": "EMAIL_NOT_VERIFIED",
+    "reason": "No bond is made, and this invite is untouched.",
+    "rule": "FR-002",
+    "evidence": "smoke",
+    "evidenceRef": "an unverified account cannot create a bond: 403 EMAIL_NOT_VERIFIED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (creator == null || !creator.emailVerified) throw EmailNotVerifiedException()"
+  },
+  {
+    "id": "invite-created-create-bond-limit",
+    "region": "bond.invite",
+    "from": "CREATED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is verified, and you are already in three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CREATED",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "No bond is made, and this invite is untouched.",
+    "rule": "FR-025",
+    "evidence": "smoke",
+    "evidenceRef": "a fourth open bond is 409 BOND_LIMIT_REACHED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
   },
   {
     "id": "invite-accepted-create-bond",
@@ -3400,17 +3585,74 @@
     "from": "ACCEPTED",
     "action": "POST /api/v1/bonds",
     "actor": "you",
-    "when": "",
-    "guards": [],
-    "outcome": "unreachable",
+    "when": "your email is verified, and you are in fewer than three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
     "to": "ACCEPTED",
-    "status": null,
+    "status": 201,
     "code": null,
-    "reason": "POST /bonds never acts on an invite that exists: it makes a new bond with a new invite, which starts from none.",
-    "rule": "",
+    "reason": "A new bond is made with a new invite of its own. This invite is untouched: creating a bond never looks at an invite that already exists.",
+    "rule": "FR-020, FR-022",
+    "evidence": "smoke",
+    "evidenceRef": "a second bond for the joiner",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#invites.insert(invite)"
+  },
+  {
+    "id": "invite-accepted-create-bond-unverified",
+    "region": "bond.invite",
+    "from": "ACCEPTED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is not verified",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACCEPTED",
+    "status": 403,
+    "code": "EMAIL_NOT_VERIFIED",
+    "reason": "No bond is made, and this invite is untouched.",
+    "rule": "FR-002",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": ""
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (creator == null || !creator.emailVerified) throw EmailNotVerifiedException()"
+  },
+  {
+    "id": "invite-accepted-create-bond-limit",
+    "region": "bond.invite",
+    "from": "ACCEPTED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is verified, and you are already in three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACCEPTED",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "No bond is made, and this invite is untouched.",
+    "rule": "FR-025",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
   },
   {
     "id": "invite-revoked-create-bond",
@@ -3418,17 +3660,74 @@
     "from": "REVOKED",
     "action": "POST /api/v1/bonds",
     "actor": "you",
-    "when": "",
-    "guards": [],
-    "outcome": "unreachable",
+    "when": "your email is verified, and you are in fewer than three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
     "to": "REVOKED",
-    "status": null,
+    "status": 201,
     "code": null,
-    "reason": "POST /bonds never acts on an invite that exists: it makes a new bond with a new invite, which starts from none.",
-    "rule": "",
+    "reason": "A new bond is made with a new invite of its own. This invite is untouched: creating a bond never looks at an invite that already exists.",
+    "rule": "FR-020, FR-022",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": ""
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#invites.insert(invite)"
+  },
+  {
+    "id": "invite-revoked-create-bond-unverified",
+    "region": "bond.invite",
+    "from": "REVOKED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is not verified",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "REVOKED",
+    "status": 403,
+    "code": "EMAIL_NOT_VERIFIED",
+    "reason": "No bond is made, and this invite is untouched.",
+    "rule": "FR-002",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (creator == null || !creator.emailVerified) throw EmailNotVerifiedException()"
+  },
+  {
+    "id": "invite-revoked-create-bond-limit",
+    "region": "bond.invite",
+    "from": "REVOKED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is verified, and you are already in three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "REVOKED",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "No bond is made, and this invite is untouched.",
+    "rule": "FR-025",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
   },
   {
     "id": "invite-expired-create-bond",
@@ -3436,17 +3735,74 @@
     "from": "EXPIRED",
     "action": "POST /api/v1/bonds",
     "actor": "you",
-    "when": "",
-    "guards": [],
-    "outcome": "unreachable",
+    "when": "your email is verified, and you are in fewer than three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
     "to": "EXPIRED",
-    "status": null,
+    "status": 201,
     "code": null,
-    "reason": "POST /bonds never acts on an invite that exists: it makes a new bond with a new invite, which starts from none.",
-    "rule": "",
+    "reason": "A new bond is made with a new invite of its own. This invite is untouched: creating a bond never looks at an invite that already exists.",
+    "rule": "FR-020, FR-022",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": ""
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#invites.insert(invite)"
+  },
+  {
+    "id": "invite-expired-create-bond-unverified",
+    "region": "bond.invite",
+    "from": "EXPIRED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is not verified",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "EXPIRED",
+    "status": 403,
+    "code": "EMAIL_NOT_VERIFIED",
+    "reason": "No bond is made, and this invite is untouched.",
+    "rule": "FR-002",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (creator == null || !creator.emailVerified) throw EmailNotVerifiedException()"
+  },
+  {
+    "id": "invite-expired-create-bond-limit",
+    "region": "bond.invite",
+    "from": "EXPIRED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is verified, and you are already in three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "EXPIRED",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "No bond is made, and this invite is untouched.",
+    "rule": "FR-025",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
   },
   {
     "id": "invite-none-issue",
