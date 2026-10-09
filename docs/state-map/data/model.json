@@ -255,13 +255,48 @@
             {
               "id": "REMOVED",
               "label": "REMOVED"
+            },
+            {
+              "id": "DELETED",
+              "label": "DELETED, its words gone"
             }
           ]
         }
       ]
     }
   ],
-  "events": [],
+  "events": [
+    {
+      "id": "event:reveal-time-arrives",
+      "label": "the reveal time arrives, and the close job's next run reveals the day",
+      "actor": "system"
+    },
+    {
+      "id": "event:day-ends",
+      "label": "the day ends and the close job runs",
+      "actor": "system"
+    },
+    {
+      "id": "event:second-member-joins",
+      "label": "your partner accepts the invite",
+      "actor": "partner"
+    },
+    {
+      "id": "event:missed-day-recorded",
+      "label": "the close job records a day nobody opened",
+      "actor": "system"
+    },
+    {
+      "id": "event:freeze-spent",
+      "label": "the close job evaluates a missed day and a banked freeze covers it",
+      "actor": "system"
+    },
+    {
+      "id": "event:partner-withdraws",
+      "label": "your partner leaves or blocks and takes their entries back",
+      "actor": "partner"
+    }
+  ],
   "everywhere": [
     {
       "status": 400,
@@ -318,18 +353,14 @@
       "DELETE /api/v1/bonds/{bondId}/deletion-request",
       "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
       "DELETE /api/v1/bonds/{bondId}/timezone",
-      "DELETE /api/v1/entries/{entryId}",
       "GET /api/v1/auth/sessions",
       "GET /api/v1/bonds",
       "GET /api/v1/bonds/{bondId}",
       "GET /api/v1/bonds/{bondId}/members/me/settings",
-      "GET /api/v1/bonds/{bondId}/streak",
-      "GET /api/v1/bonds/{bondId}/today",
       "GET /api/v1/invites/{code}",
       "GET /api/v1/me",
       "PATCH /api/v1/bonds/{bondId}",
       "PATCH /api/v1/bonds/{bondId}/timezone",
-      "PATCH /api/v1/entries/{entryId}",
       "POST /api/v1/auth/forgot-password",
       "POST /api/v1/auth/login",
       "POST /api/v1/auth/logout",
@@ -342,7 +373,6 @@
       "POST /api/v1/bonds",
       "POST /api/v1/bonds/{bondId}/block",
       "POST /api/v1/bonds/{bondId}/deletion-request",
-      "POST /api/v1/bonds/{bondId}/entries",
       "POST /api/v1/bonds/{bondId}/invites",
       "POST /api/v1/bonds/{bondId}/leave",
       "POST /api/v1/bonds/{bondId}/timezone/confirm",
@@ -369,13 +399,9 @@
       "PROPOSAL_PENDING",
       "PROPOSAL_NEEDS_OTHER_MEMBER",
       "TIMEZONE_CHANGE_TOO_SOON",
-      "IDEMPOTENCY_KEY_REUSED",
-      "IDEMPOTENCY_KEY_IN_FLIGHT",
       "ENTRY_ALREADY_EXISTS",
       "ENTRY_IMMUTABLE",
-      "DAY_CLOSED",
-      "MEDIA_NOT_YET_SUPPORTED",
-      "NOT_FOUND"
+      "DAY_CLOSED"
     ]
   }
 }

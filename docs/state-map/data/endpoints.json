@@ -1,1 +1,179 @@
-[]
+[
+  {
+    "id": "POST /api/v1/bonds/{bondId}/entries",
+    "summary": "write today's entry",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "EntriesEndpointTest#a non-member, an unknown bond and a value that is not a uuid are one answer",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val membership = access.lockMembershipOf(userId, bondId)"
+      },
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued.",
+        "evidence": "test",
+        "evidenceRef": "SubmitEntryIdempotencyTest#a second request under a key whose first is still in flight is refused at once, never queued",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII.",
+        "evidence": "smoke",
+        "evidenceRef": "an entry with no Idempotency-Key is 422 VALIDATION_FAILED",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#violationOf(key)?.let { throw IdempotencyKeyNotValidException(it) }"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The text is missing or blank, is over 500 characters or 8192 bytes, or holds a NUL character or an unpaired surrogate.",
+        "evidence": "smoke",
+        "evidenceRef": "an entry of one non-breaking space is 422 on text, not 500",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntryConstraints.kt#return validate(context) { EntryText.of(value) }"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another body, or another path.",
+        "evidence": "smoke",
+        "evidenceRef": "the same key with a different body is 422 IDEMPOTENCY_KEY_REUSED",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      },
+      {
+        "status": 422,
+        "code": "MEDIA_NOT_YET_SUPPORTED",
+        "reason": "The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. It is refused, not quietly dropped.",
+        "evidence": "smoke",
+        "evidenceRef": "an entry carrying a media id is 422 MEDIA_NOT_YET_SUPPORTED",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/entries\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\" -H 'Content-Type: application/json' -d '{\"text\": \"...\"}'"
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/today",
+    "summary": "read today",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "RevealGateTest#a non-member gets the one 404, whether or not the entry has been revealed",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntriesController.kt#val membership = access.membershipOf(caller.id, bondIdOrNotFound(bondId))"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/today\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PATCH /api/v1/entries/{entryId}",
+    "summary": "edit your entry",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key (optional)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The id is not a UUID, names no entry, names an entry in a bond you are not in, or names the entry your partner wrote. All four get this one answer, and never 403, so that it does not confirm the entry exists.",
+        "evidence": "smoke",
+        "evidenceRef": "the partner cannot edit the author's entry",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#): Pair<Entry, BondMembership> = authorOrNull(userId, entryId, lock) ?: throw EntryNotFoundException()"
+      },
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. Only when the optional key is sent.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written. The limit holds whether or not a key is sent.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#replayable.buffered(MAX_BODY_BYTES)"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The text is missing or blank, is over 500 characters or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid.",
+        "evidence": "test",
+        "evidenceRef": "EntryChangesTest#patch asks the same domain text validator and refuses unsupported media",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntryChangesController.kt#@field:NotNull @field:ValidEntryText val text: String? = null,"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another body, or another path. Only when the optional key is sent.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      },
+      {
+        "status": 422,
+        "code": "MEDIA_NOT_YET_SUPPORTED",
+        "reason": "The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4.",
+        "evidence": "test",
+        "evidenceRef": "EntryChangesTest#patch asks the same domain text validator and refuses unsupported media",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (unsupportedMedia) throw MediaNotYetSupportedException()"
+      }
+    ],
+    "curl": "curl -X PATCH \"$API/entries/$ENTRY\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"text\": \"...\"}'"
+  },
+  {
+    "id": "DELETE /api/v1/entries/{entryId}",
+    "summary": "delete your entry",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The id is not a UUID, names no entry, names an entry in a bond you are not in, or names the entry your partner wrote. All four get this one answer, and never 403, so that it does not confirm the entry exists.",
+        "evidence": "smoke",
+        "evidenceRef": "the partner cannot delete the author's entry",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#): Pair<Entry, BondMembership> = authorOrNull(userId, entryId, lock) ?: throw EntryNotFoundException()"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/entries/$ENTRY\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/streak",
+    "summary": "read the streak",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "smoke",
+        "evidenceRef": "a stranger asking for a bond's streak gets the one 404",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/StreakController.kt#val membership = access.membershipOf(caller.id, id)"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/streak\" -H \"Authorization: Bearer $TOKEN\""
+  }
+]
