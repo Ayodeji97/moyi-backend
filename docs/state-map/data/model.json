@@ -268,7 +268,7 @@
   "events": [
     {
       "id": "event:reveal-time-arrives",
-      "label": "the reveal time arrives, and the close job's next run reveals the day",
+      "label": "the reveal time arrives",
       "actor": "system"
     },
     {
@@ -288,12 +288,12 @@
     },
     {
       "id": "event:freeze-spent",
-      "label": "the close job evaluates a missed day and a banked freeze covers it",
+      "label": "a banked freeze covers a missed day",
       "actor": "system"
     },
     {
       "id": "event:partner-withdraws",
-      "label": "your partner leaves or blocks and takes their entries back",
+      "label": "your partner takes their entries back",
       "actor": "partner"
     }
   ],
