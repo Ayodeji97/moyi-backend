@@ -69,8 +69,18 @@ import javax.sql.DataSource
  * **What is scanned for:** the text of three entries (as submitted, as
  * edited, and the partner's), a password, two access tokens and two refresh
  * tokens, across register, sign-in, pairing, submit, read, edit, the reveal,
- * delete, an ending that withdraws, the withdrawal's erasure by the
- * dispatcher, a failing transactional consumer, and a refresh.
+ * the archive (the feed with and without `favourites`, one day, a bookmark
+ * set and removed, a conditional read that answers `304`), delete, an ending
+ * that withdraws, the withdrawal's erasure by the dispatcher, a failing
+ * transactional consumer, and a refresh. An `ETag` is not scanned for: it is
+ * a keyed digest and not a secret.
+ *
+ * **And one thing that is not a secret but is nobody's to read in a log:
+ * who bookmarked what.** A bookmark is private to the member who made it
+ * (FR-093), and `StatementCreatorUtils` prints each value `JdbcTemplate`
+ * binds at TRACE: for a bookmark, the entry's id, the member's id and the
+ * instant, on three adjacent lines. That logger is pinned with the others,
+ * and this test fails if it writes any line at all.
  *
  * **An invite code is held to less**, because it cannot be held to more: see
  * [PRINTS_THE_REQUEST_PATH]. **Not covered at all:** the email verification
@@ -91,7 +101,8 @@ import javax.sql.DataSource
  *
  * Each of the original six pins was removed in turn and this test failed each time,
  * naming the logger that line holds. The transactional interceptor regression
- * was also seen failing before its pin was added.
+ * was also seen failing before its pin was added, and so was the pin on
+ * `StatementCreatorUtils`.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -189,11 +200,39 @@ class SecretsNeverLoggedTest(
         get("/bonds/$bond/today", ada).body.contains(BEA_TEXT) shouldBe true
         get("/bonds/$bond/streak", ada).status shouldBe 200
 
+        // The archive: the feed, one day, a bookmark set and removed, and a conditional read.
+        val today = get("/bonds/$bond/today", ada).json["bondDay"]["date"].asString()
+        val feed = get("/bonds/$bond/days", ada)
+        feed.status shouldBe 200
+        feed.body.contains(BEA_TEXT) shouldBe true
+        get("/bonds/$bond/days", ada, ifNoneMatch = feed.etag).status shouldBe 304
+        get("/bonds/$bond/days?limit=1&until=$today&favourites=false", bea).body.contains(ADA_EDITED) shouldBe true
+        val day = get("/bonds/$bond/days/$today", bea)
+        day.body.contains(ADA_EDITED) shouldBe true
+        get("/bonds/$bond/days/$today", bea, ifNoneMatch = day.etag).status shouldBe 304
+        send("PUT", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
+        send("PUT", "/entries/$beaEntry/favourite", ada, null).status shouldBe 204
+        get("/bonds/$bond/days?favourites=true", bea).body.contains(ADA_EDITED) shouldBe true
+        // The tag from before the mark is stale, so this is the whole day again.
+        get("/bonds/$bond/days/$today", bea, ifNoneMatch = day.etag).body.contains(ADA_EDITED) shouldBe true
+        get("/bonds/$bond/days?limit=zz", ada).status shouldBe 422
+        get("/bonds/$bond/days/nonsense", ada).status shouldBe 404
+        send("DELETE", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
+        send("PUT", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
+        val marker =
+            jdbc.queryForObject(
+                "SELECT member_id::text FROM entry_favourites WHERE entry_id = ?::uuid",
+                String::class.java,
+                adaEntry,
+            )!!
+
         // Delete, then an ending that withdraws, then the erasure itself.
         send("DELETE", "/entries/$adaEntry", ada, null).status shouldBe 204
         get("/bonds/$bond/today", bea).status shouldBe 200
         post("/bonds/$bond/block", bea, """{"withdrawEntries": true}""").status shouldBe 204
         get("/bonds/$bond/today", ada).body.contains(BEA_TEXT) shouldBe false
+        get("/bonds/$bond/days", ada).body.contains(BEA_TEXT) shouldBe false
+        get("/bonds/$bond/days?favourites=true", ada).status shouldBe 200
         jdbc.queryForObject("SELECT text IS NOT NULL FROM entries WHERE id = ?::uuid", Boolean::class.java, beaEntry) shouldBe true
         dispatcher.dispatchDue(Instant.now(), DISPATCH_BUDGET).delivered shouldBe 1
         jdbc.queryForObject("SELECT text IS NULL FROM entries WHERE id = ?::uuid", Boolean::class.java, beaEntry) shouldBe true
@@ -222,6 +261,17 @@ class SecretsNeverLoggedTest(
         }
         withClue("these loggers printed a secret (logger, level, which secret); ${scan.events} events were read") {
             scan.offenders().shouldBeEmpty()
+        }
+        withClue("StatementCreatorUtils prints every value JdbcTemplate binds: for a bookmark, who kept which entry, and when") {
+            scan.linesFrom(PRINTS_BOUND_VALUES) shouldBe 0
+        }
+        // Its neighbour is not pinned and did log the bookmark's statements: their text, and no value bound to them.
+        val statements = scan.textsFrom(PRINTS_STATEMENTS).filter { "entry_favourites" in it }
+        withClue("JdbcTemplate logged no statement on entry_favourites at DEBUG: the check above proved nothing") {
+            statements.any { "INSERT INTO entry_favourites" in it } shouldBe true
+        }
+        withClue("JdbcTemplate printed a bound value beside a bookmark's statement") {
+            statements.count { marker in it || adaEntry in it || beaEntry in it } shouldBe 0
         }
         withClue("a secret reached the console by a road that is not a logger") {
             scan
@@ -317,6 +367,7 @@ class SecretsNeverLoggedTest(
     private class Answer(
         val status: Int,
         val body: String,
+        val etag: String?,
         mapper: JsonMapper,
     ) {
         val json: JsonNode by lazy { mapper.readTree(body) }
@@ -325,7 +376,8 @@ class SecretsNeverLoggedTest(
     private fun get(
         path: String,
         session: Session,
-    ) = send("GET", path, session, null)
+        ifNoneMatch: String? = null,
+    ) = send("GET", path, session, null, ifNoneMatch = ifNoneMatch)
 
     private fun post(
         path: String,
@@ -342,6 +394,7 @@ class SecretsNeverLoggedTest(
         body: String?,
         idempotent: Boolean = false,
         forwardedFor: String? = null,
+        ifNoneMatch: String? = null,
     ): Answer {
         val request = HttpRequest.newBuilder(URI("http://localhost:$port/api/v1$path"))
         request.method(method, body?.let(HttpRequest.BodyPublishers::ofString) ?: HttpRequest.BodyPublishers.noBody())
@@ -349,8 +402,9 @@ class SecretsNeverLoggedTest(
         if (session != null) request.header("Authorization", "Bearer ${session.access}")
         if (idempotent) request.header("Idempotency-Key", UUID.randomUUID().toString())
         if (forwardedFor != null) request.header("X-Forwarded-For", forwardedFor)
+        if (ifNoneMatch != null) request.header("If-None-Match", ifNoneMatch)
         val response = http.send(request.build(), HttpResponse.BodyHandlers.ofString())
-        return Answer(response.statusCode(), response.body(), json)
+        return Answer(response.statusCode(), response.body(), response.headers().firstValue("ETag").orElse(null), json)
     }
 
     /**
@@ -384,6 +438,12 @@ class SecretsNeverLoggedTest(
         }
 
         fun watched(): List<Pair<String, Watched>> = secrets.toList() + ENTRY_MARKERS
+
+        /** How many events the logger named exactly [logger] wrote, at any level. */
+        fun linesFrom(logger: String): Int = lines.count { it.logger == logger }
+
+        /** What the logger named exactly [logger] wrote. For a logger that prints no secret: this hands the lines back. */
+        fun textsFrom(logger: String): List<String> = lines.filter { it.logger == logger }.map { it.text }
 
         fun offenders(): List<String> =
             watched()
@@ -445,6 +505,12 @@ class SecretsNeverLoggedTest(
          */
         val PRINTS_THE_REQUEST_PATH =
             listOf("org.springframework.security.web.", "org.springframework.web.", "org.apache.catalina.")
+
+        /** Prints each value bound to a `JdbcTemplate` statement, at TRACE. Pinned in `application.yml`. */
+        const val PRINTS_BOUND_VALUES = "org.springframework.jdbc.core.StatementCreatorUtils"
+
+        /** Prints each statement's text at DEBUG, with `?` where a value goes. Not pinned. */
+        const val PRINTS_STATEMENTS = "org.springframework.jdbc.core.JdbcTemplate"
 
         /** Every logger name a property above raised, so that it can be put back. */
         val RAISED =

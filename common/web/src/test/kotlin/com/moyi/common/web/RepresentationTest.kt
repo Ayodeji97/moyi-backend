@@ -73,4 +73,20 @@ internal class RepresentationTest {
         leaked shouldNotContain "entityTag"
         leaked shouldNotContain Base64.getEncoder().encodeToString("""{"word":"zqthanks"}""".toByteArray())
     }
+
+    /**
+     * Spring MVC prints the value a handler returned at TRACE (`Writing
+     * [com.moyi.common.web.Representation@…]`), and this holder is a day's
+     * entries as bytes. It has no `toString` of its own, which is what keeps
+     * the words out of that line; this fails the day somebody gives it one,
+     * or makes it a class whose generated `toString` prints a field.
+     */
+    @Test
+    fun `the holder's toString says nothing of the body it holds`() {
+        val printed = representation.toString()
+
+        printed shouldNotContain "zqthanks"
+        printed shouldNotContain "word"
+        printed shouldNotContain Base64.getEncoder().encodeToString("""{"word":"zqthanks"}""".toByteArray())
+    }
 }
