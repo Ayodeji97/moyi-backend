@@ -30,6 +30,10 @@ stateDiagram-v2
         state "accepted" as bond_invite__ACCEPTED
         state "revoked" as bond_invite__REVOKED
         state "expired" as bond_invite__EXPIRED
+        bond_invite__NONE --> bond_invite__CREATED: you - create a bond / issue a new invite
+        bond_invite__CREATED --> bond_invite__REVOKED: you - 5 actions
+        bond_invite__CREATED --> bond_invite__ACCEPTED: you - accept an invite, partner - your partner accepts the invite
+        bond_invite__CREATED --> bond_invite__EXPIRED: system - the invite expires, seven days on
     }
     state "The proposal" as bond_proposal {
         state "none" as bond_proposal__NONE
@@ -152,3 +156,54 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | `ACTIVE` | your partner agrees to your proposal | partner | `ACTIVE` | The bond's zone moves as your partner agrees. The bond stays ACTIVE; the new zone decides dates from the end of the current day. | test |
 | `PENDING_DELETION` | your partner calls a proposal or the deletion off | partner | `ACTIVE` | Your partner calls the deletion off, and the bond is ACTIVE again for both of you. | smoke |
 | `PENDING_DELETION` | your partner calls a proposal or the deletion off | partner | `ARCHIVED` | Your partner calls the deletion off after you walked away. The bond is not revived with you gone: its one status becomes ARCHIVED. The test cited reads it as the member who called it off. | test |
+
+## The invite
+
+### Every action in every state
+
+| Action | `NONE` | `CREATED` | `ACCEPTED` | `REVOKED` | `EXPIRED` |
+|---|---|---|---|---|---|
+| create a bond<br>`POST /bonds` | 201 → `CREATED` (your email is verified, and you are in fewer than three bonds that are open or counting down to deletion)<br>403 `EMAIL_NOT_VERIFIED` (your email is not verified)<br>409 `BOND_LIMIT_REACHED` (your email is verified, and you are already in three bonds that are open or counting down to deletion) | not reachable | not reachable | not reachable | not reachable |
+| issue a new invite<br>`POST /bonds/{bondId}/invites` | 201 → `CREATED` | 201 → `REVOKED` | 409 `BOND_FULL` | 201 stays | 201 stays |
+| revoke an invite<br>`DELETE /bonds/{bondId}/invites/{inviteId}` | 404 `NOT_FOUND` | 204 → `REVOKED` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 404 `NOT_FOUND` |
+| look up an invite code<br>`GET /invites/{code}` | 404 `INVITE_NOT_USABLE` | 200 stays (you and the members of its bond have not blocked one another)<br>404 `INVITE_NOT_USABLE` (you and a member of its bond have blocked one another, in either direction) | 404 `INVITE_NOT_USABLE` | 404 `INVITE_NOT_USABLE` | 404 `INVITE_NOT_USABLE` |
+| accept an invite<br>`POST /invites/{code}/accept` | 404 `INVITE_NOT_USABLE` (your email is verified)<br>403 `EMAIL_NOT_VERIFIED` (your email is not verified) | 200 → `ACCEPTED` (your email is verified, you are not already in its bond, you are in fewer than three bonds that are open or counting down, and you and its members have not blocked one another)<br>403 `EMAIL_NOT_VERIFIED` (your email is not verified)<br>409 `ALREADY_MEMBER` (your email is verified, and you are already in its bond)<br>409 `BOND_LIMIT_REACHED` (your email is verified, you are not in its bond, and you are already in three bonds that are open or counting down)<br>404 `INVITE_NOT_USABLE` (your email is verified, you are not in its bond, you are under the limit, and you and a member of its bond have blocked one another, in either direction) | 404 `INVITE_NOT_USABLE` (your email is verified)<br>403 `EMAIL_NOT_VERIFIED` (your email is not verified) | 404 `INVITE_NOT_USABLE` (your email is verified)<br>403 `EMAIL_NOT_VERIFIED` (your email is not verified) | 404 `INVITE_NOT_USABLE` (your email is verified)<br>403 `EMAIL_NOT_VERIFIED` (your email is not verified) |
+| leave the bond<br>`POST /bonds/{bondId}/leave` | not reachable | 204 → `REVOKED` | 204 stays | 204 stays | 204 stays |
+| block your partner<br>`POST /bonds/{bondId}/block` | not reachable | 204 → `REVOKED` | 204 stays | 204 stays | 204 stays |
+| ask for the bond's deletion, or agree to it<br>`POST /bonds/{bondId}/deletion-request` | not reachable | 202 → `REVOKED` | 202 stays | 202 stays | 202 stays |
+
+### Refused here
+
+| In | Action | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|
+| `NONE` | create a bond | 403 `EMAIL_NOT_VERIFIED` | No bond is created, so no invite is either. | FR-002 | smoke |
+| `NONE` | create a bond | 409 `BOND_LIMIT_REACHED` | No bond is created, so no invite is either. | FR-025 | smoke |
+| `ACCEPTED` | issue a new invite | 409 `BOND_FULL` | The invite was used, so the bond has both its members and takes no new invite. Once the bond has ended or is counting down the answer is BOND_ARCHIVED instead: see the bond region. | FR-022 | smoke |
+| `NONE` | revoke an invite | 404 `NOT_FOUND` | The id names no invite of this bond: invented, another bond's, or not a UUID. The same 404 as an invite that is already dead. (a test asserts the status, not the code) | FR-023 | never-run |
+| `ACCEPTED` | revoke an invite | 404 `NOT_FOUND` | A used invite is no longer live, so there is nothing to revoke. Once the bond has ended or is counting down the answer is BOND_ARCHIVED instead: see the bond region. | FR-023 | never-run |
+| `REVOKED` | revoke an invite | 404 `NOT_FOUND` | Revoking twice is not idempotent: the second call finds no live invite under that id. | FR-023 | smoke |
+| `EXPIRED` | revoke an invite | 404 `NOT_FOUND` | An invite past its seven days is no longer live, so there is nothing to revoke. | FR-023 | never-run |
+| `NONE` | look up an invite code | 404 `INVITE_NOT_USABLE` | A code that was never issued gets the one answer every unusable code gets, so guessing codes teaches nothing. (a test asserts the status and that the body is the same bytes as a never-issued code's, not the code by name) | FR-024, ADR-0027 §1 | never-run |
+| `CREATED` | look up an invite code | 404 `INVITE_NOT_USABLE` | A blocked person is not shown the bond's name and then refused: they get the same answer as for a dead code, so nothing tells them they were blocked. (a test asserts the status, not the code) | FR-029, ADR-0027 §3 | never-run |
+| `ACCEPTED` | look up an invite code | 404 `INVITE_NOT_USABLE` | A used code is not live. The answer does not say that it was once real, or that somebody got there first. (a test asserts the status, not the code) | FR-024, ADR-0027 §1 | never-run |
+| `REVOKED` | look up an invite code | 404 `INVITE_NOT_USABLE` | A revoked code is not live, whether it was revoked by hand, replaced by a newer one, or revoked because its bond ended or began counting down. | FR-024, ADR-0027 §1 | smoke |
+| `EXPIRED` | look up an invite code | 404 `INVITE_NOT_USABLE` | A code past its seven days is not live. It is a 404 and not a 410, which would say the code was once real. (a test asserts the status and that the body is the same bytes as a never-issued code's, not the code by name) | FR-024, ADR-0027 §1 | never-run |
+| `NONE` | accept an invite | 404 `INVITE_NOT_USABLE` | A code that was never issued: the one answer. | FR-024, ADR-0027 §1 | smoke |
+| `NONE` | accept an invite | 403 `EMAIL_NOT_VERIFIED` | Verification is checked before the code is read, so the answer is the same whatever state the code is in. | FR-002, ADR-0027 §2 | never-run |
+| `CREATED` | accept an invite | 403 `EMAIL_NOT_VERIFIED` | Verification is checked before the code is read, so the answer is the same whatever state the code is in. The code is not spent. | FR-002, ADR-0027 §2 | test |
+| `CREATED` | accept an invite | 409 `ALREADY_MEMBER` | The creator sending their own code. It is named, because it is a fact about you, and the code stays live for the person it was meant for. | ADR-0027 §2 | smoke |
+| `CREATED` | accept an invite | 409 `BOND_LIMIT_REACHED` | The limit of three is checked before the bond's seat and before blocks. The code stays live, and somebody else can still use it. | FR-025, ADR-0027 §2 | test |
+| `CREATED` | accept an invite | 404 `INVITE_NOT_USABLE` | A blocked pair cannot be paired again, whichever of them holds the code. The answer is the one a dead code gets, so the blocked person cannot tell a block from a code that lapsed. The code is not spent. | FR-029, FR-024, ADR-0027 §1 | smoke |
+| `ACCEPTED` | accept an invite | 404 `INVITE_NOT_USABLE` | The code was used, by you or by somebody else: an invite works once. The one answer, identical to a code that never existed. | FR-024, ADR-0027 §1 | smoke |
+| `ACCEPTED` | accept an invite | 403 `EMAIL_NOT_VERIFIED` | Verification is checked before the code is read, so the answer is the same whatever state the code is in. | FR-002, ADR-0027 §2 | smoke |
+| `REVOKED` | accept an invite | 404 `INVITE_NOT_USABLE` | The code was revoked, or replaced by a newer one, or its bond ended or began counting down. The one answer, identical to a code that never existed. (a test asserts the status and that the body is the same bytes as a never-issued code's, not the code by name) | FR-024, ADR-0027 §1 | never-run |
+| `REVOKED` | accept an invite | 403 `EMAIL_NOT_VERIFIED` | Verification is checked before the code is read, so the answer is the same whatever state the code is in. | FR-002, ADR-0027 §2 | never-run |
+| `EXPIRED` | accept an invite | 404 `INVITE_NOT_USABLE` | The code is past its seven days. The one answer, identical to a code that never existed. (a test asserts the status and that the body is the same bytes as a never-issued code's, not the code by name) | FR-024, ADR-0027 §1 | never-run |
+| `EXPIRED` | accept an invite | 403 `EMAIL_NOT_VERIFIED` | Verification is checked before the code is read, so the answer is the same whatever state the code is in. | FR-002, ADR-0027 §2 | never-run |
+
+### Happens without you
+
+| In | What happens | Who | Leads to | Why | Evidence |
+|---|---|---|---|---|---|
+| `CREATED` | your partner accepts the invite | partner | `ACCEPTED` | Somebody accepts the code you shared. It is spent, and the bond shows no invite from then on. | test |
+| `CREATED` | the invite expires, seven days on | system | `EXPIRED` | Seven days after it was issued the code stops being live. No job does this and no row is written: every read asks whether the expiry time has passed. The test cited moves the expiry into the past and finds the code unusable; the seven days are read from the code. | test |
