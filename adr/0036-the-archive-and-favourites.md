@@ -1,6 +1,6 @@
 # ADR-0036 — The archive and favourites
 
-**Status:** Proposed · **Date:** 2026-10-09 · **Deciders:** Daniel
+**Status:** Accepted · **Date:** 2026-10-09 · **Deciders:** Daniel
 
 ## Context
 
@@ -34,13 +34,24 @@ five things in what this slice touches that the plan had to settle before any co
 - **"On delete cascade" can never remove a favourite** (X5). A delete keeps the row as a
   tombstone, so a foreign-key cascade never fires.
 
-ADR-0035's "Owed — C5b" list set five more conditions; "Owed" below says how each was met.
+ADR-0035's "Owed — C5b" list set six more conditions, the sixth shared with C5c; "Owed"
+below says how each was met.
 
 The slice was built in four tasks, each by an implementing agent. Tasks 1 to 3 were each
-then read by an independent reviewer who ran the code in a checkout of its own. The plan
+then read by an independent reviewer who ran the code in a checkout of its own. Task 4 had
+no reviewer of its own. The plan
 (`docs/superpowers/plans/2026-10-07-archive-and-favourites-c5b.md`) made fourteen decisions.
-Sixteen are recorded here. Decisions 1, 5, 6, 9 and 12 differ from the plan; each says what
-changed and which review or test caused it.
+Sixteen are recorded here. Decisions 1, 5, 6, 9 and 12 contradict the plan; 7, 11 and 14 add
+what it did not say. Each says what changed and which review or test caused it.
+
+Three whole-branch reviews then read the code at `9bba582` (the branch head was `c4b3e71`,
+one commit of documents later): privacy and the contract, concurrency and cost, and
+conformance to the corpus. **Two of them proved a defect in what this record had accepted.**
+Decision 7 said an empty page with a cursor "leaks nothing"; it told a withdrawal from a
+deletion by hand. Consequences said a mark could wait with no bound and did not mention the
+unmark; it was the unmark that waited, and a few of them stalled every user. Decisions 7 and
+12 are rewritten below and say what was proved and what was done. "How this was checked"
+has what each review ran.
 
 Four terms. A **favourite**, or **mark**, is a row of `entry_favourites`: one member's
 bookmark on one entry. The **gate** is `Entry.canBeReadBy`, the one function that says what a
@@ -66,6 +77,7 @@ corpus gives. Case by case:
 | `SOLO` on a bond that ended before the day did: never revealed (ADR-0033 decision 9) | its author only |
 | `SUSPENDED` from before the second member joined | the creator only; with both entries, each sees their own and the other's stays `LOCKED` |
 | Holding only the partner's unrevealed entry (`PARTIAL`, or today) | not the caller |
+| Listed for the caller through their own entry, where the partner wrote and erased theirs before any reveal | the caller, with the partner's entry as `{authorMemberId, status: REMOVED}`, **for good** |
 | `PARTIAL` or `PENDING_REVEAL` | whoever wrote on it; the partner's entry is `LOCKED` |
 | Closed `EMPTY` after its author deleted their only entry | **the author only, as `status: EMPTY` with their own tombstone** |
 | No entry row at all, whatever the status | nobody |
@@ -78,7 +90,16 @@ corpus gives. Case by case:
   gate answers `TOMBSTONE`. The filter and the gate agree; the prose did not. Built as the
   rule says, and tested (`ArchiveGateTest`, "EMPTY after its only entry was deleted"). A
   client that reads `EMPTY` as "nothing to draw" hides the tombstone; the contract's
-  description of the route says so. Question 2.
+  descriptions of the feed and of the one day both say so. Question 2.
+- **"They wrote something and took it back before you saw it" is permanent here.** A day
+  the caller is listed on through their own entry, on which the partner wrote and erased
+  before any reveal, shows the caller `partnerEntry: {authorMemberId, status: REMOVED}`.
+  BR-8 allows exactly that shape and `GET /today` has shown it since C5a, for that day. The
+  archive shows it on every walk, for as long as the bond's days exist. It follows from the
+  rule and the gate (`TOMBSTONE_UNSEEN`), and `ArchiveGateTest`'s matrix pins the shape for
+  every such cell. Hiding it would be a rule of its own: render an entry never shown as
+  absent once its day has closed. Noted by the whole-branch privacy review; the smoke run
+  now reads the shape from the jar. Question 6.
 - **It reads no column of the day.** A `SOLO` or `REVEALED` status is not evidence that an
   entry was revealed (ADR-0033 decision 9), and `bond_days.revealed_at` is unset on a `SOLO`
   day whose lone entry was revealed.
@@ -121,9 +142,10 @@ Found by the reviewer of Task 2, by reading; not pinned.
 **3. A day is `{date, status, myEntry, partnerEntry}`**: `GET /today`'s shape without the
 streak. `myEntry` is the wide shape or absent; `partnerEntry` is the wide shape or one of
 the two narrow ones. **`status` is the day's own**, `SOLO`, `EMPTY`, `FROZEN` and
-`SUSPENDED` included. That is the owner's ruling of 2026-10-06, given in conversation: an
-archive day carries its status, as the calendar now draws a solo day (ADR-0034, Rulings,
-2). ADR-0035's Owed list mentions the ruling; this is the first place it is recorded as a
+`SUSPENDED` included. That is the owner's ruling of 2026-10-06: an archive day carries its
+status, as the calendar now draws a solo day (ADR-0034, Rulings, 2). It was given in
+conversation and recorded at the time only in ADR-0035's Owed list, so nothing in this
+repository but that line vouches for it; this is the first place it is recorded as a
 decision. Nothing is decided from the status. It is there to be shown.
 
 No day and no entry carries `deletedAt` or `updatedAt`, on any shape. A withdrawal stamps
@@ -196,11 +218,14 @@ earlier than `limit` would have put it.
   day of two is about 98 KB, and so is `GET /today`. The bound held, and only because it
   counts escaped octets; the arithmetic written beside it (in the plan, in a KDoc, in the
   Task 2 report: "a day is at most about 21 KB") was wrong by a factor of five.
-- **The worst page is about 229 KB against 262,144.** Two of the largest days fit the
+- **The worst page is about 230 KB against 262,144.** Two of the largest days fit the
   budget (196,588 octets) and a third does not. The rest of a 50-day page (ids, dates and
   field names of a hundred wide entries) is about 32.5 KB. `DaysFeedTest` builds that page
-  and measures it: 229,063 octets. The margin is 33 KB, and a new field on an entry spends
-  it at a hundred entries a page.
+  and measures it: 229,063 octets, with the test clock's whole-second timestamps. An
+  instant in production carries microseconds, seven octets more in each of two fields of a
+  hundred entries: about 1.4 KB more than was measured (the conformance review's
+  arithmetic; not built). The margin is about 31 KB, and a new field on an entry spends it
+  at a hundred entries a page.
 - The count is an upper bound on what the serializer writes, never under: the reviewer
   compared it with the application's mapper over every scalar of the Basic Multilingual
   Plane.
@@ -216,30 +241,93 @@ earlier than `limit` would have put it.
   renderings.
 
 **7. `favourites=true` lists the days holding an entry the caller has marked and can read
-in full.** The query adds a second `EXISTS` over `entry_favourites` for this member, joined
-to a revealed, unerased entry of the day. That is still only a filter. A marked entry whose
-author has withdrawn, and which nothing has erased yet, is a whole row to the query and a
-tombstone saying `favourited: false` to the caller. So `GetDays` filters **again after the
-gate** and drops a day on which nothing marked can be read in full now.
+in full, and a day the gate drops leaves no trace in the page.** The query adds a second
+`EXISTS` over `entry_favourites` for this member, joined to a revealed, unerased entry of
+the day. That is still only a filter. A marked entry whose author has withdrawn, and which
+nothing has erased yet, is a whole row to the query and a tombstone saying
+`favourited: false` to the caller. So `GetDays` filters **again after the gate** and drops a
+day on which nothing marked can be read in full now.
 
-- **A page can therefore be empty, or shorter than `limit`, and still carry a
-  `nextCursor`.** The cursor is the last day taken from the archive, kept or dropped, so
-  the walk goes on past it and ends when the archive does. Only a null `nextCursor` means
-  the end; the contract says so on the route and on `limit`.
-- **That leaks nothing.** The dropped day held the caller's own mark, on an entry the plain
-  feed already shows them as a tombstone. The partner's marks are in no query.
+- **As first built, a dropped day still moved the cursor, and that told a withdrawal from
+  a deletion by hand.** The cursor was the last day taken from the archive, kept or
+  dropped, so a page could be empty, or shorter than `limit`, and still carry a
+  `nextCursor`. This record said of it: "That leaks nothing. The dropped day held the
+  caller's own mark, on an entry the plain feed already shows them as a tombstone." It was
+  accepted on that argument and it was false.
+- **What was proved** (the whole-branch privacy review, by running). Two bonds with one
+  history: four revealed days, Bea's bookmark on Ada's entry on two of them and on her own
+  on one, and nothing written on the day of the ending. In the first Ada blocked, taking
+  her entries back, and the dispatcher had not run. In the second Ada deleted her four
+  entries by hand and then left. Twelve of Bea's views were compared with ids normalised.
+  Ten were identical: `GET /today`, the plain feed at three page sizes, five day views,
+  and `favourites=true` at the default `limit`. `favourites=true` at `limit=1` and at
+  `limit=2` were not. At `limit=1` the first bond answered `{"items":[],"nextCursor":"…"}`,
+  then a day with a cursor, then `{"items":[],"nextCursor":null}`; the second answered
+  that day with `nextCursor: null`.
+  A deletion by hand removes the bookmark with the words (decision 13), so it can never
+  produce an empty page with a cursor. For as long as the consumer had not run, one old
+  bookmark told Bea that Ada had taken everything back in one act, which ADR-0028 decision
+  8 says she must not be able to learn. It is not ADR-0035 question 4's window either:
+  that one lasts a day and needs a lone or pending entry on the ending day; this needed
+  only that Bea had ever bookmarked an entry of Ada's, and lasted as long as the poller
+  was stopped or a delivery was backing off. After the dispatcher ran the two bonds were
+  identical in all twelve views, in four scenarios.
+- **What was done: the request reads on until the page is decided** (`GetDays.page`,
+  `a461ea8`). It reads candidates in windows, the first of `limit + 1` and then 51 at a
+  time, each through the gate. The page is the days that are shown. `nextCursor` is the
+  last day shown when a further day that would be shown has been met, and `null` when the
+  candidates have run out. So the page and its cursor are those of an archive in which the
+  dropped days were never candidates, which is the hand-deleted twin's archive.
+  `WithdrawalTwinArchiveTest` holds it: a withdrawn bond and its twin, the plain feed and
+  `favourites=true` at `limit` 1, 2, 3 and the default, page by page with ids normalised
+  and cursors as sent; and the withdrawn bond before and after the dispatcher erases, byte
+  for byte and tag for tag. Two bonds do not share an id, so their bytes and tags cannot
+  be compared directly; the second comparison is where they can be.
+- **The brief for the fix said the cursor should be "derived exactly as now", and it could
+  not be.** As it was, the cursor was the last candidate taken, shown or not. The twin's
+  cursor is its last shown day, and it is `null` when no shown day follows. So the request
+  has to look ahead to the next day that would be **shown**, not the next candidate, and
+  give the last shown day as the cursor. Run as mutations: with the cursor taken from the
+  last day examined, the look-ahead day is skipped by the next page (ten tests fail).
+- **Who has withdrawn is asked once per window, after that window's entries are loaded**
+  (decision 15). Not once after the last window: whether another window is needed depends
+  on what the gate dropped from this one, so each window needs the answer before the next
+  is fetched. Each entry is then judged by an answer taken after its own row was read,
+  which is the whole of ADR-0035 decision 12's guarantee. Two windows of one request can
+  hold two answers if an ending commits between them: the later days are tombstones and
+  the earlier are not, each true when it was read, as two requests a moment apart would
+  have been. Asking again at the end and judging every entry a second time was not done:
+  it could shorten the page after the reading had stopped.
+- **The bound: twenty windows a request, about a thousand days.** It is reached only when a
+  request meets more dropped days in a row than that: a member who bookmarked about a
+  thousand days of a partner's entries, the partner withdrew, and nothing has erased them.
+  The request then answers with what it found and the date of the last day it
+  **examined** as the cursor, so the walk goes on and skips nothing. Such a page can be
+  short or empty with a cursor, which is what every page with a dropped day used to be,
+  and there the old difference is back. Tested with 977 such days put down by hand. With
+  the cursor taken from the last day shown instead, that test's favourite beyond the
+  bound is never reached. Without a bound, one request could read a bond's whole history.
+- **What it costs.** Nothing when the gate drops nothing: one window, as before, except
+  that the look-ahead day's entries are now loaded with the page's. When it does drop,
+  about eight statements a window (the candidates, the entries, the membership read again,
+  the marks): at the bound about 160 in one request. Reasoned from the code, not measured.
 - The day still carries both entries. The filter selects days, not entries (doc 06,
   `states.md` §6).
-- *Not done:* filling the page inside one request by reading on until `limit` days are
-  kept. With `limit=1` a client makes one empty round trip per withdrawn marked day until
-  the consumer has run, normally two seconds. Question 3.
+- *Not done:* the review's other fix, giving the query the withdrawn authors as a
+  parameter. By the reviewer's own account the drop after the gate would then still fire
+  in the race between the query's reading of the marker and the gate's, so the page with a
+  cursor would be rarer and not gone; and the query would decide part of what the gate
+  decides (decision 2).
 
 **8. `GET /bonds/{bondId}/days/{date}` is one `404 DAY_NOT_FOUND` for every way a date is
 not in the caller's archive.** No row for the date, a day nobody wrote on, a date before
 the bond or not yet come, a day holding only an entry the partner wrote and the caller has
 not been shown, and a value that is not a date: one exception class with no argument, so
-one body. The last-but-one is why the others may not differ from it: an answer of its own
-would say that the partner has written.
+one body, for every value that reaches the handler. The day holding only the partner's
+entry is why the others may not differ from it: an answer of its own would say that the
+partner has written. (A value the firewall or the container refuses first never reaches
+the handler: the review of Task 1 saw a bare `400` for a percent-encoded `<` in
+`{entryId}`. Not run for the date segment.)
 
 - It is the feed's own rule asked of one date (`ArchiveDays.on` runs the same statement
   with the date pinned; the `SEEN` fragment is written once) and the feed's own rendering
@@ -248,6 +336,10 @@ would say that the partner has written.
 - **The date is taken as text and read strictly**, for the guard's reason and one more:
   bound as a `LocalDate`, a value that is not one would be Spring's `400`, a second answer
   that quotes the input. `2026-2-3`, `2026-02-30` and `yesterday` are the `404`.
+- **The contract says where today is** (`a5cf2f3`). The operation's description tells a
+  client that today is `404` here until the caller has written or the day has revealed,
+  and to read today from `GET /today`. Before the conformance review said so, only the feed
+  had a description.
 - A stranger gets the bond's `404`, before the date is looked at. The date is read before
   the joining day is reconciled, so a request that names no day writes nothing.
 - **Today, for a member who has not written while the partner has, is `404` here and a
@@ -275,6 +367,19 @@ serialisation, and the tag cannot be a digest of one attached to another.
   withdrawn, and when a day reveals. It differs between the two members for the same day.
   It does **not** move when the partner marks anything, because nothing of theirs is in
   the body (`DaysConditionalTest`).
+- **For a withdrawal it moves once, at the ending's commit, and not again at the erasure,
+  on every day that had revealed.** A second change would tell the reader when the consumer
+  ran, which a deletion by hand has no counterpart to. Run by the whole-branch privacy
+  review: the other member's seven tags (the feed, the favourites feed, each day) were
+  identical before and after the dispatcher ran; `WithdrawalTwinArchiveTest` now holds
+  every page's bytes and tag across the erasure, and the smoke run reads the tag on both
+  sides of the poller. **One day is the exception: the day of the ending, when the reader
+  is listed on it and it had not settled.** There the day's `status` goes from `PARTIAL` to
+  `OPEN` at the erasure, so the reader's feed tag and that day's tag move a second time
+  (seen in the probe: the reader's own tombstone beside the withdrawn author's lone
+  entry). That is ADR-0035 question 4's window, on the one unsettled day an ended bond
+  has; the archive adds no day to it. What the archive adds is a cheap way to watch it:
+  `If-None-Match` answers `304` until the instant the consumer runs.
 - **What a keyed tag costs.** It validates only while the secret is unchanged. After a
   rotation, or a restart with an `EPHEMERAL` secret, a stored tag matches nothing and the
   client is sent the whole `200` once.
@@ -290,12 +395,22 @@ serialisation, and the tag cannot be a digest of one attached to another.
   store one caller's view, and the caller's own cache must ask before reusing it. Setting
   it is also what stops Spring Security adding its default, which includes `no-store`
   and would forbid the copy the tag exists to revalidate. That writer adds its default
-  only where a response has no `Cache-Control`, so **every other response keeps
+  only where a response carries none of `Cache-Control`, `Pragma` and `Expires` (and never
+  on a `304`), so **every other response keeps
   `no-cache, no-store, max-age=0, must-revalidate`**: the reviewer of Task 3 saw it on the
   archive's `404`, `401` and `422`, on `GET /today` and on `GET /bonds/{id}`. No
   `Vary: Authorization`: `private` already keeps the response out of any cache that serves
   two people, and access tokens are short-lived, so a client cache that honoured it would
   discard its copy at most of the times it would have been of use.
+- **What that header lets a client's cache do, which `no-store` never did** (the
+  whole-branch privacy review; reasoned, not run). For the first time a client's HTTP cache
+  may keep entry text on the device. Words an author later withdraws stay in the other
+  member's cache for every page that member does not ask for again; the server cannot
+  reach them. And two accounts on one device share a cache keyed by URL. Revalidation is
+  mandatory and the tag is each caller's own, so a cache that follows the rules never
+  serves one member's page to the other; `Vary: Authorization` was rejected above on cost
+  alone, without this being weighed. Both are the client's to handle: a cache per account,
+  cleared at sign-out. Question 8.
 - **`Accept` is settled by the mapping, and the response is its own bytes whatever was
   asked for.** As first built, the converter claimed a `Representation` for
   `application/json` only. The reviewer of Task 3 proved what that left. For
@@ -326,9 +441,14 @@ serialisation, and the tag cannot be a digest of one attached to another.
   an unknown bond and a value that is not a UUID (run by the fixer over twelve askers), so
   it is not an oracle; but on these two
   routes a stranger who sends `Accept: text/plain` gets `406` and not the bond's `404`. On
-  `GET /today` and the rest the `406` still comes after the handler. The contract is
-  unchanged: the generator's copy of the wildcard is removed for the two operations, so
-  the `200` documents `application/json` only.
+  `GET /today` and the rest the `406` still comes after the handler. The generator's copy
+  of the wildcard is removed for the two operations, so the `200` documents
+  `application/json` only. The `406` itself was in the contract for neither operation
+  until `a5cf2f3`: it is now documented on these two and on no other, saying that it is
+  decided before the membership check and is the same response whoever asks. The
+  whole-branch privacy review saw it byte-identical for a stranger, an unknown bond, a
+  value that is not a UUID and a member, and the smoke run now compares a stranger's with
+  a member's.
 
 **10. A favourite is a row `entry_favourites (entry_id, member_id, created_at)`** (V22,
 `V22__gratitude_entry_favourites.sql`), and not a flag on `entries`: an entry is shared, so
@@ -352,12 +472,34 @@ any column on it is readable by both people. Keyed this way there is no query th
 - `member_id` is the caller's member id in the entry's bond, never a user id: one person in
   two bonds is two members.
 - `created_at` is cut to microseconds by the writer and returned by nothing. A second mark
-  keeps the first time.
+  keeps the first time. **Nothing reads it either**: no query orders or filters by it. To
+  an operator the row is a durable record of which words a person kept and the instant
+  they did, and for a partner's entry that is an instant at which they were reading it.
+  FR-093's "private" cannot be made to hold against an operator (the filter runs in SQL,
+  so the row must be readable server-side); what can be done is to keep less. The column
+  is kept because the corpus specifies it (doc 04:90, `memberId · entryId · createdAt`).
+  V22 is unmerged and may still be edited. Noted by the whole-branch privacy review;
+  question 7.
 - The feed needed no index. `bond_days_feed_idx (bond_id, date DESC)` has existed since
   V12, and on a 2,000-day bond Postgres chose the unique `(bond_id, date)` backwards
-  instead; either serves, with no sort, and a page costs about a page however old the bond
-  is. The favourites form can read further: it walks back until it has found enough marked
-  days.
+  instead; either serves, with no sort. **A page costs about a page where the listed days
+  are dense, and this record first said "however old the bond is".** The statement walks
+  `bond_days` backwards and probes `entries` once a day until it has `limit + 1` days the
+  caller has something to see on. A day they have nothing on is walked past with one
+  probe: a day with no entry row (`EMPTY`, `FROZEN`, a `SUSPENDED` gap; `CreateMissingDays`
+  writes those rows) or one holding only the partner's unrevealed entry. A page that
+  crosses a year nobody wrote in probes about 365 days, and the last page of any walk
+  reads back to the bond's first day. Measured by the whole-branch concurrency review,
+  warm, on a laptop: 3,000 days with the caller's entry on the 5 oldest, 12,084 buffers and
+  2.4 ms for the first page; 3,000 days with no entry rows at all, 9,084 buffers and
+  1.8 ms; 30,000 days with none visible, 120,761 buffers and 27.7 ms. Every page repeats
+  it, and cold it is random I/O. The bound is one row per calendar date of the bond's own
+  life, never the table. **NFR-033** (cost does not grow with the size of the table) is
+  met for the dense feed and for `GET /days/{date}`; for a sparse history and for
+  `favourites=true` it holds only in that sense, the bond's own days or the member's own
+  marks, and not by the letter. `ArchiveDaysTest` seeds a revealed day for every date and
+  so asserts the dense case only. Nothing was changed. The favourites form can read
+  further: it walks back until it has found enough marked days.
 
 **11. Who may mark what is the gate's answer for the caller, and one thing more**
 (`Entry.canBeFavouritedBy`, which calls `canBeReadBy`; `FavouriteEntry` only translates):
@@ -395,7 +537,11 @@ for.
   has not been revealed." and promises nothing about when. No test had asserted either
   sentence; `FavouritesTest` and `EntryChangesTest` now do.
 - On `DELETE` a tombstone still deletes. It costs nothing and removes a mark left by the
-  one interleaving decision 12 lets through.
+  one interleaving decision 12 lets through. It deletes only a row it can lock at once, so
+  it never waits for whoever else is deleting it (decision 12).
+- **The contract now says all of this to a client** (`a5cf2f3`): whose a bookmark is, that
+  only an entry the caller is shown as `REVEALED` takes one, and what each `409` means.
+  The conformance review found that three of the four operations had no description.
 
 **12. The mark is one statement, and it takes a `FOR SHARE` row lock. The plan said "no
 lock is taken".**
@@ -443,6 +589,52 @@ The lock is held for that statement alone and nothing else is held with it, so i
 edge to the application's lock order (bond, day, entry). In the other order the erasure
 waits for the statement and removes what it inserted.
 
+**Neither verb waits out a withdrawal** (`fdd365f`). As first built the mark waited for
+its lock with no bound, and this record said so of the mark and nothing of the unmark. The
+whole-branch concurrency review proved that the unmark was the one that mattered.
+
+- **Who waited on what.** `Favourites.unmark` was a bare `DELETE`. The withdrawal consumer
+  erases a member's entries one at a time in one transaction and holds every row it has
+  touched, the bookmarks it removed included, until the whole delivery commits. The gate
+  lets an unmark through on a tombstone, which is what a withdrawn author's entry is. So
+  an unmark of a bookmark the consumer had already removed waited for the rest of the
+  delivery, holding a pooled connection. The mark was the safe one there: the gate
+  answers a withdrawn entry as a tombstone and refuses before any statement.
+- **Measured.** 2,000 withdrawn entries, all bookmarked by the partner. The delivery took
+  3,964 ms. Six unmarks, fired 0.4 s into it, each took 3,557 ms. The test's pool is four
+  connections; with all four held, a member of **another bond** waited 3,261 ms for
+  `GET /today` (43 ms before), and so did the partner's own feed and a `PUT` that the gate
+  refuses without touching a row. They waited for a connection, not for a lock. In
+  production the pool is Hikari's default of ten and nothing sets a lock or statement
+  timeout for a request, so nine unmarks by one member, which the global limit of 120 a
+  minute allows, would hold it for the rest of a delivery, and a delivery may run to sixty
+  seconds (reasoned by the reviewer from the run, not run at ten). It healed by itself:
+  the delivery keeps its one connection, and nothing deadlocked.
+- **The unmark deletes only a row it can lock at once** (`FOR UPDATE SKIP LOCKED`) and is
+  `204` either way. A row it cannot lock is one somebody else is deleting: as good as
+  deleted. If that erasure rolls back, the bookmark outlives an unmark that reported
+  success; the entry is then whole again, shows `favourited: true`, and can be unmarked.
+- **The mark waits two seconds for a lock and then answers `409 ENTRY_IMMUTABLE`.** Its
+  statement now runs in a transaction of its own that first sets
+  `set_config('lock_timeout', '2000ms', true)`: `ConsumerRegistry`'s idiom, local to the
+  transaction, so the pooled connection goes back as it came. Set outside a transaction
+  it would end with its own statement and bound nothing. It still takes no bond or day
+  lock. A revealed, unerased entry's row is changed by nothing but an erasure, and only a
+  withdrawal's holds it for long; so a row held past two seconds is being erased, and
+  "can no longer be changed" is the answer waiting would have given, sooner. If that
+  erasure rolls back, the member was refused a mark on a whole entry and may ask again.
+  Postgres's `lock_not_available` is caught outside the transaction and never logged.
+- **How it is held.** `FavouriteLockWaitTest` opens an erasure on the test's own
+  connection and leaves it open: the unmark answers `204` while it is open; the mark is
+  refused while it is open; no pooled connection keeps the timeout. The mark's refusal is
+  asserted at the service (`EntryImmutableException`, through a store given 200 ms), not
+  over HTTP: a bean of its own for the short wait meant one more Spring context, whose
+  connections took the module's test database past its limit. Over HTTP the `409` is
+  asserted only where the erasure commits (`FavouritesTest`).
+- *Not changed:* every other request that takes the bond's lock on that bond still queues
+  behind a delivery, as since C5a (reasoned by the reviewer, not run). The pool's size is
+  not set, and no request has a statement timeout.
+
 The gate is asked first, because the statement does not know about a withdrawal that has
 erased nothing yet: that row is whole. **One interleaving is let through:** a withdrawal
 that commits after the gate answered and before the statement runs. The mark is made, by a
@@ -486,6 +678,26 @@ loads its entries first and only then resolves the membership again for the `Rea
 gate is asked with (`readerNow`). The membership the controller resolved still says whose
 archive this is and which member is "me". It does not say who has withdrawn, because the
 joining-day reconcile between the two can wait on the bond's lock while an ending commits.
+Since `a461ea8` the feed can read several windows of candidates in one request; it asks
+after each window's entries (decision 7).
+
+**A page is not one snapshot.** `GetDays.page` and `day` run in one read-only transaction
+at `READ COMMITTED`, which is one snapshot for each statement: the days and their status,
+then the entries, then the membership and the marker, then the marks. A day's `status`
+comes from the first and its entries from the second. The whole-branch concurrency review
+ran the partner's submit committing between the two, and both routes answered
+`"status":"PARTIAL"` with both entries `REVEALED` and the partner's words in full: a day
+that existed at no instant. With the author's own delete in the gap: `PARTIAL` over the
+author's tombstone and no partner entry, where the true state was `OPEN`. It is not a
+privacy fault, because the reveal or the erasure had really committed and the gate is
+asked of the later rows. It does not stick: the next read differs, and the first tag
+revalidates to a `200` (run). `GET /today` has read the day and then the entries since C1.
+**`REPEATABLE READ` was not used.** It would remove this and is mechanically possible
+(these transactions publish nothing, and a read-only one cannot fail serialisation). But
+it moves "who has withdrawn" from "as of the last read" to "as of the transaction's first
+statement": a block committing during the request would be shown whole, which is what
+this decision exists to prevent. So a client must not read "waiting" from `status` when
+both entries are present.
 
 **The first tests of this ordered nothing.** The feed's and the day's each stalled the
 request with `LOCK TABLE entries` and ended the bond while it waited. But the statement
@@ -519,26 +731,56 @@ passes (S15). A mark is one small statement and an id that was never shown is th
   `breaking-api-change`.
 - **An existing client sees one new field**, `favourited`, on every entry it already
   receives in the wide shape.
-- **A page's length means nothing.** `items` can be shorter than `limit`, or empty, while
-  `nextCursor` is not null (decisions 6 and 7). A client that stops at a short page stops
-  early.
+- **A short page is not the last page.** `items` can be shorter than `limit` while
+  `nextCursor` is not null, because a page is also bounded by its size (decision 6). A
+  client that stops at a short page stops early. A page with a cursor holds at least one
+  day, except at decision 7's bound on one request's reading; until `a461ea8` any
+  `favourites=true` page could be empty with a cursor, and that was a leak.
 - **`GET /today` can be about 98 KB** (decision 6). It always could; nobody had measured
   it. Whether `EntryText` should count untrimmed control characters is not this slice's
   and is not changed.
 - **A read can write, once per bond**, on the four new routes as on `GET /today`
   (decision 14).
-- **A mark waits behind any open update of its entry's row, with no timeout of its own.**
-  Run by the reviewers: 30 rounds of a partner's `PUT`, the author's `DELETE`, a block with
-  withdrawal and the dispatcher started together, and 25 rounds of two `PUT`s, an erasure
-  or an unmark and a favourites feed. No deadlock, no `5xx`, the worst round 24 ms, and no
-  mark left on an erased entry.
+- **A mark waits at most two seconds for its entry's row, and an unmark never waits**
+  (decision 12). Before that was so, the per-task reviewers ran 30 rounds of a partner's
+  `PUT`, the author's `DELETE`, a block with withdrawal and the dispatcher started
+  together, and 25 rounds of two `PUT`s, an erasure or an unmark and a favourites feed. No
+  deadlock, no `5xx` and no mark left on an erased entry in either; the worst round of the
+  first was 24 ms (the second was not timed). The whole-branch concurrency review then ran
+  40 rounds on one bond with two revealed days: looping `PUT`s by both members on three
+  entries, two looping unmarks, both feeds, the day view and `GET /today`, against an
+  author's `DELETE`, a block with withdrawal and its dispatcher, a second dispatcher and
+  the close job. About 1,150 requests: `PUT` `204` 275 times and `409` 123 times, so the
+  races were met; everything else `204` or `200`; no `5xx`; Postgres's deadlock counter
+  unmoved; the worst round 142 ms; and after every round no bookmark on any erased entry.
+  On a pool of four, so at most four statements at once. **None of these races was run
+  again after `fdd365f`** changed both statements; the build's own tests were.
 - **A second use of the personal-data secret that a client can see.** The tag is the first
   value made from it that leaves the server in a response. The label keeps it apart from
   the other two uses. Rotating the secret costs each client one full read per resource, in
   addition to what ADR-0031 decision 8 says it costs idempotent replays.
-- **The favourites filter reads all of the member's marks in the bond on each page** and
-  sorts them when it drives from the index. Cost grows with the member's marks, not the
-  bond's age. Not measured beyond 20 marks among 8,020.
+- **The favourites filter reads all of the member's marks in the bond on each page**, and
+  the plan the application runs is not the plan the test reads. `ArchiveDaysTest` asks
+  Postgres to explain the statement with its values in place, which is a custom plan. The
+  driver prepares the statement on its fifth use on a connection, and Postgres then prices
+  a generic plan that knows neither the member nor the limit. Measured by the whole-branch
+  concurrency review at 498,000 entries, for a member with 6,000 marks on a 3,000-day bond
+  at a limit of 21: custom plan, a backward index scan, 256 buffers, 0.06 ms; generic plan,
+  driven from all of the member's marks with a top-N sort, 48,103 buffers, 12.8 ms; through
+  `ArchiveDays.candidates` itself after twenty warm-up calls, a median of 12.3 ms, so the
+  application does get the generic plan. At about 200 and 1,000 marks: 0.4 to 0.7 ms and
+  2.6 to 3.1 ms. Cost is linear in the member's marks, on every page. The plain feed keeps
+  its index scan in every mode (88 buffers, 0.03 ms). When this was first written it said
+  "not measured beyond 20 marks among 8,020". Not changed: 12 ms at a number of bookmarks
+  no member has.
+- **A feed request is about eleven to fourteen statements in three connection
+  check-outs**, and the page's own three are the small part: the membership twice (the
+  controller's, then `readerNow`'s; each is the bond and its members, the anchor timeline
+  and the withdrawals), the joining day, the candidates, the entries, the marks.
+  `GET /days/{date}` is the same with the date pinned. The joining-day check is one read
+  and no lock on every archive and favourite request, for good. Counted from the code by
+  the concurrency review, not measured. A request that refills (decision 7) adds about
+  eight a window.
 - **A date with a dot in it gets one more header on its `404`.** `GET …/days/2026.09.15`
   answers the same `404 DAY_NOT_FOUND` body with Spring's
   `Content-Disposition: inline;filename=f.txt`, its guard against a path that looks like a
@@ -547,13 +789,30 @@ passes (S15). A mark is one small statement and an id that was never shown is th
   stranger gets the bond's `404` with the same header. Found while writing the loose-date
   test; accepted, not suppressed, and pinned by a test in `DayViewTest` since `50166ec`.
 - **A `406` on the two archive routes comes before the guard** (decision 9). Everywhere
-  else it comes after.
-- **The plan test asserts shape, not planner choice.** `ArchiveDaysTest` reads
+  else it comes after. The contract documents it on these two, and only there.
+- **One more logger is pinned in the shipped `application.yml`**:
+  `org.springframework.jdbc.core.StatementCreatorUtils`, at INFO (`b9f1e78`). At TRACE it
+  prints each value `JdbcTemplate` binds, and for a bookmark that is the entry's id, the
+  member's id and the instant on three adjacent lines: who kept what and when, in a log
+  kept longer and read by more people than the table. No entry text goes through it. Seen
+  by the whole-branch privacy review with every level raised. `SecretsNeverLoggedTest`
+  drove none of the four new routes; it does now, and fails if that logger writes a line
+  (225 before the pin). `JdbcTemplate` itself at DEBUG prints a statement's text with `?`
+  for each value, which the test asserts of the bookmark's statements, and is not pinned.
+  The pin gives way to a level set on that exact logger, as the other pins do.
+- **ADR-0032 to ADR-0035 read "Proposed" after they merged; this slice sets them to
+  "Accepted".** ADR-0035's smoke run is corrected from 18 to 19 sections. Each of the four
+  says so in a dated note; this is the line they point at. This record's own status is set
+  in this pull request, as ADR-0026 to ADR-0031 did.
+- **The plan test asserts shape, not planner choice, and of the custom plan, on a dense
+  bond.** `ArchiveDaysTest` reads
   `EXPLAIN (ANALYZE, FORMAT JSON)`: no sequential scan, and fewer than 63 rows taken from
   `bond_days` and from `entries` for a first, a deep and an `until` page on a 2,000-day
-  bond. Its first form asserted "no `Sort`" and an index name, which a Postgres upgrade
-  could turn red for no fault; the reviewer of Task 2 said so and it was rewritten. NFR-003
-  (a 20-day page at p95 ≤ 200 ms) and doc 12's 500k-entry deep paging were not measured.
+  bond. It does not read the generic plan the application comes to run (above), and it
+  never meets a gap in the days (decision 10). Its first form asserted "no `Sort`" and an
+  index name, which a Postgres upgrade could turn red for no fault; the reviewer of Task 2
+  said so and it was rewritten. NFR-003 (a 20-day page at p95 ≤ 200 ms) and doc 12's
+  500k-entry deep paging were not measured.
 - **Nothing removes a member's favourites when the member goes.** `member_id` has no
   foreign key, on purpose. Owed, Phase 5.
 
@@ -587,6 +846,24 @@ passes (S15). A mark is one small statement and an id that was never shown is th
 - `EraseEntry` must remove an entry's reactions as it removes its favourites.
 - Whether a reaction is allowed on an ended bond is not decision 14's question: a reaction
   is seen by the other person, and a bookmark is not.
+- **The owner's rulings of 2026-10-06 on reactions.** Given in conversation and written
+  down here for the first time, so nothing else in this repository vouches for them: one
+  reaction per member per entry; on the partner's revealed entry only; visible to the
+  author; no timestamp; and a placeholder set, `HEART`, `THANK_YOU`, `SMILE`, `MOVED`.
+  They answer X2 (one, where doc 07's key and doc 06's route allow one per type) and part
+  of S1, S2 and S3 below. "Placeholder" is the owner's word: the set is not final.
+- **The corpus read's reactions items are in no other ADR, and the read (`c5-corpus.md`)
+  is not in this repository.** ADR-0035 carries X6 to X10, X15 to X21 and S16 to S26; this
+  record carries the rest but these: **X2** (doc 03 says "one of a small fixed set of
+  reactions"; doc 07's unique key `(entry_id, member_id, type)` and doc 06's
+  `DELETE …/reactions/{type}` permit every type at once), **X3** (reactions have an
+  endpoint and no screen, no fixed set and no recorded gap), and **S1 to S5**: the set, its
+  wire names and whether it is an enum in the contract; whose entry may be reacted to;
+  whether and on which responses reactions are returned, and in what shape; what an
+  erasure by delete, by withdrawal and by account deletion does to them, the withdrawing
+  member's own reactions on the partner's entries included; and the status codes for a
+  repeat, an unknown type, a tombstone and before the reveal. C5c's plan settles each
+  before code. Found dropped by the conformance review.
 
 **C6, search.**
 
@@ -601,7 +878,9 @@ passes (S15). A mark is one small statement and an id that was never shown is th
 **Phase 5, account deletion.** A member's favourites. Nothing removes a member row today;
 when something does, that change removes the member's rows of `entry_favourites`. Until
 then a record of what a deleted person kept would outlive them, until the bond's days are
-hard-deleted.
+hard-deleted (the foreign key's cascade from `entries` takes them then). This belongs in
+Phase 5's deletion checklist and not only here; and a member's export should carry their
+own bookmarks and nobody else's.
 
 **`bond`.** The partner's display name is still not obtainable in `gratitude`:
 `BondMembership` names nothing about the other member (ADR-0031, Consequences). The
@@ -622,7 +901,13 @@ mechanism as F2.
 - `REVALIDATED_OPERATIONS` in the contract's configuration selects `days` and `day` by
   operation id. A later handler named `day` in another controller would get the header
   documentation without earning it.
-- Nothing bounds how long a mark waits for a row lock (Consequences).
+- The mark's two-second refusal has no test over HTTP, and the races of Consequences were
+  not run again after decision 12 changed (How this was checked).
+- `ArchiveDaysTest` reads the custom plan on a dense bond only (Consequences). A plan read
+  from a prepared statement under `plan_cache_mode = force_generic_plan`, and a bond with
+  gaps, would hold the two cases it does not.
+- Nothing sets the connection pool's size or a statement timeout for a request (decision
+  12).
 
 ## Questions that are the owner's
 
@@ -638,9 +923,11 @@ Each is built one way and cheap to turn.
    own tombstone, and shows the partner nothing. It follows from the rule and from "a
    tombstone the member could once read is still shown". Hiding it would be one predicate
    more, and the first place the list was decided from a day's status.
-3. **An empty favourites page with a cursor** (decision 7). Built: the client pages on.
-   The other way is to keep reading inside the request until `limit` days are kept, which
-   bounds nothing about how far one request reads.
+3. **An empty favourites page with a cursor** (decision 7). **Answered on 2026-10-09, the
+   other way.** This question framed it as a matter of round trips; the whole-branch
+   privacy review showed it told a withdrawal from a deletion by hand. The request now
+   reads on until the page is decided, bounded at about a thousand days. What is left for
+   the owner is that bound: past it a page can still be empty with a cursor.
 4. **`until`** is an API the corpus does not name (decision 5). Doc 06 gives the feed three
    parameters. Built as a fourth, and inclusive, so the client sends the last day of the
    month it jumps to.
@@ -653,23 +940,44 @@ Each is built one way and cheap to turn.
    | Day card with both entries side by side (§6) | `myEntry`, `partnerEntry` | served |
    | Two-line truncation in the list, full text in the day view (§6) | full text on both routes | **adaptation**: the client truncates. The list pays for full text, which is what decision 6 bounds |
    | Author label; "From you" on your own tombstone (appendix) | `authorMemberId` on every shape, and which field the entry is in | whose it is: served. **The partner's name: gap** (Owed, `bond`) |
-   | Day view (§6) | `GET /days/{date}`, byte for byte the feed's element | served. **Adaptation**: for today, before the caller has written, the client uses `GET /today` (decision 8) |
+   | Day view (§6) | `GET /days/{date}`, byte for byte the feed's element | served. **Adaptation**: for today, before the caller has written, the client uses `GET /today` (decision 8); the contract says so |
    | Favourite toggle per entry in the day view (§6) | `id`, `favourited`; `PUT` and `DELETE` | served |
-   | Toggle absent before reveal, and on a tombstone (§6) | no field says "markable" | **adaptation**: the client shows it on an entry whose `status` is `REVEALED`; anything else is a `409` |
+   | The toggle changes in place, "no confirmation, no undo toast" (§6) | both verbs are `204` with no body, and repeatable | served |
+   | Toggle absent before reveal, and on a tombstone (§6) | no field says "markable" | **adaptation**: the client shows it on an entry whose `status` is `REVEALED`; anything else is a `409`. The contract's description of the `PUT` says so |
    | Day card "holds a favourite" mark (§6) | derivable: either entry's `favourited` | served |
-   | Favourites filter, with results and empty (§6) | `favourites=true` | served. **Adaptation**: an empty page with a cursor is not the empty state (question 3) |
-   | Month jump (§6) | `until` | **adaptation** (question 4). **Gap**: nothing says which months hold days, so a month picker cannot grey out an empty one |
+   | Favourites filter, with results and empty (§6) | `favourites=true` | served. The empty state is `items: []` with a null `nextCursor`; a page with a cursor holds a day, short of decision 7's bound |
+   | Month jump (§6) | `until` | **adaptation** (question 4). **Gap**: nothing says which months hold days, so a month picker cannot grey out an empty one; and its first month is derivable only from the bond's `createdAt` on `GET /bonds/{id}`, not from the archive |
+   | Report this day's entry, reached from the archive's day view (doc 26:102) | the entry's `id`, on an entry read in full or as a wide tombstone | served for the id. **The report route is a later phase's** |
+   | "On this day" and "Milestone" rows of §6's state table | none | C6 (spec §11 names on-this-day; milestones are spec §7's) |
    | Empty archive (§6) | `items: []`, `nextCursor: null` | served |
    | Delete your own entry from the day view (§6) | `myEntry.id` | served |
    | A solo day card | `status: SOLO`, one entry, the other absent | **gap in the design**: §6 draws none |
    | A day of tombstones after a withdrawal (§9) | listed for both, wide tombstones | **gap in the design**: §9 says it owes this drawing before C5 |
-   | An emptied day; a pre-join day for its creator; a day still waiting | `status: EMPTY`, `SUSPENDED`, `PARTIAL`, `PENDING_REVEAL` with the caller's own entry | **gap in the design**: none is drawn in the archive |
+   | An emptied day; a pre-join day for its creator; a day still waiting; a day on which the partner wrote and erased before any reveal | `status: EMPTY`, `SUSPENDED`, `PARTIAL`, `PENDING_REVEAL` with the caller's own entry; for the last, the partner's entry as an author and `REMOVED` with nothing to draw | **gap in the design**: none is drawn in the archive (the last is also question 6) |
    | Archived bond, read only (§9) | both routes answer for both members, the one who left included | served |
    | No timestamp on an entry card (`tokens.md`) | `createdAt` and `intendedAt` are sent, as since C1 | the client does not draw them |
    | Search chip (§6) | none | C6 |
 
    The owner's part is the three design gaps and the name. The response would not change
-   for the first three.
+   for the first three. The rows for the report entry point, on-this-day and milestones,
+   the toggle's manner and the month picker's range were added after the conformance
+   review found them missing.
+6. **A partner's entry that was written and erased before you saw it is a permanent
+   `REMOVED` in the archive** (decision 1). BR-8 allows the shape, and `today` has shown it
+   for the day since C5a. Built: shown for good, on every walk. Hiding it once the day has
+   closed would be one more rule, and the first that renders an entry from its day's
+   state.
+7. **`entry_favourites.created_at`** (decision 10). The corpus specifies the column;
+   nothing returns it, orders by it or filters on it; to an operator it is the time a
+   person was reading. Built: kept, as specified. Dropping it is an edit to V22 while the
+   branch is unmerged, and a new migration after.
+8. **What a client may cache** (decision 9). `private, no-cache` lets a client's HTTP cache
+   keep entry text, where every other response is `no-store`. Withdrawn words then stay on
+   the other member's device until that page is asked for again, and two accounts on one
+   device share a URL-keyed cache that only revalidation keeps apart. Built: as it is, with
+   no `Vary`. The other ways are `no-store` (the tag then serves only a client that keeps
+   its own copy, as the bond route's does) or a rule for the client: one cache per account,
+   cleared at sign-out. The KMP client is not written yet.
 
 ### The corpus
 
@@ -721,8 +1029,9 @@ are the corpus's at `docs/phase-3-daily-loop`, `9be5149`, as `c5-corpus.md` quot
    true.
 4. **Doc 06:17, the pagination line** (`?limit=20&cursor=<opaque>`). It states no maximum.
    It is 50, and a page may be shorter than `limit` with more to come.
-5. **Doc 06:16, "every `PUT` accepts an `Idempotency-Key`".** The favourite `PUT` reads
-   none.
+5. **Doc 06:16, "all `POST`/`PUT`/`PATCH` accept `Idempotency-Key: <uuid>`".** The
+   favourite `PUT` reads none (decision 16). The header is ignored, not refused; no test
+   sends one.
 6. **Doc 06:18, "`ETag` on mutable resources — for a Bond it is the row's `version`".**
    True of the bond. The archive's is not a version.
 7. **Doc 07:170, `entry_favourites(id uuid pk, …)`.** There is no `id`; the primary key is
@@ -747,11 +1056,37 @@ are the corpus's at `docs/phase-3-daily-loop`, `9be5149`, as `c5-corpus.md` quot
 12. **Doc 05:189, "`ETag`/`If-None-Match` on archive reads"**, is now true. Nothing to
     carry.
 
+Added after the conformance review, which found these missing from the list:
+
+13. **Doc 06:168-169, "Every entry in a day payload carries a boolean `favourited`".** Only
+    the wide shape does. A locked entry and one erased before it was revealed are
+    `{authorMemberId, status}` and carry none (BR-8; decision 4).
+14. **Doc 04:178, BR-1, "`E.bondDay.status == REVEALED` OR (`E.bondDay.status == SOLO` AND
+    `E.bondDay.closedAt != null`)".** The gate reads the entry's `revealedAt`, never the
+    day. A `SOLO` day on a bond that ended before the day did is closed and not readable by
+    the partner (ADR-0033 decision 9), and the archive is the first route where the two
+    readings give different responses (decision 1).
+15. **Doc 06:11, "`application/json; charset=utf-8`".** Both archive routes send
+    `Content-Type: application/json` exactly, whatever charset was asked for (decision 9).
+16. **Doc 08:15, NFR-003**, is unmeasured. **Doc 08:21, NFR-008**, names "Contract test" as
+    its verification; what holds it is one integration test of the feed's worst page.
+    **Doc 08:51, NFR-033**, is not met by the letter for `favourites=true` or for a sparse
+    history (decision 10). **Doc 12:101**, deep paging over 500k entries, is not built.
+17. **Doc 05:60, "Escape hatch | Spring `JdbcClient` | For the archive feed".** Built on
+    `JdbcTemplate` (`ArchiveDays`, `Favourites`), as `StreakCalendar` is.
+18. **Doc 07 §4, the indexing table (07:265)**, has no row for
+    `entry_favourites (member_id, entry_id)`, and credits `bond_days (bond_id, date desc)`
+    with the feed, where Postgres was seen to use the unique `(bond_id, date)` backwards.
+19. **Doc 06 §2, "Error codes are enumerated and exhaustive".** `DAY_NOT_FOUND` is in no
+    corpus document: item 2's row owes it, and the error model owes it too.
+20. **`states.md` §6**, the "On this day" and "Milestone" rows, and doc 26:102's report
+    entry point: no route serves them (question 5).
+
 ## Revisit when
 
-- A field is added to `EntryResponse`: decision 6's margin is 33 KB and a hundred entries a
-  page spend it thirty octets at a time. `DaysFeedTest` measures the worst page and fails
-  first.
+- A field is added to `EntryResponse`: decision 6's margin is about 31 KB and a hundred
+  entries a page spend it thirty octets at a time. `DaysFeedTest` measures the worst page
+  and fails first.
 - The entry limit changes, or `EntryText` starts counting control characters: the worst
   case of decision 6 moves with it.
 - A second route by entry id arrives (reactions, C5c): decision 11, or its own reason.
@@ -767,6 +1102,12 @@ are the corpus's at `docs/phase-3-daily-loop`, `9be5149`, as `c5-corpus.md` quot
   reachable.
 - A member row can be removed: Owed, Phase 5.
 - Postgres is upgraded: `ArchiveDaysTest` reads a plan.
+- The withdrawal's delivery is split into several transactions, or the connection pool is
+  sized: decision 12's two seconds was chosen against a delivery that holds its rows to
+  the end and a pool of ten.
+- A member can come to hold a thousand bookmarks on one partner's entries: decision 7's
+  bound is then within reach.
+- The client's HTTP cache is written: question 8.
 
 ## How this was checked
 
@@ -777,7 +1118,8 @@ predate the rebase onto `174b474`: `32fa875` is `4826528` and `a15bf57` is `46c1
 - **Run by the implementing agents:** each task's tests were seen to fail before the code
   existed, and `./gradlew build` was green at each commit below. Tests in the build's
   result files: 1223 before the slice; 1243 at `4826528`; 1244 at `46c130f`; 1291 at
-  `f5a33f1`; 1297 at `a194778`; 1334 at `5e27c3a`; 1339 at `f1737f3`; 1341 at `a20dc2b`.
+  `f5a33f1`; 1297 at `a194778`; 1334 at `5e27c3a`; 1339 at `f1737f3`; 1341 at `a20dc2b`;
+  1351 at `50166ec`.
   `5ecf293` (the query alone) was committed on its own tests and the module's lint, and
   `44fd6d1` adds tests; neither report gives a whole-build count for them. Modules whose
   inputs had not changed were up to date and not re-executed.
@@ -795,8 +1137,9 @@ predate the rebase onto `174b474`: `32fa875` is `4826528` and `a15bf57` is `46c1
   favourite `PUT` reconciling a legacy joining day. Seventeen mutations: fifteen caught,
   one survivor (the reconcile removed from `FavouriteEntry`), and the equivalent one above,
   run this time and green as predicted. Found by reading: the two-statement mark's false
-  `409`, and the two sentences. No must-fix. All were fixed at `a194778`, each with a
-  test seen to fail first (seven red).
+  `409`. Seen in responses: the two sentences, one of them untrue of a bond still waiting
+  for its second member (run) and of a solo day that never reveals (reasoned). No
+  must-fix. All were fixed at `a194778`, each with a test seen to fail first (seven red).
 - **Task 2, the feed** (`5ecf293`, `f5a33f1`, `44fd6d1`). Run by its author: the query's
   plans on a 2,000-day bond beside 20 bonds of 200; `ArchiveGateTest`'s 200 cells, filter
   and gate agreeing in every one; 23 mutations. Twenty-one were caught. Two survived and
@@ -827,7 +1170,8 @@ predate the rebase onto `174b474`: `32fa875` is `4826528` and `a15bf57` is `46c1
   caller's to read). Seven more mutations on the Task 2 fixes: six caught; one, the
   cursor's length check removed, survives by construction, since the same value is the
   same `422` after decoding, and the KDoc says so.
-- **The review of Task 3** (at `5e27c3a`). Proved by running: F1 and F2 (decision 9); the
+- **The review of Task 3** (at `5e27c3a`). **One must-fix (F1)**, four should-fix (F2 to
+  F5). Proved by running: F1 and F2 (decision 9); the
   default `no-store` on every other response; `HEAD` and `Content-Length` right; a stale
   tag after the partner's erasure answers `200` with the tombstone; two `If-None-Match`
   headers; `0000-01-01`, `0000-00-00` and `9999-12-31` as the date, each the one `404` and
@@ -860,30 +1204,115 @@ predate the rebase onto `174b474`: `32fa875` is `4826528` and `a15bf57` is `46c1
     reviewer's mutation, the security default switched off, now fails it.
   - F5 needed nothing: the swap inside `GetDays.read` fails `ArchiveReadOrderTest`, four
     of four.
-  - `./gradlew build` for these fixes: the fixer's log ends `BUILD SUCCESSFUL`. Its report
-    gives no test count for `50166ec`, so none is given here; the last counted build is
-    1341 at `a20dc2b`.
-- **The smoke run** (`20d729c`, `28218fb`; the figures are the commits' own messages, the
-  task's report not having reached them when this was written). One new section, after the
+  - `./gradlew build` at `50166ec`: `BUILD SUCCESSFUL`, **1351 tests, 0 failed, 0
+    skipped**, counted from the build's result files by the conformance reviewer; the
+    fixer's report gave no count. It was the last execution of the tests before the
+    whole-branch reviews: `20d729c`, `28218fb` and `9bba582` change only `scripts/`,
+    `tools/` and documents, and the build at `9bba582` was 217 tasks up to date with none
+    re-executed.
+  - **None of `50166ec`, `20d729c`, `28218fb` or `9bba582` was read by an independent
+    reviewer before the whole-branch reviews**: the fix of F1 to F4 was run by its author
+    only, the smoke section and the tools by theirs.
+- **The smoke run** (`20d729c`, `28218fb`; Task 4b's report, and the run's log). One new
+  section, after the
   withdrawal section, against the booted jar on a database of its own
   (`MOYI_DB=moyi_c5b_smoke`, dropped afterwards): the `422` of each unreadable parameter
   and that none repeats the value, the two `404`s, a day only one member has written, a
   bookmark set and removed and never shown to the other member, `If-None-Match` and what
   moves a tag, the `Accept` header, and the archive after a withdrawal. **614 passed, 0
-  failed, no skips, 20 sections.** Every day it reads is today: past days and paging stay
-  with the integration tests.
+  failed, no skips, 20 sections**, at `28218fb`. An earlier run of the whole section on a
+  database that had been used before was 611 and 0, before three probes were added. No
+  probe failed at any point, and the section's helpers were checked to be able to fail.
+  Every day it reads is today: past days and paging stay with the integration tests.
 - **The tools** (`9bba582`). `scripts/moyi` gains `days`, `day <date>`, `favourite
   <entryId>` and `unfavourite <entryId>`, run once each against a booted jar on a database
-  of its own (`moyi_c5b_cli`, dropped), with the forms refused locally and the server's
-  `422` and `404`s. The line it prints for a non-null `nextCursor` was not reached: that
-  run had one day. `tools/bruno` gains the four requests. The collection has still never
-  been opened in Bruno.
-- **Not in a report or a commit when this was written:** a contract check against `main`
-  (oasdiff), and a whole-branch review. They are the pull request's to record.
+  of its own (`moyi_c5b_cli`, dropped): eight forms refused locally and six by the server
+  (`422` four times, `404` twice). The line it prints for a non-null `nextCursor` was not
+  reached: that run had one day. `tools/bruno` gains the four requests, written and not
+  run: the collection has still never been opened in Bruno.
+- **The three whole-branch reviews** (2026-10-09; the code at `9bba582`, the documents at
+  `c4b3e71`). Each worked in a checkout of its own. The first two ran probes that assert
+  nothing and print what they saw.
+  - **Privacy and the contract.** Proved by running: the twin bonds of decision 7, twelve
+    views of each over four scenarios for the day of the ending, before and after the
+    dispatcher; 73 request shapes, each asked by a stranger of an existing bond or entry,
+    of a random UUID and of a value that is not one, every one byte-identical across the
+    three (status, every header, the body but `instance`); the reader's tags across the
+    erasure (decision 9); and `SecretsNeverLoggedTest` with the four routes added, green
+    over 11,166 events at TRACE. Found: the favourites page that told a withdrawal from a
+    deletion (F1, decision 7); the guard test that drove none of the new routes (F3); the
+    TRACE lines that record who bookmarked what (F4); and four things for the owner
+    (questions 6 to 8, and the second tag change, which is ADR-0035 question 4's). Found
+    nothing on what a stranger gets, on BR-8's two shapes, on a tombstone's times, or in
+    the CLI. Its notes on the contract are answered at `a5cf2f3`.
+  - **Concurrency and cost.** Proved by running: 40 rounds and about 1,150 requests with
+    no deadlock, no `5xx` and no bookmark left on an erased entry (Consequences); the
+    stall behind a withdrawal (decision 12); the page that is not one snapshot (decision
+    15); the plans on 24,000 and on 498,000 entries (decision 10, Consequences); and
+    320,000 concurrent digests, 16 threads over inputs of one octet to 230 KB, against
+    single-threaded answers, none wrong. Reasoned and not run: the table of what each
+    transaction locks, in what order; what a failure between two steps leaves; the
+    statement count. Found: the unmark's wait (S1, should-fix), three notes (P1, P2, N1),
+    and three claims of this record the code did not have: a page's cost, which verb
+    waits, and what the plan test reads. All three are corrected here. A fourth, that a
+    read writes once per bond, it found to hold, by reading.
+  - **Conformance.** Read, with every count taken from a log or a result file: 3
+    must-fix, 10 should-fix and 8 notes, and unnumbered notes on the Figma record, the
+    corpus list, the tools and the plan. The three must-fix were all in the record and
+    none in the code: this ADR's missing test count, its status, and the spec's §6.7
+    still saying that favourites do not exist. It also checked every item ADR-0035 owed
+    this slice against the code: all six discharged, one with its design gap carried
+    (question 5) and one carried on to C5c.
+- **The fixes that followed** (2026-10-09, one agent; each test written first and seen to
+  fail for its reason, each mutation restored from a copy and compared).
+  - `a461ea8`, decision 7. Before the fix `WithdrawalTwinArchiveTest` failed three of
+    three. Mutations: no refill, four tests fail; at the bound, the cursor from the last
+    day shown, one fails (the favourite beyond the bound is never reached); the cursor from
+    the last day examined, ten fail (the look-ahead day is skipped); the marker read
+    before the entries, `ArchiveReadOrderTest` fails four of four as before. The
+    `DaysFeedTest` case that required an empty page with a cursor, "a marked entry whose
+    author has withdrawn…", now requires one page and no cursor.
+  - `fdd365f`, decision 12. Before the fix `FavouriteLockWaitTest` failed three of three,
+    each at its ten-second bound. Mutations: a plain `DELETE`, the unmark's test fails at
+    the bound; no `set_config`, both of the mark's fail at the bound; the setting made
+    session-wide, the test that reads every pooled connection fails; the timeout
+    rethrown, two fail.
+  - `b9f1e78`, the guards. `SecretsNeverLoggedTest` with the routes added and no pin: red,
+    225 lines from the logger. With the pin removed again: red. `RepresentationTest`
+    holds that the body's holder prints nothing of the body; a `toString` that prints the
+    bytes fails it.
+  - `a5cf2f3`, the contract: the `406` on the two reads, descriptions on the day and the
+    two bookmark operations, `maxLength` on `cursor`. Three tests first, red.
+  - **`./gradlew build`**, whole, at each: 1354 tests at `a461ea8`, 1357 at `fdd365f`, 1360
+    at `a5cf2f3` and with this record's own changes to comments; 0 failed, 0 skipped,
+    counted from the result files. The first whole build of `fdd365f`'s work failed eleven
+    tests of `TimezoneMatrixTest` with "too many clients already": the new test class had
+    a Spring context of its own. It was rewritten to share one, and the build was run
+    again.
+  - **The smoke run**, on the jar built from the tree that became `a5cf2f3`, on a database
+    of its own (`moyi_c5b_fix`, dropped): **647 passed, 0 failed, no skips, 20
+    sections.** The section gained the probes the privacy review
+    named: a stranger's `406` is the member's; the exact two keys of a `LOCKED` and of a
+    `REMOVED` entry; no `deletedAt` or `updatedAt` in six feed and day bodies; the
+    reader's tag before and after the poller erases, taken while the entry was seen still
+    whole; a stranger's `DELETE …/favourite`; and the withdrawn favourites page exactly
+    empty with no cursor.
+  - **The contract check**, oasdiff 1.11.7 (`tufin/oasdiff`), `origin/main` at `174b474`
+    against the working copy: `breaking --fail-on ERR` exits 0, "390 changes: 0 error, 390
+    warning, 0 info", every one `response-property-enum-value-added`: the two new codes on
+    each problem response. `--fail-on WARN` exits 1. The changelog adds 8 infos: four
+    endpoints, and `favourited` required on four responses. So CI's action, which fails on
+    errors, is not expected to fail; the `breaking-api-change` label is owed by this
+    project's own rule for a new code (ADR-0024's amendment), not by the check.
+  - **None of these commits, nor this revision of the record, has been read by an
+    independent reviewer.** The reviewers' races and the twin probe in its four scenarios
+    were not run again after them; the twin's first scenario is now a test.
 - **Read, not run:** that every erasure goes through `EraseEntry` (by search: three
   callers); the unreachable cell (decision 2); the lock order of the mark (it holds
   nothing else); rate limiting on the four routes (the test context has the limiter off);
-  that the contract change is additive but for the two codes (oasdiff was not run by
-  anyone whose report was read for this record); the bond route's `406`.
-- **Not run by anyone:** NFR-003's p95, a 500k-entry dataset, V22 against a shared
-  database, CI's own contract action.
+  the bond route's `406`; what a client's HTTP cache does with `private, no-cache`
+  (decision 9); the statement count of a request.
+- **Not run by anyone:** NFR-003's p95; doc 12's deep paging (the 498,000-entry run above
+  measured plans, not a walk); V22 against a shared database; CI's own contract action;
+  the mark's two-second refusal over HTTP; a `PUT …/favourite` that carries an
+  `Idempotency-Key`; ten connections held by nine unmarks; the collection in Bruno.

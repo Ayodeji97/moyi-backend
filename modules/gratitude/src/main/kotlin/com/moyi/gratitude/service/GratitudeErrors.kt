@@ -118,9 +118,12 @@ internal class EntryNotRevealedException :
 /**
  * The one answer for an entry the caller may not act on (spec §5.2, T-02):
  * no such id, an id that is not a UUID, an entry in a bond the caller is not
- * in, and an entry the caller's partner wrote. Four causes, one class, so
- * the four `404`s are the same bytes because they are the same object — not
- * because eight copies of a sentence happen to agree
+ * in; on the routes that change an entry, an entry the caller's partner
+ * wrote; and on the favourite routes, an entry the caller was never shown
+ * (locked, or erased before it was revealed), where a partner's revealed
+ * entry is theirs to mark (ADR-0036 decision 11). One class, so the `404`s
+ * are the same bytes because they are the same object — not because eight
+ * copies of a sentence happen to agree
  * (`bond.service.BondNotFoundException`'s own shape).
  */
 internal class EntryNotFoundException : NotFoundException("That entry was not found.")

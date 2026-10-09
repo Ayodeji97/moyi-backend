@@ -107,7 +107,9 @@ internal data class Entry(
      *    does not allow the words to be read in that interval, so the gate
      *    does not wait for the rows. It is asked **here and nowhere else**
      *    because every response that carries an entry is built from this
-     *    function's answer (`GET /today`, a fresh write, a replay): a second
+     *    function's answer (`GET /today`, a fresh write, a replay, a day of
+     *    the archive), and so is the question whether an entry may be
+     *    bookmarked ([canBeFavouritedBy]): a second
      *    place that asked would be a second copy of the rule, and a response
      *    added later that forgot to ask it would show the words, where one
      *    that goes through this gate cannot. **What it is told is only as

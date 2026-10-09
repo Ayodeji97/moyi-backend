@@ -42,7 +42,7 @@ import javax.sql.DataSource
 /**
  * **The archive lists a day exactly when the gate would show the caller
  * something on it, and shows of each entry exactly what the gate allows**
- * (the C5b plan's decision 2).
+ * (ADR-0036 decision 2).
  *
  * The feed has two parts that could disagree: a query that picks days, and
  * the read gate that renders their entries. This file holds them together

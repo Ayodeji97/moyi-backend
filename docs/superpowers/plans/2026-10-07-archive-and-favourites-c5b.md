@@ -285,7 +285,7 @@ tests `gratitude/web/DayViewTest.kt`, `gratitude/web/DaysConditionalTest.kt`.
 - [x] `scripts/moyi`: `days`, `day <date>`, `favourite <entryId>`, `unfavourite <entryId>`.
   `tools/bruno`: the four requests.
   *As built:* `9bba582`. The collection has not been opened in Bruno.
-- [x] `adr/0036-the-archive-and-favourites.md` (the fourteen decisions; Consequences; Owed;
+- [x] `adr/0036-the-archive-and-favourites.md` (the fourteen decisions, sixteen as built; Consequences; Owed;
   Questions that are the owner's; How this was checked). Spec §5.2, §6.6, §7, §11 amended in
   place, dated. `docs/learning-log.md`. Label the PR `breaking-api-change` (two new error
   codes).
@@ -331,8 +331,10 @@ bucket) are new.
 - **The favourite routes reconcile the joining day** (`ReconcileJoiningDay.beforeRead`),
   which this plan did not mention, so a `PUT` can take the bond's lock and write. Both
   archive routes do the same.
-- The filter for `favourites=true` is applied a second time after the gate, so a page can
-  be empty and still carry a `nextCursor` (decision 7).
+- The filter for `favourites=true` is applied a second time after the gate. As first
+  built a dropped day still moved the cursor, so a page could be empty and still carry a
+  `nextCursor`; after the whole-branch reviews the request reads on past a dropped day
+  (decision 7, and "After the whole-branch reviews" below).
 - "Which row is mine" was extracted from `GetToday` into `DayEntries.kt` so `today` and
   the archive share one copy. `DaysQuery.kt` is new and holds the parameter parsing.
 - `RevealGateTest` and `WithdrawalRaceTest` needed no change. `JoiningDayTest`,
@@ -346,4 +348,49 @@ bucket) are new.
   smoke section was written. Both archive routes declare what they produce, so a `406`
   there comes before the membership guard.
 - Still open in Task 4 when this note was written: the `breaking-api-change` label, which
-  is the pull request's own.
+  is the pull request's own; and, as ADR-0036 then said, the whole-branch review and the
+  contract check against `main`.
+
+What this note did not list, found by the conformance review:
+
+- **Tests created that are in no file list:** `CacheHeadersTest` (app), `KnownAnswerTest`
+  (common:security), `RepresentationTest` (common:web) and `ArchiveRig.kt`. **Changed:**
+  `OpenApiContractTest`, `FlywayMigrationTest`, `WithdrawEntriesTest`, `WithdrawalReadTest`
+  and `GratitudeCrossTenantTest`.
+- **Production files outside the lists:** `common/web/Representation.kt`,
+  `common/security/HmacRepresentationDigest.kt`, `PersonalDataHasher.mac`, the
+  `SecurityConfiguration` bean, `IdempotencyTestApplication`'s stand-in, and
+  `contracts/OpenApiConfiguration.kt` (the query parameters, the descriptions, the
+  revalidation documentation, the wildcard removed).
+- **Task 3 step 1 is ticked as written, and one of its cases is false.** "`404
+  DAY_NOT_FOUND` … for … an `EMPTY` day": an `EMPTY` day holding the caller's own tombstone
+  is a `200` for them on the day route as in the feed (`ArchiveGateTest`). Decision 1's
+  bullet above says so of the feed only.
+- **Task 2 step 1 is ticked with "a tampered or foreign cursor is `422`"**: a foreign one
+  is accepted (decision 5's bullet above).
+- **Task 4's third box says "the fourteen decisions"**: sixteen.
+- The dotted-date header, `limit`'s detail in `DaysQuery`, and the final figures are in
+  ADR-0036 ("Consequences", "How this was checked") and not here.
+- **"Review focus" says "the feed answers in time that does not grow with the bond's
+  age".** That holds for a history with no gaps. A day the caller has nothing on is walked
+  past, one probe each (ADR-0036 decision 10).
+
+### After the whole-branch reviews (2026-10-09)
+
+Three reviews read the code at `9bba582`. What changed, each test first:
+
+- **Decision 7** (`a461ea8`). An empty favourites page with a cursor told a withdrawal
+  from a deletion by hand. `GetDays.page` now reads in windows until the page is decided;
+  the cursor is the last day shown. `WithdrawalTwinArchiveTest` is new.
+- **Decision 12** (`fdd365f`). An unmark waited out a withdrawal's whole delivery and
+  held a connection. The unmark skips a locked row; the mark runs in a transaction with a
+  two-second `lock_timeout` and answers `409 ENTRY_IMMUTABLE` on a timeout.
+  `FavouriteLockWaitTest` is new. "The favourite routes take no lock" was already false
+  (decision 12 above); "no transaction" now is too, for the mark.
+- **The guards** (`b9f1e78`). `SecretsNeverLoggedTest` drives the four routes;
+  `StatementCreatorUtils` is pinned in `application.yml`; five probes more in the smoke
+  section.
+- **The contract** (`a5cf2f3`). `406` on the two reads, three descriptions, `maxLength`
+  on `cursor`.
+- 1360 tests in the final whole build; the smoke run 647 passed, 0 failed, 20 sections.
+  ADR-0036 "How this was checked" has the mutations and the oasdiff verdict.

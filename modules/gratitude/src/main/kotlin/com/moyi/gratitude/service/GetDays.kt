@@ -344,11 +344,14 @@ internal class GetDays(
          * carry besides text (fifty days of two entries are about 32.5 KB
          * of ids, dates and field names) the largest response there can be
          * is about 229 KB, under the 262,144 a response may be.
-         * `DaysFeedTest` builds that page and measures it: 229,063 octets.
+         * `DaysFeedTest` builds that page and measures it: 229,063 octets,
+         * with the test clock's whole-second timestamps. An instant in
+         * production carries microseconds, seven octets more in each of two
+         * fields of a hundred entries: about 1.4 KB.
          *
-         * The margin is 33 KB and is what a new field on an entry spends:
-         * a hundred entries a page, so every thirty octets added to one are
-         * 3 KB off it.
+         * So the margin is about 31 KB, and it is what a new field on an
+         * entry spends: a hundred entries a page, so every thirty octets
+         * added to one are 3 KB off it.
          */
         const val PAGE_TEXT_OCTETS = 192 * 1024
 

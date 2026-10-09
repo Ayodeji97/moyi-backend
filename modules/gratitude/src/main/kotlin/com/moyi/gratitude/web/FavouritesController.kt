@@ -44,8 +44,9 @@ internal class FavouritesController(
 ) {
     /**
      * `204` once the caller's mark is on the entry, whether or not it was
-     * already. `409 ENTRY_NOT_REVEALED` for the caller's own entry while the
-     * partner cannot read it yet; `409 ENTRY_IMMUTABLE` for a tombstone.
+     * already. `409 ENTRY_NOT_REVEALED` for the caller's own entry that has
+     * not been revealed; `409 ENTRY_IMMUTABLE` for a tombstone, and for an
+     * entry whose row an erasure holds past the mark's two seconds.
      */
     @PutMapping("/{entryId}/favourite")
     @ResponseStatus(HttpStatus.NO_CONTENT)

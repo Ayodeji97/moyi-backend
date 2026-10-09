@@ -222,10 +222,10 @@ states.
 there is the same question decision 12 answers for the calendar, and `states.md` §6 should
 be read before it is built.
 
-*(Discharged 2026-10-09, ADR-0036 decision 3.)* An archive day carries its own status,
+*(Discharged 2026-10-09, ADR-0036 decision 3. An archive day carries its own status,
 `SOLO` included, by the owner's ruling of 2026-10-06. `states.md` §6 was read: it draws no
 solo day card, which ADR-0036 records as a gap in the design (its question 5), not in the
-response.
+response.)*
 
 **C6.** `MilestoneReached` and the milestones endpoint.
 

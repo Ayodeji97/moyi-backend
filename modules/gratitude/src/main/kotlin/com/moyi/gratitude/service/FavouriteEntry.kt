@@ -40,8 +40,8 @@ import java.util.UUID
  * `hasLeft` or `isOpen` check, where every other write has one. BR-9 closes
  * an ended bond to writes of what the two people share; a bookmark is the
  * member's own, the other person cannot see it in any response, and the
- * archive is what an ended bond is for. (The plan's decision 14, which is
- * the owner's to turn.)
+ * archive is what an ended bond is for. (ADR-0036 decision 14 and question
+ * 1: the owner's to turn.)
  *
  * **The marker is read last** ([readerNow]): the entry is loaded, and only
  * then is the membership resolved again for the reader the gate is asked

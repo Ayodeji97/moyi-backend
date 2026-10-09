@@ -10,8 +10,9 @@ import java.util.UUID
 
 /**
  * `201` from `POST /bonds/{bondId}/entries`, `200` from
- * `PATCH /entries/{entryId}`, and — from `GET /bonds/{bondId}/today`
- * — any entry [com.moyi.gratitude.domain.Entry.canBeReadBy] grants the caller:
+ * `PATCH /entries/{entryId}`, and — from `GET /bonds/{bondId}/today` and
+ * both archive routes (`DayResponse`) —
+ * any entry [com.moyi.gratitude.domain.Entry.canBeReadBy] grants the caller:
  * their own, and a partner's once it has been revealed (BR-1 keys on the
  * entry's own `revealedAt`, spec §4). Echoing [text] back to its own author
  * is not a leak of anything — they are the one who wrote it; echoing it back
@@ -33,7 +34,8 @@ import java.util.UUID
  * been revealed to. A partner it was never revealed to gets
  * [ErasedEntryResponse], which has no id and no timestamps to give.
  * `DELETE /entries/{entryId}` is what erases an entry, and every response
- * that renders one afterwards says so: `GET /today`, and an
+ * that renders one afterwards says so: `GET /today`, both archive routes
+ * (`DayResponse`), and an
  * `Idempotency-Key` replay of `POST /entries` or `PATCH /entries/{entryId}`,
  * which re-reads the entry as it is *now* (spec §5.4) — after an erasure
  * there are no words to return, never the ones the first response carried.
@@ -42,7 +44,8 @@ import java.util.UUID
  * resolved, which may differ from a UTC reading of [createdAt] on either
  * side of midnight in the bond's zone (BR-3).
  *
- * Implements [PartnerEntryResponse] so `TodayResponse.partnerEntry` can carry
+ * Implements [PartnerEntryResponse] so `TodayResponse.partnerEntry`, and
+ * `DayResponse.partnerEntry` on both archive routes, can carry
  * this, [LockedEntryResponse] or [ErasedEntryResponse] behind one field —
  * BR-1's own decision is what picks which, in [PartnerEntryResponse.of].
  */

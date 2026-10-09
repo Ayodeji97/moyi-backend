@@ -221,7 +221,7 @@ changes serialize with close. The one-minute margin absorbs ordinary clock skew.
    "Ended" is the closer's view (`BondClosingView.endedAt`: archived, or counting down to
    deletion), compared with the day's own end. A day that ended before the bond did still
    reveals. C5's archive must read a closed `SOLO` day with no `revealedAt` as private to its
-   author. This does not change ADR-0032's first question (an author cannot delete on an
+   author *(discharged 2026-10-09: "Owed", C5, above, and ADR-0036 decisions 1 and 2)*. This does not change ADR-0032's first question (an author cannot delete on an
    ended bond), which stays open.
 
    *(Amended 2026-10-07: ADR-0032's first question was ruled on 2026-10-06 and built in

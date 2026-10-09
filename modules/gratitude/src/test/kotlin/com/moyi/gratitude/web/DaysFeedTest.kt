@@ -445,6 +445,11 @@ internal class DaysFeedTest(
      * be asked for, carrying all the text a page may carry.
      *
      * The size is written to `build/archive-largest-page.txt` for a person.
+     *
+     * Largest but for one thing: the clock here is on the whole second, so
+     * each `createdAt` and `intendedAt` is twenty characters. An instant in
+     * production carries microseconds and is twenty-seven: seven octets on
+     * two fields of a hundred entries, about 1.4 KB more than is measured.
      */
     @Test
     fun `the largest page there can be - two days of the largest entries among forty-eight of tombstones - is under 256 KB`() {

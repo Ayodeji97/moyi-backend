@@ -24,8 +24,8 @@ import javax.sql.DataSource
 import kotlin.math.ceil
 
 /**
- * The archive's query on its own: which days it picks (decision 1 of the
- * C5b plan), how it pages, and **what Postgres does to answer it**.
+ * The archive's query on its own: which days it picks (ADR-0036 decision
+ * 1), how it pages, and **what Postgres does to answer it**.
  *
  * Rows are put down by hand. Nothing here is about how a day comes to be in
  * a state; `ArchiveGateTest` builds those through the application. This is

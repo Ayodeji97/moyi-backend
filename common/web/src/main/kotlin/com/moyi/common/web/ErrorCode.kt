@@ -225,14 +225,20 @@ enum class ErrorCode {
      */
     ENTRY_ALREADY_EXISTS,
 
-    /** BR-7: revealed content cannot be edited. */
+    /**
+     * BR-7: revealed content cannot be edited. And an erased entry takes no
+     * change at all, a bookmark included: `PUT …/favourite` on a tombstone,
+     * or on an entry whose erasure is still in flight (ADR-0036 decisions 11
+     * and 12).
+     */
     ENTRY_IMMUTABLE,
 
     /**
-     * `PUT /entries/{entryId}/favourite` on the caller's **own** entry while
-     * it still waits for the partner (FR-093, spec §6.6: only a revealed
-     * entry can be kept). 409: a fact about the entry's state, and one that
-     * changes by itself when the day reveals.
+     * `PUT /entries/{entryId}/favourite` on the caller's **own** entry that
+     * has not been revealed (FR-093, spec §6.6: only a revealed entry can be
+     * kept). 409: a fact about the entry's state. It usually changes by
+     * itself when the day reveals; an entry on a day that closed after the
+     * bond ended never is revealed (ADR-0033 decision 9).
      *
      * Only ever the answer about an entry the caller wrote. A partner's
      * unrevealed entry is locked to them and its id was never shown, so that

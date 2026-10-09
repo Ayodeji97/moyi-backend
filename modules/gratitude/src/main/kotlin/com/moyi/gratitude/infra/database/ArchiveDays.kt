@@ -48,12 +48,23 @@ internal data class ArchiveDay(
  * **Read in index order.** `bond_days_feed_idx (bond_id, date DESC)` gives
  * the rows already sorted, each day's entries are probed by
  * `entries_bond_day_idx`, and the scan stops at the limit, so a page costs
- * about a page however old the bond is. `ArchiveDaysTest` reads the plan.
- * The bounds are written into the statement only when they are given, so
- * that each form is a plain range on the index and not an `OR` the planner
- * must guess about. **The favourites form can read further**: it walks back
- * until it has found enough marked days, which for a member with few marks
- * in a long history is most of the history, one index probe a day.
+ * about a page **where the listed days are dense**. A day the member has
+ * nothing to see on is walked past with one probe: a day with no entry row
+ * (`EMPTY`, `FROZEN`, a `SUSPENDED` gap), or one holding only the other
+ * person's unrevealed entry. So a page that crosses a year nobody wrote in
+ * probes about 365 days, and the last page of any walk reads back to the
+ * bond's first day. Measured by review: 3,000 days of which the member can
+ * see the 5 oldest read 12,084 buffers in 2.4 ms for the first page;
+ * 30,000 days with none visible, 27.7 ms. The bound is the bond's own days,
+ * one row per calendar date, and never the table; NFR-033 holds by the
+ * letter only for the dense case. `ArchiveDaysTest` reads the plan, on a
+ * bond with a revealed day for every date, so it asserts the dense case
+ * and no other. The bounds are written into the statement only when they
+ * are given, so that each form is a plain range on the index and not an
+ * `OR` the planner must guess about. **The favourites form can read
+ * further**: it walks back until it has found enough marked days, which
+ * for a member with few marks in a long history is most of the history,
+ * one index probe a day.
  *
  * **With `favouritesOnly`**, the day must also hold an entry this member has
  * marked that is revealed and not erased (both marks of an erasure, as

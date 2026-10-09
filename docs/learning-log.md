@@ -2220,8 +2220,10 @@ Reality: five of the fourteen were wrong as written, and the ones that mattered 
          And `hash` was routed through a new `mac`, in the class whose output is stored
          in two tables. Every test of it compared one output with another. None knew a
          right answer. A change of algorithm that kept the length would have orphaned
-         every stored hash and failed nothing. Nothing was orphaned; a reviewer checked
-         with openssl, outside the JVM.
+         every stored hash and failed one test, about the tag: nothing that says a stored
+         hash had moved. (I first wrote "failed nothing" here, copying a reviewer's
+         reasoning; the fixer ran the change, and one test that already existed failed.) Nothing was orphaned; a
+         reviewer checked with openssl, outside the JVM.
 Wrong about: what a plan can decide. "No lock is taken" and "the SHA-256 of the body"
          were written as decisions and were guesses about mechanisms I had not run. A
          plan can say what must be true: no bookmark on an erased entry, no tag that
@@ -2231,15 +2233,28 @@ Wrong about: what a plan can decide. "No lock is taken" and "the SHA-256 of the 
          early. In both the fix was found by asking what, exactly, was waiting on what.
          Arithmetic in a comment. Nobody tests a comment. The bound was tested and held;
          the number that justified it was never run until a reviewer built the entry.
-         And again, reviewers. All but one of these was found by a reviewer, or by an
+         And again, reviewers. All but two of these were found by a reviewer, or by an
          implementer acting as one, who had to prove the finding by running it. The
-         exception is the hash, argued from a rule this codebase already had. Not one
+         exceptions are the `ETag`'s plain SHA-256, argued from a rule this codebase
+         already had, and the missing known answer, found by searching the tests; what a
+         reviewer then ran there showed that nothing had been orphaned. Not one
          came from reading the diff and agreeing with it. The three reviews found no
          must-fix in two tasks and one in the third, and what they proved on the way is
          most of what I now know to be true about this slice.
          The session. One agent stalled with a mutation still applied to a source file
-         and no report. Its successor found the file dirty, restored it from a copy it
-         first checked against `HEAD`, and ran all the mutations again and did not trust
-         the first run. Four survived. That is the same lesson as last time, from the
-         other side: a report written as the work goes is what lets the next one start,
-         and a result nobody wrote down is a result nobody has.
+         and its mutations unreported. Its successor found the file dirty, restored it
+         from a copy it first checked against `HEAD`, and ran all the mutations again and
+         did not trust the first run. Four survived. That is the same lesson as last
+         time, from the other side: a report written as the work goes is what lets the
+         next one start, and a result nobody wrote down is a result nobody has.
+         And then the whole branch was reviewed, and two more sentences fell.
+         I accepted "an empty page with a cursor leaks nothing" on an argument: the
+         dropped day held only the reader's own bookmark. A reviewer built the bond's
+         twin, the same history with the entries deleted by hand, and asked both for
+         their favourites one at a time. One answered an empty page with a cursor and the
+         other never could. I had weighed what the page contained and not what its shape
+         could be compared with.
+         A route that looked private to one member, taking a bookmark off, could stall
+         every other user. It waited on a row the withdrawal held, it held a connection
+         while it waited, and the pool is everybody's. I had written down that the mark
+         could wait and never asked what the unmark does.

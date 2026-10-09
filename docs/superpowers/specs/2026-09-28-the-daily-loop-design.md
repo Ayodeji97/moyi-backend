@@ -434,9 +434,20 @@ The table's four C5 rows are three of C5b's and one of C5c's (reactions, not bui
 | PUT | `/entries/{entryId}/favourite` | `204`, repeatable. `409 ENTRY_NOT_REVEALED` for the caller's **own** entry that has no `revealedAt`; `409 ENTRY_IMMUTABLE` for a tombstone; the one `404` for an entry the caller was never shown, a partner's locked entry included. No `Idempotency-Key` (decisions 11, 12, 16) |
 | DELETE | `/entries/{entryId}/favourite` | `204`, repeatable, absent is success, on a tombstone too; the same `404` (decision 11) |
 
-- **A page may be shorter than `limit`, or empty, and still have a `nextCursor`.** It is
-  also bounded by bytes (§6.6), and with `favourites=true` a day can be dropped after the
-  gate. Only a null `nextCursor` means the end.
+- **A page may be shorter than `limit` and still have a `nextCursor`.** It is also bounded
+  by bytes (§6.6). Only a null `nextCursor` means the end. *(Corrected 2026-10-09, after
+  the whole-branch reviews. This bullet first said "or empty", because with
+  `favourites=true` a day dropped after the gate still moved the cursor. That told a
+  withdrawal from a deletion by hand, and the request now reads on past a dropped day:
+  ADR-0036 decision 7. A page with a cursor holds at least one day, except where one
+  request's reading reaches its bound of about a thousand days.)*
+- **Neither favourite route waits out a withdrawal** *(added 2026-10-09, ADR-0036 decision
+  12)*. The `PUT` waits two seconds at most for the entry's row and then answers
+  `409 ENTRY_IMMUTABLE`; the `DELETE` removes only a row it can lock at once and is `204`
+  either way.
+- **`406` on the two archive reads comes before the membership check** *(added
+  2026-10-09, ADR-0036 decision 9)*, the same response for a member and for a stranger,
+  and is documented in the contract on those two operations only.
 - **"`409 ENTRY_NOT_REVEALED` before reveal" is true only of the caller's own entry**
   (decision 11). For a partner's unrevealed entry the `409` would confirm an id the caller
   was never shown, which is why the two routes above this section answer `404` there.
@@ -850,7 +861,8 @@ a real `PATCH` between a day's end and the job.
   answers `FULL` or `TOMBSTONE` for an entry of the day.
 - **A day is `{date, status, myEntry, partnerEntry}`** (decision 3). `status` is the day's
   own, by the owner's ruling of 2026-10-06. No shape carries `deletedAt` or `updatedAt`.
-- **Favourites** (decisions 4, 7, 10 to 14). The first bullet above stands. "Only a
+- **Favourites** (decisions 4, 7, 10 to 14). The original's second bullet stands as
+  written: the partner's favourites are in no response, in any shape. "Only a
   `REVEALED` entry can be favourited" is asked of the entry's `revealedAt` through the
   gate, not of a status. "Deleting an entry cascades to its favourites" is done by
   `EraseEntry`, in the erasure's transaction, because a delete keeps the row and no
@@ -858,7 +870,9 @@ a real `PATCH` between a day's end and the job.
   close job's pre-step at once. The mark is one statement that takes a `FOR SHARE` lock on
   the entry's row, so a mark and an erasure cannot pass each other. `favourites=true`
   lists days holding an entry the caller has marked and can read in full now, filtered
-  again after the gate.
+  again after the gate; a day dropped there leaves no trace in the page or its cursor,
+  because the request reads on past it (decision 7 as revised after the whole-branch
+  reviews).
 - **ETags** (decision 9). The second sentence of the first bullet stands and is built as a
   **keyed digest**: HMAC-SHA256, under the personal-data secret, of a domain label and the
   exact bytes sent. Not a plain hash: a tag is a header, a header reaches logs, and a bare
@@ -868,7 +882,12 @@ a real `PATCH` between a day's end and the job.
   the tag.
 - **A page is bounded by bytes as well as by `limit`** (decision 6): 192 KiB of entry text
   counted as JSON carries it, the first day always taken. An entry can be 49,147 octets on
-  the wire, so the worst page is about 229 KB against NFR-008's 262,144.
+  the wire, so the worst page is about 229 KB against NFR-008's 262,144 (measured with
+  whole-second timestamps; about 1.4 KB more with microseconds).
+- **A page costs about a page where the listed days are dense** (decision 10). Days the
+  caller has nothing on are walked past one probe each, so NFR-033 holds by the letter for
+  the dense feed and for one day, and for a sparse history or `favourites=true` only in
+  that the bound is the bond's own days or the member's own marks.
 - **The marker is read last** on the feed, the day and the favourite routes (decision 15,
   §6.7's rule).
 
@@ -930,6 +949,10 @@ withdrawal means. Six things in it were built differently, or were not said.
   built from that function: `GET /today`, a fresh `POST` or `PATCH`, and a replay of either.
   `WithdrawalReadTest` holds it with no dispatcher run. Search, favourites and caches do not
   exist yet; each must go through the same gate and be cleared by `EraseEntry` when it does.
+  *(Amended 2026-10-09, ADR-0036 decisions 2, 13 and 15: favourites exist. Every mark is
+  made and shown through the gate, and `EraseEntry` removes an entry's marks in the
+  erasure's transaction. The archive's two routes are two more responses built from
+  `Entry.readBy`. Search and caches still do not exist.)*
 - **Whoever reaches a day first erases** (decision 14). The gate hides the words and does
   not stop the code that writes. A close or a reveal that ran between the ending's commit
   and the erasure revealed the day: the partner gained the withdrawn entry's id and
@@ -1110,7 +1133,7 @@ otherwise was an error in its first draft. They are built in C4.
 | `GET /today` | §3 *Today — the whole product*, and §3a's ambient-surface candidate (out of v1) |
 | `POST /entries` | §4 *Compose* |
 | the reveal | §5 *Reveal — the one animation* |
-| `GET /days`, `/days/{date}` | §6 *Archive*. *(Amended 2026-10-09, ADR-0036, question 5, which has the full table. Served: the list, the day view, both entries, whose entry is whose. Adaptations: the list's two-line truncation is the client's, the server sends full text; the month jump is `until`, a parameter doc 06 does not name; a short or empty page with a `nextCursor` is not the end; today's day view before the caller has written is `GET /today`. Recorded gaps: the partner's display name is not obtainable; nothing says which months hold days; §6 draws no solo day card, no emptied day and no pre-join day, and §9 still owes the day of tombstones.)* |
+| `GET /days`, `/days/{date}` | §6 *Archive*. *(Amended 2026-10-09, ADR-0036, question 5, which has the full table. Served: the list, the day view, both entries, whose entry is whose. Adaptations: the list's two-line truncation is the client's, the server sends full text; the month jump is `until`, a parameter doc 06 does not name; a short page with a `nextCursor` is not the end; today's day view before the caller has written is `GET /today`. Recorded gaps: the partner's display name is not obtainable; nothing says which months hold days, and a month picker's first month comes only from the bond's `createdAt`; the report entry point in the day view has the entry's `id` and no route yet; §6's "On this day" and "Milestone" rows are C6's; §6 draws no solo day card, no emptied day and no pre-join day, and §9 still owes the day of tombstones.)* |
 | `PUT`/`DELETE /entries/{id}/favourite`, `favourites=true` | §6 *Archive*: the `FavouriteToggle` in the day view, the day card's mark, the Favourites chip and its empty state. *(Added 2026-10-09, ADR-0036: this table had no row for favourites. Served by `favourited` on each entry, the caller's own. Adaptation: no field says an entry can be marked; the toggle is shown on an entry whose `status` is `REVEALED`. Whether the toggle shows on an archived bond is ADR-0036 question 1.)* |
 | `GET /streak`, `/milestones` | §7 *Streak*. *(Amended 2026-10-05, ADR-0034: three gaps recorded there — no field tells a freeze-covered day from a stepped-over date; the length of a run that just broke ("ended at 23 days") is not sent; §7's Strict-mode paragraph reads as clearing banked freezes, which FR-073 forbids.)* |
 | withdrawal on block | §9 *Ending*, whose retained-access line §6.7 qualifies |
