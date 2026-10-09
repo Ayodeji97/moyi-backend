@@ -289,6 +289,53 @@ internal class DayViewTest(
         whole(rig.day(bea, bond, "2026-09-18")) shouldBe whole(first)
     }
 
+    /**
+     * The test above cannot see a forgiving reader of dates: every date in
+     * it is one the caller has nothing on, so a loose spelling read as the
+     * date it resembles is still a `404`. Here **the day each value would
+     * mean is a day the caller can read**, so reading it at all is a `200`.
+     * The 15th for the spellings of it; the 30th and the 1st for a 31st of
+     * September, which one kind of parser pulls back to the last day of the
+     * month and another rolls into the next.
+     */
+    @Test
+    fun `a date has one spelling - a loose one is the 404 even when the day it resembles is the caller's to read`() {
+        val bond = pair()
+        val hers = listOf("2026-09-15", "2026-09-30", "2026-10-01")
+        hers.forEach { bothWrite(bond, LocalDate.parse(it)) }
+        hers.forEach { rig.day(ada, bond, it).status shouldBe 200 }
+        val noSuchDay = rig.day(ada, bond, "2026-09-14")
+        noSuchDay.status shouldBe 404
+
+        listOf(
+            "a month of one digit" to "2026-9-15",
+            "a space before" to " 2026-09-15",
+            "a space after" to "2026-09-15 ",
+            "a tab after" to "2026-09-15\t",
+            "a signed year" to "+2026-09-15",
+            "a year of five digits" to "02026-09-15",
+            "a day of three digits" to "2026-09-015",
+            "no hyphens" to "20260915",
+            "a time" to "2026-09-15T10:00:00Z",
+            "a zone" to "2026-09-15Z",
+            "an offset" to "2026-09-15+01:00",
+            "the day of the year" to "2026-258",
+            "the day of the week" to "2026-W38-2",
+            "other separators" to "2026_09_15",
+            "digits that are not ASCII" to "٢٠٢٦-٠٩-١٥",
+            "full-width digits" to "２０２６-０９-１５",
+            "a day that does not exist, between two that are hers" to "2026-09-31",
+            "a day nought" to "2026-10-00",
+        ).forEach { (why, date) ->
+            withClue(why) {
+                val answer = rig.day(ada, bond, date)
+                answer.status shouldBe 404
+                answer.contentAsString shouldContain "\"code\":\"DAY_NOT_FOUND\""
+                whole(answer) shouldBe whole(noSuchDay)
+            }
+        }
+    }
+
     @Test
     fun `a path with no date at all is no route of this API, for a member and a stranger alike`() {
         val bond = pair()
@@ -455,13 +502,20 @@ internal class DayViewTest(
     }
 
     /**
-     * The order itself, as `DaysFeedTest` holds it for a page: the request
-     * is stopped **between** its two reads. As the controller's resolution
-     * returns, another transaction takes `entries` exclusively, so the day's
-     * statement that reads entries waits. Only when Postgres reports that
-     * wait is the bond ended, and then the table let go. A request that had
-     * already asked who has withdrawn goes on with an answer from before the
-     * ending and a row that is still whole, and shows the words.
+     * A request that waits on a lock while the bond ends: as the
+     * controller's resolution returns, another transaction takes `entries`
+     * exclusively, so the day's first statement that reads entries waits.
+     * Only when Postgres reports that wait is the bond ended, and then the
+     * table let go. A request that had already asked who has withdrawn goes
+     * on with an answer from before the ending and a row that is still
+     * whole, and shows the words.
+     *
+     * **What this does not hold**, though it was first written to: the order
+     * of the two reads inside `GetDays.read`. The statement that waits is
+     * the one that *finds* the day, which reads `entries` in its filter, so
+     * both of those reads come after the ending whichever is first. This
+     * test fails for a reader made before the day is found.
+     * `ArchiveReadOrderTest` is the one that fails when the two are swapped.
      *
      * The table lock stalls every reader of `entries` while it is held. That
      * is safe here because this module's test classes run one after another

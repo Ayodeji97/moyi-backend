@@ -665,6 +665,13 @@ internal class DaysFeedTest(
      * answer from before the ending and rows that are still whole, and shows
      * the words. One that asks last does not.
      *
+     * **What this does not hold**, though it was first written to: the order
+     * of the two reads inside `GetDays.read`. The statement that waits is
+     * the one that *lists* the days, which reads `entries` in its filter, so
+     * both of those reads come after the ending whichever is first. This
+     * test fails for a reader made before the days are listed.
+     * `ArchiveReadOrderTest` is the one that fails when the two are swapped.
+     *
      * The table lock stalls every reader of `entries` while it is held. That
      * is safe here because this module's test classes run one after another
      * in one JVM (no parallel execution is configured), and the lock is held
