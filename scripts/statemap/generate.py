@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from statemap.mermaid import journeys_md, machine_md
+from statemap.mermaid import NOTICE, journeys_md, machine_md
 from statemap.model import Model
 
 
@@ -25,10 +25,14 @@ def write(model: Model, out_dir: Path) -> None:
 
 def stale(model: Model, out_dir: Path) -> list:
     problems = []
-    for name, text in outputs(model).items():
+    expected = outputs(model)
+    for name, text in expected.items():
         path = out_dir / name
         if not path.exists():
             problems.append(f"{name} is missing; run scripts/state-map-generate")
         elif path.read_text(encoding="utf-8") != text:
             problems.append(f"{name} is stale; run scripts/state-map-generate")
+    for path in sorted(out_dir.glob("*.md")):
+        if path.name not in expected and path.read_text(encoding="utf-8").startswith(NOTICE):
+            problems.append(f"{path.name} is no longer generated from the data; delete it")
     return problems

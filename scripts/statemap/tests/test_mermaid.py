@@ -103,6 +103,19 @@ class GenerateTests(unittest.TestCase):
                 ["lamp.md is stale; run scripts/state-map-generate"],
             )
 
+    def test_a_file_the_data_no_longer_produces_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            write(tiny(), out)
+            self.assertEqual(stale(tiny(rows=[]), out), ["lamp.md is no longer generated from the data; delete it"])
+
+    def test_a_hand_written_file_is_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            write(tiny(), out)
+            (out / "README.md").write_text("# The state map\n")
+            self.assertEqual(stale(tiny(), out), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -62,6 +62,15 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run(["generate"], root)[0], 1)
             self.assertFalse((root / "docs/state-map/lamp.md").exists())
 
+    def test_check_fails_on_a_stale_page_and_says_which(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = repository(tmp, tiny())
+            run(["generate"], root)
+            (root / "docs/state-map/lamp.md").write_text("old\n")
+            code, err = run(["check"], root)
+            self.assertEqual(code, 1)
+            self.assertIn("state-map: lamp.md is stale; run scripts/state-map-generate", err)
+
 
 if __name__ == "__main__":
     unittest.main()
