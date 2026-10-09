@@ -186,3 +186,12 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | `LOCKED` | the day ends and the close job runs | system | `LOCKED` | The close job stamps a suspended day closed and reveals nothing on it: it unlocks a lone entry only on a day that closes SOLO. Your partner's entry stays locked to you. The test cited asserts that nothing is revealed on a bond of one, where the entry is the author's own. | test |
 | `LOCKED` | your partner takes their entries back | partner | `REMOVED` | A withdrawal hides the entry from the moment the bond ends, before anything is erased. You never could read it, so you see only that it is gone. | test |
 | `VISIBLE` | your partner takes their entries back | partner | `DELETED` | Your very next read no longer carries the words, though the rows are erased only seconds later. Your own entry is untouched. | smoke |
+
+## Where the contract is silent
+
+The code answers these and `contracts/openapi.json` does not document them.
+
+| Endpoint | Status | What the code does |
+|---|---|---|
+| `POST /bonds/{bondId}/leave` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. |
+| `POST /bonds/{bondId}/block` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. |

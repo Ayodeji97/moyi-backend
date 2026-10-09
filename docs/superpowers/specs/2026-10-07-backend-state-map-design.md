@@ -60,12 +60,19 @@ States are read from the code, not invented.
 
 ### 3.1 Account (12 endpoints)
 
-- Main states: `anonymous`, `PENDING_VERIFICATION`, `ACTIVE (signed out)`,
-  `signed in`.
+- Main states: `anonymous`, `PENDING_VERIFICATION` (signed out), `ACTIVE (signed out)`,
+  `signed in`. An account that has not verified its address may sign in (FR-002), so
+  `signed in` covers both; what it may not do is create or join a bond.
 - Drawn grey, with no endpoint reaching them yet: `SUSPENDED`,
   `PENDING_DELETION`, `DELETED` (`UserStatus`).
-- Substates, session: access token valid, expired, refreshed; and the
-  reuse trap (`TOKEN_REUSE_DETECTED`), which ends every session.
+- Substates, session (one sign-in: a refresh-token family and its access token): none,
+  access token valid, access token expired, ended. Refreshing is an action, not a state:
+  it leaves the same session with a new pair of tokens. A session ends by logout, by
+  being removed from the sessions list, by its refresh token running out, or by the
+  reuse trap (`TOKEN_REUSE_DETECTED`): a refresh token presented a second time ends
+  that one session's token family, not every session. Ending one session does not stop
+  its access token, which lives out its fifteen minutes. Only `logout-all` and a
+  password reset end every session and every access token.
 - Substates, password reset: requested, token used, token expired.
 
 ### 3.2 Bond (17 endpoints)
@@ -121,6 +128,9 @@ Errors are of two kinds:
 - **Everywhere errors** can follow any call: 400, 401, 403, 415, 422,
   429, 500. They are explained once in a strip above the diagrams and
   listed on each endpoint card. They are never drawn as arrows.
+  One exception: in the account machine's regions `account` and `account.session`, a
+  `401 UNAUTHENTICATED` is a row. There the missing or expired token is the state, so
+  by the definition above it is a state error. Everywhere else it is never a row.
 
 ## 5. Views
 

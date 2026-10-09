@@ -206,7 +206,7 @@
     "summary": "read a bond",
     "auth": "bearer",
     "headers": [
-      "If-None-Match (optional. Sent with the ETag you already hold, the answer is 304 with no body for as long as what you would be shown has not changed. The contract does not document the 304)"
+      "If-None-Match (optional: the ETag you already hold. While what you would be shown has not changed, the answer is 304 with no body)"
     ],
     "requestErrors": [
       {
@@ -268,7 +268,7 @@
     "summary": "leave the bond",
     "auth": "bearer",
     "headers": [
-      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a leave keeps them. Any other Content-Type is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike, and that is what curl -X POST -d '' sends; the contract does not document the 415)"
+      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a leave keeps them. Any other Content-Type is refused with 415, even with no body)"
     ],
     "requestErrors": [
       {
@@ -295,7 +295,7 @@
     "summary": "block your partner",
     "auth": "bearer",
     "headers": [
-      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back. Any other Content-Type is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike, and that is what curl -X POST -d '' sends; the contract does not document the 415)"
+      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back. Any other Content-Type is refused with 415, even with no body)"
     ],
     "requestErrors": [
       {

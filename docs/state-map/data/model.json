@@ -7,15 +7,15 @@
       "regions": [
         {
           "id": "account",
-          "label": "The account",
+          "label": "The account (the one your address, link or token names), and whether you are signed in",
           "states": [
             {
               "id": "ANONYMOUS",
-              "label": "anonymous"
+              "label": "no account for this address"
             },
             {
               "id": "PENDING_VERIFICATION",
-              "label": "PENDING_VERIFICATION"
+              "label": "PENDING_VERIFICATION, signed out"
             },
             {
               "id": "ACTIVE_SIGNED_OUT",
@@ -23,7 +23,7 @@
             },
             {
               "id": "SIGNED_IN",
-              "label": "signed in"
+              "label": "signed in, verified or not"
             },
             {
               "id": "SUSPENDED",
@@ -44,45 +44,45 @@
         },
         {
           "id": "account.session",
-          "label": "The session",
+          "label": "The session (one sign-in: a refresh-token family and the access token made for it, named by the token you send)",
           "states": [
             {
               "id": "NO_SESSION",
-              "label": "no session"
+              "label": "no session (no token sent, or one that names no session)"
             },
             {
               "id": "ACCESS_VALID",
-              "label": "access token valid"
+              "label": "live, access token valid"
             },
             {
               "id": "ACCESS_EXPIRED",
-              "label": "access token expired"
+              "label": "live, access token expired"
             },
             {
-              "id": "REVOKED",
-              "label": "revoked"
+              "id": "ENDED",
+              "label": "ended (signed out, revoked, or its refresh token ran out)"
             }
           ]
         },
         {
           "id": "account.reset",
-          "label": "The password reset",
+          "label": "The password reset (one reset link, named by its token)",
           "states": [
             {
               "id": "NONE",
-              "label": "none"
+              "label": "none (no link, or a token that matches none)"
             },
             {
               "id": "REQUESTED",
-              "label": "requested"
+              "label": "requested, the link is live"
             },
             {
               "id": "USED",
-              "label": "token used"
+              "label": "link used"
             },
             {
               "id": "EXPIRED",
-              "label": "token expired"
+              "label": "link expired"
             }
           ]
         }
@@ -339,6 +339,31 @@
       "id": "event:proposal-lapses",
       "label": "the proposal lapses, seven days unanswered",
       "actor": "system"
+    },
+    {
+      "id": "event:access-token-expires",
+      "label": "the access token expires, fifteen minutes on",
+      "actor": "system"
+    },
+    {
+      "id": "event:refresh-token-expires",
+      "label": "the refresh token expires, thirty days unused",
+      "actor": "system"
+    },
+    {
+      "id": "event:verification-token-expires",
+      "label": "the verification link expires, a day on",
+      "actor": "system"
+    },
+    {
+      "id": "event:reset-token-expires",
+      "label": "the reset link expires, an hour on",
+      "actor": "system"
+    },
+    {
+      "id": "event:reuse-detected",
+      "label": "a refresh token already used is presented again",
+      "actor": "system"
     }
   ],
   "everywhere": [
@@ -351,7 +376,7 @@
     {
       "status": 401,
       "code": "UNAUTHENTICATED",
-      "reason": "No access token, or one that is expired or not valid.",
+      "reason": "No access token, or one that is expired or not valid. Everything under /api/v1 except the eight public auth POSTs needs one, and that is decided before the path is looked up: a path that does not exist, or a GET on a public auth route, is 401 without a token, not 404 or 405. In the account machine's own regions this answer is a row, because there the missing or expired token is the state.",
       "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.UNAUTHENTICATED"
     },
     {
@@ -417,5 +442,46 @@
       "PASSWORD_RESET_TOKEN_EXPIRED"
     ]
   },
-  "contractGaps": []
+  "contractGaps": [
+    {
+      "endpoint": "GET /api/v1/bonds/{bondId}",
+      "status": 304,
+      "note": "Sent with an If-None-Match that equals the bond's current ETag, the answer is 304 with no body, for as long as what you would be shown has not changed."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/leave",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/block",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "PATCH /api/v1/bonds/{bondId}",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "PUT /api/v1/bonds/{bondId}/members/me/settings",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "PATCH /api/v1/bonds/{bondId}/timezone",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    }
+  ]
 }
