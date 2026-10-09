@@ -1175,12 +1175,62 @@
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RevokeInvite.kt#if (!invites.revoke(membership.bondId, inviteId, clock.instant())) throw InviteNotFoundException()"
   },
   {
+    "id": "bond-pending-deletion-revoke-not-an-id",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "actor": "you",
+    "when": "the invite id is not a UUID",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "An id that is not a UUID is turned away in the controller, before the bond's state is read, so here the answer is the invite's 404 and not BOND_ARCHIVED.",
+    "rule": "FR-023",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondInvitesController.kt#InviteId(runCatching { UUID.fromString(raw) }.getOrElse { throw InviteNotFoundException() })"
+  },
+  {
+    "id": "bond-archived-revoke-not-an-id",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "actor": "you",
+    "when": "the invite id is not a UUID",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "An id that is not a UUID is turned away in the controller, before the bond's state is read, so here the answer is the invite's 404 and not BOND_ARCHIVED.",
+    "rule": "FR-023",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondInvitesController.kt#InviteId(runCatching { UUID.fromString(raw) }.getOrElse { throw InviteNotFoundException() })"
+  },
+  {
     "id": "bond-pending-deletion-revoke",
     "region": "bond",
     "from": "PENDING_DELETION",
     "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
     "actor": "you",
-    "when": "",
+    "when": "the invite id is a UUID",
     "guards": [
       {
         "region": "account",
@@ -1205,7 +1255,7 @@
     "from": "ARCHIVED",
     "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
     "actor": "you",
-    "when": "",
+    "when": "the invite id is a UUID",
     "guards": [
       {
         "region": "account",
@@ -1218,7 +1268,7 @@
     "to": "ARCHIVED",
     "status": 409,
     "code": "BOND_ARCHIVED",
-    "reason": "Ending the bond revoked its invite already. Every write on an ended bond gets this one answer, so the 404 of a dead invite is not given here.",
+    "reason": "Ending the bond revoked its invite already. The bond's state is answered before the invite is looked for, so the 404 of a dead invite is not given here, whichever invite the id names.",
     "rule": "BR-9, ADR-0028 §4",
     "evidence": "smoke",
     "evidenceRef": "revoking its invite is 409 too",
@@ -1380,7 +1430,7 @@
     "from": "ACTIVE",
     "action": "POST /api/v1/invites/{code}/accept",
     "actor": "you",
-    "when": "",
+    "when": "the code is one of this bond's",
     "guards": [
       {
         "region": "account",
@@ -1393,7 +1443,7 @@
     "to": "ACTIVE",
     "status": 404,
     "code": "INVITE_NOT_USABLE",
-    "reason": "None of this bond's codes is live any more: the one that paired you was spent, and ending a bond or starting its countdown revokes any other. So a code of this bond gets the one answer every dead code gets, also from its own members.",
+    "reason": "None of this bond's codes is live any more: the one that paired you was spent, and ending a bond or starting its countdown revokes any other. So a code of this bond gets the one answer every dead code gets, also from its own members. Another bond's code is a different matter: being in this bond does not stop you accepting it, and that is the no-bond column, read for the bond the code leads to.",
     "rule": "FR-024, ADR-0027 §1",
     "evidence": "smoke",
     "evidenceRef": "the spent code is 404 INVITE_NOT_USABLE",
@@ -1405,7 +1455,7 @@
     "from": "PENDING_DELETION",
     "action": "POST /api/v1/invites/{code}/accept",
     "actor": "you",
-    "when": "",
+    "when": "the code is one of this bond's",
     "guards": [
       {
         "region": "account",
@@ -1418,7 +1468,7 @@
     "to": "PENDING_DELETION",
     "status": 404,
     "code": "INVITE_NOT_USABLE",
-    "reason": "None of this bond's codes is live any more: the one that paired you was spent, and ending a bond or starting its countdown revokes any other. So a code of this bond gets the one answer every dead code gets, also from its own members.",
+    "reason": "None of this bond's codes is live any more: the one that paired you was spent, and ending a bond or starting its countdown revokes any other. So a code of this bond gets the one answer every dead code gets, also from its own members. Another bond's code is a different matter: being in this bond does not stop you accepting it, and that is the no-bond column, read for the bond the code leads to.",
     "rule": "FR-024, ADR-0027 §1",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -1430,7 +1480,7 @@
     "from": "ARCHIVED",
     "action": "POST /api/v1/invites/{code}/accept",
     "actor": "you",
-    "when": "",
+    "when": "the code is one of this bond's",
     "guards": [
       {
         "region": "account",
@@ -1443,7 +1493,7 @@
     "to": "ARCHIVED",
     "status": 404,
     "code": "INVITE_NOT_USABLE",
-    "reason": "None of this bond's codes is live any more: the one that paired you was spent, and ending a bond or starting its countdown revokes any other. So a code of this bond gets the one answer every dead code gets, also from its own members.",
+    "reason": "None of this bond's codes is live any more: the one that paired you was spent, and ending a bond or starting its countdown revokes any other. So a code of this bond gets the one answer every dead code gets, also from its own members. Another bond's code is a different matter: being in this bond does not stop you accepting it, and that is the no-bond column, read for the bond the code leads to.",
     "rule": "FR-024, ADR-0027 §1",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -2925,6 +2975,31 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
   },
   {
+    "id": "bond-pending-deletion-edit-not-yours",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "a new request for an entry that is not yours",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Whose entry it is comes first: your partner's entry, or an id that names none, is the 404 everybody else gets, and the bond's state is never reached. The day machine's cards have it.",
+    "rule": "T-02",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#): Pair<Entry, BondMembership> = authorOrNull(userId, entryId, lock) ?: throw EntryNotFoundException()"
+  },
+  {
     "id": "bond-pending-deletion-edit-replay",
     "region": "bond",
     "from": "PENDING_DELETION",
@@ -2973,6 +3048,31 @@
     "evidence": "smoke",
     "evidenceRef": "PATCH on an ended bond is 409 BOND_ARCHIVED",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-edit-not-yours",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "a new request for an entry that is not yours",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Whose entry it is comes first: your partner's entry, or an id that names none, is the 404 everybody else gets, and the bond's state is never reached. The day machine's cards have it. (the test asserts the 404 for the partner after leaving and that the body is identical to the one the partner gets on an open bond; the smoke probe \"the partner cannot edit the author's entry\" asserts that body's code)",
+    "rule": "T-02",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#entry routes hide another author and another tenant exactly like a missing id",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#): Pair<Entry, BondMembership> = authorOrNull(userId, entryId, lock) ?: throw EntryNotFoundException()"
   },
   {
     "id": "bond-archived-edit-replay",
@@ -5078,7 +5178,7 @@
     "from": "NONE",
     "action": "PATCH /api/v1/bonds/{bondId}/timezone",
     "actor": "you",
-    "when": "the zone has not moved in the last 30 days",
+    "when": "the bond is two people, and the zone has not moved in the last 30 days",
     "guards": [
       {
         "region": "account",
