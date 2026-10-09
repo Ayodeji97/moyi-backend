@@ -2893,10 +2893,10 @@
     "to": "NO_BOND",
     "status": 404,
     "code": "NOT_FOUND",
-    "reason": "An entry in a bond you are not in does not exist for you: the same 404 as an id that names no entry. (a test asserts the status, not the code)",
+    "reason": "An entry in a bond you are not in does not exist for you: the same 404 as an id that names no entry. (the test asserts the 404 and that the body is identical to the one the author's partner gets; the smoke probe \"the partner cannot edit the author's entry\" asserts that body's code)",
     "rule": "T-02",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#entry routes hide another author and another tenant exactly like a missing id",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#): Pair<Entry, BondMembership> = authorOrNull(userId, entryId, lock) ?: throw EntryNotFoundException()"
   },
   {
