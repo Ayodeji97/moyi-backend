@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 ACTORS = ("you", "partner", "system")
@@ -20,6 +20,7 @@ ROW_KEYS = (
 )
 ENDPOINT_KEYS = ("id", "summary", "auth", "headers", "requestErrors", "curl")
 REQUEST_ERROR_KEYS = ("status", "code", "reason", "evidence", "evidenceRef", "codeRef")
+GAP_KEYS = ("endpoint", "status", "note")
 STATE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 ENDPOINT_ID = re.compile(r"^(GET|POST|PUT|PATCH|DELETE) /")
 
@@ -34,6 +35,7 @@ class Model:
     endpoints: list
     rows: list
     journeys: list
+    gaps: list = field(default_factory=list)
 
     def regions(self) -> dict:
         return {r["id"]: {**r, "machine": m["id"]} for m in self.machines for r in m["regions"]}
@@ -72,6 +74,7 @@ def load(data_dir: Path) -> Model:
         endpoints=read("endpoints.json", []),
         rows=rows,
         journeys=read("journeys.json", []),
+        gaps=base.get("contractGaps", []),
     )
 
 
@@ -99,6 +102,7 @@ def validate(model: Model) -> list:
         problems += _row(row, model, regions, set(endpoint_ids), set(event_ids))
     problems += _cells(model)
     problems += _journeys(model)
+    problems += _gaps(model, set(endpoint_ids))
     return problems
 
 
@@ -215,4 +219,25 @@ def _journeys(model: Model) -> list:
                 problems.append(f"journey {name}: step {number} names no row '{step.get('row')}'")
             elif row.get("outcome") == "unreachable":
                 problems.append(f"journey {name}: step {number} is a cell that cannot be reached")
+    return problems
+
+
+def _gaps(model: Model, endpoint_ids: set) -> list:
+    problems = []
+    seen = set()
+    for gap in model.gaps:
+        missing = [k for k in GAP_KEYS if k not in gap]
+        if missing:
+            problems.append(f"contractGaps: an entry is missing {', '.join(missing)}")
+            continue
+        name = f"{gap['endpoint']} {gap['status']}"
+        if gap["endpoint"] not in endpoint_ids:
+            problems.append(f"contractGaps: {gap['endpoint']} has no endpoint card")
+        if not (isinstance(gap["status"], int) and not isinstance(gap["status"], bool)) \
+                or not str(gap["note"]).strip():
+            problems.append(f"contractGaps: {name} needs a whole-number status and a note")
+        key = (gap["endpoint"], gap["status"])
+        if key in seen:
+            problems.append(f"contractGaps: {name} is listed twice")
+        seen.add(key)
     return problems

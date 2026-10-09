@@ -13,6 +13,8 @@ from statemap.check import (
     probe_labels,
 )
 
+GAP = {"endpoint": "POST /api/v1/lamp", "status": 409, "note": "It is already on."}
+
 LAMP = {"POST /api/v1/lamp": {200, 401, 409}}
 
 KOTLIN = """
@@ -77,6 +79,26 @@ class ContractTests(unittest.TestCase):
     def test_a_row_status_the_contract_does_not_document(self):
         ops = {"POST /api/v1/lamp": {200, 401}}
         self.assertIn("answers 409, which the contract does not document", self.problems(tiny(), ops))
+
+    def test_a_listed_gap_allows_an_undocumented_status(self):
+        ops = {"POST /api/v1/lamp": {200, 401}}
+        self.assertEqual(check_contract(tiny(gaps=[GAP]), ops, True), [])
+
+    def test_an_unlisted_status_says_how_to_list_it(self):
+        ops = {"POST /api/v1/lamp": {200, 401}}
+        problems = self.problems(tiny(), ops)
+        self.assertIn("answers 409, which the contract does not document", problems)
+        self.assertIn("; if the code really answers it, list it in contractGaps", problems)
+
+    def test_a_gap_the_contract_now_documents_is_a_problem(self):
+        self.assertIn(
+            "contractGaps lists POST /api/v1/lamp 409, which the contract now documents; remove it",
+            self.problems(tiny(gaps=[GAP])),
+        )
+
+    def test_a_gap_no_row_uses_is_not_a_problem(self):
+        gap = {**GAP, "status": 304}
+        self.assertEqual(check_contract(tiny(gaps=[gap]), LAMP, True), [])
 
     def test_a_card_with_no_row_of_your_own(self):
         self.assertIn("has a card and no row", self.problems(tiny(rows=[])))

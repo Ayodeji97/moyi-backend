@@ -6,6 +6,8 @@ from pathlib import Path
 from fixture import refusal, row, tiny
 from statemap.model import load, validate
 
+GAP = {"endpoint": "POST /api/v1/lamp", "status": 409, "note": "It is already on."}
+
 
 class ValidateTests(unittest.TestCase):
     def problems(self, model):
@@ -71,6 +73,27 @@ class ValidateTests(unittest.TestCase):
     def test_two_rows_may_not_share_an_id(self):
         self.assertIn("two rows share the id", self.problems(tiny([row(when="a"), row(when="b")])))
 
+    def test_a_well_formed_gap_is_clean(self):
+        self.assertEqual(validate(tiny(gaps=[GAP])), [])
+
+    def test_a_gap_missing_keys_is_named(self):
+        self.assertIn("contractGaps: an entry is missing status, note", self.problems(tiny(gaps=[{"endpoint": "POST /api/v1/lamp"}])))
+
+    def test_a_gap_needs_an_endpoint_card(self):
+        gap = {**GAP, "endpoint": "GET /api/v1/lamp"}
+        self.assertIn("contractGaps: GET /api/v1/lamp has no endpoint card", self.problems(tiny(gaps=[gap])))
+
+    def test_a_gap_status_must_be_a_whole_number(self):
+        gap = {**GAP, "status": "409"}
+        self.assertIn("contractGaps: POST /api/v1/lamp 409 needs a whole-number status and a note", self.problems(tiny(gaps=[gap])))
+
+    def test_a_gap_note_may_not_be_blank(self):
+        gap = {**GAP, "note": "  "}
+        self.assertIn("contractGaps: POST /api/v1/lamp 409 needs a whole-number status and a note", self.problems(tiny(gaps=[gap])))
+
+    def test_a_gap_may_not_be_listed_twice(self):
+        self.assertIn("contractGaps: POST /api/v1/lamp 409 is listed twice", self.problems(tiny(gaps=[GAP, dict(GAP)])))
+
 
 class LoadTests(unittest.TestCase):
     def test_rows_come_from_every_machine_file_that_exists(self):
@@ -85,6 +108,18 @@ class LoadTests(unittest.TestCase):
         self.assertEqual(loaded.rows, model.rows)
         self.assertEqual(loaded.journeys, [])
         self.assertEqual(validate(loaded), [])
+        self.assertEqual(loaded.gaps, [])
+
+    def test_contract_gaps_are_read_from_model_json(self):
+        model = tiny(gaps=[GAP])
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            base = {k: getattr(model, k) for k in ("stamp", "machines", "events", "everywhere", "pending")}
+            (data / "model.json").write_text(json.dumps({**base, "contractGaps": model.gaps}))
+            (data / "endpoints.json").write_text(json.dumps(model.endpoints))
+            (data / "day.json").write_text(json.dumps(model.rows))
+            loaded = load(data)
+        self.assertEqual(loaded.gaps, [GAP])
 
 
 if __name__ == "__main__":

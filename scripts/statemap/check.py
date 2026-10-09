@@ -65,8 +65,14 @@ def check_contract(model: Model, operations: dict, strict: bool) -> list:
         documented = operations[operation]
         for status in sorted(documented - from_rows - from_card - everywhere):
             problems.append(f"{operation} documents {status} and nothing in the map explains it")
-        for status in sorted((from_rows | from_card) - documented):
-            problems.append(f"{operation} answers {status}, which the contract does not document")
+        listed = {g["status"] for g in model.gaps if g["endpoint"] == operation}
+        for status in sorted((from_rows | from_card) - documented - listed):
+            problems.append(
+                f"{operation} answers {status}, which the contract does not document"
+                "; if the code really answers it, list it in contractGaps"
+            )
+        for status in sorted(listed & documented):
+            problems.append(f"contractGaps lists {operation} {status}, which the contract now documents; remove it")
     return problems
 
 

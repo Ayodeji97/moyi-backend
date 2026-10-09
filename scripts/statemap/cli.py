@@ -51,5 +51,6 @@ def main(argv=None, root: Path = ROOT) -> int:
 
     never_run = sum(1 for r in model.rows if r["evidence"] == "never-run" and r["outcome"] != "unreachable")
     waiting = len(model.pending["endpoints"]) + len(model.pending["codes"])
-    print(f"state-map: {len(model.rows)} rows, {never_run} never run, {waiting} pending. Nothing wrong.")
+    gaps = f", {len(model.gaps)} contract gaps" if model.gaps else ""
+    print(f"state-map: {len(model.rows)} rows, {never_run} never run, {waiting} pending{gaps}. Nothing wrong.")
     return 0

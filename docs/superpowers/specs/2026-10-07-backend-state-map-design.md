@@ -193,6 +193,8 @@ A script, `scripts/state-map-check`, run in CI:
 - Every grid cell is filled.
 - The generated Mermaid matches the data.
 
+The contract can itself be incomplete: the code may answer a status that `contracts/openapi.json` does not document. The map does not bend a row to fit and does not edit the contract. Such a status is listed in `contractGaps` in `model.json`, with a note; the check then allows it, prints each machine's gaps on its page, and fails when a listed gap has since been documented, so the list can only shrink.
+
 Every row cites the code it was read from (`codeRef`) and says what executed it (`evidence`):
 `smoke`, `test`, `hand` or `never-run`. The check confirms each citation still resolves.
 A `pending` list in `model.json` names what is not yet mapped; the check fails when an

@@ -12,7 +12,18 @@ TIMER = row(
 )
 
 
+GAP = {"endpoint": "POST /api/v1/lamp", "status": 409, "note": "It is already on."}
+
+
 class MermaidTests(unittest.TestCase):
+    def test_a_machine_page_prints_the_gaps_of_its_endpoints(self):
+        page = machine_md(tiny(gaps=[GAP]), "lamp")
+        self.assertIn("## Where the contract is silent", page)
+        self.assertIn("| `POST /lamp` | 409 | It is already on. |", page)
+
+    def test_a_machine_without_gaps_prints_no_such_section(self):
+        self.assertNotIn("Where the contract is silent", machine_md(tiny(), "lamp"))
+
     def test_clean_removes_what_breaks_mermaid(self):
         self.assertEqual(clean('write: "today\'s" entry {bondId}; #1'), "write today's entry bondId 1")
 

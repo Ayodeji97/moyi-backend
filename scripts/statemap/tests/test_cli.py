@@ -17,6 +17,8 @@ def repository(tmp, model):
     data = root / "docs/state-map/data"
     data.mkdir(parents=True)
     base = {k: getattr(model, k) for k in ("stamp", "machines", "events", "everywhere", "pending")}
+    if model.gaps:
+        base["contractGaps"] = model.gaps
     (data / "model.json").write_text(json.dumps(base))
     (data / "endpoints.json").write_text(json.dumps(model.endpoints))
     (data / "day.json").write_text(json.dumps(model.rows))
@@ -30,11 +32,16 @@ def repository(tmp, model):
     return root
 
 
-def run(argv, root):
-    err = io.StringIO()
-    with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+def run_with_output(argv, root):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stderr(err), contextlib.redirect_stdout(out):
         code = main(argv, root)
-    return code, err.getvalue()
+    return code, err.getvalue(), out.getvalue()
+
+
+def run(argv, root):
+    code, err, _ = run_with_output(argv, root)
+    return code, err
 
 
 class CliTests(unittest.TestCase):
@@ -44,6 +51,15 @@ class CliTests(unittest.TestCase):
             self.assertEqual(run(["check", "--strict"], root)[0], 1)
             self.assertEqual(run(["generate"], root)[0], 0)
             self.assertEqual(run(["check", "--strict"], root), (0, ""))
+
+    def test_the_summary_counts_contract_gaps(self):
+        gap = {"endpoint": "POST /api/v1/lamp", "status": 304, "note": "A conditional request is answered 304."}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = repository(tmp, tiny(gaps=[gap]))
+            self.assertEqual(run(["generate"], root)[0], 0)
+            code, err, out = run_with_output(["check", "--strict"], root)
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue(out.strip().endswith("1 contract gaps. Nothing wrong."), out)
 
     def test_check_names_what_is_wrong_and_fails(self):
         with tempfile.TemporaryDirectory() as tmp:

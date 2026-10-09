@@ -119,6 +119,17 @@ def _without_you(model: Model, region_id: str) -> str:
     return _table(["In", "What happens", "Who", "Leads to", "Why", "Evidence"], rows) if rows else ""
 
 
+def _gaps(model: Model, machine: dict) -> str:
+    regions = {r["id"] for r in machine["regions"]}
+    mine = {r["action"] for r in model.rows if r["region"] in regions}
+    rows = [
+        [f"`{short(g['endpoint'])}`", str(g["status"]), cell_text(g["note"])]
+        for g in model.gaps
+        if g["endpoint"] in mine
+    ]
+    return _table(["Endpoint", "Status", "What the code does"], rows) if rows else ""
+
+
 def machine_md(model: Model, machine_id: str) -> str:
     machine = next(m for m in model.machines if m["id"] == machine_id)
     parts = [
@@ -140,6 +151,13 @@ def machine_md(model: Model, machine_id: str) -> str:
             for title, text in sections:
                 if text:
                     parts += [f"### {title}", text]
+    gaps = _gaps(model, machine)
+    if gaps:
+        parts += [
+            "## Where the contract is silent",
+            "The code answers these and `contracts/openapi.json` does not document them.",
+            gaps,
+        ]
     return "\n\n".join(parts) + "\n"
 
 
