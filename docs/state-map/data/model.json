@@ -44,7 +44,7 @@
         },
         {
           "id": "account.session",
-          "label": "The session (one sign-in: a refresh-token family and the access token made for it, named by the token you send)",
+          "label": "The session (one sign-in, which is a refresh-token family and the access token made for it, named by the token you send)",
           "states": [
             {
               "id": "NO_SESSION",
@@ -418,18 +418,10 @@
   ],
   "pending": {
     "endpoints": [
-      "DELETE /api/v1/auth/sessions/{id}",
-      "GET /api/v1/auth/sessions",
-      "GET /api/v1/me",
       "POST /api/v1/auth/forgot-password",
-      "POST /api/v1/auth/logout",
-      "POST /api/v1/auth/logout-all",
-      "POST /api/v1/auth/refresh",
       "POST /api/v1/auth/reset-password"
     ],
     "codes": [
-      "REFRESH_TOKEN_INVALID",
-      "TOKEN_REUSE_DETECTED",
       "PASSWORD_RESET_TOKEN_INVALID",
       "PASSWORD_RESET_TOKEN_EXPIRED"
     ]
@@ -512,6 +504,21 @@
     },
     {
       "endpoint": "POST /api/v1/auth/login",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/refresh",
+      "status": 401,
+      "note": "401 REFRESH_TOKEN_INVALID for a refresh token that is unknown, expired or revoked, and 401 TOKEN_REUSE_DETECTED for one already exchanged. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/refresh",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/logout",
       "status": 415,
       "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
     }

@@ -619,5 +619,92 @@
       }
     ],
     "curl": "curl -X POST \"$API/auth/login\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"device\\\": {\\\"platform\\\": \\\"ANDROID\\\", \\\"appVersion\\\": \\\"1.0\\\", \\\"osVersion\\\": \\\"16\\\"}}\""
+  },
+  {
+    "id": "POST /api/v1/auth/refresh",
+    "summary": "exchange the refresh token for a new pair",
+    "auth": "none",
+    "headers": [
+      "Content-Type (application/json. The refresh token in the body is the credential; no access token is read. No rate limit of its own. Never send two refreshes of one token at once: the second is treated as a reuse and ends the session)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "refreshToken is blank or longer than 256 characters. (a test asserts the 422 for an oversized token, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/RefreshController.kt#internal data class RefreshRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/refresh\" -H 'Content-Type: application/json' -d \"{\\\"refreshToken\\\": \\\"$REFRESH\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/logout",
+    "summary": "sign out of this session",
+    "auth": "none",
+    "headers": [
+      "Content-Type (application/json. The refresh token in the body is the credential; no access token is read, so an expired one is no obstacle. No rate limit of its own)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "refreshToken is blank or longer than 256 characters. (a test asserts the 422 for an oversized token, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/LogoutController.kt#internal data class LogoutRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/logout\" -H 'Content-Type: application/json' -d \"{\\\"refreshToken\\\": \\\"$REFRESH\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/logout-all",
+    "summary": "sign out everywhere",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X POST \"$API/auth/logout-all\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/auth/sessions",
+    "summary": "list your sessions",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/auth/sessions\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/auth/sessions/{id}",
+    "summary": "end one session",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The id in the path is not a UUID. It is the same answer as a session that is not yours, and not a 400 about its shape. The rows say what the other ids get.",
+        "evidence": "smoke",
+        "evidenceRef": "DELETE a value that is not an id is 404 too",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/SessionsController.kt#val sessionId = runCatching { UUID.fromString(id) }.getOrElse { throw SessionNotFoundException() }"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/auth/sessions/$SESSION\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/me",
+    "summary": "read your profile",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/me\" -H \"Authorization: Bearer $TOKEN\""
   }
 ]
