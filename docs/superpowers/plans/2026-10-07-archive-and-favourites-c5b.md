@@ -276,12 +276,15 @@ tests `gratitude/web/DayViewTest.kt`, `gratitude/web/DaysConditionalTest.kt`.
 
 ### Task 4: Smoke, the tools, and the record
 
-- [ ] `scripts/smoke.sh`: a section that writes and reveals days (the script's existing way
+- [x] `scripts/smoke.sh`: a section that writes and reveals days (the script's existing way
   of ending a day, or the close job's short cron), pages the feed, reads a day, marks and
   unmarks, sends `If-None-Match`, and reads the archive after a withdrawal. Run with
   `MOYI_DB`; record totals; drop the database.
-- [ ] `scripts/moyi`: `days`, `day <date>`, `favourite <entryId>`, `unfavourite <entryId>`.
+  *As built:* one section, 614 passed, 0 failed, 20 sections (`28218fb`). Every day it
+  reads is today; it does not page or end a day. Paging stays with the integration tests.
+- [x] `scripts/moyi`: `days`, `day <date>`, `favourite <entryId>`, `unfavourite <entryId>`.
   `tools/bruno`: the four requests.
+  *As built:* `9bba582`. The collection has not been opened in Bruno.
 - [x] `adr/0036-the-archive-and-favourites.md` (the fourteen decisions; Consequences; Owed;
   Questions that are the owner's; How this was checked). Spec §5.2, §6.6, §7, §11 amended in
   place, dated. `docs/learning-log.md`. Label the PR `breaking-api-change` (two new error
@@ -339,3 +342,8 @@ bucket) are new.
 - The branch was rebased onto `main` at `174b474` when #58 merged, during Task 2.
 - Task 1's review fixes were made in Task 2's last commit (`a194778`), and Task 2's in
   Task 3's (`a20dc2b`). Task 3 was finished by a second agent after the first stalled.
+- Task 4 began with the review of Task 3: its F1 to F4 were fixed at `50166ec` before the
+  smoke section was written. Both archive routes declare what they produce, so a `406`
+  there comes before the membership guard.
+- Still open in Task 4 when this note was written: the `breaking-api-change` label, which
+  is the pull request's own.

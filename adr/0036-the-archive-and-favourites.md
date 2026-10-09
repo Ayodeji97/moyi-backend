@@ -860,9 +860,26 @@ predate the rebase onto `174b474`: `32fa875` is `4826528` and `a15bf57` is `46c1
     reviewer's mutation, the security default switched off, now fails it.
   - F5 needed nothing: the swap inside `GetDays.read` fails `ArchiveReadOrderTest`, four
     of four.
-  - **Not in the reports when this was written:** the whole-build test count at
-    `50166ec`, the smoke run's totals, the CLI and Bruno additions, and the contract
-    check against `main`. They are recorded on the pull request.
+  - `./gradlew build` for these fixes: the fixer's log ends `BUILD SUCCESSFUL`. Its report
+    gives no test count for `50166ec`, so none is given here; the last counted build is
+    1341 at `a20dc2b`.
+- **The smoke run** (`20d729c`, `28218fb`; the figures are the commits' own messages, the
+  task's report not having reached them when this was written). One new section, after the
+  withdrawal section, against the booted jar on a database of its own
+  (`MOYI_DB=moyi_c5b_smoke`, dropped afterwards): the `422` of each unreadable parameter
+  and that none repeats the value, the two `404`s, a day only one member has written, a
+  bookmark set and removed and never shown to the other member, `If-None-Match` and what
+  moves a tag, the `Accept` header, and the archive after a withdrawal. **614 passed, 0
+  failed, no skips, 20 sections.** Every day it reads is today: past days and paging stay
+  with the integration tests.
+- **The tools** (`9bba582`). `scripts/moyi` gains `days`, `day <date>`, `favourite
+  <entryId>` and `unfavourite <entryId>`, run once each against a booted jar on a database
+  of its own (`moyi_c5b_cli`, dropped), with the forms refused locally and the server's
+  `422` and `404`s. The line it prints for a non-null `nextCursor` was not reached: that
+  run had one day. `tools/bruno` gains the four requests. The collection has still never
+  been opened in Bruno.
+- **Not in a report or a commit when this was written:** a contract check against `main`
+  (oasdiff), and a whole-branch review. They are the pull request's to record.
 - **Read, not run:** that every erasure goes through `EraseEntry` (by search: three
   callers); the unreachable cell (decision 2); the lock order of the mark (it holds
   nothing else); rate limiting on the four routes (the test context has the limiter off);
