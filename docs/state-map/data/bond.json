@@ -1,0 +1,3304 @@
+[
+  {
+    "id": "bond-none-list",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "GET /api/v1/bonds",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NO_BOND",
+    "status": 200,
+    "code": null,
+    "reason": "You hold no bond, so the list is empty. An account that is not yet verified may ask too.",
+    "rule": "",
+    "evidence": "smoke",
+    "evidenceRef": "the stranger's list is empty",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ListBonds.kt#fun forUser(userId: UserId): List<BondView> = views.ofAll(bonds.findAllByMember(userId), userId)"
+  },
+  {
+    "id": "bond-pending-member-list",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "GET /api/v1/bonds",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "The bond is listed, newest first, with its live invite and its code.",
+    "rule": "",
+    "evidence": "smoke",
+    "evidenceRef": "GET /bonds lists it",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ListBonds.kt#fun forUser(userId: UserId): List<BondView> = views.ofAll(bonds.findAllByMember(userId), userId)"
+  },
+  {
+    "id": "bond-active-list",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "GET /api/v1/bonds",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "The bond is listed with both members and whatever is waiting to be agreed.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ListBonds.kt#fun forUser(userId: UserId): List<BondView> = views.ofAll(bonds.findAllByMember(userId), userId)"
+  },
+  {
+    "id": "bond-pending-deletion-list",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "GET /api/v1/bonds",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 200,
+    "code": null,
+    "reason": "A bond counting down to deletion is still listed, with the date it is scheduled for.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ListBonds.kt#fun forUser(userId: UserId): List<BondView> = views.ofAll(bonds.findAllByMember(userId), userId)"
+  },
+  {
+    "id": "bond-archived-list",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "GET /api/v1/bonds",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 200,
+    "code": null,
+    "reason": "A bond that has ended stays in the list of both members, the one who left included.",
+    "rule": "ADR-0026 §4, ADR-0028 §4",
+    "evidence": "test",
+    "evidenceRef": "BondEndingEndpointTest#the member who left still reads the archive, and so does the other",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ListBonds.kt#fun forUser(userId: UserId): List<BondView> = views.ofAll(bonds.findAllByMember(userId), userId)"
+  },
+  {
+    "id": "bond-none-create",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is verified, and you are in fewer than three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 201,
+    "code": null,
+    "reason": "A new bond is created with you as its owner, waiting for its second member, and with its first invite. It starts PENDING_MEMBER, not ACTIVE: nothing counts toward a streak until somebody joins.",
+    "rule": "FR-020, doc 04 §4.3",
+    "evidence": "smoke",
+    "evidenceRef": "POST /bonds is 201, pending its second member",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#status = BondStatus.PENDING_MEMBER,"
+  },
+  {
+    "id": "bond-none-create-unverified",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is not verified",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 403,
+    "code": "EMAIL_NOT_VERIFIED",
+    "reason": "An account that has not confirmed its address may sign in and may not create a bond. It is checked first, before the limit is counted.",
+    "rule": "FR-002",
+    "evidence": "smoke",
+    "evidenceRef": "an unverified account cannot create a bond: 403 EMAIL_NOT_VERIFIED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (creator == null || !creator.emailVerified) throw EmailNotVerifiedException()"
+  },
+  {
+    "id": "bond-none-create-limit",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "your email is verified, and you are already in three bonds that are open or counting down to deletion",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "The limit is three. It counts the bonds you have not left whose status is PENDING_MEMBER, ACTIVE or PENDING_DELETION; an archived bond does not count. The probe cited fills the three with bonds still waiting for a member; that a bond counting down still counts is asserted by BondDeletionEndpointTest, by status only.",
+    "rule": "FR-025, ADR-0030 §4c",
+    "evidence": "smoke",
+    "evidenceRef": "a fourth open bond is 409 BOND_LIMIT_REACHED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateBond.kt#if (bonds.countOpenBondsOf(draft.creator) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
+  },
+  {
+    "id": "bond-pending-member-create",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "unreachable",
+    "to": "PENDING_MEMBER",
+    "status": null,
+    "code": null,
+    "reason": "POST /bonds never acts on a bond you already have: it makes a new one, and a new bond starts from no bond. The bonds you already hold matter only as the count toward the limit of three.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": ""
+  },
+  {
+    "id": "bond-active-create",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "unreachable",
+    "to": "ACTIVE",
+    "status": null,
+    "code": null,
+    "reason": "POST /bonds never acts on a bond you already have: it makes a new one, and a new bond starts from no bond. The bonds you already hold matter only as the count toward the limit of three.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": ""
+  },
+  {
+    "id": "bond-pending-deletion-create",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "unreachable",
+    "to": "PENDING_DELETION",
+    "status": null,
+    "code": null,
+    "reason": "POST /bonds never acts on a bond you already have: it makes a new one, and a new bond starts from no bond. The bonds you already hold matter only as the count toward the limit of three.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": ""
+  },
+  {
+    "id": "bond-archived-create",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "unreachable",
+    "to": "ARCHIVED",
+    "status": null,
+    "code": null,
+    "reason": "POST /bonds never acts on a bond you already have: it makes a new one, and a new bond starts from no bond. The bonds you already hold matter only as the count toward the limit of three.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": ""
+  },
+  {
+    "id": "bond-none-read",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "GET /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "the stranger's GET of someone else's bond is 404 NOT_FOUND",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-read",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "GET /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "The bond with you as its only member, its live invite, and its ETag.",
+    "rule": "",
+    "evidence": "smoke",
+    "evidenceRef": "GET /bonds/{id} is 200 for the owner",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondsController.kt#val view = getBond.view(membership)"
+  },
+  {
+    "id": "bond-active-read",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "GET /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "The bond with both members, no invite, and anything waiting to be agreed.",
+    "rule": "",
+    "evidence": "smoke",
+    "evidenceRef": "the creator sees the same active bond",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondsController.kt#val view = getBond.view(membership)"
+  },
+  {
+    "id": "bond-pending-deletion-read",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "GET /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 200,
+    "code": null,
+    "reason": "A bond counting down stays readable to both members, and says when it is scheduled to be deleted.",
+    "rule": "FR-028",
+    "evidence": "smoke",
+    "evidenceRef": "both members still read it",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondsController.kt#val view = getBond.view(membership)"
+  },
+  {
+    "id": "bond-archived-read",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "GET /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 200,
+    "code": null,
+    "reason": "An ended bond is a record both members keep. The member who left reads it too.",
+    "rule": "ADR-0026 §4, ADR-0028 §4",
+    "evidence": "smoke",
+    "evidenceRef": "the member who left still reads the bond",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondsController.kt#val view = getBond.view(membership)"
+  },
+  {
+    "id": "bond-none-patch",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "PATCH /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "a stranger patching it is 404, headers and all",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-patch",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "PATCH /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "The name, the type, the reveal time and Strict mode may be changed by either member alone, given the bond's current ETag as If-Match. The answer carries the new ETag.",
+    "rule": "ADR-0029 §1",
+    "evidence": "smoke",
+    "evidenceRef": "the right If-Match is 200",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#val updated = bond.update(settings)"
+  },
+  {
+    "id": "bond-active-patch",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PATCH /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "The same on a bond of two: either member may change these settings without the other, given the current ETag. Your partner's copy of the ETag stops matching.",
+    "rule": "ADR-0029 §1",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#either member cancels, and an active bond returns to active",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#val updated = bond.update(settings)"
+  },
+  {
+    "id": "bond-pending-deletion-patch",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "PATCH /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond counting down to deletion takes no settings change. The code is the one an ended bond gives.",
+    "rule": "BR-9, FR-028",
+    "evidence": "smoke",
+    "evidenceRef": "a PATCH during the cooling-off is 409 BOND_ARCHIVED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-patch",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "PATCH /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "An ended bond is read only. This is answered before the If-Match is compared, so a stale tag gets it too.",
+    "rule": "BR-9, ADR-0028 §4",
+    "evidence": "smoke",
+    "evidenceRef": "…the PATCH is then 409 BOND_ARCHIVED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-none-leave",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "a stranger cannot leave someone else's bond",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-leave",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 204,
+    "code": null,
+    "reason": "Leaving a bond nobody joined ends it: it becomes ARCHIVED and its live invite is revoked. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11).",
+    "rule": "FR-026, ADR-0028 §1",
+    "evidence": "test",
+    "evidenceRef": "BondEndingEndpointTest#leaving is 204, archives the bond and kills the live code",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#status = BondStatus.ARCHIVED,"
+  },
+  {
+    "id": "bond-active-leave",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 204,
+    "code": null,
+    "reason": "One member leaving ends the bond for both: it becomes ARCHIVED, a record each of you can still read. Nobody is notified, and anything waiting to be agreed is cancelled. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11).",
+    "rule": "FR-026, ADR-0028 §1",
+    "evidence": "smoke",
+    "evidenceRef": "leaving is 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#status = BondStatus.ARCHIVED,"
+  },
+  {
+    "id": "bond-pending-deletion-leave",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "you are still in the bond",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 204,
+    "code": null,
+    "reason": "Your membership ends and the bond goes on counting down: the two of you agreed to delete it, and walking away does not undo that. From here you cannot call the deletion off; if your partner does, the bond becomes ARCHIVED. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11).",
+    "rule": "ADR-0030 §4a",
+    "evidence": "smoke",
+    "evidenceRef": "one of them leaves mid-cooling-off: 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#copy(members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it })"
+  },
+  {
+    "id": "bond-pending-deletion-leave-again",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "you have already left it, and it is still counting down",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 204,
+    "code": null,
+    "reason": "Nothing about the bond changes: you had already left. With withdrawEntries: true your entries are still taken back, if they had not been (ADR-0035 §11).",
+    "rule": "ADR-0030 §4a",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (ended == before) return"
+  },
+  {
+    "id": "bond-archived-leave",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond that has ended cannot be left again, by the member who left or the one who stayed. Nothing is withdrawn, whatever the body says. To take your entries back from an ended bond, block.",
+    "rule": "BR-9, ADR-0028 §2",
+    "evidence": "smoke",
+    "evidenceRef": "leaving twice is 409 BOND_ARCHIVED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (!bond.canBeEnded) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-none-block",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "…nor block in it",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-block",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 204,
+    "code": null,
+    "reason": "With nobody else in the bond there is no one to block, so this ends it exactly as leaving does: ARCHIVED, the live invite revoked, and no block recorded. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11).",
+    "rule": "FR-029, ADR-0028 §1",
+    "evidence": "test",
+    "evidenceRef": "BondEndingEndpointTest#blocking a bond nobody else ever joined behaves exactly as leaving",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#status = BondStatus.ARCHIVED,"
+  },
+  {
+    "id": "bond-active-block",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 204,
+    "code": null,
+    "reason": "The bond ends as it does for a leave, with the same answer, and it is also recorded that the two accounts are not to be paired again. Nothing your partner can read says which of the two happened. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11).",
+    "rule": "FR-029, ADR-0028 §1, doc 26 §2.1",
+    "evidence": "test",
+    "evidenceRef": "BondEndingEndpointTest#blocking is 204 and writes one row per other member",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#status = BondStatus.ARCHIVED,"
+  },
+  {
+    "id": "bond-pending-deletion-block",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "you are still in the bond",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 204,
+    "code": null,
+    "reason": "The block is recorded and your membership ends; the bond goes on counting down. If your partner calls the deletion off, the bond becomes ARCHIVED, not ACTIVE. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11).",
+    "rule": "ADR-0030 §4a, ADR-0028 §7",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#blocking during the cooling-off ends the blocker's membership, and the bond cannot be revived with them in it",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#copy(members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it })"
+  },
+  {
+    "id": "bond-pending-deletion-block-again",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "you have already left it, and it is still counting down",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 204,
+    "code": null,
+    "reason": "The block is recorded if it was not already, and nothing about the bond changes. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11).",
+    "rule": "ADR-0030 §4a",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (ended == before) return"
+  },
+  {
+    "id": "bond-archived-block",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 204,
+    "code": null,
+    "reason": "Block is the one write an ended bond accepts, from the member who stayed or the one who left, and it may be repeated. It records the block once and changes nothing either of you can read: no status, no leftAt, no ETag. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11).",
+    "rule": "FR-029, ADR-0028 §2",
+    "evidence": "smoke",
+    "evidenceRef": "blocking an archived bond is 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#!canBeEnded -> {"
+  },
+  {
+    "id": "bond-none-invite",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds/{bondId}/invites",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "a non-member cannot invite into it: 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-invite",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds/{bondId}/invites",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 201,
+    "code": null,
+    "reason": "A fresh code is issued, good for seven days and one use. Any code still live is revoked in the same transaction, so there is never more than one.",
+    "rule": "FR-022, FR-023, ADR-0027 §4",
+    "evidence": "smoke",
+    "evidenceRef": "issuing a new invite is 201",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateInvite.kt#val invite = Invite.issue(InviteId(ids.timeOrdered()), bond.id, codes.next(), membership.memberId, now)"
+  },
+  {
+    "id": "bond-active-invite",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/invites",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 409,
+    "code": "BOND_FULL",
+    "reason": "Both members are in it, so there is nobody left to invite.",
+    "rule": "FR-022",
+    "evidence": "smoke",
+    "evidenceRef": "a full bond takes no new invite: 409 BOND_FULL",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateInvite.kt#if (!bond.hasRoom) throw BondFullException()"
+  },
+  {
+    "id": "bond-pending-deletion-invite",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/invites",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond counting down takes no new invite, whether it has one member or two. (a test asserts the status, not the code)",
+    "rule": "BR-9, FR-028",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateInvite.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-invite",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/invites",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "An ended bond cannot be invited into.",
+    "rule": "BR-9, ADR-0028 §4",
+    "evidence": "smoke",
+    "evidenceRef": "inviting into an archived bond is 409",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateInvite.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-none-revoke",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "test",
+    "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-revoke",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "actor": "you",
+    "when": "the id is this bond's live invite",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 204,
+    "code": null,
+    "reason": "The code stops working at once. The bond stays as it is, with no invite until you issue another.",
+    "rule": "FR-023",
+    "evidence": "smoke",
+    "evidenceRef": "revoking the live one is 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RevokeInvite.kt#if (!invites.revoke(membership.bondId, inviteId, clock.instant())) throw InviteNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-revoke-dead",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "actor": "you",
+    "when": "the id is not this bond's live invite",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Already revoked, expired, another bond's, invented, or not a UUID: one answer for all of them, and nothing is changed.",
+    "rule": "FR-023",
+    "evidence": "smoke",
+    "evidenceRef": "revoking it again is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RevokeInvite.kt#if (!invites.revoke(membership.bondId, inviteId, clock.instant())) throw InviteNotFoundException()"
+  },
+  {
+    "id": "bond-active-revoke",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "A bond of two has no live invite: the one that brought your partner was spent, and no new one can be issued. So no id names one.",
+    "rule": "FR-023",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RevokeInvite.kt#if (!invites.revoke(membership.bondId, inviteId, clock.instant())) throw InviteNotFoundException()"
+  },
+  {
+    "id": "bond-pending-deletion-revoke",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "Starting the countdown revoked the live invite already; the answer says the bond takes no writes, not that the invite is dead.",
+    "rule": "BR-9, ADR-0028 §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RevokeInvite.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-revoke",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "Ending the bond revoked its invite already. Every write on an ended bond gets this one answer, so the 404 of a dead invite is not given here.",
+    "rule": "BR-9, ADR-0028 §4",
+    "evidence": "smoke",
+    "evidenceRef": "revoking its invite is 409 too",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RevokeInvite.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-none-accept",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "your email is verified, the code is live, you are in fewer than three bonds that are open or counting down, its bond still waits for its second member, and neither of you has blocked the other",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "You become the second member and the bond becomes ACTIVE in the same transaction. The code is spent. The streak's clock starts on this day.",
+    "rule": "FR-022, M2",
+    "evidence": "smoke",
+    "evidenceRef": "the joiner accepts: 200, and the bond is ACTIVE",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#return copy(status = BondStatus.ACTIVE, members = members + member)"
+  },
+  {
+    "id": "bond-none-accept-unverified",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "your email is not verified",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 403,
+    "code": "EMAIL_NOT_VERIFIED",
+    "reason": "Checked before the code is even looked up, so an unverified account learns nothing about any code.",
+    "rule": "FR-002, ADR-0027 §2",
+    "evidence": "test",
+    "evidenceRef": "InviteEndpointTest#an unverified account may not accept",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#if (joiner == null || !joiner.emailVerified) throw EmailNotVerifiedException()"
+  },
+  {
+    "id": "bond-none-accept-limit",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "your email is verified, the code is live, and you are already in three bonds that are open or counting down",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 409,
+    "code": "BOND_LIMIT_REACHED",
+    "reason": "The same limit of three that creating a bond has. It is a fact about your own account, so it is named. The code is not spent.",
+    "rule": "FR-025, ADR-0027 §2",
+    "evidence": "test",
+    "evidenceRef": "InviteEndpointTest#someone already in three bonds is 409 BOND_LIMIT_REACHED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#if (bonds.countOpenBondsOf(caller) >= Bond.MAX_OPEN_BONDS_PER_USER) throw BondLimitReachedException()"
+  },
+  {
+    "id": "bond-none-accept-not-usable",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "your email is verified, and the code is not live; or it is live, you are under the limit, and either its bond has no seat or one of you has blocked the other",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "INVITE_NOT_USABLE",
+    "reason": "The one answer for every way a code can fail: never issued, expired, revoked, already used, a bond with no seat, or a block between you and a member of it. The bodies are identical, so none of these can be told from another. The probe cited sends a code that was never issued.",
+    "rule": "FR-024, ADR-0027 §1",
+    "evidence": "smoke",
+    "evidenceRef": "a code that never existed is 404 too",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#val invite = invites.findLiveByCode(code, lookupAt) ?: throw InviteNotUsableException()"
+  },
+  {
+    "id": "bond-pending-member-accept",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "the code is this bond's live invite",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 409,
+    "code": "ALREADY_MEMBER",
+    "reason": "You created this bond and the code is your own. You are told so by name, because it is a fact about you; the code is not spent and your partner can still use it.",
+    "rule": "ADR-0027 §2",
+    "evidence": "smoke",
+    "evidenceRef": "the creator accepting their own code is 409 ALREADY_MEMBER",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#if (bond.memberOf(caller)?.isActive == true) throw AlreadyMemberException()"
+  },
+  {
+    "id": "bond-pending-member-accept-dead",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "the code is one of this bond's that is no longer live",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 404,
+    "code": "INVITE_NOT_USABLE",
+    "reason": "A revoked or expired code of your own bond is not looked up far enough to notice that the bond is yours: it is the one answer every dead code gets.",
+    "rule": "FR-024, ADR-0027 §1",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#val invite = invites.findLiveByCode(code, lookupAt) ?: throw InviteNotUsableException()"
+  },
+  {
+    "id": "bond-active-accept",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 404,
+    "code": "INVITE_NOT_USABLE",
+    "reason": "None of this bond's codes is live any more: the one that paired you was spent, and ending a bond or starting its countdown revokes any other. So a code of this bond gets the one answer every dead code gets, also from its own members.",
+    "rule": "FR-024, ADR-0027 §1",
+    "evidence": "smoke",
+    "evidenceRef": "the spent code is 404 INVITE_NOT_USABLE",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#val invite = invites.findLiveByCode(code, lookupAt) ?: throw InviteNotUsableException()"
+  },
+  {
+    "id": "bond-pending-deletion-accept",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 404,
+    "code": "INVITE_NOT_USABLE",
+    "reason": "None of this bond's codes is live any more: the one that paired you was spent, and ending a bond or starting its countdown revokes any other. So a code of this bond gets the one answer every dead code gets, also from its own members.",
+    "rule": "FR-024, ADR-0027 §1",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#val invite = invites.findLiveByCode(code, lookupAt) ?: throw InviteNotUsableException()"
+  },
+  {
+    "id": "bond-archived-accept",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/invites/{code}/accept",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 404,
+    "code": "INVITE_NOT_USABLE",
+    "reason": "None of this bond's codes is live any more: the one that paired you was spent, and ending a bond or starting its countdown revokes any other. So a code of this bond gets the one answer every dead code gets, also from its own members.",
+    "rule": "FR-024, ADR-0027 §1",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#val invite = invites.findLiveByCode(code, lookupAt) ?: throw InviteNotUsableException()"
+  },
+  {
+    "id": "bond-none-settings-read",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "…and cannot read its settings either",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-settings-read",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "Your own reminder time and zone, quiet hours and nickname. Only yours: the path has no way to name your partner's.",
+    "rule": "",
+    "evidence": "smoke",
+    "evidenceRef": "the member reads their own settings",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#fun of(membership: Membership): Member = memberIn(bondOf(membership), membership)"
+  },
+  {
+    "id": "bond-active-settings-read",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "Your own settings, as on a bond of one. Your partner's are never shown.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#fun of(membership: Membership): Member = memberIn(bondOf(membership), membership)"
+  },
+  {
+    "id": "bond-pending-deletion-settings-read",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 200,
+    "code": null,
+    "reason": "Reading is not a write, so the countdown does not stop it.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#fun of(membership: Membership): Member = memberIn(bondOf(membership), membership)"
+  },
+  {
+    "id": "bond-archived-settings-read",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 200,
+    "code": null,
+    "reason": "An ended bond's record stays readable, your own settings with it.",
+    "rule": "ADR-0028 §4",
+    "evidence": "smoke",
+    "evidenceRef": "…and the settings are still readable",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#fun of(membership: Membership): Member = memberIn(bondOf(membership), membership)"
+  },
+  {
+    "id": "bond-none-settings-replace",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "test",
+    "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-settings-replace",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "All five fields are replaced: one left out is cleared, except the reminder zone, which is kept. No If-Match is needed, and the bond's ETag does not move.",
+    "rule": "ADR-0029 §6, §7",
+    "evidence": "smoke",
+    "evidenceRef": "and replaces them",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#val updated = memberIn(bond, membership).withSettings(settings)"
+  },
+  {
+    "id": "bond-active-settings-replace",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "The same on a bond of two. The row is yours alone, so the last write wins and your partner's view of the bond does not change.",
+    "rule": "ADR-0029 §6, §7",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#val updated = memberIn(bond, membership).withSettings(settings)"
+  },
+  {
+    "id": "bond-pending-deletion-settings-replace",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond counting down takes no writes, your own settings included.",
+    "rule": "BR-9, FR-028",
+    "evidence": "smoke",
+    "evidenceRef": "…so is a settings write",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-settings-replace",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/settings",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "Writes stop when the bond ends; reads do not.",
+    "rule": "BR-9, ADR-0028 §4",
+    "evidence": "smoke",
+    "evidenceRef": "…the settings PUT is too",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-none-timezone-propose",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "a stranger cannot propose a zone",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-timezone-propose",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "the zone has not moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "Alone in the bond there is nobody to ask, so the zone changes at once and no proposal is written. Dates already decided are not redone: the new zone decides days from the end of the current one.",
+    "rule": "FR-027, ADR-0030 §8, BR-6",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#a creator alone moves the zone at once, and records no proposal",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (bond.status == BondStatus.PENDING_MEMBER) {"
+  },
+  {
+    "id": "bond-pending-member-timezone-propose-too-soon",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "the zone moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 409,
+    "code": "TIMEZONE_CHANGE_TOO_SOON",
+    "reason": "The shared zone moves at most once in 30 days, also while you are alone in the bond. The detail names the date from which it may move again.",
+    "rule": "FR-027, ADR-0030 §7",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+  },
+  {
+    "id": "bond-active-timezone-propose",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "no zone change is waiting, and the zone has not moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "A proposal is recorded for your partner to agree to within seven days. The bond's zone does not move yet, and the bond stays ACTIVE.",
+    "rule": "FR-027, BR-6, ADR-0030 §4",
+    "evidence": "smoke",
+    "evidenceRef": "proposing a zone is 200 and moves nothing yet",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+  },
+  {
+    "id": "bond-active-timezone-propose-pending",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "a zone change is already waiting, yours or your partner's",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 409,
+    "code": "PROPOSAL_PENDING",
+    "reason": "One zone change may wait at a time. The one that is waiting has to be agreed to, called off, or left to lapse before another is proposed.",
+    "rule": "ADR-0030 §3",
+    "evidence": "smoke",
+    "evidenceRef": "a second proposal is 409 PROPOSAL_PENDING",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw ProposalPendingException()"
+  },
+  {
+    "id": "bond-active-timezone-propose-too-soon",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "no zone change is waiting, and the zone moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 409,
+    "code": "TIMEZONE_CHANGE_TOO_SOON",
+    "reason": "The shared zone moves at most once in 30 days. This is a 409 and not a 429: a month is not a rate limit. The detail names the date from which it may move again.",
+    "rule": "FR-027, ADR-0030 §7",
+    "evidence": "smoke",
+    "evidenceRef": "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+  },
+  {
+    "id": "bond-pending-deletion-timezone-propose",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond counting down to deletion takes no new proposal.",
+    "rule": "BR-9, FR-028",
+    "evidence": "smoke",
+    "evidenceRef": "…and a zone proposal",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-timezone-propose",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "An ended bond's zone no longer moves.",
+    "rule": "BR-9, ADR-0028 §4",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#an archived bond refuses the proposal and the confirmation",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-none-timezone-confirm",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "…nor confirm one",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-timezone-confirm",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing can be waiting on a bond of one: there a zone change applies at once and writes no proposal.",
+    "rule": "ADR-0030 §8",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-active-timezone-confirm",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "your partner's zone change is waiting, and the proposalId you send is its id",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "The zone moves as you agree, and the bond says so at once. Which date an entry belongs to changes only from the end of the current day, never for a day already begun.",
+    "rule": "FR-027, BR-6, ADR-0030 §4",
+    "evidence": "smoke",
+    "evidenceRef": "the other member confirms: 200 and the zone moves",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bonds.update(bond.withAnchorTimezone(proposal.proposedZone(), now))"
+  },
+  {
+    "id": "bond-active-timezone-confirm-own",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "the zone change waiting is your own, and the proposalId you send is its id",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 409,
+    "code": "PROPOSAL_NEEDS_OTHER_MEMBER",
+    "reason": "Only the other member can agree. One person asking twice is not two people consenting.",
+    "rule": "BR-6, ADR-0030 §4",
+    "evidence": "smoke",
+    "evidenceRef": "the proposer cannot confirm their own: 409",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (proposal.proposedByMemberId == membership.memberId) throw ProposalNeedsOtherMemberException()"
+  },
+  {
+    "id": "bond-active-timezone-confirm-nothing",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "no zone change is waiting, or the proposalId you send is not the waiting one's",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Never proposed, already agreed, called off, lapsed, or replaced by a newer proposal than the one you read: one answer for all of them. Naming the id you reviewed is what stops an old agreement being applied to a different zone. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 review amendment",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (proposal.id != expectedProposalId) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-pending-deletion-timezone-confirm",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "The bond's state is checked before the proposal is looked for, so this is the answer even while a zone change proposed before the countdown is still waiting.",
+    "rule": "BR-9, FR-028",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-timezone-confirm",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "An ended bond's zone no longer moves, and ending it cancelled whatever was waiting. (a test asserts the status, not the code)",
+    "rule": "BR-9, ADR-0030 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-none-timezone-cancel",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "test",
+    "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-timezone-cancel",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing can be waiting on a bond of one, so there is nothing to call off.",
+    "rule": "ADR-0030 §8",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-active-timezone-cancel",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "a zone change is waiting, yours or your partner's",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 204,
+    "code": null,
+    "reason": "Either member may call it off. The bond's zone stays where it was, and a fresh proposal may be made.",
+    "rule": "ADR-0030 §5",
+    "evidence": "smoke",
+    "evidenceRef": "either member may cancel it: 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-active-timezone-cancel-nothing",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "no zone change is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is nothing to call off: never proposed, already agreed, already called off, or lapsed. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-pending-deletion-timezone-cancel",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "a zone change proposed before the countdown is still waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 204,
+    "code": null,
+    "reason": "Calling a proposal off takes nothing away, so it is not refused while the bond counts down. Starting the countdown does not itself cancel a waiting zone change.",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-pending-deletion-timezone-cancel-nothing",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "no zone change is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is nothing to call off.",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-archived-timezone-cancel",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Ending a bond cancels whatever was waiting, so nothing is left to call off. The answer is the 404, not BOND_ARCHIVED: this route does not look at the bond's state. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 §5, §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-none-deletion-request",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "…nor ask for a deletion",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-deletion-request",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 202,
+    "code": null,
+    "reason": "Alone in the bond there is nobody to agree, so your request confirms itself: the 30-day countdown starts and the live invite is revoked. Nothing is deleted when this returns.",
+    "rule": "FR-028, ADR-0030 §8, §4d",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#a bond with one member confirms its own request",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (bond.activeMembers.size == 1) {"
+  },
+  {
+    "id": "bond-active-deletion-request",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "no deletion request is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 202,
+    "code": null,
+    "reason": "Your request is recorded and waits seven days for your partner. The bond stays ACTIVE and nothing else changes.",
+    "rule": "FR-028, ADR-0030 §9",
+    "evidence": "smoke",
+    "evidenceRef": "the first deletion request is 202, and nothing is deleted",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#existing == null -> {"
+  },
+  {
+    "id": "bond-active-deletion-request-repeat",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "your own deletion request is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 202,
+    "code": null,
+    "reason": "Asking again changes nothing: one person asking twice has not consented twice.",
+    "rule": "ADR-0030 §9",
+    "evidence": "smoke",
+    "evidenceRef": "repeating it is an idempotent 202",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#existing.proposedByMemberId == membership.memberId -> {"
+  },
+  {
+    "id": "bond-active-deletion-request-agree",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "your partner's deletion request is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 202,
+    "code": null,
+    "reason": "Your request is the agreement. The bond starts a 30-day countdown, during which it takes no writes and either of you can call it off. Nothing is deleted when this returns.",
+    "rule": "FR-028, ADR-0030 §9",
+    "evidence": "smoke",
+    "evidenceRef": "the other member's request confirms it: PENDING_DELETION",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#return copy(status = BondStatus.PENDING_DELETION, deletionRequestedAt = now)"
+  },
+  {
+    "id": "bond-pending-deletion-deletion-request",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 202,
+    "code": null,
+    "reason": "Already counting down, so asking again is answered with the bond as it is and its date, whether or not you have since left it. Nothing changes.",
+    "rule": "ADR-0030 §9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (bond.status == BondStatus.PENDING_DELETION) return view(membership)"
+  },
+  {
+    "id": "bond-archived-deletion-request",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "Refused on any bond that has ended, however it ended and whoever asks. Refusing only after a block would tell the blocked member which had happened.",
+    "rule": "ADR-0030 §10, doc 26 §2.1",
+    "evidence": "smoke",
+    "evidenceRef": "a deletion request on it is 409 BOND_ARCHIVED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-none-deletion-cancel",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "test",
+    "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-deletion-cancel",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing can be waiting on a bond of one: there a deletion request confirms itself and the bond is already counting down.",
+    "rule": "ADR-0030 §8",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (!cancelled) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-active-deletion-cancel",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "a deletion request is waiting, yours or your partner's",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 204,
+    "code": null,
+    "reason": "Either member may withdraw a request that has not been agreed to. The bond never changed status and does not now.",
+    "rule": "ADR-0030 §5",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#cancelling an unconfirmed request removes it",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#proposals.cancel(pending.id, now)"
+  },
+  {
+    "id": "bond-active-deletion-cancel-nothing",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "no deletion request is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is nothing to call off: never asked, already called off, or lapsed. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (!cancelled) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-pending-deletion-deletion-cancel",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "you are still in the bond, and so is your partner",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 204,
+    "code": null,
+    "reason": "Either of you may call the deletion off at any point in the 30 days. The bond is ACTIVE again and takes writes. The days that ended during the countdown are recorded as paused, not missed.",
+    "rule": "FR-028, ADR-0030 §5",
+    "evidence": "smoke",
+    "evidenceRef": "either member calls it off: 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#else -> BondStatus.ACTIVE"
+  },
+  {
+    "id": "bond-pending-deletion-deletion-cancel-partner-left",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "you are still in the bond, and your partner left or blocked you during the countdown",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 204,
+    "code": null,
+    "reason": "The countdown stops, but a bond does not come back to life because a deletion was called off: with a member gone it becomes ARCHIVED, stamped with the time it ended.",
+    "rule": "ADR-0030 §4a, §4a-ii",
+    "evidence": "smoke",
+    "evidenceRef": "…whose own cancel still works: 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#members.any { !it.isActive } -> BondStatus.ARCHIVED"
+  },
+  {
+    "id": "bond-pending-deletion-deletion-cancel-alone",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "you are its only member, and nobody ever joined",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 204,
+    "code": null,
+    "reason": "The bond goes back to waiting for its second member. The invite revoked when the countdown began stays revoked, so a fresh one has to be issued.",
+    "rule": "ADR-0030 §4b, §4d",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#cancelling a solo bond's deletion leaves it joinable",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#activeMembers.size < maxMembers -> BondStatus.PENDING_MEMBER"
+  },
+  {
+    "id": "bond-pending-deletion-deletion-cancel-left",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "you have left the bond",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "A member who walked away cannot undo what the two of you agreed. The answer is the same 404 as when nothing is waiting, and the bond goes on counting down for your partner. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 §4a-i",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#bond.memberOf(membership.userId)?.isActive != true -> {"
+  },
+  {
+    "id": "bond-archived-deletion-cancel",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "An ended bond has no deletion to call off: no request can be made on it, and ending it cancelled any that was waiting.",
+    "rule": "ADR-0030 §10, §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (!cancelled) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-none-write",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "test",
+    "evidenceRef": "GratitudeCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val membership = access.lockMembershipOf(userId, bondId)"
+  },
+  {
+    "id": "bond-pending-member-write",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the day takes the entry",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 201,
+    "code": null,
+    "reason": "A bond still waiting for its second member takes its creator's entries. What the day does with one, and when the day refuses it, is the day machine's: such a day is SUSPENDED.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "smoke",
+    "evidenceRef": "writing before a partner has joined is still 201",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-active-write",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the day takes the entry",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 201,
+    "code": null,
+    "reason": "A bond of two takes entries. Whether this one is accepted is then the day's question: the day machine has ENTRY_ALREADY_EXISTS and DAY_CLOSED.",
+    "rule": "BR-1",
+    "evidence": "smoke",
+    "evidenceRef": "the first entry is 201, SUBMITTED",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-pending-deletion-write",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "a new request",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond counting down to deletion takes no new entry, from either member. It is checked under the bond's lock and before the day is looked at, so nothing is stored and no day is opened.",
+    "rule": "BR-9",
+    "evidence": "test",
+    "evidenceRef": "EntriesEndpointTest#a bond in its deletion cooling-off takes no entries - 409 BOND_ARCHIVED for either member",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-pending-deletion-write-replay",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 201,
+    "code": null,
+    "reason": "A replay is a read of what your first request made, not a second write, so the bond's state does not refuse it: 201 again with Idempotency-Replayed: true and the entry as it stands now.",
+    "rule": "ADR-0031 §9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))"
+  },
+  {
+    "id": "bond-archived-write",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "a new request",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond that has ended takes no new entry, from either member. It is checked under the bond's lock and before the day is looked at, so nothing is stored and no day is opened.",
+    "rule": "BR-9",
+    "evidence": "test",
+    "evidenceRef": "EntriesEndpointTest#an archived bond takes no entries, and a member who left is refused too",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-write-replay",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 201,
+    "code": null,
+    "reason": "A replay is a read of what your first request made, not a second write, so the bond's state does not refuse it: 201 again with Idempotency-Replayed: true and the entry as it stands now.",
+    "rule": "ADR-0031 §9",
+    "evidence": "test",
+    "evidenceRef": "SubmitEntryIdempotencyTest#a replay by a caller who has since left the bond is a read of their entry, so it is still answered",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))"
+  },
+  {
+    "id": "bond-none-edit",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "An entry in a bond you are not in does not exist for you: the same 404 as an id that names no entry. (a test asserts the status, not the code)",
+    "rule": "T-02",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#): Pair<Entry, BondMembership> = authorOrNull(userId, entryId, lock) ?: throw EntryNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-edit",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the entry is yours and can still be edited",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "The bond takes writes, so the edit is the entry's question: the day machine has ENTRY_IMMUTABLE.",
+    "rule": "BR-7",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-active-edit",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the entry is yours and can still be edited",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "The bond takes writes, so the edit is the entry's question: the day machine has ENTRY_IMMUTABLE.",
+    "rule": "BR-7",
+    "evidence": "smoke",
+    "evidenceRef": "PATCH before reveal changes the author's words",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-pending-deletion-edit",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "a new request for an entry of your own",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond counting down to deletion takes no new words. The author is told so only after it is settled that the entry is theirs, and before anything is asked about the entry itself. Deleting it is still allowed.",
+    "rule": "BR-9, ADR-0035 §15",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-pending-deletion-edit-replay",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 200,
+    "code": null,
+    "reason": "A replay is a read of what your first request made, so the bond's state does not refuse it: 200 with Idempotency-Replayed: true and the entry as it stands now.",
+    "rule": "ADR-0031 §9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/PatchEntry.kt#val view = outcome.value ?: changes.read(userId, EntryId(outcome.resultId))"
+  },
+  {
+    "id": "bond-archived-edit",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "a new request for an entry of your own",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond that has ended takes no new words. The author is told so only after it is settled that the entry is theirs, and before anything is asked about the entry itself. Deleting it is still allowed.",
+    "rule": "BR-9, ADR-0035 §15",
+    "evidence": "smoke",
+    "evidenceRef": "PATCH on an ended bond is 409 BOND_ARCHIVED",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-edit-replay",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the request repeats an Idempotency-Key and body you already sent",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 200,
+    "code": null,
+    "reason": "A replay is a read of what your first request made, so the bond's state does not refuse it: 200 with Idempotency-Replayed: true and the entry as it stands now.",
+    "rule": "ADR-0031 §9",
+    "evidence": "test",
+    "evidenceRef": "WithdrawalReadTest#a replay of the blocker's edit answers without the words it wrote or the ones it replaced",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/PatchEntry.kt#val view = outcome.value ?: changes.read(userId, EntryId(outcome.resultId))"
+  },
+  {
+    "id": "bond-none-today",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "test",
+    "evidenceRef": "RevealGateTest#a non-member gets the one 404, whether or not the entry has been revealed",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntriesController.kt#val membership = access.membershipOf(caller.id, bondIdOrNotFound(bondId))"
+  },
+  {
+    "id": "bond-pending-member-today",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "Today is readable. A day nobody has written on reads SUSPENDED, because the bond is still waiting for its second member.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "test",
+    "evidenceRef": "RevealGateTest#a still-solo bond reports SUSPENDED before anybody has written, not OPEN",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
+    "id": "bond-active-today",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "Today is readable, and a day nobody has written on reads OPEN.",
+    "rule": "",
+    "evidence": "test",
+    "evidenceRef": "RevealGateTest#a day nobody has written to yet is OPEN with two absent entries",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
+    "id": "bond-pending-deletion-today",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 200,
+    "code": null,
+    "reason": "Reading is not a write, so the countdown does not stop it. A day with no row reads OPEN here, also on a bond that began counting down with one member: only the status PENDING_MEMBER reads SUSPENDED.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessAdapter.kt#awaitingSecondMember = bond.status == BondStatus.PENDING_MEMBER,"
+  },
+  {
+    "id": "bond-archived-today",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 200,
+    "code": null,
+    "reason": "An ended bond's today stays readable to both members, the one who left included. The probe cited reads it after a block.",
+    "rule": "ADR-0028 §4",
+    "evidence": "smoke",
+    "evidenceRef": "the partner's very next read no longer carries the words",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+  },
+  {
+    "id": "bond-none-streak",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "a stranger asking for a bond's streak gets the one 404",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/StreakController.kt#val membership = access.membershipOf(caller.id, id)"
+  },
+  {
+    "id": "bond-pending-member-streak",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "A bond of one has no streak and no calendar, whatever its creator wrote: every number is zero and days is empty.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#a bond still waiting for its second person has no streak and no calendar, whatever its creator wrote",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val from = maxOf(last.minusDays(CALENDAR_DAYS - 1), joiningDate(membership) ?: last.plusDays(1))"
+  },
+  {
+    "id": "bond-active-streak",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "The streak and a calendar from the day the bond became two people. Today is always on it, OPEN until both have written.",
+    "rule": "ADR-0034",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#a bond nobody has written in has a streak of nothing, and a calendar of today, open",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val unwritten = last == today && !from.isAfter(today) && membership.isOpen && stored.lastOrNull()?.date != today"
+  },
+  {
+    "id": "bond-pending-deletion-streak",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 200,
+    "code": null,
+    "reason": "The streak is readable, and no day is drawn as open: nobody can write while the bond counts down.",
+    "rule": "ADR-0034 §12",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#.filter { membership.isOpen || it.cell != StreakCell.OPEN }"
+  },
+  {
+    "id": "bond-archived-streak",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 200,
+    "code": null,
+    "reason": "An ended bond keeps the streak it had, and its calendar ends on the day the bond did, for both members.",
+    "rule": "ADR-0034 §12",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#an ended bond keeps the streak it was shown, and a calendar that ends where it did",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val last = membership.endedAt?.let(membership.anchorTimeline::dateAt)?.takeIf { it.isBefore(today) } ?: today"
+  },
+  {
+    "id": "bond-pending-member-joined",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "event:second-member-joins",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": null,
+    "code": null,
+    "reason": "Somebody accepts your invite. The bond is two people and ACTIVE from that instant, and the code is spent.",
+    "rule": "FR-022, M2",
+    "evidence": "smoke",
+    "evidenceRef": "the creator sees the same active bond",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#return copy(status = BondStatus.ACTIVE, members = members + member)"
+  },
+  {
+    "id": "bond-active-partner-leaves",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "event:partner-leaves",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner leaves, and the bond is ARCHIVED for both of you. You are not notified; you find out when you next read the bond, and what you read is the same bytes whether they left or blocked you.",
+    "rule": "ADR-0028 §1, §8, doc 26 §2.1",
+    "evidence": "smoke",
+    "evidenceRef": "the one who stayed reads it too",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#status = BondStatus.ARCHIVED,"
+  },
+  {
+    "id": "bond-pending-deletion-partner-leaves",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "event:partner-leaves",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": null,
+    "code": null,
+    "reason": "Your partner leaves during the countdown. Their membership ends and the bond goes on counting down. You can still call the deletion off, and then the bond becomes ARCHIVED, not ACTIVE.",
+    "rule": "ADR-0030 §4a",
+    "evidence": "smoke",
+    "evidenceRef": "…the bond is still counting down for the member who is in it",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#copy(members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it })"
+  },
+  {
+    "id": "bond-active-partner-blocks",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "event:partner-blocks",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner blocks you, and the bond is ARCHIVED for both of you. You are not notified; you find out when you next read the bond, and what you read is the same bytes whether they left or blocked you.",
+    "rule": "ADR-0028 §1, §8, doc 26 §2.1",
+    "evidence": "smoke",
+    "evidenceRef": "the blocked member reads theirs, unaware",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#status = BondStatus.ARCHIVED,"
+  },
+  {
+    "id": "bond-pending-deletion-partner-blocks",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "event:partner-blocks",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": null,
+    "code": null,
+    "reason": "Your partner blocks you during the countdown. Their membership ends and the bond goes on counting down. You can still call the deletion off, and then the bond becomes ARCHIVED, not ACTIVE.",
+    "rule": "ADR-0030 §4a",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#leaving during the cooling-off is allowed, and looks exactly like blocking",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#copy(members = members.map { if (it.id == memberId && it.isActive) it.copy(leftAt = now) else it })"
+  },
+  {
+    "id": "bond-archived-partner-blocks",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "event:partner-blocks",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": null,
+    "code": null,
+    "reason": "A block made after the bond has ended changes nothing you can read: not the status, not who left when, not the ETag. If they also take their entries back, that is the day machine's.",
+    "rule": "ADR-0028 §2, doc 26 §2.1",
+    "evidence": "test",
+    "evidenceRef": "DiscreetExitTest#a block after the other member has already left changes nothing they can see",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#!canBeEnded -> {"
+  },
+  {
+    "id": "bond-active-partner-confirms-deletion",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "event:partner-confirms",
+    "actor": "partner",
+    "when": "what you asked for is the deletion",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": null,
+    "code": null,
+    "reason": "Your partner's own request is their agreement. The 30-day countdown starts and the bond takes no writes until one of you calls it off.",
+    "rule": "FR-028, ADR-0030 §9",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#the other member's request confirms it, and the cooling-off starts",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#agree(bond, existing, membership, now)"
+  },
+  {
+    "id": "bond-active-partner-confirms-timezone",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "event:partner-confirms",
+    "actor": "partner",
+    "when": "what you proposed is a zone change",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": null,
+    "code": null,
+    "reason": "The bond's zone moves as your partner agrees. The bond stays ACTIVE; the new zone decides dates from the end of the current day.",
+    "rule": "FR-027, BR-6",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#the other member confirms, and the zone moves",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#bonds.update(bond.withAnchorTimezone(proposal.proposedZone(), now))"
+  },
+  {
+    "id": "bond-pending-deletion-partner-cancels",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "event:partner-cancels",
+    "actor": "partner",
+    "when": "you are both still in the bond",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": null,
+    "code": null,
+    "reason": "Your partner calls the deletion off, and the bond is ACTIVE again for both of you.",
+    "rule": "FR-028, ADR-0030 §5",
+    "evidence": "smoke",
+    "evidenceRef": "…and the bond is ACTIVE again",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#else -> BondStatus.ACTIVE"
+  },
+  {
+    "id": "bond-pending-deletion-partner-cancels-left",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "event:partner-cancels",
+    "actor": "partner",
+    "when": "you left or blocked them during the countdown",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner calls the deletion off after you walked away. The bond is not revived with you gone: its one status becomes ARCHIVED. The test cited reads it as the member who called it off.",
+    "rule": "ADR-0030 §4a, §4a-ii",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#a deletion called off after the other member left leaves an archived bond that knows when it ended",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#members.any { !it.isActive } -> BondStatus.ARCHIVED"
+  }
+]
