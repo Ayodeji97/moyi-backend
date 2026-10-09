@@ -30,6 +30,8 @@ stateDiagram-v2
         day_entry__NONE --> day_entry__REVEALED: you - write today's entry
         day_entry__DELETED --> day_entry__SUBMITTED: you - write today's entry
         day_entry__DELETED --> day_entry__REVEALED: you - write today's entry
+        day_entry__SUBMITTED --> day_entry__DELETED: you - delete your entry
+        day_entry__REVEALED --> day_entry__DELETED: you - delete your entry
     }
     state "What you see of your partner's entry" as day_partnerEntry {
         state "nothing yet" as day_partnerEntry__NONE
@@ -70,6 +72,8 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | Action | `NONE` | `SUBMITTED` | `REVEALED` | `DELETED` |
 |---|---|---|---|---|
 | write today's entry<br>`POST /bonds/{bondId}/entries` | 201 → `SUBMITTED` (your partner has not written, or the bond's reveal time is still ahead)<br>201 → `REVEALED` (your partner has already written, and the bond has no reveal time or it has passed) | 409 `ENTRY_ALREADY_EXISTS` | 409 `DAY_CLOSED` | 201 → `SUBMITTED` (you deleted it before the reveal, and your partner has not written or the reveal time is still ahead)<br>201 → `REVEALED` (you deleted it before the reveal, your partner has written, and the bond has no reveal time or it has passed)<br>409 `DAY_CLOSED` (you deleted it after the reveal) |
+| edit your entry<br>`PATCH /entries/{entryId}` | 404 `NOT_FOUND` | 200 stays | 409 `ENTRY_IMMUTABLE` | 409 `ENTRY_IMMUTABLE` |
+| delete your entry<br>`DELETE /entries/{entryId}` | 404 `NOT_FOUND` | 204 → `DELETED` | 204 → `DELETED` (the bond is live)<br>204 → `DELETED` (the bond has ended, or you have left it) | 204 stays |
 
 ### Refused here
 
@@ -78,6 +82,10 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | `SUBMITTED` | write today's entry | 409 `ENTRY_ALREADY_EXISTS` | You have a live entry for today. Edit it, or delete it and write again; a second one is refused. | BR-2 | smoke |
 | `REVEALED` | write today's entry | 409 `DAY_CLOSED` | Your entry has been revealed, so its day is settled. The day is checked before the insert, so the answer is DAY_CLOSED and not ENTRY_ALREADY_EXISTS. | BR-10 | never-run |
 | `DELETED` | write today's entry | 409 `DAY_CLOSED` | The day was revealed before you deleted, and a revealed day is a record: your place is free but the day takes no new entry. | BR-10, ADR-0032 §8 | test |
+| `NONE` | edit your entry | 404 `NOT_FOUND` | You have no entry behind the id you sent. Your partner's entry, a stranger's and an id nobody has all get this one answer. | ADR-0032 §9 | smoke |
+| `REVEALED` | edit your entry | 409 `ENTRY_IMMUTABLE` | Your partner may already have read these words, so they can no longer be changed. You can still delete the entry. | BR-7 | smoke |
+| `DELETED` | edit your entry | 409 `ENTRY_IMMUTABLE` | An erased entry has no words to edit, and the answer does not say whether it was ever revealed. | BR-7 | test |
+| `NONE` | delete your entry | 404 `NOT_FOUND` | You have no entry behind the id you sent. Your partner's entry, a stranger's and an id nobody has all get this one answer. | ADR-0032 §9 | test |
 
 ## What you see of your partner's entry
 

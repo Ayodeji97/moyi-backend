@@ -1742,5 +1742,264 @@
     "evidence": "smoke",
     "evidenceRef": "the partner sees the tombstone",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/EntryReading.kt#Readability.TOMBSTONE -> disclose(EntryStatus.DELETED, null)"
+  },
+  {
+    "id": "entry-none-edit",
+    "region": "day.entry",
+    "from": "NONE",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "You have no entry behind the id you sent. Your partner's entry, a stranger's and an id nobody has all get this one answer.",
+    "rule": "ADR-0032 §9",
+    "evidence": "smoke",
+    "evidenceRef": "the partner cannot edit the author's entry",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#return if (entry != null && membership != null && entry.authorMemberId == membership.memberId) entry to membership else null"
+  },
+  {
+    "id": "entry-submitted-edit",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 200,
+    "code": null,
+    "reason": "Nobody else has been entitled to read it yet, so the text is replaced. Only the text can change.",
+    "rule": "BR-7",
+    "evidence": "smoke",
+    "evidenceRef": "PATCH before reveal changes the author's words",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#return if (text == replacement) this else copy(text = replacement, updatedAt = now)"
+  },
+  {
+    "id": "entry-revealed-edit",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "REVEALED",
+    "status": 409,
+    "code": "ENTRY_IMMUTABLE",
+    "reason": "Your partner may already have read these words, so they can no longer be changed. You can still delete the entry.",
+    "rule": "BR-7",
+    "evidence": "smoke",
+    "evidenceRef": "PATCH after reveal is ENTRY_IMMUTABLE",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (!entry.isEditable) throw EntryImmutableException()"
+  },
+  {
+    "id": "entry-deleted-edit",
+    "region": "day.entry",
+    "from": "DELETED",
+    "action": "PATCH /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "DELETED",
+    "status": 409,
+    "code": "ENTRY_IMMUTABLE",
+    "reason": "An erased entry has no words to edit, and the answer does not say whether it was ever revealed.",
+    "rule": "BR-7",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#editing an entry its author erased is refused without claiming it was revealed",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val isEditable: Boolean get() = !isErased && revealedAt == null && status != EntryStatus.REVEALED"
+  },
+  {
+    "id": "entry-none-delete",
+    "region": "day.entry",
+    "from": "NONE",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "You have no entry behind the id you sent. Your partner's entry, a stranger's and an id nobody has all get this one answer.",
+    "rule": "ADR-0032 §9",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#entry routes hide another author and another tenant exactly like a missing id",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#return if (entry != null && membership != null && entry.authorMemberId == membership.memberId) entry to membership else null"
+  },
+  {
+    "id": "entry-submitted-delete",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "The words are erased and the row is kept as a tombstone. Before the reveal this also frees your place, so you may write the day again.",
+    "rule": "BR-10, ADR-0032 §8",
+    "evidence": "smoke",
+    "evidenceRef": "DELETE before reveal frees the author's slot",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#status = EntryStatus.DELETED,"
+  },
+  {
+    "id": "entry-revealed-delete",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the bond is live",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "The words are erased for both of you; your partner is left a tombstone. The reveal stamp is kept and the day stays as it was.",
+    "rule": "BR-10, ADR-0032 §8",
+    "evidence": "smoke",
+    "evidenceRef": "DELETE after reveal succeeds",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#status = EntryStatus.DELETED,"
+  },
+  {
+    "id": "entry-revealed-delete-ended",
+    "region": "day.entry",
+    "from": "REVEALED",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the bond has ended, or you have left it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "An author may always take their own words back, also after the bond has ended and after leaving it. Only an edit is refused there.",
+    "rule": "ADR-0032 q1, ADR-0035 §15",
+    "evidence": "smoke",
+    "evidenceRef": "DELETE of one's own entry on an ended bond is 204",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()"
+  },
+  {
+    "id": "entry-deleted-delete",
+    "region": "day.entry",
+    "from": "DELETED",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 204,
+    "code": null,
+    "reason": "Deleting is repeatable: an entry already erased is returned as it is and nothing is written.",
+    "rule": "ADR-0032 §8",
+    "evidence": "smoke",
+    "evidenceRef": "repeated DELETE succeeds",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#if (isErased) {"
   }
 ]
