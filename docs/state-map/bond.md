@@ -41,6 +41,15 @@ stateDiagram-v2
         state "confirmed" as bond_proposal__CONFIRMED
         state "cancelled" as bond_proposal__CANCELLED
         state "lapsed, unanswered" as bond_proposal__LAPSED
+        bond_proposal__NONE --> bond_proposal__PROPOSED: you - propose a new time zone / ask for the bond's deletion, or agree to it, partner - your partner proposes a change
+        bond_proposal__CONFIRMED --> bond_proposal__PROPOSED: you - propose a new time zone / ask for the bond's deletion, or agree to it, partner - your partner proposes a change
+        bond_proposal__CANCELLED --> bond_proposal__PROPOSED: you - propose a new time zone / ask for the bond's deletion, or agree to it, partner - your partner proposes a change
+        bond_proposal__LAPSED --> bond_proposal__PROPOSED: you - propose a new time zone / ask for the bond's deletion, or agree to it, partner - your partner proposes a change
+        bond_proposal__PROPOSED --> bond_proposal__CONFIRMED: you - agree to the time zone change / ask for the bond's deletion, or agree to it, partner - your partner agrees to your proposal
+        bond_proposal__PROPOSED --> bond_proposal__CANCELLED: you - 4 actions, partner - 3 actions
+        bond_proposal__NONE --> bond_proposal__CONFIRMED: you - ask for the bond's deletion, or agree to it
+        bond_proposal__LAPSED --> bond_proposal__CANCELLED: you - leave the bond / block your partner
+        bond_proposal__PROPOSED --> bond_proposal__LAPSED: system - the proposal lapses, seven days unanswered
     }
     classDef unbuilt fill:#eeeeee,stroke:#aaaaaa,color:#888888
     class bond__DELETED unbuilt
@@ -66,7 +75,7 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | read your own member settings<br>`GET /bonds/{bondId}/members/me/settings` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
 | replace your own member settings<br>`PUT /bonds/{bondId}/members/me/settings` | 404 `NOT_FOUND` | 200 stays | 200 stays | 409 `BOND_ARCHIVED` | 409 `BOND_ARCHIVED` |
 | propose a new time zone<br>`PATCH /bonds/{bondId}/timezone` | 404 `NOT_FOUND` | 200 stays (the zone has not moved in the last 30 days)<br>409 `TIMEZONE_CHANGE_TOO_SOON` (the zone moved in the last 30 days) | 200 stays (no zone change is waiting, and the zone has not moved in the last 30 days)<br>409 `PROPOSAL_PENDING` (a zone change is already waiting, yours or your partner's)<br>409 `TIMEZONE_CHANGE_TOO_SOON` (no zone change is waiting, and the zone moved in the last 30 days) | 409 `BOND_ARCHIVED` | 409 `BOND_ARCHIVED` |
-| agree to the time zone change<br>`POST /bonds/{bondId}/timezone/confirm` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 200 stays (your partner's zone change is waiting, and the proposalId you send is its id)<br>409 `PROPOSAL_NEEDS_OTHER_MEMBER` (the zone change waiting is your own, and the proposalId you send is its id)<br>404 `NOT_FOUND` (no zone change is waiting, or the proposalId you send is not the waiting one's) | 409 `BOND_ARCHIVED` | 409 `BOND_ARCHIVED` |
+| agree to the time zone change<br>`POST /bonds/{bondId}/timezone/confirm` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 200 stays (your partner's zone change is waiting, and the proposalId you send is its id)<br>409 `PROPOSAL_NEEDS_OTHER_MEMBER` (the zone change waiting is your own, and the proposalId you send is its id)<br>404 `NOT_FOUND` (no zone change is waiting, or the proposalId you send is not the waiting one's)<br>409 `TIMEZONE_CHANGE_TOO_SOON` (your partner's zone change is waiting, the proposalId you send is its id, and the zone moved in the last 30 days) | 409 `BOND_ARCHIVED` | 409 `BOND_ARCHIVED` |
 | call off the time zone change<br>`DELETE /bonds/{bondId}/timezone` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 204 stays (a zone change is waiting, yours or your partner's)<br>404 `NOT_FOUND` (no zone change is waiting) | 204 stays (a zone change proposed before the countdown is still waiting)<br>404 `NOT_FOUND` (no zone change is waiting) | 404 `NOT_FOUND` |
 | ask for the bond's deletion, or agree to it<br>`POST /bonds/{bondId}/deletion-request` | 404 `NOT_FOUND` | 202 → `PENDING_DELETION` | 202 stays (no deletion request is waiting)<br>202 stays (your own deletion request is waiting)<br>202 → `PENDING_DELETION` (your partner's deletion request is waiting) | 202 stays | 409 `BOND_ARCHIVED` |
 | call off the deletion<br>`DELETE /bonds/{bondId}/deletion-request` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 204 stays (a deletion request is waiting, yours or your partner's)<br>404 `NOT_FOUND` (no deletion request is waiting) | 204 → `ACTIVE` (you are still in the bond, and so is your partner)<br>204 → `ARCHIVED` (you are still in the bond, and your partner left or blocked you during the countdown)<br>204 → `PENDING_MEMBER` (you are its only member, and nobody ever joined)<br>404 `NOT_FOUND` (you have left the bond) | 404 `NOT_FOUND` |
@@ -141,6 +150,7 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | `ARCHIVED` | edit your entry | 409 `BOND_ARCHIVED` | A bond that has ended takes no new words. The author is told so only after it is settled that the entry is theirs, and before anything is asked about the entry itself. Deleting it is still allowed. | BR-9, ADR-0035 §15 | smoke |
 | `NO_BOND` | read today | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | test |
 | `NO_BOND` | read the streak | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `ACTIVE` | agree to the time zone change | 409 `TIMEZONE_CHANGE_TOO_SOON` | The 30-day rule is asked again at agreement, and the proposal stays waiting. I found no sequence of requests that reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database. | ADR-0030 §6 | test |
 
 ### Happens without you
 
@@ -207,3 +217,55 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 |---|---|---|---|---|---|
 | `CREATED` | your partner accepts the invite | partner | `ACCEPTED` | Somebody accepts the code you shared. It is spent, and the bond shows no invite from then on. | test |
 | `CREATED` | the invite expires, seven days on | system | `EXPIRED` | Seven days after it was issued the code stops being live. No job does this and no row is written: every read asks whether the expiry time has passed. The test cited moves the expiry into the past and finds the code unusable; the seven days are read from the code. | test |
+
+## The proposal
+
+### Every action in every state
+
+| Action | `NONE` | `PROPOSED` | `CONFIRMED` | `CANCELLED` | `LAPSED` |
+|---|---|---|---|---|---|
+| propose a new time zone<br>`PATCH /bonds/{bondId}/timezone` | 200 → `PROPOSED` (the zone has not moved in the last 30 days)<br>200 stays (you are alone in the bond, and the zone has not moved in the last 30 days)<br>409 `TIMEZONE_CHANGE_TOO_SOON` (the zone moved in the last 30 days) | 409 `PROPOSAL_PENDING` | 200 → `PROPOSED` (30 days have passed since the zone moved)<br>409 `TIMEZONE_CHANGE_TOO_SOON` (fewer than 30 days have passed since the zone moved) | 200 → `PROPOSED` | 200 → `PROPOSED` |
+| agree to the time zone change<br>`POST /bonds/{bondId}/timezone/confirm` | 404 `NOT_FOUND` | 200 → `CONFIRMED` (your partner opened it, the proposalId you send is its id, and the zone has not moved in the last 30 days)<br>409 `PROPOSAL_NEEDS_OTHER_MEMBER` (you opened it, and the proposalId you send is its id)<br>404 `NOT_FOUND` (the proposalId you send is not its id)<br>409 `TIMEZONE_CHANGE_TOO_SOON` (your partner opened it, the proposalId you send is its id, and the zone moved in the last 30 days) | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 404 `NOT_FOUND` |
+| call off the time zone change<br>`DELETE /bonds/{bondId}/timezone` | 404 `NOT_FOUND` | 204 → `CANCELLED` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 404 `NOT_FOUND` |
+| ask for the bond's deletion, or agree to it<br>`POST /bonds/{bondId}/deletion-request` | 202 → `PROPOSED` (the bond is two people)<br>202 → `CONFIRMED` (you are alone in the bond) | 202 stays (you opened it)<br>202 → `CONFIRMED` (your partner opened it) | 202 stays (the bond is counting down)<br>202 → `PROPOSED` (the deletion it started was called off, and the bond is two people)<br>202 stays (the deletion it started was called off, and you are alone in the bond) | 202 → `PROPOSED` | 202 → `PROPOSED` |
+| call off the deletion<br>`DELETE /bonds/{bondId}/deletion-request` | 404 `NOT_FOUND` | 204 → `CANCELLED` | 204 stays (the bond is counting down, and you are still in it)<br>404 `NOT_FOUND` (the bond is counting down, and you have left it)<br>404 `NOT_FOUND` (the deletion it started has already been called off) | 404 `NOT_FOUND` | 404 `NOT_FOUND` |
+| leave the bond<br>`POST /bonds/{bondId}/leave` | 204 stays | 204 → `CANCELLED` | 204 stays | 204 stays | 204 → `CANCELLED` |
+| block your partner<br>`POST /bonds/{bondId}/block` | 204 stays | 204 → `CANCELLED` | 204 stays | 204 stays | 204 → `CANCELLED` |
+
+### Refused here
+
+| In | Action | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|
+| `NONE` | propose a new time zone | 409 `TIMEZONE_CHANGE_TOO_SOON` | No proposal is written. With no earlier proposal, the zone can only have moved while you were alone in the bond, where a change applies at once. | FR-027, ADR-0030 §7 | never-run |
+| `PROPOSED` | propose a new time zone | 409 `PROPOSAL_PENDING` | One zone change waits at a time, whoever opened it. The database refuses a second as well, with a unique index. The 30-day rule is checked before this, but the zone cannot have moved while a proposal waits. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | ADR-0030 §3 | smoke |
+| `CONFIRMED` | propose a new time zone | 409 `TIMEZONE_CHANGE_TOO_SOON` | The zone moved when the last proposal was agreed, and it moves at most once in 30 days. The detail names the date from which it may move again. | FR-027, ADR-0030 §7 | smoke |
+| `NONE` | agree to the time zone change | 404 `NOT_FOUND` | Nothing has been proposed, so there is nothing to agree to. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | ADR-0030 §4 | never-run |
+| `PROPOSED` | agree to the time zone change | 409 `PROPOSAL_NEEDS_OTHER_MEMBER` | The proposal stays waiting for your partner. Only the other member can agree. | BR-6, ADR-0030 §4 | smoke |
+| `PROPOSED` | agree to the time zone change | 404 `NOT_FOUND` | You are agreeing to a proposal other than the one that is waiting: the one you read was called off and replaced. Nothing is applied, and the waiting proposal stays as it is. The id is compared before who opened it. (a test asserts the status, not the code) | ADR-0030 review amendment | never-run |
+| `PROPOSED` | agree to the time zone change | 409 `TIMEZONE_CHANGE_TOO_SOON` | The 30-day rule is asked again at agreement, and the proposal stays waiting. I found no sequence of requests that reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database. | ADR-0030 §6 | test |
+| `CONFIRMED` | agree to the time zone change | 404 `NOT_FOUND` | It was already agreed to, and the zone has moved. The answer is the same as when nothing was ever proposed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | ADR-0030 §2, §4 | never-run |
+| `CANCELLED` | agree to the time zone change | 404 `NOT_FOUND` | It was called off. The answer is the same as when nothing was ever proposed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | ADR-0030 §2, §4 | never-run |
+| `LAPSED` | agree to the time zone change | 404 `NOT_FOUND` | It went seven days unanswered, and a lapsed proposal cannot be agreed to. The answer is the same as when nothing was ever proposed. (a test asserts the status, not the code) On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | ADR-0030 §2, §4 | never-run |
+| `NONE` | call off the time zone change | 404 `NOT_FOUND` | Nothing has been proposed, so there is nothing to call off. This route does not look at the bond's status. (a test asserts the status, not the code) | ADR-0030 §5 | never-run |
+| `CONFIRMED` | call off the time zone change | 404 `NOT_FOUND` | It was agreed to and the zone has moved; an agreed change cannot be called off. | ADR-0030 §5 | never-run |
+| `CANCELLED` | call off the time zone change | 404 `NOT_FOUND` | It was already called off, and calling off twice is not idempotent. (a test asserts the status, not the code) | ADR-0030 §5 | never-run |
+| `LAPSED` | call off the time zone change | 404 `NOT_FOUND` | It lapsed unanswered, which already has the effect of calling it off. | ADR-0030 §5 | never-run |
+| `NONE` | call off the deletion | 404 `NOT_FOUND` | No deletion has been asked for, so there is nothing to call off. (a test asserts the status, not the code) | ADR-0030 §5 | never-run |
+| `CONFIRMED` | call off the deletion | 404 `NOT_FOUND` | A member who walked away cannot undo what the two of you agreed. The answer is the 404 of nothing waiting, not a code of its own. (a test asserts the status, not the code) | ADR-0030 §4a-i | never-run |
+| `CONFIRMED` | call off the deletion | 404 `NOT_FOUND` | The countdown is over and nothing is waiting, so a second call finds nothing. (a test asserts the status, not the code) | ADR-0030 §5 | never-run |
+| `CANCELLED` | call off the deletion | 404 `NOT_FOUND` | The request was already withdrawn, or was cancelled when the bond ended. There is nothing to call off. | ADR-0030 §5 | never-run |
+| `LAPSED` | call off the deletion | 404 `NOT_FOUND` | The request lapsed unanswered, which already has the effect of withdrawing it. There is nothing to call off. | ADR-0030 §5 | never-run |
+
+### Happens without you
+
+| In | What happens | Who | Leads to | Why | Evidence |
+|---|---|---|---|---|---|
+| `NONE` | your partner proposes a change | partner | `PROPOSED` | Your partner proposes a zone change or asks for the deletion. Your next read of the bond shows it waiting, with seven days to answer. You are not notified. | test |
+| `CONFIRMED` | your partner proposes a change | partner | `PROPOSED` | A new proposal of the same kind waits for you. The earlier agreement does not carry over to it. | never-run |
+| `CANCELLED` | your partner proposes a change | partner | `PROPOSED` | Your partner proposes again after the last one was called off. A new proposal has a new id, which is what you send to agree to a zone change. | test |
+| `LAPSED` | your partner proposes a change | partner | `PROPOSED` | Your partner proposes again after the last one lapsed. The lapsed one is stamped cancelled to free the slot, and the new one waits for you. | test |
+| `PROPOSED` | your partner agrees to your proposal | partner | `CONFIRMED` | Your partner agrees to what you proposed. A zone change is applied to the bond at once; a deletion starts the 30-day countdown. The bond region has both. | test |
+| `PROPOSED` | your partner calls a proposal or the deletion off | partner | `CANCELLED` | Your partner calls it off, whether it was theirs or yours. Your next read of the bond shows nothing waiting. | test |
+| `PROPOSED` | your partner leaves | partner | `CANCELLED` | Your partner leaves, the bond ends, and whatever was waiting is cancelled with it. You can no longer agree to it: the answer would be BOND_ARCHIVED. | test |
+| `PROPOSED` | your partner blocks you | partner | `CANCELLED` | Your partner blocks you, the bond ends, and whatever was waiting is cancelled with it. You can no longer agree to it: the answer would be BOND_ARCHIVED. | never-run |
+| `PROPOSED` | the proposal lapses, seven days unanswered | system | `LAPSED` | Seven days pass with no answer. No job runs and no row is written: every read asks whether the expiry has passed, and from then the proposal is not shown, cannot be agreed to and cannot be called off. The test cited moves the expiry into the past; the seven days are read from the code. | test |

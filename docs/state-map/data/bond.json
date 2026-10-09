@@ -4715,5 +4715,1682 @@
     "evidence": "test",
     "evidenceRef": "InviteOneAnswerTest#every way a code can fail is one response, on resolve and on accept alike",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Invite.kt#fun isLive(now: Instant): Boolean = usedAt == null && revokedAt == null && expiresAt.isAfter(now)"
+  },
+  {
+    "id": "proposal-none-timezone-propose",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "the zone has not moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 200,
+    "code": null,
+    "reason": "The first zone change this bond has been asked for. It is recorded with the zone it names and waits seven days for your partner; the bond's zone does not move yet. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "FR-027, ADR-0030 §1",
+    "evidence": "smoke",
+    "evidenceRef": "proposing a zone is 200 and moves nothing yet",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+  },
+  {
+    "id": "proposal-none-timezone-propose-alone",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "you are alone in the bond, and the zone has not moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NONE",
+    "status": 200,
+    "code": null,
+    "reason": "With nobody to ask, the zone moves at once and no proposal is written at all.",
+    "rule": "ADR-0030 §8",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#a creator alone moves the zone at once, and records no proposal",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (bond.status == BondStatus.PENDING_MEMBER) {"
+  },
+  {
+    "id": "proposal-none-timezone-propose-too-soon",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "the zone moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 409,
+    "code": "TIMEZONE_CHANGE_TOO_SOON",
+    "reason": "No proposal is written. With no earlier proposal, the zone can only have moved while you were alone in the bond, where a change applies at once.",
+    "rule": "FR-027, ADR-0030 §7",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+  },
+  {
+    "id": "proposal-proposed-timezone-propose",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PROPOSED",
+    "status": 409,
+    "code": "PROPOSAL_PENDING",
+    "reason": "One zone change waits at a time, whoever opened it. The database refuses a second as well, with a unique index. The 30-day rule is checked before this, but the zone cannot have moved while a proposal waits. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "ADR-0030 §3",
+    "evidence": "smoke",
+    "evidenceRef": "a second proposal is 409 PROPOSAL_PENDING",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw ProposalPendingException()"
+  },
+  {
+    "id": "proposal-confirmed-timezone-propose",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "30 days have passed since the zone moved",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 200,
+    "code": null,
+    "reason": "The last change was agreed long enough ago, so a new proposal is recorded and waits for your partner. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "FR-027",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+  },
+  {
+    "id": "proposal-confirmed-timezone-propose-too-soon",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "fewer than 30 days have passed since the zone moved",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CONFIRMED",
+    "status": 409,
+    "code": "TIMEZONE_CHANGE_TOO_SOON",
+    "reason": "The zone moved when the last proposal was agreed, and it moves at most once in 30 days. The detail names the date from which it may move again.",
+    "rule": "FR-027, ADR-0030 §7",
+    "evidence": "smoke",
+    "evidenceRef": "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#throw TimezoneChangeTooSoonException(requireNotNull(bond.nextTimezoneChangeAt), bond.anchorTimezone)"
+  },
+  {
+    "id": "proposal-cancelled-timezone-propose",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 200,
+    "code": null,
+    "reason": "A proposal that was called off is no obstacle: a fresh one is recorded, with its own id and its own seven days. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "ADR-0030 §5",
+    "evidence": "smoke",
+    "evidenceRef": "…and a fresh proposal is allowed",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+  },
+  {
+    "id": "proposal-lapsed-timezone-propose",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 200,
+    "code": null,
+    "reason": "A lapsed proposal is invisible to every read but still holds the one slot, so proposing first stamps it cancelled and then records the new one. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "ADR-0030 §2, §3",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#a lapsed proposal cannot be confirmed, and a fresh one may be made",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.closeLapsed(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now)"
+  },
+  {
+    "id": "proposal-none-timezone-confirm",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing has been proposed, so there is nothing to agree to. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "ADR-0030 §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-proposed-timezone-confirm",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "your partner opened it, the proposalId you send is its id, and the zone has not moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 200,
+    "code": null,
+    "reason": "Your agreement is recorded against the proposal in one compare-and-set, and the bond's zone moves to the one it named. If two answers arrive together, one is applied and the other finds nothing waiting.",
+    "rule": "BR-6, ADR-0030 §4",
+    "evidence": "smoke",
+    "evidenceRef": "the other member confirms: 200 and the zone moves",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.confirm(proposal.id, membership.memberId, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-proposed-timezone-confirm-own",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "you opened it, and the proposalId you send is its id",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PROPOSED",
+    "status": 409,
+    "code": "PROPOSAL_NEEDS_OTHER_MEMBER",
+    "reason": "The proposal stays waiting for your partner. Only the other member can agree.",
+    "rule": "BR-6, ADR-0030 §4",
+    "evidence": "smoke",
+    "evidenceRef": "the proposer cannot confirm their own: 409",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (proposal.proposedByMemberId == membership.memberId) throw ProposalNeedsOtherMemberException()"
+  },
+  {
+    "id": "proposal-proposed-timezone-confirm-other-id",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "the proposalId you send is not its id",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PROPOSED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "You are agreeing to a proposal other than the one that is waiting: the one you read was called off and replaced. Nothing is applied, and the waiting proposal stays as it is. The id is compared before who opened it. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 review amendment",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (proposal.id != expectedProposalId) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-proposed-timezone-confirm-too-soon",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "your partner opened it, the proposalId you send is its id, and the zone moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PROPOSED",
+    "status": 409,
+    "code": "TIMEZONE_CHANGE_TOO_SOON",
+    "reason": "The 30-day rule is asked again at agreement, and the proposal stays waiting. I found no sequence of requests that reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database.",
+    "rule": "ADR-0030 §6",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#the thirty days are re-checked at confirmation, not only at proposal",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.mayChangeTimezoneAt(now)) {"
+  },
+  {
+    "id": "bond-active-timezone-confirm-too-soon",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "your partner's zone change is waiting, the proposalId you send is its id, and the zone moved in the last 30 days",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 409,
+    "code": "TIMEZONE_CHANGE_TOO_SOON",
+    "reason": "The 30-day rule is asked again at agreement, and the proposal stays waiting. I found no sequence of requests that reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database.",
+    "rule": "ADR-0030 §6",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#the thirty days are re-checked at confirmation, not only at proposal",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.mayChangeTimezoneAt(now)) {"
+  },
+  {
+    "id": "proposal-confirmed-timezone-confirm",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CONFIRMED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "It was already agreed to, and the zone has moved. The answer is the same as when nothing was ever proposed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "ADR-0030 §2, §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-cancelled-timezone-confirm",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CANCELLED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "It was called off. The answer is the same as when nothing was ever proposed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "ADR-0030 §2, §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-lapsed-timezone-confirm",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "LAPSED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "It went seven days unanswered, and a lapsed proposal cannot be agreed to. The answer is the same as when nothing was ever proposed. (a test asserts the status, not the code) On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "ADR-0030 §2, §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-none-timezone-cancel",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing has been proposed, so there is nothing to call off. This route does not look at the bond's status. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-proposed-timezone-cancel",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": 204,
+    "code": null,
+    "reason": "Either member may call it off, the one who opened it or the other. The bond's zone stays where it was. It works while the bond counts down to deletion too, because calling a proposal off takes nothing away.",
+    "rule": "ADR-0030 §5",
+    "evidence": "smoke",
+    "evidenceRef": "either member may cancel it: 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!proposals.cancel(proposal.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-confirmed-timezone-cancel",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CONFIRMED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "It was agreed to and the zone has moved; an agreed change cannot be called off.",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-cancelled-timezone-cancel",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CANCELLED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "It was already called off, and calling off twice is not idempotent. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-lapsed-timezone-cancel",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "LAPSED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "It lapsed unanswered, which already has the effect of calling it off.",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) ?: throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-none-deletion-request",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "the bond is two people",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "Your request is recorded and waits seven days for your partner, whose own request is the agreement. Nothing else changes. On a bond that has ended the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "FR-028, ADR-0030 §9",
+    "evidence": "smoke",
+    "evidenceRef": "the first deletion request is 202, and nothing is deleted",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#val proposal = Proposal.deletion(ProposalId(support.ids.timeOrdered()), bond.id, membership.memberId, now)"
+  },
+  {
+    "id": "proposal-none-deletion-request-alone",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "you are alone in the bond",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 202,
+    "code": null,
+    "reason": "Alone in the bond, your request is written and confirmed by you in the same transaction, so that a bond counting down always has a record of who asked.",
+    "rule": "ADR-0030 §8",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#a bond with one member confirms its own request",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#proposals.confirm(proposal.id, membership.memberId, now)"
+  },
+  {
+    "id": "proposal-proposed-deletion-request-repeat",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "you opened it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "Asking again is answered 202 and changes nothing: the request still waits for your partner, with the expiry it already had.",
+    "rule": "ADR-0030 §9",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#repeating it as the same member is an idempotent 202 that confirms nothing",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#existing.proposedByMemberId == membership.memberId -> {"
+  },
+  {
+    "id": "proposal-proposed-deletion-request-agree",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "your partner opened it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 202,
+    "code": null,
+    "reason": "Your request is your agreement to theirs. It is recorded in one compare-and-set, and the bond starts its 30-day countdown.",
+    "rule": "FR-028, ADR-0030 §4, §9",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#the other member's request confirms it, and the cooling-off starts",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (proposals.confirm(proposal.id, membership.memberId, now)) {"
+  },
+  {
+    "id": "proposal-confirmed-deletion-request",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "the bond is counting down",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 202,
+    "code": null,
+    "reason": "The bond is already counting down, so asking again changes nothing and no new request is written.",
+    "rule": "ADR-0030 §9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (bond.status == BondStatus.PENDING_DELETION) return view(membership)"
+  },
+  {
+    "id": "proposal-confirmed-deletion-request-again",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "the deletion it started was called off, and the bond is two people",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "The deletion this request started was called off, and the bond is ACTIVE again. A new request is recorded and needs your partner's agreement afresh; the old agreement does not carry over.",
+    "rule": "ADR-0030 §9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#val proposal = Proposal.deletion(ProposalId(support.ids.timeOrdered()), bond.id, membership.memberId, now)"
+  },
+  {
+    "id": "proposal-confirmed-deletion-request-again-alone",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "the deletion it started was called off, and you are alone in the bond",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 202,
+    "code": null,
+    "reason": "The deletion this request started was called off and the bond went back to waiting for its second member. Asking again writes a new request, which confirms itself as the first did.",
+    "rule": "ADR-0030 §8, §4b",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (bond.activeMembers.size == 1) {"
+  },
+  {
+    "id": "proposal-cancelled-deletion-request",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "A request that was withdrawn is no obstacle: a new one is recorded and waits for your partner.",
+    "rule": "ADR-0030 §5",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#cancelling an unconfirmed request removes it",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#val proposal = Proposal.deletion(ProposalId(support.ids.timeOrdered()), bond.id, membership.memberId, now)"
+  },
+  {
+    "id": "proposal-lapsed-deletion-request",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "A request your partner never answered lapsed after seven days. Asking again stamps it cancelled and records a new one, whoever opened the old one: a lapsed request of your partner's is not agreed to by this.",
+    "rule": "ADR-0030 §2, §3",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#proposals.closeLapsed(membership.bondId, ProposalKind.DELETION, now)"
+  },
+  {
+    "id": "proposal-none-deletion-cancel",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "No deletion has been asked for, so there is nothing to call off. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (!cancelled) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-proposed-deletion-cancel",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": 204,
+    "code": null,
+    "reason": "Either member may withdraw a request that has not been agreed to: the one who asked, or the one being asked. The bond never changed status.",
+    "rule": "ADR-0030 §5",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#cancelling an unconfirmed request removes it",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#proposals.cancel(pending.id, now)"
+  },
+  {
+    "id": "proposal-confirmed-deletion-cancel",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "the bond is counting down, and you are still in it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 204,
+    "code": null,
+    "reason": "This is the escape hatch of the 30 days. The countdown is called off by changing the bond, not the request: the request stays confirmed, as the record of who asked and who agreed. The bond region has what the bond becomes.",
+    "rule": "FR-028, ADR-0030 §5",
+    "evidence": "smoke",
+    "evidenceRef": "either member calls it off: 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#bonds.update(bond.cancelDeletion(now))"
+  },
+  {
+    "id": "proposal-confirmed-deletion-cancel-left",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "the bond is counting down, and you have left it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CONFIRMED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "A member who walked away cannot undo what the two of you agreed. The answer is the 404 of nothing waiting, not a code of its own. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 §4a-i",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#bond.memberOf(membership.userId)?.isActive != true -> {"
+  },
+  {
+    "id": "proposal-confirmed-deletion-cancel-over",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "the deletion it started has already been called off",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CONFIRMED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "The countdown is over and nothing is waiting, so a second call finds nothing. (a test asserts the status, not the code)",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (!cancelled) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-cancelled-deletion-cancel",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CANCELLED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "The request was already withdrawn, or was cancelled when the bond ended. There is nothing to call off.",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (!cancelled) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-lapsed-deletion-cancel",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "LAPSED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "The request lapsed unanswered, which already has the effect of withdrawing it. There is nothing to call off.",
+    "rule": "ADR-0030 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#if (!cancelled) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-none-leave",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NONE",
+    "status": 204,
+    "code": null,
+    "reason": "Nothing was ever proposed, so ending the bond has nothing to cancel. A leave of a bond that has already ended is refused: see the bond region.",
+    "rule": "ADR-0030 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#proposals.cancelLiveOf(ended.id, at)"
+  },
+  {
+    "id": "proposal-proposed-leave",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": 204,
+    "code": null,
+    "reason": "Leaving cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended.",
+    "rule": "ADR-0030 §11, ADR-0028",
+    "evidence": "test",
+    "evidenceRef": "BondEndingEndpointTest#ending a bond cancels what was waiting to be agreed",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#proposals.cancelLiveOf(ended.id, at)"
+  },
+  {
+    "id": "proposal-confirmed-leave",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 204,
+    "code": null,
+    "reason": "An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region. A leave of a bond that has already ended is refused: see the bond region.",
+    "rule": "ADR-0030 §4a",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
+  },
+  {
+    "id": "proposal-cancelled-leave",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": 204,
+    "code": null,
+    "reason": "A proposal already called off stays as it is. A leave of a bond that has already ended is refused: see the bond region.",
+    "rule": "ADR-0030 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
+  },
+  {
+    "id": "proposal-lapsed-leave",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "POST /api/v1/bonds/{bondId}/leave",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": 204,
+    "code": null,
+    "reason": "The statement that cancels what is waiting does not ask the clock, so a proposal that had lapsed and was never closed is stamped cancelled too. No response can show the difference: a lapsed proposal was already invisible.",
+    "rule": "ADR-0030 §2, §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
+  },
+  {
+    "id": "proposal-none-block",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NONE",
+    "status": 204,
+    "code": null,
+    "reason": "Nothing was ever proposed, so ending the bond has nothing to cancel.",
+    "rule": "ADR-0030 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#proposals.cancelLiveOf(ended.id, at)"
+  },
+  {
+    "id": "proposal-proposed-block",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": 204,
+    "code": null,
+    "reason": "Blocking cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended.",
+    "rule": "ADR-0030 §11, ADR-0028",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#proposals.cancelLiveOf(ended.id, at)"
+  },
+  {
+    "id": "proposal-confirmed-block",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 204,
+    "code": null,
+    "reason": "An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region.",
+    "rule": "ADR-0030 §4a",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
+  },
+  {
+    "id": "proposal-cancelled-block",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": 204,
+    "code": null,
+    "reason": "A proposal already called off stays as it is.",
+    "rule": "ADR-0030 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
+  },
+  {
+    "id": "proposal-lapsed-block",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "POST /api/v1/bonds/{bondId}/block",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": 204,
+    "code": null,
+    "reason": "The statement that cancels what is waiting does not ask the clock, so a proposal that had lapsed and was never closed is stamped cancelled too. No response can show the difference: a lapsed proposal was already invisible.",
+    "rule": "ADR-0030 §2, §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
+  },
+  {
+    "id": "proposal-none-partner-proposes",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "event:partner-proposes",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner proposes a zone change or asks for the deletion. Your next read of the bond shows it waiting, with seven days to answer. You are not notified.",
+    "rule": "FR-027, FR-028",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#an active bond records a proposal, and the zone does not move yet",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+  },
+  {
+    "id": "proposal-confirmed-partner-proposes",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "event:partner-proposes",
+    "actor": "partner",
+    "when": "the earlier one is done with: 30 days have passed since the zone moved, or the deletion it started was called off",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": null,
+    "code": null,
+    "reason": "A new proposal of the same kind waits for you. The earlier agreement does not carry over to it.",
+    "rule": "FR-027, FR-028",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/RequestDeletion.kt#val proposal = Proposal.deletion(ProposalId(support.ids.timeOrdered()), bond.id, membership.memberId, now)"
+  },
+  {
+    "id": "proposal-cancelled-partner-proposes",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "event:partner-proposes",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner proposes again after the last one was called off. A new proposal has a new id, which is what you send to agree to a zone change.",
+    "rule": "ADR-0030 review amendment",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#a stale confirmation cannot approve a replacement proposal",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (proposal.id != expectedProposalId) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-lapsed-partner-proposes",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "event:partner-proposes",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner proposes again after the last one lapsed. The lapsed one is stamped cancelled to free the slot, and the new one waits for you.",
+    "rule": "ADR-0030 §3",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#a lapsed proposal cannot be confirmed, and a fresh one may be made",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun closeLapsed("
+  },
+  {
+    "id": "proposal-proposed-partner-confirms",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "event:partner-confirms",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner agrees to what you proposed. A zone change is applied to the bond at once; a deletion starts the 30-day countdown. The bond region has both.",
+    "rule": "BR-6, ADR-0030 §4",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#the other member confirms, and the zone moves",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#SET p.confirmedAt = :now,"
+  },
+  {
+    "id": "proposal-proposed-partner-cancels",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "event:partner-cancels",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner calls it off, whether it was theirs or yours. Your next read of the bond shows nothing waiting.",
+    "rule": "ADR-0030 §5",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#either member may cancel, and then a fresh proposal is allowed",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancel("
+  },
+  {
+    "id": "proposal-proposed-partner-leaves",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "event:partner-leaves",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner leaves, the bond ends, and whatever was waiting is cancelled with it. You can no longer agree to it: the answer would be BOND_ARCHIVED.",
+    "rule": "ADR-0030 §11",
+    "evidence": "test",
+    "evidenceRef": "BondEndingEndpointTest#ending a bond cancels what was waiting to be agreed",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#proposals.cancelLiveOf(ended.id, at)"
+  },
+  {
+    "id": "proposal-proposed-partner-blocks",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "event:partner-blocks",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner blocks you, the bond ends, and whatever was waiting is cancelled with it. You can no longer agree to it: the answer would be BOND_ARCHIVED.",
+    "rule": "ADR-0030 §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#proposals.cancelLiveOf(ended.id, at)"
+  },
+  {
+    "id": "proposal-proposed-lapses",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "event:proposal-lapses",
+    "actor": "system",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "LAPSED",
+    "status": null,
+    "code": null,
+    "reason": "Seven days pass with no answer. No job runs and no row is written: every read asks whether the expiry has passed, and from then the proposal is not shown, cannot be agreed to and cannot be called off. The test cited moves the expiry into the past; the seven days are read from the code.",
+    "rule": "ADR-0030 §2",
+    "evidence": "test",
+    "evidenceRef": "BondTimezoneEndpointTest#a lapsed proposal cannot be confirmed, and a fresh one may be made",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#AND p.expiresAt > :now"
   }
 ]
