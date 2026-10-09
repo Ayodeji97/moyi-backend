@@ -180,6 +180,7 @@ class OpenApiConfiguration {
             requireDiscriminatorProperty(api)
             documentDaysQuery(api)
             documentRevalidation(api)
+            documentFavourites(api)
         }
 
     /**
@@ -264,6 +265,9 @@ class OpenApiConfiguration {
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER && it.name == "code" }) {
                 add(HttpStatus.UNPROCESSABLE_ENTITY)
             }
+            // The two archive reads declare what they produce, so a request that will take none of it is refused before
+            // the handler: the one 406 a client can be told about, and the one that comes before the membership check.
+            if (operation.operationId in REVALIDATED_OPERATIONS) add(HttpStatus.NOT_ACCEPTABLE)
             // A query parameter is read by the application, which refuses one it cannot read as it refuses a field.
             if (operation.parameters.orEmpty().any { it.`in` == QUERY_PARAMETER }) add(HttpStatus.UNPROCESSABLE_ENTITY)
             add(HttpStatus.TOO_MANY_REQUESTS)
@@ -842,6 +846,9 @@ private fun documentDaysQuery(api: OpenAPI) {
             }
 
             "cursor" -> {
+                // The bound the route enforces before it decodes anything (`gratitude.web.DayCursor.MAX_LENGTH`, which is
+                // internal to that module and mirrored here, as the limit's bounds are).
+                parameter.schema = StringSchema().maxLength(DAYS_MAX_CURSOR_LENGTH)
                 parameter.description =
                     "The `nextCursor` of an earlier page, unchanged: the days before that page's last. Opaque; do not " +
                     "build or alter one. It carries no bond and no caller, only a position, so it grants nothing."
@@ -894,6 +901,7 @@ private const val DAYS_DESCRIPTION =
 private const val DAYS_MIN_LIMIT = 1
 private const val DAYS_MAX_LIMIT = 50
 private const val DAYS_DEFAULT_LIMIT = 20
+private const val DAYS_MAX_CURSOR_LENGTH = 32
 
 /**
  * States what a **conditional read** is on the operations that are one
@@ -926,6 +934,15 @@ private const val DAYS_DEFAULT_LIMIT = 20
  * segment taken as text (the handler reads it after the guard), so springdoc
  * documents a bare string. It is a calendar date, and anything else is the
  * same `404` as a date with nothing on it.
+ *
+ * **And the `406`.** Because the mappings declare `produces`, a request
+ * whose `Accept` admits no JSON is refused before the handler runs, and so
+ * before the membership check: on these two operations, and nowhere else,
+ * somebody who is not in the bond can be answered something other than its
+ * `404`. It is the same response whoever asks, so it says nothing about the
+ * bond; a client is told so here, because a `406` where it expected a `404`
+ * would otherwise look like a different answer about the bond. No other
+ * operation documents its `406`, which comes after the handler there.
  */
 private fun documentRevalidation(api: OpenAPI) {
     api.paths.values
@@ -956,6 +973,8 @@ private fun documentRevalidation(api: OpenAPI) {
                             "would be sent. No body.",
                     ).addHeaderObject(REVALIDATION_ETAG, revalidationTag()),
             )
+            operation.responses[NOT_ACCEPTABLE]?.description(NOT_ACCEPTABLE_DESCRIPTION)
+            ARCHIVE_DESCRIPTIONS[operation.operationId]?.let { operation.description = it }
             operation.parameters
                 .filter { it.`in` == "path" && it.name == "date" }
                 .forEach { date ->
@@ -982,3 +1001,49 @@ private const val REVALIDATION_ETAG = "ETag"
 private const val JSON = "application/json"
 private const val OK = "200"
 private const val NOT_MODIFIED = "304"
+private const val NOT_ACCEPTABLE = "406"
+private const val NOT_ACCEPTABLE_DESCRIPTION =
+    "Not Acceptable: the request's `Accept` header admits no JSON. Decided from that header alone, before the caller's " +
+        "membership is looked at, so it is the same response for a member, for somebody who is not one and for a bond " +
+        "that does not exist. It carries no `ETag`."
+
+/**
+ * What a client of the one day has to be told, for [DAYS_DESCRIPTION]'s
+ * reason: today is a `404` here until the caller has written, and nothing in
+ * the schema says where else to read it.
+ */
+private val ARCHIVE_DESCRIPTIONS =
+    mapOf(
+        "day" to
+            "One day exactly as `GET /bonds/{bondId}/days` lists it: the same object, for the same caller. " +
+            "`404 DAY_NOT_FOUND` for every date that is not in the caller's archive, whatever the reason. Today is not " +
+            "in it until the caller has written or the day has revealed, so read today from `GET /bonds/{bondId}/today`. " +
+            "As in the feed, a day's `status` does not say whether there is anything to draw: draw a day from its entries.",
+    )
+
+/**
+ * What a client of the two bookmark operations has to be told: whose the
+ * mark is, which entries take one, and what each refusal means. `409` is two
+ * codes here and the schema lists neither against the operation.
+ */
+private val FAVOURITE_DESCRIPTIONS =
+    mapOf(
+        "favouriteEntry" to
+            "Marks the entry as the caller's own bookmark. The other member is never shown it, in any response. " +
+            "Repeatable: a second mark changes nothing and is `204`. Only an entry the caller is shown with " +
+            "`status: REVEALED` can be marked. `409 ENTRY_NOT_REVEALED` is the caller's own entry that has not been " +
+            "revealed. `409 ENTRY_IMMUTABLE` is an entry that has been erased, or is being erased: a tombstone. `404` " +
+            "is every entry the caller was never shown, the same as for an id that does not exist. A body, if one is " +
+            "sent, is ignored. Allowed on a bond that has ended.",
+        "unfavouriteEntry" to
+            "Removes the caller's bookmark. Repeatable: no bookmark is success, and so is an entry that has since been " +
+            "erased. `404` is every entry the caller was never shown, the same as for an id that does not exist. " +
+            "Allowed on a bond that has ended.",
+    )
+
+/** Gives the two bookmark operations their [FAVOURITE_DESCRIPTIONS]. */
+private fun documentFavourites(api: OpenAPI) {
+    api.paths.values.flatMap { it.readOperations() }.forEach { operation ->
+        FAVOURITE_DESCRIPTIONS[operation.operationId]?.let { operation.description = it }
+    }
+}

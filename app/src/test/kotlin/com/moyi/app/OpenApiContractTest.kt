@@ -454,6 +454,53 @@ class OpenApiContractTest(
             .getValue("cursor")
             .schema.format
             .shouldBeNull()
+        // And bounded as the route bounds it: a longer one is refused unread (`DayCursor.MAX_LENGTH`, internal to gratitude).
+        query.getValue("cursor").schema.maxLength shouldBe 32
+    }
+
+    @Test
+    fun `both archive reads document the 406 that comes before the membership check, and no other operation documents one`() {
+        val reads = listOf("/api/v1/bonds/{bondId}/days", "/api/v1/bonds/{bondId}/days/{date}").map { api.paths[it]!!.get }
+
+        reads.forEach { read ->
+            withClue(read.operationId) {
+                val refused = read.responses["406"].shouldNotBeNull()
+                refused.content.keys shouldBe setOf("application/problem+json")
+                refused.headers.orEmpty().keys shouldNotContain "ETag"
+                refused.description shouldContain "before the caller's membership is looked at"
+                refused.description shouldContain "the same response for a member"
+            }
+        }
+        // Everywhere else a 406 comes after the handler, as it always has, and is documented nowhere (as 405 is not).
+        operations().filter { (_, op) -> op.responses.containsKey("406") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
+            listOf("days", "day")
+    }
+
+    @Test
+    fun `the day and the two favourite operations say what the schema cannot`() {
+        // One day: today is not there until the caller has written, and where to read it instead.
+        val day =
+            api.paths["/api/v1/bonds/{bondId}/days/{date}"]!!
+                .get.description
+                .shouldNotBeNull()
+        day shouldContain "`404 DAY_NOT_FOUND` for every date that is not in the caller's archive"
+        day shouldContain "read today from `GET /bonds/{bondId}/today`"
+        day shouldContain "does not say whether there is anything to draw"
+
+        // A mark: whose it is, what can be marked, and which of the two 409s means what.
+        val favourite = api.paths["/api/v1/entries/{entryId}/favourite"]!!
+        val mark = favourite.put.description.shouldNotBeNull()
+        mark shouldContain "The other member is never shown it"
+        mark shouldContain "`status: REVEALED`"
+        mark shouldContain "`409 ENTRY_NOT_REVEALED`"
+        mark shouldContain "`409 ENTRY_IMMUTABLE`"
+        mark shouldContain "never shown"
+        mark shouldContain "Allowed on a bond that has ended"
+
+        val unmark = favourite.delete.description.shouldNotBeNull()
+        unmark shouldContain "no bookmark is success"
+        unmark shouldContain "never shown"
+        unmark shouldContain "Allowed on a bond that has ended"
     }
 
     @Test

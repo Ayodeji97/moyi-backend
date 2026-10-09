@@ -1224,7 +1224,8 @@
           "name" : "cursor",
           "required" : false,
           "schema" : {
-            "type" : "string"
+            "type" : "string",
+            "maxLength" : 32
           }
         }, {
           "description" : "Start at this calendar date (`YYYY-MM-DD`) or the nearest earlier day: for jumping to a month. With `cursor` as well, both apply.",
@@ -1313,6 +1314,16 @@
             },
             "description" : "Not Found"
           },
+          "406" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Acceptable: the request's `Accept` header admits no JSON. Decided from that header alone, before the caller's membership is looked at, so it is the same response for a member, for somebody who is not one and for a bond that does not exist. It carries no `ETag`."
+          },
           "422" : {
             "content" : {
               "application/problem+json" : {
@@ -1349,6 +1360,7 @@
     },
     "/api/v1/bonds/{bondId}/days/{date}" : {
       "get" : {
+        "description" : "One day exactly as `GET /bonds/{bondId}/days` lists it: the same object, for the same caller. `404 DAY_NOT_FOUND` for every date that is not in the caller's archive, whatever the reason. Today is not in it until the caller has written or the day has revealed, so read today from `GET /bonds/{bondId}/today`. As in the feed, a day's `status` does not say whether there is anything to draw: draw a day from its entries.",
         "operationId" : "day",
         "parameters" : [ {
           "in" : "path",
@@ -1434,6 +1446,16 @@
               }
             },
             "description" : "Not Found"
+          },
+          "406" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Acceptable: the request's `Accept` header admits no JSON. Decided from that header alone, before the caller's membership is looked at, so it is the same response for a member, for somebody who is not one and for a bond that does not exist. It carries no `ETag`."
           },
           "429" : {
             "content" : {
@@ -2937,6 +2959,7 @@
     },
     "/api/v1/entries/{entryId}/favourite" : {
       "delete" : {
+        "description" : "Removes the caller's bookmark. Repeatable: no bookmark is success, and so is an entry that has since been erased. `404` is every entry the caller was never shown, the same as for an id that does not exist. Allowed on a bond that has ended.",
         "operationId" : "unfavouriteEntry",
         "parameters" : [ {
           "in" : "path",
@@ -3004,6 +3027,7 @@
         "tags" : [ "favourites-controller" ]
       },
       "put" : {
+        "description" : "Marks the entry as the caller's own bookmark. The other member is never shown it, in any response. Repeatable: a second mark changes nothing and is `204`. Only an entry the caller is shown with `status: REVEALED` can be marked. `409 ENTRY_NOT_REVEALED` is the caller's own entry that has not been revealed. `409 ENTRY_IMMUTABLE` is an entry that has been erased, or is being erased: a tombstone. `404` is every entry the caller was never shown, the same as for an id that does not exist. A body, if one is sent, is ignored. Allowed on a bond that has ended.",
         "operationId" : "favouriteEntry",
         "parameters" : [ {
           "in" : "path",
