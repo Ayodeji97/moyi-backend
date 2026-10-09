@@ -26,7 +26,8 @@ script:post-response {
     const first = res.body.items[0];
     if (first) {
       bru.setVar("date", first.date);
-      if (first.partnerEntry) bru.setVar("partnerEntryId", first.partnerEntry.id);
+      // A partner's entry you were never shown is an author and a status, with no id to keep.
+      if (first.partnerEntry && first.partnerEntry.id) bru.setVar("partnerEntryId", first.partnerEntry.id);
     }
     if (res.body.nextCursor) bru.setVar("nextCursor", res.body.nextCursor);
   }

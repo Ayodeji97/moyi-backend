@@ -327,7 +327,7 @@ case "$cmd" in
     authed GET "/bonds/$BOND/days${query:+?${query#&}}"; show 200
     # One page, as the server cut it. Nothing here follows the cursor: it is printed, to be given back.
     next="$(printf '%s' "$BODY" | field nextCursor)"
-    [ -z "$next" ] || echo "There are earlier days. For the next page, the same command with: --cursor $next"
+    [ -z "$next" ] || echo "There may be earlier days. For the next page, the same command with: --cursor $next"
     ;;
   day)
     [ $# -eq 1 ] || die "usage: moyi day <YYYY-MM-DD>"
