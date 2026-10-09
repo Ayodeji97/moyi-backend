@@ -18,6 +18,8 @@ stateDiagram-v2
         day__OPEN --> day__PARTIAL: you - write today's entry
         day__PARTIAL --> day__REVEALED: you - write today's entry
         day__PARTIAL --> day__PENDING_REVEAL: you - write today's entry
+        day__PARTIAL --> day__OPEN: you - delete your entry
+        day__PENDING_REVEAL --> day__PARTIAL: you - delete your entry
     }
     state "Your entry" as day_entry {
         state "none" as day_entry__NONE
@@ -48,6 +50,7 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | Action | `OPEN` | `PARTIAL` | `PENDING_REVEAL` | `REVEALED` | `SOLO` | `EMPTY` | `FROZEN` | `SUSPENDED` |
 |---|---|---|---|---|---|---|---|---|
 | write today's entry<br>`POST /bonds/{bondId}/entries` | 201 → `PARTIAL` | 409 `ENTRY_ALREADY_EXISTS` (you have already written today)<br>201 → `REVEALED` (your partner has written, you have not, and the bond has no reveal time or it has passed)<br>201 → `PENDING_REVEAL` (your partner has written, you have not, and the bond's reveal time is still ahead) | 409 `ENTRY_ALREADY_EXISTS` | 409 `DAY_CLOSED` (the day is today)<br>201 stays (the day is an earlier one, named by an offline draft's intendedAt) | 201 stays (an offline draft's intendedAt names this day) | 201 stays (an offline draft's intendedAt names this day) | 201 stays (an offline draft's intendedAt names this day) | 201 stays (the bond is still waiting for its second member, and you have not written today)<br>409 `ENTRY_ALREADY_EXISTS` (the bond is still waiting for its second member, and you have already written today)<br>201 stays (your partner has since joined, the day ended before they did and is not yet stamped closed, and an offline draft's intendedAt names it)<br>201 stays (the close job has stamped the day closed, and an offline draft's intendedAt names it) |
+| delete your entry<br>`DELETE /entries/{entryId}` | 204 stays | 204 → `OPEN` (the day's one live entry is yours)<br>204 stays (the live entry is your partner's, and you repeat the delete of one you already deleted) | 204 → `PARTIAL` | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays (the day is still running, on a bond waiting for its second member)<br>204 stays (the close job has stamped the day closed) |
 
 ### Refused here
 

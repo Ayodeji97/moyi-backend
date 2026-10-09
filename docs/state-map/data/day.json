@@ -840,5 +840,255 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#redirectOnce(membership, claimed, calendar, now) ?: throw DayClosedException()"
+  },
+  {
+    "id": "day-open-delete",
+    "region": "day",
+    "from": "OPEN",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "OPEN",
+    "status": 204,
+    "code": null,
+    "reason": "An open day holds no live entry, so the only entry of yours on it is one you already deleted. Deleting it again is 204 and changes nothing.",
+    "rule": "ADR-0032 §8",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#delete frees the live slot and today picks the replacement",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/EraseEntry.kt#val nextDay = if (entry.isErased) day else day.withoutEntry()"
+  },
+  {
+    "id": "day-partial-delete",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the day's one live entry is yours",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "OPEN",
+    "status": 204,
+    "code": null,
+    "reason": "Deleting before the reveal steps the day back: it is counted again without your entry.",
+    "rule": "BR-10, ADR-0032 §8",
+    "evidence": "test",
+    "evidenceRef": "RevealTest#a delete before the reveal shows the partner an author and that it is gone, and nothing else",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#entryCount == 1 -> BondDayStatus.OPEN"
+  },
+  {
+    "id": "day-partial-delete-again",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the live entry is your partner's, and you repeat the delete of one you already deleted",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 204,
+    "code": null,
+    "reason": "The entry was already erased, so the day is not stepped back a second time.",
+    "rule": "ADR-0032 §8",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/EraseEntry.kt#val nextDay = if (entry.isErased) day else day.withoutEntry()"
+  },
+  {
+    "id": "day-pending-reveal-delete",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 204,
+    "code": null,
+    "reason": "Nobody has read anything yet, so the day steps back to one entry. If you write again, the reveal rule is asked afresh.",
+    "rule": "ADR-0032 §8",
+    "evidence": "test",
+    "evidenceRef": "RevealTest#deleting on a PENDING_REVEAL day returns it to PARTIAL, and a rewrite follows the reveal rule again",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> BondDayStatus.PARTIAL"
+  },
+  {
+    "id": "day-revealed-delete",
+    "region": "day",
+    "from": "REVEALED",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 204,
+    "code": null,
+    "reason": "A revealed day is a record. Your words are erased; the day stays REVEALED and is not recounted.",
+    "rule": "BR-10",
+    "evidence": "smoke",
+    "evidenceRef": "DELETE after reveal succeeds",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#fun withoutEntry(): BondDay ="
+  },
+  {
+    "id": "day-solo-delete",
+    "region": "day",
+    "from": "SOLO",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SOLO",
+    "status": 204,
+    "code": null,
+    "reason": "A closed day is history. Your words are erased and the day stays SOLO.",
+    "rule": "BR-10",
+    "evidence": "test",
+    "evidenceRef": "EntryChangesTest#a delete on an ended bond leaves a day the close job has settled exactly as it was",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#fun withoutEntry(): BondDay ="
+  },
+  {
+    "id": "day-empty-delete",
+    "region": "day",
+    "from": "EMPTY",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "EMPTY",
+    "status": 204,
+    "code": null,
+    "reason": "An empty day holds no live entry; at most one you deleted before it closed. Deleting that again is 204 and changes nothing.",
+    "rule": "ADR-0032 §8",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/EraseEntry.kt#val nextDay = if (entry.isErased) day else day.withoutEntry()"
+  },
+  {
+    "id": "day-frozen-delete",
+    "region": "day",
+    "from": "FROZEN",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "FROZEN",
+    "status": 204,
+    "code": null,
+    "reason": "A day a freeze covered is closed. Your words are erased; the day stays FROZEN and the streak keeps the rest day.",
+    "rule": "BR-10",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#fun withoutEntry(): BondDay ="
+  },
+  {
+    "id": "day-suspended-delete-waiting",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the day is still running, on a bond waiting for its second member",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 204,
+    "code": null,
+    "reason": "Your entry is erased and the day's count goes down by one. The day stays suspended, and you may write again.",
+    "rule": "ADR-0032 §8",
+    "evidence": "smoke",
+    "evidenceRef": "DELETE before reveal frees the author's slot",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.SUSPENDED -> status"
+  },
+  {
+    "id": "day-suspended-delete-closed",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "DELETE /api/v1/entries/{entryId}",
+    "actor": "you",
+    "when": "the close job has stamped the day closed",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 204,
+    "code": null,
+    "reason": "A suspended day the close job has stamped is settled. Your words are erased and the day is left as it is.",
+    "rule": "BR-10",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#val isSettled: Boolean get() = closedAt != null || status.isClosed"
   }
 ]
