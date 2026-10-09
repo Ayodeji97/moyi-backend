@@ -1570,8 +1570,8 @@
     "code": null,
     "reason": "Your own settings, as on a bond of one. Your partner's are never shown.",
     "rule": "",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "BondSettingsEndpointTest#settings are the caller's own, and writing them does not move the bond's ETag",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#fun of(membership: Membership): Member = memberIn(bondOf(membership), membership)"
   },
   {
@@ -1695,8 +1695,8 @@
     "code": null,
     "reason": "The same on a bond of two. The row is yours alone, so the last write wins and your partner's view of the bond does not change.",
     "rule": "ADR-0029 §6, §7",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "BondSettingsEndpointTest#settings are the caller's own, and writing them does not move the bond's ETag",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#val updated = memberIn(bond, membership).withSettings(settings)"
   },
   {
@@ -1830,7 +1830,7 @@
     "from": "ACTIVE",
     "action": "PATCH /api/v1/bonds/{bondId}/timezone",
     "actor": "you",
-    "when": "no zone change is waiting, and the zone has not moved in the last 30 days",
+    "when": "the zone has not moved in the last 30 days, and no zone change is waiting",
     "guards": [
       {
         "region": "account",
@@ -1855,7 +1855,7 @@
     "from": "ACTIVE",
     "action": "PATCH /api/v1/bonds/{bondId}/timezone",
     "actor": "you",
-    "when": "a zone change is already waiting, yours or your partner's",
+    "when": "the zone has not moved in the last 30 days, and a zone change is already waiting, yours or your partner's",
     "guards": [
       {
         "region": "account",
@@ -1868,7 +1868,7 @@
     "to": "ACTIVE",
     "status": 409,
     "code": "PROPOSAL_PENDING",
-    "reason": "One zone change may wait at a time. The one that is waiting has to be agreed to, called off, or left to lapse before another is proposed.",
+    "reason": "The 30 days are asked first and the waiting proposal second. One zone change may wait at a time. The one that is waiting has to be agreed to, called off, or left to lapse before another is proposed.",
     "rule": "ADR-0030 §3",
     "evidence": "smoke",
     "evidenceRef": "a second proposal is 409 PROPOSAL_PENDING",
@@ -1880,7 +1880,7 @@
     "from": "ACTIVE",
     "action": "PATCH /api/v1/bonds/{bondId}/timezone",
     "actor": "you",
-    "when": "no zone change is waiting, and the zone moved in the last 30 days",
+    "when": "the zone moved in the last 30 days",
     "guards": [
       {
         "region": "account",
@@ -2819,7 +2819,7 @@
     "status": 201,
     "code": null,
     "reason": "A replay is a read of what your first request made, not a second write, so the bond's state does not refuse it: 201 again with Idempotency-Replayed: true and the entry as it stands now.",
-    "rule": "ADR-0031 §9",
+    "rule": "ADR-0031 §8",
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))"
@@ -2869,7 +2869,7 @@
     "status": 201,
     "code": null,
     "reason": "A replay is a read of what your first request made, not a second write, so the bond's state does not refuse it: 201 again with Idempotency-Replayed: true and the entry as it stands now.",
-    "rule": "ADR-0031 §9",
+    "rule": "ADR-0031 §8",
     "evidence": "test",
     "evidenceRef": "SubmitEntryIdempotencyTest#a replay by a caller who has since left the bond is a read of their entry, so it is still answered",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))"
@@ -3019,7 +3019,7 @@
     "status": 200,
     "code": null,
     "reason": "A replay is a read of what your first request made, so the bond's state does not refuse it: 200 with Idempotency-Replayed: true and the entry as it stands now.",
-    "rule": "ADR-0031 §9",
+    "rule": "ADR-0031 §8",
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/PatchEntry.kt#val view = outcome.value ?: changes.read(userId, EntryId(outcome.resultId))"
@@ -3094,7 +3094,7 @@
     "status": 200,
     "code": null,
     "reason": "A replay is a read of what your first request made, so the bond's state does not refuse it: 200 with Idempotency-Replayed: true and the entry as it stands now.",
-    "rule": "ADR-0031 §9",
+    "rule": "ADR-0031 §8",
     "evidence": "test",
     "evidenceRef": "WithdrawalReadTest#a replay of the blocker's edit answers without the words it wrote or the ones it replaced",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/PatchEntry.kt#val view = outcome.value ?: changes.read(userId, EntryId(outcome.resultId))"
@@ -3433,7 +3433,7 @@
     "to": "PENDING_DELETION",
     "status": null,
     "code": null,
-    "reason": "Your partner blocks you during the countdown. Their membership ends and the bond goes on counting down. You can still call the deletion off, and then the bond becomes ARCHIVED, not ACTIVE. The test cited asserts that what you then read is the same as after a leave.",
+    "reason": "Your partner blocks you during the countdown. Their membership ends and the bond goes on counting down. You can still call the deletion off, and then the bond becomes ARCHIVED, not ACTIVE. The test cited asserts only that what you then read is the same as after a leave; that a leave leaves it PENDING_DELETION is asserted by the smoke probe \"…the bond is still counting down for the member who is in it\".",
     "rule": "ADR-0030 §4a",
     "evidence": "test",
     "evidenceRef": "BondDeletionEndpointTest#leaving during the cooling-off is allowed, and looks exactly like blocking",
@@ -4023,7 +4023,7 @@
     "status": 201,
     "code": null,
     "reason": "A new invite is issued with a new code. This one stays revoked: a dead code is never brought back.",
-    "rule": "ADR-0027 §4, ADR-0030 §4d",
+    "rule": "ADR-0027 §4",
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateInvite.kt#val invite = Invite.issue(InviteId(ids.timeOrdered()), bond.id, codes.next(), membership.memberId, now)"
@@ -4054,7 +4054,7 @@
     "status": 201,
     "code": null,
     "reason": "A new invite is issued with a new code. This one stays expired: a dead code is never brought back.",
-    "rule": "ADR-0027 §4, ADR-0030 §4d",
+    "rule": "ADR-0027 §4",
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/CreateInvite.kt#val invite = Invite.issue(InviteId(ids.timeOrdered()), bond.id, codes.next(), membership.memberId, now)"
@@ -4085,7 +4085,7 @@
     "to": "NONE",
     "status": 404,
     "code": "NOT_FOUND",
-    "reason": "The id names no invite of this bond: invented, another bond's, or not a UUID. The same 404 as an invite that is already dead. (a test asserts the status, not the code)",
+    "reason": "The id names no invite of this bond: it is invented or is another bond's, and the conditional update finds nothing to revoke. An id that is not a UUID gets the same 404 a step earlier, in the controller (BondInvitesController.inviteIdOrNotFound). The same answer as an invite that is already dead. (a test asserts the status, not the code)",
     "rule": "FR-023",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -4236,10 +4236,10 @@
     "to": "NONE",
     "status": 404,
     "code": "INVITE_NOT_USABLE",
-    "reason": "A code that was never issued gets the one answer every unusable code gets, so guessing codes teaches nothing. (a test asserts the status and that the body is the same bytes as a never-issued code's, not the code by name)",
+    "reason": "A code that was never issued gets the one answer every unusable code gets, so guessing codes teaches nothing. (the test asserts the 404 and that the body is identical to the one accept gives a never-issued code; the smoke probe \"a code that never existed is 404 too\" asserts that body's code)",
     "rule": "FR-024, ADR-0027 §1",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "InviteOneAnswerTest#every way a code can fail is one response, on resolve and on accept alike",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ResolveInvite.kt#val invite = invites.findLiveByCode(code, now) ?: throw InviteNotUsableException()"
   },
   {
@@ -4286,10 +4286,10 @@
     "to": "CREATED",
     "status": 404,
     "code": "INVITE_NOT_USABLE",
-    "reason": "A blocked person is not shown the bond's name and then refused: they get the same answer as for a dead code, so nothing tells them they were blocked. (a test asserts the status, not the code)",
+    "reason": "A blocked person is not shown the bond's name and then refused: they get the same answer as for a dead code, so nothing tells them they were blocked. (the test asserts the 404 and that the body is identical to a never-issued code's; the smoke probe \"a code that never existed is 404 too\" asserts that body's code)",
     "rule": "FR-029, ADR-0027 §3",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "InviteOneAnswerTest#every way a code can fail is one response, on resolve and on accept alike",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ResolveInvite.kt#if (blocks.existsBetween(caller, bond.everyMemberUserId())) throw InviteNotUsableException()"
   },
   {
@@ -4311,10 +4311,10 @@
     "to": "ACCEPTED",
     "status": 404,
     "code": "INVITE_NOT_USABLE",
-    "reason": "A used code is not live. The answer does not say that it was once real, or that somebody got there first. (a test asserts the status, not the code)",
+    "reason": "A used code is not live. The answer does not say that it was once real, or that somebody got there first. (the test asserts the 404 and that the body is identical to a never-issued code's; the smoke probe \"a code that never existed is 404 too\" asserts that body's code)",
     "rule": "FR-024, ADR-0027 §1",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "InviteOneAnswerTest#every way a code can fail is one response, on resolve and on accept alike",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ResolveInvite.kt#val invite = invites.findLiveByCode(code, now) ?: throw InviteNotUsableException()"
   },
   {
@@ -4361,10 +4361,10 @@
     "to": "EXPIRED",
     "status": 404,
     "code": "INVITE_NOT_USABLE",
-    "reason": "A code past its seven days is not live. It is a 404 and not a 410, which would say the code was once real. (a test asserts the status and that the body is the same bytes as a never-issued code's, not the code by name)",
+    "reason": "A code past its seven days is not live. It is a 404 and not a 410, which would say the code was once real. (the test asserts the 404 and that the body is identical to a never-issued code's; the smoke probe \"a code that never existed is 404 too\" asserts that body's code)",
     "rule": "FR-024, ADR-0027 §1",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "InviteOneAnswerTest#every way a code can fail is one response, on resolve and on accept alike",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ResolveInvite.kt#val invite = invites.findLiveByCode(code, now) ?: throw InviteNotUsableException()"
   },
   {
@@ -4611,10 +4611,10 @@
     "to": "REVOKED",
     "status": 404,
     "code": "INVITE_NOT_USABLE",
-    "reason": "The code was revoked, or replaced by a newer one, or its bond ended or began counting down. The one answer, identical to a code that never existed. (a test asserts the status and that the body is the same bytes as a never-issued code's, not the code by name)",
+    "reason": "The code was revoked, or replaced by a newer one, or its bond ended or began counting down. The one answer, identical to a code that never existed. (the test asserts the 404 and that the body is identical to a never-issued code's; the smoke probe \"a code that never existed is 404 too\" asserts that body's code)",
     "rule": "FR-024, ADR-0027 §1",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "InviteOneAnswerTest#every way a code can fail is one response, on resolve and on accept alike",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#val invite = invites.findLiveByCode(code, lookupAt) ?: throw InviteNotUsableException()"
   },
   {
@@ -4661,10 +4661,10 @@
     "to": "EXPIRED",
     "status": 404,
     "code": "INVITE_NOT_USABLE",
-    "reason": "The code is past its seven days. The one answer, identical to a code that never existed. (a test asserts the status and that the body is the same bytes as a never-issued code's, not the code by name)",
+    "reason": "The code is past its seven days. The one answer, identical to a code that never existed. (the test asserts the 404 and that the body is identical to a never-issued code's; the smoke probe \"a code that never existed is 404 too\" asserts that body's code)",
     "rule": "FR-024, ADR-0027 §1",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "InviteOneAnswerTest#every way a code can fail is one response, on resolve and on accept alike",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/AcceptInvite.kt#val invite = invites.findLiveByCode(code, lookupAt) ?: throw InviteNotUsableException()"
   },
   {
@@ -4769,8 +4769,8 @@
     "code": null,
     "reason": "Ending a bond revokes only a live invite. This one is not live, so it stays as it is. A leave of a bond that has already ended is refused: see the bond region.",
     "rule": "ADR-0028 §1",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "leaving is 204",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun revokeLiveOf("
   },
   {
@@ -4917,8 +4917,8 @@
     "code": null,
     "reason": "Ending a bond revokes only a live invite. This one is not live, so it stays as it is.",
     "rule": "ADR-0028 §1",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "blocking is 204 — the same 204",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun revokeLiveOf("
   },
   {
@@ -5066,8 +5066,8 @@
     "code": null,
     "reason": "Only a live invite is revoked when a countdown starts. This one is not live, so it stays as it is. On a bond that has ended the request is refused: see the bond region.",
     "rule": "ADR-0030 §4d",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "the first deletion request is 202, and nothing is deleted",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun revokeLiveOf("
   },
   {
@@ -5478,7 +5478,7 @@
     "to": "CONFIRMED",
     "status": 200,
     "code": null,
-    "reason": "Your agreement is recorded against the proposal in one compare-and-set, and the bond's zone moves to the one it named. If two answers arrive together, one is applied and the other finds nothing waiting.",
+    "reason": "Your agreement is recorded against the proposal in one compare-and-set, and the bond's zone setting moves to the one it named. Which date an entry belongs to changes only from the end of the current day, never for a day already begun (BR-6). If two answers arrive together, one is applied and the other finds nothing waiting.",
     "rule": "BR-6, ADR-0030 §4",
     "evidence": "smoke",
     "evidenceRef": "the other member confirms: 200 and the zone moves",
@@ -5552,7 +5552,7 @@
     "from": "PROPOSED",
     "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
     "actor": "you",
-    "when": "your partner opened it, the proposalId you send is its id, and the zone moved in the last 30 days",
+    "when": "your partner opened it, the proposalId you send is its id, and the zone moved in the last 30 days (not reachable by requests)",
     "guards": [
       {
         "region": "account",
@@ -5571,7 +5571,7 @@
     "to": "PROPOSED",
     "status": 409,
     "code": "TIMEZONE_CHANGE_TOO_SOON",
-    "reason": "The 30-day rule is asked again at agreement, and the proposal stays waiting. I found no sequence of requests that reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database.",
+    "reason": "The 30-day rule is asked again at agreement, and the proposal stays waiting. No sequence of requests reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database.",
     "rule": "ADR-0030 §6",
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#the thirty days are re-checked at confirmation, not only at proposal",
@@ -5583,7 +5583,7 @@
     "from": "ACTIVE",
     "action": "POST /api/v1/bonds/{bondId}/timezone/confirm",
     "actor": "you",
-    "when": "your partner's zone change is waiting, the proposalId you send is its id, and the zone moved in the last 30 days",
+    "when": "your partner's zone change is waiting, the proposalId you send is its id, and the zone moved in the last 30 days (not reachable by requests)",
     "guards": [
       {
         "region": "account",
@@ -5596,7 +5596,7 @@
     "to": "ACTIVE",
     "status": 409,
     "code": "TIMEZONE_CHANGE_TOO_SOON",
-    "reason": "The 30-day rule is asked again at agreement, and the proposal stays waiting. I found no sequence of requests that reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database.",
+    "reason": "The 30-day rule is asked again at agreement, and the proposal stays waiting. No sequence of requests reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database.",
     "rule": "ADR-0030 §6",
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#the thirty days are re-checked at confirmation, not only at proposal",
@@ -6389,8 +6389,8 @@
     "code": null,
     "reason": "Nothing was ever proposed, so ending the bond has nothing to cancel. A leave of a bond that has already ended is refused: see the bond region.",
     "rule": "ADR-0030 §11",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "leaving is 204",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#proposals.cancelLiveOf(ended.id, at)"
   },
   {
@@ -6454,8 +6454,8 @@
     "code": null,
     "reason": "An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region. A leave of a bond that has already ended is refused: see the bond region.",
     "rule": "ADR-0030 §4a",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "one of them leaves mid-cooling-off: 204",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
   },
   {
@@ -6552,8 +6552,8 @@
     "code": null,
     "reason": "Nothing was ever proposed, so ending the bond has nothing to cancel.",
     "rule": "ADR-0030 §11",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "blocking is 204 — the same 204",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#proposals.cancelLiveOf(ended.id, at)"
   },
   {
@@ -6618,8 +6618,8 @@
     "code": null,
     "reason": "An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region.",
     "rule": "ADR-0030 §4a",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "BondDeletionEndpointTest#blocking during the cooling-off ends the blocker's membership, and the bond cannot be revived with them in it",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
   },
   {
@@ -6771,7 +6771,7 @@
     "to": "CONFIRMED",
     "status": null,
     "code": null,
-    "reason": "Your partner agrees to what you proposed. A zone change is applied to the bond at once; a deletion starts the 30-day countdown. The bond region has both.",
+    "reason": "Your partner agrees to what you proposed. A zone change shows on the bond at once, and decides which date an entry belongs to only from the end of the current day (BR-6); a deletion starts the 30-day countdown. The bond region has both.",
     "rule": "BR-6, ADR-0030 §4",
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#the other member confirms, and the zone moves",
@@ -6830,6 +6830,42 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#proposals.cancelLiveOf(ended.id, at)"
+  },
+  {
+    "id": "proposal-lapsed-partner-leaves",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "event:partner-leaves",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner leaves and the bond ends. A proposal that had lapsed and was never closed is stamped cancelled with everything else, because that statement does not ask the clock. Nothing you can read changes: a lapsed proposal was already invisible.",
+    "rule": "ADR-0030 §2, §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
+  },
+  {
+    "id": "proposal-lapsed-partner-blocks",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "event:partner-blocks",
+    "actor": "partner",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner blocks you and the bond ends. A proposal that had lapsed and was never closed is stamped cancelled with everything else, because that statement does not ask the clock. Nothing you can read changes: a lapsed proposal was already invisible.",
+    "rule": "ADR-0030 §2, §11",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#fun cancelLiveOf("
   },
   {
     "id": "proposal-proposed-lapses",

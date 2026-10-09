@@ -268,7 +268,7 @@
     "summary": "leave the bond",
     "auth": "bearer",
     "headers": [
-      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a leave keeps them)"
+      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a leave keeps them. Any other Content-Type is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike, and that is what curl -X POST -d '' sends; the contract does not document the 415)"
     ],
     "requestErrors": [
       {
@@ -295,7 +295,7 @@
     "summary": "block your partner",
     "auth": "bearer",
     "headers": [
-      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back)"
+      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back. Any other Content-Type is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike, and that is what curl -X POST -d '' sends; the contract does not document the 415)"
     ],
     "requestErrors": [
       {
@@ -458,6 +458,14 @@
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The body is required: {\"proposalId\": the id of the proposal you reviewed}. With no body, or with proposalId missing, null or not a UUID, the request cannot be read into the type the handler takes (a non-null UUID), and an unreadable body is this 400, before membership is looked at. Read from the code and never run: the field also carries @NotNull, which would answer 422 VALIDATION_FAILED if a null ever reached validation, and reading alone did not settle whether one can.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/ConfirmTimezoneRequest.kt#val proposalId: UUID,"
+      },
       {
         "status": 404,
         "code": "NOT_FOUND",

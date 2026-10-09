@@ -3584,8 +3584,8 @@
     "code": null,
     "reason": "You have no entry on this day, so there is nothing to keep and nothing to take back. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
     "rule": "FR-029a, ADR-0035 §11",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "leaving is 204",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
   },
   {
@@ -3615,7 +3615,7 @@
     "to": "DELETED",
     "status": 204,
     "code": null,
-    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased some seconds later.",
+    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased afterwards: in seconds as a rule, and much later if the poller is stopped or a delivery is backing off.",
     "rule": "FR-029a, ADR-0035 §11, §12",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -3680,7 +3680,7 @@
     "to": "DELETED",
     "status": 204,
     "code": null,
-    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased some seconds later. Your partner's own entries are untouched.",
+    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased afterwards, in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. Your partner's own entries are untouched.",
     "rule": "FR-029a, ADR-0035 §11, §12",
     "evidence": "test",
     "evidenceRef": "WithdrawalReadTest#leaving and withdrawing hides the leaver's entries from both, as a block does",
@@ -3780,8 +3780,8 @@
     "code": null,
     "reason": "The day has no row, and ending the bond writes none. Whether your entries are taken back makes no difference to it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine.",
     "rule": "FR-029a, ADR-0035 §11",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "leaving is 204",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
   },
   {
@@ -3842,8 +3842,8 @@
     "to": "OPEN",
     "status": 204,
     "code": null,
-    "reason": "Right after the call the day still reads PARTIAL. Some seconds later your entry is erased by the routine a delete uses, and a day still running steps back exactly as it would for a delete.",
-    "rule": "FR-029a, ADR-0035 §13",
+    "reason": "Right after the call the day still reads PARTIAL. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14).",
+    "rule": "FR-029a, ADR-0035 §13, §14",
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
@@ -3906,8 +3906,8 @@
     "to": "PARTIAL",
     "status": 204,
     "code": null,
-    "reason": "Some seconds after the call your entry is erased, before anything was revealed, so the day steps back to your partner's entry alone and the reveal never happens.",
-    "rule": "FR-029a, ADR-0035 §13",
+    "reason": "After the call your entry is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14).",
+    "rule": "FR-029a, ADR-0035 §13, §14",
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
@@ -4135,8 +4135,8 @@
     "code": null,
     "reason": "You have no entry on this day, so there is nothing to keep and nothing to take back.",
     "rule": "FR-029a, ADR-0035 §11",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "blocking is 204 — the same 204",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
   },
   {
@@ -4167,7 +4167,7 @@
     "to": "DELETED",
     "status": 204,
     "code": null,
-    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased some seconds later.",
+    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased afterwards: in seconds as a rule, and much later if the poller is stopped or a delivery is backing off.",
     "rule": "FR-029a, ADR-0035 §11, §12",
     "evidence": "test",
     "evidenceRef": "WithdrawalReadTest#an entry withdrawn before it was ever revealed is author and REMOVED to the partner, and nothing else",
@@ -4234,7 +4234,7 @@
     "to": "DELETED",
     "status": 204,
     "code": null,
-    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased some seconds later. Your partner's own entries are untouched.",
+    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased afterwards, in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. Your partner's own entries are untouched.",
     "rule": "FR-029a, ADR-0035 §11, §12",
     "evidence": "test",
     "evidenceRef": "WithdrawalReadTest#a block hides the blocker's revealed entry from both, on today, and leaves the partner's whole",
@@ -4337,8 +4337,8 @@
     "code": null,
     "reason": "The day has no row, and ending the bond writes none. Whether your entries are taken back makes no difference to it.",
     "rule": "FR-029a, ADR-0035 §11",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "smoke",
+    "evidenceRef": "blocking is 204 — the same 204",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
   },
   {
@@ -4401,8 +4401,8 @@
     "to": "OPEN",
     "status": 204,
     "code": null,
-    "reason": "Right after the call the day still reads PARTIAL. Some seconds later your entry is erased by the routine a delete uses, and a day still running steps back exactly as it would for a delete.",
-    "rule": "FR-029a, ADR-0035 §13",
+    "reason": "Right after the call the day still reads PARTIAL. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14).",
+    "rule": "FR-029a, ADR-0035 §13, §14",
     "evidence": "test",
     "evidenceRef": "WithdrawEntriesTest#a withdrawal leaves the rows and the answers that a run of single deletes leaves, and the close job then settles both alike",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"
@@ -4467,8 +4467,8 @@
     "to": "PARTIAL",
     "status": 204,
     "code": null,
-    "reason": "Some seconds after the call your entry is erased, before anything was revealed, so the day steps back to your partner's entry alone and the reveal never happens.",
-    "rule": "FR-029a, ADR-0035 §13",
+    "reason": "After the call your entry is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14).",
+    "rule": "FR-029a, ADR-0035 §13, §14",
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/WithdrawEntries.kt#eraser.erase(it.id, it.bondDayId, now)"

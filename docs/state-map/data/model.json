@@ -125,11 +125,11 @@
         },
         {
           "id": "bond.invite",
-          "label": "The invite",
+          "label": "The invite (one invite, named by its code)",
           "states": [
             {
               "id": "NONE",
-              "label": "none"
+              "label": "none (a code never issued, or an invite not yet made)"
             },
             {
               "id": "CREATED",
@@ -145,13 +145,13 @@
             },
             {
               "id": "EXPIRED",
-              "label": "expired"
+              "label": "expired (answered in every cell exactly as revoked is, and reached differently)"
             }
           ]
         },
         {
           "id": "bond.proposal",
-          "label": "The proposal",
+          "label": "The proposal (the latest of the kind the endpoint works on, the zone change or the deletion)",
           "states": [
             {
               "id": "NONE",
