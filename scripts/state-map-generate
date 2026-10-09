@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Rewrites docs/state-map/*.md from docs/state-map/data. Commit what it writes.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHONPATH="$here" exec python3 -m statemap generate "$@"

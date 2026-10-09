@@ -1,0 +1,29 @@
+name: State map
+
+# docs/state-map is generated from docs/state-map/data and claims to cover
+# every endpoint and every error code. This is what holds it to that: a new
+# endpoint, a new ErrorCode, or a changed status in contracts/openapi.json
+# fails here until the map says what it does.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: state-map-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  state-map:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: The checker's own tests
+        run: PYTHONPATH=scripts python3 -m unittest discover -s scripts/statemap/tests
+
+      - name: The map against the contract, the error codes and its evidence
+        run: scripts/state-map-check
