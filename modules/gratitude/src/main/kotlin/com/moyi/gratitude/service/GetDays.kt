@@ -35,9 +35,12 @@ internal data class DayView(
 
 /**
  * A page of the archive, newest day first, and where the next one begins.
- * [next] is the date of the last day this page took from the archive, or
- * `null` when there is nothing older: the next page is the days strictly
- * before it.
+ * [next] is the date of the last day of [days], or `null` when there is
+ * nothing older to show: the next page is the days strictly before it.
+ *
+ * One exception, which [GetDays.page] explains: a request that stopped at
+ * its bound on reading gives the date of the last day it examined, and
+ * [days] may then be short or empty.
  */
 internal data class DaysPage(
     val days: List<DayView>,
@@ -84,10 +87,20 @@ internal data class DaysPage(
  * full now**. The query sees rows; a marked entry whose author has withdrawn
  * is still a whole row until the erasure reaches it, and to this caller it is
  * already a tombstone that says `favourited: false`. Such a day is not a
- * favourite. Dropping it after the gate means a page can hold fewer days
- * than were asked for, or none, and still have a [DaysPage.next]: the cursor
- * is the last day **taken from the archive**, kept or dropped, so the walk
- * goes on past it and ends when the archive does.
+ * favourite.
+ *
+ * **A dropped day leaves no trace in the page: the request reads on past
+ * it.** The page is the days that are shown, and its cursor is the last of
+ * them, exactly as if the dropped days had not been candidates. That is not
+ * tidiness. A member who deletes an entry by hand takes every bookmark on it
+ * away in the same transaction, so their partner's favourites never hold a
+ * gap. A member who withdraws leaves the bookmarks until the erasure runs.
+ * As first built, a dropped day still moved the cursor, so the partner could
+ * be sent `{"items": [], "nextCursor": "…"}`, which a deletion by hand can
+ * never produce: for as long as the consumer was behind, one old bookmark
+ * told a withdrawal from a deletion (ADR-0028 decision 8 says nothing may;
+ * found by review, with a twin bond; ADR-0036 decision 7).
+ * `WithdrawalTwinArchiveTest` holds the two to one answer.
  *
  * **`favourited` is the caller's own**, asked once for the page and only of
  * entries the gate answered in full. No query here can return the other
@@ -120,6 +133,42 @@ internal class GetDays(
      * real one alone (the largest is 98,294 octets of text, half of it), and
      * the rule that the first day is always taken would otherwise be a line
      * nothing could show to be needed.
+     *
+     * **It reads in windows until the page is decided.** A window is a run
+     * of candidates from [ArchiveDays], read through the gate. The page is
+     * decided when a day that would be shown is met after the page is
+     * complete (there is more, and [DaysPage.next] is the last day shown),
+     * or when the candidates run out (`null`). Without `favouritesOnly`
+     * every candidate is shown and the first window, one more than [limit],
+     * always decides. With it, a window can be all dropped days, and the
+     * request reads the next one from where that ended: [REFILL_WINDOW]
+     * candidates at a time, whatever [limit] is, so that a page of one
+     * does not go back to the database for every two days.
+     *
+     * **Who has withdrawn is asked once per window, after that window's
+     * entries are loaded** ([read]). Not once after the last window: whether
+     * to read another window depends on what the gate dropped from this one,
+     * so each window needs the answer before the next is fetched. And each
+     * entry is then judged by an answer taken after its own row was read,
+     * which is the whole of ADR-0035 decision 12's guarantee: a member who
+     * was absent from the marker when asked had not committed their ending
+     * when the row was read. Two windows can hold two answers if an ending
+     * commits between them. The later days are then tombstones and the
+     * earlier ones are not, each true when it was read; it is what two
+     * requests a moment apart would have been sent.
+     *
+     * **The bound: at most [MAX_WINDOWS] windows.** It is reached only when
+     * a request meets more dropped days in a row than the windows hold
+     * (about a thousand: `limit + 1`, then nineteen of [REFILL_WINDOW]):
+     * a member who bookmarked that many days of a partner's entries, the
+     * partner withdrew, and the erasure has not run. The request then
+     * returns what it has, with the date of the last day it **examined** as
+     * the cursor, so the walk goes on from there and skips nothing. Such a
+     * page can be short or empty and still carry a cursor, which is what
+     * every page with a dropped day looked like before, and is the one case
+     * left where a withdrawal that nothing has erased can be told from a
+     * deletion by hand. Without a bound, one request could read a bond's
+     * whole history.
      */
     @Suppress("LongParameterList") // The page's own bounds, each a separate fact of the request.
     @Transactional(readOnly = true)
@@ -132,10 +181,35 @@ internal class GetDays(
         textOctets: Int = PAGE_TEXT_OCTETS,
     ): DaysPage {
         require(limit in 1..MAX_LIMIT) { "a page of the archive is 1 to $MAX_LIMIT days" }
-        // One more than the page: its presence is how "there is more" is known without a second query.
-        val candidates = archive.candidates(membership.bondId, membership.memberId, before, until, favouritesOnly, limit + 1)
-        val read = read(membership, candidates.take(limit))
-        return read.paged(marksOf(membership, read), favouritesOnly, textOctets, more = candidates.size > read.size)
+        val page = Filling(limit, textOctets)
+        var examined = before
+        var older = true
+        var windows = 0
+        while (older && !page.more && windows < MAX_WINDOWS) {
+            // The first window is one more than the page: that day's presence is how "there is more" is known.
+            val size = if (windows == 0) limit + 1 else REFILL_WINDOW
+            val candidates = archive.candidates(membership.bondId, membership.memberId, examined, until, favouritesOnly, size)
+            val read = read(membership, candidates)
+            val marked = marksOf(membership, read)
+            for (day in read) {
+                val kept = day.keptOf(marked)
+                // With favourites only, a day on which nothing marked can be read any more is passed over.
+                if (!favouritesOnly || kept.isNotEmpty()) page.offer(day, kept)
+            }
+            windows++
+            older = candidates.size == size
+            examined = candidates.lastOrNull()?.date ?: examined
+        }
+        val next =
+            when {
+                page.more -> page.days.last().date
+
+                // The bound was reached with candidates left: go on from the last one examined, shown or not.
+                older -> examined
+
+                else -> null
+            }
+        return DaysPage(page.days, next)
     }
 
     /**
@@ -189,36 +263,37 @@ internal class GetDays(
     ): Set<EntryId> = favourites.markedBy(membership.memberId, read.flatMap { it.readInFull })
 
     /**
-     * Takes days in order until the text bound is reached, and says where
-     * the next page begins. [more] is whether the archive has a day older
-     * than this window.
+     * A page being filled: days that will be shown are offered in order,
+     * and it takes them until it has [limit] or the next would take the text
+     * past [textOctets]. The first day offered is always taken.
+     *
+     * [more] becomes true at the first day offered that it does not take.
+     * Nothing is taken after that, so the page is its first days and never
+     * a later one that happened to fit.
      */
-    private fun List<Read>.paged(
-        marked: Set<EntryId>,
-        favouritesOnly: Boolean,
-        textOctets: Int,
-        more: Boolean,
-    ): DaysPage {
-        val days = mutableListOf<DayView>()
-        var octets = 0
-        var taken = 0
-        var full = false
-        for (day in this) {
-            val kept = day.keptOf(marked)
-            // With favourites only, a day on which nothing marked can be read any more is taken from the archive and not shown.
-            val shown = !favouritesOnly || kept.isNotEmpty()
-            // The first day shown is always taken. Once a day does not fit, nothing after it is taken either.
-            full = full || (shown && days.isNotEmpty() && octets + day.octets > textOctets)
-            if (!full) {
-                taken++
-                if (shown) {
-                    days += day.shown(kept)
-                    octets += day.octets
-                }
+    private class Filling(
+        private val limit: Int,
+        private val textOctets: Int,
+    ) {
+        private val taken = mutableListOf<DayView>()
+        private var octets = 0
+
+        val days: List<DayView> get() = taken
+
+        /** Whether a day that would be shown was met and not taken: the archive has more for this caller than this page. */
+        var more = false
+            private set
+
+        fun offer(
+            day: Read,
+            kept: Set<EntryId>,
+        ) {
+            more = more || taken.size == limit || (taken.isNotEmpty() && octets + day.octets > textOctets)
+            if (!more) {
+                taken += day.shown(kept)
+                octets += day.octets
             }
         }
-        val last = this.getOrNull(taken - 1)?.day?.date
-        return DaysPage(days, next = last.takeIf { more || taken < size })
     }
 
     /** A candidate day after the gate: what the caller may see of each side. */
@@ -251,6 +326,16 @@ internal class GetDays(
         /** The most days a page may be asked for, and what it is when nothing is asked (doc 06 §3). */
         const val MAX_LIMIT = 50
         const val DEFAULT_LIMIT = 20
+
+        /**
+         * How many candidates a request reads at a time once its first
+         * window has not decided the page, and how many windows it reads at
+         * most. `page` says when either matters. Together they bound one
+         * request to about a thousand days and, at about eight statements a
+         * window, to about 160 statements.
+         */
+        const val REFILL_WINDOW = MAX_LIMIT + 1
+        const val MAX_WINDOWS = 20
 
         /**
          * 192 KiB (196,608 octets) of entry text in a page, counted as

@@ -837,8 +837,8 @@ private fun documentDaysQuery(api: OpenAPI) {
                         ).maximum(DAYS_MAX_LIMIT.toBigDecimal())
                         ._default(DAYS_DEFAULT_LIMIT)
                 parameter.description =
-                    "The most days to return. A page can hold fewer: it is also bounded by its size, and with " +
-                    "`favourites=true` a day may be left out after it was counted. Only a null `nextCursor` means the end."
+                    "The most days to return. A page can hold fewer and still not be the last: it is also bounded by " +
+                    "its size. Only a null `nextCursor` means the end."
             }
 
             "cursor" -> {
@@ -869,17 +869,25 @@ private const val DAYS_OPERATION = "days"
 /**
  * What a client of the feed has to be told, because the schema cannot say it
  * and a guess gets it wrong. Both were found by the review of slice C5b: a
- * client that stops at an empty page never reaches the days after it, and
+ * client that stops at a short page never reaches the days after it, and
  * one that draws nothing for `EMPTY` hides a member's own tombstone from
  * them.
+ *
+ * It once said a page could be empty with a cursor whenever
+ * `favourites=true` left a day out. That is no longer so: the request reads
+ * on until the page is full (`GetDays.page`), and an empty page with a
+ * cursor is left only at that reading's bound, which the text names so that
+ * no client treats it as impossible.
  */
 private const val DAYS_DESCRIPTION =
     "The days of the bond on which the caller has something to see, newest first. A day is listed when it holds an " +
         "entry the caller wrote, or one that has been revealed to them; an erased entry still counts, and is returned " +
         "as its tombstone.\n\n" +
-        "**Only a null `nextCursor` means the end.** A page's `items` can be empty, or shorter than `limit`, while " +
-        "`nextCursor` is not null: a page is also bounded by its size, and with `favourites=true` a day can be left " +
-        "out after it was counted. Keep asking with the cursor until it is null.\n\n" +
+        "**Only a null `nextCursor` means the end.** A page's `items` can be shorter than `limit` while `nextCursor` " +
+        "is not null, because a page is also bounded by its size. A page with a `nextCursor` holds at least one day, " +
+        "with one exception: a single request reads at most about a thousand days, and with `favourites=true` a " +
+        "request that reaches that bound answers with what it has found, which can be nothing. Keep asking with the " +
+        "cursor until it is null.\n\n" +
         "**A day's `status` does not say whether there is anything to draw.** A day whose author deleted their only " +
         "entry is still listed, for that author alone, with their tombstone as `myEntry`; once that day has closed " +
         "it carries `status: EMPTY`. Draw a day from its entries, not from its status."

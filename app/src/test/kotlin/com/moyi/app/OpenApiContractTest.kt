@@ -20,6 +20,7 @@ import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldNotContainIgnoringCase
 import io.kotest.matchers.string.shouldStartWith
 import io.swagger.v3.oas.models.OpenAPI
@@ -418,11 +419,14 @@ class OpenApiContractTest(
         // OpenApiConfiguration states what the route enforces.
         val days = api.paths["/api/v1/bonds/{bondId}/days"]!!.get
         days.operationId shouldBe "days"
-        // Two things the schema cannot say and a client gets wrong by guessing (the review of slice C5b): an empty page
-        // is not the end, and a day whose status is EMPTY can hold the caller's own tombstone.
+        // Two things the schema cannot say and a client gets wrong by guessing (the review of slice C5b): a short page
+        // is not the end, and a day whose status is EMPTY can hold the caller's own tombstone. It no longer says that a
+        // page can be empty with a cursor as a matter of course: only at the bound on one request's reading.
         val told = days.description.shouldNotBeNull()
         told shouldContain "Only a null `nextCursor` means the end"
-        told shouldContain "`items` can be empty"
+        told shouldContain "`items` can be shorter than `limit`"
+        told shouldContain "A page with a `nextCursor` holds at least one day, with one exception"
+        told shouldNotContain "`items` can be empty"
         told shouldContain "`status: EMPTY`"
         told shouldContain "tombstone"
         days.responses.keys shouldContainAll listOf("200", "401", "404", "422", "429")

@@ -594,7 +594,7 @@ internal class DaysFeedTest(
     }
 
     @Test
-    fun `a marked entry whose author has withdrawn is no favourite from the withdrawal's commit, and the walk still ends`() {
+    fun `a marked entry whose author has withdrawn is no favourite from the withdrawal's commit, and no page is empty for it`() {
         val bond = pair()
         val days = (0L until 4).map { bothWrite(bond, DAY_ONE.plusDays(it)) }
         rig.favourite(bea, days[0].adas)
@@ -609,9 +609,11 @@ internal class DaysFeedTest(
 
         val pages = rig.pages(bea, bond, mapOf("favourites" to "true", "limit" to "1"))
 
-        // Each withdrawn day was a row match and is dropped after the gate: its page is empty and still says where to go on.
-        pages.map { rig.datesOf(it["items"].toList()) } shouldBe listOf(emptyList(), listOf("2026-09-16"), emptyList())
-        pages.map { it["nextCursor"].isNull } shouldBe listOf(false, false, true)
+        // Each withdrawn day was a row match and is dropped after the gate, and the request reads on past it: one page, holding
+        // the one favourite left, and no cursor. This test once required the opposite, an empty page with a cursor on each
+        // side of it, and that was how a withdrawal could be told from a deletion by hand (`WithdrawalTwinArchiveTest`).
+        pages.map { rig.datesOf(it["items"].toList()) } shouldBe listOf(listOf("2026-09-16"))
+        pages.map { it["nextCursor"].isNull } shouldBe listOf(true)
         val whole = rig.walk(bea, bond, mapOf("favourites" to "true"))
         rig.datesOf(whole) shouldBe listOf("2026-09-16")
         whole.single()["myEntry"]["favourited"].asBoolean() shouldBe true
