@@ -2169,3 +2169,75 @@ Wrong about: where a rule is held. I held "withdrawn means erased" in the read g
          withdrawn before it read the entries, which I had written down as accepted. An
          "accepted" window was accepted at the width I imagined, not the width a lock wait
          gives it. Read the marker last.
+
+## 2026-10-09 · Phase 3 · The archive — "no lock is taken", and six other sentences that running them undid
+
+Expected: a read slice. A query by keyset, the gate that already exists, a bookmark that is
+         one row and one statement. The hard part had been done in C5a. I wrote fourteen
+         decisions in the plan and expected the build to follow them.
+Reality: five of the fourteen were wrong as written, and none was found by reading.
+         I wrote "no lock is taken" for the bookmark. The statement was an insert guarded
+         by a `WHERE`: an erasure that commits first leaves nothing to insert. The first
+         time it was run against an erasure held open, the insert waited behind it, in
+         its foreign-key check, and when the erasure committed the insert went through.
+         A bookmark on an erased entry, written after the erasure had finished removing
+         that entry's bookmarks. The `WHERE` had been judged on the row as it was before
+         the wait. Only a lock taken at the read makes Postgres judge it again.
+         The lock first chosen was `FOR KEY SHARE`, the one the foreign key takes anyway.
+         It passed. A reviewer wrote an eraser as a plain `UPDATE` and the bookmark landed
+         on the erased entry again. The test had passed because `EraseEntry` happens to
+         take `FOR UPDATE` first. The guard was true of the other side's code, not of its
+         own. `FOR SHARE` waits for any update.
+         The page's size bound held, and the arithmetic beside it was wrong by a factor
+         of five. I wrote "327,680 bytes" in the plan, from 8 KB an entry. The implementer
+         noticed that JSON writes a control character as six octets and counted escaped
+         octets. A reviewer then built the entry: one letter and 8,191 U+001F, which the
+         500-character limit counts as one character because it counts the text trimmed.
+         8,192 octets in, 49,147 out. The bound held because it measured what is sent.
+         Every sentence that explained it, in the plan, the KDoc and the report, was
+         about a smaller number.
+         I specified the `ETag` as the SHA-256 of the body. This codebase had already
+         learned why not, for the idempotency fingerprint: a hash of a body in which
+         everything but a few words is known is a way to check a guess at the words. A
+         header reaches logs a body never does. A reviewer said so before the task
+         started. It is a MAC now.
+         The response wrapper that holds the serialised bytes had a converter for
+         `application/json`. A client that asked for `application/problem+json` first,
+         which is plausible on an API whose errors are that type, was sent the wrapper
+         itself: Jackson will serialise anything, and it serialised the holder, with the
+         real body in base64 inside it, under a tag that was not the digest of what was
+         sent. The class's own comment said that could not happen. No test sent an
+         `Accept` header.
+         The rule from C5a, read the marker last, had a test on each new read path, and
+         both tests ordered nothing. Each stalled the request with a lock on `entries`
+         and ended the bond while it waited. But the query that finds the days reads
+         `entries` too, so the request stopped there, before either of the two reads the
+         test was about, and then made both after the ending. Swapping the two reads left
+         both tests green. That mutation survived twice, a day apart, in two agents'
+         runs. The test that holds it now stops the request where the rule is: as the
+         read of the entries returns.
+         And `hash` was routed through a new `mac`, in the class whose output is stored
+         in two tables. Every test of it compared one output with another. None knew a
+         right answer. A change of algorithm that kept the length would have orphaned
+         every stored hash and failed nothing. Nothing was orphaned; a reviewer checked
+         with openssl, outside the JVM.
+Wrong about: what a plan can decide. "No lock is taken" and "the SHA-256 of the body"
+         were written as decisions and were guesses about mechanisms I had not run. A
+         plan can say what must be true: no bookmark on an erased entry, no tag that
+         confirms a guess. How is for whoever runs it.
+         What a passing concurrency test shows. Twice the test passed for a reason that
+         was not the thing under test: the other side locked first; the request stalled
+         early. In both the fix was found by asking what, exactly, was waiting on what.
+         Arithmetic in a comment. Nobody tests a comment. The bound was tested and held;
+         the number that justified it was never run until a reviewer built the entry.
+         And again, reviewers. Every one of these was found by a reviewer, or by an
+         implementer acting as one, who had to prove the finding by running it. Not one
+         came from reading the diff and agreeing with it. The three reviews found no
+         must-fix in two tasks and one in the third, and what they proved on the way is
+         most of what I now know to be true about this slice.
+         The session. One agent stalled with a mutation still applied to a source file
+         and no report. Its successor found the file dirty, restored it from a copy it
+         first checked against `HEAD`, and ran all the mutations again and did not trust
+         the first run. Four survived. That is the same lesson as last time, from the
+         other side: a report written as the work goes is what lets the next one start,
+         and a result nobody wrote down is a result nobody has.
