@@ -376,7 +376,7 @@
     {
       "status": 401,
       "code": "UNAUTHENTICATED",
-      "reason": "No access token, or one that is expired or not valid. Everything under /api/v1 except the eight public auth POSTs needs one, and that is decided before the path is looked up: a path that does not exist, or a GET on a public auth route, is 401 without a token, not 404 or 405. In the account machine's own regions this answer is a row, because there the missing or expired token is the state.",
+      "reason": "No access token, or one that is expired or not valid. Everything under /api/v1 except the eight public auth POSTs needs one, and that is decided before the path is looked up: a path that does not exist, or a GET on a public auth route, is 401 without a token, not 404 or 405. A public route needs no token, but a token that is sent to one is still checked, and an expired or unaccepted one is 401 there too: send no Authorization header to a public route. In the account machine's own regions this answer is a row, because there the missing or expired token is the state.",
       "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.UNAUTHENTICATED"
     },
     {
@@ -406,7 +406,7 @@
     {
       "status": 429,
       "code": "RATE_LIMITED",
-      "reason": "A rate-limit bucket is empty; Retry-After says when to try again.",
+      "reason": "A rate-limit bucket is empty; Retry-After says when to try again. The buckets are kept in Redis and fail open: if Redis cannot be reached every request is let through, with no X-RateLimit headers, and nothing is 429 until it is back.",
       "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.RATE_LIMITED"
     },
     {
@@ -424,7 +424,7 @@
     {
       "endpoint": "GET /api/v1/bonds/{bondId}",
       "status": 304,
-      "note": "Sent with an If-None-Match that equals the bond's current ETag, the answer is 304 with no body, for as long as what you would be shown has not changed."
+      "note": "Sent with an If-None-Match that equals the bond's current ETag, the answer is 304 with no body, for as long as what you would be shown has not changed. Asserted by BondSettingsEndpointTest (rotating and expiring an invite invalidate a cached bond without a row version change) and BondTimezoneEndpointTest (proposal creation cancellation and expiry invalidate the other member's cached view)."
     },
     {
       "endpoint": "POST /api/v1/bonds/{bondId}/leave",
@@ -463,6 +463,36 @@
     },
     {
       "endpoint": "POST /api/v1/auth/register",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/verify-email",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/resend-verification",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/logout",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/forgot-password",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/reset-password",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/register",
       "status": 503,
       "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
     },
@@ -489,7 +519,7 @@
     {
       "endpoint": "POST /api/v1/auth/login",
       "status": 401,
-      "note": "401 INVALID_CREDENTIALS for every refused sign-in: a wrong password, an unknown address, a locked account. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+      "note": "401 INVALID_CREDENTIALS for every refused sign-in: a wrong password, an unknown address, a locked account; and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
     },
     {
       "endpoint": "POST /api/v1/auth/login",
@@ -504,7 +534,7 @@
     {
       "endpoint": "POST /api/v1/auth/refresh",
       "status": 401,
-      "note": "401 REFRESH_TOKEN_INVALID for a refresh token that is unknown, expired or revoked, and 401 TOKEN_REUSE_DETECTED for one already exchanged. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+      "note": "401 REFRESH_TOKEN_INVALID for a refresh token that is unknown, expired or revoked, 401 TOKEN_REUSE_DETECTED for one already exchanged, and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
     },
     {
       "endpoint": "POST /api/v1/auth/refresh",

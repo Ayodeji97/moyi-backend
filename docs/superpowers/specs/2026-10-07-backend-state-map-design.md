@@ -73,7 +73,8 @@ States are read from the code, not invented.
   that one session's token family, not every session. Ending one session does not stop
   its access token, which lives out its fifteen minutes. Only `logout-all` and a
   password reset end every session and every access token.
-- Substates, password reset: requested, token used, token expired.
+- Substates, password reset (one reset link): none, requested (the link is live), link used,
+  link expired.
 
 ### 3.2 Bond (17 endpoints)
 

@@ -533,6 +533,8 @@
     "summary": "register",
     "auth": "none",
     "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json)",
       "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Three registrations an hour per client address, one back every twenty minutes; the limit is spent before the body is checked, so a 422 uses one too. The fourth is 429 with Retry-After)"
     ],
     "requestErrors": [
@@ -560,6 +562,7 @@
     "summary": "verify your email",
     "auth": "none",
     "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
       "Content-Type (application/json. The token travels in the body of a POST, never in a GET: a GET on this path without a bearer is the everywhere 401, so a mail scanner that fetches the link cannot spend it. No rate limit of its own)"
     ],
     "requestErrors": [
@@ -579,6 +582,8 @@
     "summary": "ask for a new verification link",
     "auth": "none",
     "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json)",
       "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, spent before the body is checked. Beside it, one a minute per email address as typed, counted for every address whether or not it has an account, so the 429 says nothing either: a second request inside the minute is 429 with Retry-After: 60)"
     ],
     "requestErrors": [
@@ -598,7 +603,9 @@
     "summary": "sign in",
     "auth": "none",
     "headers": [
-      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Two limits, both 429 with Retry-After and neither the lockout. Five attempts per fifteen minutes per email address as typed, one back every three minutes, counted for an address with no account too and spent before any password is checked: the sixth attempt is 429. And twenty an hour per client address. The lockout is separate and silent: five wrong passwords in a row lock the account for a minute, then longer, and a locked account answers 401 INVALID_CREDENTIALS, not 429. With both in force the 429 comes first)"
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Two limits, both 429 with Retry-After and neither the lockout. Five attempts per fifteen minutes per email address as typed, one back every three minutes, counted for an address with no account too and spent before any password is checked: the sixth attempt is 429. And twenty an hour per client address. The lockout is separate and silent: five wrong passwords in a row lock the account for a minute, then longer, and a locked account answers 401 INVALID_CREDENTIALS, not 429. With both in force the 429 comes first. The limits are kept in Redis and fail open: if Redis cannot be reached every request is let through and these headers are absent, while the lockout, which is kept in Postgres, still applies)"
     ],
     "requestErrors": [
       {
@@ -625,7 +632,8 @@
     "summary": "exchange the refresh token for a new pair",
     "auth": "none",
     "headers": [
-      "Content-Type (application/json. The refresh token in the body is the credential; no access token is read. No rate limit of its own. Never send two refreshes of one token at once: the second is treated as a reuse and ends the session)"
+      "Authorization (not needed, and must not carry an expired token: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the refresh token is looked at. A client that attaches its access token to every request must leave it off this one, or it cannot refresh once the access token has expired)",
+      "Content-Type (application/json. The refresh token in the body is the credential. No rate limit of its own. Never send two refreshes of one token at once: the second is treated as a reuse and ends the session)"
     ],
     "requestErrors": [
       {
@@ -644,7 +652,8 @@
     "summary": "sign out of this session",
     "auth": "none",
     "headers": [
-      "Content-Type (application/json. The refresh token in the body is the credential; no access token is read, so an expired one is no obstacle. No rate limit of its own)"
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json. The refresh token in the body is the credential. No rate limit of its own)"
     ],
     "requestErrors": [
       {
@@ -712,6 +721,8 @@
     "summary": "ask for a password reset link",
     "auth": "none",
     "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json)",
       "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, spent before the body is checked. Beside it, three an hour per email address as typed, one back every twenty minutes, counted for every address whether or not it has an account: the fourth is 429 with Retry-After)"
     ],
     "requestErrors": [
@@ -731,7 +742,8 @@
     "summary": "set a new password with a reset link",
     "auth": "none",
     "headers": [
-      "Content-Type (application/json. The reset token in the body is the credential; no access token is read. No rate limit of its own)"
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json. The reset token in the body is the credential. No rate limit of its own)"
     ],
     "requestErrors": [
       {
