@@ -906,6 +906,14 @@ private const val DAYS_DEFAULT_LIMIT = 20
  * `If-None-Match` is optional, and is documented as a string: it is one tag,
  * or several separated by commas, exactly as RFC 9110 writes them.
  *
+ * **One media type in the `200`.** These mappings declare `produces` as
+ * `application/json` and every `application/<x>+json`. The second is there for what
+ * a request may *ask* for: without it `Accept: application/problem+json`,
+ * which a client of a problem-details API sends, would be a `406`. What is
+ * *sent* is `application/json` in every case (`RepresentationConverter`
+ * names the bytes itself), so the wildcard springdoc copies into the
+ * response is removed: it would describe a `Content-Type` that never comes.
+ *
  * Also here, to stay one function: the `date` of the one day is a path
  * segment taken as text (the handler reads it after the guard), so springdoc
  * documents a bare string. It is a calendar date, and anything else is the
@@ -928,6 +936,10 @@ private fun documentRevalidation(api: OpenAPI) {
                     ).schema(StringSchema()),
             )
             operation.responses[OK]?.addHeaderObject(REVALIDATION_ETAG, revalidationTag())
+            operation.responses[OK]
+                ?.content
+                ?.keys
+                ?.retainAll(setOf(JSON))
             operation.responses.addApiResponse(
                 NOT_MODIFIED,
                 ApiResponse()
@@ -959,5 +971,6 @@ private fun revalidationTag(): Header =
 private val REVALIDATED_OPERATIONS = setOf("days", "day")
 private const val IF_NONE_MATCH = "If-None-Match"
 private const val REVALIDATION_ETAG = "ETag"
+private const val JSON = "application/json"
 private const val OK = "200"
 private const val NOT_MODIFIED = "304"

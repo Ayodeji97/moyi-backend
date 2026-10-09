@@ -510,6 +510,9 @@ class OpenApiContractTest(
         reads.forEach { read ->
             withClue(read.operationId) {
                 read.responses["200"]!!.headers.orEmpty() shouldContainKey "ETag"
+                // One media type comes back, whatever the mapping accepts: `produces` also names `application/*+json`, so that
+                // an `Accept` of a `+json` type is answered and not refused, and what answers it is still `application/json`.
+                read.responses["200"]!!.content.keys shouldBe setOf("application/json")
                 val condition = read.parameters.single { it.name == HttpHeaders.IF_NONE_MATCH }
                 condition.`in` shouldBe "header"
                 condition.required shouldBe false

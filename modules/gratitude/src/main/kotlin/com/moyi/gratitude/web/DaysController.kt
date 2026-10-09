@@ -9,6 +9,7 @@ import com.moyi.common.web.Representations
 import com.moyi.gratitude.service.DayNotFoundException
 import com.moyi.gratitude.service.GetDays
 import com.moyi.gratitude.service.ReconcileJoiningDay
+import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -54,6 +55,20 @@ import java.util.UUID
  * The tag is made from the response, so every check a `200` passes a `304`
  * has passed too, and a refusal has none.
  *
+ * **`Accept` is settled by the mapping, before the handler.** Both routes
+ * declare what they produce: `application/json`, and any
+ * `application/<x>+json` so that a client which lists
+ * `application/problem+json` (the type of this API's errors, and so a thing
+ * its clients send) is answered and not refused. What it is answered with
+ * is the same bytes under the same name, `application/json`, whichever it
+ * asked for (`RepresentationConverter`). A request that will take neither
+ * is the API's standing `406`, and here Spring gives it **before the guard
+ * runs**: it is decided from the request's own header, it is the same for a
+ * member, a stranger and a bond that does not exist, and nothing has been
+ * read, so there is no tag to send with it. Without the declaration the
+ * `406` came after the read and carried the day's `ETag` and `private,
+ * no-cache` (found by review, by asking).
+ *
  * No bucket of its own: reads under the global per-user limit, as `today`
  * and `streak` are.
  */
@@ -67,7 +82,7 @@ internal class DaysController(
 ) {
     // Named `days`: the method name is the API's operationId (see EntriesController).
     @Suppress("LongParameterList") // The route's own parameters: Spring binds each from the request.
-    @GetMapping("/{bondId}/days")
+    @GetMapping("/{bondId}/days", produces = [MediaType.APPLICATION_JSON_VALUE, ANY_JSON])
     fun days(
         caller: CurrentUser,
         @PathVariable bondId: String,
@@ -99,7 +114,7 @@ internal class DaysController(
      * The date is read before the joining day is reconciled, so a request
      * that names no day changes nothing.
      */
-    @GetMapping("/{bondId}/days/{date}")
+    @GetMapping("/{bondId}/days/{date}", produces = [MediaType.APPLICATION_JSON_VALUE, ANY_JSON])
     fun day(
         caller: CurrentUser,
         @PathVariable bondId: String,
@@ -119,5 +134,10 @@ internal class DaysController(
     ): BondMembership {
         val id = runCatching { UUID.fromString(bondId) }.getOrElse { throw NotFoundException("That bond was not found.") }
         return access.membershipOf(caller.id, id)
+    }
+
+    private companion object {
+        /** Any `application/<x>+json`: see the class's note on `Accept`. */
+        const val ANY_JSON = "application/*+json"
     }
 }

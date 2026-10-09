@@ -8,6 +8,7 @@ import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -458,12 +459,14 @@ internal class DaysConditionalTest(
                     response.status shouldBe 404
                     response.contentAsString shouldContain "\"code\":\"$code\""
                     response.getHeader(HttpHeaders.ETAG).shouldBeNull()
-                    response.getHeaders(HttpHeaders.CACHE_CONTROL) shouldNotContain "private, no-cache"
+                    // Exactly the default every other response of this API has. "Not private, no-cache" was true of no header at all.
+                    response.getHeaders(HttpHeaders.CACHE_CONTROL) shouldBe listOf(NO_STORE)
                 }
                 // A parameter that cannot be read is still a 422.
                 rig.days(ada, bond, mapOf("limit" to "0"), condition).let {
                     it.status shouldBe 422
                     it.getHeader(HttpHeaders.ETAG).shouldBeNull()
+                    it.getHeaders(HttpHeaders.CACHE_CONTROL) shouldBe listOf(NO_STORE)
                 }
             }
         }
@@ -485,6 +488,104 @@ internal class DaysConditionalTest(
 
         response.status shouldBe 404
         response.contentAsString shouldContain "\"code\":\"DAY_NOT_FOUND\""
+    }
+
+    // ---- Accept ----
+
+    /**
+     * **Found by review:** nothing here sent an `Accept`, and for
+     * `application/problem+json` (what a client of a problem-details API
+     * lists, often first) the response was a `200` whose body was the
+     * holder of the bytes, in base64, under a tag that was not its digest.
+     * So every `Accept` that JSON can answer is asked, of both routes, and
+     * each must get **the very bytes a plain read gets**, called
+     * `application/json`, under the tag of those bytes.
+     */
+    @Test
+    fun `whatever Accept says that JSON can answer, the read is the same bytes, called application-json and tagged as those bytes`() {
+        val bond = pair()
+        bothWrite(bond, DAY_ONE)
+        val shape = mapOf("the feed" to listOf("items", "nextCursor"), "the day" to listOf("date", "status", "myEntry", "partnerEntry"))
+
+        reads(bond).forEach { (route, read) ->
+            val plain = read(ada, emptyMap())
+            plain.status shouldBe 200
+            ANSWERED_AS_JSON.forEach { accept ->
+                withClue("$route, Accept: $accept") {
+                    val response = read(ada, mapOf(HttpHeaders.ACCEPT to accept))
+
+                    response.status shouldBe 200
+                    // The body is the response this route documents, and not a thing that holds it.
+                    json.readTree(response.contentAsByteArray).propertyNames().toList() shouldContainExactlyInAnyOrder shape.getValue(route)
+                    response.contentAsByteArray.toList() shouldBe plain.contentAsByteArray.toList()
+                    response.contentAsString shouldContain "zq-ada"
+                    // Called what it is: UTF-8 JSON, whatever name or charset the request preferred.
+                    response.getHeaders(HttpHeaders.CONTENT_TYPE) shouldBe listOf("application/json")
+                    response.getHeader(HttpHeaders.CONTENT_LENGTH) shouldBe response.contentAsByteArray.size.toString()
+                    // And the tag is the digest of exactly what was sent.
+                    response.getHeaders(HttpHeaders.ETAG) shouldBe listOf(keyedTagOf(response.contentAsByteArray))
+                    response.getHeaders(HttpHeaders.CACHE_CONTROL) shouldBe listOf("private, no-cache")
+                    // The condition works the same way under any of them.
+                    read(ada, mapOf(HttpHeaders.ACCEPT to accept, HttpHeaders.IF_NONE_MATCH to tagOf(plain))).status shouldBe 304
+                }
+            }
+        }
+    }
+
+    /**
+     * An `Accept` JSON cannot answer is the application's standing `406`
+     * (`UNSUPPORTED_MEDIA_TYPE`, as for every route). **Here it is decided
+     * before the handler runs**, from the request alone: so it is the same
+     * response for a member, a stranger, a bond that does not exist and a
+     * value that is no id, it says nothing about any of them, and nothing
+     * has been read that a tag could be made of. Before, the `406` came
+     * after the read and went out with the day's `ETag` and `private,
+     * no-cache`: an error a cache was invited to keep under a validator.
+     */
+    @Test
+    fun `an Accept that JSON cannot answer is one 406 for everyone, decided before anything is read - no tag, and no-store`() {
+        val bond = pair()
+        bothWrite(bond, DAY_ONE)
+        val tag = tagOf(rig.day(ada, bond, "2026-09-15"))
+        val nobodys = UUID.randomUUID().toString()
+
+        REFUSED.forEach { accept ->
+            val asked = mapOf(HttpHeaders.ACCEPT to accept)
+            val answers =
+                listOf(
+                    "a member, the feed" to rig.days(ada, bond, emptyMap(), asked),
+                    "a member, her day" to rig.day(ada, bond, "2026-09-15", asked),
+                    "a member, her day, with its tag" to rig.day(ada, bond, "2026-09-15", asked + (HttpHeaders.IF_NONE_MATCH to tag)),
+                    "a member, a day not in her archive" to rig.day(ada, bond, "2026-09-14", asked),
+                    "a member, no date" to rig.day(ada, bond, "zqwyesterday", asked),
+                    "a member, a parameter that cannot be read" to rig.days(ada, bond, mapOf("limit" to "0"), asked),
+                    "a stranger, the feed" to rig.days(eve, bond, emptyMap(), asked),
+                    "a stranger, the day" to rig.day(eve, bond, "2026-09-15", asked),
+                    "no such bond, the feed" to rig.days(ada, nobodys, emptyMap(), asked),
+                    "no such bond, the day" to rig.day(ada, nobodys, "2026-09-15", asked),
+                    "no id, the feed" to rig.days(ada, "not-a-bond", emptyMap(), asked),
+                    "no id, the day" to rig.day(ada, "not-a-bond", "2026-09-15", asked),
+                )
+            val first = answers.first().second
+            answers.forEach { (who, answer) ->
+                withClue("$who, Accept: $accept") {
+                    answer.status shouldBe 406
+                    answer.contentType shouldBe "application/problem+json"
+                    answer.contentAsString shouldContain "\"code\":\"UNSUPPORTED_MEDIA_TYPE\""
+                    answer.getHeader(HttpHeaders.ETAG).shouldBeNull()
+                    answer.getHeaders(HttpHeaders.CACHE_CONTROL) shouldBe listOf(NO_STORE)
+                    answer.getHeader(HttpHeaders.PRAGMA) shouldBe "no-cache"
+                    answer.getHeader(HttpHeaders.EXPIRES) shouldBe "0"
+                    // One response, whoever asked and whatever for: only `instance`, the path they typed, differs.
+                    whole(answer) shouldBe whole(first)
+                    answer.contentAsString shouldNotContain "zq-"
+                }
+            }
+        }
+        // Without the header the same twelve are the 200s, the 304, the 404s and the 422 they always were.
+        rig.day(eve, bond, "2026-09-15").status shouldBe 404
+        rig.day(ada, bond, "2026-09-14").status shouldBe 404
+        rig.days(ada, bond, mapOf("limit" to "0")).status shouldBe 422
     }
 
     // ---- helpers ----
@@ -551,6 +652,33 @@ internal class DaysConditionalTest(
         val BOND_CREATED: Instant = Instant.parse("2026-09-13T10:00:00Z")
         val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
         val DAY_ONE: LocalDate = LocalDate.of(2026, 9, 15)
+
+        /** Spring Security's default, which every response that sets no `Cache-Control` of its own is given. */
+        const val NO_STORE = "no-cache, no-store, max-age=0, must-revalidate"
+
+        /**
+         * Each of these can be answered with JSON: by name, by a wildcard, by
+         * a `+json` name, or because JSON is somewhere in the list. The
+         * second, third and fourth are the ones that used to get the holder.
+         */
+        val ANSWERED_AS_JSON =
+            listOf(
+                "application/json",
+                "application/problem+json",
+                "application/vnd.moyi+json",
+                "application/problem+json, application/json",
+                "application/json, application/problem+json",
+                "application/problem+json;q=0.9, application/json;q=0.1",
+                "application/json;charset=ISO-8859-1",
+                "application/json;charset=UTF-8",
+                "*/*",
+                "application/*",
+                "text/plain, application/json;q=0.5",
+                "text/html, application/xhtml+xml, */*;q=0.8",
+            )
+
+        /** None of these can. */
+        val REFUSED = listOf("text/plain", "application/xml", "application/x-ndjson", "text/html, image/png", "text/*")
 
         /** 10:00Z: late morning of [date] in Africa/Lagos. */
         fun at(date: LocalDate): Instant = Instant.parse("${date}T10:00:00Z")

@@ -5,10 +5,15 @@ import org.springframework.http.HttpInputMessage
 import org.springframework.http.HttpOutputMessage
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
-import org.springframework.http.converter.AbstractHttpMessageConverter
+import org.springframework.http.converter.HttpMessageConverter
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.stereotype.Component
+import tools.jackson.core.JsonGenerator
+import tools.jackson.databind.DatabindException
 import tools.jackson.databind.ObjectMapper
+import tools.jackson.databind.SerializationContext
+import tools.jackson.databind.ValueSerializer
+import tools.jackson.databind.annotation.JsonSerialize
 
 /**
  * A response body **as the bytes that will be sent**, and the validator made
@@ -29,7 +34,11 @@ import tools.jackson.databind.ObjectMapper
  *
  * Built only by [Representations], so a tag cannot be attached to bytes it
  * was not made from.
+ *
+ * **Not a JSON value.** [RepresentationIsNotJson] makes the mapper refuse
+ * one, so the only road to the wire is the converter.
  */
+@JsonSerialize(using = RepresentationIsNotJson::class)
 class Representation<T : Any> internal constructor(
     internal val bytes: ByteArray,
     /**
@@ -145,32 +154,80 @@ class Representations(
  *
  * A bean of this type is placed ahead of the framework's own converters, so
  * a [Representation] is never handed to the JSON converter, which would
- * serialise the holder and not send what it holds. `gratitude`'s
- * `DaysConditionalTest` holds that: the body it receives must be the JSON,
- * and the tag must be the digest of it.
+ * serialise the holder and not send what it holds.
+ *
+ * **It claims a [Representation] for every media type it is asked about.**
+ * The framework chooses a media type from the request's `Accept` first and
+ * only then asks each converter whether it writes that type. This one used
+ * to say yes to `application/json` alone, so for `Accept:
+ * application/problem+json`, or any `application/<x>+json`, the question
+ * passed to the JSON converter, which says yes to all of those and to any
+ * class: a `200` whose body was the holder, its bytes in base64, under a
+ * tag that was the digest of something else (found by review, by asking).
+ * What a [Representation] is does not depend on what the caller would have
+ * liked, so the answer no longer does either. Which requests get one at all
+ * is the mapping's business (`produces`, on the routes that return one).
+ *
+ * **And it names the bytes itself**: `application/json`, which is UTF-8 by
+ * definition (RFC 8259 §8.1), whatever was negotiated. Left to the
+ * framework, `Accept: application/json;charset=ISO-8859-1` was answered
+ * with that charset in the `Content-Type` over the same UTF-8 bytes.
+ *
+ * `gratitude`'s `DaysConditionalTest` holds all of it over HTTP: for each
+ * `Accept`, the body received must be the JSON and the tag its digest.
  *
  * It reads nothing: a [Representation] is only ever a response.
  */
 @Component
-class RepresentationConverter : AbstractHttpMessageConverter<Representation<*>>(MediaType.APPLICATION_JSON) {
-    override fun supports(clazz: Class<*>): Boolean = Representation::class.java.isAssignableFrom(clazz)
+class RepresentationConverter : HttpMessageConverter<Representation<*>> {
+    override fun canRead(
+        clazz: Class<*>,
+        mediaType: MediaType?,
+    ): Boolean = false
 
-    override fun canRead(mediaType: MediaType?): Boolean = false
+    override fun canWrite(
+        clazz: Class<*>,
+        mediaType: MediaType?,
+    ): Boolean = Representation::class.java.isAssignableFrom(clazz)
 
-    override fun getContentLength(
+    override fun getSupportedMediaTypes(): List<MediaType> = listOf(MediaType.APPLICATION_JSON)
+
+    override fun write(
         representation: Representation<*>,
         contentType: MediaType?,
-    ): Long = representation.bytes.size.toLong()
-
-    override fun writeInternal(
-        representation: Representation<*>,
         outputMessage: HttpOutputMessage,
     ) {
+        // Set, not defaulted: [contentType] is what was negotiated, and it is not what these bytes are.
+        outputMessage.headers.contentType = MediaType.APPLICATION_JSON
+        outputMessage.headers.contentLength = representation.bytes.size.toLong()
         outputMessage.body.write(representation.bytes)
+        outputMessage.body.flush()
     }
 
-    override fun readInternal(
+    override fun read(
         clazz: Class<out Representation<*>>,
         inputMessage: HttpInputMessage,
     ): Representation<*> = throw HttpMessageNotReadableException("A representation is written, never read.", inputMessage)
+}
+
+/**
+ * Why Jackson cannot write a [Representation]: asked to, it fails.
+ *
+ * [RepresentationConverter] is what writes one. Should a response ever
+ * reach the JSON converter instead (a context without that bean, a list of
+ * converters somebody reordered, a holder nested in another body), the
+ * result must be a failure somebody sees, a `500`, and not a `200` carrying
+ * the holder's fields. That happened once, and looked like success.
+ */
+internal class RepresentationIsNotJson : ValueSerializer<Representation<*>>() {
+    override fun serialize(
+        value: Representation<*>,
+        gen: JsonGenerator,
+        ctxt: SerializationContext,
+    ): Unit = throw DatabindException.from(gen, NOT_JSON)
+
+    private companion object {
+        // Says what happened and names no content: the bytes held are a response body.
+        const val NOT_JSON = "A Representation is written by RepresentationConverter, as its bytes; it is not a JSON value."
+    }
 }

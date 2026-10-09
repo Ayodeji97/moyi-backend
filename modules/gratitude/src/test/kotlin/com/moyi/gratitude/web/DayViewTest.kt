@@ -336,6 +336,68 @@ internal class DayViewTest(
         }
     }
 
+    /**
+     * **The one header in which two `404`s of this route differ, stated
+     * rather than left out of the lists above.** A last path segment with a
+     * dot in it looks to Spring MVC like a file name with an extension, and
+     * for an extension it does not know to be harmless it adds
+     * `Content-Disposition: inline;filename=f.txt` to whatever it writes:
+     * its guard against a reflected file download, applied to every route
+     * of every Spring application, error bodies included. `2026.09.15` is
+     * such a segment; `2026-09-15.json` is not (`json` is on its list).
+     *
+     * It is accepted, and not suppressed, because **it is a function of the
+     * characters the caller typed and of nothing else**: not of the bond,
+     * not of the caller, not of whether the day the value resembles exists
+     * or is theirs. That is what is held here: the same value gets the
+     * same whole response whether it resembles a day that is hers or a day
+     * that is nobody's; without that one header it is the `404` of every
+     * other date; and a stranger typing it gets the bond's `404` with the
+     * same header, so it does not tell a member from a stranger either.
+     * There is no local way to turn it off: the guard has no switch, and a
+     * filter that removed the header here would be a second mechanism to
+     * keep in step with the framework's for no observable gain.
+     */
+    @Test
+    fun `a date typed with a dot is the same 404 with one header more, and that header follows from what was typed alone`() {
+        val bond = pair()
+        bothWrite(bond, DAY_ONE)
+        rig.day(ada, bond, "2026-09-15").status shouldBe 200
+        val noSuchDay = rig.day(ada, bond, "2026-09-14")
+        noSuchDay.status shouldBe 404
+        noSuchDay.getHeader(HttpHeaders.CONTENT_DISPOSITION).shouldBeNull()
+        val strangers = rig.day(eve, bond, "2026-09-14")
+        strangers.status shouldBe 404
+        val guard = listOf("inline;filename=f.txt")
+
+        // Each value twice: once resembling the 15th, which is hers to read, and once the 14th, which is nobody's.
+        listOf(
+            Triple("2026.09.15", "2026.09.14", guard),
+            Triple("2026-09.15", "2026-09.14", guard),
+            Triple("2026-09-15.exe", "2026-09-14.exe", guard),
+            Triple("2026-09-15.zqw", "2026-09-14.zqw", guard),
+            // An extension the framework takes to be harmless: no header, and so the 404 of every other date entire.
+            Triple("2026-09-15.json", "2026-09-14.json", emptyList()),
+            Triple("2026-09-15.txt", "2026-09-14.txt", emptyList()),
+        ).forEach { (resemblesHers, resemblesNothing, disposition) ->
+            withClue(resemblesHers) {
+                val answer = rig.day(ada, bond, resemblesHers)
+
+                answer.status shouldBe 404
+                answer.contentAsString shouldContain "\"code\":\"DAY_NOT_FOUND\""
+                answer.getHeaders(HttpHeaders.CONTENT_DISPOSITION) shouldBe disposition
+                // Whether the day it resembles is hers or nobody's: the same response, this header included.
+                whole(answer) shouldBe whole(rig.day(ada, bond, resemblesNothing))
+                // And but for that header it is the one 404.
+                whole(answer).without(HttpHeaders.CONTENT_DISPOSITION) shouldBe whole(noSuchDay)
+                // A stranger who types it gets the bond's 404 with the same header: it is about the path, not the asker.
+                val stranger = rig.day(eve, bond, resemblesHers)
+                stranger.getHeaders(HttpHeaders.CONTENT_DISPOSITION) shouldBe disposition
+                whole(stranger).without(HttpHeaders.CONTENT_DISPOSITION) shouldBe whole(strangers)
+            }
+        }
+    }
+
     @Test
     fun `a path with no date at all is no route of this API, for a member and a stranger alike`() {
         val bond = pair()
@@ -655,6 +717,8 @@ internal class DayViewTest(
             response.headerNames.sorted().associateWith { response.getHeaders(it) },
             response.contentAsString.withoutInstance(),
         )
+
+    private fun Triple<Int, Map<String, List<String>>, String>.without(header: String) = copy(second = second - header)
 
     private fun String.withoutInstance(): String = replace(Regex(""""instance":"[^"]*""""), "\"instance\":\"-\"")
 
