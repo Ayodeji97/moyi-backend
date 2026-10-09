@@ -55,10 +55,17 @@ import java.util.UUID
  * 1. The gate, which is the only thing that knows about a withdrawal whose
  *    entries are still whole.
  * 2. The statement ([Favourites.mark]), which takes the mark only if the
- *    row is still revealed and unerased at that moment, waiting out an
- *    erasure in flight. An erasure that commits after the gate answered and
- *    before the statement ran leaves nothing to insert, and is answered as
- *    the tombstone it now is.
+ *    row is still revealed and unerased at that moment. It waits for an
+ *    erasure in flight, two seconds at most. An erasure that commits after
+ *    the gate answered and before the statement ran leaves nothing to
+ *    insert, and is answered as the tombstone it now is; so is one that
+ *    holds the row past the wait, because a row held that long is being
+ *    erased by a withdrawal.
+ *
+ * **Neither verb waits out a withdrawal.** The unmark deletes only a row it
+ * can lock at once and is `204` either way ([Favourites.unmark]). Before
+ * that, each request stuck behind a long withdrawal held a pooled
+ * connection, and a few of them stalled every other request there was.
  *
  * One interleaving is let through: a **withdrawal** that commits between
  * the two. The row is whole, so the mark is made, by a request whose answer
@@ -80,7 +87,7 @@ internal class FavouriteEntry(
      *
      * @throws EntryNotFoundException the entry was never shown to the caller, for any reason.
      * @throws EntryNotRevealedException the caller's own entry, which the partner cannot read yet.
-     * @throws EntryImmutableException a tombstone, or an entry erased while this request was deciding.
+     * @throws EntryImmutableException a tombstone, or an entry erased, or still being erased, while this request was deciding.
      */
     fun mark(
         userId: UUID,

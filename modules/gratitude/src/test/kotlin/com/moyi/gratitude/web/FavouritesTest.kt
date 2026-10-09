@@ -694,9 +694,9 @@ internal class FavouritesTest(
      * member's own unmark, a moment later, can have taken away.
      *
      * The store here is the real one over a `JdbcTemplate` that runs the
-     * member's unmark, to its commit, as soon as the store's first statement
-     * returns: the double tap on a toggle, in the order that used to answer
-     * `409` on a whole entry.
+     * member's unmark, to its commit, as soon as the store's statement on
+     * `entry_favourites` returns: the double tap on a toggle, in the order
+     * that used to answer `409` on a whole entry.
      */
     @Test
     fun `a repeat mark is a success whatever the member's own unmark does a moment later`() {
@@ -706,10 +706,12 @@ internal class FavouritesTest(
         var unmarked = false
         val racing =
             Favourites(
-                AfterFirstStatement(dataSource) {
+                AfterTheMark(dataSource) {
                     unmarked = true
-                    favourites.unmark(entry, day.beaMember)
+                    // On another thread, so that it commits by itself and not with the mark's transaction.
+                    pool.submit { favourites.unmark(entry, day.beaMember) }.get(10, TimeUnit.SECONDS)
                 },
+                transactions,
             )
 
         racing.mark(entry, day.beaMember, clock.instant()) shouldBe true
@@ -747,15 +749,19 @@ internal class FavouritesTest(
         marks().shouldBeEmpty()
     }
 
-    /** A `JdbcTemplate` that runs [then] once, right after the first statement made through it returns. */
-    private class AfterFirstStatement(
+    /**
+     * A `JdbcTemplate` that runs [then] once, right after the first statement
+     * on `entry_favourites` made through it returns. Not the first statement
+     * of all: the mark sets its lock timeout before it.
+     */
+    private class AfterTheMark(
         dataSource: DataSource,
         private val then: () -> Unit,
     ) : JdbcTemplate(dataSource) {
         private var fired = false
 
-        private fun <T> T.andThen(): T {
-            if (!fired) {
+        private fun <T> T.andThen(sql: String): T {
+            if (!fired && "entry_favourites" in sql) {
                 fired = true
                 then()
             }
@@ -765,13 +771,13 @@ internal class FavouritesTest(
         override fun update(
             sql: String,
             vararg args: Any?,
-        ): Int = super.update(sql, *args).andThen()
+        ): Int = super.update(sql, *args).andThen(sql)
 
         override fun <T : Any> queryForObject(
             sql: String,
             requiredType: Class<T>,
             vararg args: Any?,
-        ): T? = super.queryForObject(sql, requiredType, *args).andThen()
+        ): T? = super.queryForObject(sql, requiredType, *args).andThen(sql)
     }
 
     // ---- fixtures ----
