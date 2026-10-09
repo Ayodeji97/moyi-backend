@@ -1132,6 +1132,76 @@ for words in "$TAKEN_TEXT" "$READER_TEXT" "$KEPT_TEXT" "$OTHER_TEXT" "$LEFT_TEXT
 [ -z "$LEAKED" ] && pass "no entry of this section is anywhere in the log" || fail "text in log" "found:$LEAKED"
 if grep -qiE '\bblock' <<<"$WITHDRAWN_LOG"; then fail "block in log" "the log says block"; else pass "…and the log does not say which ending was a block"; fi
 
+echo; echo "the archive — days, one day, a bookmark and a conditional read (FR-090, FR-093, ADR-0036)"
+flush_buckets
+# What this section is for: the four routes of slice C5b answering from the jar,
+# with the real converter, the real security headers and the real poller. Every
+# day here is TODAY. A Bond-day is a calendar day long and the close job's short
+# schedule cannot end one, so nothing in this run pages past a first page, reads
+# a closed or a solo day, or follows a nextCursor that is not null: past days,
+# paging and the byte budget are the integration tests' to show, not this
+# script's. If Lagos midnight passes while this section runs, its date checks
+# fail; that is the run's timing and not a finding.
+
+# at <dotted.path> — a value out of LAST_BODY as JSON with its keys sorted
+# ("true", "null", "\"REVEALED\"", a whole object), or "absent" for a key or an
+# index that is not there. An empty path is the whole body. raw is the same,
+# with a string printed bare.
+at() {
+  python3 -c '
+import json, sys
+try:
+    node = json.loads(sys.stdin.read())
+    for part in filter(None, sys.argv[1].split(".")):
+        node = node[int(part)] if isinstance(node, list) else node[part]
+    print(node if sys.argv[2] == "raw" and isinstance(node, str) else json.dumps(node, sort_keys=True, ensure_ascii=False))
+except (KeyError, IndexError, TypeError, ValueError):
+    print("absent")' "$1" "${2:-json}" <<<"$LAST_BODY"
+}
+raw() { at "$1" raw; }
+# is <label> <got> <expected>
+is() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "expected '${3:0:200}', got '${2:0:200}'"; fi; }
+# repeats <value> — whether LAST_BODY carries it as a word of its own anywhere
+# but `instance`, which is the path the caller typed. "50" does not repeat "0".
+repeats() {
+  python3 -c '
+import re, sys
+body = re.sub(r"\"instance\":\"[^\"]*\"", "", sys.stdin.read())
+sys.exit(0 if re.search(r"(?<![0-9A-Za-z])" + re.escape(sys.argv[1]) + r"(?![0-9A-Za-z])", body) else 1)' "$1" <<<"$LAST_BODY"
+}
+no_instance() { printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/'; }
+tag() { etag_of || true; }
+
+verified_account "writer" "203.0.113.90";   ARC_W="$ACCOUNT_ACCESS"
+verified_account "marker" "203.0.113.91";   ARC_M="$ACCOUNT_ACCESS"
+verified_account "outsider" "203.0.113.92"; ARC_O="$ACCOUNT_ACCESS"
+ARC_W_TEXT="thank you for the tea left by the door"
+ARC_M_TEXT="thank you for reading to me last night"
+ARC_SOLO_TEXT="thank you for the walk before work"
+revealed_bond "an archive of one day" "$ARC_W" "$ARC_M" "$ARC_W_TEXT" "$ARC_M_TEXT"
+ARC_BOND="$RB_BOND"; ARC_W_ENTRY="$RB_A_ENTRY"; ARC_M_ENTRY="$RB_B_ENTRY"
+expect "today, for the date the archive should carry" 200 '"bondDay"' -- "$API/bonds/$ARC_BOND/today" -H "Authorization: Bearer $ARC_W"
+ARC_DATE="$(raw bondDay.date)"
+
+# The feed: one day, newest first, each member's own entry as myEntry.
+expect "the writer's GET /days is 200" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"
+is "…it lists today, $ARC_DATE, and no other day" "$(raw items.0.date)|$(at items.1)" "$ARC_DATE|absent"
+is "…REVEALED" "$(raw items.0.status)" "REVEALED"
+is "…the writer's own entry is myEntry, with its words" "$(raw items.0.myEntry.id)|$(raw items.0.myEntry.text)" "$ARC_W_ENTRY|$ARC_W_TEXT"
+is "…the partner's is partnerEntry, with its words" "$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)" "$ARC_M_ENTRY|$ARC_M_TEXT"
+is "…neither is marked, and there is no further page" "$(at items.0.myEntry.favourited)|$(at items.0.partnerEntry.favourited)|$(at nextCursor)" "false|false|null"
+ARC_W_ITEM="$(at items.0)"
+expect "the marker's GET /days is 200" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
+is "…the same day, REVEALED, and no other" "$(raw items.0.date)|$(raw items.0.status)|$(at items.1)|$(at nextCursor)" "$ARC_DATE|REVEALED|absent|null"
+is "…with the two entries the other way round" "$(raw items.0.myEntry.id)|$(raw items.0.myEntry.text)|$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)" "$ARC_M_ENTRY|$ARC_M_TEXT|$ARC_W_ENTRY|$ARC_W_TEXT"
+ARC_M_ITEM="$(at items.0)"
+
+# One day is the feed's item, not a second rendering of it.
+expect "the writer's GET /days/{today} is 200" 200 "\"date\":\"$ARC_DATE\"" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_W"
+is "…and is the feed's first item, value for value" "$(at "")" "$ARC_W_ITEM"
+expect "the marker's GET /days/{today} is 200" 200 "\"date\":\"$ARC_DATE\"" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M"
+is "…and is the marker's first item, value for value" "$(at "")" "$ARC_M_ITEM"
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.
