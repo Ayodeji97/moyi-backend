@@ -4,7 +4,7 @@
     "summary": "write today's entry",
     "auth": "bearer",
     "headers": [
-      "Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the entry as it stands now, and nothing written)"
+      "Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the entry as it stands now, and no entry written)"
     ],
     "requestErrors": [
       {
@@ -88,7 +88,7 @@
     "summary": "edit your entry",
     "auth": "bearer",
     "headers": [
-      "Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 200 with Idempotency-Replayed: true, the entry as it stands now, and the edit not applied again)"
+      "Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 200 with Idempotency-Replayed: true, the entry as it stands now, and no entry written or changed)"
     ],
     "requestErrors": [
       {

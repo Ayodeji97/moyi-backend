@@ -5,7 +5,7 @@
     "from": "NOT_OPENED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the bond is two people",
+    "when": "the bond is two people, and the day did not end before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -60,6 +60,37 @@
     "evidence": "smoke",
     "evidenceRef": "writing before a partner has joined is still 201",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val openStatus = if (beforeThePairing) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
+    "id": "day-not-opened-write-before-pairing",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "an offline draft's intendedAt names a day that ended before the bond became two people",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 201,
+    "code": null,
+    "reason": "The draft is within the 36-hour offline window and the day has no row, so this write opens it, and opens it SUSPENDED. A day that ended before the bond became two people is suspended for good, so nothing on it is revealed, even with both entries in.",
+    "rule": "ADR-0032 §7",
+    "evidence": "test",
+    "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val beforeThePairing = activeSince == null || !activeSince.isBefore(window.endsAt)"
   },
   {
     "id": "day-open-write",
@@ -534,7 +565,7 @@
     "from": "NONE",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "your partner has already written, and the bond has no reveal time or it has passed",
+    "when": "your partner has already written, and the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -558,6 +589,37 @@
     "evidence": "test",
     "evidenceRef": "EntriesEndpointTest#the second submission reveals both entries and records one content-free event",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/RevealDay.kt#val revealed = entry.reveal(next.revealedAt)"
+  },
+  {
+    "id": "entry-none-write-before-pairing",
+    "region": "day.entry",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "an offline draft's intendedAt names a day that ended before the bond became two people",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 201,
+    "code": null,
+    "reason": "Your entry is stored on the suspended day and stays SUBMITTED, yours alone, whether or not your partner wrote on that day too.",
+    "rule": "ADR-0032 §7",
+    "evidence": "test",
+    "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val beforeThePairing = activeSince == null || !activeSince.isBefore(window.endsAt)"
   },
   {
     "id": "entry-submitted-write",
@@ -610,7 +672,7 @@
     "to": "SUBMITTED",
     "status": 201,
     "code": null,
-    "reason": "A replay runs nothing again. It answers the first request's 201 with Idempotency-Replayed: true and the entry read as it stands now, so none of a new write's refusals apply, on a revealed day or an ended bond alike.",
+    "reason": "A replay writes no entry. It answers the first request's 201 with Idempotency-Replayed: true and the entry read as it stands now, so none of a new write's refusals apply, on a revealed day or an ended bond alike.",
     "rule": "ADR-0031 §8",
     "evidence": "smoke",
     "evidenceRef": "replaying the same key with the same body is 201 again",
@@ -666,10 +728,10 @@
     "to": "REVEALED",
     "status": 201,
     "code": null,
-    "reason": "A replay runs nothing again. It answers the first request's 201 with Idempotency-Replayed: true and the entry read as it stands now, so none of a new write's refusals apply, on a revealed day or an ended bond alike. The body shows the entry as REVEALED.",
+    "reason": "A replay writes no entry. It answers the first request's 201 with Idempotency-Replayed: true and the entry read as it stands now, so none of a new write's refusals apply, on a revealed day or an ended bond alike.",
     "rule": "ADR-0031 §8",
     "evidence": "test",
-    "evidenceRef": "JoiningDayTest#a first POST replay reconciles a legacy joining day and reads the entry as revealed",
+    "evidenceRef": "WithdrawalReadTest#a replay of the blocker's own submission answers without the words, and the partner's replay with theirs",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val view = outcome.value ?: replay(userId, bondId, EntryId(outcome.resultId))"
   },
   {
@@ -741,7 +803,7 @@
     "from": "DELETED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you deleted it before the reveal, your partner has written, and the bond has no reveal time or it has passed",
+    "when": "you deleted it before the reveal, your partner has written, and the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -816,7 +878,7 @@
     "to": "DELETED",
     "status": 201,
     "code": null,
-    "reason": "A replay runs nothing again. It answers the first request's 201 with Idempotency-Replayed: true and the entry read as it stands now, so none of a new write's refusals apply, on a revealed day or an ended bond alike. The body is the tombstone: there is no second copy of the words to answer from.",
+    "reason": "A replay writes no entry. It answers the first request's 201 with Idempotency-Replayed: true and the entry read as it stands now, so none of a new write's refusals apply, on a revealed day or an ended bond alike. The body is the tombstone: there is no second copy of the words to answer from.",
     "rule": "ADR-0031 §8",
     "evidence": "smoke",
     "evidenceRef": "POST replay after DELETE returns its tombstone",
@@ -860,7 +922,7 @@
     "from": "LOCKED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you have not yet written today, and the bond has no reveal time or it has passed",
+    "when": "you have not yet written today, and the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -915,6 +977,37 @@
     "evidence": "smoke",
     "evidenceRef": "the second writes, and is not shown a reveal",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#return if (due != null && now.isBefore(due)) {"
+  },
+  {
+    "id": "partner-locked-write-before-pairing",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "an offline draft's intendedAt names a day that ended before the bond became two people, and your partner has written on it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "LOCKED",
+    "status": 201,
+    "code": null,
+    "reason": "Both of you have now written on the suspended day, and nothing is revealed: your partner's entry stays locked to you for good. No built endpoint shows a past day yet, so this is what the entry is, not something a response shows.",
+    "rule": "ADR-0032 §7",
+    "evidence": "test",
+    "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (entryCount != MAX_ENTRIES || status !in setOf(BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL)) return this"
   },
   {
     "id": "partner-visible-write",
@@ -1329,10 +1422,10 @@
     "to": "NOT_OPENED",
     "status": 200,
     "code": null,
-    "reason": "The response says OPEN with both entries null. Reading does not open the day: no row is written, so OPEN here is what the day would open as.",
+    "reason": "The response says OPEN with both entries null: what the day would open as. Reading opens nothing; that no row is written is asserted by a separate test, not by the one cited.",
     "rule": "",
     "evidence": "test",
-    "evidenceRef": "RevealGateTest#a day nobody has written to yet is never created by reading it",
+    "evidenceRef": "RevealGateTest#a day nobody has written to yet is OPEN with two absent entries",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
   },
   {
@@ -1581,7 +1674,7 @@
     "rule": "doc 04 §8.3a",
     "evidence": "smoke",
     "evidenceRef": "…and the day it landed on opens SUSPENDED, not OPEN",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
   },
   {
     "id": "day-not-opened-streak",
@@ -2274,7 +2367,7 @@
     "to": "SUBMITTED",
     "status": 200,
     "code": null,
-    "reason": "A replay of a keyed edit applies nothing again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now.",
+    "reason": "A replay of a keyed edit writes no entry and does not apply the edit again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now.",
     "rule": "ADR-0032 §10",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -2330,7 +2423,7 @@
     "to": "REVEALED",
     "status": 200,
     "code": null,
-    "reason": "A replay of a keyed edit applies nothing again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. An edit made before the reveal and repeated after it is not refused.",
+    "reason": "A replay of a keyed edit writes no entry and does not apply the edit again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. An edit made before the reveal and repeated after it is not refused.",
     "rule": "ADR-0032 §10",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -2387,7 +2480,7 @@
     "to": "DELETED",
     "status": 200,
     "code": null,
-    "reason": "A replay of a keyed edit applies nothing again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. The body is the tombstone, without the words the edit wrote.",
+    "reason": "A replay of a keyed edit writes no entry and does not apply the edit again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. The body is the tombstone, without the words the edit wrote.",
     "rule": "ADR-0032 §10",
     "evidence": "test",
     "evidenceRef": "EntryChangesTest#a keyed patch replays the current tombstone and never re-applies the edit",
@@ -2738,13 +2831,13 @@
     "from": "NOT_OPENED",
     "action": "event:missed-day-recorded",
     "actor": "system",
-    "when": "the day did not end inside a deletion countdown that was later called off",
+    "when": "the day ran from the day the bond became two people until it ended, and did not end inside a deletion countdown that was later called off",
     "guards": [],
     "outcome": "ok",
     "to": "EMPTY",
     "status": null,
     "code": null,
-    "reason": "Nobody wrote, so the day never had a row. Once it has ended the close job writes one, already closed as EMPTY. That includes a day on which the bond ended or began a countdown: it began while the bond took entries.",
+    "reason": "Nobody wrote, so the day never had a row. Once it has ended the close job writes one, already closed as EMPTY. That includes a day on which the bond ended or began a countdown: it began while the bond took entries. A day from before the pairing, or one that began after the bond ended, is never written and stays without a row.",
     "rule": "ADR-0033 §6",
     "evidence": "test",
     "evidenceRef": "MissingDaysTest#a couple who paired and never wrote get every day that has ended, closed EMPTY, and not today",
@@ -2882,7 +2975,7 @@
     "from": "NOT_OPENED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "partner",
-    "when": "the bond is two people",
+    "when": "the bond is two people, and the day did not end before the bond became two people",
     "guards": [],
     "outcome": "ok",
     "to": "PARTIAL",
@@ -2893,6 +2986,24 @@
     "evidence": "test",
     "evidenceRef": "RevealGateTest#the day's status IS returned, because it is deliberately shared",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val opened = days.openOrGet(membership.bondId, window, zone, now, openStatus)"
+  },
+  {
+    "id": "day-not-opened-partner-writes-before-pairing",
+    "region": "day",
+    "from": "NOT_OPENED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "partner",
+    "when": "your partner's offline draft names a day that ended before the bond became two people",
+    "guards": [],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 201,
+    "code": null,
+    "reason": "Your partner's offline draft opens the day's row, SUSPENDED. A day that ended before the bond became two people is suspended for good, so nothing on it is revealed, even with both entries in.",
+    "rule": "ADR-0032 §7",
+    "evidence": "test",
+    "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val beforeThePairing = activeSince == null || !activeSince.isBefore(window.endsAt)"
   },
   {
     "id": "day-open-partner-writes",
@@ -2990,7 +3101,7 @@
     "from": "SUBMITTED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "partner",
-    "when": "the bond has no reveal time, or it has passed",
+    "when": "the bond has no reveal time, or it has passed, and the day did not end before the bond became two people",
     "guards": [],
     "outcome": "ok",
     "to": "REVEALED",
@@ -3019,6 +3130,24 @@
     "evidence": "test",
     "evidenceRef": "RevealTest#a timed reveal holds both entries in PENDING_REVEAL until the bond's time",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#copy(status = BondDayStatus.PENDING_REVEAL)"
+  },
+  {
+    "id": "entry-submitted-partner-writes-before-pairing",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "partner",
+    "when": "the day is one that ended before the bond became two people",
+    "guards": [],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": 201,
+    "code": null,
+    "reason": "Your partner's entry is the second on a suspended day, and a suspended day never reveals. Yours stays SUBMITTED.",
+    "rule": "ADR-0032 §7",
+    "evidence": "test",
+    "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (entryCount != MAX_ENTRIES || status !in setOf(BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL)) return this"
   },
   {
     "id": "entry-submitted-reveal-time",
@@ -3134,7 +3263,7 @@
     "from": "NONE",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "partner",
-    "when": "you have already written, and the bond has no reveal time or it has passed",
+    "when": "you have already written, and the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
     "guards": [],
     "outcome": "ok",
     "to": "VISIBLE",
@@ -3145,6 +3274,24 @@
     "evidence": "test",
     "evidenceRef": "RevealTest#once both have written each reads the other's words",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/RevealDay.kt#val revealed = entry.reveal(next.revealedAt)"
+  },
+  {
+    "id": "partner-none-partner-writes-before-pairing",
+    "region": "day.partnerEntry",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "partner",
+    "when": "the day is one that ended before the bond became two people",
+    "guards": [],
+    "outcome": "ok",
+    "to": "LOCKED",
+    "status": 201,
+    "code": null,
+    "reason": "Your partner filed an offline draft on a suspended day. It is locked to you and stays so, even if you wrote on that day as well.",
+    "rule": "ADR-0032 §7",
+    "evidence": "test",
+    "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val beforeThePairing = activeSince == null || !activeSince.isBefore(window.endsAt)"
   },
   {
     "id": "partner-locked-partner-deletes",
@@ -3206,7 +3353,7 @@
     "from": "REMOVED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "partner",
-    "when": "you have written, and the bond has no reveal time or it has passed",
+    "when": "you have written, and the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
     "guards": [],
     "outcome": "ok",
     "to": "VISIBLE",

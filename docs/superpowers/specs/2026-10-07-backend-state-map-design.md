@@ -80,7 +80,9 @@ States are read from the code, not invented.
 ### 3.3 Day (5 endpoints, and most of the system's own transitions)
 
 - `NOT_OPENED`: the day has no row yet. Nothing is stored for a day until its first
-  entry is written, or until the close job records it after it has ended.
+  entry is written. The close job records an unwritten day after it has ended, but only
+  from the day the bond became two people until the bond ended; a day outside that
+  span stays without a row.
 - Not closed: `OPEN`, `PARTIAL`, `PENDING_REVEAL`.
 - Closed: `REVEALED`, `SOLO`, `EMPTY`, `FROZEN`.
 - `SUSPENDED`, drawn apart. It has two meanings (waiting for the second
