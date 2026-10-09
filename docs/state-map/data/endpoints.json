@@ -706,5 +706,51 @@
     ],
     "requestErrors": [],
     "curl": "curl \"$API/me\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/auth/forgot-password",
+    "summary": "ask for a password reset link",
+    "auth": "none",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, spent before the body is checked. Beside it, three an hour per email address as typed, one back every twenty minutes, counted for every address whether or not it has an account: the fourth is 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "email is blank or not shaped like an address. This says nothing about whether the address has an account.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ForgotPasswordRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/forgot-password\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/reset-password",
+    "summary": "set a new password with a reset link",
+    "auth": "none",
+    "headers": [
+      "Content-Type (application/json. The reset token in the body is the credential; no access token is read. No rate limit of its own)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "token is blank or over 256 characters; or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link is looked at, so a refused password does not spend the link. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ResetPasswordRequest("
+      },
+      {
+        "status": 503,
+        "code": "HASHING_CAPACITY_EXCEEDED",
+        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link is not spent. (the test of this answer drives register, not a reset)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/reset-password\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$RESET_TOKEN\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\""
   }
 ]

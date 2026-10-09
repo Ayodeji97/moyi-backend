@@ -18,6 +18,8 @@ stateDiagram-v2
         account__PENDING_VERIFICATION --> account__ACTIVE_SIGNED_OUT: you - verify your email
         account__PENDING_VERIFICATION --> account__SIGNED_IN: you - sign in
         account__ACTIVE_SIGNED_OUT --> account__SIGNED_IN: you - sign in
+        account__SIGNED_IN --> account__ACTIVE_SIGNED_OUT: you - 4 actions, system - a refresh token already used is presented again / the refresh token expires, thirty days unused
+        account__SIGNED_IN --> account__PENDING_VERIFICATION: you - 4 actions, system - a refresh token already used is presented again / the refresh token expires, thirty days unused
     }
     state "The session (one sign-in, which is a refresh-token family and the access token made for it, named by the token you send)" as account_session {
         state "no session (no token sent, or one that names no session)" as account_session__NO_SESSION
@@ -26,8 +28,8 @@ stateDiagram-v2
         state "ended (signed out, revoked, or its refresh token ran out)" as account_session__ENDED
         account_session__NO_SESSION --> account_session__ACCESS_VALID: you - sign in
         account_session__ACCESS_EXPIRED --> account_session__ACCESS_VALID: you - exchange the refresh token for a new pair
-        account_session__ACCESS_VALID --> account_session__ENDED: you - 3 actions, system - a refresh token already used is presented again
-        account_session__ACCESS_EXPIRED --> account_session__ENDED: you - sign out of this session, system - the refresh token expires, thirty days unused / a refresh token already used is presented again
+        account_session__ACCESS_VALID --> account_session__ENDED: you - 4 actions, system - a refresh token already used is presented again
+        account_session__ACCESS_EXPIRED --> account_session__ENDED: you - sign out of this session / set a new password with a reset link, system - the refresh token expires, thirty days unused / a refresh token already used is presented again
         account_session__ACCESS_VALID --> account_session__ACCESS_EXPIRED: system - the access token expires, fifteen minutes on
     }
     state "The password reset (one reset link, named by its token)" as account_reset {
@@ -35,6 +37,9 @@ stateDiagram-v2
         state "requested, the link is live" as account_reset__REQUESTED
         state "link used" as account_reset__USED
         state "link expired" as account_reset__EXPIRED
+        account_reset__NONE --> account_reset__REQUESTED: you - ask for a password reset link
+        account_reset__REQUESTED --> account_reset__USED: you - set a new password with a reset link
+        account_reset__REQUESTED --> account_reset__EXPIRED: system - the reset link expires, an hour on
     }
     classDef unbuilt fill:#eeeeee,stroke:#aaaaaa,color:#888888
     class account__SUSPENDED unbuilt
@@ -54,6 +59,10 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | verify your email<br>`POST /auth/verify-email` | 422 `VERIFICATION_TOKEN_INVALID` | 200 → `ACTIVE_SIGNED_OUT` (the token is one of this account's verification links, under 24 hours old and not yet used)<br>410 `VERIFICATION_TOKEN_EXPIRED` (the token is one of this account's verification links, more than 24 hours old)<br>422 `VERIFICATION_TOKEN_INVALID` (the token matches no verification link on record: mistyped, cut short, never issued, or a password-reset token) | 410 `VERIFICATION_TOKEN_EXPIRED` (the token is the link that verified this account, or one of its links that had already passed its 24 hours by then)<br>422 `VERIFICATION_TOKEN_INVALID` (the token is anything else: a link that was still live when another one verified the account, or a token that matches no verification link) | 200 stays (the token is one of this account's verification links, under 24 hours old and not yet used (so your email is not yet verified))<br>410 `VERIFICATION_TOKEN_EXPIRED` (the token is one of this account's verification links that is more than 24 hours old or was already used)<br>422 `VERIFICATION_TOKEN_INVALID` (the token is anything else: a link deleted when another one verified the account, or a token that matches no verification link) |
 | ask for a new verification link<br>`POST /auth/resend-verification` | 202 stays | 202 stays | 202 stays | 202 stays (your email is not verified)<br>202 stays (your email is verified) |
 | sign in<br>`POST /auth/login` | 401 `INVALID_CREDENTIALS` | 200 → `SIGNED_IN` (the account is not locked out and the password is right)<br>401 `INVALID_CREDENTIALS` (the account is not locked out and the password is wrong)<br>401 `INVALID_CREDENTIALS` (the account is locked out, whatever the password) | 200 → `SIGNED_IN` (the account is not locked out and the password is right)<br>401 `INVALID_CREDENTIALS` (the account is not locked out and the password is wrong)<br>401 `INVALID_CREDENTIALS` (the account is locked out, whatever the password) | 200 stays (the account is not locked out and the password is right)<br>401 `INVALID_CREDENTIALS` (the account is not locked out and the password is wrong)<br>401 `INVALID_CREDENTIALS` (the account is locked out, whatever the password) |
+| sign out of this session<br>`POST /auth/logout` | 204 stays | 204 stays | 204 stays | 204 → `ACTIVE_SIGNED_OUT` (your email is verified)<br>204 → `PENDING_VERIFICATION` (your email is not verified) |
+| sign out everywhere<br>`POST /auth/logout-all` | 401 `UNAUTHENTICATED` | 401 `UNAUTHENTICATED` (you send no access token, or one the server does not accept)<br>204 stays (you send the access token of a session that has ended, and the server still accepts it) | 401 `UNAUTHENTICATED` (you send no access token, or one the server does not accept)<br>204 stays (you send the access token of a session that has ended, and the server still accepts it) | 204 → `ACTIVE_SIGNED_OUT` (your email is verified)<br>204 → `PENDING_VERIFICATION` (your email is not verified) |
+| end one session<br>`DELETE /auth/sessions/{id}` | 401 `UNAUTHENTICATED` | 401 `UNAUTHENTICATED` (you send no access token, or one the server does not accept)<br>204 stays (you send the access token of a session that has ended, and the server still accepts it, and the id is a live session of this account on another device)<br>404 `NOT_FOUND` (you send the access token of a session that has ended, and the server still accepts it, and the id is anything else, your own ended session included) | 401 `UNAUTHENTICATED` (you send no access token, or one the server does not accept)<br>204 stays (you send the access token of a session that has ended, and the server still accepts it, and the id is a live session of this account on another device)<br>404 `NOT_FOUND` (you send the access token of a session that has ended, and the server still accepts it, and the id is anything else, your own ended session included) | 204 → `ACTIVE_SIGNED_OUT` (the id is the session you are calling from, and your email is verified)<br>204 → `PENDING_VERIFICATION` (the id is the session you are calling from, and your email is not verified)<br>204 stays (the id is another live session of yours)<br>404 `NOT_FOUND` (the id is anything else: not a UUID, somebody else's session, one that never existed, or one already ended or expired) |
+| set a new password with a reset link<br>`POST /auth/reset-password` | 422 `PASSWORD_RESET_TOKEN_INVALID` | 200 stays | 200 stays | 200 → `ACTIVE_SIGNED_OUT` (your email is verified)<br>200 → `PENDING_VERIFICATION` (your email is not verified) |
 
 ### Refused here
 
@@ -73,12 +82,26 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | `ACTIVE_SIGNED_OUT` | sign in | 401 `INVALID_CREDENTIALS` | While locked, the right password is refused with the same 401 and the same body as a wrong one, and the caller is deliberately not told the account is locked: only a real account can be locked, so saying so would confirm the address. The password is still checked and the result thrown away; the attempt is not counted, so a lock cannot be made longer by retrying. The lock ends by itself, and a password reset clears it. | ADR-0020 §4 | test |
 | `SIGNED_IN` | sign in | 401 `INVALID_CREDENTIALS` | One refusal covers a wrong password, an unknown address and a locked account, with a byte-identical body and no WWW-Authenticate, so that the answer does not say which it was. The failure is counted: the fifth in a row locks the account for one minute, and each failure after a lock has run out doubles the next lock, up to one hour. The session you already hold is not affected by a failed sign-in. | FR-003, ADR-0020 §1, §4 | smoke |
 | `SIGNED_IN` | sign in | 401 `INVALID_CREDENTIALS` | While locked, the right password is refused with the same 401 and the same body as a wrong one, and the caller is deliberately not told the account is locked: only a real account can be locked, so saying so would confirm the address. The password is still checked and the result thrown away; the attempt is not counted, so a lock cannot be made longer by retrying. The lock ends by itself, and a password reset clears it. The session you already hold keeps working: a lock stops new sign-ins only. | ADR-0020 §4 | smoke |
+| `ANONYMOUS` | sign out everywhere | 401 `UNAUTHENTICATED` | With no account there is no access token the server would accept. (a test asserts the 401 for a call with no token, not the code) | ADR-0019 §5 | never-run |
+| `PENDING_VERIFICATION` | sign out everywhere | 401 `UNAUTHENTICATED` | Signed out, you have nothing to prove who you are with. Sign in first. | ADR-0019 §5 | never-run |
+| `ACTIVE_SIGNED_OUT` | sign out everywhere | 401 `UNAUTHENTICATED` | Signed out, you have nothing to prove who you are with. Sign in first. | ADR-0019 §5 | smoke |
+| `ANONYMOUS` | end one session | 401 `UNAUTHENTICATED` | With no account there is no access token the server would accept. (a test asserts the 401 for a call with no token, not the code) | ADR-0019 §5 | never-run |
+| `PENDING_VERIFICATION` | end one session | 401 `UNAUTHENTICATED` | Signed out, you have nothing to prove who you are with. Sign in first. (a test asserts the 401 for a call with no token, not the code) | ADR-0019 §5 | never-run |
+| `PENDING_VERIFICATION` | end one session | 404 `NOT_FOUND` | A session that has ended is not found, like one that is somebody else's or never existed. (a test asserts the 404 for ending the same session twice, not the code) | FR-007, ADR-0025 §5 | never-run |
+| `ACTIVE_SIGNED_OUT` | end one session | 401 `UNAUTHENTICATED` | Signed out, you have nothing to prove who you are with. Sign in first. (a test asserts the 401 for a call with no token, not the code) | ADR-0019 §5 | never-run |
+| `ACTIVE_SIGNED_OUT` | end one session | 404 `NOT_FOUND` | A session that has ended is not found, like one that is somebody else's or never existed. (a test asserts the 404 for ending the same session twice, not the code) | FR-007, ADR-0025 §5 | never-run |
+| `SIGNED_IN` | end one session | 404 `NOT_FOUND` | All of these get one answer, and never 403, so that it does not confirm an id exists. Nothing changes. | FR-007, ADR-0025 §5 | smoke |
+| `ANONYMOUS` | set a new password with a reset link | 422 `PASSWORD_RESET_TOKEN_INVALID` | With no account there is no reset link, so whatever is presented matches nothing. (a test asserts the 422 for a token that is not a reset link, not the code) | FR-004, ADR-0022 §1 | never-run |
 
 ### Happens without you
 
 | In | What happens | Who | Leads to | Why | Evidence |
 |---|---|---|---|---|---|
 | `PENDING_VERIFICATION` | the verification link expires, a day on | system | `PENDING_VERIFICATION` | A verification link stops working 24 hours after it was issued. No job does this and nothing is written: every presentation compares the link's expiry with the clock. The account stays as it is, and a new link can be asked for. The test cited moves the expiry into the past and finds the link refused and the account unchanged; the 24 hours are read from the code. | test |
+| `SIGNED_IN` | a refresh token already used is presented again | system | `ACTIVE_SIGNED_OUT` | A refresh token of your session that had already been exchanged was presented again, by you or by someone holding a copy; the server cannot tell which. That one session is ended, so you are signed out on this device, and the account's address is emailed. Your other devices stay signed in, and nothing else about the account changes. | test |
+| `SIGNED_IN` | a refresh token already used is presented again | system | `PENDING_VERIFICATION` | A refresh token of your session that had already been exchanged was presented again. That one session is ended, so you are signed out on this device, and the account's address is emailed. | never-run |
+| `SIGNED_IN` | the refresh token expires, thirty days unused | system | `ACTIVE_SIGNED_OUT` | Thirty days pass without a refresh, so the session's refresh token can no longer be exchanged and you are signed out. No job does this and nothing is written: each use compares the expiry with the clock. The test cited moves the clock 31 days on and finds the session gone from the list; the thirty days are read from the code. | test |
+| `SIGNED_IN` | the refresh token expires, thirty days unused | system | `PENDING_VERIFICATION` | Thirty days pass without a refresh, so the session's refresh token can no longer be exchanged and you are signed out; the account is still waiting for its address to be verified. | never-run |
 
 ## The session (one sign-in, which is a refresh-token family and the access token made for it, named by the token you send)
 
@@ -93,6 +116,7 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | read your profile<br>`GET /me` | 401 `UNAUTHENTICATED` | 200 stays | 401 `UNAUTHENTICATED` | 200 stays (its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token is under 15 minutes old)<br>401 `UNAUTHENTICATED` (its access token is no longer accepted: logout-all or a password reset ended it, or the token is past its 15 minutes) |
 | list your sessions<br>`GET /auth/sessions` | 401 `UNAUTHENTICATED` | 200 stays | 401 `UNAUTHENTICATED` | 200 stays (its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token is under 15 minutes old)<br>401 `UNAUTHENTICATED` (its access token is no longer accepted: logout-all or a password reset ended it, or the token is past its 15 minutes) |
 | end one session<br>`DELETE /auth/sessions/{id}` | 401 `UNAUTHENTICATED` | 204 → `ENDED` (the id is this session's)<br>204 stays (the id is another live session of yours)<br>404 `NOT_FOUND` (the id is anything else: not a UUID, somebody else's session, one that never existed, or one already ended or expired) | 401 `UNAUTHENTICATED` | 204 stays (its access token is still accepted, and the id is another live session of yours)<br>404 `NOT_FOUND` (its access token is still accepted, and the id is anything else, this session's own included)<br>401 `UNAUTHENTICATED` (its access token is no longer accepted: logout-all or a password reset ended it, or the token is past its 15 minutes) |
+| set a new password with a reset link<br>`POST /auth/reset-password` | 200 stays | 200 → `ENDED` | 200 → `ENDED` | 200 stays |
 
 ### Refused here
 
@@ -132,6 +156,29 @@ Each arrow says who acts: you, your partner or the system. Refusals are not draw
 | `ACCESS_VALID` | a refresh token already used is presented again | system | `ENDED` | A refresh token of this session that had already been exchanged is presented again, by you or by someone holding a copy. Every refresh token of the session's family is revoked, the newest included, though it was never misused, and the account's address is emailed. Only this session ends: the account's other sessions are untouched, and this session's access token is accepted until its 15 minutes run out. | test |
 | `ACCESS_EXPIRED` | a refresh token already used is presented again | system | `ENDED` | A refresh token of this session that had already been exchanged is presented again. Every refresh token of the session's family is revoked, the newest included, and the account's address is emailed. Only this session ends. | never-run |
 
+## The password reset (one reset link, named by its token)
+
+### Every action in every state
+
+| Action | `NONE` | `REQUESTED` | `USED` | `EXPIRED` |
+|---|---|---|---|---|
+| ask for a password reset link<br>`POST /auth/forgot-password` | 202 → `REQUESTED` (an account has this address, verified or not)<br>202 stays (no account has this address) | 202 stays | 202 stays | 202 stays |
+| set a new password with a reset link<br>`POST /auth/reset-password` | 422 `PASSWORD_RESET_TOKEN_INVALID` | 200 → `USED` | 410 `PASSWORD_RESET_TOKEN_EXPIRED` | 410 `PASSWORD_RESET_TOKEN_EXPIRED` |
+
+### Refused here
+
+| In | Action | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|
+| `NONE` | set a new password with a reset link | 422 `PASSWORD_RESET_TOKEN_INVALID` | The token matches no reset link: mistyped, cut short, never issued, or a verification link, which is looked up separately. (a test asserts the 422 for a verification link sent here, not the code) | FR-004, ADR-0022 §1 | never-run |
+| `USED` | set a new password with a reset link | 410 `PASSWORD_RESET_TOKEN_EXPIRED` | A reset link works once. Used and expired get the same answer; ask for a new link. | FR-004, ADR-0022 §1 | smoke |
+| `EXPIRED` | set a new password with a reset link | 410 `PASSWORD_RESET_TOKEN_EXPIRED` | The link's hour has passed. Nothing changes; ask for a new link. | FR-004, ADR-0022 §1 | never-run |
+
+### Happens without you
+
+| In | What happens | Who | Leads to | Why | Evidence |
+|---|---|---|---|---|---|
+| `REQUESTED` | the reset link expires, an hour on | system | `EXPIRED` | A reset link stops working one hour after it was issued. No job does this and nothing is written: each presentation compares the link's expiry with the clock. | never-run |
+
 ## Where the contract is silent
 
 The code answers these and `contracts/openapi.json` does not document them.
@@ -149,3 +196,7 @@ The code answers these and `contracts/openapi.json` does not document them.
 | `POST /auth/refresh` | 401 | 401 REFRESH_TOKEN_INVALID for a refresh token that is unknown, expired or revoked, and 401 TOKEN_REUSE_DETECTED for one already exchanged. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
 | `POST /auth/refresh` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
 | `POST /auth/logout` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
+| `POST /auth/forgot-password` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
+| `POST /auth/reset-password` | 410 | 410 PASSWORD_RESET_TOKEN_EXPIRED for a reset link that is past its hour or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
+| `POST /auth/reset-password` | 503 | 503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; the link is not spent. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
+| `POST /auth/reset-password` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |

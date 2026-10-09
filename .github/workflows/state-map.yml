@@ -26,4 +26,4 @@ jobs:
         run: PYTHONPATH=scripts python3 -m unittest discover -s scripts/statemap/tests
 
       - name: The map against the contract, the error codes and its evidence
-        run: scripts/state-map-check
+        run: scripts/state-map-check --strict

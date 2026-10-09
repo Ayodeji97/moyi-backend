@@ -522,6 +522,710 @@
     "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/domain/Verification.kt#private const val EMAIL_VERIFICATION_TTL_HOURS = 24L"
   },
   {
+    "id": "account-anonymous-logout",
+    "region": "account",
+    "from": "ANONYMOUS",
+    "action": "POST /api/v1/auth/logout",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ANONYMOUS",
+    "status": 204,
+    "code": null,
+    "reason": "You hold no session, so the refresh token sent matches none that is live and nothing changes. The answer is 204 all the same, so that logout cannot be used to test whether a token exists.",
+    "rule": "ADR-0021 §6",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#val token = refreshTokens.findByHash(hash) ?: return@executeWithoutResult"
+  },
+  {
+    "id": "account-pending-logout",
+    "region": "account",
+    "from": "PENDING_VERIFICATION",
+    "action": "POST /api/v1/auth/logout",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": 204,
+    "code": null,
+    "reason": "You hold no session, so the refresh token sent matches none that is live and nothing changes. The answer is 204 all the same, so that logout cannot be used to test whether a token exists.",
+    "rule": "ADR-0021 §6",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#val token = refreshTokens.findByHash(hash) ?: return@executeWithoutResult"
+  },
+  {
+    "id": "account-active-logout",
+    "region": "account",
+    "from": "ACTIVE_SIGNED_OUT",
+    "action": "POST /api/v1/auth/logout",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 204,
+    "code": null,
+    "reason": "You are already signed out: the refresh token sent is unknown or its session has ended, and nothing changes. The answer is 204 all the same, so that logout cannot be used to test whether a token exists.",
+    "rule": "ADR-0021 §6",
+    "evidence": "smoke",
+    "evidenceRef": "…and idempotent",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#val token = refreshTokens.findByHash(hash) ?: return@executeWithoutResult"
+  },
+  {
+    "id": "account-signed-in-logout",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "POST /api/v1/auth/logout",
+    "actor": "you",
+    "when": "your email is verified",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ACCESS_VALID",
+          "ACCESS_EXPIRED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 204,
+    "code": null,
+    "reason": "The session the refresh token belongs to is ended and you are signed out. Logout takes no access token: the refresh token is the credential. The access token of that session is not cancelled and is accepted until its 15 minutes run out (see the session). With a refresh token that is not your session's, nothing changes and the answer is still 204.",
+    "rule": "ADR-0021 §6",
+    "evidence": "smoke",
+    "evidenceRef": "logout is 204",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#refreshTokens.revokeFamily(token.familyId, now)"
+  },
+  {
+    "id": "account-signed-in-logout-unverified",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "POST /api/v1/auth/logout",
+    "actor": "you",
+    "when": "your email is not verified",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ACCESS_VALID",
+          "ACCESS_EXPIRED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": 204,
+    "code": null,
+    "reason": "The session the refresh token belongs to is ended and you are signed out; the account is still waiting for its address to be verified. The access token of that session is accepted until its 15 minutes run out.",
+    "rule": "ADR-0021 §6",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#refreshTokens.revokeFamily(token.familyId, now)"
+  },
+  {
+    "id": "account-anonymous-logout-all",
+    "region": "account",
+    "from": "ANONYMOUS",
+    "action": "POST /api/v1/auth/logout-all",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "refused",
+    "to": "ANONYMOUS",
+    "status": 401,
+    "code": "UNAUTHENTICATED",
+    "reason": "With no account there is no access token the server would accept. (a test asserts the 401 for a call with no token, not the code)",
+    "rule": "ADR-0019 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/SecurityConfiguration.kt#authorize(anyRequest, authenticated)"
+  },
+  {
+    "id": "account-pending-logout-all",
+    "region": "account",
+    "from": "PENDING_VERIFICATION",
+    "action": "POST /api/v1/auth/logout-all",
+    "actor": "you",
+    "when": "you send no access token, or one the server does not accept",
+    "guards": [],
+    "outcome": "refused",
+    "to": "PENDING_VERIFICATION",
+    "status": 401,
+    "code": "UNAUTHENTICATED",
+    "reason": "Signed out, you have nothing to prove who you are with. Sign in first.",
+    "rule": "ADR-0019 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/SecurityConfiguration.kt#authorize(anyRequest, authenticated)"
+  },
+  {
+    "id": "account-active-logout-all",
+    "region": "account",
+    "from": "ACTIVE_SIGNED_OUT",
+    "action": "POST /api/v1/auth/logout-all",
+    "actor": "you",
+    "when": "you send no access token, or one the server does not accept",
+    "guards": [],
+    "outcome": "refused",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 401,
+    "code": "UNAUTHENTICATED",
+    "reason": "Signed out, you have nothing to prove who you are with. Sign in first.",
+    "rule": "ADR-0019 §5",
+    "evidence": "smoke",
+    "evidenceRef": "logout-all without a bearer token is 401",
+    "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/SecurityConfiguration.kt#authorize(anyRequest, authenticated)"
+  },
+  {
+    "id": "account-pending-logout-all-lingering",
+    "region": "account",
+    "from": "PENDING_VERIFICATION",
+    "action": "POST /api/v1/auth/logout-all",
+    "actor": "you",
+    "when": "you send the access token of a session that has ended, and the server still accepts it",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ENDED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": 204,
+    "code": null,
+    "reason": "Logging out, removing a session or a reuse ends the session and leaves its access token usable for the rest of its 15 minutes. Sent in that time, the call goes through: every session of the account on any device ends and every access token stops being accepted, this one included.",
+    "rule": "ADR-0021 §6",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#accounts.revokeAllSessions(UserId(currentUser.id), now)"
+  },
+  {
+    "id": "account-active-logout-all-lingering",
+    "region": "account",
+    "from": "ACTIVE_SIGNED_OUT",
+    "action": "POST /api/v1/auth/logout-all",
+    "actor": "you",
+    "when": "you send the access token of a session that has ended, and the server still accepts it",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ENDED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 204,
+    "code": null,
+    "reason": "Logging out, removing a session or a reuse ends the session and leaves its access token usable for the rest of its 15 minutes. Sent in that time, the call goes through: every session of the account on any device ends and every access token stops being accepted, this one included. The probe cited sends the access token of a session it has just logged out of.",
+    "rule": "ADR-0021 §6",
+    "evidence": "smoke",
+    "evidenceRef": "logout-all with one is 204",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#accounts.revokeAllSessions(UserId(currentUser.id), now)"
+  },
+  {
+    "id": "account-signed-in-logout-all",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "POST /api/v1/auth/logout-all",
+    "actor": "you",
+    "when": "your email is verified",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ACCESS_VALID"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 204,
+    "code": null,
+    "reason": "Every session of the account ends, on every device, and every access token already issued stops being accepted: this is one of the two things that cancel access tokens, the other being a password reset. You are signed out everywhere. With an expired access token the call is 401 first: see the session.",
+    "rule": "FR-007, ADR-0021 §6",
+    "evidence": "test",
+    "evidenceRef": "LoginEndpointTest#logout-all revokes every family and every outstanding access token",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#accounts.revokeAllSessions(UserId(currentUser.id), now)"
+  },
+  {
+    "id": "account-signed-in-logout-all-unverified",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "POST /api/v1/auth/logout-all",
+    "actor": "you",
+    "when": "your email is not verified",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ACCESS_VALID"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": 204,
+    "code": null,
+    "reason": "Every session of the account ends and every access token already issued stops being accepted. You are signed out everywhere; the account is still waiting for its address to be verified.",
+    "rule": "FR-007, ADR-0021 §6",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#accounts.revokeAllSessions(UserId(currentUser.id), now)"
+  },
+  {
+    "id": "account-anonymous-end-session",
+    "region": "account",
+    "from": "ANONYMOUS",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "refused",
+    "to": "ANONYMOUS",
+    "status": 401,
+    "code": "UNAUTHENTICATED",
+    "reason": "With no account there is no access token the server would accept. (a test asserts the 401 for a call with no token, not the code)",
+    "rule": "ADR-0019 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/SecurityConfiguration.kt#authorize(anyRequest, authenticated)"
+  },
+  {
+    "id": "account-pending-end-session",
+    "region": "account",
+    "from": "PENDING_VERIFICATION",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "you send no access token, or one the server does not accept",
+    "guards": [],
+    "outcome": "refused",
+    "to": "PENDING_VERIFICATION",
+    "status": 401,
+    "code": "UNAUTHENTICATED",
+    "reason": "Signed out, you have nothing to prove who you are with. Sign in first. (a test asserts the 401 for a call with no token, not the code)",
+    "rule": "ADR-0019 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/SecurityConfiguration.kt#authorize(anyRequest, authenticated)"
+  },
+  {
+    "id": "account-pending-end-session-lingering",
+    "region": "account",
+    "from": "PENDING_VERIFICATION",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "you send the access token of a session that has ended, and the server still accepts it, and the id is a live session of this account on another device",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ENDED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": 204,
+    "code": null,
+    "reason": "The access token of an ended session is accepted until its 15 minutes run out, and in that time it can still end another of the account's sessions. You stay signed out.",
+    "rule": "FR-007, ADR-0025 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/Sessions.kt#tokens.revokeFamilyOf(userId, sessionId, now)"
+  },
+  {
+    "id": "account-pending-end-session-lingering-missing",
+    "region": "account",
+    "from": "PENDING_VERIFICATION",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "you send the access token of a session that has ended, and the server still accepts it, and the id is anything else, your own ended session included",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ENDED"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_VERIFICATION",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "A session that has ended is not found, like one that is somebody else's or never existed. (a test asserts the 404 for ending the same session twice, not the code)",
+    "rule": "FR-007, ADR-0025 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/Sessions.kt#if (!revoked) throw SessionNotFoundException()"
+  },
+  {
+    "id": "account-active-end-session",
+    "region": "account",
+    "from": "ACTIVE_SIGNED_OUT",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "you send no access token, or one the server does not accept",
+    "guards": [],
+    "outcome": "refused",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 401,
+    "code": "UNAUTHENTICATED",
+    "reason": "Signed out, you have nothing to prove who you are with. Sign in first. (a test asserts the 401 for a call with no token, not the code)",
+    "rule": "ADR-0019 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/SecurityConfiguration.kt#authorize(anyRequest, authenticated)"
+  },
+  {
+    "id": "account-active-end-session-lingering",
+    "region": "account",
+    "from": "ACTIVE_SIGNED_OUT",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "you send the access token of a session that has ended, and the server still accepts it, and the id is a live session of this account on another device",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ENDED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 204,
+    "code": null,
+    "reason": "The access token of an ended session is accepted until its 15 minutes run out, and in that time it can still end another of the account's sessions. You stay signed out.",
+    "rule": "FR-007, ADR-0025 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/Sessions.kt#tokens.revokeFamilyOf(userId, sessionId, now)"
+  },
+  {
+    "id": "account-active-end-session-lingering-missing",
+    "region": "account",
+    "from": "ACTIVE_SIGNED_OUT",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "you send the access token of a session that has ended, and the server still accepts it, and the id is anything else, your own ended session included",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ENDED"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "A session that has ended is not found, like one that is somebody else's or never existed. (a test asserts the 404 for ending the same session twice, not the code)",
+    "rule": "FR-007, ADR-0025 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/Sessions.kt#if (!revoked) throw SessionNotFoundException()"
+  },
+  {
+    "id": "account-signed-in-end-session-current",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "the id is the session you are calling from, and your email is verified",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ACCESS_VALID"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 204,
+    "code": null,
+    "reason": "Ending your current session is a logout: its refresh token is dead and you are signed out. Its access token is not cancelled and is accepted until its 15 minutes run out.",
+    "rule": "FR-007, ADR-0025 §5",
+    "evidence": "smoke",
+    "evidenceRef": "DELETE the current session is a logout: 204",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/Sessions.kt#tokens.revokeFamilyOf(userId, sessionId, now)"
+  },
+  {
+    "id": "account-signed-in-end-session-current-unverified",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "the id is the session you are calling from, and your email is not verified",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ACCESS_VALID"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": 204,
+    "code": null,
+    "reason": "Ending your current session is a logout: its refresh token is dead and you are signed out; the account is still waiting for its address to be verified.",
+    "rule": "FR-007, ADR-0025 §5",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/Sessions.kt#tokens.revokeFamilyOf(userId, sessionId, now)"
+  },
+  {
+    "id": "account-signed-in-end-session-other",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "the id is another live session of yours",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ACCESS_VALID"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SIGNED_IN",
+    "status": 204,
+    "code": null,
+    "reason": "That other session is ended: its refresh token is dead, though its access token is accepted until its 15 minutes run out. The session you are calling from is untouched and you stay signed in.",
+    "rule": "FR-007, ADR-0025 §5",
+    "evidence": "smoke",
+    "evidenceRef": "DELETE the phone's session from the watch is 204",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/Sessions.kt#tokens.revokeFamilyOf(userId, sessionId, now)"
+  },
+  {
+    "id": "account-signed-in-end-session-missing",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "DELETE /api/v1/auth/sessions/{id}",
+    "actor": "you",
+    "when": "the id is anything else: not a UUID, somebody else's session, one that never existed, or one already ended or expired",
+    "guards": [
+      {
+        "region": "account.session",
+        "states": [
+          "ACCESS_VALID"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "SIGNED_IN",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "All of these get one answer, and never 403, so that it does not confirm an id exists. Nothing changes.",
+    "rule": "FR-007, ADR-0025 §5",
+    "evidence": "smoke",
+    "evidenceRef": "DELETE somebody else's (a random id) is 404 NOT_FOUND",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/Sessions.kt#if (!revoked) throw SessionNotFoundException()"
+  },
+  {
+    "id": "account-anonymous-reset",
+    "region": "account",
+    "from": "ANONYMOUS",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "refused",
+    "to": "ANONYMOUS",
+    "status": 422,
+    "code": "PASSWORD_RESET_TOKEN_INVALID",
+    "reason": "With no account there is no reset link, so whatever is presented matches nothing. (a test asserts the 422 for a token that is not a reset link, not the code)",
+    "rule": "FR-004, ADR-0022 §1",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#val existing = tokens.findByHash(hash, VerificationPurpose.PASSWORD_RESET) ?: throw PasswordResetTokenInvalidException()"
+  },
+  {
+    "id": "account-pending-reset",
+    "region": "account",
+    "from": "PENDING_VERIFICATION",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account.reset",
+        "states": [
+          "REQUESTED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": 200,
+    "code": null,
+    "reason": "The password is replaced and any lockout is cleared. An account that has not verified its address may reset its password, and doing so does not verify it: it stays PENDING_VERIFICATION. A link that is not live is refused: see the password reset.",
+    "rule": "FR-004, ADR-0022 §3, §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#passwordHash = newPasswordHash,"
+  },
+  {
+    "id": "account-active-reset",
+    "region": "account",
+    "from": "ACTIVE_SIGNED_OUT",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account.reset",
+        "states": [
+          "REQUESTED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 200,
+    "code": null,
+    "reason": "The password is replaced and any lockout is cleared. Resetting does not sign you in: sign in with the new password. Sessions still live on other devices are ended too (see the session). A link that is not live is refused: see the password reset. The probe cited asserts the 200; the probes after it, that the link no longer works and the old password no longer signs in.",
+    "rule": "FR-004, T-17, ADR-0022 §4",
+    "evidence": "smoke",
+    "evidenceRef": "reset with a good password is 200",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#passwordHash = newPasswordHash,"
+  },
+  {
+    "id": "account-signed-in-reset",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "your email is verified",
+    "guards": [
+      {
+        "region": "account.reset",
+        "states": [
+          "REQUESTED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": 200,
+    "code": null,
+    "reason": "The password is replaced, and every device is signed out, the one that did the reset included: every session ends and every access token already issued stops being accepted. Sign in again with the new password. A link that is not live is refused: see the password reset.",
+    "rule": "FR-004, T-17, ADR-0022 §4",
+    "evidence": "test",
+    "evidenceRef": "LoginEndpointTest#forgot and reset, through the emailed link, change the password and sign every device out",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#accounts.revokeAllSessions(user.id, now)"
+  },
+  {
+    "id": "account-signed-in-reset-unverified",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "your email is not verified",
+    "guards": [
+      {
+        "region": "account.reset",
+        "states": [
+          "REQUESTED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": 200,
+    "code": null,
+    "reason": "The password is replaced, and every device is signed out, the one that did the reset included. The account is still waiting for its address to be verified: a reset does not verify it.",
+    "rule": "FR-004, ADR-0022 §3, §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#accounts.revokeAllSessions(user.id, now)"
+  },
+  {
+    "id": "account-signed-in-reuse-detected",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "event:reuse-detected",
+    "actor": "system",
+    "when": "your email is verified",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": null,
+    "code": null,
+    "reason": "A refresh token of your session that had already been exchanged was presented again, by you or by someone holding a copy; the server cannot tell which. That one session is ended, so you are signed out on this device, and the account's address is emailed. Your other devices stay signed in, and nothing else about the account changes.",
+    "rule": "ADR-0021 §2, §4",
+    "evidence": "test",
+    "evidenceRef": "LoginEndpointTest#refresh rotates the token, and the old one is then a reuse that revokes the family",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#val revoked = tokens.revokeFamily(previous.familyId, now)"
+  },
+  {
+    "id": "account-signed-in-reuse-detected-unverified",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "event:reuse-detected",
+    "actor": "system",
+    "when": "your email is not verified",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": null,
+    "code": null,
+    "reason": "A refresh token of your session that had already been exchanged was presented again. That one session is ended, so you are signed out on this device, and the account's address is emailed.",
+    "rule": "ADR-0021 §2, §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#val revoked = tokens.revokeFamily(previous.familyId, now)"
+  },
+  {
+    "id": "account-signed-in-refresh-token-expires",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "event:refresh-token-expires",
+    "actor": "system",
+    "when": "your email is verified",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACTIVE_SIGNED_OUT",
+    "status": null,
+    "code": null,
+    "reason": "Thirty days pass without a refresh, so the session's refresh token can no longer be exchanged and you are signed out. No job does this and nothing is written: each use compares the expiry with the clock. The test cited moves the clock 31 days on and finds the session gone from the list; the thirty days are read from the code.",
+    "rule": "FR-003",
+    "evidence": "test",
+    "evidenceRef": "SessionsEndpointTest#a session whose refresh token has expired is not in the list, and ending it is 404, not a quiet 204",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/domain/RefreshToken.kt#val TTL: Duration = Duration.ofDays(30)"
+  },
+  {
+    "id": "account-signed-in-refresh-token-expires-unverified",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "event:refresh-token-expires",
+    "actor": "system",
+    "when": "your email is not verified",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PENDING_VERIFICATION",
+    "status": null,
+    "code": null,
+    "reason": "Thirty days pass without a refresh, so the session's refresh token can no longer be exchanged and you are signed out; the account is still waiting for its address to be verified.",
+    "rule": "FR-003",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/domain/RefreshToken.kt#val TTL: Duration = Duration.ofDays(30)"
+  },
+  {
     "id": "session-none-login",
     "region": "account.session",
     "from": "NO_SESSION",
@@ -1296,6 +2000,106 @@
     "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/TokenRevocations.kt#issuedAt.truncatedTo(ChronoUnit.SECONDS) < invalidBefore.truncatedTo(ChronoUnit.SECONDS) -> {"
   },
   {
+    "id": "session-none-reset",
+    "region": "account.session",
+    "from": "NO_SESSION",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account.reset",
+        "states": [
+          "REQUESTED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NO_SESSION",
+    "status": 200,
+    "code": null,
+    "reason": "There is no session to end, and resetting the password does not start one: the answer has no body and no token. Sign in with the new password afterwards.",
+    "rule": "FR-004, ADR-0022 §4",
+    "evidence": "smoke",
+    "evidenceRef": "reset with a good password is 200",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#passwordHash = newPasswordHash,"
+  },
+  {
+    "id": "session-valid-reset",
+    "region": "account.session",
+    "from": "ACCESS_VALID",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account.reset",
+        "states": [
+          "REQUESTED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ENDED",
+    "status": 200,
+    "code": null,
+    "reason": "A password reset ends every session of the account, on every device, and sets the account's sign-out time, so this session's refresh token is dead and its access token stops being accepted at once, not after 15 minutes. The device that did the reset is signed out too.",
+    "rule": "FR-004, T-17, ADR-0022 §4",
+    "evidence": "test",
+    "evidenceRef": "LoginEndpointTest#forgot and reset, through the emailed link, change the password and sign every device out",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#refreshTokens.revokeAllForUser(user.id, now)"
+  },
+  {
+    "id": "session-expired-reset",
+    "region": "account.session",
+    "from": "ACCESS_EXPIRED",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account.reset",
+        "states": [
+          "REQUESTED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ENDED",
+    "status": 200,
+    "code": null,
+    "reason": "A password reset ends every session of the account, this one included: its refresh token can no longer be exchanged.",
+    "rule": "FR-004, ADR-0022 §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#refreshTokens.revokeAllForUser(user.id, now)"
+  },
+  {
+    "id": "session-ended-reset",
+    "region": "account.session",
+    "from": "ENDED",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account.reset",
+        "states": [
+          "REQUESTED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ENDED",
+    "status": 200,
+    "code": null,
+    "reason": "The session was already over. If its access token was still being accepted, it stops being accepted now: a reset cancels every access token issued before it.",
+    "rule": "FR-004, ADR-0022 §4",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#accounts.revokeAllSessions(user.id, now)"
+  },
+  {
     "id": "session-valid-access-token-expires",
     "region": "account.session",
     "from": "ACCESS_VALID",
@@ -1366,5 +2170,185 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#val revoked = tokens.revokeFamily(previous.familyId, now)"
+  },
+  {
+    "id": "reset-none-forgot",
+    "region": "account.reset",
+    "from": "NONE",
+    "action": "POST /api/v1/auth/forgot-password",
+    "actor": "you",
+    "when": "an account has this address, verified or not",
+    "guards": [],
+    "outcome": "ok",
+    "to": "REQUESTED",
+    "status": 202,
+    "code": null,
+    "reason": "A reset link good for one hour is made and emailed to the address. The answer is 202 with an empty body. An account that has not verified its address gets one too, since it may sign in.",
+    "rule": "FR-004, ADR-0022 §3",
+    "evidence": "test",
+    "evidenceRef": "LoginEndpointTest#forgot and reset, through the emailed link, change the password and sign every device out",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RequestPasswordReset.kt#if (user != null && user.canAuthenticate) {"
+  },
+  {
+    "id": "reset-none-forgot-unknown",
+    "region": "account.reset",
+    "from": "NONE",
+    "action": "POST /api/v1/auth/forgot-password",
+    "actor": "you",
+    "when": "no account has this address",
+    "guards": [],
+    "outcome": "ok",
+    "to": "NONE",
+    "status": 202,
+    "code": null,
+    "reason": "Nothing is made and nothing is emailed. The answer is the same 202 with the same empty body: the caller is deliberately not told whether the address has an account.",
+    "rule": "FR-004, ADR-0022 §3",
+    "evidence": "smoke",
+    "evidenceRef": "forgot-password for a stranger is 202, identical",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RequestPasswordReset.kt#if (user != null && user.canAuthenticate) {"
+  },
+  {
+    "id": "reset-requested-forgot",
+    "region": "account.reset",
+    "from": "REQUESTED",
+    "action": "POST /api/v1/auth/forgot-password",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "REQUESTED",
+    "status": 202,
+    "code": null,
+    "reason": "Asking again makes a second link and emails it. This one is not cancelled: each link stays usable until its own hour ends.",
+    "rule": "ADR-0022",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RequestPasswordReset.kt#if (user != null && user.canAuthenticate) {"
+  },
+  {
+    "id": "reset-used-forgot",
+    "region": "account.reset",
+    "from": "USED",
+    "action": "POST /api/v1/auth/forgot-password",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "USED",
+    "status": 202,
+    "code": null,
+    "reason": "A new link is made and emailed; the used one stays used. The test cited resets twice, each time through a link it asked for.",
+    "rule": "ADR-0022",
+    "evidence": "test",
+    "evidenceRef": "LoginEndpointTest#two password changes are two notices, not one and a retry",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RequestPasswordReset.kt#if (user != null && user.canAuthenticate) {"
+  },
+  {
+    "id": "reset-expired-forgot",
+    "region": "account.reset",
+    "from": "EXPIRED",
+    "action": "POST /api/v1/auth/forgot-password",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "EXPIRED",
+    "status": 202,
+    "code": null,
+    "reason": "A new link is made and emailed; the expired one stays expired.",
+    "rule": "ADR-0022",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RequestPasswordReset.kt#if (user != null && user.canAuthenticate) {"
+  },
+  {
+    "id": "reset-none-reset",
+    "region": "account.reset",
+    "from": "NONE",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 422,
+    "code": "PASSWORD_RESET_TOKEN_INVALID",
+    "reason": "The token matches no reset link: mistyped, cut short, never issued, or a verification link, which is looked up separately. (a test asserts the 422 for a verification link sent here, not the code)",
+    "rule": "FR-004, ADR-0022 §1",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#val existing = tokens.findByHash(hash, VerificationPurpose.PASSWORD_RESET) ?: throw PasswordResetTokenInvalidException()"
+  },
+  {
+    "id": "reset-requested-reset",
+    "region": "account.reset",
+    "from": "REQUESTED",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "USED",
+    "status": 200,
+    "code": null,
+    "reason": "The link is spent and the password replaced. In the same transaction any lockout is cleared, every session of the account is ended and every access token stops being accepted; afterwards the address is emailed that the password changed. The account's other live reset links are not cancelled and stay usable until their own hour ends. The new password is checked before the link is looked at, so a refused password does not spend it.",
+    "rule": "FR-004, T-17, ADR-0022 §4",
+    "evidence": "test",
+    "evidenceRef": "LoginEndpointTest#forgot and reset, through the emailed link, change the password and sign every device out",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!tokens.consume(tokenHash, now)) throw PasswordResetTokenExpiredException()"
+  },
+  {
+    "id": "reset-used-reset",
+    "region": "account.reset",
+    "from": "USED",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "refused",
+    "to": "USED",
+    "status": 410,
+    "code": "PASSWORD_RESET_TOKEN_EXPIRED",
+    "reason": "A reset link works once. Used and expired get the same answer; ask for a new link.",
+    "rule": "FR-004, ADR-0022 §1",
+    "evidence": "smoke",
+    "evidenceRef": "the same link again is 410 PASSWORD_RESET_TOKEN_EXPIRED",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!existing.isLive(clock.instant())) throw PasswordResetTokenExpiredException()"
+  },
+  {
+    "id": "reset-expired-reset",
+    "region": "account.reset",
+    "from": "EXPIRED",
+    "action": "POST /api/v1/auth/reset-password",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "refused",
+    "to": "EXPIRED",
+    "status": 410,
+    "code": "PASSWORD_RESET_TOKEN_EXPIRED",
+    "reason": "The link's hour has passed. Nothing changes; ask for a new link.",
+    "rule": "FR-004, ADR-0022 §1",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/ResetPassword.kt#if (!existing.isLive(clock.instant())) throw PasswordResetTokenExpiredException()"
+  },
+  {
+    "id": "reset-requested-expires",
+    "region": "account.reset",
+    "from": "REQUESTED",
+    "action": "event:reset-token-expires",
+    "actor": "system",
+    "when": "",
+    "guards": [],
+    "outcome": "ok",
+    "to": "EXPIRED",
+    "status": null,
+    "code": null,
+    "reason": "A reset link stops working one hour after it was issued. No job does this and nothing is written: each presentation compares the link's expiry with the clock.",
+    "rule": "FR-004",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/domain/Verification.kt#private const val PASSWORD_RESET_TTL_HOURS = 1L"
   }
 ]

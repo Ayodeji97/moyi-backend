@@ -417,14 +417,8 @@
     }
   ],
   "pending": {
-    "endpoints": [
-      "POST /api/v1/auth/forgot-password",
-      "POST /api/v1/auth/reset-password"
-    ],
-    "codes": [
-      "PASSWORD_RESET_TOKEN_INVALID",
-      "PASSWORD_RESET_TOKEN_EXPIRED"
-    ]
+    "endpoints": [],
+    "codes": []
   },
   "contractGaps": [
     {
@@ -519,6 +513,26 @@
     },
     {
       "endpoint": "POST /api/v1/auth/logout",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/forgot-password",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/reset-password",
+      "status": 410,
+      "note": "410 PASSWORD_RESET_TOKEN_EXPIRED for a reset link that is past its hour or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/reset-password",
+      "status": 503,
+      "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; the link is not spent. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/reset-password",
       "status": 415,
       "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
     }
