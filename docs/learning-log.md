@@ -2175,7 +2175,8 @@ Wrong about: where a rule is held. I held "withdrawn means erased" in the read g
 Expected: a read slice. A query by keyset, the gate that already exists, a bookmark that is
          one row and one statement. The hard part had been done in C5a. I wrote fourteen
          decisions in the plan and expected the build to follow them.
-Reality: five of the fourteen were wrong as written, and none was found by reading.
+Reality: five of the fourteen were wrong as written, and the ones that mattered were
+         found by running something.
          I wrote "no lock is taken" for the bookmark. The statement was an insert guarded
          by a `WHERE`: an erasure that commits first leaves nothing to insert. The first
          time it was run against an erasure held open, the insert waited behind it, in
@@ -2199,8 +2200,8 @@ Reality: five of the fourteen were wrong as written, and none was found by readi
          I specified the `ETag` as the SHA-256 of the body. This codebase had already
          learned why not, for the idempotency fingerprint: a hash of a body in which
          everything but a few words is known is a way to check a guess at the words. A
-         header reaches logs a body never does. A reviewer said so before the task
-         started. It is a MAC now.
+         header reaches logs a body never does. A reviewer said so in a note for the
+         next task. It is a MAC now.
          The response wrapper that holds the serialised bytes had a converter for
          `application/json`. A client that asked for `application/problem+json` first,
          which is plausible on an API whose errors are that type, was sent the wrapper
@@ -2213,8 +2214,8 @@ Reality: five of the fourteen were wrong as written, and none was found by readi
          and ended the bond while it waited. But the query that finds the days reads
          `entries` too, so the request stopped there, before either of the two reads the
          test was about, and then made both after the ending. Swapping the two reads left
-         both tests green. That mutation survived twice, a day apart, in two agents'
-         runs. The test that holds it now stops the request where the rule is: as the
+         both tests green. That mutation survived twice, in two agents' runs. The test
+         that holds it now stops the request where the rule is: as the
          read of the entries returns.
          And `hash` was routed through a new `mac`, in the class whose output is stored
          in two tables. Every test of it compared one output with another. None knew a
@@ -2230,8 +2231,9 @@ Wrong about: what a plan can decide. "No lock is taken" and "the SHA-256 of the 
          early. In both the fix was found by asking what, exactly, was waiting on what.
          Arithmetic in a comment. Nobody tests a comment. The bound was tested and held;
          the number that justified it was never run until a reviewer built the entry.
-         And again, reviewers. Every one of these was found by a reviewer, or by an
-         implementer acting as one, who had to prove the finding by running it. Not one
+         And again, reviewers. All but one of these was found by a reviewer, or by an
+         implementer acting as one, who had to prove the finding by running it. The
+         exception is the hash, argued from a rule this codebase already had. Not one
          came from reading the diff and agreeing with it. The three reviews found no
          must-fix in two tasks and one in the third, and what they proved on the way is
          most of what I now know to be true about this slice.
