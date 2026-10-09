@@ -1090,5 +1090,657 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#val isSettled: Boolean get() = closedAt != null || status.isClosed"
+  },
+  {
+    "id": "day-open-today",
+    "region": "day",
+    "from": "OPEN",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "OPEN",
+    "status": 200,
+    "code": null,
+    "reason": "Nobody has a live entry today. A day nobody has written on has no row, and reading it does not create one.",
+    "rule": "",
+    "evidence": "test",
+    "evidenceRef": "RevealGateTest#a day nobody has written to yet is OPEN with two absent entries",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
+    "id": "day-partial-today",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 200,
+    "code": null,
+    "reason": "One of you has written. The status is shared on purpose, so a member who has not written can tell that their partner has.",
+    "rule": "BR-8",
+    "evidence": "smoke",
+    "evidenceRef": "the partner's today is PARTIAL, with the entry locked",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+  },
+  {
+    "id": "day-pending-reveal-today",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_REVEAL",
+    "status": 200,
+    "code": null,
+    "reason": "Both of you have written and the bond's reveal time has not come. Each sees their own entry in full and the other's locked.",
+    "rule": "FR-062",
+    "evidence": "smoke",
+    "evidenceRef": "both have written and the day is PENDING_REVEAL, not PARTIAL",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+  },
+  {
+    "id": "day-revealed-today",
+    "region": "day",
+    "from": "REVEALED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 200,
+    "code": null,
+    "reason": "Both entries are readable by both of you, and today is counted in the streak the response carries.",
+    "rule": "BR-1",
+    "evidence": "smoke",
+    "evidenceRef": "both submissions make today REVEALED",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),"
+  },
+  {
+    "id": "day-solo-today",
+    "region": "day",
+    "from": "SOLO",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "unreachable",
+    "to": "SOLO",
+    "status": null,
+    "code": null,
+    "reason": "GET /today reads the day the clock is in. A day becomes SOLO only when the close job settles it, at least a minute after it ended, and by then today is the next date.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": ""
+  },
+  {
+    "id": "day-empty-today",
+    "region": "day",
+    "from": "EMPTY",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "unreachable",
+    "to": "EMPTY",
+    "status": null,
+    "code": null,
+    "reason": "GET /today reads the day the clock is in. A day becomes EMPTY only once it has ended, and by then today is the next date.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": ""
+  },
+  {
+    "id": "day-frozen-today",
+    "region": "day",
+    "from": "FROZEN",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [],
+    "outcome": "unreachable",
+    "to": "FROZEN",
+    "status": null,
+    "code": null,
+    "reason": "GET /today reads the day the clock is in. A FROZEN day is either a date the calendar stepped over, which has no hours, or a past day a freeze covered.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": ""
+  },
+  {
+    "id": "day-suspended-today",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "the bond is still waiting for its second member",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 200,
+    "code": null,
+    "reason": "The bond is still waiting for its second member, so today is suspended whether or not you have written on it. The other kind of suspended day, one the close job stamped, is never today.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "smoke",
+    "evidenceRef": "…and the day it landed on opens SUSPENDED, not OPEN",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN"
+  },
+  {
+    "id": "day-open-streak",
+    "region": "day",
+    "from": "OPEN",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "OPEN",
+    "status": 200,
+    "code": null,
+    "reason": "Today is on the calendar as an OPEN square, and the numbers are the run up to the last day the close job evaluated.",
+    "rule": "FR-071",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#a bond nobody has written in has a streak of nothing, and a calendar of today, open",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val days = if (unwritten) stored + StreakDay(today, StreakCell.OPEN) else stored"
+  },
+  {
+    "id": "day-partial-streak",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PARTIAL",
+    "status": 200,
+    "code": null,
+    "reason": "Today's square still says OPEN: the calendar never says who has written so far. One entry adds nothing to the run.",
+    "rule": "FR-076",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#today is on the calendar and OPEN whether or not anybody has written",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
+  },
+  {
+    "id": "day-pending-reveal-streak",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_REVEAL",
+    "status": 200,
+    "code": null,
+    "reason": "A day waiting on its reveal time is not complete yet: its square says OPEN and it is not in the run.",
+    "rule": "FR-071",
+    "evidence": "smoke",
+    "evidenceRef": "a day still waiting on its reveal time is not in the streak yet",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
+  },
+  {
+    "id": "day-revealed-streak",
+    "region": "day",
+    "from": "REVEALED",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 200,
+    "code": null,
+    "reason": "The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; after midnight the close job evaluates it and stores the same number.",
+    "rule": "FR-071",
+    "evidence": "smoke",
+    "evidenceRef": "the streak counts today once both have written",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#if (todayComplete && todayFollows(membership, today)) {"
+  },
+  {
+    "id": "day-solo-streak",
+    "region": "day",
+    "from": "SOLO",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SOLO",
+    "status": 200,
+    "code": null,
+    "reason": "Once the close job has evaluated it, a day one of you wrote on is a SOLO square and is not in the run. It has no square if it moved nothing: missed after the bond had ended, or during a deletion countdown since called off.",
+    "rule": "ADR-0034 ruling 2",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#the calendar is a square a day, oldest first, with a solo day drawn as one",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#BondDayStatus.SOLO -> SOLO"
+  },
+  {
+    "id": "day-empty-streak",
+    "region": "day",
+    "from": "EMPTY",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "EMPTY",
+    "status": 200,
+    "code": null,
+    "reason": "Once the close job has evaluated it, a day nobody wrote on is a MISSED square and is not in the run. It has no square if it moved nothing: missed after the bond had ended.",
+    "rule": "BR-4",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#the calendar is a square a day, oldest first, with a solo day drawn as one",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#else -> MISSED"
+  },
+  {
+    "id": "day-frozen-streak",
+    "region": "day",
+    "from": "FROZEN",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "FROZEN",
+    "status": 200,
+    "code": null,
+    "reason": "A rest day: a freeze covered it, or a zone change stepped over the date. It is a FROZEN square and it keeps the run going.",
+    "rule": "BR-5",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#a day a freeze covered is a rest day on the calendar, whoever wrote on it",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#BondDayStatus.FROZEN -> FROZEN"
+  },
+  {
+    "id": "day-suspended-streak",
+    "region": "day",
+    "from": "SUSPENDED",
+    "action": "GET /api/v1/bonds/{bondId}/streak",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "SUSPENDED",
+    "status": 200,
+    "code": null,
+    "reason": "A suspended day has no square and moves no number. A bond still waiting for its second member has no calendar at all, whatever its creator wrote.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "test",
+    "evidenceRef": "StreakEndpointTest#a bond still waiting for its second person has no streak and no calendar, whatever its creator wrote",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#BondDayStatus.SUSPENDED -> SUSPENDED"
+  },
+  {
+    "id": "partner-none-today",
+    "region": "day.partnerEntry",
+    "from": "NONE",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NONE",
+    "status": 200,
+    "code": null,
+    "reason": "partnerEntry is null: your partner has no entry on today.",
+    "rule": "",
+    "evidence": "test",
+    "evidenceRef": "RevealGateTest#a day nobody has written to yet is OPEN with two absent entries",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#partnerEntry = entryList.firstOrNull { it.authorMemberId != membership.memberId }?.readBy(reader),"
+  },
+  {
+    "id": "partner-locked-today",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "LOCKED",
+    "status": 200,
+    "code": null,
+    "reason": "You are shown who wrote it and the word LOCKED, and nothing else: no text, no id, no time, no length.",
+    "rule": "BR-1, BR-8",
+    "evidence": "test",
+    "evidenceRef": "RevealGateTest#a locked entry is exactly an author and a status, and nothing else",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/TodayResponse.kt#Readability.LOCKED -> reading.authorMemberId?.let { LockedEntryResponse(it) }"
+  },
+  {
+    "id": "partner-visible-today",
+    "region": "day.partnerEntry",
+    "from": "VISIBLE",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "VISIBLE",
+    "status": 200,
+    "code": null,
+    "reason": "The entry has been revealed, so you read it in full. What decides this is the entry's own reveal stamp, never the day's status.",
+    "rule": "BR-1",
+    "evidence": "smoke",
+    "evidenceRef": "the partner reads the author's edited words",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val everReadable = authorMemberId == reader.memberId || revealedAt != null"
+  },
+  {
+    "id": "partner-removed-today",
+    "region": "day.partnerEntry",
+    "from": "REMOVED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REMOVED",
+    "status": 200,
+    "code": null,
+    "reason": "Your partner deleted or withdrew it before you could ever read it. You are shown who wrote it and the word REMOVED: no id and no times, which were never yours to see.",
+    "rule": "BR-8, ADR-0032 q2",
+    "evidence": "test",
+    "evidenceRef": "RevealTest#a delete before the reveal shows the partner an author and that it is gone, and nothing else",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/TodayResponse.kt#Readability.TOMBSTONE_UNSEEN -> reading.authorMemberId?.let { ErasedEntryResponse(it) }"
+  },
+  {
+    "id": "partner-deleted-today",
+    "region": "day.partnerEntry",
+    "from": "DELETED",
+    "action": "GET /api/v1/bonds/{bondId}/today",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE",
+          "PENDING_DELETION",
+          "ARCHIVED"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": 200,
+    "code": null,
+    "reason": "Your partner deleted or withdrew an entry you had already been able to read. You are shown the same entry without its words: its id and times, text null, status DELETED.",
+    "rule": "BR-10a",
+    "evidence": "smoke",
+    "evidenceRef": "the partner sees the tombstone",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/EntryReading.kt#Readability.TOMBSTONE -> disclose(EntryStatus.DELETED, null)"
   }
 ]
