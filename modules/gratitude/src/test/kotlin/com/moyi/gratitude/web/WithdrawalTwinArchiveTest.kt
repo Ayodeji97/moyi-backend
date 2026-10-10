@@ -175,6 +175,39 @@ internal class WithdrawalTwinArchiveTest(
         rig.datesOf(rig.walk(bea, bond, mapOf("favourites" to "true"))) shouldBe listOf(first.toString())
     }
 
+    /**
+     * The bound reached on the archive's very last day: every window the
+     * request read was full, and there is nothing beyond them. A cursor then
+     * would promise a page that does not exist, so the request looks once
+     * more before it gives one (Codex's review of the pull request).
+     */
+    @Test
+    fun `at the bound with nothing older, the page carries no cursor`() {
+        clock.set(BOND_CREATED)
+        val bond = rig.bonds.pair(ada, bea)
+        val adasMember = rig.bonds.memberId(bond, ada)
+        val beasMember = rig.bonds.memberId(bond, bea)
+        // Exactly as many days as one request reads when asked for one: every window comes back full.
+        val reach = 2 + (GetDays.MAX_WINDOWS - 1) * GetDays.REFILL_WINDOW
+        val first = LocalDate.of(2020, 1, 1)
+        (0 until reach).forEach { index ->
+            val date = first.plusDays(index.toLong())
+            val day = rig.insertDay(bond, date, "REVEALED")
+            val at = Instant.parse("${date}T10:00:00Z")
+            val adas = rig.insertEntry(day, bond, adasMember, EntryState.REVEALED, "zq-ada-$index", at)
+            rig.insertEntry(day, bond, beasMember, EntryState.REVEALED, "zq-bea-$index", at)
+            mark(adas!!, beasMember, at)
+        }
+        clock.set(NOW)
+        rig.bonds.block(ada, bond, true)
+
+        val pages = rig.pages(bea, bond, mapOf("favourites" to "true", "limit" to "1"))
+
+        pages.size shouldBe 1
+        rig.datesOf(pages[0]["items"].toList()) shouldBe emptyList()
+        pages[0]["nextCursor"].isNull shouldBe true
+    }
+
     // ---- the history ----
 
     /** One day of the shared history: which entries Bea bookmarks on it. */

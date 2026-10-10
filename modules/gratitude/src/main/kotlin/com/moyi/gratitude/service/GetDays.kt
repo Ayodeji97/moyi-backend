@@ -163,7 +163,10 @@ internal class GetDays(
      * a member who bookmarked that many days of a partner's entries, the
      * partner withdrew, and the erasure has not run. The request then
      * returns what it has, with the date of the last day it **examined** as
-     * the cursor, so the walk goes on from there and skips nothing. Such a
+     * the cursor, so the walk goes on from there and skips nothing; and it
+     * gives that cursor only after looking for one day beyond, so that a
+     * history which ends exactly at the bound is not followed by a page
+     * that is not there. Such a
      * page can be short or empty and still carry a cursor, which is what
      * every page with a dropped day looked like before, and is the one case
      * left where a withdrawal that nothing has erased can be told from a
@@ -187,7 +190,8 @@ internal class GetDays(
         var windows = 0
         while (older && !page.more && windows < MAX_WINDOWS) {
             // The first window is one more than the page: that day's presence is how "there is more" is known.
-            val size = if (windows == 0) limit + 1 else REFILL_WINDOW
+            // `addExact`, though `limit` is at most MAX_LIMIT by the check above: a sum that cannot wrap, whoever calls.
+            val size = if (windows == 0) Math.addExact(limit, 1) else REFILL_WINDOW
             val candidates = archive.candidates(membership.bondId, membership.memberId, examined, until, favouritesOnly, size)
             val read = read(membership, candidates)
             val marked = marksOf(membership, read)
@@ -204,13 +208,24 @@ internal class GetDays(
             when {
                 page.more -> page.days.last().date
 
-                // The bound was reached with candidates left: go on from the last one examined, shown or not.
-                older -> examined
+                // The bound was reached and the last window came back full. Full is not the same as "there is
+                // more": the archive may end exactly there, and a cursor would then promise a page that does
+                // not exist. So look once more, for one day, before giving it; then go on from the last day
+                // examined, shown or not.
+                older -> examined.takeIf { anyBefore(membership, it, until, favouritesOnly) }
 
                 else -> null
             }
         return DaysPage(page.days, next)
     }
+
+    /** Whether the feed has a day older than [date] for this member: one row asked for, nothing read. */
+    private fun anyBefore(
+        membership: BondMembership,
+        date: LocalDate?,
+        until: LocalDate?,
+        favouritesOnly: Boolean,
+    ): Boolean = archive.candidates(membership.bondId, membership.memberId, date, until, favouritesOnly, 1).isNotEmpty()
 
     /**
      * `GET /bonds/{bondId}/days/{date}`: that one day as the feed would give
