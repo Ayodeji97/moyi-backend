@@ -1,0 +1,60 @@
+[
+  {
+    "id": "J2",
+    "title": "The daily loop",
+    "steps": [
+      {
+        "row": "day-not-opened-write",
+        "note": ""
+      },
+      {
+        "row": "day-partial-write-again",
+        "note": ""
+      },
+      {
+        "row": "entry-submitted-edit",
+        "note": ""
+      },
+      {
+        "row": "day-partial-partner-writes-waits",
+        "note": "Later the same day."
+      },
+      {
+        "row": "partner-none-partner-writes",
+        "note": "The same request, as it changes what you see of their entry."
+      },
+      {
+        "row": "day-pending-reveal-today",
+        "note": ""
+      },
+      {
+        "row": "day-pending-reveal-time",
+        "note": ""
+      },
+      {
+        "row": "entry-submitted-reveal-time",
+        "note": "The same moment, as your entry sees it."
+      },
+      {
+        "row": "day-revealed-today",
+        "note": ""
+      },
+      {
+        "row": "entry-revealed-edit",
+        "note": ""
+      },
+      {
+        "row": "day-revealed-streak",
+        "note": ""
+      },
+      {
+        "row": "day-revealed-ends",
+        "note": "That night."
+      },
+      {
+        "row": "day-not-opened-today",
+        "note": "The next morning. This is a new day, so nothing of yesterday's carries over, and the loop begins again."
+      }
+    ]
+  }
+]
