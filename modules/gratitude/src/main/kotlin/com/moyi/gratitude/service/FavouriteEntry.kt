@@ -63,7 +63,7 @@ import java.util.UUID
  *    erased by a withdrawal.
  *
  * **Neither verb waits out a withdrawal.** The unmark deletes only a row it
- * can lock at once; a held row is a retryable conflict ([Favourites.unmark]). Before
+ * can lock at once; a held row is a retryable conflict, except on a tombstone ([unmark]). Before
  * that, each request stuck behind a long withdrawal held a pooled
  * connection, and a few of them stalled every other request there was.
  *
@@ -113,15 +113,27 @@ internal class FavouriteEntry(
      * left by the one interleaving the class KDoc describes.
      *
      * @throws EntryNotFoundException as [mark]: an unmark must not be a way to ask whether an id exists.
-     * @throws FavouriteBusyException another transaction holds the mark; retry the removal.
+     * **A held row is a conflict only on an entry that is not a tombstone
+     * to the caller.** There the holder may be an erasure that rolls back,
+     * and the mark would then still show after a removal reported as made.
+     * On a tombstone it is `204` all the same: the entry is a tombstone by
+     * something that has committed, a tombstone says `favourited: false`
+     * whatever rows there are, and what holds the row is the erasure that
+     * removes it (a delivery that fails is retried). A `409` there was the
+     * one answer that differed between a withdrawal whose delivery is still
+     * open and its twin deleted by hand (review of slice C5c).
+     *
+     * @throws FavouriteBusyException another transaction holds the mark on an entry that is not a tombstone; retry the removal.
      */
     fun unmark(
         userId: UUID,
         entryId: EntryId,
     ) {
         val (entry, reader) = entryAndReader(userId, entryId)
-        if (entry.canBeFavouritedBy(reader) == Favouriting.NEVER_SHOWN) throw EntryNotFoundException()
-        if (!favourites.unmark(entryId, reader.memberId)) throw FavouriteBusyException()
+        val answer = entry.canBeFavouritedBy(reader)
+        if (answer == Favouriting.NEVER_SHOWN) throw EntryNotFoundException()
+        val removed = favourites.unmark(entryId, reader.memberId)
+        if (!removed && answer != Favouriting.ERASED) throw FavouriteBusyException()
     }
 
     /**

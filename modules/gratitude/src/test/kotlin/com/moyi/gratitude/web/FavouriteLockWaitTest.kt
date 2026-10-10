@@ -1,6 +1,7 @@
 package com.moyi.gratitude.web
 
 import com.moyi.bond.api.BondAccess
+import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
@@ -99,6 +100,7 @@ internal class FavouriteLockWaitTest(
     @Autowired entries: EntryStore,
     @Autowired joining: ReconcileJoiningDay,
     @Autowired transactions: TransactionTemplate,
+    @Autowired private val dispatcher: OutboxDispatcher,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -247,6 +249,82 @@ internal class FavouriteLockWaitTest(
         marksOn(adas) shouldBe 0
     }
 
+    /**
+     * **The busy refusal must not tell a withdrawal from a deletion by hand**
+     * (found by the review of slice C5c, on the reaction route and on this
+     * one alike). Ada has blocked and withdrawn, and an eraser holds the row
+     * of Bea's bookmark on Ada's entry, as the consumer holds every row it
+     * has touched until its delivery commits. In the twin bond Cy deleted
+     * the entry by hand and left. The entry is the same tombstone to Bea and
+     * to Dee, so the unmark must be the same whole response.
+     */
+    @Test
+    fun `an unmark on a withdrawn entry whose row an eraser holds is the same 204 as on its twin deleted by hand`() {
+        favourite(bea, adas).status shouldBe 204
+        rig.block(ada, bond)
+        wordsOf(adas) shouldBe ADAS_WORDS
+
+        val cy = users.verified("Cy")
+        val dee = users.verified("Dee")
+        clock.set(BOND_CREATED)
+        val twin = rig.pair(cy, dee)
+        clock.set(NOW)
+        val cys = rig.submit(cy, twin, ADAS_WORDS)
+        rig.submit(dee, twin, BEAS_WORDS)
+        favourite(dee, cys).status shouldBe 204
+        rig.delete(cy, cys)
+        rig.leave(cy, twin)
+        val byHand = unfavourite(dee, cys)
+        byHand.status shouldBe 204
+
+        whileErasing(adas) { eraser ->
+            val unmarking = pool.submit(Callable { unfavourite(bea, adas) })
+            val held =
+                try {
+                    unmarking.get(BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                } finally {
+                    eraser.rollbackIfStill(unmarking)
+                }
+            comparable(held) shouldBe comparable(byHand)
+            marksOn(adas) shouldBe 1
+            refusedAtOnce("SELECT 1 FROM entry_favourites WHERE entry_id = '$adas' FOR UPDATE NOWAIT")
+            eraser.commit()
+        }
+
+        marksOn(adas) shouldBe 0
+    }
+
+    /**
+     * The same held row, and the eraser rolls back. The `204` was given for
+     * a row that is then still there; nothing shows it, since the entry is a
+     * tombstone to her by the withdrawal, which did commit, and a tombstone
+     * says `favourited: false`. The consumer's retry removes it.
+     */
+    @Test
+    fun `when the eraser of a withdrawn entry rolls back, the bookmark's row shows nowhere and goes with the consumer's retry`() {
+        favourite(bea, adas).status shouldBe 204
+        rig.block(ada, bond)
+
+        whileErasing(adas) { eraser ->
+            val unmarking = pool.submit(Callable { unfavourite(bea, adas) })
+            try {
+                unmarking.get(BOUND.toMillis(), TimeUnit.MILLISECONDS).status shouldBe 204
+            } finally {
+                eraser.rollbackIfStill(unmarking)
+            }
+            eraser.rollback()
+        }
+
+        wordsOf(adas) shouldBe ADAS_WORDS
+        marksOn(adas) shouldBe 1
+        rig.today(bea, bond) shouldNotContain "\"favourited\":true"
+        rig.today(bea, bond) shouldContain "\"status\":\"DELETED\""
+
+        dispatcher.dispatchDue(clock.instant(), 10).delivered shouldBe 1
+        wordsOf(adas) shouldBe null
+        marksOn(adas) shouldBe 0
+    }
+
     // ---- the eraser ----
 
     /**
@@ -300,6 +378,17 @@ internal class FavouriteLockWaitTest(
                 other.autoCommit = true
             }
         }
+    }
+
+    /** Status, every header but the request's own, and the body with the path the caller typed taken out. */
+    private fun comparable(response: MockHttpServletResponse): String {
+        val body = response.contentAsString.replace(Regex("\"instance\":\"[^\"]*\""), "\"instance\":\"-\"")
+        val headers =
+            response.headerNames
+                .filterNot { it.equals("X-Request-Id", ignoreCase = true) || it.startsWith("X-RateLimit", ignoreCase = true) }
+                .sorted()
+                .joinToString { "$it=${response.getHeaders(it)}" }
+        return "${response.status}|$headers|$body"
     }
 
     private fun marksOn(entryId: String): Int =
