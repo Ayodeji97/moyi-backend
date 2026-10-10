@@ -167,3 +167,38 @@ sequenceDiagram
     Job->>API: the day ends and the close job runs
     Note over API: day is REVEALED
 ```
+
+## J5: Ending
+
+1. **you**: leave the bond. One member leaving ends the bond for both: it becomes ARCHIVED, a record each of you can still read. Nobody is notified, and anything waiting to be agreed is cancelled. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). You send no body, so your entries stay.
+2. **you**: leave the bond. Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. The same request, as your entry sees it.
+3. **you**: read a bond. An ended bond is a record both members keep. The member who left reads it too.
+4. **you**: write today's entry. A bond that has ended takes no new entry, from either member. It is checked under the bond's lock and before the day is looked at, so nothing is stored and no day is opened.
+5. **you**: leave the bond. A bond that has ended cannot be left again, by the member who left or the one who stayed. Nothing is withdrawn, whatever the body says. To take your entries back from an ended bond, block.
+6. **you**: block your partner. Block is the one write an ended bond accepts, from the member who stayed or the one who left, and it may be repeated. It records the block once and changes nothing either of you can read: no status, no leftAt, no ETag. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). You send no body, so your entries go.
+7. **you**: block your partner. Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased afterwards, in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. Your partner's own entries are untouched. The same request, as your entry sees it.
+8. **you**: read the streak. An ended bond keeps the streak it had, and its calendar ends on the day the bond did, for both members.
+
+```mermaid
+sequenceDiagram
+    actor You
+    actor Partner
+    participant API
+    participant Job as Scheduled job
+    You->>API: leave the bond
+    API-->>You: 204, bond is ARCHIVED
+    You->>API: leave the bond
+    API-->>You: 204, day.entry is REVEALED
+    You->>API: read a bond
+    API-->>You: 200, bond is ARCHIVED
+    You->>API: write today's entry
+    API-->>You: 409 BOND_ARCHIVED
+    You->>API: leave the bond
+    API-->>You: 409 BOND_ARCHIVED
+    You->>API: block your partner
+    API-->>You: 204, bond is ARCHIVED
+    You->>API: block your partner
+    API-->>You: 204, day.entry is DELETED
+    You->>API: read the streak
+    API-->>You: 200, bond is ARCHIVED
+```

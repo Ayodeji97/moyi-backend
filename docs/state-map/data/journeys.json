@@ -182,5 +182,43 @@
         "note": "After this the day is no longer today, and the journey stops here, where the API does: the archive, favourites and search that would show the day again are not built."
       }
     ]
+  },
+  {
+    "id": "J5",
+    "title": "Ending",
+    "steps": [
+      {
+        "row": "bond-active-leave",
+        "note": "You send no body, so your entries stay."
+      },
+      {
+        "row": "entry-revealed-leave-keeps",
+        "note": "The same request, as your entry sees it."
+      },
+      {
+        "row": "bond-archived-read",
+        "note": ""
+      },
+      {
+        "row": "bond-archived-write",
+        "note": ""
+      },
+      {
+        "row": "bond-archived-leave",
+        "note": ""
+      },
+      {
+        "row": "bond-archived-block",
+        "note": "You send no body, so your entries go."
+      },
+      {
+        "row": "entry-revealed-block-withdraws",
+        "note": "The same request, as your entry sees it."
+      },
+      {
+        "row": "bond-archived-streak",
+        "note": ""
+      }
+    ]
   }
 ]
