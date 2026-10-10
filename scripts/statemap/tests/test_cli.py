@@ -5,14 +5,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fixture import tiny
+from fixture import row, tiny
 from statemap.cli import main
 
 KOTLIN = "enum class ErrorCode {\n    UNAUTHENTICATED,\n    LAMP_ALREADY_ON,\n}\n"
 OPENAPI = {"paths": {"/api/v1/lamp": {"post": {"responses": {"200": {}, "401": {}, "409": {}}}}}}
 
 
-def repository(tmp, model):
+def repository(tmp, model, openapi=OPENAPI, kotlin=KOTLIN):
     root = Path(tmp)
     data = root / "docs/state-map/data"
     data.mkdir(parents=True)
@@ -23,10 +23,10 @@ def repository(tmp, model):
     (data / "endpoints.json").write_text(json.dumps(model.endpoints))
     (data / "day.json").write_text(json.dumps(model.rows))
     (root / "contracts").mkdir()
-    (root / "contracts/openapi.json").write_text(json.dumps(OPENAPI))
+    (root / "contracts/openapi.json").write_text(json.dumps(openapi))
     enum = root / "common/web/src/main/kotlin/com/moyi/common/web"
     enum.mkdir(parents=True)
-    (enum / "ErrorCode.kt").write_text(KOTLIN)
+    (enum / "ErrorCode.kt").write_text(kotlin)
     (root / "src").mkdir()
     (root / "src/Lamp.kt").write_text("fun press() {}\n")
     return root
@@ -86,6 +86,31 @@ class CliTests(unittest.TestCase):
             code, err = run(["check"], root)
             self.assertEqual(code, 1)
             self.assertIn("state-map: lamp.md is stale; run scripts/state-map-generate", err)
+
+    # One per check the CLI calls: each fails when its call is taken out of cli.main.
+    # check_refs is held by test_check_names_what_is_wrong_and_fails, stale by the test above.
+
+    def checked(self, model, **over):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = repository(tmp, model, **over)
+            run(["generate"], root)
+            return run(["check"], root)
+
+    def test_check_runs_the_contract_check(self):
+        paths = {"/api/v1/lamp": {**OPENAPI["paths"]["/api/v1/lamp"], "get": {"responses": {"200": {}}}}}
+        code, err = self.checked(tiny(), openapi={"paths": paths})
+        self.assertEqual(code, 1)
+        self.assertIn("state-map: GET /api/v1/lamp is in the contract and has no endpoint card", err)
+
+    def test_check_runs_the_error_code_check(self):
+        code, err = self.checked(tiny(), kotlin=KOTLIN.replace("}", "    LAMP_FUSED,\n}"))
+        self.assertEqual(code, 1)
+        self.assertIn("state-map: LAMP_FUSED is an ErrorCode and nothing in the map returns it", err)
+
+    def test_check_runs_the_grid_check(self):
+        code, err = self.checked(tiny([row()]))
+        self.assertEqual(code, 1)
+        self.assertIn("state-map: lamp: 'POST /api/v1/lamp' in ON has no row", err)
 
 
 if __name__ == "__main__":

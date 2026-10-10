@@ -161,6 +161,96 @@ class ValidateTests(unittest.TestCase):
     def test_a_gap_may_not_be_listed_twice(self):
         self.assertIn("contractGaps: POST /api/v1/lamp 409 is listed twice", self.problems(tiny(gaps=[GAP, dict(GAP)])))
 
+    def test_two_regions_may_not_share_an_id(self):
+        machines, rows = two_regions()
+        machines[0]["regions"][1]["id"] = "lamp"
+        self.assertIn("two regions share an id", self.problems(tiny([row(), refusal()], machines=machines)))
+
+    def test_two_states_of_a_region_may_not_share_an_id(self):
+        model = tiny()
+        model.machines[0]["regions"][0]["states"].append({"id": "ON", "label": "on again"})
+        self.assertIn("lamp: two states share an id", self.problems(model))
+
+    def test_a_state_id_is_one_word(self):
+        model = tiny()
+        model.machines[0]["regions"][0]["states"].append({"id": "ON AIR", "label": "on air", "built": False})
+        self.assertIn("lamp: state id 'ON AIR' must match", self.problems(model))
+
+    def card(self, **over):
+        model = tiny()
+        model.endpoints[0].update(over)
+        return model
+
+    def test_a_card_missing_a_key_is_named(self):
+        model = tiny()
+        del model.endpoints[0]["curl"]
+        self.assertIn("endpoint POST /api/v1/lamp: missing curl", self.problems(model))
+
+    def test_a_card_id_is_a_method_and_a_path(self):
+        self.assertIn("endpoint lamp: the id is the method, a space, then the path", self.problems(self.card(id="lamp")))
+
+    def test_a_card_auth_is_none_or_bearer(self):
+        self.assertIn("endpoint POST /api/v1/lamp: auth is 'none' or 'bearer'", self.problems(self.card(auth="cookie")))
+
+    def test_a_request_error_missing_a_key_is_named(self):
+        errors = [{"status": 422, "code": "LAMP_NO_BULB"}]
+        self.assertIn(
+            "endpoint POST /api/v1/lamp: a request error is missing reason, evidence, evidenceRef, codeRef",
+            self.problems(self.card(requestErrors=errors)),
+        )
+
+    def test_a_request_error_evidence_is_one_of_the_four(self):
+        errors = [{"status": 422, "code": "LAMP_NO_BULB", "reason": "No bulb.", "evidence": "guess",
+                   "evidenceRef": "", "codeRef": "src/Lamp.kt#fun press("}]
+        self.assertIn(
+            "endpoint POST /api/v1/lamp: evidence 'guess' is not one of smoke, test, hand, never-run",
+            self.problems(self.card(requestErrors=errors)),
+        )
+
+    def test_an_unknown_region_is_refused(self):
+        self.assertIn("row lamp-off-press: unknown region 'kettle'", self.problems(tiny([row(region="kettle")])))
+
+    def test_an_actor_is_one_of_the_three(self):
+        self.assertIn("row lamp-off-press: actor 'cat' is not one of you, partner, system", self.problems(tiny([row(actor="cat")])))
+
+    def test_a_row_needs_a_reason(self):
+        self.assertIn("row lamp-off-press: no reason", self.problems(tiny([row(reason="  ")])))
+
+    def test_a_success_carries_no_error_code(self):
+        self.assertIn("a success carries no error code", self.problems(tiny([row(code="LAMP_ALREADY_ON")])))
+
+    def test_a_successful_request_needs_a_2xx(self):
+        self.assertIn("a successful request needs a 2xx status", self.problems(tiny([row(status=404)])))
+
+    def test_an_unreachable_cell_has_no_status(self):
+        cell = row(outcome="unreachable", to="OFF")
+        self.assertIn("an unreachable cell has no status and no code", self.problems(tiny([cell])))
+
+    def test_a_row_needs_a_code_ref(self):
+        self.assertIn("row lamp-off-press: no codeRef", self.problems(tiny([row(codeRef=" ")])))
+
+    def test_a_guard_names_states_of_its_region(self):
+        machines, rows = two_regions()
+        rows[0] = {**rows[0], "guards": [{"region": "lamp.bulb", "states": ["COLD", "HOT"]}]}
+        self.assertIn(
+            "row lamp-off-press: guard names HOT, not states of lamp.bulb",
+            self.problems(tiny(rows, machines=machines)),
+        )
+
+    def test_a_journey_needs_a_title_and_a_step(self):
+        sentence = "journey J1: needs a title and at least one step"
+        self.assertIn(sentence, self.problems(tiny(journeys=[{"id": "J1", "title": "On", "steps": []}])))
+        untitled = {"id": "J1", "title": "", "steps": [{"row": "lamp-off-press", "note": ""}]}
+        self.assertIn(sentence, self.problems(tiny(journeys=[untitled])))
+
+    def test_a_journey_may_not_step_on_an_unreachable_cell(self):
+        cell = row(id="lamp-on-press", **{"from": "ON"}, to="ON", outcome="unreachable", status=None)
+        journey = {"id": "J1", "title": "On", "steps": [{"row": "lamp-on-press", "note": ""}]}
+        self.assertIn(
+            "journey J1: step 1 is a cell that cannot be reached",
+            self.problems(tiny([row(), cell], journeys=[journey])),
+        )
+
 
 class LoadTests(unittest.TestCase):
     def test_rows_come_from_every_machine_file_that_exists(self):

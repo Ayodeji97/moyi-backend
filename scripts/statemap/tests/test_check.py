@@ -69,6 +69,10 @@ class ContractTests(unittest.TestCase):
         stale = tiny(pending={"endpoints": ["POST /api/v1/lamp"], "codes": []})
         self.assertIn("is mapped; take it off the pending list", self.problems(stale))
 
+    def test_a_pending_endpoint_the_contract_lacks(self):
+        waiting = tiny(pending={"endpoints": ["GET /api/v1/lamp"], "codes": []})
+        self.assertIn("pending names GET /api/v1/lamp, which is not in the contract", self.problems(waiting))
+
     def test_a_card_for_an_endpoint_the_contract_lacks(self):
         self.assertIn("is not in the contract", self.problems(tiny(), {}))
 
@@ -191,6 +195,15 @@ class RefTests(unittest.TestCase):
 
     def test_a_test_that_does_not_exist(self):
         self.assertIn("no test", self.problems(tiny([row(evidence="test", evidenceRef="LampTest#a lamp that flies"), refusal()])))
+
+    def test_a_test_citation_names_its_class_and_its_test(self):
+        cited = row(evidence="test", evidenceRef="LampTest")
+        self.assertIn("a test's evidenceRef is 'ClassName#the full test name', not 'LampTest'", self.problems(tiny([cited, refusal()])))
+
+    def test_part_of_a_test_name_is_not_a_citation(self):
+        for part in ("a lamp that", "fun", "lamp that is on refuses", "a lamp that is on refuses`("):
+            cited = refusal(evidence="test", evidenceRef=f"LampTest#{part}")
+            self.assertIn(f"no test '{part}' in a LampTest.kt", self.problems(tiny([row(), cited])), part)
 
     def test_the_everywhere_errors_are_checked_too(self):
         model = tiny()

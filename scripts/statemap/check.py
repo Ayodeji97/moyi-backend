@@ -156,8 +156,9 @@ def _code_ref(name: str, ref: str, root: Path) -> list:
 def _test_ref(name: str, ref: str, root: Path) -> list:
     class_name, separator, test_name = ref.partition("#")
     if not separator or not test_name:
-        return [f"{name}: a test's evidenceRef is 'ClassName#text of the test name', not '{ref}'"]
+        return [f"{name}: a test's evidenceRef is 'ClassName#the full test name', not '{ref}'"]
     files = [f for top in SOURCE_ROOTS for f in (root / top).glob(f"**/src/test/**/{class_name}.kt")]
-    if not any(test_name in f.read_text(encoding="utf-8") for f in files):
+    declared = f"fun `{test_name}`("  # the whole name: part of one would pass for any row
+    if not any(declared in f.read_text(encoding="utf-8") for f in files):
         return [f"{name}: no test '{test_name}' in a {class_name}.kt under src/test"]
     return []
