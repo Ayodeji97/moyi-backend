@@ -194,12 +194,34 @@
     "title": "Ending",
     "steps": [
       {
+        "row": "bond-active-deletion-request",
+        "note": "First the two of you try to end it together."
+      },
+      {
+        "row": "proposal-none-deletion-request",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "bond-active-partner-confirms-deletion",
+        "note": ""
+      },
+      {
+        "row": "bond-pending-deletion-write",
+        "note": ""
+      },
+      {
+        "row": "bond-pending-deletion-deletion-cancel",
+        "note": "You change your mind inside the 30 days. What would have come at their end, the deletion itself, is not built."
+      },
+      {
         "row": "bond-active-leave",
-        "note": "You send no body, so your entries stay."
+        "note": "The bond is whole again, and some time later you go on your own after all. You send no body, so your entries stay."
       },
       {
         "row": "entry-revealed-leave-keeps",
-        "note": "The same request, as your entry sees it."
+        "note": "",
+        "sameRequest": true
       },
       {
         "row": "bond-archived-read",
@@ -215,11 +237,12 @@
       },
       {
         "row": "bond-archived-block",
-        "note": "You send no body, so your entries go."
+        "note": "Later you decide not to leave your words with them. You send no body, so your entries go."
       },
       {
         "row": "entry-revealed-block-withdraws",
-        "note": "The same request, as your entry sees it."
+        "note": "",
+        "sameRequest": true
       },
       {
         "row": "bond-archived-streak",
