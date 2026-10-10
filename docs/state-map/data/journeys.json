@@ -21,11 +21,12 @@
       },
       {
         "row": "bond-none-create",
-        "note": ""
+        "note": "The request carries the bond's name, its kind and its anchor time zone, and here a reveal time as well, which is optional."
       },
       {
         "row": "invite-none-create-bond",
-        "note": "The same request, as the invite sees it."
+        "note": "",
+        "sameRequest": true
       },
       {
         "row": "invite-created-accept-own",
@@ -41,11 +42,12 @@
       },
       {
         "row": "day-suspended-joined-partial",
-        "note": "The same moment, as the day sees it."
+        "note": "",
+        "sameRequest": true
       },
       {
         "row": "invite-accepted-accept",
-        "note": "The code is tried once more, after your partner has used it."
+        "note": "You try the code once more, after your partner has used it."
       },
       {
         "row": "day-partial-today",
