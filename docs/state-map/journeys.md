@@ -100,3 +100,41 @@ sequenceDiagram
     You->>API: read today
     API-->>You: 200, day is NOT_OPENED
 ```
+
+## J3: The broken streak
+
+1. **you**: write today's entry. Yours is the first entry of the day, and this write is what opens the day's row. The row is inserted OPEN and counted to PARTIAL in the same transaction, so OPEN is never what this write commits. Your partner sees that you wrote, and nothing of what you wrote.
+2. **you**: read the streak. Today's square still says OPEN: the calendar never says who has written so far. One entry adds nothing to the run.
+3. **system**: the day ends and the close job runs. The day ended with one entry, so it closes as a solo day. Your partner never wrote.
+4. **system**: the day ends and the close job runs. A lone entry is unlocked to the partner who did not write when the day closes SOLO. The same moment, as your entry sees it.
+5. **system**: a banked freeze covers a missed day. A missed day spends a banked freeze when Strict mode is off and there is a run to save. This is the one change evaluation makes to a closed day's status. The lone entry stays revealed. One freeze was banked.
+6. **you**: read the streak. A rest day: a freeze covered it, or a zone change stepped over the date. It is a FROZEN square and it keeps the run going. The next morning.
+7. **you**: edit your entry. Your partner may already have read these words, so they can no longer be changed. You can still delete the entry. You try to change what you wrote yesterday.
+8. **system**: the close job records a day nobody opened. Nobody wrote, so the day never had a row. Once it has ended the close job writes one, already closed as EMPTY. That includes a day on which the bond ended or began a countdown: it began while the bond took entries. A day from before the pairing, or one that began after the bond ended, is never written and stays without a row. That day neither of you writes.
+9. **you**: read the streak. Once the close job has evaluated it, a day nobody wrote on is a MISSED square and is not in the run. It has no square if it moved nothing: missed after the bond had ended, or during a deletion countdown since called off. The morning after. No freeze is left to cover the day, so the run ends here.
+
+```mermaid
+sequenceDiagram
+    actor You
+    actor Partner
+    participant API
+    participant Job as Scheduled job
+    You->>API: write today's entry
+    API-->>You: 201, day is PARTIAL
+    You->>API: read the streak
+    API-->>You: 200, day is PARTIAL
+    Job->>API: the day ends and the close job runs
+    Note over API: day is SOLO
+    Job->>API: the day ends and the close job runs
+    Note over API: day.entry is REVEALED
+    Job->>API: a banked freeze covers a missed day
+    Note over API: day is FROZEN
+    You->>API: read the streak
+    API-->>You: 200, day is FROZEN
+    You->>API: edit your entry
+    API-->>You: 409 ENTRY_IMMUTABLE
+    Job->>API: the close job records a day nobody opened
+    Note over API: day is EMPTY
+    You->>API: read the streak
+    API-->>You: 200, day is EMPTY
+```
