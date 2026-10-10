@@ -135,11 +135,10 @@ sequenceDiagram
 ## J4: Looking back
 
 1. **you**: read today. Both entries are readable by both of you, and today is counted in the streak the response carries. Both of you wrote today and the day has been revealed.
-2. **you**: read today. The entry has been revealed, so you read it in full. What decides this is the entry's own reveal stamp, never the day's status. The same request, for your partner's entry.
+2. (the same request) **you**: read today. The entry has been revealed, so you read it in full. What decides this is the entry's own reveal stamp, never the day's status.
 3. **you**: read the streak. The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; after midnight the close job evaluates it and stores the same number.
-4. **you**: read the streak. The streak and a calendar from the day the bond became two people. Today is always on it, OPEN until both have written. The same request, as the bond sees it.
-5. **you**: write today's entry. A revealed day is settled: its words have been read. The day is checked before the entry is inserted, so this is the answer whether you still have an entry on it or deleted yours, which is what stops delete-then-rewrite replacing words already read. You try to add to a day that is already settled.
-6. **system**: the day ends and the close job runs. A day revealed while it was running is stamped closed and nothing else about it changes. After this the day is no longer today, and the journey stops here, where the API does: the archive, favourites and search that would show the day again are not built.
+4. **you**: write today's entry. A revealed day is settled: its words have been read. The day is checked before the entry is inserted, so this is the answer whether you still have an entry on it or deleted yours, which is what stops delete-then-rewrite replacing words already read. You try to add to a day that is already settled.
+5. **system**: the day ends and the close job runs. A day revealed while it was running is stamped closed and nothing else about it changes. After this the day is no longer today, and the journey stops here, where the API does: the archive by month, search, "on this day", milestone cards and export are not built.
 
 ```mermaid
 sequenceDiagram
@@ -148,13 +147,9 @@ sequenceDiagram
     participant API
     participant Job as Scheduled job
     You->>API: read today
-    API-->>You: 200, day is REVEALED
-    You->>API: read today
-    API-->>You: 200, day.partnerEntry is VISIBLE
+    API-->>You: 200, day is REVEALED, day.partnerEntry is VISIBLE
     You->>API: read the streak
     API-->>You: 200, day is REVEALED
-    You->>API: read the streak
-    API-->>You: 200, bond is ACTIVE
     You->>API: write today's entry
     API-->>You: 409 DAY_CLOSED
     Job->>API: the day ends and the close job runs

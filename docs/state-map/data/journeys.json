@@ -172,15 +172,12 @@
       },
       {
         "row": "partner-visible-today",
-        "note": "The same request, for your partner's entry."
+        "note": "",
+        "sameRequest": true
       },
       {
         "row": "day-revealed-streak",
         "note": ""
-      },
-      {
-        "row": "bond-active-streak",
-        "note": "The same request, as the bond sees it."
       },
       {
         "row": "day-revealed-write",
@@ -188,7 +185,7 @@
       },
       {
         "row": "day-revealed-ends",
-        "note": "After this the day is no longer today, and the journey stops here, where the API does: the archive, favourites and search that would show the day again are not built."
+        "note": "After this the day is no longer today, and the journey stops here, where the API does: the archive by month, search, \"on this day\", milestone cards and export are not built."
       }
     ]
   },
