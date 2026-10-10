@@ -1,6 +1,9 @@
 # ADR-0033 — The close job
 
-**Status:** Proposed · **Date:** 2026-10-05 · **Deciders:** Daniel
+**Status:** Accepted · **Date:** 2026-10-05 · **Deciders:** Daniel
+**Amended:** 2026-10-09 (the status; "C5, the archive" discharged — ADR-0036)
+
+*(2026-10-09: the status read "Proposed" until this date, though the slice merged as #54 on 2026-10-06. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
 ## Context
 
@@ -197,6 +200,9 @@ The `FROZEN` row for a skipped date exists from the handoff on. `EMPTY` days wri
 through a cancelled deletion (question 2 below) will read as missed days.
 
 **C5, the archive.** Question 1 below must be ruled before a past day can be read.
+*(Discharged 2026-10-09. Question 1 was ruled on 2026-10-06 and is decision 9 as it now
+reads. The archive honours it without reading the day's status: such an entry has no
+`revealedAt`, so its day is listed for its author alone — ADR-0036 decisions 1 and 2.)*
 
 **The deploy slice.** Export the meters; alert on the gauge's maximum going stale and on
 the counter staying flat for 25 hours (doc 11); configure a `lock_timeout` outside tests.
@@ -215,7 +221,7 @@ changes serialize with close. The one-minute margin absorbs ordinary clock skew.
    "Ended" is the closer's view (`BondClosingView.endedAt`: archived, or counting down to
    deletion), compared with the day's own end. A day that ended before the bond did still
    reveals. C5's archive must read a closed `SOLO` day with no `revealedAt` as private to its
-   author. This does not change ADR-0032's first question (an author cannot delete on an
+   author *(discharged 2026-10-09: "Owed", C5, above, and ADR-0036 decisions 1 and 2)*. This does not change ADR-0032's first question (an author cannot delete on an
    ended bond), which stays open.
 
    *(Amended 2026-10-07: ADR-0032's first question was ruled on 2026-10-06 and built in

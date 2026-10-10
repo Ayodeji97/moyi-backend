@@ -1,5 +1,6 @@
 package com.moyi.common.web.idempotency
 
+import com.moyi.common.web.RepresentationDigest
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.context.annotation.Bean
@@ -34,6 +35,11 @@ import java.security.MessageDigest
  * SHA-256 over the same unambiguous framing, which is all these tests need:
  * equal requests compare equal, different ones do not. Whether the stored
  * value is *keyed* is proved where the real one is wired, in `gratitude`.
+ *
+ * **[RepresentationDigest] is a stand-in for the same reason.** Scanning
+ * `com.moyi.common` finds `Representations`, which needs one, and the real
+ * one is `common:security`'s too. Nothing in this module's tests reads a
+ * tag; `gratitude`'s `DaysConditionalTest` holds the real one to being keyed.
  */
 @SpringBootApplication(scanBasePackages = ["com.moyi.common"])
 @ConfigurationPropertiesScan("com.moyi.common")
@@ -56,4 +62,8 @@ class IdempotencyTestApplication {
             }
             digest.digest(body).joinToString("") { "%02x".format(it) }
         }
+
+    @Bean
+    fun representationDigest(): RepresentationDigest =
+        RepresentationDigest { body -> MessageDigest.getInstance("SHA-256").digest(body).joinToString("") { "%02x".format(it) } }
 }

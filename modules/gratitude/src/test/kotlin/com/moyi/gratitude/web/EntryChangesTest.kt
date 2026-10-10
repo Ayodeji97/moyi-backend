@@ -48,7 +48,9 @@ import javax.sql.DataSource
  * discovers routes by `{bondId}` and so cannot see a path that carries only
  * an entry id (spec §5.2 chose that path on purpose). The test below that
  * compares the `404`s is their cross-tenant test, and it asserts the exact
- * set of `{entryId}` routes — so a third one added without a case here fails.
+ * set of `{entryId}` routes — so another one added without a case fails
+ * here. The favourite routes (slice C5b) are in that set and have their
+ * case in `FavouritesTest`, which has the fixtures a mark needs.
  *
  * The clock is pinned by [TimeConfiguration]: every entry lands on
  * `2026-09-15` in `Africa/Lagos` unless a test moves it.
@@ -114,6 +116,7 @@ internal class EntryChangesTest(
         val refused = patchEntry(ada, id, """{"text":"too late"}""")
         refused.status shouldBe 409
         refused.contentAsString shouldContain "ENTRY_IMMUTABLE"
+        refused.contentAsString shouldContain "This entry can no longer be changed."
     }
 
     @Test
@@ -174,7 +177,14 @@ internal class EntryChangesTest(
                         info.methodsCondition.methods.map { "${it.name} $path" }
                     }
                 }.toSet()
-        discovered shouldBe setOf("PATCH /api/v1/entries/{entryId}", "DELETE /api/v1/entries/{entryId}")
+        // The two here, and the two `FavouritesTest` compares the same way (and against this one's delete).
+        discovered shouldBe
+            setOf(
+                "PATCH /api/v1/entries/{entryId}",
+                "DELETE /api/v1/entries/{entryId}",
+                "PUT /api/v1/entries/{entryId}/favourite",
+                "DELETE /api/v1/entries/{entryId}/favourite",
+            )
     }
 
     /**

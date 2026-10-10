@@ -1195,6 +1195,292 @@
         "tags" : [ "bonds-controller" ]
       }
     },
+    "/api/v1/bonds/{bondId}/days" : {
+      "get" : {
+        "description" : "The days of the bond on which the caller has something to see, newest first. A day is listed when it holds an entry the caller wrote, or one that has been revealed to them; an erased entry still counts, and is returned as its tombstone.\n\n**Only a null `nextCursor` means the end.** A page's `items` can be shorter than `limit` while `nextCursor` is not null, because a page is also bounded by its size. A page with a `nextCursor` holds at least one day, with one exception: a single request reads at most about a thousand days, and with `favourites=true` a request that reaches that bound answers with what it has found, which can be nothing. Keep asking with the cursor until it is null.\n\n**A day's `status` does not say whether there is anything to draw.** A day whose author deleted their only entry is still listed, for that author alone, with their tombstone as `myEntry`; once that day has closed it carries `status: EMPTY`. Draw a day from its entries, not from its status.",
+        "operationId" : "days",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "description" : "The most days to return. A page can hold fewer and still not be the last: it is also bounded by its size. Only a null `nextCursor` means the end.",
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 20,
+            "maximum" : 50,
+            "minimum" : 1
+          }
+        }, {
+          "description" : "The `nextCursor` of an earlier page, unchanged: the days before that page's last. Opaque; do not build or alter one. It carries no bond and no caller, only a position, so it grants nothing.",
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "maxLength" : 32
+          }
+        }, {
+          "description" : "Start at this calendar date (`YYYY-MM-DD`) or the nearest earlier day: for jumping to a month. With `cursor` as well, both apply.",
+          "in" : "query",
+          "name" : "until",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "description" : "`true` for only the days holding an entry the caller has bookmarked and can still read. Only the caller's own bookmarks are ever considered.",
+          "in" : "query",
+          "name" : "favourites",
+          "required" : false,
+          "schema" : {
+            "type" : "boolean",
+            "default" : false
+          }
+        }, {
+          "description" : "The `ETag` of a response to this same request that the client still holds (RFC 9110 §13.1.2). If it is still current the answer is `304` with no body. A value that is not current, or is not a tag, is ignored and the whole response is sent.",
+          "in" : "header",
+          "name" : "If-None-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DaysResponse"
+                }
+              }
+            },
+            "description" : "OK",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "304" : {
+            "description" : "Not Modified: what the client holds under the `If-None-Match` it sent is still exactly what would be sent. No body.",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "406" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Acceptable: the request's `Accept` header admits no JSON. Decided from that header alone, before the caller's membership is looked at, so it is the same response for a member, for somebody who is not one and for a bond that does not exist. It carries no `ETag`."
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "days-controller" ]
+      }
+    },
+    "/api/v1/bonds/{bondId}/days/{date}" : {
+      "get" : {
+        "description" : "One day exactly as `GET /bonds/{bondId}/days` lists it: the same object, for the same caller. `404 DAY_NOT_FOUND` for every date that is not in the caller's archive, whatever the reason. Today is not in it until the caller has written or the day has revealed, so read today from `GET /bonds/{bondId}/today`. As in the feed, a day's `status` does not say whether there is anything to draw: draw a day from its entries.",
+        "operationId" : "day",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "description" : "A calendar date, `YYYY-MM-DD`. A date that is not in the caller's archive is `404 DAY_NOT_FOUND`, whatever the reason, and so is a value that is not a date.",
+          "in" : "path",
+          "name" : "date",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date"
+          }
+        }, {
+          "description" : "The `ETag` of a response to this same request that the client still holds (RFC 9110 §13.1.2). If it is still current the answer is `304` with no body. A value that is not current, or is not a tag, is ignored and the whole response is sent.",
+          "in" : "header",
+          "name" : "If-None-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DayResponse"
+                }
+              }
+            },
+            "description" : "OK",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "304" : {
+            "description" : "Not Modified: what the client holds under the `If-None-Match` it sent is still exactly what would be sent. No body.",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "406" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Acceptable: the request's `Accept` header admits no JSON. Decided from that header alone, before the caller's membership is looked at, so it is the same response for a member, for somebody who is not one and for a bond that does not exist. It carries no `ETag`."
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "days-controller" ]
+      }
+    },
     "/api/v1/bonds/{bondId}/deletion-request" : {
       "delete" : {
         "operationId" : "cancelBondDeletion",
@@ -2671,6 +2957,164 @@
         "tags" : [ "entry-changes-controller" ]
       }
     },
+    "/api/v1/entries/{entryId}/favourite" : {
+      "delete" : {
+        "description" : "Removes the caller's bookmark. Repeatable: no bookmark is success, and so is an entry that has since been erased. `404` is every entry the caller was never shown, the same as for an id that does not exist. `409 FAVOURITE_BUSY` means another operation holds the bookmark; retry the removal. Allowed on a bond that has ended.",
+        "operationId" : "unfavouriteEntry",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "entryId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "favourites-controller" ]
+      },
+      "put" : {
+        "description" : "Marks the entry as the caller's own bookmark. The other member is never shown it, in any response. Repeatable: a second mark changes nothing and is `204`. Only an entry the caller is shown with `status: REVEALED` can be marked. `409 ENTRY_NOT_REVEALED` is the caller's own entry that has not been revealed. `409 ENTRY_IMMUTABLE` is an entry that has been erased, or is being erased: a tombstone. `404` is every entry the caller was never shown, the same as for an id that does not exist. A body, if one is sent, is ignored. Allowed on a bond that has ended.",
+        "operationId" : "favouriteEntry",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "entryId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "favourites-controller" ]
+      }
+    },
     "/api/v1/invites/{code}" : {
       "get" : {
         "operationId" : "resolve",
@@ -3067,6 +3511,61 @@
         },
         "required" : [ "anchorTimezone", "name", "type" ]
       },
+      "DayResponse" : {
+        "type" : "object",
+        "properties" : {
+          "date" : {
+            "type" : "string",
+            "format" : "date"
+          },
+          "myEntry" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/EntryResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "partnerEntry" : {
+            "discriminator" : {
+              "mapping" : {
+                "DELETED" : "#/components/schemas/EntryResponse",
+                "LOCKED" : "#/components/schemas/LockedEntryResponse",
+                "REMOVED" : "#/components/schemas/ErasedEntryResponse",
+                "REVEALED" : "#/components/schemas/EntryResponse",
+                "SUBMITTED" : "#/components/schemas/EntryResponse"
+              },
+              "propertyName" : "status"
+            },
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/EntryResponse"
+            }, {
+              "$ref" : "#/components/schemas/ErasedEntryResponse"
+            }, {
+              "$ref" : "#/components/schemas/LockedEntryResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN" ]
+          }
+        }
+      },
+      "DaysResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DayResponse"
+            }
+          },
+          "nextCursor" : {
+            "type" : [ "string", "null" ]
+          }
+        }
+      },
       "DeviceRequest" : {
         "type" : "object",
         "properties" : {
@@ -3134,6 +3633,9 @@
               "type" : "string",
               "format" : "date"
             },
+            "favourited" : {
+              "type" : "boolean"
+            },
             "id" : {
               "type" : "string",
               "format" : "uuid"
@@ -3150,7 +3652,7 @@
               "type" : [ "string", "null" ]
             }
           },
-          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "id", "intendedAt", "status", "text" ]
+          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "intendedAt", "status", "text" ]
         } ]
       },
       "ErasedEntryResponse" : {
@@ -3498,7 +4000,7 @@
         "properties" : {
           "code" : {
             "type" : "string",
-            "enum" : [ "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"

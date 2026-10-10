@@ -1,0 +1,42 @@
+meta {
+  name: Days
+  type: http
+  seq: 13
+}
+
+get {
+  url: {{api}}/bonds/{{bondId}}/days?limit=20
+  body: none
+  auth: bearer
+}
+
+params:query {
+  limit: 20
+  ~until: 2026-10-09
+  ~favourites: true
+  ~cursor: {{nextCursor}}
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+script:post-response {
+  if (res.status === 200) {
+    const first = res.body.items[0];
+    if (first) {
+      bru.setVar("date", first.date);
+      // A partner's entry you were never shown is an author and a status, with no id to keep.
+      if (first.partnerEntry && first.partnerEntry.id) bru.setVar("partnerEntryId", first.partnerEntry.id);
+    }
+    if (res.body.nextCursor) bru.setVar("nextCursor", res.body.nextCursor);
+  }
+}
+
+docs {
+  The archive, newest day first: every day you have something to see on. A day is your entry, your partner's, and the day's status; each entry you can read says whether YOU have marked it (favourited).
+
+  Three parameters are switched off here; tick one to send it. until starts the page at that date or the nearest earlier one. favourites=true keeps to the days holding an entry you have marked. cursor is the nextCursor of the page before: it is kept when a response carries one, and null means there is no earlier page. A value the server cannot read is 422, naming the parameter.
+
+  The first day's date and your partner's entry on it are kept for Day, Favourite and Unfavourite.
+}

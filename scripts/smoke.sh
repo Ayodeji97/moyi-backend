@@ -30,10 +30,22 @@
 # that asks for it have their author's entries erased within ten seconds, a
 # block told to keep them leaves them readable, an author deletes on an ended
 # bond, and a misspelt flag ends nothing; and the poller announces no delivery
-# in the log. Last run on 2026-10-07, against a database of its own (MOYI_DB,
-# below): 458 passed, 0 failed. An earlier run that day, with the poller held
-# idle, failed the four probes that then depended on it; three do now, and
-# that run has not been repeated. The pull request
+# in the log. Since slice C5b it reads the archive: the feed and one day of it
+# for each member, the 422 of each unreadable parameter, the two 404s, a day
+# only one has written, the two shapes of an entry the caller was never shown
+# (an author and a status, no other key) and no time of erasure on any shape,
+# a bookmark set and taken off and never shown to the other, what may not be
+# marked and by whom, If-None-Match answered 304 on a tag that moves with the
+# caller's own mark and not with the partner's, the archive as JSON whatever
+# JSON was asked for and a 406 with no tag for a caller who will take none
+# (the same 406 for a stranger), and the tombstone a withdrawal leaves in it:
+# no empty page with a cursor before the erasure, and the same tag after it.
+# Every day it reads is today: no day ends during a run, so paging and past
+# days are the tests' to show. Last run on 2026-10-09, against a database of
+# its own (MOYI_DB, below): 647 passed, 0 failed. A run on 2026-10-07, with the
+# poller held idle, failed the four probes that then depended on it; three did
+# after that, the C5b section adds its own, and that run has not been
+# repeated. The pull request
 # that last changed this file names the commit the
 # jar was built from; a later commit is unproven until it is run again.
 #
@@ -1131,6 +1143,316 @@ LEAKED=""
 for words in "$TAKEN_TEXT" "$READER_TEXT" "$KEPT_TEXT" "$OTHER_TEXT" "$LEFT_TEXT" "$STAYED_TEXT"; do grep -qF "$words" "$MOYI_LOG" && LEAKED="$LEAKED [$words]"; done
 [ -z "$LEAKED" ] && pass "no entry of this section is anywhere in the log" || fail "text in log" "found:$LEAKED"
 if grep -qiE '\bblock' <<<"$WITHDRAWN_LOG"; then fail "block in log" "the log says block"; else pass "…and the log does not say which ending was a block"; fi
+
+echo; echo "the archive — days, one day, a bookmark and a conditional read (FR-090, FR-093, ADR-0036)"
+flush_buckets
+# What this section is for: the four routes of slice C5b answering from the jar,
+# with the real converter, the real security headers and the real poller. Every
+# day here is TODAY. A Bond-day is a calendar day long and the close job's short
+# schedule cannot end one, so nothing in this run pages past a first page, reads
+# a closed or a solo day, or follows a nextCursor that is not null: past days,
+# paging and the byte budget are the integration tests' to show, not this
+# script's. If Lagos midnight passes while this section runs, its date checks
+# fail; that is the run's timing and not a finding.
+
+# at <dotted.path> — a value out of LAST_BODY as JSON with its keys sorted
+# ("true", "null", "\"REVEALED\"", a whole object), or "absent" for a key or an
+# index that is not there. An empty path is the whole body. raw is the same,
+# with a string printed bare.
+at() {
+  python3 -c '
+import json, sys
+try:
+    node = json.loads(sys.stdin.read())
+    for part in filter(None, sys.argv[1].split(".")):
+        node = node[int(part)] if isinstance(node, list) else node[part]
+    print(node if sys.argv[2] == "raw" and isinstance(node, str) else json.dumps(node, sort_keys=True, ensure_ascii=False))
+except (KeyError, IndexError, TypeError, ValueError):
+    print("absent")' "$1" "${2:-json}" <<<"$LAST_BODY"
+}
+raw() { at "$1" raw; }
+# is <label> <got> <expected>
+is() { if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "expected '${3:0:200}', got '${2:0:200}'"; fi; }
+# repeats <value> — whether LAST_BODY carries it as a word of its own anywhere
+# but `instance`, which is the path the caller typed. "50" does not repeat "0".
+repeats() {
+  python3 -c '
+import re, sys
+body = re.sub(r"\"instance\":\"[^\"]*\"", "", sys.stdin.read())
+sys.exit(0 if re.search(r"(?<![0-9A-Za-z])" + re.escape(sys.argv[1]) + r"(?![0-9A-Za-z])", body) else 1)' "$1" <<<"$LAST_BODY"
+}
+no_instance() { printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/'; }
+# no_times <label> — LAST_BODY carries no key that says when an entry was erased
+# or last changed. A withdrawal stamps every entry it erases with one instant,
+# so either key on a tombstone would tell a withdrawal from a deletion by hand.
+no_times() { if [[ "$LAST_BODY" == *'"deletedAt"'* || "$LAST_BODY" == *'"updatedAt"'* ]]; then fail "$1" "${LAST_BODY:0:300}"; else pass "$1"; fi; }
+tag() { etag_of || true; }
+
+verified_account "writer" "203.0.113.90";   ARC_W="$ACCOUNT_ACCESS"
+verified_account "marker" "203.0.113.91";   ARC_M="$ACCOUNT_ACCESS"
+verified_account "outsider" "203.0.113.92"; ARC_O="$ACCOUNT_ACCESS"
+ARC_W_TEXT="thank you for the tea left by the door"
+ARC_M_TEXT="thank you for reading to me last night"
+ARC_SOLO_TEXT="thank you for the walk before work"
+revealed_bond "an archive of one day" "$ARC_W" "$ARC_M" "$ARC_W_TEXT" "$ARC_M_TEXT"
+ARC_BOND="$RB_BOND"; ARC_W_ENTRY="$RB_A_ENTRY"; ARC_M_ENTRY="$RB_B_ENTRY"
+expect "today, for the date the archive should carry" 200 '"bondDay"' -- "$API/bonds/$ARC_BOND/today" -H "Authorization: Bearer $ARC_W"
+ARC_DATE="$(raw bondDay.date)"
+
+# The feed: one day, newest first, each member's own entry as myEntry.
+expect "the writer's GET /days is 200" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"
+is "…it lists today, $ARC_DATE, and no other day" "$(raw items.0.date)|$(at items.1)" "$ARC_DATE|absent"
+is "…REVEALED" "$(raw items.0.status)" "REVEALED"
+is "…the writer's own entry is myEntry, with its words" "$(raw items.0.myEntry.id)|$(raw items.0.myEntry.text)" "$ARC_W_ENTRY|$ARC_W_TEXT"
+is "…the partner's is partnerEntry, with its words" "$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)" "$ARC_M_ENTRY|$ARC_M_TEXT"
+is "…neither is marked, and there is no further page" "$(at items.0.myEntry.favourited)|$(at items.0.partnerEntry.favourited)|$(at nextCursor)" "false|false|null"
+no_times "…and no entry says when it was erased or last changed"
+ARC_W_ITEM="$(at items.0)"
+expect "the marker's GET /days is 200" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
+is "…the same day, REVEALED, and no other" "$(raw items.0.date)|$(raw items.0.status)|$(at items.1)|$(at nextCursor)" "$ARC_DATE|REVEALED|absent|null"
+is "…with the two entries the other way round" "$(raw items.0.myEntry.id)|$(raw items.0.myEntry.text)|$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)" "$ARC_M_ENTRY|$ARC_M_TEXT|$ARC_W_ENTRY|$ARC_W_TEXT"
+ARC_M_ITEM="$(at items.0)"
+
+# One day is the feed's item, not a second rendering of it.
+expect "the writer's GET /days/{today} is 200" 200 "\"date\":\"$ARC_DATE\"" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_W"
+is "…and is the feed's first item, value for value" "$(at "")" "$ARC_W_ITEM"
+expect "the marker's GET /days/{today} is 200" 200 "\"date\":\"$ARC_DATE\"" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M"
+is "…and is the marker's first item, value for value" "$(at "")" "$ARC_M_ITEM"
+
+# A parameter the route cannot read is a 422 that names the parameter and does
+# not hand the value back: what was typed into a query string is the caller's,
+# and an error body is copied into bug reports.
+for bad in limit=0 limit=51 limit=007 cursor=junk until=2026-02-30 favourites=maybe; do
+  expect "GET /days?$bad is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- "$API/bonds/$ARC_BOND/days?$bad" -H "Authorization: Bearer $ARC_W"
+  is "…on ${bad%%=*}" "$(raw errors.0.field)" "${bad%%=*}"
+  if repeats "${bad#*=}"; then fail "422 repeats the value" "'${bad#*=}' is in the body: ${LAST_BODY:0:300}"; else pass "…and the body does not repeat '${bad#*=}'"; fi
+done
+
+# One 404 for a date that is not in the caller's archive, whatever the reason.
+expect "GET /days/1999-01-01 is 404 DAY_NOT_FOUND" 404 '"code":"DAY_NOT_FOUND"' -- "$API/bonds/$ARC_BOND/days/1999-01-01" -H "Authorization: Bearer $ARC_W"
+ARC_NO_DAY="$(no_instance)"
+expect "GET /days/not-a-date is 404 DAY_NOT_FOUND" 404 '"code":"DAY_NOT_FOUND"' -- "$API/bonds/$ARC_BOND/days/not-a-date" -H "Authorization: Bearer $ARC_W"
+is "…the same body, apart from the path that was typed" "$(no_instance)" "$ARC_NO_DAY"
+
+# Somebody who is not in the bond gets the bond's own 404, before any parameter is read.
+expect "a stranger's GET /days is the bond's 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_O"
+ARC_NO_BOND="$(no_instance)"
+expect "a stranger's GET /days/{today} is the same 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_O"
+is "…the same body, apart from the path" "$(no_instance)" "$ARC_NO_BOND"
+expect "a stranger's unreadable cursor is that 404 too, not a 422" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$ARC_BOND/days?cursor=junk" -H "Authorization: Bearer $ARC_O"
+[[ "$LAST_BODY" != *"$ARC_W_TEXT"* && "$LAST_BODY" != *"$ARC_M_TEXT"* ]] && pass "…and nothing of the day is in it" || fail "stranger's 404" "${LAST_BODY:0:300}"
+
+# A second bond, in which only one of the two has written today. The day is in
+# the writer's archive and not in the other member's, and the other member
+# cannot tell that from a date on which nothing happened at all.
+expect "a second bond is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $ARC_W" -d "$(bond_body "Us")"
+ARC_BOND2="$(printf '%s' "$LAST_BODY" | jget id)"
+ARC_CODE2="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$ARC_CODE2/accept" -H "Authorization: Bearer $ARC_O"
+expect "only one of them writes today" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$ARC_BOND2/entries" -H "Authorization: Bearer $ARC_W" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"$ARC_SOLO_TEXT\"}"
+ARC_SOLO_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+expect "the one who wrote has today in their archive" 200 '"items":[' -- "$API/bonds/$ARC_BOND2/days" -H "Authorization: Bearer $ARC_W"
+is "…with their own entry and no partner entry" "$(raw items.0.date)|$(raw items.0.myEntry.id)|$(raw items.0.myEntry.text)|$(at items.0.partnerEntry)|$(at items.1)" "$ARC_DATE|$ARC_SOLO_ENTRY|$ARC_SOLO_TEXT|null|absent"
+expect "…and reads it as one day" 200 "\"text\":\"$ARC_SOLO_TEXT\"" -- "$API/bonds/$ARC_BOND2/days/$ARC_DATE" -H "Authorization: Bearer $ARC_W"
+expect "the one who has not written has an empty archive" 200 '"items":[]' -- "$API/bonds/$ARC_BOND2/days" -H "Authorization: Bearer $ARC_O"
+is "…exactly empty: no day, no cursor" "$(at "")" '{"items": [], "nextCursor": null}'
+expect "…and today is 404 DAY_NOT_FOUND for them" 404 '"code":"DAY_NOT_FOUND"' -- "$API/bonds/$ARC_BOND2/days/$ARC_DATE" -H "Authorization: Bearer $ARC_O"
+ARC_HIDDEN_DAY="$(no_instance)"
+expect "…as a date nobody wrote on is" 404 '"code":"DAY_NOT_FOUND"' -- "$API/bonds/$ARC_BOND2/days/1999-01-01" -H "Authorization: Bearer $ARC_O"
+is "…the same body, so the route does not say whether the partner wrote" "$(no_instance)" "$ARC_HIDDEN_DAY"
+
+# A third bond, for the two shapes of a partner's entry the caller was never
+# shown, as the jar's own serializer writes them: an author and a status, and
+# no other key (BR-8). The archive lists such a day only for a member with an
+# entry of their own on it, so one member writes and deletes, which leaves
+# their tombstone, and then the other writes alone.
+flush_buckets
+ARC_GONE_TEXT="thank you for waiting up for me"
+ARC_LOCKED_TEXT="thank you for the lift to the station"
+expect "a third bond is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $ARC_M" -d "$(bond_body "Us")"
+ARC_BOND3="$(printf '%s' "$LAST_BODY" | jget id)"
+ARC_CODE3="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$ARC_CODE3/accept" -H "Authorization: Bearer $ARC_O"
+expect "one member writes today" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$ARC_BOND3/entries" -H "Authorization: Bearer $ARC_O" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"$ARC_GONE_TEXT\"}"
+ARC_GONE_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+expect "…and deletes it" 204 "" -- -X DELETE "$API/entries/$ARC_GONE_ENTRY" -H "Authorization: Bearer $ARC_O"
+expect "then the other writes, alone" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$ARC_BOND3/entries" -H "Authorization: Bearer $ARC_M" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"$ARC_LOCKED_TEXT\"}"
+ARC_LOCKED_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"; ARC_LOCKED_AUTHOR="$(printf '%s' "$LAST_BODY" | jget authorMemberId)"
+expect "the one who deleted still has the day, through their own tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND3/days" -H "Authorization: Bearer $ARC_O"
+is "…their own entry the wide tombstone" "$(raw items.0.myEntry.id)|$(at items.0.myEntry.text)|$(raw items.0.myEntry.status)" "$ARC_GONE_ENTRY|null|DELETED"
+is "…and the partner's entry exactly an author and LOCKED, no other key" "$(at items.0.partnerEntry)" "{\"authorMemberId\": \"$ARC_LOCKED_AUTHOR\", \"status\": \"LOCKED\"}"
+[[ "$LAST_BODY" != *"$ARC_LOCKED_TEXT"* && "$LAST_BODY" != *"$ARC_LOCKED_ENTRY"* ]] && pass "…neither its words nor its id anywhere in the feed" || fail "locked entry read" "${LAST_BODY:0:300}"
+no_times "…and no key says when anything was erased or changed, on the tombstone or the locked entry"
+ARC_LOCKED_ITEM="$(at items.0)"
+expect "…and the day alone" 200 '"status":"LOCKED"' -- "$API/bonds/$ARC_BOND3/days/$ARC_DATE" -H "Authorization: Bearer $ARC_O"
+is "…is that same item" "$(at "")" "$ARC_LOCKED_ITEM"
+no_times "…with no such key either"
+expect "the other deletes theirs too, before anybody read it" 204 "" -- -X DELETE "$API/entries/$ARC_LOCKED_ENTRY" -H "Authorization: Bearer $ARC_M"
+expect "the first member's archive now" 200 '"status":"REMOVED"' -- "$API/bonds/$ARC_BOND3/days" -H "Authorization: Bearer $ARC_O"
+is "…carries the partner's entry as exactly an author and REMOVED, no other key" "$(at items.0.partnerEntry)" "{\"authorMemberId\": \"$ARC_LOCKED_AUTHOR\", \"status\": \"REMOVED\"}"
+[[ "$LAST_BODY" != *"$ARC_LOCKED_ENTRY"* ]] && pass "…and still not its id" || fail "removed entry read" "${LAST_BODY:0:300}"
+no_times "…and no key says when it was removed"
+ARC_REMOVED_ITEM="$(at items.0)"
+expect "…and the day alone" 200 '"status":"REMOVED"' -- "$API/bonds/$ARC_BOND3/days/$ARC_DATE" -H "Authorization: Bearer $ARC_O"
+is "…is that same item" "$(at "")" "$ARC_REMOVED_ITEM"
+
+# A bookmark is the caller's own. The marker marks the writer's entry; the
+# writer, reading the same entry as their own, is told nothing about it.
+flush_buckets
+expect "PUT /entries/{id}/favourite on the partner's revealed entry is 204" 204 "" -- -X PUT "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_M"
+[ -z "$LAST_BODY" ] && pass "…with no body" || fail "favourite body" "${LAST_BODY:0:200}"
+expect "…and 204 again" 204 "" -- -X PUT "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_M"
+ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id='$ARC_W_ENTRY'")"
+case "$ARC_MARKS" in psql-unavailable) echo "  skip the favourite row count";; 1) pass "…leaving one row, not two";; *) fail "favourite rows" "expected 1, got '$ARC_MARKS'";; esac
+expect "the marker's archive" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
+is "…says favourited on that entry, and not on their own" "$(raw items.0.partnerEntry.id)|$(at items.0.partnerEntry.favourited)|$(at items.0.myEntry.favourited)" "$ARC_W_ENTRY|true|false"
+expect "the writer's archive" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"
+is "…says false on the same entry: a partner's mark is in no response" "$(raw items.0.myEntry.id)|$(at items.0.myEntry.favourited)|$(at items.0.partnerEntry.favourited)" "$ARC_W_ENTRY|false|false"
+is "…and the writer's day is what it was before anybody marked anything" "$(at items.0)" "$ARC_W_ITEM"
+expect "GET /days?favourites=true lists the day for the one who marked it" 200 '"favourited":true' -- "$API/bonds/$ARC_BOND/days?favourites=true" -H "Authorization: Bearer $ARC_M"
+is "…that day and no other" "$(raw items.0.date)|$(at items.1)" "$ARC_DATE|absent"
+expect "…and nothing for the partner" 200 '"items":[]' -- "$API/bonds/$ARC_BOND/days?favourites=true" -H "Authorization: Bearer $ARC_W"
+expect "favourites=false is the whole archive" 200 "\"date\":\"$ARC_DATE\"" -- "$API/bonds/$ARC_BOND/days?favourites=false" -H "Authorization: Bearer $ARC_W"
+expect "today carries the mark too" 200 '"favourited":true' -- "$API/bonds/$ARC_BOND/today" -H "Authorization: Bearer $ARC_M"
+expect "DELETE /entries/{id}/favourite is 204" 204 "" -- -X DELETE "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_M"
+expect "…and 204 again" 204 "" -- -X DELETE "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_M"
+expect "the marker's archive, afterwards" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
+is "…is the day as it was before the mark" "$(at items.0)" "$ARC_M_ITEM"
+expect "…and favourites=true is empty again" 200 '"items":[]' -- "$API/bonds/$ARC_BOND/days?favourites=true" -H "Authorization: Bearer $ARC_M"
+
+# What may not be marked. One's own entry that is still waiting is a 409, which
+# tells its author nothing they do not know; everything the caller was never
+# shown is one 404, the same as an id that was never issued.
+expect "marking one's own unrevealed entry is 409 ENTRY_NOT_REVEALED" 409 '"code":"ENTRY_NOT_REVEALED"' -- -X PUT "$API/entries/$ARC_SOLO_ENTRY/favourite" -H "Authorization: Bearer $ARC_W"
+expect "PUT /entries/<an id nobody was issued>/favourite is 404" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/entries/$(new_key)/favourite" -H "Authorization: Bearer $ARC_W"
+ARC_NO_ENTRY="$(no_instance)"
+expect "the partner marking that unrevealed entry, which they may not read, is 404" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/entries/$ARC_SOLO_ENTRY/favourite" -H "Authorization: Bearer $ARC_O"
+is "…the same body as for no entry at all" "$(no_instance)" "$ARC_NO_ENTRY"
+expect "a stranger marking a revealed entry of a bond they are not in is 404" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_O"
+is "…the same body again" "$(no_instance)" "$ARC_NO_ENTRY"
+expect "DELETE /entries/<an id nobody was issued>/favourite is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$(new_key)/favourite" -H "Authorization: Bearer $ARC_W"
+is "…the same body as the PUT's" "$(no_instance)" "$ARC_NO_ENTRY"
+expect "a stranger unmarking a revealed entry of a bond they are not in is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_O"
+is "…the one 404: the same body as for no entry at all" "$(no_instance)" "$ARC_NO_ENTRY"
+ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id IN ('$ARC_W_ENTRY','$ARC_SOLO_ENTRY')")"
+case "$ARC_MARKS" in psql-unavailable) echo "  skip the refused-mark row count";; 0) pass "…and none of those refusals, nor the unmarking, left a row";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
+
+# The conditional read. The tag is of the bytes this caller is sent, so it moves
+# when their own mark does and stays when only the partner's does.
+flush_buckets
+expect "the marker's GET /days, for its headers" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
+ARC_FEED_TAG="$(tag)"
+[[ "$ARC_FEED_TAG" =~ ^\"[^\"]+\"$ ]] && pass "…a quoted, strong ETag" || fail "feed ETag" "got '$ARC_FEED_TAG'"
+header_is "…and it is the caller's alone to keep, revalidated every time" Cache-Control "private, no-cache"
+expect "the same request with If-None-Match is 304" 304 "" -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_FEED_TAG"
+[ -z "$LAST_BODY" ] && pass "…with no body" || fail "304 body" "${LAST_BODY:0:200}"
+header_is "…the same ETag" ETag "$ARC_FEED_TAG"
+header_is "…and the same Cache-Control" Cache-Control "private, no-cache"
+expect "the marker's GET /days/{today}, for its headers" 200 "\"date\":\"$ARC_DATE\"" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M"
+ARC_DAY_TAG="$(tag)"
+[[ "$ARC_DAY_TAG" =~ ^\"[^\"]+\"$ ]] && pass "…a quoted, strong ETag" || fail "day ETag" "got '$ARC_DAY_TAG'"
+header_is "…private, no-cache" Cache-Control "private, no-cache"
+expect "the same request with If-None-Match is 304" 304 "" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_DAY_TAG"
+[ -z "$LAST_BODY" ] && pass "…with no body" || fail "304 body" "${LAST_BODY:0:200}"
+header_is "…the same ETag" ETag "$ARC_DAY_TAG"
+expect "the writer's GET /days/{today}, the same day read by the other member" 200 "\"date\":\"$ARC_DATE\"" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_W"
+ARC_W_DAY_TAG="$(tag)"
+[ -n "$ARC_W_DAY_TAG" ] && [ "$ARC_W_DAY_TAG" != "$ARC_DAY_TAG" ] && pass "…has a different ETag: one member's tag is not the other's" || fail "tags of two members" "writer '$ARC_W_DAY_TAG', marker '$ARC_DAY_TAG'"
+expect "…and the marker's tag does not make the writer's read a 304" 200 "\"date\":\"$ARC_DATE\"" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_W" -H "If-None-Match: $ARC_DAY_TAG"
+
+expect "the marker marks the writer's entry" 204 "" -- -X PUT "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_M"
+expect "the old feed tag is no longer current: 200, not 304" 200 '"favourited":true' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_FEED_TAG"
+ARC_FEED_TAG_MARKED="$(tag)"
+[ -n "$ARC_FEED_TAG_MARKED" ] && [ "$ARC_FEED_TAG_MARKED" != "$ARC_FEED_TAG" ] && pass "…and the feed's ETag is a new one" || fail "feed tag after a mark" "before '$ARC_FEED_TAG', after '$ARC_FEED_TAG_MARKED'"
+expect "the old day tag is no longer current either" 200 '"favourited":true' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_DAY_TAG"
+ARC_DAY_TAG_MARKED="$(tag)"
+[ -n "$ARC_DAY_TAG_MARKED" ] && [ "$ARC_DAY_TAG_MARKED" != "$ARC_DAY_TAG" ] && pass "…and the day's ETag is a new one" || fail "day tag after a mark" "before '$ARC_DAY_TAG', after '$ARC_DAY_TAG_MARKED'"
+
+# The partner's mark is not in the caller's bytes, so it is not in the caller's tag.
+expect "the writer marks the marker's entry" 204 "" -- -X PUT "$API/entries/$ARC_M_ENTRY/favourite" -H "Authorization: Bearer $ARC_W"
+expect "the marker's feed is still 304 on the tag from before that" 304 "" -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_FEED_TAG_MARKED"
+header_is "…the same ETag" ETag "$ARC_FEED_TAG_MARKED"
+expect "…and so is the marker's day" 304 "" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_DAY_TAG_MARKED"
+expect "…while the writer's own tag has moved" 200 '"favourited":true' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_W" -H "If-None-Match: $ARC_W_DAY_TAG"
+expect "the writer unmarks it" 204 "" -- -X DELETE "$API/entries/$ARC_M_ENTRY/favourite" -H "Authorization: Bearer $ARC_W"
+expect "the marker's feed is 304 still" 304 "" -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_FEED_TAG_MARKED"
+expect "…and the marker's day" 304 "" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_DAY_TAG_MARKED"
+expect "…and the writer's day is 304 again on the tag it began with" 304 "" -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_W" -H "If-None-Match: $ARC_W_DAY_TAG"
+
+# The archive is JSON whatever JSON the caller asked for, and the tag is of
+# those bytes; a caller who will take no JSON gets no day and no tag.
+expect "Accept: application/problem+json on GET /days is still 200" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M" -H 'Accept: application/problem+json'
+header_is "…sent as what it is" Content-Type "application/json"
+header_is "…under the tag a plain read has" ETag "$ARC_FEED_TAG_MARKED"
+expect "Accept: text/plain on GET /days is 406" 406 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M" -H 'Accept: text/plain'
+[ -z "$(tag)" ] && pass "…with no ETag" || fail "406 ETag" "a 406 carried ETag $(tag)"
+[[ "$LAST_BODY" != *"$ARC_W_TEXT"* && "$LAST_BODY" != *"$ARC_M_TEXT"* ]] && pass "…and nothing of the day" || fail "406 body" "${LAST_BODY:0:300}"
+expect "Accept: text/plain on GET /days/{today} is 406" 406 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M" -H 'Accept: text/plain'
+[ -z "$(tag)" ] && pass "…with no ETag" || fail "406 ETag" "a 406 carried ETag $(tag)"
+ARC_NOT_ACCEPTABLE="$(no_instance)"
+# The one place a stranger is not given the bond's 404: the 406 is decided from
+# the request's own header, before anybody's membership is looked at. So it
+# must be the member's 406 exactly, or it would say who is in the bond.
+expect "a stranger's Accept: text/plain on GET /days/{today} is 406 too" 406 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_O" -H 'Accept: text/plain'
+is "…the member's 406, body for body" "$(no_instance)" "$ARC_NOT_ACCEPTABLE"
+[ -z "$(tag)" ] && pass "…with no ETag" || fail "406 ETag" "a stranger's 406 carried ETag $(tag)"
+header_is "…and not to be stored" Cache-Control "no-cache, no-store, max-age=0, must-revalidate"
+expect "…and for a bond that does not exist" 406 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- "$API/bonds/$(new_key)/days" -H "Authorization: Bearer $ARC_O" -H 'Accept: text/plain'
+
+# The archive after a withdrawal. The marker's bookmark is on the writer's
+# entry (set above); the writer now leaves and takes their entries back. The
+# poller erases the entry, and the erasure takes the bookmark with it: a mark
+# on words that are gone would be the one thing left that says they were liked.
+flush_buckets
+expect "before the ending, favourites=true lists the day for the marker" 200 '"favourited":true' -- "$API/bonds/$ARC_BOND/days?favourites=true" -H "Authorization: Bearer $ARC_M"
+expect "the writer leaves, taking their entries back: 204" 204 "" -- -X POST "$API/bonds/$ARC_BOND/leave" -H "Authorization: Bearer $ARC_W" -d '{"withdrawEntries": true}'
+# At once, whether or not the poller has run yet: the read is gated on the record the ending wrote.
+expect "the marker's very next read of the archive carries a tombstone, unmarked" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
+is "…text null, DELETED, not favourited" "$(raw items.0.partnerEntry.id)|$(at items.0.partnerEntry.text)|$(raw items.0.partnerEntry.status)|$(at items.0.partnerEntry.favourited)" "$ARC_W_ENTRY|null|DELETED|false"
+ARC_FEED_TAG_WITHDRAWN="$(tag)"
+no_times "…and nothing in it says when"
+# Whether the poller had already erased the entry when that tag was taken: the tag is "before the erasure" only if not.
+ARC_STILL_WHOLE="$(sql "SELECT text IS NOT NULL FROM entries WHERE id='$ARC_W_ENTRY'")"
+expect "…and favourites=true has already stopped listing the day" 200 '"items":[]' -- "$API/bonds/$ARC_BOND/days?favourites=true" -H "Authorization: Bearer $ARC_M"
+# A dropped day leaves no trace: no cursor pointing past it, which a deletion by hand could never have produced.
+is "…exactly empty: no day, no cursor" "$(at "")" '{"items": [], "nextCursor": null}'
+await_erased "$ARC_W_ENTRY"
+erased_check "the poller erases the withdrawn entry"
+expect "the marker's archive, once it is erased" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
+is "…the writer's entry is a tombstone: text null, DELETED, not favourited" "$(raw items.0.partnerEntry.id)|$(at items.0.partnerEntry.text)|$(raw items.0.partnerEntry.status)|$(at items.0.partnerEntry.favourited)" "$ARC_W_ENTRY|null|DELETED|false"
+is "…and the marker's own entry is whole" "$(raw items.0.myEntry.id)|$(raw items.0.myEntry.text)|$(raw items.0.myEntry.status)" "$ARC_M_ENTRY|$ARC_M_TEXT|REVEALED"
+[[ "$LAST_BODY" != *"$ARC_W_TEXT"* ]] && pass "…the withdrawn words are nowhere in the feed" || fail "withdrawn text read" "${LAST_BODY:0:300}"
+ARC_M_ITEM_AFTER="$(at items.0)"
+[ -n "$(tag)" ] && [ "$(tag)" != "$ARC_FEED_TAG_MARKED" ] && pass "…and the feed's ETag has moved with it" || fail "feed tag after a withdrawal" "still '$ARC_FEED_TAG_MARKED'"
+# It moved once, at the ending. The erasure must not move it again on a day
+# that had revealed: a second change would tell the reader when the consumer
+# ran, and that a consumer ran at all, which a deletion by hand has none of.
+case "$ARC_STILL_WHOLE" in
+  t) is "…and it is the tag the feed had before the erasure: the erasure itself moved nothing" "$(tag)" "$ARC_FEED_TAG_WITHDRAWN";;
+  psql-unavailable) echo "  skip the tag across the erasure (psql unavailable)";;
+  *) echo "  skip the tag across the erasure: the poller had erased the entry before the first read (text whole: '$ARC_STILL_WHOLE')";;
+esac
+no_times "…and nothing in the erased feed says when"
+expect "the marker's day view" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M"
+is "…is that same item" "$(at "")" "$ARC_M_ITEM_AFTER"
+expect "…and the tag from before the withdrawal does not make it a 304" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_DAY_TAG_MARKED"
+expect "favourites=true no longer lists the day for the marker" 200 '"items":[]' -- "$API/bonds/$ARC_BOND/days?favourites=true" -H "Authorization: Bearer $ARC_M"
+ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id='$ARC_W_ENTRY'")"
+case "$ARC_MARKS" in psql-unavailable) echo "  skip the erased-mark row count";; 0) pass "…and the mark's row is gone with the words";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
+expect "the one who withdrew still reads the archive of the ended bond" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"
+is "…their own entry a tombstone: text null, DELETED, not favourited" "$(raw items.0.myEntry.id)|$(at items.0.myEntry.text)|$(raw items.0.myEntry.status)|$(at items.0.myEntry.favourited)" "$ARC_W_ENTRY|null|DELETED|false"
+is "…beside the partner's entry, whole" "$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)|$(raw items.0.partnerEntry.status)" "$ARC_M_ENTRY|$ARC_M_TEXT|REVEALED"
+ARC_W_ITEM_AFTER="$(at items.0)"
+expect "…and their day view" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_W"
+is "…is that same item" "$(at "")" "$ARC_W_ITEM_AFTER"
+expect "marking the tombstone is refused: 409 ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PUT "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_M"
+expect "a bookmark may still be kept on the ended bond's surviving entry" 204 "" -- -X PUT "$API/entries/$ARC_M_ENTRY/favourite" -H "Authorization: Bearer $ARC_W"
+expect "…and favourites=true lists the day for the one who left" 200 '"favourited":true' -- "$API/bonds/$ARC_BOND/days?favourites=true" -H "Authorization: Bearer $ARC_W"
+expect "the second bond, which nobody ended, is as it was" 200 "\"text\":\"$ARC_SOLO_TEXT\"" -- "$API/bonds/$ARC_BOND2/days" -H "Authorization: Bearer $ARC_W"
+
+ARC_LEAKED=""
+for words in "$ARC_W_TEXT" "$ARC_M_TEXT" "$ARC_SOLO_TEXT" "$ARC_GONE_TEXT" "$ARC_LOCKED_TEXT"; do grep -qF "$words" "$MOYI_LOG" && ARC_LEAKED="$ARC_LEAKED [$words]"; done
+[ -z "$ARC_LEAKED" ] && pass "no entry of this section is anywhere in the log" || fail "text in log" "found:$ARC_LEAKED"
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

@@ -98,6 +98,18 @@ logging:
     # and at ERROR if rollback itself fails. INFO is therefore insufficient.
     # The dispatcher reports the failure by class name and retains the retry.
     org.springframework.transaction.interceptor.TransactionInterceptor: "OFF"
+    # FR-093: a bookmark is private to the member who made it. At TRACE this
+    # logger prints every value JdbcTemplate binds to a statement, one line
+    # each. For a bookmark those are the entry's id, the member's id and the
+    # instant, on three adjacent lines: who kept which entry, and when they
+    # were reading it, in a log that is kept longer and read by more people
+    # than the table. Seen on 2026-10-09 with everything at TRACE (ADR-0036).
+    # No entry text goes through it (entries are Hibernate's, pinned above);
+    # what it does print is ids, and for the outbox an event's payload. Its
+    # neighbour JdbcTemplate, at DEBUG, prints a statement's text with `?`
+    # where each value goes, and is left alone. SecretsNeverLoggedTest fails
+    # if this line is removed.
+    org.springframework.jdbc.core.StatementCreatorUtils: INFO
 
 management:
   endpoints:

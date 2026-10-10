@@ -30,10 +30,15 @@ class PersonalDataHasher private constructor(
      * The same MAC over raw bytes — for a value that is not text, or must not
      * be decoded as text on the way in (a request body: [HmacRequestFingerprint]).
      */
-    fun hash(value: ByteArray): String {
-        val mac = Mac.getInstance(ALGORITHM).apply { init(key) }
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(value))
-    }
+    fun hash(value: ByteArray): String = Base64.getUrlEncoder().withoutPadding().encodeToString(mac(value))
+
+    /**
+     * The MAC itself, thirty-two bytes, for a caller that needs another
+     * spelling of it than [hash]'s ([HmacRepresentationDigest] writes
+     * hexadecimal). The same key and the same algorithm: one secret, used
+     * one way.
+     */
+    fun mac(value: ByteArray): ByteArray = Mac.getInstance(ALGORITHM).apply { init(key) }.doFinal(value)
 
     companion object {
         private const val ALGORITHM = "HmacSHA256"

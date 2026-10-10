@@ -84,6 +84,21 @@ internal enum class Readability {
     LOCKED,
 }
 
+/** Whether a [Reader] may bookmark one [Entry] — [Entry.canBeFavouritedBy]'s answer, which has the reasons. */
+internal enum class Favouriting {
+    /** Revealed, and the reader can read it in full. */
+    ALLOWED,
+
+    /** The reader's own entry, which the partner cannot read yet. */
+    NOT_YET_REVEALED,
+
+    /** A tombstone to this reader: deleted, or withdrawn whether or not anything has been erased. */
+    ERASED,
+
+    /** Nothing this reader was ever shown. To be answered exactly as an entry that does not exist. */
+    NEVER_SHOWN,
+}
+
 /**
  * Everything of an entry a reader who can — or once could — read it may
  * have: [Readability.FULL] or [Readability.TOMBSTONE]. [text] is `null`

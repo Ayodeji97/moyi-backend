@@ -16,9 +16,11 @@ import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.maps.shouldContainKey
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldNotContainIgnoringCase
 import io.kotest.matchers.string.shouldStartWith
 import io.swagger.v3.oas.models.OpenAPI
@@ -113,27 +115,31 @@ class OpenApiContractTest(
         // CurrentUser and ClientContext are resolved from the token and the
         // socket; documented as query parameters they would generate a client
         // that sends them. Path parameters (`/sessions/{id}`) are real.
-        // Query and cookie parameters: none, ever. A resolver type documented as
-        // one would generate a client that sends it.
+        // Cookie parameters: none, ever. Query parameters: the archive feed's
+        // four and no others (slice C5b). A resolver type documented as one
+        // would generate a client that sends it, so the list is exhaustive: a
+        // new query parameter has to be added here by somebody who meant it.
         operations()
-            .flatMap { (_, op) ->
+            .flatMap { (route, op) ->
                 op.parameters
                     .orEmpty()
                     .filter { it.`in` != "path" && it.`in` != "header" }
-                    .map { it.name }
-            }.shouldBeEmpty()
+                    .map { "$route ${it.`in`} ${it.name}" }
+            }.toSet() shouldBe
+            listOf("limit", "cursor", "until", "favourites").map { "GET /api/v1/bonds/{bondId}/days query $it" }.toSet()
         // Headers are not all accidental — `If-Match` is required by doc 06 §1
         // and has to appear, or a generated client cannot send it. The list is
         // exhaustive on purpose: a *new* header parameter should have to be
         // justified here, which is what this assertion makes someone do.
         // `Idempotency-Key` joined it in C1 (`submitEntry`), and `patchEntry` carries it since C2.
+        // `If-None-Match` in C5b: the archive's two reads are conditional, and a client has to be able to send its tag.
         operations()
             .flatMap { (_, op) ->
                 op.parameters
                     .orEmpty()
                     .filter { it.`in` == "header" }
                     .map { it.name }
-            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH, IdempotencyInterceptor.HEADER)
+            }.toSet() shouldBe setOf(HttpHeaders.IF_MATCH, HttpHeaders.IF_NONE_MATCH, IdempotencyInterceptor.HEADER)
         api.components.schemas.keys
             .filter { it in setOf("CurrentUser", "ClientContext") }
             .shouldBeEmpty()
@@ -404,6 +410,211 @@ class OpenApiContractTest(
         entries.parameters.first { it.name == "Idempotency-Key" }.required shouldBe true
 
         api.paths["/api/v1/bonds/{bondId}/today"]!!.get.responses shouldContainKey "404"
+    }
+
+    @Test
+    fun `the archive feed documents its four parameters with their bounds, its 422 and its 404`() {
+        // The handler takes the four as optional text and reads them after the
+        // membership guard, so springdoc alone would document four strings.
+        // OpenApiConfiguration states what the route enforces.
+        val days = api.paths["/api/v1/bonds/{bondId}/days"]!!.get
+        days.operationId shouldBe "days"
+        // Two things the schema cannot say and a client gets wrong by guessing (the review of slice C5b): a short page
+        // is not the end, and a day whose status is EMPTY can hold the caller's own tombstone. It no longer says that a
+        // page can be empty with a cursor as a matter of course: only at the bound on one request's reading.
+        val told = days.description.shouldNotBeNull()
+        told shouldContain "Only a null `nextCursor` means the end"
+        told shouldContain "`items` can be shorter than `limit`"
+        told shouldContain "A page with a `nextCursor` holds at least one day, with one exception"
+        told shouldNotContain "`items` can be empty"
+        told shouldContain "`status: EMPTY`"
+        told shouldContain "tombstone"
+        days.responses.keys shouldContainAll listOf("200", "401", "404", "422", "429")
+        days.responses.keys shouldNotContain "409"
+        days.requestBody.shouldBeNull()
+
+        val query = days.parameters.filter { it.`in` == "query" }.associateBy { it.name }
+        query.keys shouldBe setOf("limit", "cursor", "until", "favourites")
+        query.values.forEach { it.required shouldBe false }
+
+        fun typesOf(name: String) = query.getValue(name).schema.let { it.types ?: setOf(it.type) }
+
+        val limit = query.getValue("limit").schema
+        typesOf("limit") shouldBe setOf("integer")
+        limit.minimum.toInt() shouldBe 1
+        limit.maximum.toInt() shouldBe 50
+        limit.default.toString() shouldBe "20"
+        typesOf("until") shouldBe setOf("string")
+        query.getValue("until").schema.format shouldBe "date"
+        typesOf("favourites") shouldBe setOf("boolean")
+        query.getValue("favourites").schema.default shouldBe false
+        // Opaque: a string with no format, so no client is generated to take it apart.
+        typesOf("cursor") shouldBe setOf("string")
+        query
+            .getValue("cursor")
+            .schema.format
+            .shouldBeNull()
+        // And bounded as the route bounds it: a longer one is refused unread (`DayCursor.MAX_LENGTH`, internal to gratitude).
+        query.getValue("cursor").schema.maxLength shouldBe 32
+    }
+
+    @Test
+    fun `both archive reads document the 406 that comes before the membership check, and no other operation documents one`() {
+        val reads = listOf("/api/v1/bonds/{bondId}/days", "/api/v1/bonds/{bondId}/days/{date}").map { api.paths[it]!!.get }
+
+        reads.forEach { read ->
+            withClue(read.operationId) {
+                val refused = read.responses["406"].shouldNotBeNull()
+                refused.content.keys shouldBe setOf("application/problem+json")
+                refused.headers.orEmpty().keys shouldNotContain "ETag"
+                refused.description shouldContain "before the caller's membership is looked at"
+                refused.description shouldContain "the same response for a member"
+            }
+        }
+        // Everywhere else a 406 comes after the handler, as it always has, and is documented nowhere (as 405 is not).
+        operations().filter { (_, op) -> op.responses.containsKey("406") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
+            listOf("days", "day")
+    }
+
+    @Test
+    fun `the day and the two favourite operations say what the schema cannot`() {
+        // One day: today is not there until the caller has written, and where to read it instead.
+        val day =
+            api.paths["/api/v1/bonds/{bondId}/days/{date}"]!!
+                .get.description
+                .shouldNotBeNull()
+        day shouldContain "`404 DAY_NOT_FOUND` for every date that is not in the caller's archive"
+        day shouldContain "read today from `GET /bonds/{bondId}/today`"
+        day shouldContain "does not say whether there is anything to draw"
+
+        // A mark: whose it is, what can be marked, and which of the two 409s means what.
+        val favourite = api.paths["/api/v1/entries/{entryId}/favourite"]!!
+        val mark = favourite.put.description.shouldNotBeNull()
+        mark shouldContain "The other member is never shown it"
+        mark shouldContain "`status: REVEALED`"
+        mark shouldContain "`409 ENTRY_NOT_REVEALED`"
+        mark shouldContain "`409 ENTRY_IMMUTABLE`"
+        mark shouldContain "never shown"
+        mark shouldContain "Allowed on a bond that has ended"
+
+        val unmark = favourite.delete.description.shouldNotBeNull()
+        unmark shouldContain "no bookmark is success"
+        unmark shouldContain "never shown"
+        unmark shouldContain "Allowed on a bond that has ended"
+    }
+
+    @Test
+    fun `a day of the archive carries the two entry fields exactly as today does, and a page is days and a cursor`() {
+        // One reader for an entry, wherever it is met: the same branches, the
+        // same discriminator, the same null. And no field about the other
+        // person: nothing but a date, the day's status and the two entries.
+        val today = api.components.schemas["TodayResponse"]!!.properties
+        val day = api.components.schemas["DayResponse"]!!
+        day.properties.keys shouldBe setOf("date", "status", "myEntry", "partnerEntry")
+        day.properties["partnerEntry"] shouldBe today["partnerEntry"]
+        day.properties["myEntry"] shouldBe today["myEntry"]
+        day.properties["partnerEntry"]!!.discriminator.shouldNotBeNull()
+        day.properties["partnerEntry"]!!.oneOf.size shouldBe 4
+        day.properties["date"]!!.format shouldBe "date"
+
+        val page = api.components.schemas["DaysResponse"]!!
+        page.properties.keys shouldBe setOf("items", "nextCursor")
+        page.properties["items"]!!.items.`$ref` shouldBe "#/components/schemas/DayResponse"
+    }
+
+    @Test
+    fun `one day of the archive is the feed's day, at a date, with the one 404 and no parameter but its path`() {
+        val day = api.paths["/api/v1/bonds/{bondId}/days/{date}"]!!.get
+        day.operationId shouldBe "day"
+        day.requestBody.shouldBeNull()
+        // The body is a `Representation<DayResponse>` in the handler: the document must say DayResponse, not the holder.
+        day.responses["200"]!!
+            .content[MediaType.APPLICATION_JSON_VALUE]!!
+            .schema.`$ref` shouldBe "#/components/schemas/DayResponse"
+        api.paths["/api/v1/bonds/{bondId}/days"]!!
+            .get.responses["200"]!!
+            .content[MediaType.APPLICATION_JSON_VALUE]!!
+            .schema.`$ref` shouldBe "#/components/schemas/DaysResponse"
+        api.components.schemas.keys
+            .filter { it.contains("Representation") }
+            .shouldBeEmpty()
+        day.responses.keys shouldContainAll listOf("200", "304", "401", "404", "429")
+        day.responses.keys shouldNotContain "422"
+        day.responses.keys shouldNotContain "409"
+        day.parameters.filter { it.`in` == "query" }.shouldBeEmpty()
+        val date = day.parameters.single { it.`in` == "path" && it.name == "date" }
+        date.required shouldBe true
+        date.schema.format shouldBe "date"
+        (
+            api.components.schemas["ProblemDetail"]!!
+                .properties["code"]!!
+                .enum
+                .map { it.toString() }
+        ) shouldContain "DAY_NOT_FOUND"
+    }
+
+    @Test
+    fun `both archive reads document the ETag they send, the If-None-Match they take and the 304 they may answer`() {
+        // The header is set on the ResponseEntity and the 304 is the framework's, so springdoc sees neither.
+        val reads = listOf("/api/v1/bonds/{bondId}/days", "/api/v1/bonds/{bondId}/days/{date}").map { api.paths[it]!!.get }
+
+        reads.forEach { read ->
+            withClue(read.operationId) {
+                read.responses["200"]!!.headers.orEmpty() shouldContainKey "ETag"
+                // One media type comes back, whatever the mapping accepts: `produces` also names `application/*+json`, so that
+                // an `Accept` of a `+json` type is answered and not refused, and what answers it is still `application/json`.
+                read.responses["200"]!!.content.keys shouldBe setOf("application/json")
+                val condition = read.parameters.single { it.name == HttpHeaders.IF_NONE_MATCH }
+                condition.`in` shouldBe "header"
+                condition.required shouldBe false
+                val notModified = read.responses["304"].shouldNotBeNull()
+                notModified.content.shouldBeNull()
+                notModified.headers.orEmpty() shouldContainKey "ETag"
+                // Nothing here is a condition on a write.
+                read.parameters.map { it.name } shouldNotContain HttpHeaders.IF_MATCH
+                read.responses.keys shouldNotContain "412"
+                read.responses.keys shouldNotContain "428"
+            }
+        }
+        // And only they: a 304 documented on a route that cannot give one is a branch a client is generated to handle for nothing.
+        operations().filter { (_, op) -> op.responses.containsKey("304") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
+            listOf("days", "day")
+    }
+
+    @Test
+    fun `a favourite is put and deleted with no body, and removing a locked mark can conflict`() {
+        val favourite = api.paths["/api/v1/entries/{entryId}/favourite"]!!
+        favourite.readOperationsMap().keys.map { it.name } shouldContainExactlyInAnyOrder listOf("PUT", "DELETE")
+
+        // 409 is ENTRY_NOT_REVEALED and ENTRY_IMMUTABLE. No body goes in, so no 400 or 422, and none comes out.
+        favourite.put.operationId shouldBe "favouriteEntry"
+        favourite.put.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "409", "429", "500")
+        favourite.put.requestBody shouldBe null
+        favourite.put.responses["204"]!!.content shouldBe null
+        favourite.put.parameters.map { it.name } shouldBe listOf("entryId")
+
+        // Absent is success; a row held by another transaction is FAVOURITE_BUSY.
+        favourite.delete.operationId shouldBe "unfavouriteEntry"
+        favourite.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "409", "429", "500")
+        favourite.delete.description shouldContain "409 FAVOURITE_BUSY"
+        favourite.delete.responses["204"]!!.content shouldBe null
+        favourite.delete.parameters.map { it.name } shouldBe listOf("entryId")
+    }
+
+    @Test
+    fun `an entry says whether its reader kept it, and the two shapes for an entry never shown have no such field`() {
+        val full =
+            api.components.schemas["EntryResponse"]!!
+                .allOf
+                .last()
+        full.properties["favourited"]!!.types shouldBe setOf("boolean")
+        full.required shouldContain "favourited"
+        listOf("LockedEntryResponse", "ErasedEntryResponse").forEach { name ->
+            api.components.schemas[name]!!
+                .allOf
+                .last()
+                .properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+        }
     }
 
     @Test

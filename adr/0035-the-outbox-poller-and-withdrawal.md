@@ -1,6 +1,9 @@
 # ADR-0035 — The outbox poller and withdrawal
 
-**Status:** Proposed · **Date:** 2026-10-07 · **Deciders:** Daniel
+**Status:** Accepted · **Date:** 2026-10-07 · **Deciders:** Daniel
+**Amended:** 2026-10-09 (the status; "Owed — C5b" discharged; the smoke run's section count corrected — ADR-0036)
+
+*(2026-10-09: the status read "Proposed" until this date, though the slice merged as #58 on 2026-10-07. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
 ## Context
 
@@ -535,30 +538,47 @@ polling by delivery row (decision 1), `last_error` (decision 5), a replay consul
 marker (decision 12, `WithdrawalReadTest`). ADR-0032's first note stands for whoever
 consumes `EntrySubmitted`: there is no event for an erasure, so read the entry before acting.
 
-**C5b, the archive and favourites.**
+**C5b, the archive and favourites.** *(2026-10-09: each item below is marked with what
+became of it in slice C5b, ADR-0036.)*
 
 - A closed `SOLO` day whose entry has no `revealedAt` is private to its author (ADR-0033
   decision 9, as ruled). The archive must go through `Entry.canBeReadBy`, which already
   answers so, and must not infer readability from the day's status.
+  *(Discharged, ADR-0036 decisions 1 and 2: the archive's query reads no column of the
+  day, and every entry is rendered through the gate. `ArchiveGateTest`, "SOLO on a bond
+  that ended before the day did".)*
 - A delete keeps the row, so no foreign-key cascade will ever remove a favourite (X5).
   Favourites are removed in `EraseEntry`, which serves `DELETE`, the withdrawal and decision
   14 at once.
+  *(Discharged, ADR-0036 decision 13. `FavouritesTest` holds each of the three.)*
 - **No response may carry a tombstone's `deletedAt` or `updatedAt`.** A withdrawal stamps
   every entry it erases with one instant (Consequences), so the first response to show
   either field would let the partner tell a withdrawal from a run of deletes, and from
   there, by the defaults, guess at a block. The archive is the first route that returns
   many tombstones at once.
+  *(Discharged, ADR-0036 decision 3. `DaysFeedTest`, "no response carries when an entry
+  was erased or last changed, on any shape". It stays a rule for every later response:
+  search and reactions.)*
 - The default page of 20 days can exceed NFR-008's 256 KB: 20 days, two entries, 8,192 bytes
   each is 327,680 bytes of text alone (X11).
+  *(Discharged, ADR-0036 decision 6: a page is bounded by 192 KiB of text counted as JSON
+  carries it. The figure above is too small: an entry of control characters is 8,192
+  octets in and 49,147 on the wire, so a day can be 98 KB. The worst page was built and
+  measured at 229,063 octets.)*
 - Whether a day's page may say `SOLO` (ADR-0034, "Owed, C5, the archive": the same question
   its decision 12 answered for the calendar). The owner ruled on 2026-10-06 that an archive
   day carries its status; ADR-0034's Rulings, 2, records the calendar's half, where a solo
   day is now drawn. Still owed before it is built: read `states.md` §6, which by the
   corpus read draws no solo day card.
+  *(Discharged, ADR-0036 decision 3: a day carries its status. `states.md` §6 was read
+  and draws no solo day card. That is left open, as a gap in the design: ADR-0036
+  question 5.)*
 
 **C5b and C5c.** Each new route by entry id (favourites in C5b, reactions in C5c) uses
 `ChangeEntry.authorOf`'s rule or states why not, and joins `EntryChangesTest`'s route set
 (ADR-0032, Revisit).
+*(2026-10-09. Discharged for favourites, ADR-0036 decision 11: not `authorOf`'s rule, with
+the reason, and both routes are in the set. Open for reactions, C5c.)*
 
 **C6.** `entries.text_search` exists (V12) and nothing writes it: no entity maps it and no
 statement sets it, so an erasure leaves it `NULL` only because it was never anything else.
@@ -805,6 +825,8 @@ their own checkout; reviewers wrote probes that assert nothing and print what th
     the owed-deliveries count, the poller's own log line). Every API probe stayed green
     there: that is the read gate with no consumer. The next boot delivered the five
     deliveries that run left owed.
+    *(Corrected 2026-10-09, in ADR-0036's slice: the run has **19** sections, not 18,
+    counted from the log of the run on `main` on 2026-10-07. The totals above stand.)*
   - The CLI's `bond leave` and `bond block`, with each flag and with none, against a jar:
     kept, kept, erased, erased, kept, erased, as the defaults say. The Bruno requests were
     written and not opened in Bruno.

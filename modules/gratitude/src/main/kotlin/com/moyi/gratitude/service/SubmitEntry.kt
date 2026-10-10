@@ -21,6 +21,7 @@ import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
+import com.moyi.gratitude.infra.database.Favourites
 import com.moyi.gratitude.infra.database.GratitudeConstraints
 import com.moyi.gratitude.infra.database.redacted
 import com.moyi.gratitude.infra.database.violates
@@ -68,10 +69,15 @@ internal data class EntryDraft(
  * what the web layer renders. An [EntryReading], not an [Entry]: a fresh
  * write and a replay both leave this class through [Entry.readBy], so the
  * response is built from the gate's answer on either path.
+ *
+ * [favourited] is **the caller's own** bookmark on it (FR-093), never
+ * anybody else's, and has no default: whoever builds a view says what the
+ * caller's mark is, or says why there cannot be one.
  */
 internal data class EntryView(
     val entry: EntryReading,
     val day: BondDay,
+    val favourited: Boolean,
 )
 
 /**
@@ -233,9 +239,9 @@ internal data class Submission(
  * requires: the lock is only worth taking inside the transaction that does
  * the write.
  *
- * `LongParameterList` is suppressed on the constructor: ten collaborators
+ * `LongParameterList` is suppressed on the constructor: eleven collaborators
  * is what one transaction spanning the key, the bond, the day, the entry,
- * the reveal and the outbox takes, and bundling some of them to get under
+ * the reveal and the outbox takes (and the replay's read of the caller's bookmark), and bundling some of them to get under
  * the threshold would hide which of them this class actually uses.
  */
 @Service
@@ -251,6 +257,7 @@ internal class SubmitEntry(
     private val reveal: RevealDay,
     private val joining: ReconcileJoiningDay,
     private val events: EventPublisher,
+    private val favourites: Favourites,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -381,7 +388,8 @@ internal class SubmitEntry(
         // else — an entry of another bond, above all — has none to give.
         val day = reading?.disclosed?.let { days.find(it.bondDayId) }
         if (reading == null || day == null) throw EntryNotFoundException()
-        return EntryView(reading, day)
+        // The caller's mark as it is now, like everything else a replay returns.
+        return EntryView(reading, day, favourites.isMarkedBy(membership, reading))
     }
 
     /**
@@ -457,7 +465,8 @@ internal class SubmitEntry(
         val updated = reveal.apply(day.withEntry(), membership.revealTimeLocal, now)
         if (joiningDate != null && joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)
         val persisted = checkNotNull(entries.find(entry.id))
-        return EntryView(persisted.readBy(membership.asReader()), updated) to entry.id
+        // Not asked of the table: the row was inserted a moment ago in this transaction, and nobody can have marked it.
+        return EntryView(persisted.readBy(membership.asReader()), updated, favourited = false) to entry.id
     }
 
     /**

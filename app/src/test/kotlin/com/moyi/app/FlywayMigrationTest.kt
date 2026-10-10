@@ -51,8 +51,8 @@ class FlywayMigrationTest(
         // V1 lives in `app` (database-wide extensions); V2 to V8 live in
         // `modules/identity`, V9, V10, V13, V18, V19 and V21 in `modules/bond` (its own
         // tables, its proposals, and the effective-anchor timeline), V11 in
-        // `common:web` (idempotency_keys, doc 06 §1), V12, V15 and V17 in
-        // `modules/gratitude` (its tables, the close job's index, the streak), V14
+        // `common:web` (idempotency_keys, doc 06 §1), V12, V15, V17 and V22 in
+        // `modules/gratitude` (its tables, the close job's index, the streak, favourites), V14
         // and V20 in `common:events` (the outbox, spec §8, and its consumers) and
         // V16 in `modules/scheduling` (ShedLock's table). Versions are one global sequence across
         // modules. Flyway merges every `classpath:db/migration` it finds, which
@@ -75,8 +75,8 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll((1..21).toList()),
-            "Expected every module's migrations through V21, found: $versions",
+            versions.containsAll((1..22).toList()),
+            "Expected every module's migrations through V22, found: $versions",
         )
 
         val extensions =

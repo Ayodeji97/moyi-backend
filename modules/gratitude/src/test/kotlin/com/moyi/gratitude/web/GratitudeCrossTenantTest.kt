@@ -105,6 +105,11 @@ internal class GratitudeCrossTenantTest(
             // coverage every bond-scoped route owes this table.
             "GET /api/v1/bonds/{bondId}/today" to Fixture(),
             "GET /api/v1/bonds/{bondId}/streak" to Fixture(),
+            // Slice C5b. No parameters: `DaysFeedTest` sends a stranger ones that cannot be read and expects this same 404.
+            "GET /api/v1/bonds/{bondId}/days" to Fixture(),
+            // The date is whatever the suite puts there, which is not a date: a stranger must get the bond's 404 all the
+            // same, and not the day's. `DayViewTest` sends a stranger real dates and expects this answer too.
+            "GET /api/v1/bonds/{bondId}/days/{date}" to Fixture(),
         )
 
     private data class Fixture(

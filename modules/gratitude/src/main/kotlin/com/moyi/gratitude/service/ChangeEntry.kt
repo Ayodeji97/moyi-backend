@@ -10,6 +10,7 @@ import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
+import com.moyi.gratitude.infra.database.Favourites
 import com.moyi.gratitude.infra.database.redacted
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -48,6 +49,7 @@ internal class ChangeEntry(
     private val clock: Clock,
     private val joining: ReconcileJoiningDay,
     private val eraser: EraseEntry,
+    private val favourites: Favourites,
 ) {
     fun change(
         userId: UUID,
@@ -95,7 +97,10 @@ internal class ChangeEntry(
                     val day = lockDays(membership, initial.bondDayId, now)
                     val (changed, nextDay) =
                         if (replacement == null) eraser.erase(entryId, day.id, now) else edit(entryId, replacement, now) to day
-                    EntryView(changed.readBy(membership.asReader()), nextDay)
+                    // Not asked of the table, because neither outcome can carry a mark. An edit
+                    // has just passed BR-7 under the entry's lock, so the entry is not revealed,
+                    // and only a revealed entry can be marked. A delete leaves a tombstone.
+                    EntryView(changed.readBy(membership.asReader()), nextDay, favourited = false)
                 },
             )
         } catch (violation: DataIntegrityViolationException) {
@@ -162,7 +167,9 @@ internal class ChangeEntry(
             } catch (_: NotFoundException) {
                 throw EntryNotFoundException()
             }
-        return EntryView(current.readBy(reader), checkNotNull(days.find(entry.bondDayId)))
+        val reading = current.readBy(reader)
+        // The caller's mark as it is now: since the edit this replays, the entry may have been revealed and kept.
+        return EntryView(reading, checkNotNull(days.find(entry.bondDayId)), favourites.isMarkedBy(membership, reading))
     }
 
     /**

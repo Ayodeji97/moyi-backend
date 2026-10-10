@@ -4,6 +4,7 @@ import com.moyi.common.security.ClientContext
 import com.moyi.common.security.CurrentUser
 import com.moyi.common.security.SecurityConfiguration
 import com.moyi.common.web.ErrorCode
+import com.moyi.common.web.Representation
 import io.swagger.v3.oas.models.Components
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.Operation
@@ -11,6 +12,7 @@ import io.swagger.v3.oas.models.PathItem
 import io.swagger.v3.oas.models.headers.Header
 import io.swagger.v3.oas.models.info.Info
 import io.swagger.v3.oas.models.media.ArraySchema
+import io.swagger.v3.oas.models.media.BooleanSchema
 import io.swagger.v3.oas.models.media.Content
 import io.swagger.v3.oas.models.media.Discriminator
 import io.swagger.v3.oas.models.media.IntegerSchema
@@ -135,6 +137,8 @@ import org.springframework.http.HttpStatus
 class OpenApiConfiguration {
     init {
         SpringDocUtils.getConfig().addRequestWrapperToIgnore(CurrentUser::class.java, ClientContext::class.java)
+        // A `Representation<T>` is `T` already serialised (common:web): what the response carries is `T`, as with `ResponseEntity<T>`.
+        SpringDocUtils.getConfig().addResponseWrapperToIgnore(Representation::class.java)
     }
 
     @Bean
@@ -174,6 +178,9 @@ class OpenApiConfiguration {
             discriminatePartnerEntry(api)
             admitAbsentPartnerEntry(api)
             requireDiscriminatorProperty(api)
+            documentDaysQuery(api)
+            documentRevalidation(api)
+            documentFavourites(api)
         }
 
     /**
@@ -258,6 +265,11 @@ class OpenApiConfiguration {
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER && it.name == "code" }) {
                 add(HttpStatus.UNPROCESSABLE_ENTITY)
             }
+            // The two archive reads declare what they produce, so a request that will take none of it is refused before
+            // the handler: the one 406 a client can be told about, and the one that comes before the membership check.
+            if (operation.operationId in REVALIDATED_OPERATIONS) add(HttpStatus.NOT_ACCEPTABLE)
+            // A query parameter is read by the application, which refuses one it cannot read as it refuses a field.
+            if (operation.parameters.orEmpty().any { it.`in` == QUERY_PARAMETER }) add(HttpStatus.UNPROCESSABLE_ENTITY)
             add(HttpStatus.TOO_MANY_REQUESTS)
             add(HttpStatus.INTERNAL_SERVER_ERROR)
         }
@@ -396,6 +408,7 @@ class OpenApiConfiguration {
         private const val FIELD_VIOLATION_REF = "#/components/schemas/$FIELD_VIOLATION"
         private const val PROBLEM_JSON = "application/problem+json"
         private const val PATH_PARAMETER = "path"
+        private const val QUERY_PARAMETER = "query"
         private const val HEADER_PARAMETER = "header"
         private const val ETAG = "ETag"
         private const val IF_MATCH = "If-Match"
@@ -450,6 +463,12 @@ class OpenApiConfiguration {
                 // only conflict a delete ever answered. It takes no
                 // idempotency key, an erased entry deleted again is a `204`,
                 // and nothing translates a database refusal into a `409`.
+                //
+                // Slice C5b. ENTRY_NOT_REVEALED (the caller's own entry, before
+                // the partner has written) and ENTRY_IMMUTABLE (a tombstone).
+                // Removing a locked bookmark is a retryable FAVOURITE_BUSY conflict.
+                "unfavouriteEntry",
+                "favouriteEntry",
             )
 
         /**
@@ -560,6 +579,12 @@ private fun documentBondNamePattern(api: OpenAPI) {
 
 /** `TodayResponse`'s schema name and its `partnerEntry` property — see [discriminatePartnerEntry] and [requireDiscriminatorProperty]. */
 private const val TODAY_RESPONSE = "TodayResponse"
+
+/** A day of the archive (`gratitude.web.DayResponse`): the same two entry fields as [TODAY_RESPONSE], from the same functions. */
+private const val DAY_RESPONSE = "DayResponse"
+
+/** Every schema with a `partnerEntry`: each gets the same discriminator and the same null branch, or a client would need two readers. */
+private val PARTNER_ENTRY_HOLDERS = listOf(TODAY_RESPONSE, DAY_RESPONSE)
 private const val PARTNER_ENTRY_PROPERTY = "partnerEntry"
 private const val DISCRIMINATOR_PROPERTY = "status"
 private const val ENTRY_RESPONSE = "EntryResponse"
@@ -617,22 +642,24 @@ private const val ERASED_ENTRY_RESPONSE_REF = "#/components/schemas/$ERASED_ENTR
  * alone.
  */
 private fun discriminatePartnerEntry(api: OpenAPI) {
-    val partnerEntry =
-        api.components.schemas[TODAY_RESPONSE]
-            ?.properties
-            ?.get(PARTNER_ENTRY_PROPERTY)
-    partnerEntry?.takeIf { it.oneOf.orEmpty().isNotEmpty() }?.discriminator =
-        Discriminator()
-            .propertyName(DISCRIMINATOR_PROPERTY)
-            .mapping(
-                mapOf(
-                    "SUBMITTED" to ENTRY_RESPONSE_REF,
-                    "REVEALED" to ENTRY_RESPONSE_REF,
-                    "DELETED" to ENTRY_RESPONSE_REF,
-                    "LOCKED" to LOCKED_ENTRY_RESPONSE_REF,
-                    "REMOVED" to ERASED_ENTRY_RESPONSE_REF,
-                ),
-            )
+    PARTNER_ENTRY_HOLDERS.forEach { holder ->
+        val partnerEntry =
+            api.components.schemas[holder]
+                ?.properties
+                ?.get(PARTNER_ENTRY_PROPERTY)
+        partnerEntry?.takeIf { it.oneOf.orEmpty().isNotEmpty() }?.discriminator =
+            Discriminator()
+                .propertyName(DISCRIMINATOR_PROPERTY)
+                .mapping(
+                    mapOf(
+                        "SUBMITTED" to ENTRY_RESPONSE_REF,
+                        "REVEALED" to ENTRY_RESPONSE_REF,
+                        "DELETED" to ENTRY_RESPONSE_REF,
+                        "LOCKED" to LOCKED_ENTRY_RESPONSE_REF,
+                        "REMOVED" to ERASED_ENTRY_RESPONSE_REF,
+                    ),
+                )
+    }
 }
 
 /**
@@ -651,13 +678,15 @@ private fun discriminatePartnerEntry(api: OpenAPI) {
  * Idempotent, so a second pass over the same document adds nothing.
  */
 private fun admitAbsentPartnerEntry(api: OpenAPI) {
-    val partnerEntry =
-        api.components.schemas[TODAY_RESPONSE]
-            ?.properties
-            ?.get(PARTNER_ENTRY_PROPERTY)
-            ?.takeIf { it.oneOf.orEmpty().isNotEmpty() } ?: return
-    if (partnerEntry.oneOf.none { NULL_TYPE in it.types.orEmpty() }) {
-        partnerEntry.addOneOfItem(Schema<Any>().apply { types = setOf(NULL_TYPE) })
+    PARTNER_ENTRY_HOLDERS.forEach { holder ->
+        val partnerEntry =
+            api.components.schemas[holder]
+                ?.properties
+                ?.get(PARTNER_ENTRY_PROPERTY)
+                ?.takeIf { it.oneOf.orEmpty().isNotEmpty() } ?: return@forEach
+        if (partnerEntry.oneOf.none { NULL_TYPE in it.types.orEmpty() }) {
+            partnerEntry.addOneOfItem(Schema<Any>().apply { types = setOf(NULL_TYPE) })
+        }
     }
 }
 
@@ -767,3 +796,254 @@ private val ENDING_DESCRIPTIONS =
             "with no body, withdraws what an earlier one kept. " +
             ENDING_BODY_RULES,
     )
+
+/**
+ * States what the four query parameters of the archive feed (`GET
+ * /bonds/{bondId}/days`, operation `days`) are.
+ *
+ * The handler takes each as optional text and reads it itself, after the
+ * membership guard (`gratitude.web.DaysQuery` has why: bound as typed
+ * arguments, a value that does not convert would be refused before the guard
+ * and by a handler that quotes it). So springdoc sees four optional strings,
+ * and a generated client would have no bound on `limit`, no type for
+ * `favourites` and no format for `until`. The document states the rule the
+ * API enforces, as it does for `If-Match` and for an entry's text.
+ *
+ * The literals mirror `gratitude.service.GetDays.MAX_LIMIT` and
+ * `DEFAULT_LIMIT`, which this module cannot see (it names no controller and
+ * depends on no domain module). `OpenApiContractTest` holds the document to
+ * these numbers, and `gratitude`'s `DaysFeedTest` holds the route to them.
+ *
+ * `cursor` stays a string and is described as opaque on purpose: its form is
+ * not part of the contract.
+ *
+ * The operation itself is given [DAYS_DESCRIPTION] here too, as the two
+ * endings are given theirs: what a page and a day's status do not mean.
+ */
+private fun documentDaysQuery(api: OpenAPI) {
+    val operations =
+        api.paths.values
+            .flatMap { it.readOperations() }
+            .filter { it.operationId == DAYS_OPERATION }
+    operations.forEach { it.description = DAYS_DESCRIPTION }
+    val parameters =
+        operations
+            .flatMap { it.parameters.orEmpty() }
+            .filter { it.`in` == "query" }
+    parameters.forEach { parameter ->
+        when (parameter.name) {
+            "limit" -> {
+                parameter.schema =
+                    IntegerSchema()
+                        .minimum(
+                            DAYS_MIN_LIMIT.toBigDecimal(),
+                        ).maximum(DAYS_MAX_LIMIT.toBigDecimal())
+                        ._default(DAYS_DEFAULT_LIMIT)
+                parameter.description =
+                    "The most days to return. A page can hold fewer and still not be the last: it is also bounded by " +
+                    "its size. Only a null `nextCursor` means the end."
+            }
+
+            "cursor" -> {
+                // The bound the route enforces before it decodes anything (`gratitude.web.DayCursor.MAX_LENGTH`, which is
+                // internal to that module and mirrored here, as the limit's bounds are).
+                parameter.schema = StringSchema().maxLength(DAYS_MAX_CURSOR_LENGTH)
+                parameter.description =
+                    "The `nextCursor` of an earlier page, unchanged: the days before that page's last. Opaque; do not " +
+                    "build or alter one. It carries no bond and no caller, only a position, so it grants nothing."
+            }
+
+            "until" -> {
+                parameter.schema = StringSchema().format("date")
+                parameter.description =
+                    "Start at this calendar date (`YYYY-MM-DD`) or the nearest earlier day: for jumping to a month. " +
+                    "With `cursor` as well, both apply."
+            }
+
+            "favourites" -> {
+                parameter.schema = BooleanSchema()._default(false)
+                parameter.description =
+                    "`true` for only the days holding an entry the caller has bookmarked and can still read. " +
+                    "Only the caller's own bookmarks are ever considered."
+            }
+        }
+    }
+}
+
+private const val DAYS_OPERATION = "days"
+
+/**
+ * What a client of the feed has to be told, because the schema cannot say it
+ * and a guess gets it wrong. Both were found by the review of slice C5b: a
+ * client that stops at a short page never reaches the days after it, and
+ * one that draws nothing for `EMPTY` hides a member's own tombstone from
+ * them.
+ *
+ * It once said a page could be empty with a cursor whenever
+ * `favourites=true` left a day out. That is no longer so: the request reads
+ * on until the page is full (`GetDays.page`), and an empty page with a
+ * cursor is left only at that reading's bound, which the text names so that
+ * no client treats it as impossible.
+ */
+private const val DAYS_DESCRIPTION =
+    "The days of the bond on which the caller has something to see, newest first. A day is listed when it holds an " +
+        "entry the caller wrote, or one that has been revealed to them; an erased entry still counts, and is returned " +
+        "as its tombstone.\n\n" +
+        "**Only a null `nextCursor` means the end.** A page's `items` can be shorter than `limit` while `nextCursor` " +
+        "is not null, because a page is also bounded by its size. A page with a `nextCursor` holds at least one day, " +
+        "with one exception: a single request reads at most about a thousand days, and with `favourites=true` a " +
+        "request that reaches that bound answers with what it has found, which can be nothing. Keep asking with the " +
+        "cursor until it is null.\n\n" +
+        "**A day's `status` does not say whether there is anything to draw.** A day whose author deleted their only " +
+        "entry is still listed, for that author alone, with their tombstone as `myEntry`; once that day has closed " +
+        "it carries `status: EMPTY`. Draw a day from its entries, not from its status."
+private const val DAYS_MIN_LIMIT = 1
+private const val DAYS_MAX_LIMIT = 50
+private const val DAYS_DEFAULT_LIMIT = 20
+private const val DAYS_MAX_CURSOR_LENGTH = 32
+
+/**
+ * States what a **conditional read** is on the operations that are one
+ * ([REVALIDATED_OPERATIONS]: the archive's feed and its one day).
+ *
+ * The `ETag` and `Cache-Control` are set on the `ResponseEntity`, and the
+ * `304` is Spring MVC's own answer to `If-None-Match`, made after the
+ * handler returns (`common.web.Representations`). springdoc can see none of
+ * the three, so a client generated without this has no typed way to keep
+ * the tag, no parameter to send it back in, and a `304` it was never told
+ * could come. Added by rule for the listed operations, as `ETag` is for a
+ * versioned resource and `If-Match` for a conditional update.
+ *
+ * This is not `If-Match`'s `ETag`. A bond's tag is echoed to make a write
+ * conditional, and its description says so; these are echoed only to ask
+ * "has what I was shown changed?", and say that.
+ *
+ * `If-None-Match` is optional, and is documented as a string: it is one tag,
+ * or several separated by commas, exactly as RFC 9110 writes them.
+ *
+ * **One media type in the `200`.** These mappings declare `produces` as
+ * `application/json` and every `application/<x>+json`. The second is there for what
+ * a request may *ask* for: without it `Accept: application/problem+json`,
+ * which a client of a problem-details API sends, would be a `406`. What is
+ * *sent* is `application/json` in every case (`RepresentationConverter`
+ * names the bytes itself), so the wildcard springdoc copies into the
+ * response is removed: it would describe a `Content-Type` that never comes.
+ *
+ * Also here, to stay one function: the `date` of the one day is a path
+ * segment taken as text (the handler reads it after the guard), so springdoc
+ * documents a bare string. It is a calendar date, and anything else is the
+ * same `404` as a date with nothing on it.
+ *
+ * **And the `406`.** Because the mappings declare `produces`, a request
+ * whose `Accept` admits no JSON is refused before the handler runs, and so
+ * before the membership check: on these two operations, and nowhere else,
+ * somebody who is not in the bond can be answered something other than its
+ * `404`. It is the same response whoever asks, so it says nothing about the
+ * bond; a client is told so here, because a `406` where it expected a `404`
+ * would otherwise look like a different answer about the bond. No other
+ * operation documents its `406`, which comes after the handler there.
+ */
+private fun documentRevalidation(api: OpenAPI) {
+    api.paths.values
+        .flatMap { it.readOperations() }
+        .filter { it.operationId in REVALIDATED_OPERATIONS }
+        .forEach { operation ->
+            operation.addParametersItem(
+                Parameter()
+                    .`in`("header")
+                    .name(IF_NONE_MATCH)
+                    .required(false)
+                    .description(
+                        "The `ETag` of a response to this same request that the client still holds (RFC 9110 §13.1.2). " +
+                            "If it is still current the answer is `304` with no body. A value that is not current, or " +
+                            "is not a tag, is ignored and the whole response is sent.",
+                    ).schema(StringSchema()),
+            )
+            operation.responses[OK]?.addHeaderObject(REVALIDATION_ETAG, revalidationTag())
+            operation.responses[OK]
+                ?.content
+                ?.keys
+                ?.retainAll(setOf(JSON))
+            operation.responses.addApiResponse(
+                NOT_MODIFIED,
+                ApiResponse()
+                    .description(
+                        "Not Modified: what the client holds under the `If-None-Match` it sent is still exactly what " +
+                            "would be sent. No body.",
+                    ).addHeaderObject(REVALIDATION_ETAG, revalidationTag()),
+            )
+            operation.responses[NOT_ACCEPTABLE]?.description(NOT_ACCEPTABLE_DESCRIPTION)
+            ARCHIVE_DESCRIPTIONS[operation.operationId]?.let { operation.description = it }
+            operation.parameters
+                .filter { it.`in` == "path" && it.name == "date" }
+                .forEach { date ->
+                    date.schema = StringSchema().format("date")
+                    date.description =
+                        "A calendar date, `YYYY-MM-DD`. A date that is not in the caller's archive is `404 DAY_NOT_FOUND`, " +
+                        "whatever the reason, and so is a value that is not a date."
+                }
+        }
+}
+
+private fun revalidationTag(): Header =
+    Header()
+        .description(
+            "Strong validator (RFC 9110 §8.8.3) of this response body exactly as it was sent to this caller. Opaque: " +
+                "keep the entire value and send it back as `If-None-Match`. It changes whenever anything in the body " +
+                "would, and is not the other member's. Sent with `Cache-Control: private, no-cache`.",
+        ).schema(StringSchema())
+
+/** The operations answered as conditional reads: `gratitude.web.DaysController`'s two, by operation id. */
+private val REVALIDATED_OPERATIONS = setOf("days", "day")
+private const val IF_NONE_MATCH = "If-None-Match"
+private const val REVALIDATION_ETAG = "ETag"
+private const val JSON = "application/json"
+private const val OK = "200"
+private const val NOT_MODIFIED = "304"
+private const val NOT_ACCEPTABLE = "406"
+private const val NOT_ACCEPTABLE_DESCRIPTION =
+    "Not Acceptable: the request's `Accept` header admits no JSON. Decided from that header alone, before the caller's " +
+        "membership is looked at, so it is the same response for a member, for somebody who is not one and for a bond " +
+        "that does not exist. It carries no `ETag`."
+
+/**
+ * What a client of the one day has to be told, for [DAYS_DESCRIPTION]'s
+ * reason: today is a `404` here until the caller has written, and nothing in
+ * the schema says where else to read it.
+ */
+private val ARCHIVE_DESCRIPTIONS =
+    mapOf(
+        "day" to
+            "One day exactly as `GET /bonds/{bondId}/days` lists it: the same object, for the same caller. " +
+            "`404 DAY_NOT_FOUND` for every date that is not in the caller's archive, whatever the reason. Today is not " +
+            "in it until the caller has written or the day has revealed, so read today from `GET /bonds/{bondId}/today`. " +
+            "As in the feed, a day's `status` does not say whether there is anything to draw: draw a day from its entries.",
+    )
+
+/**
+ * What a client of the two bookmark operations has to be told: whose the
+ * mark is, which entries take one, and what each refusal means. The shared
+ * error schema does not list the applicable codes separately for each operation.
+ */
+private val FAVOURITE_DESCRIPTIONS =
+    mapOf(
+        "favouriteEntry" to
+            "Marks the entry as the caller's own bookmark. The other member is never shown it, in any response. " +
+            "Repeatable: a second mark changes nothing and is `204`. Only an entry the caller is shown with " +
+            "`status: REVEALED` can be marked. `409 ENTRY_NOT_REVEALED` is the caller's own entry that has not been " +
+            "revealed. `409 ENTRY_IMMUTABLE` is an entry that has been erased, or is being erased: a tombstone. `404` " +
+            "is every entry the caller was never shown, the same as for an id that does not exist. A body, if one is " +
+            "sent, is ignored. Allowed on a bond that has ended.",
+        "unfavouriteEntry" to
+            "Removes the caller's bookmark. Repeatable: no bookmark is success, and so is an entry that has since been " +
+            "erased. `404` is every entry the caller was never shown, the same as for an id that does not exist. " +
+            "`409 FAVOURITE_BUSY` means another operation holds the bookmark; retry the removal. " +
+            "Allowed on a bond that has ended.",
+    )
+
+/** Gives the two bookmark operations their [FAVOURITE_DESCRIPTIONS]. */
+private fun documentFavourites(api: OpenAPI) {
+    api.paths.values.flatMap { it.readOperations() }.forEach { operation ->
+        FAVOURITE_DESCRIPTIONS[operation.operationId]?.let { operation.description = it }
+    }
+}

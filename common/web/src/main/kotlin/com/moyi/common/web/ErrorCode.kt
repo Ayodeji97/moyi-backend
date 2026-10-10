@@ -18,6 +18,9 @@ package com.moyi.common.web
  * client handling a case the server never produces.
  */
 enum class ErrorCode {
+    /** A bookmark is locked by another transaction. 409: retry the same removal once it finishes. */
+    FAVOURITE_BUSY,
+
     /**
      * The body could not be taken in at all — not JSON, not the right shape,
      * or (`413`) longer than an `@Idempotent` route will buffer.
@@ -225,8 +228,27 @@ enum class ErrorCode {
      */
     ENTRY_ALREADY_EXISTS,
 
-    /** BR-7: revealed content cannot be edited. */
+    /**
+     * BR-7: revealed content cannot be edited. And an erased entry takes no
+     * change at all, a bookmark included: `PUT …/favourite` on a tombstone,
+     * or on an entry whose erasure is still in flight (ADR-0036 decisions 11
+     * and 12).
+     */
     ENTRY_IMMUTABLE,
+
+    /**
+     * `PUT /entries/{entryId}/favourite` on the caller's **own** entry that
+     * has not been revealed (FR-093, spec §6.6: only a revealed entry can be
+     * kept). 409: a fact about the entry's state. It usually changes by
+     * itself when the day reveals; an entry on a day that closed after the
+     * bond ended never is revealed (ADR-0033 decision 9).
+     *
+     * Only ever the answer about an entry the caller wrote. A partner's
+     * unrevealed entry is locked to them and its id was never shown, so that
+     * request is the `404` every other unknown entry gets: this code there
+     * would confirm that the id names an entry, and that it was written.
+     */
+    ENTRY_NOT_REVEALED,
 
     /**
      * `POST /bonds/{bondId}/entries` for a day that has already closed
@@ -244,6 +266,22 @@ enum class ErrorCode {
      * simply not one this deployment can honour today.
      */
     MEDIA_NOT_YET_SUPPORTED,
+
+    /**
+     * `GET /bonds/{bondId}/days/{date}` for a date that is not in the
+     * caller's archive. 404.
+     *
+     * **One code for every reason, on purpose**: no day was ever opened for
+     * that date, nobody wrote on it, it has not come yet, it is before the
+     * bond, the value is not a date at all, or the day holds only what the
+     * other person wrote and the caller has not been shown. The last is why
+     * the rest may not differ from it: any answer of its own would say that
+     * the other person has written, on a route that is not `today`.
+     *
+     * Only ever told to a member. A caller who is not one gets [NOT_FOUND]
+     * about the bond, before the date is looked at.
+     */
+    DAY_NOT_FOUND,
 
     /** No route, or a route that exists for other methods. */
     NOT_FOUND,

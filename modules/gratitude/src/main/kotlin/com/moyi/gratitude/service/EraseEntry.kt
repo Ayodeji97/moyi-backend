@@ -6,6 +6,7 @@ import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
+import com.moyi.gratitude.infra.database.Favourites
 import org.springframework.stereotype.Component
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -46,6 +47,7 @@ import java.time.temporal.ChronoUnit
 internal class EraseEntry(
     private val days: BondDayStore,
     private val entries: EntryStore,
+    private val favourites: Favourites,
 ) {
     /**
      * The entry and its day as they now stand.
@@ -63,6 +65,16 @@ internal class EraseEntry(
      * order; it is taken here regardless so that this routine is safe for a
      * caller that has not.
      *
+     * **Every member's bookmark on the entry goes with its words**, in this
+     * transaction, and only when this call is the one that erases: a
+     * bookmark is never a reason to keep anything of an entry its author
+     * took back (spec §6.6). It is done here and not by the foreign key,
+     * whose cascade never fires because the row is kept (ADR-0035, "Owed,
+     * C5b"); and here rather than in each caller so that the author's
+     * delete, the withdrawal and the close job's pre-step cannot come to
+     * differ in it. A repeated call finds the entry erased and writes
+     * nothing, this included.
+     *
      * [now] is cut to microseconds here, so `deleted_at` reads back as it
      * was written whoever the caller is.
      */
@@ -78,7 +90,11 @@ internal class EraseEntry(
         val erased = entry.erase(now.truncatedTo(ChronoUnit.MICROS))
         // Only for the erasure that happens now: one already made has had its step back, or its day was settled.
         val nextDay = if (entry.isErased) day else day.withoutEntry()
-        if (erased != entry) entries.update(erased)
+        if (erased != entry) {
+            entries.update(erased)
+            // Under the entry's lock, which is what a mark being made at this moment waits for (`Favourites.mark`).
+            favourites.removeAllOf(entryId)
+        }
         if (nextDay != day) days.update(nextDay)
         return erased to nextDay
     }

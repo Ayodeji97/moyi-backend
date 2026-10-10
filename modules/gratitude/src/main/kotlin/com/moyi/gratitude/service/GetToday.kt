@@ -5,9 +5,12 @@ import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.DayAssignment
 import com.moyi.gratitude.domain.Entry
+import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
+import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
+import com.moyi.gratitude.infra.database.Favourites
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
@@ -32,6 +35,12 @@ internal data class TodayView(
     val partnerEntry: EntryReading?,
     /** The bond's streak, with today in it when today is complete ([GetStreak]). */
     val streak: StreakView,
+    /**
+     * Which of the two entries **the caller** has bookmarked (FR-093): the
+     * caller's own marks and nobody else's. Only ever ids of entries read in
+     * full; a mark on anything else is not looked for.
+     */
+    val marked: Set<EntryId>,
 )
 
 /**
@@ -87,6 +96,11 @@ internal data class TodayView(
  * "mine" (`memberId`, which never changes) and the streak's inputs. None of
  * those can show anybody words.
  *
+ * **`favourited` is the caller's own bookmark, asked last and only of what
+ * the gate answered in full** (FR-093). One more query, by the caller's
+ * member id, and none on a day with nothing they can read. The partner's
+ * marks are not read at all: there is no query here that could return them.
+ *
  * **Nothing here is cached.** Every call re-reads the row and the entries
  * fresh; the day this returns is only ever as current as the transaction
  * that reads it. A cache in front of this method would have to be reasoned
@@ -110,6 +124,7 @@ internal class GetToday(
     private val clock: Clock,
     private val streak: GetStreak,
     private val access: BondAccess,
+    private val favourites: Favourites,
 ) {
     @Transactional(readOnly = true)
     fun today(membership: BondMembership): TodayView {
@@ -124,21 +139,24 @@ internal class GetToday(
         if (day == null) {
             val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
             val unwritten = streak.view(membership, date, todayComplete = false)
-            return TodayView(date, status, myEntry = null, partnerEntry = null, streak = unwritten)
+            return TodayView(date, status, myEntry = null, partnerEntry = null, streak = unwritten, marked = emptySet())
         }
 
-        val entryList =
-            entries.findForDay(day.id).sortedWith(
-                compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value },
-            )
+        val written = entries.findForDay(day.id).onEachSideOf(membership.memberId)
         // After the entries, never before: the marker is read last.
         val reader = access.readerNow(membership)
+        val mine = written.mine?.readBy(reader)
+        val partners = written.partners?.readBy(reader)
+        // After the gate, and only for what it answered in full: a tombstone says `false` whatever rows
+        // there are, and an entry the caller was never shown has no id here to ask about.
+        val readInFull = listOfNotNull(mine, partners).filter { it.readability == Readability.FULL }.mapNotNull { it.disclosed?.id }
         return TodayView(
             date = date,
             status = day.status,
-            myEntry = entryList.firstOrNull { it.authorMemberId == membership.memberId }?.readBy(reader),
-            partnerEntry = entryList.firstOrNull { it.authorMemberId != membership.memberId }?.readBy(reader),
+            myEntry = mine,
+            partnerEntry = partners,
             streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),
+            marked = favourites.markedBy(membership.memberId, readInFull),
         )
     }
 }

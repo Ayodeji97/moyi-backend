@@ -1,0 +1,31 @@
+meta {
+  name: Day
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{api}}/bonds/{{bondId}}/days/{{date}}
+  body: none
+  auth: bearer
+}
+
+headers {
+  If-None-Match: {{dayETag}}
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+script:post-response {
+  if (res.status === 200) bru.setVar("dayETag", res.getHeader("etag"));
+}
+
+docs {
+  One day of the archive: the same object Days lists. Run Days first, which keeps the date; or set date yourself, as YYYY-MM-DD. A date that is not in your archive is 404 DAY_NOT_FOUND, whatever the reason.
+
+  Send it twice. The first answer is 200 with an ETag, which is kept; the second sends it back as If-None-Match and is 304 with no body, because nothing you would be shown has changed. Mark or unmark an entry of that day and it is 200 again, under a new ETag. Your partner's marks never change it: they are not in what you are sent. (Days answers If-None-Match the same way.)
+
+  Before the first send dayETag is not set, and the header goes out as written, which matches nothing: 200.
+}
