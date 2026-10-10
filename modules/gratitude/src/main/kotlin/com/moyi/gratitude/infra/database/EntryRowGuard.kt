@@ -49,9 +49,12 @@ internal object EntryRowGuard {
      * NOWAIT`). Four parameters: the entry and the member, twice. Run through
      * [removedUnlessHeld], which turns the refusal into an answer.
      *
-     * A row that cannot be locked is one somebody else is deleting: the
-     * member's own second tap, or an erasure, which removes every such row
-     * on its entry. Waiting for it would hold a connection until that
+     * A row that cannot be locked is one another transaction is writing.
+     * Usually it is being deleted: by the member's own second tap, or by an
+     * erasure, which removes every such row on its entry. Not always: a
+     * reaction's row is also held, for an instant, by the member's own
+     * `PUT` replacing it (`ON CONFLICT … DO UPDATE` locks the row it
+     * updates). Waiting for it would hold a connection until that
      * transaction ends, which for the withdrawal consumer is the whole
      * delivery. Skipping it (`SKIP LOCKED`, as first built) answered
      * "removed" for a deletion that had not committed, and an erasure that

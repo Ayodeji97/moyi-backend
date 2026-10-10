@@ -145,7 +145,9 @@ internal class ReactionLockWaitTest(
     }
 
     @Test
-    fun `taking a reaction back returns at once with 409 REACTION_BUSY while an erasure holds its row, which is as the eraser leaves it`() {
+    fun `taking a reaction back returns at once with 409 REACTION_BUSY while an erasure holds its row, which is as the eraser leaves it`(
+        output: CapturedOutput,
+    ) {
         react(bea, adas).status shouldBe 204
         reactionsOn(adas) shouldBe 1
 
@@ -172,6 +174,10 @@ internal class ReactionLockWaitTest(
         reactionsOn(adas) shouldBe 0
         wordsOf(adas) shouldBe null
         unreact(bea, adas).status shouldBe 204
+        // The refusal is an answer, not a failure: nothing of Postgres's message, or its code, is in the log.
+        output.all shouldNotContain "could not obtain lock"
+        output.all shouldNotContain LOCK_NOT_AVAILABLE
+        output.all shouldNotContain "CannotAcquireLock"
     }
 
     /**

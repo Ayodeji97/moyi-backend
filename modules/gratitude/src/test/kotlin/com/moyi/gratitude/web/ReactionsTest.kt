@@ -447,6 +447,10 @@ internal class ReactionsTest(
                 """{"type":"HEART","pad":"$long"}""" to 400,
                 """{"type":""" to 400,
                 "" to 400,
+                // A whole body, and then more: a second body, or anything at all.
+                """{"type":"HEART"}{"type":"SMILE"}""" to 400,
+                """{"type":"HEART"} zq-trailing""" to 400,
+                """{"type":"HEART"},""" to 400,
             )
 
         for ((body, status) in bodies) {
@@ -735,6 +739,32 @@ internal class ReactionsTest(
 
         dispatcher.dispatchDue(clock.instant(), 10) shouldBe DispatchResult(delivered = 1, failed = 0, more = false)
         entry(day.adas)["text"].shouldBeNull()
+        rows().shouldBeEmpty()
+    }
+
+    /**
+     * The same seam, with an ending that withdraws **nothing**: the race the
+     * plan's decision 5 accepts, and the one whose outcome is seen. The bond
+     * and the gate were asked before the leave committed, no lock on the
+     * bond is taken, and so the reaction lands a moment after the ending.
+     * The author is shown it. Pinned here so that a change to it is noticed;
+     * whether it should be so is the owner's to turn.
+     */
+    @Test
+    fun `an ending without withdrawal that commits between the gate and the statement lets the reaction land, and the author sees it`() {
+        val day = revealedDay()
+        interruptible.afterResolution(2) { pool.submit { rig.leave(ada, day.bond) }.get(10, TimeUnit.SECONDS) }
+
+        react(bea, day.adas, "MOVED").status shouldBe 204
+
+        interruptible.fired shouldBe true
+        interruptible.resolutions shouldBe 2
+        interruptible.disarm()
+        rows() shouldBe listOf(Row(day.adas, day.beaMember, "MOVED"))
+        for (user in listOf(ada, bea)) reactionShown(user, day.bond, day.adas) shouldBe listOf("MOVED", "MOVED", "MOVED")
+        // The bond has ended: the next one is refused, and this one can still be taken back.
+        json.readTree(react(bea, day.adas, "HEART").contentAsString)["code"].asString() shouldBe "BOND_ARCHIVED"
+        unreact(bea, day.adas).status shouldBe 204
         rows().shouldBeEmpty()
     }
 
