@@ -77,7 +77,8 @@
       },
       {
         "row": "partner-none-partner-writes",
-        "note": "The same request, as it changes what you see of their entry."
+        "note": "",
+        "sameRequest": true
       },
       {
         "row": "day-pending-reveal-today",
@@ -89,7 +90,8 @@
       },
       {
         "row": "entry-submitted-reveal-time",
-        "note": "The same moment, as your entry sees it."
+        "note": "",
+        "sameRequest": true
       },
       {
         "row": "day-revealed-today",
@@ -98,6 +100,10 @@
       {
         "row": "entry-revealed-edit",
         "note": ""
+      },
+      {
+        "row": "entry-revealed-delete",
+        "note": "You take the words back instead."
       },
       {
         "row": "day-revealed-streak",
