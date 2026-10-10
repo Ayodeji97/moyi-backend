@@ -7,6 +7,7 @@ import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.Favourites
+import com.moyi.gratitude.infra.database.Reactions
 import org.springframework.stereotype.Component
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -48,6 +49,7 @@ internal class EraseEntry(
     private val days: BondDayStore,
     private val entries: EntryStore,
     private val favourites: Favourites,
+    private val reactions: Reactions,
 ) {
     /**
      * The entry and its day as they now stand.
@@ -75,6 +77,14 @@ internal class EraseEntry(
      * differ in it. A repeated call finds the entry erased and writes
      * nothing, this included.
      *
+     * **So does the reaction on it** (FR-048, the plan's decision 8), for
+     * the same reasons and in the same place: an acknowledgement of words
+     * does not outlive them. Only the reactions ON the erased entry. What
+     * its author left on the partner's entries is not touched, by a delete
+     * or by a withdrawal: a withdrawal takes back entries (FR-029a), and if
+     * it took reactions too it could be told from deleting each entry by
+     * hand, by the reactions vanishing.
+     *
      * [now] is cut to microseconds here, so `deleted_at` reads back as it
      * was written whoever the caller is.
      */
@@ -94,6 +104,8 @@ internal class EraseEntry(
             entries.update(erased)
             // Under the entry's lock, which is what a mark being made at this moment waits for (`Favourites.mark`).
             favourites.removeAllOf(entryId)
+            // The same lock is what a reaction being set at this moment waits for (`Reactions.set`).
+            reactions.removeAllOn(entryId)
         }
         if (nextDay != day) days.update(nextDay)
         return erased to nextDay
