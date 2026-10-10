@@ -61,7 +61,11 @@ internal class ReactionsController(
         reaction.react(caller.id, entryIdOrNotFound(entryId), request.reactionType())
     }
 
-    /** `204` when absent or removed, whatever has become of the entry or the bond; `409 REACTION_BUSY` when another operation holds it. */
+    /**
+     * `204` when absent or removed, whatever has become of the entry or the
+     * bond; `409 REACTION_BUSY` when another operation holds it on an entry
+     * the caller reads in full.
+     */
     @DeleteMapping("/{entryId}/reaction")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun unreactToEntry(

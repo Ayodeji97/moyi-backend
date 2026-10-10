@@ -121,7 +121,9 @@ internal class Reactions(
      * will commit** (`EntryRowGuard.deleteOrBeRefused`, as
      * `Favourites.unmark`). True means absent or removed. False means
      * another transaction holds the row, usually an erasure that is deleting
-     * it: nothing was removed, and the service asks the caller to try again.
+     * it: nothing was removed, and what the caller is told is the service's to
+     * say (`ReactToEntry.unreact`: try again, unless the entry is already a
+     * tombstone to them).
      * Were that answered as a removal, an erasure that then rolled back
      * would leave the reaction there, shown to both, after the member was
      * told it was gone.

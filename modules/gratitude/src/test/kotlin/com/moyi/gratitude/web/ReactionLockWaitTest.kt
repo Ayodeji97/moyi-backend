@@ -1,6 +1,7 @@
 package com.moyi.gratitude.web
 
 import com.moyi.bond.api.BondAccess
+import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
@@ -38,6 +39,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.put
 import org.springframework.transaction.support.TransactionTemplate
+import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.sql.Connection
 import java.sql.SQLException
@@ -67,10 +69,16 @@ import javax.sql.DataSource
  * still open" is a fact of where the test is and not of timing, and it is
  * checked: another connection is refused the row at once.
  *
- * - **Taking a reaction back answers `409 REACTION_BUSY` at once while that
- *   transaction is open.** A deletion that has not committed is never
- *   reported as a removal: the eraser may roll back. Asked again after
- *   either a commit or a rollback, it succeeds.
+ * - **Taking a reaction back from an entry the caller reads in full answers
+ *   `409 REACTION_BUSY` at once while that transaction is open.** Here the
+ *   eraser is the author's own delete in flight: nothing of it has
+ *   committed, the entry is whole to everybody, and if it rolls back the
+ *   reaction is still there and shown. So a deletion that has not committed
+ *   is not reported as a removal. Asked again after either a commit or a
+ *   rollback, it succeeds.
+ * - **From an entry that is already a tombstone to the caller it is `204`
+ *   whoever holds the row**, so that a withdrawal whose delivery is open
+ *   answers as its twin deleted by hand does.
  * - **Setting one is refused as `ENTRY_IMMUTABLE` while it is open**, once
  *   its lock timeout has passed. The real timeout is two seconds, so the
  *   request here is made through the application's own `ReactToEntry` built
@@ -100,6 +108,7 @@ internal class ReactionLockWaitTest(
     @Autowired joining: ReconcileJoiningDay,
     @Autowired transactions: TransactionTemplate,
     @Autowired private val json: ObjectMapper,
+    @Autowired private val dispatcher: OutboxDispatcher,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -189,6 +198,99 @@ internal class ReactionLockWaitTest(
         wordsOf(adas) shouldBe ADAS_WORDS
         reactionsOn(adas) shouldBe 1
         unreact(bea, adas).status shouldBe 204
+        reactionsOn(adas) shouldBe 0
+    }
+
+    /**
+     * **The busy refusal must not tell a withdrawal from a deletion by hand**
+     * (found by review). Two bonds with one history. In the first, Ada has
+     * blocked and withdrawn, and an eraser holds the row of Bea's reaction on
+     * Ada's entry: what the consumer holds, on every row it has touched,
+     * until its whole delivery commits. In the second, its twin, Cy deleted
+     * the entry by hand and left. To Bea and to Dee the entry is the same
+     * tombstone in every view, so taking the reaction back must be the same
+     * whole response; a `409` in the first alone would say that a delivery is
+     * in flight, which a deletion by hand has no counterpart to.
+     *
+     * The answer is safe where the entry is already a tombstone to the
+     * caller by a **committed** withdrawal or erasure: the rollback the
+     * refusal exists for cannot make it false there, since a tombstone shows
+     * no reaction whatever rows there are.
+     */
+    @Test
+    fun `taking a reaction back from a withdrawn entry whose row an eraser holds is the same 204 as from its twin deleted by hand`() {
+        react(bea, adas).status shouldBe 204
+        rig.block(ada, bond)
+        // Withdrawn and committed; nothing erased. The entry is a tombstone to her by the gate alone.
+        wordsOf(adas) shouldBe ADAS_WORDS
+        partnerEntryOf(bea, bond)["status"].asString() shouldBe "DELETED"
+
+        val cy = users.verified("Cy")
+        val dee = users.verified("Dee")
+        clock.set(BOND_CREATED)
+        val twin = rig.pair(cy, dee)
+        clock.set(NOW)
+        val cys = rig.submit(cy, twin, ADAS_WORDS)
+        rig.submit(dee, twin, BEAS_WORDS)
+        react(dee, cys).status shouldBe 204
+        rig.delete(cy, cys)
+        rig.leave(cy, twin)
+        val byHand = unreact(dee, cys)
+        byHand.status shouldBe 204
+
+        whileErasing(adas) { eraser ->
+            val removing = pool.submit(Callable { unreact(bea, adas) })
+            val held =
+                try {
+                    removing.get(BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                } finally {
+                    eraser.rollbackIfStill(removing)
+                }
+            comparable(held) shouldBe comparable(byHand)
+            // Answered with the eraser still open, and its row still held.
+            reactionsOn(adas) shouldBe 1
+            refusedAtOnce("SELECT 1 FROM reactions WHERE entry_id = '$adas' FOR UPDATE NOWAIT")
+            eraser.commit()
+        }
+
+        // The delivery committed: there is no row, as the answer said.
+        reactionsOn(adas) shouldBe 0
+    }
+
+    /**
+     * The same held row, and the eraser **rolls back**: a delivery that
+     * failed. The `204` was given for a row that is then still there. What
+     * the caller sees is what they saw before: the entry is a tombstone to
+     * them by the withdrawal, which did commit, and a tombstone shows no
+     * reaction. And the row does not outlive the consumer's retry.
+     */
+    @Test
+    fun `when the eraser of a withdrawn entry rolls back, the reaction's row is shown to nobody and goes with the consumer's retry`() {
+        react(bea, adas).status shouldBe 204
+        rig.block(ada, bond)
+
+        whileErasing(adas) { eraser ->
+            val removing = pool.submit(Callable { unreact(bea, adas) })
+            try {
+                removing.get(BOUND.toMillis(), TimeUnit.MILLISECONDS).status shouldBe 204
+            } finally {
+                eraser.rollbackIfStill(removing)
+            }
+            eraser.rollback()
+        }
+
+        // Nothing was erased and nothing removed: the row is whole, and so is the reaction's.
+        wordsOf(adas) shouldBe ADAS_WORDS
+        reactionsOn(adas) shouldBe 1
+        for (user in listOf(ada, bea)) {
+            val entry = if (user == ada) myEntryOf(user, bond) else partnerEntryOf(user, bond)
+            entry["status"].asString() shouldBe "DELETED"
+            entry["reaction"].isNull shouldBe true
+        }
+
+        // The delivery is tried again, and this time commits.
+        dispatcher.dispatchDue(clock.instant(), 10).delivered shouldBe 1
+        wordsOf(adas) shouldBe null
         reactionsOn(adas) shouldBe 0
     }
 
@@ -354,6 +456,16 @@ internal class ReactionLockWaitTest(
                 .joinToString { "$it=${response.getHeaders(it)}" }
         return "${response.status}|$headers|$body"
     }
+
+    private fun partnerEntryOf(
+        user: UUID,
+        bond: String,
+    ): JsonNode = json.readTree(rig.today(user, bond))["partnerEntry"]
+
+    private fun myEntryOf(
+        user: UUID,
+        bond: String,
+    ): JsonNode = json.readTree(rig.today(user, bond))["myEntry"]
 
     private fun reactionsOn(entryId: String): Int =
         jdbc.queryForObject("SELECT count(*) FROM reactions WHERE entry_id = ?::uuid", Int::class.java, entryId)!!

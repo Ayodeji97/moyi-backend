@@ -55,9 +55,10 @@ import java.util.UUID
  *
  * **Neither verb waits out a withdrawal** ([Reactions] has why): taking the
  * bond's lock here would put a reaction behind a delivery that can run to
- * sixty seconds, holding a pooled connection. Taking one back while an
- * erasure holds its row is refused at once as a conflict to retry, never
- * answered as done: that erasure may roll back.
+ * sixty seconds, holding a pooled connection. Taking one back from an
+ * entry read in full while an erasure holds its row is refused at once as a
+ * conflict to retry, never answered as done: that erasure may roll back
+ * ([unreact] has where that stops).
  *
  * So one interleaving is let through: an **ending** that commits between
  * the two steps. The reaction is then made, by a request whose answer was
@@ -125,20 +126,32 @@ internal class ReactToEntry(
      * ended make no difference to a caller the entry was shown to.
      *
      * **One refusal of its own, and it comes last:** a row another
-     * transaction holds is `409 REACTION_BUSY`, and the caller tries again.
-     * It is asked only of the caller's own row, after the gate, so it tells
-     * nobody anything about an entry they were not shown.
+     * transaction holds, on a partner's entry the caller reads **in full**,
+     * is `409 REACTION_BUSY`, and the caller tries again. There the holder
+     * may be an erasure that rolls back, and the reaction would then still
+     * be shown after a removal reported as made.
+     *
+     * **On a tombstone a held row is `204` all the same.** The entry is a
+     * tombstone to the caller by something that has committed, a tombstone
+     * shows no reaction whatever rows there are, and what holds the row is
+     * the erasure that removes it (a delivery that fails is retried). A
+     * `409` there would also be the one answer that differs between a
+     * withdrawal whose delivery is still open and its twin deleted by hand,
+     * for as long as the delivery runs.
      *
      * @throws EntryNotFoundException as [react]: this must not be a way to ask whether an id exists.
-     * @throws ReactionBusyException another transaction holds the reaction; no removal is promised.
+     * @throws ReactionBusyException another transaction holds the reaction on an entry read in full; no removal is promised.
      */
     fun unreact(
         userId: UUID,
         entryId: EntryId,
     ) {
         val (entry, membership) = entryAndMembership(userId, entryId)
-        if (entry.canBeReactedToBy(membership.asReader()) == Reacting.NEVER_SHOWN) throw EntryNotFoundException()
-        if (!reactions.remove(entryId, membership.memberId)) throw ReactionBusyException()
+        val answer = entry.canBeReactedToBy(membership.asReader())
+        if (answer == Reacting.NEVER_SHOWN) throw EntryNotFoundException()
+        val removed = reactions.remove(entryId, membership.memberId)
+        // Only where a rollback could bring it back into view: the caller's own entry can hold no row of theirs.
+        if (!removed && answer == Reacting.ALLOWED) throw ReactionBusyException()
     }
 
     /**
