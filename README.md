@@ -151,8 +151,9 @@ at the cost of distributed transactions and multiplied ops. A ball-of-mud
 monolith would teach nothing. This is the middle.
 
 What the API does in each state (every action, where it leads, and every refusal with
-its reason) is drawn in [`docs/state-map/`](docs/state-map/README.md), generated from data
-that CI checks against the contract.
+its reason), and every answer each endpoint can give, is laid out in
+[`docs/state-map/`](docs/state-map/README.md): three machine pages, an endpoints page and
+five journeys, generated from data that CI checks against the contract and the error codes.
 
 ```
 moyi-backend/

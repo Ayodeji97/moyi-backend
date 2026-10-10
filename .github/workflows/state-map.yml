@@ -2,8 +2,11 @@ name: State map
 
 # docs/state-map is generated from docs/state-map/data and claims to cover
 # every endpoint and every error code. This is what holds it to that: a new
-# endpoint, a new ErrorCode, or a changed status in contracts/openapi.json
-# fails here until the map says what it does.
+# endpoint, a new ErrorCode, or a status added to or dropped from an endpoint
+# in contracts/openapi.json fails here until the map says what it does. The
+# statuses that can follow any call (the map's "everywhere" list) are the
+# exception: they are not checked per endpoint. What this run proves and what
+# it cannot is in docs/state-map/README.md, "What the check cannot tell you".
 on:
   pull_request:
   push:

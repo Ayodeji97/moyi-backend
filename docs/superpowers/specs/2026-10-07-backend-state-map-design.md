@@ -3,6 +3,11 @@
 **Date:** 2026-10-07
 **Status:** awaiting the owner's review
 **Describes:** `main @ 174b474` (34 endpoints, 34 error codes)
+**Amended:** 2026-10-10, to record what steps 1 to 4 built where it differs from the
+design: §3.4 (guards are not shown on the pages), §4 (actors are named on the arrow; 405
+and 406 are everywhere errors; the exception is in the data), §5 (one diagram and one grid
+per region; the endpoint card is a page), §6 (the fields added) and §7 (what the check
+does and does not prove).
 
 ## 1. Purpose
 
@@ -108,30 +113,42 @@ States are read from the code, not invented.
 
 A transition in one machine may require a state in another. Writing an
 entry requires `signed in`, a bond in `PENDING_MEMBER` or `ACTIVE`, and a
-day that is not closed. These are guards on the transition, shown as tags.
-No arrow crosses from one diagram to another.
+day that is not closed. These are guards on the transition. No arrow crosses
+from one diagram to another.
+
+As built: the guards are in the data, as each row's `guards`, and the Markdown pages
+do not show them as tags. Where a cell is mirrored from another machine, the row's
+`when` or its reason carries the condition in words. Tags belong to the clickable
+page (step 5).
 
 ## 4. Notation
 
 | Mark | Meaning |
 |---|---|
-| Solid arrow | the reader's own action succeeding |
-| Dashed arrow | the partner's action |
-| Dotted arrow with a clock | the system or time: reveal, close job, token expiry, countdown |
-| Red self-loop (toggle, off by default) | refused in this state; the reader stays |
-| Grey | designed and not built (C5b, C5c, C6, Phase 4) |
+| Arrow labelled `you - …` | the reader's own action succeeding |
+| Arrow labelled `partner - …` | the partner's action |
+| Arrow labelled `system - …` | the system or time: reveal, close job, token expiry, countdown |
+| Red self-loop (toggle, off by default) | refused in this state; the reader stays. Not built: it belongs to the clickable page (step 5) |
+| Grey | designed or only partly built, and no endpoint reaches it |
+
+As built: Mermaid's `stateDiagram-v2` draws one kind of arrow, so the actor is named
+on the arrow's label and not drawn as solid, dashed or dotted. Where one actor has
+more than one action between the same two states the label counts them
+(`you - 3 actions`) and the tables name them.
 
 Errors are of two kinds:
 
 - **State errors** depend on the current state (`EMAIL_NOT_VERIFIED`,
   `BOND_FULL`, `ENTRY_ALREADY_EXISTS`, `DAY_CLOSED`, `PROPOSAL_PENDING`
   and the like). They appear in the state panel, the grid and the loops.
-- **Everywhere errors** can follow any call: 400, 401, 403, 415, 422,
-  429, 500. They are explained once in a strip above the diagrams and
-  listed on each endpoint card. They are never drawn as arrows.
+- **Everywhere errors** can follow any call: 400, 401, 403, 405, 406, 415,
+  422, 429, 500. They are explained once, at the top of the endpoints page,
+  and are not repeated on each endpoint's card. They are never drawn as arrows.
   One exception: in the account machine's regions `account` and `account.session`, a
   `401 UNAUTHENTICATED` is a row. There the missing or expired token is the state, so
-  by the definition above it is a state error. Everywhere else it is never a row.
+  by the definition above it is a state error. Everywhere else it is never a row. The
+  exception is stated in the data (`rowsAllowedIn` on the 401 entry) and the check
+  enforces it.
 
 ## 5. Views
 
@@ -140,17 +157,30 @@ All five are drawn from the data in section 6.
 1. **Map.** The three diagrams stacked. Clicking a state opens a panel
    with three lists: *you can* (action, resulting state), *refused here*
    (status, code, plain reason, rule or ADR), *happens without you*.
+   As built, in Markdown: one diagram per region, not one per machine (a
+   machine's single diagram was too dense to read, and a class cannot be
+   relied on inside a composite state, so grey could not be either). The
+   three lists are three tables under each region's diagram, per region
+   and not per state, each row naming the state it is about.
 2. **Endpoint card.** Opened by clicking an arrow. Method and path; what
    it needs (auth, headers such as `Idempotency-Key` and `If-Match`, the
    guard in each machine); every response with its cause; a curl line.
+   As built: `docs/state-map/endpoints.md`, one section per endpoint,
+   filed under the machine of the region where it has the most rows of
+   the reader's own. It prints the condition of each answer in words; it
+   does not print the guards.
 3. **Grid.** Actions down the side, states across the top, one grid per
-   machine. Each cell is a success with its next state, an error code, or
-   "not reachable". An empty cell is a defect in the data.
+   region (a machine's regions have different states, so one grid per
+   machine has no single top row). Each cell is a success with its next
+   state, an error code, or "not reachable". An empty cell is a defect in
+   the data.
 4. **Journeys.** J1–J5 from doc 02. Choosing one highlights its path
    across the three diagrams as numbered steps and shows the same steps
-   as a sequence diagram (you, partner, API, scheduled job).
+   as a sequence diagram (you, partner, API, and the service acting
+   on its own schedule: the close job and the clock).
    One request can change several regions; a journey shows that as consecutive steps marked as the same request, which the sequence diagram draws as a single call with one answer.
 5. **Search.** An error code or path highlights every place it occurs.
+   Not built; it belongs to the clickable page (step 5).
 
 ## 6. The data
 
@@ -158,7 +188,7 @@ Six hand-written files under `docs/state-map/data/`:
 
 | File | Holds |
 |---|---|
-| `model.json` | The machines, regions and states; the events; the errors that apply everywhere; the `pending` list; the stamp |
+| `model.json` | The machines, regions and states; the events; the errors that apply everywhere; the `pending` list; `contractGaps`; the stamp |
 | `endpoints.json` | One card per endpoint: summary, auth, headers, request errors, a curl line |
 | `day.json`, `bond.json`, `account.json` | The rows of each machine |
 | `journeys.json` | Each journey as an ordered list of row references |
@@ -183,13 +213,39 @@ Six hand-written files under `docs/state-map/data/`:
 | `evidenceRef` | smoke: text of the probe's label. test: `ClassName#text of the test name`. hand: who and when. never-run: `""` |
 | `codeRef` | `path/from/repo/root.kt#text found in that file`. Text, not a line number, so it survives edits above it |
 
+**The rest of the data, as built** (fields the first draft of this section did not name):
+
+| Where | Field | Content |
+|---|---|---|
+| a state in `model.json` | `id`, `label` | the id rows use, and the words a diagram shows |
+| | `built` | `false` for a state that is designed or only partly built and that no row may touch; drawn grey. Absent means built |
+| | `initial` | `true` on exactly one built state of each region: where the region starts. It is the one state the strict check does not require a row to enter |
+| an event in `model.json` | `id`, `label`, `actor` | `event:day-ends`; the sentence a page prints; `partner` or `system` |
+| an `everywhere` entry | `status`, `code`, `reason`, `codeRef` | an error that can follow any call |
+| | `rowsAllowedIn` | optional: the regions in which this status and code may also be a row. Only the 401 entry has it |
+| a `contractGaps` entry | `endpoint`, `status`, `note` | a status the code answers and the contract does not document |
+| `pending` | `endpoints`, `codes` | what is not yet mapped; empty in strict mode |
+| a card in `endpoints.json` | `id` | the method, a space, and the path as the contract spells it |
+| | `summary` | the action in a few words, addressed to the reader ("delete your entry"). A page rewords it as the partner's when the partner is the actor |
+| | `auth` | `bearer` or `none` |
+| | `headers` | a list of sentences, one per header |
+| | `requestErrors` | errors that depend on the request and not on any state: `status`, `code`, `reason`, `evidence`, `evidenceRef`, `codeRef` |
+| | `curl` | one line, with shell variables and never a real token |
+| a step in `journeys.json` | `row`, `note` | the row the step names, and a sentence of its own |
+| | `sameRequest` | optional, `true` when the step is the same request as the one before, seen in another region |
+
+A test's `evidenceRef` is `ClassName#the full test name`: the check matches the whole
+name, not a part of it.
+
 ### Generated from the data
 
 - `docs/state-map/account.md`, `bond.md`, `day.md`: Mermaid
-  `stateDiagram-v2`, which GitHub renders. These satisfy doc 18 §7 and
-  are the artefact a reviewer or interviewer sees in the repository.
+  `stateDiagram-v2`, which GitHub renders, one per region, with the
+  region's tables under it. These satisfy doc 18 §7 and are the artefact
+  a reviewer or interviewer sees in the repository.
+- `docs/state-map/endpoints.md`: the endpoint cards (view 2).
 - `docs/state-map/journeys.md`: Mermaid `sequenceDiagram` per journey.
-- The published page.
+- The published page (step 5, not built).
 
 Generated files are committed. The check in section 7 fails if they are
 stale.
@@ -199,11 +255,20 @@ stale.
 A script, `scripts/state-map-check`, run in CI:
 
 - Every path and method in `contracts/openapi.json` has at least one row.
-- Every status the contract documents for an endpoint has a row or is an
-  everywhere error.
-- Every value of `ErrorCode` appears in at least one row.
+- Every status the contract documents for an endpoint has a row or a
+  request error on the endpoint's card, or is an everywhere error. The
+  everywhere statuses are not checked per endpoint.
+- Every value of `ErrorCode` appears in at least one row, in a card's
+  request errors, or among the everywhere errors.
 - Every grid cell is filled.
-- The generated Mermaid matches the data.
+- In strict mode, every built state except its region's initial one is
+  entered by some row.
+- An everywhere error is a row only in the regions its entry allows.
+- The generated pages match the data.
+
+What the check proves and what it cannot (that the service behaves as a row says, that a
+condition or a guard is right, that a journey can be walked) is set out in
+`docs/state-map/README.md`, "What the check cannot tell you".
 
 The contract can itself be incomplete: the code may answer a status that `contracts/openapi.json` does not document. The map does not bend a row to fit and does not edit the contract. Such a status is listed in `contractGaps` in `model.json`, with a note; the check then allows it, prints each machine's gaps on its page, and fails when a listed gap has since been documented, so the list can only shrink.
 
