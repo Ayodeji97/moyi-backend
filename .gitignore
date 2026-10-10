@@ -30,6 +30,9 @@ out/
 ### macOS ###
 .DS_Store
 
+### Python ###
+__pycache__/
+
 ### SDKMAN local pin (per-developer, not project-wide) ###
 .sdkmanrc.local
 
