@@ -125,7 +125,7 @@
     "steps": [
       {
         "row": "day-not-opened-write",
-        "note": ""
+        "note": "You are some days into a run, with one rest day banked and Strict mode off."
       },
       {
         "row": "day-partial-streak",
@@ -137,11 +137,12 @@
       },
       {
         "row": "entry-submitted-ends-solo",
-        "note": "The same moment, as your entry sees it."
+        "note": "",
+        "sameRequest": true
       },
       {
         "row": "day-solo-freeze",
-        "note": "One freeze was banked."
+        "note": ""
       },
       {
         "row": "day-frozen-streak",
