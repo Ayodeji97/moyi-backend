@@ -24,7 +24,7 @@ sequenceDiagram
     actor You
     actor Partner
     participant API
-    participant Job as Scheduled job
+    participant Job as The service, on its own schedule
     You->>API: register
     API-->>You: 201, account is PENDING_VERIFICATION
     You->>API: verify your email
@@ -69,7 +69,7 @@ sequenceDiagram
     actor You
     actor Partner
     participant API
-    participant Job as Scheduled job
+    participant Job as The service, on its own schedule
     You->>API: write today's entry
     API-->>You: 201, day is PARTIAL
     You->>API: write today's entry
@@ -113,7 +113,7 @@ sequenceDiagram
     actor You
     actor Partner
     participant API
-    participant Job as Scheduled job
+    participant Job as The service, on its own schedule
     You->>API: write today's entry
     API-->>You: 201, day is PARTIAL
     You->>API: read the streak
@@ -145,7 +145,7 @@ sequenceDiagram
     actor You
     actor Partner
     participant API
-    participant Job as Scheduled job
+    participant Job as The service, on its own schedule
     You->>API: read today
     API-->>You: 200, day is REVEALED, day.partnerEntry is VISIBLE
     You->>API: read the streak
@@ -177,7 +177,7 @@ sequenceDiagram
     actor You
     actor Partner
     participant API
-    participant Job as Scheduled job
+    participant Job as The service, on its own schedule
     You->>API: ask for the bond's deletion, or agree to it
     API-->>You: 202, bond is ACTIVE, bond.proposal is PROPOSED
     Partner->>API: your partner agrees to your proposal

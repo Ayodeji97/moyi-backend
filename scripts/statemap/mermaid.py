@@ -29,12 +29,28 @@ def node(region_id: str, state: str) -> str:
     return f"{region_id.replace('.', '_')}__{state}"
 
 
+def told(model: Model, row: dict) -> str:
+    """The action in words. A request your partner makes is their act, so it is said as theirs."""
+    label = model.label(row["action"])
+    if row["actor"] == "partner" and any(e["id"] == row["action"] for e in model.endpoints):
+        label = re.sub(r"\byou\b", "they", re.sub(r"\byour\b", "their", label))
+    return label
+
+
+def _on_arrow(model: Model, row: dict) -> str:
+    """An arrow already names its actor, so an event's label drops its own subject."""
+    label = told(model, row)
+    if row["actor"] != "you" and any(e["id"] == row["action"] for e in model.events):
+        label = re.sub(r"^(your partner|the) ", "", label)
+    return clean(label)
+
+
 def _edges(model: Model, region_id: str) -> dict:
     edges = {}
     for row in model.rows:
         if row["region"] == region_id and row["outcome"] == "ok" and row["to"] != row["from"]:
             labels = edges.setdefault((row["from"], row["to"]), {}).setdefault(row["actor"], [])
-            label = clean(model.label(row["action"]))
+            label = _on_arrow(model, row)
             if label not in labels:
                 labels.append(label)
     return edges
@@ -43,25 +59,21 @@ def _edges(model: Model, region_id: str) -> dict:
 def _edge_label(by_actor: dict) -> str:
     parts = []
     for actor, labels in by_actor.items():
-        text = " / ".join(labels) if len(labels) <= 2 else f"{len(labels)} actions"
+        text = labels[0] if len(labels) == 1 else f"{len(labels)} actions"
         parts.append(f"{actor} - {text}")
     return ", ".join(parts)
 
 
-def state_diagram(model: Model, machine_id: str) -> str:
-    machine = next(m for m in model.machines if m["id"] == machine_id)
+def state_diagram(model: Model, region_id: str) -> str:
+    """One region, drawn flat: a class cannot be relied on inside a composite state."""
     lines = ["stateDiagram-v2"]
     unbuilt = []
-    for region in machine["regions"]:
-        region_id = region["id"]
-        lines.append(f'    state "{clean(region["label"])}" as {region_id.replace(".", "_")} {{')
-        for state in region["states"]:
-            lines.append(f'        state "{clean(state["label"])}" as {node(region_id, state["id"])}')
-            if not state.get("built", True):
-                unbuilt.append(node(region_id, state["id"]))
-        for (source, target), by_actor in _edges(model, region_id).items():
-            lines.append(f"        {node(region_id, source)} --> {node(region_id, target)}: {_edge_label(by_actor)}")
-        lines.append("    }")
+    for state in model.regions()[region_id]["states"]:
+        lines.append(f'    state "{clean(state["label"])}" as {node(region_id, state["id"])}')
+        if not state.get("built", True):
+            unbuilt.append(node(region_id, state["id"]))
+    for (source, target), by_actor in _edges(model, region_id).items():
+        lines.append(f"    {node(region_id, source)} --> {node(region_id, target)}: {_edge_label(by_actor)}")
     if unbuilt:
         lines.append("    classDef unbuilt fill:#eeeeee,stroke:#aaaaaa,color:#888888")
         lines += [f"    class {name} unbuilt" for name in unbuilt]
@@ -99,24 +111,34 @@ def grid_table(model: Model, region_id: str) -> str:
     return _table(["Action"] + [f"`{s}`" for s in states], body) if body else ""
 
 
+def _you_can(model: Model, region_id: str) -> str:
+    rows = [
+        [f"`{r['from']}`", cell_text(told(model, r)), cell_text(r["when"]),
+         "stays" if r["to"] == r["from"] else f"`{r['to']}`", cell_text(r["reason"]), r["evidence"]]
+        for r in model.rows
+        if r["region"] == region_id and r["actor"] == "you" and r["outcome"] == "ok"
+    ]
+    return _table(["In", "Action", "When", "Leads to", "Why", "Evidence"], rows) if rows else ""
+
+
 def _refusals(model: Model, region_id: str) -> str:
     rows = [
-        [f"`{r['from']}`", cell_text(model.label(r["action"])), f"{r['status']} `{r['code']}`",
+        [f"`{r['from']}`", cell_text(told(model, r)), cell_text(r["when"]), f"{r['status']} `{r['code']}`",
          cell_text(r["reason"]), r["rule"], r["evidence"]]
         for r in model.rows
         if r["region"] == region_id and r["actor"] == "you" and r["outcome"] == "refused"
     ]
-    return _table(["In", "Action", "Answer", "Why", "Rule", "Evidence"], rows) if rows else ""
+    return _table(["In", "Action", "When", "Answer", "Why", "Rule", "Evidence"], rows) if rows else ""
 
 
 def _without_you(model: Model, region_id: str) -> str:
     rows = [
-        [f"`{r['from']}`", cell_text(model.label(r["action"])), r["actor"], f"`{r['to']}`",
+        [f"`{r['from']}`", cell_text(told(model, r)), r["actor"], cell_text(r["when"]), f"`{r['to']}`",
          cell_text(r["reason"]), r["evidence"]]
         for r in model.rows
         if r["region"] == region_id and r["actor"] != "you"
     ]
-    return _table(["In", "What happens", "Who", "Leads to", "Why", "Evidence"], rows) if rows else ""
+    return _table(["In", "What happens", "Who", "When", "Leads to", "Why", "Evidence"], rows) if rows else ""
 
 
 def _gaps(model: Model, machine: dict) -> str:
@@ -136,21 +158,21 @@ def machine_md(model: Model, machine_id: str) -> str:
         NOTICE,
         f"# The {machine['label'].lower()} machine",
         f"Describes `main @ {model.stamp}`. How to read this: [README](README.md).",
-        "```mermaid\n" + state_diagram(model, machine_id) + "\n```",
-        "Each arrow says who acts: you, your partner or the system. "
-        "Refusals are not drawn; they are in the tables below.",
+        "Each region below has its own diagram. Each arrow says who acts: you, your partner or the "
+        "system. Refusals are not drawn; they are in the tables. Grey means designed or only partly "
+        "built, and no endpoint reaches it.",
     ]
     for region in machine["regions"]:
+        parts += [f"## {region['label']}", "```mermaid\n" + state_diagram(model, region["id"]) + "\n```"]
         sections = (
             ("Every action in every state", grid_table(model, region["id"])),
+            ("You can", _you_can(model, region["id"])),
             ("Refused here", _refusals(model, region["id"])),
             ("Happens without you", _without_you(model, region["id"])),
         )
-        if any(text for _, text in sections):
-            parts.append(f"## {region['label']}")
-            for title, text in sections:
-                if text:
-                    parts += [f"### {title}", text]
+        for title, text in sections:
+            if text:
+                parts += [f"### {title}", text]
     gaps = _gaps(model, machine)
     if gaps:
         parts += [
@@ -168,7 +190,7 @@ def sequence_diagram(model: Model, journey: dict) -> str:
         "    actor You",
         "    actor Partner",
         "    participant API",
-        "    participant Job as Scheduled job",
+        "    participant Job as The service, on its own schedule",
     ]
     groups = []
     for step in journey["steps"]:
@@ -179,7 +201,7 @@ def sequence_diagram(model: Model, journey: dict) -> str:
     for group in groups:
         row = group[0]
         who = {"you": "You", "partner": "Partner", "system": "Job"}[row["actor"]]
-        lines.append(f"    {who}->>API: {clean(model.label(row['action']))}")
+        lines.append(f"    {who}->>API: {clean(told(model, row))}")
         regions = ", ".join(f"{r['region']} is {r['to']}" for r in group)
         if row["outcome"] == "refused":
             lines.append(f"    API-->>{who}: {row['status']} {row['code']}")
@@ -205,7 +227,8 @@ def journeys_md(model: Model) -> str:
             row = rows[step["row"]]
             note = f" {step['note']}" if step.get("note") else ""
             same = "(the same request) " if step.get("sameRequest") is True else ""
-            steps.append(f"{number}. {same}**{row['actor']}**: {model.label(row['action'])}. {row['reason']}{note}")
+            steps.append(f"{number}. {same}**{row['actor']}**: {told(model, row)}. {row['reason']}{note}")
         parts.append("\n".join(steps))
         parts.append("```mermaid\n" + sequence_diagram(model, journey) + "\n```")
     return "\n\n".join(parts) + "\n"
+
