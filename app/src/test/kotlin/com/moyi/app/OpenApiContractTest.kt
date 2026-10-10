@@ -61,6 +61,7 @@ import javax.sql.DataSource
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@Suppress("LargeClass") // One document, and everything held about it where it can be read together.
 class OpenApiContractTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val issuer: AccessTokenIssuer,
@@ -618,6 +619,81 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `a reaction is put as one required type of the four and deleted with no body, and only putting one can conflict`() {
+        val reaction = api.paths["/api/v1/entries/{entryId}/reaction"]!!
+        reaction.readOperationsMap().keys.map { it.name } shouldContainExactlyInAnyOrder listOf("PUT", "DELETE")
+
+        // 409 is REACTION_ON_OWN_ENTRY, ENTRY_IMMUTABLE and BOND_ARCHIVED. A body goes in, so 400 and 422; none comes out.
+        reaction.put.operationId shouldBe "reactToEntry"
+        reaction.put.responses.keys shouldContainExactlyInAnyOrder listOf("204", "400", "401", "403", "404", "409", "422", "429", "500")
+        reaction.put.responses["204"]!!.content shouldBe null
+        reaction.put.parameters.map { it.name } shouldBe listOf("entryId")
+        reaction.put.requestBody.required shouldBe true
+        reaction.put.requestBody.content.keys shouldBe setOf(MediaType.APPLICATION_JSON_VALUE)
+
+        // The body is the one key, never null, and its values are the set itself: no second list to drift.
+        val body = api.components.schemas["ReactionRequest"]!!
+        body.properties.keys shouldBe setOf("type")
+        body.required shouldBe listOf("type")
+        val type = body.properties["type"]!!
+        (type.types ?: setOf(type.type)) shouldBe setOf("string")
+        type.enum.map { it.toString() } shouldBe REACTION_TYPES
+
+        // Taking one back is never a conflict: absent is success, on a tombstone and on an ended bond too.
+        reaction.delete.operationId shouldBe "unreactToEntry"
+        reaction.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "429", "500")
+        reaction.delete.responses["204"]!!.content shouldBe null
+        reaction.delete.requestBody shouldBe null
+        reaction.delete.parameters.map { it.name } shouldBe listOf("entryId")
+    }
+
+    @Test
+    fun `an entry carries the reaction on it, one of the four or null and always sent, and nothing says when it was left`() {
+        val full =
+            api.components.schemas["EntryResponse"]!!
+                .allOf
+                .last()
+        val reaction = full.properties["reaction"]!!
+        reaction.types shouldBe setOf("string", "null")
+        // `null` is listed: by JSON Schema an enum that leaves it out forbids it, whatever `type` says.
+        reaction.enum.map { it?.toString() } shouldBe REACTION_TYPES + null
+        // Required though nullable, as `text` is: "no reaction" is `null`, not a field the server left out.
+        full.required shouldContain "reaction"
+        // The whole of what an entry says: a field added for a reaction's time, or its maker, fails here.
+        full.properties.keys shouldBe
+            setOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
+        // No schema of a reaction beyond its type exists to carry more.
+        api.components.schemas.keys
+            .filter { "eaction" in it } shouldBe listOf("ReactionRequest")
+    }
+
+    @Test
+    fun `the two reaction operations say what the schema cannot`() {
+        val reaction = api.paths["/api/v1/entries/{entryId}/reaction"]!!
+        val set = reaction.put.description.shouldNotBeNull()
+        set shouldContain "The other member is shown it"
+        set shouldContain "replaces"
+        set shouldContain "`409 REACTION_ON_OWN_ENTRY`"
+        set shouldContain "`409 ENTRY_IMMUTABLE`"
+        set shouldContain "`409 BOND_ARCHIVED`"
+        set shouldContain "never shown"
+        set shouldContain "`422`"
+        set shouldContain "`400`"
+
+        val remove = reaction.delete.description.shouldNotBeNull()
+        remove shouldContain "no reaction is success"
+        remove shouldContain "never shown"
+        remove shouldContain "Allowed on a bond that has ended"
+
+        api.components.schemas["EntryResponse"]!!
+            .allOf
+            .last()
+            .properties["reaction"]!!
+            .description
+            .shouldNotBeNull() shouldContain "left by the member who did not write"
+    }
+
+    @Test
     fun `partnerEntry is one of three branches, discriminated on status with no value naming two`() {
         // springdoc resolves the sealed interface to a `oneOf` of its
         // branches; OpenApiConfiguration adds the `discriminator`, which is
@@ -824,6 +900,8 @@ class OpenApiContractTest(
     }
 
     private companion object {
+        /** FR-048's set, written out: the contract's enum, so a change here is a breaking change to a generated client. */
+        val REACTION_TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED")
         val GENERATED = File("build/openapi/openapi.json")
         val COMMITTED = File("../contracts/openapi.json")
     }

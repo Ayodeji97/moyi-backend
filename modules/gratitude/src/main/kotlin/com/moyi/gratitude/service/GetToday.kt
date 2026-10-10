@@ -7,10 +7,12 @@ import com.moyi.gratitude.domain.DayAssignment
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
+import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.Favourites
+import com.moyi.gratitude.infra.database.Reactions
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
@@ -41,6 +43,11 @@ internal data class TodayView(
      * full; a mark on anything else is not looked for.
      */
     val marked: Set<EntryId>,
+    /**
+     * The reaction on each of the two entries that has one (FR-048), which
+     * both members are shown. Only ever of entries read in full.
+     */
+    val reactions: Map<EntryId, ReactionType>,
 )
 
 /**
@@ -101,6 +108,10 @@ internal data class TodayView(
  * member id, and none on a day with nothing they can read. The partner's
  * marks are not read at all: there is no query here that could return them.
  *
+ * **`reaction` is asked the same way, of the same entries, and names no
+ * member** (FR-048): the reaction on an entry is the other person's and is
+ * shown to both.
+ *
  * **Nothing here is cached.** Every call re-reads the row and the entries
  * fresh; the day this returns is only ever as current as the transaction
  * that reads it. A cache in front of this method would have to be reasoned
@@ -118,6 +129,7 @@ internal data class TodayView(
  * no such check either.
  */
 @Service
+@Suppress("LongParameterList") // What today is read from, each named.
 internal class GetToday(
     private val days: BondDayStore,
     private val entries: EntryStore,
@@ -125,6 +137,7 @@ internal class GetToday(
     private val streak: GetStreak,
     private val access: BondAccess,
     private val favourites: Favourites,
+    private val reactions: Reactions,
 ) {
     @Transactional(readOnly = true)
     fun today(membership: BondMembership): TodayView {
@@ -139,7 +152,15 @@ internal class GetToday(
         if (day == null) {
             val status = if (membership.awaitingSecondMember) BondDayStatus.SUSPENDED else BondDayStatus.OPEN
             val unwritten = streak.view(membership, date, todayComplete = false)
-            return TodayView(date, status, myEntry = null, partnerEntry = null, streak = unwritten, marked = emptySet())
+            return TodayView(
+                date,
+                status,
+                myEntry = null,
+                partnerEntry = null,
+                streak = unwritten,
+                marked = emptySet(),
+                reactions = emptyMap(),
+            )
         }
 
         val written = entries.findForDay(day.id).onEachSideOf(membership.memberId)
@@ -157,6 +178,7 @@ internal class GetToday(
             partnerEntry = partners,
             streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),
             marked = favourites.markedBy(membership.memberId, readInFull),
+            reactions = reactions.on(readInFull),
         )
     }
 }

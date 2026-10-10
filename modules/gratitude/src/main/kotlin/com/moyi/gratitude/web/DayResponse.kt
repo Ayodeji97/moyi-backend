@@ -32,8 +32,19 @@ internal data class DayResponse(
             DayResponse(
                 date = view.date,
                 status = view.status,
-                myEntry = view.myEntry?.let { EntryResponse.of(it, view.date, it.disclosed?.id in view.marked) },
-                partnerEntry = view.partnerEntry?.let { PartnerEntryResponse.of(it, view.date, it.disclosed?.id in view.marked) },
+                myEntry =
+                    view.myEntry?.let {
+                        EntryResponse.of(
+                            it,
+                            view.date,
+                            it.disclosed?.id in view.marked,
+                            view.reactions[it.disclosed?.id],
+                        )
+                    },
+                partnerEntry =
+                    view.partnerEntry?.let {
+                        PartnerEntryResponse.of(it, view.date, it.disclosed?.id in view.marked, view.reactions[it.disclosed?.id])
+                    },
             )
     }
 }

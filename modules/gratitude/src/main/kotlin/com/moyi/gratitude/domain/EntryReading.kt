@@ -99,6 +99,21 @@ internal enum class Favouriting {
     NEVER_SHOWN,
 }
 
+/** Whether a [Reader] may leave a reaction on one [Entry] — [Entry.canBeReactedToBy]'s answer, which has the reasons. */
+internal enum class Reacting {
+    /** The partner's entry, which the reader can read in full. */
+    ALLOWED,
+
+    /** The reader wrote it. */
+    OWN_ENTRY,
+
+    /** The partner's entry, a tombstone to this reader: deleted, or withdrawn whether or not anything has been erased. */
+    ERASED,
+
+    /** Nothing this reader was ever shown. To be answered exactly as an entry that does not exist. */
+    NEVER_SHOWN,
+}
+
 /**
  * Everything of an entry a reader who can — or once could — read it may
  * have: [Readability.FULL] or [Readability.TOMBSTONE]. [text] is `null`

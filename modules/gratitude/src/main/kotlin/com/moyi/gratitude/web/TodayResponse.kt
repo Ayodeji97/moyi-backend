@@ -2,6 +2,7 @@ package com.moyi.gratitude.web
 
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.EntryReading
+import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.service.TodayView
 import java.time.LocalDate
@@ -71,8 +72,19 @@ internal data class TodayResponse(
         fun from(view: TodayView): TodayResponse =
             TodayResponse(
                 bondDay = BondDayResponse(date = view.date, status = view.status),
-                myEntry = view.myEntry?.let { EntryResponse.of(it, view.date, it.disclosed?.id in view.marked) },
-                partnerEntry = view.partnerEntry?.let { PartnerEntryResponse.of(it, view.date, it.disclosed?.id in view.marked) },
+                myEntry =
+                    view.myEntry?.let {
+                        EntryResponse.of(
+                            it,
+                            view.date,
+                            it.disclosed?.id in view.marked,
+                            view.reactions[it.disclosed?.id],
+                        )
+                    },
+                partnerEntry =
+                    view.partnerEntry?.let {
+                        PartnerEntryResponse.of(it, view.date, it.disclosed?.id in view.marked, view.reactions[it.disclosed?.id])
+                    },
                 streak = TodayStreakResponse.from(view.streak),
             )
     }
@@ -120,18 +132,20 @@ internal sealed interface PartnerEntryResponse {
          * are given the author and nothing else — the reading has nothing
          * else to give them. A non-member: nothing.
          *
-         * [favourited], the caller's own bookmark, goes to the one branch
-         * that has a field for it. The two narrow shapes are not given it
-         * and could not carry it: an entry the caller was never shown has
-         * nothing of the caller's on it either.
+         * [favourited], the caller's own bookmark, and [reaction], the one
+         * on the entry, go to the one branch that has fields for them. The
+         * two narrow shapes are not given either and could not carry one: an
+         * entry the caller was never shown has nothing of the caller's on it,
+         * and they cannot have reacted to it.
          */
         fun of(
             reading: EntryReading,
             date: LocalDate,
             favourited: Boolean,
+            reaction: ReactionType?,
         ): PartnerEntryResponse? =
             when (reading.readability) {
-                Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date, favourited)
+                Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date, favourited, reaction)
                 Readability.LOCKED -> reading.authorMemberId?.let { LockedEntryResponse(it) }
                 Readability.TOMBSTONE_UNSEEN -> reading.authorMemberId?.let { ErasedEntryResponse(it) }
                 Readability.NOT_A_MEMBER -> null

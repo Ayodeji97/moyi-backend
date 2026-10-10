@@ -316,6 +316,51 @@ internal class DaysConditionalTest(
         }
     }
 
+    /**
+     * A reaction is the one thing the other person is meant to see (FR-048),
+     * so unlike a bookmark it is in both members' bodies and moves both
+     * members' tags: the author's, and the tag of the member who left it.
+     */
+    @Test
+    fun `the tag changes for both members when a reaction is set, replaced and taken back, and comes back to what it was`() {
+        val bond = pair()
+        val day = bothWrite(bond, DAY_ONE)
+
+        reads(bond).forEach { (route, read) ->
+            withClue(route) {
+                val before = listOf(ada, bea).associateWith { tagOf(read(it, emptyMap())) }
+
+                /** Each member's tag now, having been answered in full for [stale] and with a 304 for the new one. */
+                fun movedFrom(
+                    stale: Map<UUID, String>,
+                    type: String,
+                ): Map<UUID, String> =
+                    listOf(ada, bea).associateWith { user ->
+                        val changed = read(user, mapOf(HttpHeaders.IF_NONE_MATCH to stale.getValue(user)))
+                        changed.status shouldBe 200
+                        changed.contentAsString shouldContain "\"reaction\":\"$type\""
+                        tagOf(changed) shouldNotBe stale.getValue(user)
+                        tagOf(changed) shouldBe keyedTagOf(changed.contentAsByteArray)
+                        read(user, mapOf(HttpHeaders.IF_NONE_MATCH to tagOf(changed))).status shouldBe 304
+                        tagOf(changed)
+                    }
+
+                rig.bonds.react(bea, day.adas, "HEART")
+                val set = movedFrom(before, "HEART")
+                // Setting what is already set moves nothing.
+                rig.bonds.react(bea, day.adas, "HEART")
+                listOf(ada, bea).associateWith { tagOf(read(it, emptyMap())) } shouldBe set
+
+                rig.bonds.react(bea, day.adas, "MOVED")
+                val replaced = movedFrom(set, "MOVED")
+                replaced.values.intersect(before.values.toSet() + set.values).size shouldBe 0
+
+                rig.bonds.unreact(bea, day.adas)
+                listOf(ada, bea).associateWith { tagOf(read(it, emptyMap())) } shouldBe before
+            }
+        }
+    }
+
     @Test
     fun `the tag changes when the day reveals`() {
         val bond = pair()

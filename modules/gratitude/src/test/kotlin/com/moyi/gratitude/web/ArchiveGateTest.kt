@@ -524,6 +524,7 @@ internal class ArchiveGateTest(
         const val ADAS = "zqw-ada-words"
         const val BEAS = "zqw-bea-words"
 
-        val WIDE_KEYS = listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited")
+        val WIDE_KEYS =
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
     }
 }

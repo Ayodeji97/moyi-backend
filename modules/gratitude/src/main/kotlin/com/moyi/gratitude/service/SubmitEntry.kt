@@ -19,10 +19,12 @@ import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryText
+import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.Favourites
 import com.moyi.gratitude.infra.database.GratitudeConstraints
+import com.moyi.gratitude.infra.database.Reactions
 import com.moyi.gratitude.infra.database.redacted
 import com.moyi.gratitude.infra.database.violates
 import org.slf4j.LoggerFactory
@@ -72,12 +74,14 @@ internal data class EntryDraft(
  *
  * [favourited] is **the caller's own** bookmark on it (FR-093), never
  * anybody else's, and has no default: whoever builds a view says what the
- * caller's mark is, or says why there cannot be one.
+ * caller's mark is, or says why there cannot be one. [reaction] is the one
+ * the other member has left on it (FR-048), and has none either.
  */
 internal data class EntryView(
     val entry: EntryReading,
     val day: BondDay,
     val favourited: Boolean,
+    val reaction: ReactionType?,
 )
 
 /**
@@ -258,6 +262,7 @@ internal class SubmitEntry(
     private val joining: ReconcileJoiningDay,
     private val events: EventPublisher,
     private val favourites: Favourites,
+    private val reactions: Reactions,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -388,8 +393,8 @@ internal class SubmitEntry(
         // else — an entry of another bond, above all — has none to give.
         val day = reading?.disclosed?.let { days.find(it.bondDayId) }
         if (reading == null || day == null) throw EntryNotFoundException()
-        // The caller's mark as it is now, like everything else a replay returns.
-        return EntryView(reading, day, favourites.isMarkedBy(membership, reading))
+        // The caller's mark and the partner's reaction as they are now, like everything else a replay returns.
+        return EntryView(reading, day, favourites.isMarkedBy(membership, reading), reactions.on(reading))
     }
 
     /**
@@ -465,8 +470,8 @@ internal class SubmitEntry(
         val updated = reveal.apply(day.withEntry(), membership.revealTimeLocal, now)
         if (joiningDate != null && joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)
         val persisted = checkNotNull(entries.find(entry.id))
-        // Not asked of the table: the row was inserted a moment ago in this transaction, and nobody can have marked it.
-        return EntryView(persisted.readBy(membership.asReader()), updated, favourited = false) to entry.id
+        // Not asked of the tables: the row was inserted a moment ago in this transaction, and nobody can have marked it or reacted to it.
+        return EntryView(persisted.readBy(membership.asReader()), updated, favourited = false, reaction = null) to entry.id
     }
 
     /**

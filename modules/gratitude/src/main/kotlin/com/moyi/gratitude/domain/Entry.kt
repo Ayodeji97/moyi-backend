@@ -183,6 +183,36 @@ internal data class Entry(
             Readability.LOCKED, Readability.TOMBSTONE_UNSEEN, Readability.NOT_A_MEMBER -> Favouriting.NEVER_SHOWN
         }
 
+    /**
+     * FR-048: may [reader] leave a reaction on this entry? **The read gate's
+     * answer for that reader, and one thing more**, whether they wrote it:
+     *
+     * - Anything the reader was never shown ([Readability.LOCKED],
+     *   [Readability.TOMBSTONE_UNSEEN], [Readability.NOT_A_MEMBER]): no, and
+     *   not in a way that says the entry exists. Asked first, so that "it is
+     *   your own" is only ever said to a member of the entry's bond.
+     * - The reader's **own** entry, in any state they can see it in: no. A
+     *   reaction is the other person's acknowledgement (the owner's ruling:
+     *   on the partner's entry only).
+     * - The partner's, [Readability.FULL]: yes. The gate gives a partner
+     *   that answer only once the entry is revealed, so "revealed only" has
+     *   no line of its own here.
+     * - The partner's, [Readability.TOMBSTONE]: there is nothing left to
+     *   acknowledge. That includes an entry whose author has withdrawn and
+     *   whose row is still whole.
+     *
+     * It knows nothing of whether the bond still takes a reaction; that is
+     * the bond's fact and `ReactToEntry` asks it. As current as the
+     * [Reader], like [canBeReadBy]: the caller builds the reader after
+     * loading this entry.
+     */
+    fun canBeReactedToBy(reader: Reader): Reacting =
+        when (canBeReadBy(reader)) {
+            Readability.LOCKED, Readability.TOMBSTONE_UNSEEN, Readability.NOT_A_MEMBER -> Reacting.NEVER_SHOWN
+            Readability.FULL -> if (authorMemberId == reader.memberId) Reacting.OWN_ENTRY else Reacting.ALLOWED
+            Readability.TOMBSTONE -> if (authorMemberId == reader.memberId) Reacting.OWN_ENTRY else Reacting.ERASED
+        }
+
     /** This entry as [reader] may see it — the only form an entry is rendered from ([EntryReading]). */
     fun readBy(reader: Reader): EntryReading = EntryReading.of(this, reader)
 

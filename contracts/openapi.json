@@ -3115,6 +3115,184 @@
         "tags" : [ "favourites-controller" ]
       }
     },
+    "/api/v1/entries/{entryId}/reaction" : {
+      "delete" : {
+        "description" : "Takes the caller's reaction back. Repeatable: no reaction is success, and so is an entry that has since been erased, or one the caller wrote. `404` is every entry the caller was never shown, the same as for an id that does not exist. Allowed on a bond that has ended.",
+        "operationId" : "unreactToEntry",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "entryId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "reactions-controller" ]
+      },
+      "put" : {
+        "description" : "Leaves the caller's reaction on their partner's entry: one per member per entry, so a second one replaces the first. The other member is shown it, as the entry's `reaction`, and is not shown when it was left. Repeatable. Only the partner's entry that the caller is shown with `status: REVEALED` takes one. `409 REACTION_ON_OWN_ENTRY` is an entry the caller wrote. `409 ENTRY_IMMUTABLE` is an entry that has been erased, or is being erased: a tombstone. `409 BOND_ARCHIVED` is a bond that has ended. `404` is every entry the caller was never shown, the same as for an id that does not exist. A `type` that is absent, null or not one of the listed names, exactly, is `422`. A body with any other key, or with `type` twice, is `400`; nothing is ignored. A body is judged before the entry is looked at.",
+        "operationId" : "reactToEntry",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "entryId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReactionRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "409" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Conflict"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "reactions-controller" ]
+      }
+    },
     "/api/v1/invites/{code}" : {
       "get" : {
         "operationId" : "resolve",
@@ -3644,6 +3822,11 @@
               "type" : "string",
               "format" : "date-time"
             },
+            "reaction" : {
+              "type" : [ "string", "null" ],
+              "description" : "The reaction on this entry: the one left by the member who did not write it, or null. Both members are sent the same value. Always null on an erased entry.",
+              "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED", null ]
+            },
             "status" : {
               "type" : "string",
               "enum" : [ "SUBMITTED", "REVEALED", "DELETED" ]
@@ -3652,7 +3835,7 @@
               "type" : [ "string", "null" ]
             }
           },
-          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "intendedAt", "status", "text" ]
+          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "intendedAt", "reaction", "status", "text" ]
         } ]
       },
       "ErasedEntryResponse" : {
@@ -4000,7 +4183,7 @@
         "properties" : {
           "code" : {
             "type" : "string",
-            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "REACTION_ON_OWN_ENTRY", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"
@@ -4028,6 +4211,17 @@
           }
         },
         "required" : [ "code", "status", "title", "type" ]
+      },
+      "ReactionRequest" : {
+        "type" : "object",
+        "properties" : {
+          "type" : {
+            "type" : "string",
+            "description" : "The reaction to leave, by its exact name.",
+            "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED" ]
+          }
+        },
+        "required" : [ "type" ]
       },
       "RefreshRequest" : {
         "type" : "object",

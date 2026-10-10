@@ -70,7 +70,8 @@ import javax.sql.DataSource
  * edited, and the partner's), a password, two access tokens and two refresh
  * tokens, across register, sign-in, pairing, submit, read, edit, the reveal,
  * the archive (the feed with and without `favourites`, one day, a bookmark
- * set and removed, a conditional read that answers `304`), delete, an ending
+ * set and removed, a conditional read that answers `304`), a reaction set,
+ * replaced, refused and taken back, delete, an ending
  * that withdraws, the withdrawal's erasure by the dispatcher, a failing
  * transactional consumer, and a refresh. An `ETag` is not scanned for: it is
  * a keyed digest and not a secret.
@@ -80,7 +81,11 @@ import javax.sql.DataSource
  * (FR-093), and `StatementCreatorUtils` prints each value `JdbcTemplate`
  * binds at TRACE: for a bookmark, the entry's id, the member's id and the
  * instant, on three adjacent lines. That logger is pinned with the others,
- * and this test fails if it writes any line at all.
+ * and this test fails if it writes any line at all. **A reaction is held to
+ * the same** (slice C5c): the other member is shown it, and a log is not the
+ * other member. Its bound values are an entry, the member who read it and
+ * what they left, on lines whose own timestamp would be the time of the
+ * reading that no table keeps.
  *
  * **An invite code is held to less**, because it cannot be held to more: see
  * [PRINTS_THE_REQUEST_PATH]. **Not covered at all:** the email verification
@@ -219,6 +224,15 @@ class SecretsNeverLoggedTest(
         get("/bonds/$bond/days/nonsense", ada).status shouldBe 404
         send("DELETE", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         send("PUT", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
+        // A reaction each way; hers replaced, refused twice, taken back, and set again for the erasure to remove.
+        send("PUT", "/entries/$adaEntry/reaction", bea, """{"type":"HEART"}""").status shouldBe 204
+        send("PUT", "/entries/$beaEntry/reaction", ada, """{"type":"SMILE"}""").status shouldBe 204
+        send("PUT", "/entries/$adaEntry/reaction", bea, """{"type":"MOVED"}""").status shouldBe 204
+        get("/bonds/$bond/today", ada).body.contains("\"reaction\":\"MOVED\"") shouldBe true
+        send("PUT", "/entries/$beaEntry/reaction", bea, """{"type":"HEART"}""").status shouldBe 409
+        send("PUT", "/entries/$adaEntry/reaction", bea, """{"type":"heart"}""").status shouldBe 422
+        send("DELETE", "/entries/$adaEntry/reaction", bea, null).status shouldBe 204
+        send("PUT", "/entries/$adaEntry/reaction", bea, """{"type":"THANK_YOU"}""").status shouldBe 204
         val marker =
             jdbc.queryForObject(
                 "SELECT member_id::text FROM entry_favourites WHERE entry_id = ?::uuid",
@@ -265,12 +279,14 @@ class SecretsNeverLoggedTest(
         withClue("StatementCreatorUtils prints every value JdbcTemplate binds: for a bookmark, who kept which entry, and when") {
             scan.linesFrom(PRINTS_BOUND_VALUES) shouldBe 0
         }
-        // Its neighbour is not pinned and did log the bookmark's statements: their text, and no value bound to them.
-        val statements = scan.textsFrom(PRINTS_STATEMENTS).filter { "entry_favourites" in it }
-        withClue("JdbcTemplate logged no statement on entry_favourites at DEBUG: the check above proved nothing") {
-            statements.any { "INSERT INTO entry_favourites" in it } shouldBe true
+        // Its neighbour is not pinned and did log the bookmark's and the reaction's statements: their text, and no value bound to them.
+        val statements = scan.textsFrom(PRINTS_STATEMENTS).filter { "entry_favourites" in it || "reactions" in it }
+        for (written in listOf("INSERT INTO entry_favourites", "INSERT INTO reactions", "DELETE FROM reactions")) {
+            withClue("JdbcTemplate logged no `$written` at DEBUG: the check above proved nothing") {
+                statements.any { written in it } shouldBe true
+            }
         }
-        withClue("JdbcTemplate printed a bound value beside a bookmark's statement") {
+        withClue("JdbcTemplate printed a bound value beside a bookmark's or a reaction's statement") {
             statements.count { marker in it || adaEntry in it || beaEntry in it } shouldBe 0
         }
         withClue("a secret reached the console by a road that is not a logger") {

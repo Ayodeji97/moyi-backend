@@ -732,7 +732,8 @@ internal class DayViewTest(
         val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
         val DAY_ONE: LocalDate = LocalDate.of(2026, 9, 15)
 
-        val FULL_KEYS = listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited")
+        val FULL_KEYS =
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
 
         /** 10:00Z: late morning of [date] in Africa/Lagos. */
         fun at(date: LocalDate): Instant = Instant.parse("${date}T10:00:00Z")

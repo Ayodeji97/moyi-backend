@@ -81,4 +81,14 @@ internal fun BondMembership.asReader(): Reader = Reader(memberId = memberId, bon
  * member. Member rows are never deleted, so this cannot happen today; if it
  * ever can, the answer is the `404` the first resolution would have given.
  */
-internal fun BondAccess.readerNow(membership: BondMembership): Reader = membershipOf(membership.userId, membership.bondId).asReader()
+internal fun BondAccess.readerNow(membership: BondMembership): Reader = membershipNow(membership).asReader()
+
+/**
+ * The caller's membership **resolved again, now**: [readerNow]'s one
+ * resolution, for a path that has a second thing to ask of it. Whether the
+ * bond has ended goes stale across the same wait as who has withdrawn, so a
+ * route that refuses on an ended bond without taking its lock
+ * (`ReactToEntry`) asks both of this one membership, after the entry is
+ * loaded. Everything [readerNow] says of when to call it holds here.
+ */
+internal fun BondAccess.membershipNow(membership: BondMembership): BondMembership = membershipOf(membership.userId, membership.bondId)

@@ -49,8 +49,9 @@ import javax.sql.DataSource
  * an entry id (spec §5.2 chose that path on purpose). The test below that
  * compares the `404`s is their cross-tenant test, and it asserts the exact
  * set of `{entryId}` routes — so another one added without a case fails
- * here. The favourite routes (slice C5b) are in that set and have their
- * case in `FavouritesTest`, which has the fixtures a mark needs.
+ * here. The favourite routes (slice C5b) and the reaction routes (C5c) are
+ * in that set and have their cases in `FavouritesTest` and `ReactionsTest`,
+ * which have the fixtures a mark and a reaction need.
  *
  * The clock is pinned by [TimeConfiguration]: every entry lands on
  * `2026-09-15` in `Africa/Lagos` unless a test moves it.
@@ -177,13 +178,15 @@ internal class EntryChangesTest(
                         info.methodsCondition.methods.map { "${it.name} $path" }
                     }
                 }.toSet()
-        // The two here, and the two `FavouritesTest` compares the same way (and against this one's delete).
+        // The two here, and the two each that `FavouritesTest` and `ReactionsTest` compare the same way (and against this one's delete).
         discovered shouldBe
             setOf(
                 "PATCH /api/v1/entries/{entryId}",
                 "DELETE /api/v1/entries/{entryId}",
                 "PUT /api/v1/entries/{entryId}/favourite",
                 "DELETE /api/v1/entries/{entryId}/favourite",
+                "PUT /api/v1/entries/{entryId}/reaction",
+                "DELETE /api/v1/entries/{entryId}/reaction",
             )
     }
 

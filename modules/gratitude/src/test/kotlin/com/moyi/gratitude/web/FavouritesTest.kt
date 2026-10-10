@@ -965,7 +965,8 @@ internal class FavouritesTest(
         val MIDNIGHT: Instant = Instant.parse("2026-09-15T23:02:00Z")
         const val DAY = 86_400L
 
-        val FULL_KEYS = listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited")
+        val FULL_KEYS =
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
 
         const val ADAS_FIRST_WORDS = "ada-first-thoughts-on-the-rain"
         const val ADAS_WORDS = "ada-thanks-for-the-walk-home"

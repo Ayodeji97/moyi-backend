@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
@@ -24,8 +25,8 @@ import java.util.UUID
  * decision 13), and has to leave it whichever of the close job and the
  * consumer reached a day first. A test that named the columns it cared about
  * would pass on the column nobody thought of. So [Snapshot] is every row of a
- * bond's entries and days, its streak, the events it published and what both
- * members are then answered, with the bond's own ids replaced by names so
+ * bond's entries and days, the reactions on its entries, its streak, the
+ * events it published and what both members are then answered, with the bond's own ids replaced by names so
  * that two bonds can be compared with `shouldBe`.
  *
  * **What a snapshot leaves out, and why:** `updated_at` and the value of
@@ -108,6 +109,31 @@ internal class WithdrawalRig(
     ) {
         mockMvc
             .delete("/api/v1/entries/$entryId") { header(HttpHeaders.AUTHORIZATION, bearer(user)) }
+            .andReturn()
+            .response.status shouldBe 204
+    }
+
+    /** [user]'s reaction on [entryId] becomes [type]. */
+    fun react(
+        user: UUID,
+        entryId: String,
+        type: String,
+    ) {
+        mockMvc
+            .put("/api/v1/entries/$entryId/reaction") {
+                header(HttpHeaders.AUTHORIZATION, bearer(user))
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"type":"$type"}"""
+            }.andReturn()
+            .response.status shouldBe 204
+    }
+
+    fun unreact(
+        user: UUID,
+        entryId: String,
+    ) {
+        mockMvc
+            .delete("/api/v1/entries/$entryId/reaction") { header(HttpHeaders.AUTHORIZATION, bearer(user)) }
             .andReturn()
             .response.status shouldBe 204
     }
@@ -233,6 +259,7 @@ internal class WithdrawalRig(
                     ).map { it.toString().named() }
                     // By date, then by author: two entries of one instant have no order of their own.
                     .sorted(),
+            reactions = reactionsOf(bond).map { it.named() }.sorted(),
             days =
                 jdbc
                     .queryForList(
@@ -276,6 +303,17 @@ internal class WithdrawalRig(
         )
     }
 
+    /** Every reaction on an entry of [bond], as its row: the entry, the member who left it, and the type. */
+    private fun reactionsOf(bond: String): List<String> =
+        jdbc
+            .queryForList(
+                """
+                SELECT r.entry_id::text AS entry, r.member_id::text AS member, r.type
+                FROM reactions r JOIN entries e ON e.id = r.entry_id WHERE e.bond_id = ?::uuid
+                """.trimIndent(),
+                bond,
+            ).map { it.toString() }
+
     /** Each id that belongs to [bond] alone, and the name it is compared under. */
     private fun names(
         bond: String,
@@ -309,6 +347,8 @@ internal class WithdrawalRig(
     /** A bond as it stands, with its own ids named: two of these are equal when the bonds cannot be told apart. */
     data class Snapshot(
         val entries: List<String>,
+        /** Every reaction on an entry of the bond: which entry, whose, and what. */
+        val reactions: List<String>,
         val days: List<String>,
         val streak: List<String>,
         val events: List<String>,

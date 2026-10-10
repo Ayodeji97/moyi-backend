@@ -251,6 +251,17 @@ enum class ErrorCode {
     ENTRY_NOT_REVEALED,
 
     /**
+     * `PUT /entries/{entryId}/reaction` on an entry the caller wrote
+     * (FR-048: a reaction is left on the partner's entry). 409: a fact about
+     * whose the entry is, which no retry changes.
+     *
+     * Only ever the answer about the caller's own entry, which they have
+     * always been shown. An entry they were never shown is the `404` every
+     * other unknown entry gets.
+     */
+    REACTION_ON_OWN_ENTRY,
+
+    /**
      * `POST /bonds/{bondId}/entries` for a day that has already closed
      * (BR-10). 409: the day this entry would have landed on is no longer
      * open to writes — a fact about the day's own state, the same shape of
