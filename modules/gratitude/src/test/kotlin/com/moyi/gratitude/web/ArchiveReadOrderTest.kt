@@ -117,6 +117,39 @@ internal class ArchiveReadOrderTest(
         endingAsTheEntriesArrive { bond -> rig.days(bea, bond) }
     }
 
+    @Test
+    fun `a withdrawal racing the first favourites window does not consume the refill bound`() {
+        clock.set(Instant.parse("2019-12-31T10:00:00Z"))
+        val bond = rig.bonds.pair(ada, bea)
+        val adasMember = rig.bonds.memberId(bond, ada)
+        val beasMember = rig.bonds.memberId(bond, bea)
+        val first = LocalDate.of(2020, 1, 1)
+        (0..1000).forEach { index ->
+            val date = first.plusDays(index.toLong())
+            val day = rig.insertDay(bond, date, "REVEALED")
+            val at = Instant.parse("${date}T10:00:00Z")
+            val adas = rig.insertEntry(day, bond, adasMember, EntryState.REVEALED, "zq-race-ada", at)
+            val beas = rig.insertEntry(day, bond, beasMember, EntryState.REVEALED, "zq-race-bea", at)
+            jdbc.update(
+                "INSERT INTO entry_favourites (entry_id, member_id, created_at) VALUES (?, ?, ?)",
+                if (index == 0) beas else adas,
+                beasMember,
+                java.sql.Timestamp.from(at),
+            )
+        }
+        clock.set(NOW)
+        stoppable.afterNextRead {
+            pool.submit { rig.bonds.block(ada, bond) }.get(10, TimeUnit.SECONDS)
+        }
+
+        val pages = rig.pages(bea, bond, mapOf("limit" to "1", "favourites" to "true"))
+
+        stoppable.fired shouldBe true
+        pages.size shouldBe 1
+        rig.datesOf(pages.single()["items"].toList()) shouldBe listOf(first.toString())
+        pages.single()["nextCursor"].isNull shouldBe true
+    }
+
     /** The ending commits as the request's read of the entries returns, and before it asks who has withdrawn. */
     private fun endingAsTheEntriesArrive(read: (String) -> MockHttpServletResponse) {
         clock.set(BOND_CREATED)

@@ -143,3 +143,11 @@ internal class DayNotFoundException :
         ErrorCode.DAY_NOT_FOUND,
         "That day was not found.",
     )
+
+/** A competing bookmark operation has not finished; no successful removal is promised. */
+internal class FavouriteBusyException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.FAVOURITE_BUSY,
+        "This bookmark is being changed. Please try again.",
+    )

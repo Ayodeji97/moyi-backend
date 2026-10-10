@@ -83,8 +83,8 @@ internal data class DaysPage(
  * 197 KB.
  *
  * **`favouritesOnly`** asks the query for days holding an entry the caller
- * has marked, and then **drops a day on which nothing marked can be read in
- * full now**. The query sees rows; a marked entry whose author has withdrawn
+ * has marked, excluding known withdrawn authors before the limit, and then
+ * **drops a day on which nothing marked can be read in full now**. The query sees rows; a marked entry whose author has withdrawn
  * is still a whole row until the erasure reaches it, and to this caller it is
  * already a tombstone that says `favourited: false`. Such a day is not a
  * favourite.
@@ -157,21 +157,14 @@ internal class GetDays(
      * earlier ones are not, each true when it was read; it is what two
      * requests a moment apart would have been sent.
      *
-     * **The bound: at most [MAX_WINDOWS] windows.** It is reached only when
-     * a request meets more dropped days in a row than the windows hold
-     * (about a thousand: `limit + 1`, then nineteen of [REFILL_WINDOW]):
-     * a member who bookmarked that many days of a partner's entries, the
-     * partner withdrew, and the erasure has not run. The request then
-     * returns what it has, with the date of the last day it **examined** as
-     * the cursor, so the walk goes on from there and skips nothing; and it
-     * gives that cursor only after looking for one day beyond, so that a
-     * history which ends exactly at the bound is not followed by a page
-     * that is not there. Such a
-     * page can be short or empty and still carry a cursor, which is what
-     * every page with a dropped day looked like before, and is the one case
-     * left where a withdrawal that nothing has erased can be told from a
-     * deletion by hand. Without a bound, one request could read a bond's
-     * whole history.
+     * **The bound: at most [MAX_WINDOWS] windows.** This bounds work when
+     * concurrent deletions or unmarks keep invalidating candidates. Known
+     * withdrawn authors are excluded BEFORE LIMIT, freshly for each window,
+     * so a static withdrawn history cannot consume the bound. A withdrawal
+     * racing a window can invalidate that window, but the next query excludes
+     * that author; a bond has only two members and markers are insert-only.
+     * At the bound, look ahead before returning the last examined date. This
+     * fallback is for concurrent changes, not an observable erasure backlog.
      */
     @Suppress("LongParameterList") // The page's own bounds, each a separate fact of the request.
     @Transactional(readOnly = true)
@@ -192,7 +185,7 @@ internal class GetDays(
             // The first window is one more than the page: that day's presence is how "there is more" is known.
             // `addExact`, though `limit` is at most MAX_LIMIT by the check above: a sum that cannot wrap, whoever calls.
             val size = if (windows == 0) Math.addExact(limit, 1) else REFILL_WINDOW
-            val candidates = archive.candidates(membership.bondId, membership.memberId, examined, until, favouritesOnly, size)
+            val candidates = candidates(membership, examined, until, favouritesOnly, size)
             val read = read(membership, candidates)
             val marked = marksOf(membership, read)
             for (day in read) {
@@ -225,7 +218,31 @@ internal class GetDays(
         date: LocalDate?,
         until: LocalDate?,
         favouritesOnly: Boolean,
-    ): Boolean = archive.candidates(membership.bondId, membership.memberId, date, until, favouritesOnly, 1).isNotEmpty()
+    ): Boolean = candidates(membership, date, until, favouritesOnly, 1).isNotEmpty()
+
+    /**
+     * Omit known withdrawals before applying LIMIT. Ask again for every window,
+     * including look-ahead: a withdrawal that races one query cannot leave a
+     * history's worth of invisible candidates in the next. The gate still
+     * reads the marker AFTER loading entries, so this filter grants no access.
+     * Bond facts come through BondAccess, never a cross-module table join.
+     */
+    private fun candidates(
+        membership: BondMembership,
+        before: LocalDate?,
+        until: LocalDate?,
+        favouritesOnly: Boolean,
+        limit: Int,
+    ): List<ArchiveDay> =
+        archive.candidates(
+            membership.bondId,
+            membership.memberId,
+            before,
+            until,
+            favouritesOnly,
+            limit,
+            if (favouritesOnly) access.readerNow(membership).withdrawnAuthors else emptySet(),
+        )
 
     /**
      * `GET /bonds/{bondId}/days/{date}`: that one day as the feed would give

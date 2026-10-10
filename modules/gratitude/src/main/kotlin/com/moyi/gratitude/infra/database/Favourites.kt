@@ -148,24 +148,25 @@ internal class Favourites(
      * Removes the member's mark if there is one. No mark is not an error:
      * absent is what was asked for.
      *
-     * **It never waits.** It deletes the row only if it can lock it at once
-     * (`FOR UPDATE SKIP LOCKED`), and returns either way. A row that cannot
-     * be locked is one somebody else is deleting: the member's own second
-     * tap, or an erasure, which removes every mark on its entry
-     * ([removeAllOf]). Either way the mark is going, and waiting to delete
-     * it again would only hold a connection until that transaction ends,
-     * which for the withdrawal consumer is the whole delivery (the class's
-     * note). The one case where the answer runs ahead of the fact: if that
-     * erasure rolls back, the mark is still there after an unmark that
-     * reported success. The entry is then whole again, the mark shows as
-     * `favourited: true`, and the member can remove it.
+     * **It never waits for a row lock, and never guesses that deletion will commit.**
+     * `FOR UPDATE NOWAIT` returns a lock refusal instead of skipping the row.
+     * True means absent or removed; false means a competing transaction holds
+     * the mark, and the service asks the caller to retry. In particular, an
+     * erasure that later rolls back cannot undo a removal we reported successful.
+     * The statement runs in autocommit on the request path, so a refusal is
+     * already rolled back when caught. No database message escapes this method.
      */
     fun unmark(
         entryId: EntryId,
         memberId: UUID,
-    ) {
-        jdbc.update(UNMARK, entryId.value, memberId, entryId.value, memberId)
-    }
+    ): Boolean =
+        try {
+            jdbc.update(UNMARK, entryId.value, memberId, entryId.value, memberId)
+            true
+        } catch (failure: DataAccessException) {
+            if (!failure.isLockTimeout()) throw failure
+            false
+        }
 
     /**
      * Every member's mark on one entry, for `EraseEntry` and nobody else: a
@@ -236,7 +237,7 @@ internal class Favourites(
               AND (entry_id, member_id) IN (
                   SELECT entry_id, member_id FROM entry_favourites
                   WHERE entry_id = ? AND member_id = ?
-                  FOR UPDATE SKIP LOCKED
+                  FOR UPDATE NOWAIT
               )
             """.trimIndent()
 

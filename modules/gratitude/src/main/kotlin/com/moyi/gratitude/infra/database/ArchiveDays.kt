@@ -68,12 +68,13 @@ internal data class ArchiveDay(
  *
  * **With `favouritesOnly`**, the day must also hold an entry this member has
  * marked that is revealed and not erased (both marks of an erasure, as
- * `Entry.isErased` asks both). That is still only a filter: a marked entry
- * whose author has withdrawn, and which nothing has erased yet, is a row
- * like any other here. The caller reads it through the gate and drops the
- * day if nothing marked on it can still be read in full. Only ever
- * [memberId]'s own marks: there is no form of this query that asks about
- * anybody else's.
+ * `Entry.isErased` asks both), excluding authors already known to have
+ * withdrawn. The exclusion is passed through BondAccess by the caller:
+ * no query reaches into the bond module's tables. It applies BEFORE LIMIT,
+ * so years of withdrawn bookmarks cannot create empty pages and cursors.
+ * It is still a filter: the caller loads the entries, asks who has withdrawn
+ * again, and gates each entry. A withdrawal racing this query is caught there.
+ * Only ever [memberId]'s own marks are considered.
  *
  * Plain SQL on [JdbcTemplate], as `StreakCalendar` and `CloseCandidates`
  * are: three columns of rows nothing here will write. It takes no lock and
@@ -98,8 +99,9 @@ internal class ArchiveDays(
         until: LocalDate?,
         favouritesOnly: Boolean,
         limit: Int,
+        withdrawnMemberIds: Set<UUID> = emptySet(),
     ): List<ArchiveDay> {
-        val (sql, arguments) = query(bondId, memberId, before, until, favouritesOnly, limit)
+        val (sql, arguments) = query(bondId, memberId, before, until, favouritesOnly, limit, withdrawnMemberIds)
         return jdbc.query(
             sql,
             PreparedStatementSetter { statement -> arguments.forEachIndexed { index, value -> statement.setObject(index + 1, value) } },
@@ -151,7 +153,7 @@ internal class ArchiveDays(
         private const val MARKED =
             "AND EXISTS (SELECT 1 FROM entries e JOIN entry_favourites f ON f.entry_id = e.id " +
                 "WHERE e.bond_day_id = d.id AND f.member_id = ? " +
-                "AND e.revealed_at IS NOT NULL AND e.deleted_at IS NULL AND e.status <> 'DELETED')"
+                "AND e.revealed_at IS NOT NULL AND e.deleted_at IS NULL AND e.status <> 'DELETED'"
 
         /**
          * The statement and its arguments, in order. Apart from [candidates]
@@ -168,7 +170,11 @@ internal class ArchiveDays(
             until: LocalDate?,
             favouritesOnly: Boolean,
             limit: Int,
+            withdrawnMemberIds: Set<UUID> = emptySet(),
         ): Pair<String, List<Any>> {
+            val excluded = withdrawnMemberIds.takeIf { favouritesOnly }.orEmpty()
+            val excluding =
+                if (excluded.isEmpty()) "" else " AND e.author_member_id NOT IN (${excluded.joinToString { "?" }})"
             val sql =
                 listOfNotNull(
                     SELECT,
@@ -176,11 +182,11 @@ internal class ArchiveDays(
                     before?.let { "AND d.date < ?" },
                     until?.let { "AND d.date <= ?" },
                     SEEN,
-                    MARKED.takeIf { favouritesOnly },
+                    "$MARKED$excluding)".takeIf { favouritesOnly },
                     "ORDER BY d.date DESC",
                     "LIMIT ?",
                 ).joinToString("\n")
-            val arguments = listOfNotNull(bondId, before, until, memberId, memberId.takeIf { favouritesOnly }, limit)
+            val arguments = listOfNotNull(bondId, before, until, memberId, memberId.takeIf { favouritesOnly }) + excluded + limit
             return sql to arguments
         }
     }

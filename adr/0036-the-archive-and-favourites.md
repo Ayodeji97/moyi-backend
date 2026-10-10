@@ -298,26 +298,24 @@ day on which nothing marked can be read in full now.
   the earlier are not, each true when it was read, as two requests a moment apart would
   have been. Asking again at the end and judging every entry a second time was not done:
   it could shorten the page after the reading had stopped.
-- **The bound: twenty windows a request, about a thousand days.** It is reached only when a
-  request meets more dropped days in a row than that: a member who bookmarked about a
-  thousand days of a partner's entries, the partner withdrew, and nothing has erased them.
-  The request then answers with what it found and the date of the last day it
-  **examined** as the cursor, so the walk goes on and skips nothing. Such a page can be
-  short or empty with a cursor, which is what every page with a dropped day used to be,
-  and there the old difference is back. Tested with 977 such days put down by hand. With
-  the cursor taken from the last day shown instead, that test's favourite beyond the
-  bound is never reached. Without a bound, one request could read a bond's whole history.
-- **What it costs.** Nothing when the gate drops nothing: one window, as before, except
-  that the look-ahead day's entries are now loaded with the page's. When it does drop,
-  about eight statements a window (the candidates, the entries, the membership read again,
-  the marks): at the bound about 160 in one request. Reasoned from the code, not measured.
-- The day still carries both entries. The filter selects days, not entries (doc 06,
-  `states.md` §6).
-- *Not done:* the review's other fix, giving the query the withdrawn authors as a
-  parameter. By the reviewer's own account the drop after the gate would then still fire
-  in the race between the query's reading of the marker and the gate's, so the page with a
-  cursor would be rarer and not gone; and the query would decide part of what the gate
-  decides (decision 2).
+- **Amended 2026-10-10, after PR #60 review: exclude known withdrawn authors before
+  `LIMIT`.** The earlier refill fix still exposed withdrawal once twenty windows were
+  exhausted: 972 bookmarked days at `limit=1` produced two empty pages before erasure
+  and one afterward, with different tags. `GetDays` now asks `BondAccess` for the current
+  withdrawn authors before **each** candidate query, including look-ahead, and passes
+  that set as SQL parameters. `ArchiveDays` excludes those authors only from the
+  favourites predicate; the ordinary archive still includes their tombstones. No query
+  reaches into another module's tables, and this filter grants no permission.
+- **The gate still reads the marker last.** A withdrawal can commit between the candidate
+  query and entry loading. The final gate drops it, and the next window's fresh exclusion
+  skips the rest of that author's history. There are at most two such additions: a bond
+  has two members and withdrawal markers are insert-only. A settled withdrawal therefore
+  cannot consume the refill bound, and racing withdrawals cannot exhaust its twenty
+  windows either. The bound remains for concurrent deletions/unmarks invalidating
+  candidates, not for a backlog of withdrawn entries. No unbounded refill was introduced.
+- **Cost:** favourites requests add a membership read before each candidate query. All
+  entry disclosure still uses a separate reader resolved after loading the entries.
+  The day still carries both entries: the filter selects days, not entries.
 
 **8. `GET /bonds/{bondId}/days/{date}` is one `404 DAY_NOT_FOUND` for every way a date is
 not in the caller's archive.** No row for the date, a day nobody wrote on, a date before
@@ -610,10 +608,13 @@ whole-branch concurrency review proved that the unmark was the one that mattered
   minute allows, would hold it for the rest of a delivery, and a delivery may run to sixty
   seconds (reasoned by the reviewer from the run, not run at ten). It healed by itself:
   the delivery keeps its one connection, and nothing deadlocked.
-- **The unmark deletes only a row it can lock at once** (`FOR UPDATE SKIP LOCKED`) and is
-  `204` either way. A row it cannot lock is one somebody else is deleting: as good as
-  deleted. If that erasure rolls back, the bookmark outlives an unmark that reported
-  success; the entry is then whole again, shows `favourited: true`, and can be unmarked.
+- **Amended 2026-10-10: an unmark uses `FOR UPDATE NOWAIT`, not `SKIP LOCKED`.**
+  Skipping a held row returned `204` even when its competing erasure subsequently rolled
+  back, leaving the bookmark intact. A held row now gives `409 FAVOURITE_BUSY`, a
+  retryable response with no database exception text. An absent or successfully removed
+  row still gives `204`. A retry after either commit or rollback is covered over HTTP.
+  Both variants avoid waiting for a row lock, but only `NOWAIT` distinguishes contention
+  from absence ([PostgreSQL 18 locking clauses](https://www.postgresql.org/docs/18/sql-select.html#SQL-FOR-UPDATE-SHARE)).
 - **The mark waits two seconds for a lock and then answers `409 ENTRY_IMMUTABLE`.** Its
   statement now runs in a transaction of its own that first sets
   `set_config('lock_timeout', '2000ms', true)`: `ConsumerRegistry`'s idiom, local to the
@@ -625,7 +626,7 @@ whole-branch concurrency review proved that the unmark was the one that mattered
   erasure rolls back, the member was refused a mark on a whole entry and may ask again.
   Postgres's `lock_not_available` is caught outside the transaction and never logged.
 - **How it is held.** `FavouriteLockWaitTest` opens an erasure on the test's own
-  connection and leaves it open: the unmark answers `204` while it is open; the mark is
+  connection and leaves it open: the unmark answers `409 FAVOURITE_BUSY` while it is open; the mark is
   refused while it is open; no pooled connection keeps the timeout. The mark's refusal is
   asserted at the service (`EntryImmutableException`, through a store given 200 ms), not
   over HTTP: a bean of its own for the short wait meant one more Spring context, whose
@@ -926,8 +927,9 @@ Each is built one way and cheap to turn.
 3. **An empty favourites page with a cursor** (decision 7). **Answered on 2026-10-09, the
    other way.** This question framed it as a matter of round trips; the whole-branch
    privacy review showed it told a withdrawal from a deletion by hand. The request now
-   reads on until the page is decided, bounded at about a thousand days. What is left for
-   the owner is that bound: past it a page can still be empty with a cursor.
+   reads on until the page is decided. The remaining withdrawal signal at the bound was
+   fixed on 2026-10-10 by excluding known withdrawn authors before each candidate limit
+   and retaining the final read gate (decision 7).
 4. **`until`** is an API the corpus does not name (decision 5). Doc 06 gives the feed three
    parameters. Built as a fourth, and inclusive, so the client sends the last day of the
    month it jumps to.
@@ -1316,3 +1318,23 @@ predate the rebase onto `174b474`: `32fa875` is `4826528` and `a15bf57` is `46c1
   measured plans, not a walk); V22 against a shared database; CI's own contract action;
   the mark's two-second refusal over HTTP; a `PUT …/favourite` that carries an
   `Idempotency-Key`; ten connections held by nine unmarks; the collection in Bruno.
+
+### PR #60 fixes, 2026-10-10
+
+The two review reproductions were first run against `36bc05c` and failed for their
+reported reasons: different empty-page cursors before and after erasure, and a `204`
+unmark where a retryable conflict was required. The regression suite also exercises a
+withdrawal committing after the first favourites window loads its entries, an older
+bookmark belonging to the reader, and retries after both erasure commit and rollback.
+The contract adds `FAVOURITE_BUSY` and documents the DELETE route's `409`; its generated
+client impact is covered by PR #60's existing breaking-api-change classification.
+
+Validation of these fixes: `./gradlew build` passed with 1,364 tests, zero failures,
+errors or skipped tests. `scripts/smoke.sh --attach` ran against the built jar and
+separate PostgreSQL/Valkey containers: 646 passed, zero failed. Its optional tag-across-
+erasure check skipped because the poller had already erased the entry before the first
+read; the deterministic large-history regression compares the same bytes and tags before
+and after explicit dispatch. Reusing the original membership's withdrawal set instead of
+refreshing it per window made the new race test fail (two pages instead of one); restored,
+the full build passed. A follow-up read of response rendering, replay paths and contract
+handling found no additional confirmed defect.

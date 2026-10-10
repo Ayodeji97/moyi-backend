@@ -34,8 +34,8 @@ import org.springframework.web.bind.annotation.RestController
  *
  * The method names are the API's `operationId`s (`EntriesController` has
  * why), and `contracts.OpenApiConfiguration` lists `favouriteEntry` among
- * the operations that can answer `409`, and deliberately not
- * `unfavouriteEntry`.
+ * the operations that can answer `409`, together with `unfavouriteEntry`
+ * for its retryable lock conflict.
  */
 @RestController
 @RequestMapping("/api/v1/entries")
@@ -57,7 +57,7 @@ internal class FavouritesController(
         favourite.mark(caller.id, entryIdOrNotFound(entryId))
     }
 
-    /** `204` once the caller has no mark on the entry, whether or not there was one, and whatever has become of the entry. */
+    /** `204` when absent or removed; `409 FAVOURITE_BUSY` when a competing operation holds the mark. Retry then. */
     @DeleteMapping("/{entryId}/favourite")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun unfavouriteEntry(

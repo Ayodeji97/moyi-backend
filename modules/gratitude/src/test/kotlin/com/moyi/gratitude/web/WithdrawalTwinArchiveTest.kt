@@ -139,13 +139,11 @@ internal class WithdrawalTwinArchiveTest(
     }
 
     /**
-     * The bound on how far one request reads, reached: more withdrawn,
-     * bookmarked days in a row than a request will read past. The page is
-     * then short with a cursor, as every such page once was, and the walk
-     * still reaches the favourite that lies beyond them.
+     * More withdrawn bookmarks than the old refill bound allowed. They
+     * must not consume that bound or hide the favourite beyond them.
      */
     @Test
-    fun `past the bound on one request's reading a page may be empty with a cursor, and the walk still reaches what lies beyond`() {
+    fun `a large withdrawn history is skipped before the limit and an older favourite is reached`() {
         clock.set(BOND_CREATED)
         val bond = rig.bonds.pair(ada, bea)
         val adasMember = rig.bonds.memberId(bond, ada)
@@ -167,22 +165,17 @@ internal class WithdrawalTwinArchiveTest(
 
         val pages = rig.pages(bea, bond, mapOf("favourites" to "true", "limit" to "1"))
 
-        pages.map { rig.datesOf(it["items"].toList()) } shouldBe listOf(emptyList(), listOf(first.toString()))
-        // The cursor is the last day the request examined, not the last it showed: it showed none.
-        pages[0]["nextCursor"].asString() shouldBe rig.cursorBefore(first.plusDays(6).toString())
-        pages[1]["nextCursor"].isNull shouldBe true
-        // Asked for a whole page, the same archive is read in one request: fifty at a time reaches further.
+        pages.map { rig.datesOf(it["items"].toList()) } shouldBe listOf(listOf(first.toString()))
+        pages.single()["nextCursor"].isNull shouldBe true
         rig.datesOf(rig.walk(bea, bond, mapOf("favourites" to "true"))) shouldBe listOf(first.toString())
     }
 
     /**
-     * The bound reached on the archive's very last day: every window the
-     * request read was full, and there is nothing beyond them. A cursor then
-     * would promise a page that does not exist, so the request looks once
-     * more before it gives one (Codex's review of the pull request).
+     * A history exactly as long as the old refill bound must also be empty
+     * without a cursor after withdrawal, before the consumer runs.
      */
     @Test
-    fun `at the bound with nothing older, the page carries no cursor`() {
+    fun `a withdrawn history exactly at the old bound carries no cursor`() {
         clock.set(BOND_CREATED)
         val bond = rig.bonds.pair(ada, bea)
         val adasMember = rig.bonds.memberId(bond, ada)
@@ -206,6 +199,30 @@ internal class WithdrawalTwinArchiveTest(
         pages.size shouldBe 1
         rig.datesOf(pages[0]["items"].toList()) shouldBe emptyList()
         pages[0]["nextCursor"].isNull shouldBe true
+    }
+
+    @Test
+    fun `a large withdrawn history has the same pages before and after erasure`() {
+        clock.set(Instant.parse("2019-12-31T10:00:00Z"))
+        val bond = rig.bonds.pair(ada, bea)
+        val adasMember = rig.bonds.memberId(bond, ada)
+        val beasMember = rig.bonds.memberId(bond, bea)
+        val reach = 2 + (GetDays.MAX_WINDOWS - 1) * GetDays.REFILL_WINDOW
+        val first = LocalDate.of(2020, 1, 1)
+        (0..reach).forEach { index ->
+            val date = first.plusDays(index.toLong())
+            val day = rig.insertDay(bond, date, "REVEALED")
+            val at = Instant.parse("${date}T10:00:00Z")
+            val adas = rig.insertEntry(day, bond, adasMember, EntryState.REVEALED, "review-probe", at)
+            rig.insertEntry(day, bond, beasMember, EntryState.REVEALED, "review-probe", at)
+            mark(adas!!, beasMember, at)
+        }
+        clock.set(NOW)
+        rig.bonds.block(ada, bond, true)
+        val asked = mapOf("favourites" to "true", "limit" to "1")
+        val before = sent(bond, asked)
+        dispatcher.dispatchDue(clock.instant(), 10).failed shouldBe 0
+        sent(bond, asked) shouldBe before
     }
 
     // ---- the history ----

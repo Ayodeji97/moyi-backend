@@ -870,9 +870,13 @@ a real `PATCH` between a day's end and the job.
   close job's pre-step at once. The mark is one statement that takes a `FOR SHARE` lock on
   the entry's row, so a mark and an erasure cannot pass each other. `favourites=true`
   lists days holding an entry the caller has marked and can read in full now, filtered
-  again after the gate; a day dropped there leaves no trace in the page or its cursor,
-  because the request reads on past it (decision 7 as revised after the whole-branch
-  reviews).
+  again after the gate. Known withdrawn authors are excluded before each candidate
+  limit, using fresh bond facts; the marker is still read after entry loading for the
+  final gate. A racing withdrawal is dropped there and excluded by the next query, so a
+  delayed erasure cannot create empty-page cursors even for a large history (decision 7,
+  amended 2026-10-10). Removing a bookmark returns `204` only when absent or removed;
+  a row held by another transaction gives `409 FAVOURITE_BUSY`, to be retried after that
+  transaction finishes (decision 12).
 - **ETags** (decision 9). The second sentence of the first bullet stands and is built as a
   **keyed digest**: HMAC-SHA256, under the personal-data secret, of a domain label and the
   exact bytes sent. Not a plain hash: a tag is a header, a header reaches logs, and a bare

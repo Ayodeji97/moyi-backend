@@ -582,7 +582,7 @@ class OpenApiContractTest(
     }
 
     @Test
-    fun `a favourite is put and deleted with no body, and only putting one can conflict`() {
+    fun `a favourite is put and deleted with no body, and removing a locked mark can conflict`() {
         val favourite = api.paths["/api/v1/entries/{entryId}/favourite"]!!
         favourite.readOperationsMap().keys.map { it.name } shouldContainExactlyInAnyOrder listOf("PUT", "DELETE")
 
@@ -593,9 +593,10 @@ class OpenApiContractTest(
         favourite.put.responses["204"]!!.content shouldBe null
         favourite.put.parameters.map { it.name } shouldBe listOf("entryId")
 
-        // Taking a mark off is never a conflict: absent is success, on a tombstone too.
+        // Absent is success; a row held by another transaction is FAVOURITE_BUSY.
         favourite.delete.operationId shouldBe "unfavouriteEntry"
-        favourite.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "429", "500")
+        favourite.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "409", "429", "500")
+        favourite.delete.description shouldContain "409 FAVOURITE_BUSY"
         favourite.delete.responses["204"]!!.content shouldBe null
         favourite.delete.parameters.map { it.name } shouldBe listOf("entryId")
     }

@@ -2258,3 +2258,17 @@ Wrong about: what a plan can decide. "No lock is taken" and "the SHA-256 of the 
          every other user. It waited on a row the withdrawal held, it held a connection
          while it waited, and the pool is everybody's. I had written down that the mark
          could wait and never asked what the unmark does.
+
+
+## 2026-10-10 — PR #60: a bound is not a privacy fix, and a lock is not a commit
+
+The refill bound still exposed a withdrawal in a long bookmarked history. Excluding
+known withdrawn authors before the candidate limit fixes the steady case; asking again
+for each window and keeping the read gate's final marker read covers the race. The other
+fix had treated a locked bookmark as already deleted. Rolling its eraser back proved
+that `204` was false. Unmark now refuses contention with a retryable `FAVOURITE_BUSY`
+conflict and succeeds on a later retry. Both reproductions were run red first.
+
+Validation: full build green (1,364 tests); isolated smoke run 646 passed, zero failed,
+one optional erasure-timing probe skipped. The new race test also failed with the
+per-window refresh deliberately replaced by the original membership's stale set.

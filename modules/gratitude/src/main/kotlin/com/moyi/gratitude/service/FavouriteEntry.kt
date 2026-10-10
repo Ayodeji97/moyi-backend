@@ -63,7 +63,7 @@ import java.util.UUID
  *    erased by a withdrawal.
  *
  * **Neither verb waits out a withdrawal.** The unmark deletes only a row it
- * can lock at once and is `204` either way ([Favourites.unmark]). Before
+ * can lock at once; a held row is a retryable conflict ([Favourites.unmark]). Before
  * that, each request stuck behind a long withdrawal held a pooled
  * connection, and a few of them stalled every other request there was.
  *
@@ -113,6 +113,7 @@ internal class FavouriteEntry(
      * left by the one interleaving the class KDoc describes.
      *
      * @throws EntryNotFoundException as [mark]: an unmark must not be a way to ask whether an id exists.
+     * @throws FavouriteBusyException another transaction holds the mark; retry the removal.
      */
     fun unmark(
         userId: UUID,
@@ -120,7 +121,7 @@ internal class FavouriteEntry(
     ) {
         val (entry, reader) = entryAndReader(userId, entryId)
         if (entry.canBeFavouritedBy(reader) == Favouriting.NEVER_SHOWN) throw EntryNotFoundException()
-        favourites.unmark(entryId, reader.memberId)
+        if (!favourites.unmark(entryId, reader.memberId)) throw FavouriteBusyException()
     }
 
     /**

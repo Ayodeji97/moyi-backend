@@ -466,9 +466,8 @@ class OpenApiConfiguration {
                 //
                 // Slice C5b. ENTRY_NOT_REVEALED (the caller's own entry, before
                 // the partner has written) and ENTRY_IMMUTABLE (a tombstone).
-                // `unfavouriteEntry` is deliberately absent: taking a mark off
-                // is `204` whether or not there was one and whatever has become
-                // of the entry, so the only refusal it has is the `404`.
+                // Removing a locked bookmark is a retryable FAVOURITE_BUSY conflict.
+                "unfavouriteEntry",
                 "favouriteEntry",
             )
 
@@ -1023,8 +1022,8 @@ private val ARCHIVE_DESCRIPTIONS =
 
 /**
  * What a client of the two bookmark operations has to be told: whose the
- * mark is, which entries take one, and what each refusal means. `409` is two
- * codes here and the schema lists neither against the operation.
+ * mark is, which entries take one, and what each refusal means. The shared
+ * error schema does not list the applicable codes separately for each operation.
  */
 private val FAVOURITE_DESCRIPTIONS =
     mapOf(
@@ -1038,6 +1037,7 @@ private val FAVOURITE_DESCRIPTIONS =
         "unfavouriteEntry" to
             "Removes the caller's bookmark. Repeatable: no bookmark is success, and so is an entry that has since been " +
             "erased. `404` is every entry the caller was never shown, the same as for an id that does not exist. " +
+            "`409 FAVOURITE_BUSY` means another operation holds the bookmark; retry the removal. " +
             "Allowed on a bond that has ended.",
     )
 

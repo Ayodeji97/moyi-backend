@@ -17,6 +17,7 @@ import com.moyi.identity.api.UserDirectory
 import com.zaxxer.hikari.HikariDataSource
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.AfterEach
@@ -65,9 +66,9 @@ import javax.sql.DataSource
  * still open" is a fact of where the test is and not of timing, and it is
  * checked: another connection is refused the bookmark's row at once.
  *
- * - **The unmark answers `204` while that transaction is open.** It deletes
- *   only a row it can lock at once, and a row someone else is deleting is as
- *   good as deleted.
+ * - **The unmark answers `409 FAVOURITE_BUSY` while that transaction is open.**
+ *   A retry after either commit or rollback succeeds; an uncommitted deletion
+ *   is never treated as a successful removal.
  * - **The mark is refused as `ENTRY_IMMUTABLE` while it is open**, once its
  *   lock timeout has passed. The real timeout is two seconds, so the mark
  *   here is made through the application's own `FavouriteEntry` built over
@@ -133,14 +134,16 @@ internal class FavouriteLockWaitTest(
     }
 
     @Test
-    fun `an unmark answers 204 while an erasure still holds the bookmark's row, and the row goes when the erasure commits`() {
+    fun `an unmark conflicts while an erasure holds the bookmark and succeeds after commit`() {
         favourite(bea, adas).status shouldBe 204
         marksOn(adas) shouldBe 1
 
         whileErasing(adas) { eraser ->
             val unmarking = pool.submit(Callable { unfavourite(bea, adas) })
             try {
-                unmarking.get(BOUND.toMillis(), TimeUnit.MILLISECONDS).status shouldBe 204
+                val response = unmarking.get(BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                response.status shouldBe 409
+                response.contentAsString shouldContain "FAVOURITE_BUSY"
             } finally {
                 eraser.rollbackIfStill(unmarking)
             }
@@ -153,6 +156,7 @@ internal class FavouriteLockWaitTest(
 
         marksOn(adas) shouldBe 0
         wordsOf(adas) shouldBe null
+        unfavourite(bea, adas).status shouldBe 204
     }
 
     @Test
@@ -221,6 +225,26 @@ internal class FavouriteLockWaitTest(
         } finally {
             held.forEach { it.close() }
         }
+    }
+
+    @Test
+    fun `an unmark refused during erasure can be retried after rollback`() {
+        favourite(bea, adas).status shouldBe 204
+        whileErasing(adas) { eraser ->
+            val unmarking = pool.submit(Callable { unfavourite(bea, adas) })
+            try {
+                val response = unmarking.get(BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                response.status shouldBe 409
+                response.contentAsString.shouldContain("FAVOURITE_BUSY")
+            } finally {
+                eraser.rollbackIfStill(unmarking)
+            }
+            eraser.rollback()
+        }
+        wordsOf(adas) shouldBe ADAS_WORDS
+        marksOn(adas) shouldBe 1
+        unfavourite(bea, adas).status shouldBe 204
+        marksOn(adas) shouldBe 0
     }
 
     // ---- the eraser ----

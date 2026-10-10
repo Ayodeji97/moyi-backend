@@ -18,6 +18,9 @@ package com.moyi.common.web
  * client handling a case the server never produces.
  */
 enum class ErrorCode {
+    /** A bookmark is locked by another transaction. 409: retry the same removal once it finishes. */
+    FAVOURITE_BUSY,
+
     /**
      * The body could not be taken in at all — not JSON, not the right shape,
      * or (`413`) longer than an `@Idempotent` route will buffer.
