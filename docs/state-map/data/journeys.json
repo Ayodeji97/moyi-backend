@@ -152,5 +152,35 @@
         "note": "The morning after. No freeze is left to cover the day, so the run ends here."
       }
     ]
+  },
+  {
+    "id": "J4",
+    "title": "Looking back",
+    "steps": [
+      {
+        "row": "day-revealed-today",
+        "note": "Both of you wrote today and the day has been revealed."
+      },
+      {
+        "row": "partner-visible-today",
+        "note": "The same request, for your partner's entry."
+      },
+      {
+        "row": "day-revealed-streak",
+        "note": ""
+      },
+      {
+        "row": "bond-active-streak",
+        "note": "The same request, as the bond sees it."
+      },
+      {
+        "row": "day-revealed-write",
+        "note": "You try to add to a day that is already settled."
+      },
+      {
+        "row": "day-revealed-ends",
+        "note": "After this the day is no longer today, and the journey stops here, where the API does: the archive, favourites and search that would show the day again are not built."
+      }
+    ]
   }
 ]
