@@ -55,7 +55,9 @@ import java.util.UUID
  *
  * **Neither verb waits out a withdrawal** ([Reactions] has why): taking the
  * bond's lock here would put a reaction behind a delivery that can run to
- * sixty seconds, holding a pooled connection.
+ * sixty seconds, holding a pooled connection. Taking one back while an
+ * erasure holds its row is refused at once as a conflict to retry, never
+ * answered as done: that erasure may roll back.
  *
  * So one interleaving is let through: an **ending** that commits between
  * the two steps. The reaction is then made, by a request whose answer was
@@ -122,7 +124,13 @@ internal class ReactToEntry(
      * theirs), whether it has since been erased and whether the bond has
      * ended make no difference to a caller the entry was shown to.
      *
+     * **One refusal of its own, and it comes last:** a row another
+     * transaction holds is `409 REACTION_BUSY`, and the caller tries again.
+     * It is asked only of the caller's own row, after the gate, so it tells
+     * nobody anything about an entry they were not shown.
+     *
      * @throws EntryNotFoundException as [react]: this must not be a way to ask whether an id exists.
+     * @throws ReactionBusyException another transaction holds the reaction; no removal is promised.
      */
     fun unreact(
         userId: UUID,
@@ -130,7 +138,7 @@ internal class ReactToEntry(
     ) {
         val (entry, membership) = entryAndMembership(userId, entryId)
         if (entry.canBeReactedToBy(membership.asReader()) == Reacting.NEVER_SHOWN) throw EntryNotFoundException()
-        reactions.remove(entryId, membership.memberId)
+        if (!reactions.remove(entryId, membership.memberId)) throw ReactionBusyException()
     }
 
     /**

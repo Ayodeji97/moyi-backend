@@ -38,6 +38,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.put
 import org.springframework.transaction.support.TransactionTemplate
+import tools.jackson.databind.ObjectMapper
 import java.sql.Connection
 import java.sql.SQLException
 import java.time.Duration
@@ -66,9 +67,10 @@ import javax.sql.DataSource
  * still open" is a fact of where the test is and not of timing, and it is
  * checked: another connection is refused the row at once.
  *
- * - **Taking a reaction back answers `204` while that transaction is open.**
- *   It deletes only a row it can lock at once, and a row someone else is
- *   deleting is as good as deleted.
+ * - **Taking a reaction back answers `409 REACTION_BUSY` at once while that
+ *   transaction is open.** A deletion that has not committed is never
+ *   reported as a removal: the eraser may roll back. Asked again after
+ *   either a commit or a rollback, it succeeds.
  * - **Setting one is refused as `ENTRY_IMMUTABLE` while it is open**, once
  *   its lock timeout has passed. The real timeout is two seconds, so the
  *   request here is made through the application's own `ReactToEntry` built
@@ -97,6 +99,7 @@ internal class ReactionLockWaitTest(
     @Autowired entries: EntryStore,
     @Autowired joining: ReconcileJoiningDay,
     @Autowired transactions: TransactionTemplate,
+    @Autowired private val json: ObjectMapper,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -133,17 +136,22 @@ internal class ReactionLockWaitTest(
     }
 
     @Test
-    fun `taking a reaction back answers 204 while an erasure still holds its row, and the row goes when the erasure commits`() {
+    fun `taking a reaction back returns at once with 409 REACTION_BUSY while an erasure holds its row, which is as the eraser leaves it`() {
         react(bea, adas).status shouldBe 204
         reactionsOn(adas) shouldBe 1
 
         whileErasing(adas) { eraser ->
             val removing = pool.submit(Callable { unreact(bea, adas) })
-            try {
-                removing.get(BOUND.toMillis(), TimeUnit.MILLISECONDS).status shouldBe 204
-            } finally {
-                eraser.rollbackIfStill(removing)
-            }
+            val refused =
+                try {
+                    removing.get(BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                } finally {
+                    eraser.rollbackIfStill(removing)
+                }
+            // Not a 204: the row's deletion is somebody else's and has not committed, so no removal is promised.
+            refused.status shouldBe 409
+            json.readTree(refused.contentAsString)["code"].asString() shouldBe "REACTION_BUSY"
+            json.readTree(refused.contentAsString)["detail"].asString() shouldBe "This reaction is being changed. Please try again."
             // Answered with the eraser still open: nothing of its work is committed, and it still holds the row.
             wordsOf(adas) shouldBe ADAS_WORDS
             reactionsOn(adas) shouldBe 1
@@ -151,8 +159,67 @@ internal class ReactionLockWaitTest(
             eraser.commit()
         }
 
+        // The eraser committed: the row is gone with the words, and the same request is now a success.
         reactionsOn(adas) shouldBe 0
         wordsOf(adas) shouldBe null
+        unreact(bea, adas).status shouldBe 204
+    }
+
+    /**
+     * Why the held row is not answered `204`: the eraser may not commit.
+     * Then the reaction is still there, shown to both, after a removal that
+     * would have been reported successful.
+     */
+    @Test
+    fun `a removal refused during an erasure that rolls back leaves the reaction there, and a second request removes it`() {
+        react(bea, adas).status shouldBe 204
+
+        whileErasing(adas) { eraser ->
+            val removing = pool.submit(Callable { unreact(bea, adas) })
+            try {
+                val refused = removing.get(BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                refused.status shouldBe 409
+                json.readTree(refused.contentAsString)["code"].asString() shouldBe "REACTION_BUSY"
+            } finally {
+                eraser.rollbackIfStill(removing)
+            }
+            eraser.rollback()
+        }
+
+        wordsOf(adas) shouldBe ADAS_WORDS
+        reactionsOn(adas) shouldBe 1
+        unreact(bea, adas).status shouldBe 204
+        reactionsOn(adas) shouldBe 0
+    }
+
+    /**
+     * The refusal is about the caller's own row and comes after every `404`
+     * decision: with the row held, somebody the entry was never shown to is
+     * told exactly what they are told of an id nobody has, and the entry's
+     * author, who has no row on it, is not told that anything is busy.
+     */
+    @Test
+    fun `while the row is held a stranger still gets the one 404, and the author, who has no row there, a 204`() {
+        react(bea, adas).status shouldBe 204
+        val eve = users.verified("Eve")
+
+        whileErasing(adas) { eraser ->
+            val asked =
+                pool.submit(
+                    Callable { Triple(unreact(eve, adas), unreact(eve, UUID.randomUUID().toString()), unreact(ada, adas)) },
+                )
+            val (strangers, nobodys, authors) =
+                try {
+                    asked.get(BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                } finally {
+                    eraser.rollbackIfStill(asked)
+                }
+            strangers.status shouldBe 404
+            comparable(strangers) shouldBe comparable(nobodys)
+            strangers.contentAsString shouldNotContain "BUSY"
+            authors.status shouldBe 204
+            refusedAtOnce("SELECT 1 FROM reactions WHERE entry_id = '$adas' FOR UPDATE NOWAIT")
+        }
     }
 
     @Test
@@ -275,6 +342,17 @@ internal class ReactionLockWaitTest(
                 other.autoCommit = true
             }
         }
+    }
+
+    /** Status, every header but the request's own, and the body with the path the caller typed taken out. */
+    private fun comparable(response: MockHttpServletResponse): String {
+        val body = response.contentAsString.replace(Regex("\"instance\":\"[^\"]*\""), "\"instance\":\"-\"")
+        val headers =
+            response.headerNames
+                .filterNot { it.equals("X-Request-Id", ignoreCase = true) || it.startsWith("X-RateLimit", ignoreCase = true) }
+                .sorted()
+                .joinToString { "$it=${response.getHeaders(it)}" }
+        return "${response.status}|$headers|$body"
     }
 
     private fun reactionsOn(entryId: String): Int =

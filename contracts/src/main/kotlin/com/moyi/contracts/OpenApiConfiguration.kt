@@ -471,11 +471,10 @@ class OpenApiConfiguration {
                 "unfavouriteEntry",
                 "favouriteEntry",
                 // Slice C5c. REACTION_ON_OWN_ENTRY, ENTRY_IMMUTABLE (a tombstone)
-                // and BOND_ARCHIVED. `unreactToEntry` is deliberately absent, for
-                // `unfavouriteEntry`'s reason: taking a reaction back is `204`
-                // whether or not there was one, whatever has become of the entry
-                // or the bond.
+                // and BOND_ARCHIVED. Taking back a locked reaction is a retryable
+                // REACTION_BUSY conflict, as `unfavouriteEntry`'s is.
                 "reactToEntry",
+                "unreactToEntry",
             )
 
         /**
@@ -1050,8 +1049,8 @@ private val FAVOURITE_DESCRIPTIONS =
 
 /**
  * What a client of the two reaction operations has to be told: who sees a
- * reaction, which entries take one, and what each refusal means. `409` is
- * three codes here and the schema lists none against the operation.
+ * reaction, which entries take one, and what each refusal means. The shared
+ * error schema does not list the applicable codes for each operation.
  */
 private val REACTION_DESCRIPTIONS =
     mapOf(
@@ -1067,7 +1066,8 @@ private val REACTION_DESCRIPTIONS =
         "unreactToEntry" to
             "Takes the caller's reaction back. Repeatable: no reaction is success, and so is an entry that has since " +
             "been erased, or one the caller wrote. `404` is every entry the caller was never shown, the same as for an " +
-            "id that does not exist. Allowed on a bond that has ended.",
+            "id that does not exist. `409 REACTION_BUSY` means another operation holds the reaction; retry the removal. " +
+            "Allowed on a bond that has ended.",
     )
 
 /**

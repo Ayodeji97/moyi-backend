@@ -619,7 +619,7 @@ class OpenApiContractTest(
     }
 
     @Test
-    fun `a reaction is put as one required type of the four and deleted with no body, and only putting one can conflict`() {
+    fun `a reaction is put as one required type of the four and deleted with no body, and removing a locked one can conflict`() {
         val reaction = api.paths["/api/v1/entries/{entryId}/reaction"]!!
         reaction.readOperationsMap().keys.map { it.name } shouldContainExactlyInAnyOrder listOf("PUT", "DELETE")
 
@@ -639,9 +639,10 @@ class OpenApiContractTest(
         (type.types ?: setOf(type.type)) shouldBe setOf("string")
         type.enum.map { it.toString() } shouldBe REACTION_TYPES
 
-        // Taking one back is never a conflict: absent is success, on a tombstone and on an ended bond too.
+        // Absent is success, on a tombstone and on an ended bond too; a row held by another transaction is REACTION_BUSY.
         reaction.delete.operationId shouldBe "unreactToEntry"
-        reaction.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "429", "500")
+        reaction.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "409", "429", "500")
+        reaction.delete.description shouldContain "409 REACTION_BUSY"
         reaction.delete.responses["204"]!!.content shouldBe null
         reaction.delete.requestBody shouldBe null
         reaction.delete.parameters.map { it.name } shouldBe listOf("entryId")

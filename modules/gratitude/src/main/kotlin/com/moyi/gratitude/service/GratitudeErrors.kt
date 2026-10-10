@@ -128,6 +128,14 @@ internal class ReactionOnOwnEntryException :
         "You cannot react to your own entry.",
     )
 
+/** A competing operation on the reaction has not finished; no successful removal is promised. */
+internal class ReactionBusyException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.REACTION_BUSY,
+        "This reaction is being changed. Please try again.",
+    )
+
 /**
  * The one answer for an entry the caller may not act on (spec §5.2, T-02):
  * no such id, an id that is not a UUID, an entry in a bond the caller is not

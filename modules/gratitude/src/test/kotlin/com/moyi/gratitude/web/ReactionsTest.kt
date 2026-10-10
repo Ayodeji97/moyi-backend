@@ -655,8 +655,10 @@ internal class ReactionsTest(
         reactions.on(emptyList()) shouldBe emptyMap()
 
         // Erased, by either mark of an erasure: nothing.
-        reactions.remove(id, beaMember)
+        reactions.remove(id, beaMember) shouldBe true
         rows().shouldBeEmpty()
+        // Absent is what was asked for.
+        reactions.remove(id, beaMember) shouldBe true
         for (erasure in listOf("deleted_at = now()", "status = 'DELETED'")) {
             withClue(erasure) {
                 jdbc.update("UPDATE entries SET deleted_at = NULL, status = 'REVEALED' WHERE id = ?::uuid", adas) shouldBe 1

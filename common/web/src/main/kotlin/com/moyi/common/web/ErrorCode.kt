@@ -261,6 +261,9 @@ enum class ErrorCode {
      */
     REACTION_ON_OWN_ENTRY,
 
+    /** A reaction is locked by another transaction. 409: retry the same removal once it finishes. */
+    REACTION_BUSY,
+
     /**
      * `POST /bonds/{bondId}/entries` for a day that has already closed
      * (BR-10). 409: the day this entry would have landed on is no longer

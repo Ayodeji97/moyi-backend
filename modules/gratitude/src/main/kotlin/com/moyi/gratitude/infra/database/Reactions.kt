@@ -45,8 +45,8 @@ import java.util.UUID
  * **Neither write waits out an erasure**, for the reason `Favourites` gives
  * (ADR-0036 decision 12): the withdrawal consumer holds every row it has
  * touched until its whole delivery commits, and a request that waited on one
- * held a pooled connection while it did. [remove] leaves a row it cannot lock
- * at once; [set] gives up after `EntryRowGuard.LOCK_WAIT`. Both idioms are
+ * held a pooled connection while it did. [remove] is refused a row it cannot
+ * lock at once; [set] gives up after `EntryRowGuard.LOCK_WAIT`. Both idioms are
  * `EntryRowGuard`'s, shared with `Favourites`.
  */
 @Component
@@ -117,16 +117,19 @@ internal class Reactions(
      * Removes the member's reaction if there is one. None is not an error:
      * absent is what was asked for.
      *
-     * **It never waits** (`EntryRowGuard.deleteOrBeRefused`): a row it
-     * cannot lock at once is one an erasure is already deleting, and is left
-     * to it.
+     * **It never waits for a row lock, and never guesses that a deletion
+     * will commit** (`EntryRowGuard.deleteOrBeRefused`, as
+     * `Favourites.unmark`). True means absent or removed. False means
+     * another transaction holds the row, usually an erasure that is deleting
+     * it: nothing was removed, and the service asks the caller to try again.
+     * Were that answered as a removal, an erasure that then rolled back
+     * would leave the reaction there, shown to both, after the member was
+     * told it was gone.
      */
     fun remove(
         entryId: EntryId,
         memberId: UUID,
-    ) {
-        jdbc.removedUnlessHeld(REMOVE, entryId, memberId)
-    }
+    ): Boolean = jdbc.removedUnlessHeld(REMOVE, entryId, memberId)
 
     /**
      * Every reaction on one entry, for `EraseEntry` and nobody else: an
