@@ -191,7 +191,7 @@
     "to": "SIGNED_IN",
     "status": 200,
     "code": null,
-    "reason": "The address is marked verified and the account becomes ACTIVE while you stay signed in. Your tokens keep working unchanged: nothing about the account's status is inside them, so the next GET /me says emailVerified true and creating a bond is no longer refused..",
+    "reason": "The address is marked verified and the account becomes ACTIVE while you stay signed in. Your tokens keep working unchanged: nothing about the account's status is inside them, so the next GET /me says emailVerified true and creating a bond is no longer refused.",
     "rule": "FR-002, ADR-0018 §3",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -752,6 +752,24 @@
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#refreshTokens.revokeFamily(token.familyId, now)"
+  },
+  {
+    "id": "account-signed-in-logout-other",
+    "region": "account",
+    "from": "SIGNED_IN",
+    "action": "POST /api/v1/auth/logout",
+    "actor": "you",
+    "when": "no Authorization header is sent, or the access token it carries is accepted, and the refresh token is not your live session's: it is another live session's, or it matches none",
+    "guards": [],
+    "outcome": "ok",
+    "to": "SIGNED_IN",
+    "status": 204,
+    "code": null,
+    "reason": "Nothing ties the refresh token to whoever sends it, so the answer is 204 whatever it names. A token of another live session ends that session, whoever's it is, and the one you are using goes on; a token that matches no live session changes nothing. Either way you stay signed in. (read from the code; a test shows the 204 for a token never issued, sent by someone whose only session had already ended, and nothing runs the case where you stay signed in)",
+    "rule": "ADR-0021 §6",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/LogoutUser.kt#val token = refreshTokens.findByHash(hash) ?: return@executeWithoutResult"
   },
   {
     "id": "account-anonymous-logout-all",

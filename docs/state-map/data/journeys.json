@@ -41,6 +41,11 @@
         "note": "Later the same day. Your partner has registered, verified and signed in on their own device, as you did."
       },
       {
+        "row": "invite-created-joined",
+        "note": "",
+        "sameRequest": true
+      },
+      {
         "row": "day-suspended-joined-partial",
         "note": "",
         "sameRequest": true

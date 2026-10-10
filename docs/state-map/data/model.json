@@ -387,7 +387,10 @@
       "code": "UNAUTHENTICATED",
       "reason": "No access token, or one that is expired or not valid. Everything under /api/v1 except the eight public auth POSTs needs one, and that is decided before the path is looked up: a path that does not exist, or a GET on a public auth route, is 401 without a token, not 404 or 405. A public route needs no token, but a token that is sent to one is still checked, and an expired or unaccepted one is 401 there too: send no Authorization header to a public route. In the account machine's own regions this answer is a row, because there the missing or expired token is the state.",
       "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.UNAUTHENTICATED",
-      "rowsAllowedIn": ["account", "account.session"]
+      "rowsAllowedIn": [
+        "account",
+        "account.session"
+      ]
     },
     {
       "status": 403,
@@ -400,6 +403,12 @@
       "code": "METHOD_NOT_ALLOWED",
       "reason": "The path exists; this verb does not.",
       "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.METHOD_NOT_ALLOWED"
+    },
+    {
+      "status": 406,
+      "code": "UNSUPPORTED_MEDIA_TYPE",
+      "reason": "An Accept header that rules out JSON. There is no code of its own: it is the one a 415 carries. Read from the code; nothing runs it, and the contract documents no 406.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#HttpStatus.UNSUPPORTED_MEDIA_TYPE.value(), HttpStatus.NOT_ACCEPTABLE.value() -> {"
     },
     {
       "status": 415,

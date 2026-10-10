@@ -193,7 +193,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "name is missing, blank once trimmed, or over 60 characters; type is not COUPLE, FRIENDS, FAMILY or PARENT_CHILD; anchorTimezone is missing or is not a region time zone (a fixed offset such as Etc/GMT+3 is refused); revealTimeLocal is not a time such as 21:00; or reminderTimezone is not a region time zone. (the tests and the smoke script assert the status and the field, not the code)",
+        "reason": "name is blank once trimmed, or over 60 characters; type is not COUPLE, FRIENDS, FAMILY or PARENT_CHILD; anchorTimezone is not a region time zone (a fixed offset such as Etc/GMT+3 is refused); revealTimeLocal is not a time such as 21:00; or reminderTimezone is not a region time zone. A required field that is missing or null is not this answer: it fails while the body is read, which is 400 MALFORMED_REQUEST (by reading; nothing sends such a body). (the tests and the smoke script assert the status and the field, not the code)",
         "evidence": "never-run",
         "evidenceRef": "",
         "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/CreateBondRequest.kt#@field:ValidBondType"
@@ -444,7 +444,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "anchorTimezone is missing, blank, or not a region time zone; a fixed offset such as Etc/GMT+3 is refused. (the tests and the smoke script assert the status and the field, not the code)",
+        "reason": "anchorTimezone is blank, or not a region time zone; a fixed offset such as Etc/GMT+3 is refused. A required field that is missing or null is not this answer: it fails while the body is read, which is 400 MALFORMED_REQUEST (by reading; nothing sends such a body). (the tests and the smoke script assert the status and the field, not the code)",
         "evidence": "never-run",
         "evidenceRef": "",
         "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/ChangeTimezoneRequest.kt#@field:ValidRegionZone"

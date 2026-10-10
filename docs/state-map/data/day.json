@@ -5,7 +5,7 @@
     "from": "NOT_OPENED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the bond is two people, and the day did not end before the bond became two people",
+    "when": "the bond takes entries and is two people, and the day did not end before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -24,7 +24,7 @@
     "to": "PARTIAL",
     "status": 201,
     "code": null,
-    "reason": "Yours is the first entry of the day, and this write is what opens the day's row. The row is inserted OPEN and counted to PARTIAL in the same transaction, so OPEN is never what this write commits. Your partner sees that you wrote, and nothing of what you wrote.",
+    "reason": "Yours is the first entry of the day, and this write is what opens the day's row. The row is inserted OPEN and counted to PARTIAL in the same transaction, so OPEN is never what this write commits. Your partner sees that you wrote, and nothing of what you wrote. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-1",
     "evidence": "smoke",
     "evidenceRef": "the first entry is 201, SUBMITTED",
@@ -36,7 +36,7 @@
     "from": "NOT_OPENED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the bond is still waiting for its second member",
+    "when": "the bond takes entries and is still waiting for its second member",
     "guards": [
       {
         "region": "account",
@@ -55,7 +55,7 @@
     "to": "SUSPENDED",
     "status": 201,
     "code": null,
-    "reason": "The creator may write before the invitee joins. This write opens the day's row, and opens it SUSPENDED: private, and never counted by the streak.",
+    "reason": "The creator may write before the invitee joins. This write opens the day's row, and opens it SUSPENDED: private, and never counted by the streak. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "doc 04 §8.3a",
     "evidence": "smoke",
     "evidenceRef": "writing before a partner has joined is still 201",
@@ -67,7 +67,7 @@
     "from": "NOT_OPENED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "an offline draft's intendedAt names a day that ended before the bond became two people",
+    "when": "the bond takes entries, and an offline draft's intendedAt names a day that ended before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -86,7 +86,7 @@
     "to": "SUSPENDED",
     "status": 201,
     "code": null,
-    "reason": "The draft is within the 36-hour offline window and the day has no row, so this write opens it, and opens it SUSPENDED. A day that ended before the bond became two people is suspended for good, so nothing on it is revealed, even with both entries in.",
+    "reason": "The draft is within the 36-hour offline window and the day has no row, so this write opens it, and opens it SUSPENDED. A day that ended before the bond became two people is suspended for good, so nothing on it is revealed, even with both entries in. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "ADR-0032 §7",
     "evidence": "test",
     "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
@@ -98,7 +98,7 @@
     "from": "OPEN",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "",
+    "when": "the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -117,7 +117,7 @@
     "to": "PARTIAL",
     "status": 201,
     "code": null,
-    "reason": "The day has a row and no live entry: an entry was deleted from it, or the joining day resumed empty. Yours is counted as its first.",
+    "reason": "The day has a row and no live entry: an entry was deleted from it, or the joining day resumed empty. Yours is counted as its first. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-1",
     "evidence": "test",
     "evidenceRef": "EntryChangesTest#delete frees the live slot and today picks the replacement",
@@ -129,7 +129,7 @@
     "from": "PARTIAL",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request, and you have already written today",
+    "when": "a new request, the bond takes entries, and you have already written today",
     "guards": [
       {
         "region": "account",
@@ -148,7 +148,7 @@
     "to": "PARTIAL",
     "status": 409,
     "code": "ENTRY_ALREADY_EXISTS",
-    "reason": "One entry per member per day. The database's unique index refuses the second; the first is untouched.",
+    "reason": "One entry per member per day. The database's unique index refuses the second; the first is untouched. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-2",
     "evidence": "smoke",
     "evidenceRef": "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS",
@@ -160,7 +160,7 @@
     "from": "PARTIAL",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "your partner has written, you have not, and the bond has no reveal time or it has passed",
+    "when": "the bond takes entries, your partner has written, you have not, and the bond has no reveal time or it has passed",
     "guards": [
       {
         "region": "account",
@@ -179,7 +179,7 @@
     "to": "REVEALED",
     "status": 201,
     "code": null,
-    "reason": "Yours is the second entry, so both are revealed in the same transaction and each of you can read the other.",
+    "reason": "Yours is the second entry, so both are revealed in the same transaction and each of you can read the other. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-1, ADR-0032 §1",
     "evidence": "smoke",
     "evidenceRef": "an entry with typographic characters is 201, and echoes them",
@@ -191,7 +191,7 @@
     "from": "PARTIAL",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "your partner has written, you have not, and the bond's reveal time is still ahead",
+    "when": "the bond takes entries, your partner has written, you have not, and the bond's reveal time is still ahead",
     "guards": [
       {
         "region": "account",
@@ -210,7 +210,7 @@
     "to": "PENDING_REVEAL",
     "status": 201,
     "code": null,
-    "reason": "Yours is the second entry, but the bond has a reveal time that has not come, so both entries stay locked until it does.",
+    "reason": "Yours is the second entry, but the bond has a reveal time that has not come, so both entries stay locked until it does. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "FR-062",
     "evidence": "smoke",
     "evidenceRef": "the second writes, and is not shown a reveal",
@@ -222,7 +222,7 @@
     "from": "PENDING_REVEAL",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request",
+    "when": "a new request, and the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -241,7 +241,7 @@
     "to": "PENDING_REVEAL",
     "status": 409,
     "code": "ENTRY_ALREADY_EXISTS",
-    "reason": "Both of you have written and the day is only waiting for its time, so any write here is a second entry from its author.",
+    "reason": "Both of you have written and the day is only waiting for its time, so any write here is a second entry from its author. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-2",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -253,7 +253,7 @@
     "from": "REVEALED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request, and the day is today",
+    "when": "a new request, the bond takes entries, and the day is today",
     "guards": [
       {
         "region": "account",
@@ -272,7 +272,7 @@
     "to": "REVEALED",
     "status": 409,
     "code": "DAY_CLOSED",
-    "reason": "A revealed day is settled: its words have been read. The day is checked before the entry is inserted, so this is the answer whether you still have an entry on it or deleted yours, which is what stops delete-then-rewrite replacing words already read.",
+    "reason": "A revealed day is settled: its words have been read. The day is checked before the entry is inserted, so this is the answer whether you still have an entry on it or deleted yours, which is what stops delete-then-rewrite replacing words already read. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-10, ADR-0032 §8",
     "evidence": "test",
     "evidenceRef": "RevealTest#after a post-reveal delete the author cannot write that day again, and the day stands as it was revealed",
@@ -284,7 +284,7 @@
     "from": "REVEALED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the day is an earlier one, named by an offline draft's intendedAt",
+    "when": "the bond takes entries, and the day is an earlier one, named by an offline draft's intendedAt",
     "guards": [
       {
         "region": "account",
@@ -303,7 +303,7 @@
     "to": "REVEALED",
     "status": 201,
     "code": null,
-    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's.",
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-3a, ADR-0031 §20",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -315,7 +315,7 @@
     "from": "SOLO",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "an offline draft's intendedAt names this day",
+    "when": "the bond takes entries, and an offline draft's intendedAt names this day",
     "guards": [
       {
         "region": "account",
@@ -334,7 +334,7 @@
     "to": "SOLO",
     "status": 201,
     "code": null,
-    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's.",
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-3a, ADR-0031 §20",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -346,7 +346,7 @@
     "from": "EMPTY",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "an offline draft's intendedAt names this day",
+    "when": "the bond takes entries, and an offline draft's intendedAt names this day",
     "guards": [
       {
         "region": "account",
@@ -365,7 +365,7 @@
     "to": "EMPTY",
     "status": 201,
     "code": null,
-    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's.",
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-3a, ADR-0031 §20",
     "evidence": "test",
     "evidenceRef": "MissingDaysTest#an offline entry aimed at a day the job wrote EMPTY is filed on today, and that day stays empty",
@@ -377,7 +377,7 @@
     "from": "FROZEN",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "an offline draft's intendedAt names this day",
+    "when": "the bond takes entries, and an offline draft's intendedAt names this day",
     "guards": [
       {
         "region": "account",
@@ -396,7 +396,7 @@
     "to": "FROZEN",
     "status": 201,
     "code": null,
-    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's.",
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-3a, ADR-0031 §20",
     "evidence": "test",
     "evidenceRef": "SubmitEntrySettledDayTest#a claimed day that is already stamped closed sends the draft to today, whatever its status",
@@ -408,7 +408,7 @@
     "from": "SUSPENDED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the bond is still waiting for its second member, and you have no live entry on the day",
+    "when": "the bond takes entries and is still waiting for its second member, and you have no live entry on the day",
     "guards": [
       {
         "region": "account",
@@ -427,7 +427,7 @@
     "to": "SUSPENDED",
     "status": 201,
     "code": null,
-    "reason": "A suspended day has a row because its creator wrote on it. With that entry deleted, a new one is accepted and counted, and the day stays suspended.",
+    "reason": "A suspended day has a row because its creator wrote on it. With that entry deleted, a new one is accepted and counted, and the day stays suspended. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "doc 04 §8.3a",
     "evidence": "smoke",
     "evidenceRef": "the author can write a replacement on the same day",
@@ -439,7 +439,7 @@
     "from": "SUSPENDED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request, the bond is still waiting for its second member, and you have a live entry on the day",
+    "when": "a new request, the bond takes entries and is still waiting for its second member, and you have a live entry on the day",
     "guards": [
       {
         "region": "account",
@@ -458,7 +458,7 @@
     "to": "SUSPENDED",
     "status": 409,
     "code": "ENTRY_ALREADY_EXISTS",
-    "reason": "One entry per member per day holds on a suspended day as on any other.",
+    "reason": "One entry per member per day holds on a suspended day as on any other. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-2",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -470,7 +470,7 @@
     "from": "SUSPENDED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "your partner has since joined, the day ended before they did and is not yet stamped closed, and an offline draft's intendedAt names it",
+    "when": "the bond takes entries, your partner has since joined, the day ended before they did and is not yet stamped closed, and an offline draft's intendedAt names it",
     "guards": [
       {
         "region": "account",
@@ -489,7 +489,7 @@
     "to": "SUSPENDED",
     "status": 201,
     "code": null,
-    "reason": "An offline draft may be filed on a day that ended before the bond became two people, while the close job has not yet stamped it. The entry is kept there and the day stays suspended, so nothing on it is ever revealed.",
+    "reason": "An offline draft may be filed on a day that ended before the bond became two people, while the close job has not yet stamped it. The entry is kept there and the day stays suspended, so nothing on it is ever revealed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "ADR-0032 §7",
     "evidence": "test",
     "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had a row",
@@ -501,7 +501,7 @@
     "from": "SUSPENDED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "the close job has stamped the day closed, and an offline draft's intendedAt names it",
+    "when": "the bond takes entries, the close job has stamped the day closed, and an offline draft's intendedAt names it",
     "guards": [
       {
         "region": "account",
@@ -521,7 +521,7 @@
     "to": "SUSPENDED",
     "status": 201,
     "code": null,
-    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's. A suspended day is closed once the close job has stamped it: one that ended while the bond waited for its second member, or one that ended during a deletion countdown since called off.",
+    "reason": "A closed day takes no entry, and the only request that can name one is an offline draft's intendedAt. The claim is not used: the entry is filed on today instead, and this day does not change. If today cannot take it either, the answer is today's. A suspended day is closed once the close job has stamped it: one that ended while the bond waited for its second member, or one that ended during a deletion countdown since called off. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-3a, ADR-0031 §20",
     "evidence": "test",
     "evidenceRef": "SubmitEntrySettledDayTest#a claimed day that is already stamped closed sends the draft to today, whatever its status",
@@ -533,7 +533,7 @@
     "from": "NONE",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "your partner has not written, or the bond's reveal time is still ahead",
+    "when": "the bond takes entries, and either your partner has not written or the bond's reveal time is still ahead",
     "guards": [
       {
         "region": "account",
@@ -553,7 +553,7 @@
     "to": "SUBMITTED",
     "status": 201,
     "code": null,
-    "reason": "Your entry is stored and is yours alone to read until the day is revealed.",
+    "reason": "Your entry is stored and is yours alone to read until the day is revealed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-1",
     "evidence": "smoke",
     "evidenceRef": "the first entry is 201, SUBMITTED",
@@ -565,7 +565,7 @@
     "from": "NONE",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "your partner has already written, and the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
+    "when": "the bond takes entries, your partner has already written, the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -584,7 +584,7 @@
     "to": "REVEALED",
     "status": 201,
     "code": null,
-    "reason": "Yours is the second entry and nothing holds the reveal back, so it is revealed in the transaction that stores it.",
+    "reason": "Yours is the second entry and nothing holds the reveal back, so it is revealed in the transaction that stores it. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-1, ADR-0032 §1",
     "evidence": "test",
     "evidenceRef": "EntriesEndpointTest#the second submission reveals both entries and records one content-free event",
@@ -596,7 +596,7 @@
     "from": "NONE",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "an offline draft's intendedAt names a day that ended before the bond became two people",
+    "when": "the bond takes entries, and an offline draft's intendedAt names a day that ended before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -615,7 +615,7 @@
     "to": "SUBMITTED",
     "status": 201,
     "code": null,
-    "reason": "Your entry is stored on the suspended day and stays SUBMITTED, yours alone, whether or not your partner wrote on that day too.",
+    "reason": "Your entry is stored on the suspended day and stays SUBMITTED, yours alone, whether or not your partner wrote on that day too. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "ADR-0032 §7",
     "evidence": "test",
     "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
@@ -627,7 +627,7 @@
     "from": "SUBMITTED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request",
+    "when": "a new request, and the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -647,7 +647,7 @@
     "to": "SUBMITTED",
     "status": 409,
     "code": "ENTRY_ALREADY_EXISTS",
-    "reason": "You have a live entry for today. Edit it, or delete it and write again; a second one is refused.",
+    "reason": "You have a live entry for today. Edit it, or delete it and write again; a second one is refused. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-2",
     "evidence": "smoke",
     "evidenceRef": "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS",
@@ -684,7 +684,7 @@
     "from": "REVEALED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request, and the entry's day is today",
+    "when": "a new request, the bond takes entries, and the entry's day is today",
     "guards": [
       {
         "region": "account",
@@ -703,7 +703,7 @@
     "to": "REVEALED",
     "status": 409,
     "code": "DAY_CLOSED",
-    "reason": "Your entry has been revealed, so its day is settled. The day is checked before the insert, so the answer is DAY_CLOSED and not ENTRY_ALREADY_EXISTS.",
+    "reason": "Your entry has been revealed, so its day is settled. The day is checked before the insert, so the answer is DAY_CLOSED and not ENTRY_ALREADY_EXISTS. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-10",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -740,7 +740,7 @@
     "from": "REVEALED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request whose intendedAt names the entry's day, and that day is an earlier one",
+    "when": "a new request whose intendedAt names the entry's day, that day is an earlier one, and the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -759,7 +759,7 @@
     "to": "REVEALED",
     "status": 201,
     "code": null,
-    "reason": "The entry's day is settled, so the claim is not used: the new entry is filed on today, and this one is untouched. If today cannot take it, the answer is today's.",
+    "reason": "The entry's day is settled, so the claim is not used: the new entry is filed on today, and this one is untouched. If today cannot take it, the answer is today's. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-3a, ADR-0031 §20",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -771,7 +771,7 @@
     "from": "DELETED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you deleted it before the reveal, and your partner has not written or the reveal time is still ahead",
+    "when": "the bond takes entries, you deleted it before the reveal, and your partner has not written or the reveal time is still ahead",
     "guards": [
       {
         "region": "account",
@@ -791,7 +791,7 @@
     "to": "SUBMITTED",
     "status": 201,
     "code": null,
-    "reason": "Deleting before the reveal freed your place for the day. The replacement is a new entry with a new id; the deleted one stays as its tombstone, and today shows the live one.",
+    "reason": "Deleting before the reveal freed your place for the day. The replacement is a new entry with a new id; the deleted one stays as its tombstone, and today shows the live one. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-2, ADR-0032 §8",
     "evidence": "smoke",
     "evidenceRef": "the author can write a replacement on the same day",
@@ -803,7 +803,7 @@
     "from": "DELETED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you deleted it before the reveal, your partner has written, and the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
+    "when": "the bond takes entries, you deleted it before the reveal, your partner has written, the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -822,7 +822,7 @@
     "to": "REVEALED",
     "status": 201,
     "code": null,
-    "reason": "The replacement is the day's second live entry, so it meets the reveal rule afresh and both are revealed.",
+    "reason": "The replacement is the day's second live entry, so it meets the reveal rule afresh and both are revealed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "ADR-0032 §8",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -834,7 +834,7 @@
     "from": "DELETED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request, and you deleted it after the reveal",
+    "when": "a new request, the bond takes entries, and you deleted it after the reveal",
     "guards": [
       {
         "region": "account",
@@ -853,7 +853,7 @@
     "to": "DELETED",
     "status": 409,
     "code": "DAY_CLOSED",
-    "reason": "The day was revealed before you deleted, and a revealed day is a record: your place is free but the day takes no new entry.",
+    "reason": "The day was revealed before you deleted, and a revealed day is a record: your place is free but the day takes no new entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-10, ADR-0032 §8",
     "evidence": "test",
     "evidenceRef": "RevealTest#after a post-reveal delete the author cannot write that day again, and the day stands as it was revealed",
@@ -890,7 +890,7 @@
     "from": "NONE",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you have not yet written today",
+    "when": "the bond takes entries, and you have no live entry for today",
     "guards": [
       {
         "region": "account",
@@ -910,11 +910,43 @@
     "to": "NONE",
     "status": 201,
     "code": null,
-    "reason": "Your partner has written nothing, so your write changes nothing you see of theirs.",
+    "reason": "Your partner has written nothing, so your write changes nothing you see of theirs. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "",
     "evidence": "smoke",
     "evidenceRef": "the first entry is 201, SUBMITTED",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#partnerEntry = entryList.firstOrNull { it.authorMemberId != membership.memberId }?.readBy(reader),"
+  },
+  {
+    "id": "partner-none-write-again",
+    "region": "day.partnerEntry",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "a new request, the bond takes entries, and you have a live entry for today",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 409,
+    "code": "ENTRY_ALREADY_EXISTS",
+    "reason": "One entry per member per day: you have a live entry for today, so a second is refused, and nothing you see of your partner's changes. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
+    "rule": "BR-2",
+    "evidence": "smoke",
+    "evidenceRef": "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#throw EntryAlreadyExistsException()"
   },
   {
     "id": "partner-locked-write-reveals",
@@ -922,7 +954,7 @@
     "from": "LOCKED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you have not yet written today, and the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
+    "when": "the bond takes entries, you have no live entry for today, the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
     "guards": [
       {
         "region": "account",
@@ -941,7 +973,7 @@
     "to": "VISIBLE",
     "status": 201,
     "code": null,
-    "reason": "Writing your own entry is what unlocks your partner's: both are revealed together.",
+    "reason": "Writing your own entry is what unlocks your partner's: both are revealed together. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-1",
     "evidence": "smoke",
     "evidenceRef": "an entry with typographic characters is 201, and echoes them",
@@ -953,7 +985,7 @@
     "from": "LOCKED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you have not yet written today, and the bond's reveal time is still ahead",
+    "when": "the bond takes entries, you have no live entry for today, and the bond's reveal time is still ahead",
     "guards": [
       {
         "region": "account",
@@ -972,7 +1004,7 @@
     "to": "LOCKED",
     "status": 201,
     "code": null,
-    "reason": "Both of you have now written, but the bond's reveal time has not come, so your partner's entry stays locked.",
+    "reason": "Both of you have now written, but the bond's reveal time has not come, so your partner's entry stays locked. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "FR-062",
     "evidence": "smoke",
     "evidenceRef": "the second writes, and is not shown a reveal",
@@ -984,7 +1016,7 @@
     "from": "LOCKED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "an offline draft's intendedAt names a day that ended before the bond became two people, and your partner has written on it",
+    "when": "the bond takes entries, an offline draft's intendedAt names a day that ended before the bond became two people, and your partner has written on it",
     "guards": [
       {
         "region": "account",
@@ -1003,11 +1035,42 @@
     "to": "LOCKED",
     "status": 201,
     "code": null,
-    "reason": "Both of you have now written on the suspended day, and nothing is revealed: your partner's entry stays locked to you for good. No built endpoint shows a past day yet, so this is what the entry is, not something a response shows.",
+    "reason": "Both of you have now written on the suspended day, and nothing is revealed: your partner's entry stays locked to you for good. No built endpoint shows a past day yet, so this is what the entry is, not something a response shows. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "ADR-0032 §7",
     "evidence": "test",
     "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (entryCount != MAX_ENTRIES || status !in setOf(BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL)) return this"
+  },
+  {
+    "id": "partner-locked-write-again",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "a new request, the bond takes entries, and you have a live entry for today",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "LOCKED",
+    "status": 409,
+    "code": "ENTRY_ALREADY_EXISTS",
+    "reason": "Both of you have written and the day is waiting for its reveal time, so a write from you is a second entry: it is refused, and your partner's entry stays locked. (the probe that shows this answer runs before the partner has written; nothing runs it here) On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
+    "rule": "BR-2",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#throw EntryAlreadyExistsException()"
   },
   {
     "id": "partner-visible-write",
@@ -1015,7 +1078,7 @@
     "from": "VISIBLE",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request",
+    "when": "a new request, and the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -1034,7 +1097,7 @@
     "to": "VISIBLE",
     "status": 409,
     "code": "DAY_CLOSED",
-    "reason": "You can read your partner's words only on a revealed day, and a revealed day takes no new entry.",
+    "reason": "You can read your partner's words only on a revealed day, and a revealed day takes no new entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-10",
     "evidence": "test",
     "evidenceRef": "RevealTest#after a post-reveal delete the author cannot write that day again, and the day stands as it was revealed",
@@ -1046,7 +1109,7 @@
     "from": "REMOVED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "you have not yet written today",
+    "when": "the bond takes entries, and you have no live entry for today",
     "guards": [
       {
         "region": "account",
@@ -1065,11 +1128,42 @@
     "to": "REMOVED",
     "status": 201,
     "code": null,
-    "reason": "Your partner deleted their entry before the reveal. Your write is accepted and their removed entry stays as it is; nothing is revealed until they write again.",
+    "reason": "Your partner deleted their entry before the reveal. Your write is accepted and their removed entry stays as it is; nothing is revealed until they write again. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "",
     "evidence": "never-run",
     "evidenceRef": "",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value },"
+  },
+  {
+    "id": "partner-removed-write-again",
+    "region": "day.partnerEntry",
+    "from": "REMOVED",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "a new request, the bond takes entries, and you have a live entry for today",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "REMOVED",
+    "status": 409,
+    "code": "ENTRY_ALREADY_EXISTS",
+    "reason": "One entry per member per day: you have a live entry for today, so a second is refused, and your partner's removed entry stays as it is. (the probe that shows this answer runs before the partner has written; nothing runs it here) On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
+    "rule": "BR-2",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#throw EntryAlreadyExistsException()"
   },
   {
     "id": "partner-deleted-write",
@@ -1077,7 +1171,7 @@
     "from": "DELETED",
     "action": "POST /api/v1/bonds/{bondId}/entries",
     "actor": "you",
-    "when": "a new request",
+    "when": "a new request, and the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -1096,7 +1190,7 @@
     "to": "DELETED",
     "status": 409,
     "code": "DAY_CLOSED",
-    "reason": "A tombstone with its id and dates is shown only for an entry you could once read, so the day was revealed, and a revealed day takes no new entry.",
+    "reason": "A tombstone with its id and dates is shown only for an entry you could once read, so the day was revealed, and a revealed day takes no new entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-10",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -2386,7 +2480,7 @@
     "from": "SUBMITTED",
     "action": "PATCH /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "a new request",
+    "when": "a new request, and the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -2406,7 +2500,7 @@
     "to": "SUBMITTED",
     "status": 200,
     "code": null,
-    "reason": "Nobody else has been entitled to read it yet, so the text is replaced. Only the text can change.",
+    "reason": "Nobody else has been entitled to read it yet, so the text is replaced. Only the text can change. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-7",
     "evidence": "smoke",
     "evidenceRef": "PATCH before reveal changes the author's words",
@@ -2443,7 +2537,7 @@
     "from": "REVEALED",
     "action": "PATCH /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "a new request",
+    "when": "a new request, and the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -2462,7 +2556,7 @@
     "to": "REVEALED",
     "status": 409,
     "code": "ENTRY_IMMUTABLE",
-    "reason": "Your partner may already have read these words, so they can no longer be changed. You can still delete the entry.",
+    "reason": "Your partner may already have read these words, so they can no longer be changed. You can still delete the entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-7",
     "evidence": "smoke",
     "evidenceRef": "PATCH after reveal is ENTRY_IMMUTABLE",
@@ -2499,7 +2593,7 @@
     "from": "DELETED",
     "action": "PATCH /api/v1/entries/{entryId}",
     "actor": "you",
-    "when": "a new request",
+    "when": "a new request, and the bond takes entries",
     "guards": [
       {
         "region": "account",
@@ -2519,7 +2613,7 @@
     "to": "DELETED",
     "status": 409,
     "code": "ENTRY_IMMUTABLE",
-    "reason": "An erased entry has no words to edit, and the answer does not say whether it was ever revealed.",
+    "reason": "An erased entry has no words to edit, and the answer does not say whether it was ever revealed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "BR-7",
     "evidence": "test",
     "evidenceRef": "EntryChangesTest#editing an entry its author erased is refused without claiming it was revealed",
@@ -2823,7 +2917,7 @@
     "from": "SUSPENDED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "the day ended before your partner joined, or nobody has joined yet",
+    "when": "the day ended before your partner joined, or nobody has joined yet; not the day your partner joined on, which the close job resumes before it closes it, so that it closes EMPTY or SOLO",
     "guards": [],
     "outcome": "ok",
     "to": "SUSPENDED",
@@ -2895,13 +2989,13 @@
     "from": "NOT_OPENED",
     "action": "event:missed-day-recorded",
     "actor": "system",
-    "when": "the day ran from the day the bond became two people until it ended, and did not end inside a deletion countdown that was later called off",
+    "when": "the day is the one the bond became two people on or a later one, it began while the bond took entries, and either it did not end inside a deletion countdown or the close job wrote it while that countdown was still running",
     "guards": [],
     "outcome": "ok",
     "to": "EMPTY",
     "status": null,
     "code": null,
-    "reason": "Nobody wrote, so the day never had a row. Once it has ended the close job writes one, already closed as EMPTY. That includes a day on which the bond ended or began a countdown: it began while the bond took entries. A day from before the pairing, or one that began after the bond ended, is never written and stays without a row.",
+    "reason": "Nobody wrote, so the day never had a row. Once it has ended the close job writes one, already closed as EMPTY. That includes the day on which the bond ended or began a deletion countdown: it began while the bond took entries, and the job writes it that night. If the countdown is later called off that row stays EMPTY, because the pause is recorded only at the call-off and a row that exists is never written again; the streak passes over it all the same. A day from before the pairing, or one that began after the bond ended or began counting down, is not written and has no row.",
     "rule": "ADR-0033 §6",
     "evidence": "test",
     "evidenceRef": "MissingDaysTest#a couple who paired and never wrote get every day that has ended, closed EMPTY, and not today",
@@ -2913,13 +3007,13 @@
     "from": "NOT_OPENED",
     "action": "event:missed-day-recorded",
     "actor": "system",
-    "when": "the day ended while a deletion was counting down, and the deletion was later called off",
+    "when": "the day ended while a deletion was counting down, the deletion was later called off, and the close job had not already written the day (in practice, every day after the one the countdown began on)",
     "guards": [],
     "outcome": "ok",
     "to": "SUSPENDED",
     "status": null,
     "code": null,
-    "reason": "The bond took no entries when this day ended, so nobody missed it: it is written SUSPENDED and closed, and the streak passes over it.",
+    "reason": "The bond took no entries when this day ended, so nobody missed it: it is written SUSPENDED and closed, and the streak passes over it. While the countdown runs the close job writes nothing for a day that began inside it; these rows are written after the call-off. The day the countdown began on is the exception: it began while the bond took entries, so the job has usually written it EMPTY that night, and it stays EMPTY.",
     "rule": "ADR-0034 ruling 1",
     "evidence": "test",
     "evidenceRef": "StreakAfterCancelledDeletionTest#the days of a deletion that was called off are suspended, and the run goes on",
