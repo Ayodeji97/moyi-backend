@@ -4,6 +4,53 @@
 
 Describes `main @ 174b474`. Each journey is a path through the three machines, taken from doc 02. How to read this: [README](README.md).
 
+## J1: First run and pairing
+
+1. **you**: register. The account is created PENDING_VERIFICATION, with its password hash and three consent rows, and a verification link good for 24 hours is emailed after the commit. The answer is 201 with an empty body and says nothing about the account. You are not signed in by registering.
+2. **you**: verify your email. The link is spent, the address is marked verified and the account becomes ACTIVE. Any other live link of this account is deleted in the same transaction. The answer is 200 with an empty body; verifying does not sign you in.
+3. **you**: sign in. One refusal covers a wrong password, an unknown address and a locked account, with a byte-identical body and no WWW-Authenticate, so that the answer does not say which it was. The failure is counted: the fifth in a row locks the account for one minute, and each failure after a lock has run out doubles the next lock, up to one hour. A first try, with the password mistyped.
+4. **you**: sign in. You are signed in: a new session begins, and the answer carries an access token good for 15 minutes (expiresIn 900), a refresh token good for 30 days, and the profile. The count of failed attempts is cleared.
+5. **you**: create a bond. A new bond is created with you as its owner, waiting for its second member, and with its first invite. It starts PENDING_MEMBER, not ACTIVE: nothing counts toward a streak until somebody joins.
+6. **you**: create a bond. A bond is created together with its first invite, in one transaction: a six-character code, good for seven days and for one use. The response carries the code and its link. The same request, as the invite sees it.
+7. **you**: accept an invite. The creator sending their own code. It is named, because it is a fact about you, and the code stays live for the person it was meant for.
+8. **you**: write today's entry. The creator may write before the invitee joins. This write opens the day's row, and opens it SUSPENDED: private, and never counted by the streak. You do not wait for your partner.
+9. **partner**: your partner accepts the invite. Somebody accepts your invite. The bond is two people and ACTIVE from that instant, and the code is spent. Later the same day. Your partner has registered, verified and signed in on their own device, as you did.
+10. **partner**: your partner accepts the invite. What the creator wrote while waiting counts from the pairing on: the joining day resumes with one entry, locked to the member who has just joined. A joining day left with both entries on it by the first build of this slice resumes straight to REVEALED or PENDING_REVEAL; nothing the current code writes can be in that state. The same moment, as the day sees it.
+11. **you**: accept an invite. The code was used, by you or by somebody else: an invite works once. The one answer, identical to a code that never existed. The code is tried once more, after your partner has used it.
+12. **you**: read today. One of you has written. The status is shared on purpose, so a member who has not written can tell that their partner has. Both of you are now on day one, and your entry is waiting for theirs.
+
+```mermaid
+sequenceDiagram
+    actor You
+    actor Partner
+    participant API
+    participant Job as Scheduled job
+    You->>API: register
+    API-->>You: 201, account is PENDING_VERIFICATION
+    You->>API: verify your email
+    API-->>You: 200, account is ACTIVE_SIGNED_OUT
+    You->>API: sign in
+    API-->>You: 401 INVALID_CREDENTIALS
+    You->>API: sign in
+    API-->>You: 200, account is SIGNED_IN
+    You->>API: create a bond
+    API-->>You: 201, bond is PENDING_MEMBER
+    You->>API: create a bond
+    API-->>You: 201, bond.invite is CREATED
+    You->>API: accept an invite
+    API-->>You: 409 ALREADY_MEMBER
+    You->>API: write today's entry
+    API-->>You: 201, day is SUSPENDED
+    Partner->>API: your partner accepts the invite
+    Note over API: bond is ACTIVE
+    Partner->>API: your partner accepts the invite
+    Note over API: day is PARTIAL
+    You->>API: accept an invite
+    API-->>You: 404 INVITE_NOT_USABLE
+    You->>API: read today
+    API-->>You: 200, day is PARTIAL
+```
+
 ## J2: The daily loop
 
 1. **you**: write today's entry. Yours is the first entry of the day, and this write is what opens the day's row. The row is inserted OPEN and counted to PARTIAL in the same transaction, so OPEN is never what this write commits. Your partner sees that you wrote, and nothing of what you wrote.

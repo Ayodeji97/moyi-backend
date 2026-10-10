@@ -1,5 +1,59 @@
 [
   {
+    "id": "J1",
+    "title": "First run and pairing",
+    "steps": [
+      {
+        "row": "account-anonymous-register",
+        "note": ""
+      },
+      {
+        "row": "account-pending-verify",
+        "note": ""
+      },
+      {
+        "row": "account-active-login-wrong",
+        "note": "A first try, with the password mistyped."
+      },
+      {
+        "row": "account-active-login",
+        "note": ""
+      },
+      {
+        "row": "bond-none-create",
+        "note": ""
+      },
+      {
+        "row": "invite-none-create-bond",
+        "note": "The same request, as the invite sees it."
+      },
+      {
+        "row": "invite-created-accept-own",
+        "note": ""
+      },
+      {
+        "row": "day-not-opened-write-waiting",
+        "note": "You do not wait for your partner."
+      },
+      {
+        "row": "bond-pending-member-joined",
+        "note": "Later the same day. Your partner has registered, verified and signed in on their own device, as you did."
+      },
+      {
+        "row": "day-suspended-joined-partial",
+        "note": "The same moment, as the day sees it."
+      },
+      {
+        "row": "invite-accepted-accept",
+        "note": "The code is tried once more, after your partner has used it."
+      },
+      {
+        "row": "day-partial-today",
+        "note": "Both of you are now on day one, and your entry is waiting for theirs."
+      }
+    ]
+  },
+  {
     "id": "J2",
     "title": "The daily loop",
     "steps": [
