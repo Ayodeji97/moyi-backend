@@ -166,9 +166,8 @@ All five are drawn from the data in section 6.
    it needs (auth, headers such as `Idempotency-Key` and `If-Match`, the
    guard in each machine); every response with its cause; a curl line.
    As built: `docs/state-map/endpoints.md`, one section per endpoint,
-   filed under the machine of the region where it has the most rows of
-   the reader's own. It prints the condition of each answer in words; it
-   does not print the guards.
+   filed under the machine its card names. It prints the condition of
+   each answer in words; it does not print the guards.
 3. **Grid.** Actions down the side, states across the top, one grid per
    region (a machine's regions have different states, so one grid per
    machine has no single top row). Each cell is a success with its next
@@ -189,7 +188,7 @@ Six hand-written files under `docs/state-map/data/`:
 | File | Holds |
 |---|---|
 | `model.json` | The machines, regions and states; the events; the errors that apply everywhere; the `pending` list; `contractGaps`; the stamp |
-| `endpoints.json` | One card per endpoint: summary, auth, headers, request errors, a curl line |
+| `endpoints.json` | One card per endpoint: summary, the machine it belongs to, auth, headers, request errors, a curl line |
 | `day.json`, `bond.json`, `account.json` | The rows of each machine |
 | `journeys.json` | Each journey as an ordered list of row references |
 
@@ -227,6 +226,7 @@ Six hand-written files under `docs/state-map/data/`:
 | `pending` | `endpoints`, `codes` | what is not yet mapped; empty in strict mode |
 | a card in `endpoints.json` | `id` | the method, a space, and the path as the contract spells it |
 | | `summary` | the action in a few words, addressed to the reader ("delete your entry"). A page rewords it as the partner's when the partner is the actor |
+| | `machine` | the id of the machine the endpoint belongs to; `endpoints.md` files the card under it |
 | | `auth` | `bearer` or `none` |
 | | `headers` | a list of sentences, one per header |
 | | `requestErrors` | errors that depend on the request and not on any state: `status`, `code`, `reason`, `evidence`, `evidenceRef`, `codeRef` |

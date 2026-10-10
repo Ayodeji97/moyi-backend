@@ -73,6 +73,7 @@ def tiny(rows=None, **over):
             {
                 "id": "POST /api/v1/lamp",
                 "summary": "press the switch",
+                "machine": "lamp",
                 "auth": "bearer",
                 "headers": [],
                 "requestErrors": [],

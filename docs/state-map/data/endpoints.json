@@ -2,6 +2,7 @@
   {
     "id": "POST /api/v1/bonds/{bondId}/entries",
     "summary": "write today's entry",
+    "machine": "day",
     "auth": "bearer",
     "headers": [
       "Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the entry as it stands now, and no entry written)"
@@ -69,6 +70,7 @@
   {
     "id": "GET /api/v1/bonds/{bondId}/today",
     "summary": "read today",
+    "machine": "day",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -86,6 +88,7 @@
   {
     "id": "PATCH /api/v1/entries/{entryId}",
     "summary": "edit your entry",
+    "machine": "day",
     "auth": "bearer",
     "headers": [
       "Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 200 with Idempotency-Replayed: true, the entry as it stands now, and no entry written or changed)"
@@ -145,6 +148,7 @@
   {
     "id": "DELETE /api/v1/entries/{entryId}",
     "summary": "delete your entry",
+    "machine": "day",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -162,6 +166,7 @@
   {
     "id": "GET /api/v1/bonds/{bondId}/streak",
     "summary": "read the streak",
+    "machine": "day",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -179,6 +184,7 @@
   {
     "id": "GET /api/v1/bonds",
     "summary": "list your bonds",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [],
@@ -187,6 +193,7 @@
   {
     "id": "POST /api/v1/bonds",
     "summary": "create a bond",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -204,6 +211,7 @@
   {
     "id": "GET /api/v1/bonds/{bondId}",
     "summary": "read a bond",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [
       "If-None-Match (optional: the ETag you already hold. While what you would be shown has not changed, the answer is 304 with no body)"
@@ -223,6 +231,7 @@
   {
     "id": "PATCH /api/v1/bonds/{bondId}",
     "summary": "change the bond's settings",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [
       "If-Match (required: the complete ETag of the bond as you last read it. The answer carries the new ETag; a patch that changes nothing keeps the old one)"
@@ -266,6 +275,7 @@
   {
     "id": "POST /api/v1/bonds/{bondId}/leave",
     "summary": "leave the bond",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [
       "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a leave keeps them. Any other Content-Type is refused with 415, even with no body)"
@@ -293,6 +303,7 @@
   {
     "id": "POST /api/v1/bonds/{bondId}/block",
     "summary": "block your partner",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [
       "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back. Any other Content-Type is refused with 415, even with no body)"
@@ -320,6 +331,7 @@
   {
     "id": "POST /api/v1/bonds/{bondId}/invites",
     "summary": "issue a new invite",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -337,6 +349,7 @@
   {
     "id": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
     "summary": "revoke an invite",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -354,6 +367,7 @@
   {
     "id": "GET /api/v1/invites/{code}",
     "summary": "look up an invite code",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -371,6 +385,7 @@
   {
     "id": "POST /api/v1/invites/{code}/accept",
     "summary": "accept an invite",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -388,6 +403,7 @@
   {
     "id": "GET /api/v1/bonds/{bondId}/members/me/settings",
     "summary": "read your own member settings",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -405,6 +421,7 @@
   {
     "id": "PUT /api/v1/bonds/{bondId}/members/me/settings",
     "summary": "replace your own member settings",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -430,6 +447,7 @@
   {
     "id": "PATCH /api/v1/bonds/{bondId}/timezone",
     "summary": "propose a new time zone",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -455,6 +473,7 @@
   {
     "id": "POST /api/v1/bonds/{bondId}/timezone/confirm",
     "summary": "agree to the time zone change",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -480,6 +499,7 @@
   {
     "id": "DELETE /api/v1/bonds/{bondId}/timezone",
     "summary": "call off the time zone change",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -497,6 +517,7 @@
   {
     "id": "POST /api/v1/bonds/{bondId}/deletion-request",
     "summary": "ask for the bond's deletion, or agree to it",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -514,6 +535,7 @@
   {
     "id": "DELETE /api/v1/bonds/{bondId}/deletion-request",
     "summary": "call off the deletion",
+    "machine": "bond",
     "auth": "bearer",
     "headers": [],
     "requestErrors": [
@@ -531,6 +553,7 @@
   {
     "id": "POST /api/v1/auth/register",
     "summary": "register",
+    "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
@@ -560,6 +583,7 @@
   {
     "id": "POST /api/v1/auth/verify-email",
     "summary": "verify your email",
+    "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
@@ -580,6 +604,7 @@
   {
     "id": "POST /api/v1/auth/resend-verification",
     "summary": "ask for a new verification link",
+    "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
@@ -601,6 +626,7 @@
   {
     "id": "POST /api/v1/auth/login",
     "summary": "sign in",
+    "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
@@ -630,6 +656,7 @@
   {
     "id": "POST /api/v1/auth/refresh",
     "summary": "exchange the refresh token for a new pair",
+    "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and must not carry an expired token: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the refresh token is looked at. A client that attaches its access token to every request must leave it off this one, or it cannot refresh once the access token has expired)",
@@ -650,6 +677,7 @@
   {
     "id": "POST /api/v1/auth/logout",
     "summary": "sign out of this session",
+    "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
@@ -670,6 +698,7 @@
   {
     "id": "POST /api/v1/auth/logout-all",
     "summary": "sign out everywhere",
+    "machine": "account",
     "auth": "bearer",
     "headers": [
       "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
@@ -680,6 +709,7 @@
   {
     "id": "GET /api/v1/auth/sessions",
     "summary": "list your sessions",
+    "machine": "account",
     "auth": "bearer",
     "headers": [
       "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
@@ -690,6 +720,7 @@
   {
     "id": "DELETE /api/v1/auth/sessions/{id}",
     "summary": "end one session",
+    "machine": "account",
     "auth": "bearer",
     "headers": [
       "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
@@ -709,6 +740,7 @@
   {
     "id": "GET /api/v1/me",
     "summary": "read your profile",
+    "machine": "account",
     "auth": "bearer",
     "headers": [
       "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
@@ -719,6 +751,7 @@
   {
     "id": "POST /api/v1/auth/forgot-password",
     "summary": "ask for a password reset link",
+    "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
@@ -740,6 +773,7 @@
   {
     "id": "POST /api/v1/auth/reset-password",
     "summary": "set a new password with a reset link",
+    "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",

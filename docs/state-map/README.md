@@ -46,9 +46,9 @@ it, up to four tables.
 **The endpoints page** turns the same rows the other way: for one endpoint, every answer it
 can give across all regions, in one table, with the request errors that do not depend on any
 state, what the contract does not document for it, what it needs and a curl line. Each
-endpoint is filed under the machine of the region in which it has the most rows of your
-own, which is not always the one its path suggests: editing an entry is under Bond, and
-leaving and blocking are under Day.
+endpoint is filed under the machine its card names (`machine` in `data/endpoints.json`):
+the one the endpoint belongs to, whichever regions its rows are in. Leaving a bond is
+under Bond, though most of its rows say what becomes of the day and its entries.
 
 **States that name an absence.** Some states are not enum values but real absences that the
 code has: `NO_BOND`, `ANONYMOUS`, `NO_SESSION`, and the day's `NOT_OPENED`, which means "no

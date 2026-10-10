@@ -513,52 +513,6 @@ curl -X POST "$API/auth/reset-password" -H 'Content-Type: application/json' -d "
 
 ## Bond
 
-### PATCH /entries/{entryId}
-
-edit your entry
-
-**Needs:** an access token.
-
-- Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 200 with Idempotency-Replayed: true, the entry as it stands now, and no entry written or changed)
-
-**Try it:**
-
-```sh
-curl -X PATCH "$API/entries/$ENTRY" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"text": "..."}'
-```
-
-#### Every answer
-
-| Region | In | When | Answer | Why | Rule | Evidence |
-|---|---|---|---|---|---|---|
-| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | An entry in a bond you are not in does not exist for you: the same 404 as an id that names no entry. (the test asserts the 404 and that the body is identical to the one the author's partner gets; the smoke probe "the partner cannot edit the author's entry" asserts that body's code) | T-02 | test |
-| `bond` | `PENDING_MEMBER` | the entry is yours and can still be edited | 200 stays | The bond takes writes, so the edit is the entry's question: the day machine has ENTRY_IMMUTABLE. | BR-7 | never-run |
-| `bond` | `ACTIVE` | the entry is yours and can still be edited | 200 stays | The bond takes writes, so the edit is the entry's question: the day machine has ENTRY_IMMUTABLE. | BR-7 | smoke |
-| `bond` | `PENDING_DELETION` | a new request for an entry of your own | 409 `BOND_ARCHIVED` | A bond counting down to deletion takes no new words. The author is told so only after it is settled that the entry is theirs, and before anything is asked about the entry itself. Deleting it is still allowed. | BR-9, ADR-0035 §15 | test |
-| `bond` | `PENDING_DELETION` | a new request for an entry that is not yours | 404 `NOT_FOUND` | Whose entry it is comes first: your partner's entry, or an id that names none, is the 404 everybody else gets, and the bond's state is never reached. The day machine's cards have it. | T-02 | never-run |
-| `bond` | `PENDING_DELETION` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay is a read of what your first request made, so the bond's state does not refuse it: 200 with Idempotency-Replayed: true and the entry as it stands now. | ADR-0031 §8 | never-run |
-| `bond` | `ARCHIVED` | a new request for an entry of your own | 409 `BOND_ARCHIVED` | A bond that has ended takes no new words. The author is told so only after it is settled that the entry is theirs, and before anything is asked about the entry itself. Deleting it is still allowed. | BR-9, ADR-0035 §15 | smoke |
-| `bond` | `ARCHIVED` | a new request for an entry that is not yours | 404 `NOT_FOUND` | Whose entry it is comes first: your partner's entry, or an id that names none, is the 404 everybody else gets, and the bond's state is never reached. The day machine's cards have it. (the test asserts the 404 for the partner after leaving and that the body is identical to the one the partner gets on an open bond; the smoke probe "the partner cannot edit the author's entry" asserts that body's code) | T-02 | test |
-| `bond` | `ARCHIVED` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay is a read of what your first request made, so the bond's state does not refuse it: 200 with Idempotency-Replayed: true and the entry as it stands now. | ADR-0031 §8 | test |
-| `day.entry` | `NONE` |  | 404 `NOT_FOUND` | You have no entry behind the id you sent. Your partner's entry, a stranger's and an id nobody has all get this one answer. | ADR-0032 §9 | smoke |
-| `day.entry` | `SUBMITTED` | a new request, and the bond takes entries | 200 stays | Nobody else has been entitled to read it yet, so the text is replaced. Only the text can change. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-7 | smoke |
-| `day.entry` | `SUBMITTED` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay of a keyed edit writes no entry and does not apply the edit again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. | ADR-0032 §10 | never-run |
-| `day.entry` | `REVEALED` | a new request, and the bond takes entries | 409 `ENTRY_IMMUTABLE` | Your partner may already have read these words, so they can no longer be changed. You can still delete the entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-7 | smoke |
-| `day.entry` | `REVEALED` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay of a keyed edit writes no entry and does not apply the edit again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. An edit made before the reveal and repeated after it is not refused. | ADR-0032 §10 | never-run |
-| `day.entry` | `DELETED` | a new request, and the bond takes entries | 409 `ENTRY_IMMUTABLE` | An erased entry has no words to edit, and the answer does not say whether it was ever revealed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-7 | test |
-| `day.entry` | `DELETED` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay of a keyed edit writes no entry and does not apply the edit again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. The body is the tombstone, without the words the edit wrote. | ADR-0032 §10 | test |
-
-#### Whatever the state
-
-| Status | Code | Why | Evidence |
-|---|---|---|---|
-| 404 | `NOT_FOUND` | The id is not a UUID, names no entry, names an entry in a bond you are not in, or names the entry your partner wrote. All four get this one answer, and never 403, so that it does not confirm the entry exists. | smoke |
-| 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. Only when the optional key is sent. | never-run |
-| 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written. The limit holds whether or not a key is sent. | never-run |
-| 422 | `VALIDATION_FAILED` | The text is missing or blank, is over 500 graphemes or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid. (a test asserts the status, not the code) | never-run |
-| 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another path. Only when the optional key is sent. | never-run |
-| 422 | `MEDIA_NOT_YET_SUPPORTED` | The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. (a test asserts the status, not the code) | never-run |
-
 ### GET /bonds
 
 list your bonds
@@ -710,6 +664,136 @@ curl -X PATCH "$API/bonds/$BOND" -H "Authorization: Bearer $TOKEN" -H "If-Match:
 | Status | What the code does |
 |---|---|
 | 415 | Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type. |
+
+### POST /bonds/{bondId}/leave
+
+leave the bond
+
+**Needs:** an access token.
+
+- Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {"withdrawEntries": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a leave keeps them. Any other Content-Type is refused with 415, even with no body)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/bonds/$BOND/leave" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"withdrawEntries": false}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 204 → `ARCHIVED` | Leaving a bond nobody joined ends it: it becomes ARCHIVED and its live invite is revoked. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). | FR-026, ADR-0028 §1 | test |
+| `bond` | `ACTIVE` |  | 204 → `ARCHIVED` | One member leaving ends the bond for both: it becomes ARCHIVED, a record each of you can still read. Nobody is notified, and anything waiting to be agreed is cancelled. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). | FR-026, ADR-0028 §1 | smoke |
+| `bond` | `PENDING_DELETION` | you are still in the bond | 204 stays | Your membership ends and the bond goes on counting down: the deletion was agreed, and walking away does not undo that. From here you cannot call the deletion off; if your partner does, the bond becomes ARCHIVED. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). | ADR-0030 §4a | smoke |
+| `bond` | `PENDING_DELETION` | you have already left it, and it is still counting down | 204 stays | Nothing about the bond changes: you had already left. With withdrawEntries: true your entries are still taken back, if they had not been (ADR-0035 §11). | ADR-0030 §4a | never-run |
+| `bond` | `ARCHIVED` |  | 409 `BOND_ARCHIVED` | A bond that has ended cannot be left again, by the member who left or the one who stayed. Nothing is withdrawn, whatever the body says. To take your entries back from an ended bond, block. | BR-9, ADR-0028 §2 | smoke |
+| `bond.invite` | `NONE` |  | not reachable | A bond is created with its first invite, so a bond you are in has never had none. |  | never-run |
+| `bond.invite` | `CREATED` |  | 204 → `REVOKED` | Leaving a bond nobody has joined ends it, and its live invite is revoked in the same transaction: a live code must not outlast the bond it opens. | ADR-0028 §1 | test |
+| `bond.invite` | `ACCEPTED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0028 §1 | smoke |
+| `bond.invite` | `REVOKED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0028 §1 | never-run |
+| `bond.invite` | `EXPIRED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0028 §1 | never-run |
+| `bond.proposal` | `NONE` |  | 204 stays | Nothing was ever proposed, so ending the bond has nothing to cancel. A leave of a bond that has already ended is refused: see the bond region. | ADR-0030 §11 | smoke |
+| `bond.proposal` | `PROPOSED` |  | 204 → `CANCELLED` | Leaving cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. | ADR-0030 §11, ADR-0028 | test |
+| `bond.proposal` | `CONFIRMED` |  | 204 stays | An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region. A leave of a bond that has already ended is refused: see the bond region. | ADR-0030 §4a | smoke |
+| `bond.proposal` | `CANCELLED` |  | 204 stays | A proposal already called off stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0030 §11 | never-run |
+| `bond.proposal` | `LAPSED` |  | 204 → `CANCELLED` | The statement that cancels what is waiting does not ask the clock, so a proposal that had lapsed and was never closed is stamped cancelled too. No response can show the difference: a lapsed proposal was already invisible. | ADR-0030 §2, §11 | never-run |
+| `day` | `NOT_OPENED` |  | 204 stays | The day has no row, and ending the bond writes none. Whether your entries are taken back makes no difference to it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | FR-029a, ADR-0035 §11 | smoke |
+| `day` | `OPEN` |  | 204 stays | A day with a row and no live entry has nothing of yours on it to take back. It stays OPEN until the close job settles it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | FR-029a, ADR-0035 §11 | never-run |
+| `day` | `PARTIAL` | the body says withdrawEntries: true, and the day's one live entry is yours | 204 → `OPEN` | Right after the call the day still reads PARTIAL. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14). | FR-029a, ADR-0035 §13, §14 | never-run |
+| `day` | `PARTIAL` | the body is absent, or does not say withdrawEntries: true; or the day's one live entry is your partner's | 204 stays | Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond stopped taking writes first. | FR-029a, ADR-0033 §9 | never-run |
+| `day` | `PENDING_REVEAL` | the body says withdrawEntries: true | 204 → `PARTIAL` | After the call your entry is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14). | FR-029a, ADR-0035 §13, §14 | never-run |
+| `day` | `PENDING_REVEAL` | the body is absent, or does not say withdrawEntries: true | 204 stays | Both entries stay, and the day goes on waiting. Ending the bond does not stop the reveal: at the reveal time, or at the day's end, the close job reveals both entries all the same. ADR-0035 records this as an open question for the owner, and no test pins it. | FR-029a, ADR-0035 owner question 9 | never-run |
+| `day` | `REVEALED` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | BR-10, ADR-0035 §13 | test |
+| `day` | `SOLO` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | BR-10, ADR-0035 §13 | never-run |
+| `day` | `EMPTY` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | BR-10, ADR-0035 §13 | never-run |
+| `day` | `FROZEN` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | BR-10, ADR-0035 §13 | never-run |
+| `day` | `SUSPENDED` |  | 204 stays | A suspended day stays suspended, with your entry or without it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | doc 04 §8.3a | never-run |
+| `day.entry` | `NONE` |  | 204 stays | You have no entry on this day, so there is nothing to keep and nothing to take back. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | FR-029a, ADR-0035 §11 | smoke |
+| `day.entry` | `SUBMITTED` | the body says withdrawEntries: true | 204 → `DELETED` | Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased afterwards: in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. | FR-029a, ADR-0035 §11, §12 | never-run |
+| `day.entry` | `SUBMITTED` | the body is absent, or does not say withdrawEntries: true | 204 stays | Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is still revealed at that time or at the day's end, ended bond or not (ADR-0035, owner question 9; no test pins it). You may still delete it yourself. | FR-029a, ADR-0035 §11, ADR-0033 §9 | never-run |
+| `day.entry` | `REVEALED` | the body says withdrawEntries: true | 204 → `DELETED` | Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased afterwards, in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. Your partner's own entries are untouched. | FR-029a, ADR-0035 §11, §12 | test |
+| `day.entry` | `REVEALED` | the body is absent, or does not say withdrawEntries: true | 204 stays | Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. | FR-029a, ADR-0035 §11, §15 | test |
+| `day.entry` | `DELETED` |  | 204 stays | An entry you already deleted has no words left to take back; it stays the tombstone it was. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | FR-029a, ADR-0035 §11 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 400 | `MALFORMED_REQUEST` | A body was sent and it is not exactly {"withdrawEntries": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn. | test |
+| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
+
+#### The contract is silent on
+
+| Status | What the code does |
+|---|---|
+| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. |
+
+### POST /bonds/{bondId}/block
+
+block your partner
+
+**Needs:** an access token.
+
+- Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {"withdrawEntries": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back. Any other Content-Type is refused with 415, even with no body)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/bonds/$BOND/block" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"withdrawEntries": true}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 204 → `ARCHIVED` | With nobody else in the bond there is no one to block, so this ends it exactly as leaving does: ARCHIVED, the live invite revoked, and no block recorded. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | FR-029, ADR-0028 §1 | test |
+| `bond` | `ACTIVE` |  | 204 → `ARCHIVED` | The bond ends as it does for a leave, with the same answer, and it is also recorded that the two accounts are not to be paired again. Nothing your partner can read says which of the two happened. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | FR-029, ADR-0028 §1, doc 26 §2.1 | test |
+| `bond` | `PENDING_DELETION` | you are still in the bond | 204 stays | The block is recorded and your membership ends; the bond goes on counting down. If your partner calls the deletion off, the bond becomes ARCHIVED, not ACTIVE. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | ADR-0030 §4a, ADR-0028 §7 | test |
+| `bond` | `PENDING_DELETION` | you have already left it, and it is still counting down | 204 stays | The block is recorded if it was not already, and nothing about the bond changes. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | ADR-0030 §4a | never-run |
+| `bond` | `ARCHIVED` |  | 204 stays | Block is the one write an ended bond accepts, from the member who stayed or the one who left, and it may be repeated. It records the block once and changes nothing about the bond that either of you can read: no status, no leftAt, no ETag. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | FR-029, ADR-0028 §2 | smoke |
+| `bond.invite` | `NONE` |  | not reachable | A bond is created with its first invite, so a bond you are in has never had none. |  | never-run |
+| `bond.invite` | `CREATED` |  | 204 → `REVOKED` | Blocking a bond nobody has joined ends it, and its live invite is revoked in the same transaction: a live code must not outlast the bond it opens. | ADR-0028 §1 | never-run |
+| `bond.invite` | `ACCEPTED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. | ADR-0028 §1 | smoke |
+| `bond.invite` | `REVOKED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. | ADR-0028 §1 | never-run |
+| `bond.invite` | `EXPIRED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. | ADR-0028 §1 | never-run |
+| `bond.proposal` | `NONE` |  | 204 stays | Nothing was ever proposed, so ending the bond has nothing to cancel. | ADR-0030 §11 | smoke |
+| `bond.proposal` | `PROPOSED` |  | 204 → `CANCELLED` | Blocking cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. | ADR-0030 §11, ADR-0028 | never-run |
+| `bond.proposal` | `CONFIRMED` |  | 204 stays | An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region. | ADR-0030 §4a | test |
+| `bond.proposal` | `CANCELLED` |  | 204 stays | A proposal already called off stays as it is. | ADR-0030 §11 | never-run |
+| `bond.proposal` | `LAPSED` |  | 204 → `CANCELLED` | The statement that cancels what is waiting does not ask the clock, so a proposal that had lapsed and was never closed is stamped cancelled too. No response can show the difference: a lapsed proposal was already invisible. | ADR-0030 §2, §11 | never-run |
+| `day` | `NOT_OPENED` |  | 204 stays | The day has no row, and ending the bond writes none. Whether your entries are taken back makes no difference to it. | FR-029a, ADR-0035 §11 | smoke |
+| `day` | `OPEN` |  | 204 stays | A day with a row and no live entry has nothing of yours on it to take back. It stays OPEN until the close job settles it. | FR-029a, ADR-0035 §11 | never-run |
+| `day` | `PARTIAL` | the body is absent, or does not say withdrawEntries: false, and the day's one live entry is yours | 204 → `OPEN` | Right after the call the day still reads PARTIAL. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14). | FR-029a, ADR-0035 §13, §14 | test |
+| `day` | `PARTIAL` | the body says withdrawEntries: false; or the day's one live entry is your partner's | 204 stays | Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond stopped taking writes first. | FR-029a, ADR-0033 §9 | never-run |
+| `day` | `PENDING_REVEAL` | the body is absent, or does not say withdrawEntries: false | 204 → `PARTIAL` | After the call your entry is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14). | FR-029a, ADR-0035 §13, §14 | never-run |
+| `day` | `PENDING_REVEAL` | the body says withdrawEntries: false | 204 stays | Both entries stay, and the day goes on waiting. Ending the bond does not stop the reveal: at the reveal time, or at the day's end, the close job reveals both entries all the same. ADR-0035 records this as an open question for the owner, and no test pins it. | FR-029a, ADR-0035 owner question 9 | never-run |
+| `day` | `REVEALED` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | BR-10, ADR-0035 §13 | test |
+| `day` | `SOLO` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | BR-10, ADR-0035 §13 | never-run |
+| `day` | `EMPTY` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | BR-10, ADR-0035 §13 | never-run |
+| `day` | `FROZEN` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | BR-10, ADR-0035 §13 | never-run |
+| `day` | `SUSPENDED` |  | 204 stays | A suspended day stays suspended, with your entry or without it. | doc 04 §8.3a | never-run |
+| `day.entry` | `NONE` |  | 204 stays | You have no entry on this day, so there is nothing to keep and nothing to take back. | FR-029a, ADR-0035 §11 | smoke |
+| `day.entry` | `SUBMITTED` | the body is absent, or does not say withdrawEntries: false | 204 → `DELETED` | Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased afterwards: in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. | FR-029a, ADR-0035 §11, §12 | test |
+| `day.entry` | `SUBMITTED` | the body says withdrawEntries: false | 204 stays | Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is still revealed at that time or at the day's end, ended bond or not (ADR-0035, owner question 9; no test pins it). You may still delete it yourself. | FR-029a, ADR-0035 §11, ADR-0033 §9 | never-run |
+| `day.entry` | `REVEALED` | the body is absent, or does not say withdrawEntries: false | 204 → `DELETED` | Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased afterwards, in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. Your partner's own entries are untouched. | FR-029a, ADR-0035 §11, §12 | test |
+| `day.entry` | `REVEALED` | the body says withdrawEntries: false | 204 stays | Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. Repeating the block without the flag takes it back after all. | FR-029a, ADR-0035 §11, §15 | smoke |
+| `day.entry` | `DELETED` |  | 204 stays | An entry you already deleted has no words left to take back; it stays the tombstone it was. | FR-029a, ADR-0035 §11 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 400 | `MALFORMED_REQUEST` | A body was sent and it is not exactly {"withdrawEntries": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn. | smoke |
+| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
+
+#### The contract is silent on
+
+| Status | What the code does |
+|---|---|
+| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. |
 
 ### POST /bonds/{bondId}/invites
 
@@ -1251,6 +1335,52 @@ curl "$API/bonds/$BOND/today" -H "Authorization: Bearer $TOKEN"
 |---|---|---|---|
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
 
+### PATCH /entries/{entryId}
+
+edit your entry
+
+**Needs:** an access token.
+
+- Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 200 with Idempotency-Replayed: true, the entry as it stands now, and no entry written or changed)
+
+**Try it:**
+
+```sh
+curl -X PATCH "$API/entries/$ENTRY" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"text": "..."}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | An entry in a bond you are not in does not exist for you: the same 404 as an id that names no entry. (the test asserts the 404 and that the body is identical to the one the author's partner gets; the smoke probe "the partner cannot edit the author's entry" asserts that body's code) | T-02 | test |
+| `bond` | `PENDING_MEMBER` | the entry is yours and can still be edited | 200 stays | The bond takes writes, so the edit is the entry's question: the day machine has ENTRY_IMMUTABLE. | BR-7 | never-run |
+| `bond` | `ACTIVE` | the entry is yours and can still be edited | 200 stays | The bond takes writes, so the edit is the entry's question: the day machine has ENTRY_IMMUTABLE. | BR-7 | smoke |
+| `bond` | `PENDING_DELETION` | a new request for an entry of your own | 409 `BOND_ARCHIVED` | A bond counting down to deletion takes no new words. The author is told so only after it is settled that the entry is theirs, and before anything is asked about the entry itself. Deleting it is still allowed. | BR-9, ADR-0035 §15 | test |
+| `bond` | `PENDING_DELETION` | a new request for an entry that is not yours | 404 `NOT_FOUND` | Whose entry it is comes first: your partner's entry, or an id that names none, is the 404 everybody else gets, and the bond's state is never reached. The day machine's cards have it. | T-02 | never-run |
+| `bond` | `PENDING_DELETION` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay is a read of what your first request made, so the bond's state does not refuse it: 200 with Idempotency-Replayed: true and the entry as it stands now. | ADR-0031 §8 | never-run |
+| `bond` | `ARCHIVED` | a new request for an entry of your own | 409 `BOND_ARCHIVED` | A bond that has ended takes no new words. The author is told so only after it is settled that the entry is theirs, and before anything is asked about the entry itself. Deleting it is still allowed. | BR-9, ADR-0035 §15 | smoke |
+| `bond` | `ARCHIVED` | a new request for an entry that is not yours | 404 `NOT_FOUND` | Whose entry it is comes first: your partner's entry, or an id that names none, is the 404 everybody else gets, and the bond's state is never reached. The day machine's cards have it. (the test asserts the 404 for the partner after leaving and that the body is identical to the one the partner gets on an open bond; the smoke probe "the partner cannot edit the author's entry" asserts that body's code) | T-02 | test |
+| `bond` | `ARCHIVED` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay is a read of what your first request made, so the bond's state does not refuse it: 200 with Idempotency-Replayed: true and the entry as it stands now. | ADR-0031 §8 | test |
+| `day.entry` | `NONE` |  | 404 `NOT_FOUND` | You have no entry behind the id you sent. Your partner's entry, a stranger's and an id nobody has all get this one answer. | ADR-0032 §9 | smoke |
+| `day.entry` | `SUBMITTED` | a new request, and the bond takes entries | 200 stays | Nobody else has been entitled to read it yet, so the text is replaced. Only the text can change. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-7 | smoke |
+| `day.entry` | `SUBMITTED` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay of a keyed edit writes no entry and does not apply the edit again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. | ADR-0032 §10 | never-run |
+| `day.entry` | `REVEALED` | a new request, and the bond takes entries | 409 `ENTRY_IMMUTABLE` | Your partner may already have read these words, so they can no longer be changed. You can still delete the entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-7 | smoke |
+| `day.entry` | `REVEALED` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay of a keyed edit writes no entry and does not apply the edit again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. An edit made before the reveal and repeated after it is not refused. | ADR-0032 §10 | never-run |
+| `day.entry` | `DELETED` | a new request, and the bond takes entries | 409 `ENTRY_IMMUTABLE` | An erased entry has no words to edit, and the answer does not say whether it was ever revealed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-7 | test |
+| `day.entry` | `DELETED` | the request repeats an Idempotency-Key and body you already sent | 200 stays | A replay of a keyed edit writes no entry and does not apply the edit again. It answers 200 with Idempotency-Replayed: true and the entry read as it stands now. The body is the tombstone, without the words the edit wrote. | ADR-0032 §10 | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | The id is not a UUID, names no entry, names an entry in a bond you are not in, or names the entry your partner wrote. All four get this one answer, and never 403, so that it does not confirm the entry exists. | smoke |
+| 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. Only when the optional key is sent. | never-run |
+| 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written. The limit holds whether or not a key is sent. | never-run |
+| 422 | `VALIDATION_FAILED` | The text is missing or blank, is over 500 graphemes or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid. (a test asserts the status, not the code) | never-run |
+| 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another path. Only when the optional key is sent. | never-run |
+| 422 | `MEDIA_NOT_YET_SUPPORTED` | The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. (a test asserts the status, not the code) | never-run |
+
 ### DELETE /entries/{entryId}
 
 delete your entry
@@ -1333,133 +1463,3 @@ curl "$API/bonds/$BOND/streak" -H "Authorization: Bearer $TOKEN"
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | smoke |
-
-### POST /bonds/{bondId}/leave
-
-leave the bond
-
-**Needs:** an access token.
-
-- Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {"withdrawEntries": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a leave keeps them. Any other Content-Type is refused with 415, even with no body)
-
-**Try it:**
-
-```sh
-curl -X POST "$API/bonds/$BOND/leave" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"withdrawEntries": false}'
-```
-
-#### Every answer
-
-| Region | In | When | Answer | Why | Rule | Evidence |
-|---|---|---|---|---|---|---|
-| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
-| `bond` | `PENDING_MEMBER` |  | 204 → `ARCHIVED` | Leaving a bond nobody joined ends it: it becomes ARCHIVED and its live invite is revoked. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). | FR-026, ADR-0028 §1 | test |
-| `bond` | `ACTIVE` |  | 204 → `ARCHIVED` | One member leaving ends the bond for both: it becomes ARCHIVED, a record each of you can still read. Nobody is notified, and anything waiting to be agreed is cancelled. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). | FR-026, ADR-0028 §1 | smoke |
-| `bond` | `PENDING_DELETION` | you are still in the bond | 204 stays | Your membership ends and the bond goes on counting down: the deletion was agreed, and walking away does not undo that. From here you cannot call the deletion off; if your partner does, the bond becomes ARCHIVED. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). | ADR-0030 §4a | smoke |
-| `bond` | `PENDING_DELETION` | you have already left it, and it is still counting down | 204 stays | Nothing about the bond changes: you had already left. With withdrawEntries: true your entries are still taken back, if they had not been (ADR-0035 §11). | ADR-0030 §4a | never-run |
-| `bond` | `ARCHIVED` |  | 409 `BOND_ARCHIVED` | A bond that has ended cannot be left again, by the member who left or the one who stayed. Nothing is withdrawn, whatever the body says. To take your entries back from an ended bond, block. | BR-9, ADR-0028 §2 | smoke |
-| `bond.invite` | `NONE` |  | not reachable | A bond is created with its first invite, so a bond you are in has never had none. |  | never-run |
-| `bond.invite` | `CREATED` |  | 204 → `REVOKED` | Leaving a bond nobody has joined ends it, and its live invite is revoked in the same transaction: a live code must not outlast the bond it opens. | ADR-0028 §1 | test |
-| `bond.invite` | `ACCEPTED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0028 §1 | smoke |
-| `bond.invite` | `REVOKED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0028 §1 | never-run |
-| `bond.invite` | `EXPIRED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0028 §1 | never-run |
-| `bond.proposal` | `NONE` |  | 204 stays | Nothing was ever proposed, so ending the bond has nothing to cancel. A leave of a bond that has already ended is refused: see the bond region. | ADR-0030 §11 | smoke |
-| `bond.proposal` | `PROPOSED` |  | 204 → `CANCELLED` | Leaving cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. | ADR-0030 §11, ADR-0028 | test |
-| `bond.proposal` | `CONFIRMED` |  | 204 stays | An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region. A leave of a bond that has already ended is refused: see the bond region. | ADR-0030 §4a | smoke |
-| `bond.proposal` | `CANCELLED` |  | 204 stays | A proposal already called off stays as it is. A leave of a bond that has already ended is refused: see the bond region. | ADR-0030 §11 | never-run |
-| `bond.proposal` | `LAPSED` |  | 204 → `CANCELLED` | The statement that cancels what is waiting does not ask the clock, so a proposal that had lapsed and was never closed is stamped cancelled too. No response can show the difference: a lapsed proposal was already invisible. | ADR-0030 §2, §11 | never-run |
-| `day` | `NOT_OPENED` |  | 204 stays | The day has no row, and ending the bond writes none. Whether your entries are taken back makes no difference to it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | FR-029a, ADR-0035 §11 | smoke |
-| `day` | `OPEN` |  | 204 stays | A day with a row and no live entry has nothing of yours on it to take back. It stays OPEN until the close job settles it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | FR-029a, ADR-0035 §11 | never-run |
-| `day` | `PARTIAL` | the body says withdrawEntries: true, and the day's one live entry is yours | 204 → `OPEN` | Right after the call the day still reads PARTIAL. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14). | FR-029a, ADR-0035 §13, §14 | never-run |
-| `day` | `PARTIAL` | the body is absent, or does not say withdrawEntries: true; or the day's one live entry is your partner's | 204 stays | Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond stopped taking writes first. | FR-029a, ADR-0033 §9 | never-run |
-| `day` | `PENDING_REVEAL` | the body says withdrawEntries: true | 204 → `PARTIAL` | After the call your entry is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14). | FR-029a, ADR-0035 §13, §14 | never-run |
-| `day` | `PENDING_REVEAL` | the body is absent, or does not say withdrawEntries: true | 204 stays | Both entries stay, and the day goes on waiting. Ending the bond does not stop the reveal: at the reveal time, or at the day's end, the close job reveals both entries all the same. ADR-0035 records this as an open question for the owner, and no test pins it. | FR-029a, ADR-0035 owner question 9 | never-run |
-| `day` | `REVEALED` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | BR-10, ADR-0035 §13 | test |
-| `day` | `SOLO` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | BR-10, ADR-0035 §13 | never-run |
-| `day` | `EMPTY` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | BR-10, ADR-0035 §13 | never-run |
-| `day` | `FROZEN` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | BR-10, ADR-0035 §13 | never-run |
-| `day` | `SUSPENDED` |  | 204 stays | A suspended day stays suspended, with your entry or without it. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | doc 04 §8.3a | never-run |
-| `day.entry` | `NONE` |  | 204 stays | You have no entry on this day, so there is nothing to keep and nothing to take back. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | FR-029a, ADR-0035 §11 | smoke |
-| `day.entry` | `SUBMITTED` | the body says withdrawEntries: true | 204 → `DELETED` | Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased afterwards: in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. | FR-029a, ADR-0035 §11, §12 | never-run |
-| `day.entry` | `SUBMITTED` | the body is absent, or does not say withdrawEntries: true | 204 stays | Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is still revealed at that time or at the day's end, ended bond or not (ADR-0035, owner question 9; no test pins it). You may still delete it yourself. | FR-029a, ADR-0035 §11, ADR-0033 §9 | never-run |
-| `day.entry` | `REVEALED` | the body says withdrawEntries: true | 204 → `DELETED` | Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased afterwards, in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. Your partner's own entries are untouched. | FR-029a, ADR-0035 §11, §12 | test |
-| `day.entry` | `REVEALED` | the body is absent, or does not say withdrawEntries: true | 204 stays | Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. | FR-029a, ADR-0035 §11, §15 | test |
-| `day.entry` | `DELETED` |  | 204 stays | An entry you already deleted has no words left to take back; it stays the tombstone it was. A leave of a bond that has already ended is refused and takes nothing back: see the bond machine. | FR-029a, ADR-0035 §11 | never-run |
-
-#### Whatever the state
-
-| Status | Code | Why | Evidence |
-|---|---|---|---|
-| 400 | `MALFORMED_REQUEST` | A body was sent and it is not exactly {"withdrawEntries": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn. | test |
-| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. |
-
-### POST /bonds/{bondId}/block
-
-block your partner
-
-**Needs:** an access token.
-
-- Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {"withdrawEntries": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back. Any other Content-Type is refused with 415, even with no body)
-
-**Try it:**
-
-```sh
-curl -X POST "$API/bonds/$BOND/block" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"withdrawEntries": true}'
-```
-
-#### Every answer
-
-| Region | In | When | Answer | Why | Rule | Evidence |
-|---|---|---|---|---|---|---|
-| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
-| `bond` | `PENDING_MEMBER` |  | 204 → `ARCHIVED` | With nobody else in the bond there is no one to block, so this ends it exactly as leaving does: ARCHIVED, the live invite revoked, and no block recorded. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | FR-029, ADR-0028 §1 | test |
-| `bond` | `ACTIVE` |  | 204 → `ARCHIVED` | The bond ends as it does for a leave, with the same answer, and it is also recorded that the two accounts are not to be paired again. Nothing your partner can read says which of the two happened. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | FR-029, ADR-0028 §1, doc 26 §2.1 | test |
-| `bond` | `PENDING_DELETION` | you are still in the bond | 204 stays | The block is recorded and your membership ends; the bond goes on counting down. If your partner calls the deletion off, the bond becomes ARCHIVED, not ACTIVE. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | ADR-0030 §4a, ADR-0028 §7 | test |
-| `bond` | `PENDING_DELETION` | you have already left it, and it is still counting down | 204 stays | The block is recorded if it was not already, and nothing about the bond changes. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | ADR-0030 §4a | never-run |
-| `bond` | `ARCHIVED` |  | 204 stays | Block is the one write an ended bond accepts, from the member who stayed or the one who left, and it may be repeated. It records the block once and changes nothing about the bond that either of you can read: no status, no leftAt, no ETag. Your entries are taken back for both of you unless the body says withdrawEntries: false (ADR-0035 §11). | FR-029, ADR-0028 §2 | smoke |
-| `bond.invite` | `NONE` |  | not reachable | A bond is created with its first invite, so a bond you are in has never had none. |  | never-run |
-| `bond.invite` | `CREATED` |  | 204 → `REVOKED` | Blocking a bond nobody has joined ends it, and its live invite is revoked in the same transaction: a live code must not outlast the bond it opens. | ADR-0028 §1 | never-run |
-| `bond.invite` | `ACCEPTED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. | ADR-0028 §1 | smoke |
-| `bond.invite` | `REVOKED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. | ADR-0028 §1 | never-run |
-| `bond.invite` | `EXPIRED` |  | 204 stays | Ending a bond revokes only a live invite. This one is not live, so it stays as it is. | ADR-0028 §1 | never-run |
-| `bond.proposal` | `NONE` |  | 204 stays | Nothing was ever proposed, so ending the bond has nothing to cancel. | ADR-0030 §11 | smoke |
-| `bond.proposal` | `PROPOSED` |  | 204 → `CANCELLED` | Blocking cancels whatever was waiting to be agreed, of either kind and whoever opened it, in the same transaction. Otherwise an agreement arriving later would try to move the zone of a bond that has ended. | ADR-0030 §11, ADR-0028 | never-run |
-| `bond.proposal` | `CONFIRMED` |  | 204 stays | An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region. | ADR-0030 §4a | test |
-| `bond.proposal` | `CANCELLED` |  | 204 stays | A proposal already called off stays as it is. | ADR-0030 §11 | never-run |
-| `bond.proposal` | `LAPSED` |  | 204 → `CANCELLED` | The statement that cancels what is waiting does not ask the clock, so a proposal that had lapsed and was never closed is stamped cancelled too. No response can show the difference: a lapsed proposal was already invisible. | ADR-0030 §2, §11 | never-run |
-| `day` | `NOT_OPENED` |  | 204 stays | The day has no row, and ending the bond writes none. Whether your entries are taken back makes no difference to it. | FR-029a, ADR-0035 §11 | smoke |
-| `day` | `OPEN` |  | 204 stays | A day with a row and no live entry has nothing of yours on it to take back. It stays OPEN until the close job settles it. | FR-029a, ADR-0035 §11 | never-run |
-| `day` | `PARTIAL` | the body is absent, or does not say withdrawEntries: false, and the day's one live entry is yours | 204 → `OPEN` | Right after the call the day still reads PARTIAL. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14). | FR-029a, ADR-0035 §13, §14 | test |
-| `day` | `PARTIAL` | the body says withdrawEntries: false; or the day's one live entry is your partner's | 204 stays | Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond stopped taking writes first. | FR-029a, ADR-0033 §9 | never-run |
-| `day` | `PENDING_REVEAL` | the body is absent, or does not say withdrawEntries: false | 204 → `PARTIAL` | After the call your entry is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14). | FR-029a, ADR-0035 §13, §14 | never-run |
-| `day` | `PENDING_REVEAL` | the body says withdrawEntries: false | 204 stays | Both entries stay, and the day goes on waiting. Ending the bond does not stop the reveal: at the reveal time, or at the day's end, the close job reveals both entries all the same. ADR-0035 records this as an open question for the owner, and no test pins it. | FR-029a, ADR-0035 owner question 9 | never-run |
-| `day` | `REVEALED` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | BR-10, ADR-0035 §13 | test |
-| `day` | `SOLO` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | BR-10, ADR-0035 §13 | never-run |
-| `day` | `EMPTY` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | BR-10, ADR-0035 §13 | never-run |
-| `day` | `FROZEN` |  | 204 stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | BR-10, ADR-0035 §13 | never-run |
-| `day` | `SUSPENDED` |  | 204 stays | A suspended day stays suspended, with your entry or without it. | doc 04 §8.3a | never-run |
-| `day.entry` | `NONE` |  | 204 stays | You have no entry on this day, so there is nothing to keep and nothing to take back. | FR-029a, ADR-0035 §11 | smoke |
-| `day.entry` | `SUBMITTED` | the body is absent, or does not say withdrawEntries: false | 204 → `DELETED` | Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased afterwards: in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. | FR-029a, ADR-0035 §11, §12 | test |
-| `day.entry` | `SUBMITTED` | the body says withdrawEntries: false | 204 stays | Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is still revealed at that time or at the day's end, ended bond or not (ADR-0035, owner question 9; no test pins it). You may still delete it yourself. | FR-029a, ADR-0035 §11, ADR-0033 §9 | never-run |
-| `day.entry` | `REVEALED` | the body is absent, or does not say withdrawEntries: false | 204 → `DELETED` | Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to both of you, though your partner had read it; the rows are erased afterwards, in seconds as a rule, and much later if the poller is stopped or a delivery is backing off. Your partner's own entries are untouched. | FR-029a, ADR-0035 §11, §12 | test |
-| `day.entry` | `REVEALED` | the body says withdrawEntries: false | 204 stays | Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. Repeating the block without the flag takes it back after all. | FR-029a, ADR-0035 §11, §15 | smoke |
-| `day.entry` | `DELETED` |  | 204 stays | An entry you already deleted has no words left to take back; it stays the tombstone it was. | FR-029a, ADR-0035 §11 | never-run |
-
-#### Whatever the state
-
-| Status | Code | Why | Evidence |
-|---|---|---|---|
-| 400 | `MALFORMED_REQUEST` | A body was sent and it is not exactly {"withdrawEntries": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn. | smoke |
-| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. |

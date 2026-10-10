@@ -259,7 +259,7 @@ class SameRequestTests(unittest.TestCase):
 
 CARD_ERROR = {"status": 422, "code": "LAMP_NO_BULB", "reason": "No bulb | was named.",
               "evidence": "smoke", "evidenceRef": "a lamp with no bulb", "codeRef": "src/Lamp.kt#fun press("}
-LOOK = {"id": "GET /api/v1/lamp", "summary": "look at it", "auth": "none",
+LOOK = {"id": "GET /api/v1/lamp", "summary": "look at it", "machine": "lamp", "auth": "none",
         "headers": ["If-None-Match (optional)", "Accept (application/json)"], "requestErrors": [],
         "curl": 'curl "$API/lamp"'}
 
@@ -356,27 +356,27 @@ class EndpointPageTests(unittest.TestCase):
         bulb = machines[0]["regions"].pop()
         return machines + [{"id": "bulb", "label": "Bulb", "regions": [bulb]}]
 
-    def headings(self, rows):
-        cards = tiny().endpoints + [LOOK]
+    def headings(self, rows, look="bulb", cards=None):
+        cards = cards or tiny().endpoints + [{**LOOK, "machine": look}]
         page = endpoints_md(tiny(rows, machines=self.machines(), endpoints=cards))
         return [line for line in page.splitlines() if line.startswith(("## ", "### "))][1:]
 
-    def test_a_card_is_filed_under_the_machine_where_it_has_most_rows_of_your_own(self):
-        look = dict(action=LOOK["id"], region="lamp.bulb")
-        rows = [
-            row(), refusal(),
-            row(id="l1", **look, **{"from": "COLD"}, to="COLD"), row(id="l2", **look, **{"from": "WARM"}, to="WARM"),
-            row(id="l3", action=LOOK["id"], to="OFF"),
-            # the partner's rows are not yours and do not count
-            row(id="p1", actor="partner", action=LOOK["id"]), row(id="p2", actor="partner", action=LOOK["id"]),
-            row(id="p3", actor="partner", action=LOOK["id"]),
-        ]
+    def test_a_card_is_filed_under_the_machine_it_names(self):
+        # Every row of looking is in the lamp's own region; the card says it belongs to the bulb.
+        rows = [row(), refusal(), row(id="l1", action=LOOK["id"], to="OFF"),
+                row(id="l2", action=LOOK["id"], **{"from": "ON"}, to="ON")]
         self.assertEqual(self.headings(rows), ["## Lamp", "### POST /lamp", "## Bulb", "### GET /lamp"])
+        self.assertEqual(self.headings(rows, look="lamp"), ["## Lamp", "### POST /lamp", "### GET /lamp"])
 
-    def test_a_tie_goes_to_the_machine_listed_first(self):
-        rows = [row(), refusal(), row(id="l1", action=LOOK["id"], region="lamp.bulb", **{"from": "COLD"}, to="COLD"),
-                row(id="l3", action=LOOK["id"], to="OFF")]
-        self.assertEqual(self.headings(rows), ["## Lamp", "### POST /lamp", "### GET /lamp"])
+    def test_machines_are_in_the_maps_order_and_cards_in_file_order(self):
+        press = tiny().endpoints[0]
+        cards = [{**LOOK, "machine": "bulb"}, {**press, "id": "POST /api/v1/lamp/2", "summary": "b"}, press]
+        rows = [row(), refusal(), row(id="l1", action=LOOK["id"], to="OFF"), row(id="l2", action="POST /api/v1/lamp/2", to="OFF")]
+        self.assertEqual(self.headings(rows, cards=cards),
+                         ["## Lamp", "### POST /lamp/2", "### POST /lamp", "## Bulb", "### GET /lamp"])
+
+    def test_a_machine_with_no_card_has_no_heading(self):
+        self.assertEqual(self.headings([row(), refusal()], cards=tiny().endpoints), ["## Lamp", "### POST /lamp"])
 
     def test_a_machine_page_links_to_the_endpoints(self):
         line = "Every answer of every endpoint, with its cause and how to try it: [endpoints](endpoints.md)"

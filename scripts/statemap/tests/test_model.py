@@ -221,6 +221,20 @@ class ValidateTests(unittest.TestCase):
         del model.endpoints[0]["curl"]
         self.assertIn("endpoint POST /api/v1/lamp: missing curl", self.problems(model))
 
+    def test_a_card_without_a_machine_is_named(self):
+        model = tiny()
+        del model.endpoints[0]["machine"]
+        self.assertIn("endpoint POST /api/v1/lamp: missing machine", self.problems(model))
+
+    def test_a_card_names_a_machine_of_the_map(self):
+        sentence = "endpoint POST /api/v1/lamp: machine 'kettle' is not a machine of the map"
+        self.assertIn(sentence, self.problems(self.card(machine="kettle")))
+        # a region's id is not a machine's
+        machines, rows = two_regions()
+        model = tiny(rows, machines=machines)
+        model.endpoints[0]["machine"] = "lamp.bulb"
+        self.assertIn("machine 'lamp.bulb' is not a machine of the map", self.problems(model))
+
     def test_a_card_id_is_a_method_and_a_path(self):
         self.assertIn("endpoint lamp: the id is the method, a space, then the path", self.problems(self.card(id="lamp")))
 

@@ -18,7 +18,7 @@ ROW_KEYS = (
     "id", "region", "from", "action", "actor", "when", "guards", "outcome",
     "to", "status", "code", "reason", "rule", "evidence", "evidenceRef", "codeRef",
 )
-ENDPOINT_KEYS = ("id", "summary", "auth", "headers", "requestErrors", "curl")
+ENDPOINT_KEYS = ("id", "summary", "machine", "auth", "headers", "requestErrors", "curl")
 REQUEST_ERROR_KEYS = ("status", "code", "reason", "evidence", "evidenceRef", "codeRef")
 GAP_KEYS = ("endpoint", "status", "note")
 STATE_ID = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -108,7 +108,7 @@ def validate(model: Model) -> list:
             problems.append(f"two {name} share the id '{repeated}'")
 
     for endpoint in model.endpoints:
-        problems += _endpoint(endpoint)
+        problems += _endpoint(endpoint, {m["id"] for m in model.machines})
     for row in model.rows:
         problems += _row(row, model, regions, set(endpoint_ids), set(event_ids))
     problems += _cells(model)
@@ -117,7 +117,7 @@ def validate(model: Model) -> list:
     return problems
 
 
-def _endpoint(endpoint: dict) -> list:
+def _endpoint(endpoint: dict, machine_ids: set) -> list:
     name = endpoint.get("id", "<no id>")
     missing = [k for k in ENDPOINT_KEYS if k not in endpoint]
     if missing:
@@ -125,6 +125,8 @@ def _endpoint(endpoint: dict) -> list:
     problems = []
     if not ENDPOINT_ID.match(name):
         problems.append(f"endpoint {name}: the id is the method, a space, then the path")
+    if endpoint["machine"] not in machine_ids:
+        problems.append(f"endpoint {name}: machine '{endpoint['machine']}' is not a machine of the map")
     if endpoint["auth"] not in ("none", "bearer"):
         problems.append(f"endpoint {name}: auth is 'none' or 'bearer'")
     if "eyJ" in endpoint["curl"]:

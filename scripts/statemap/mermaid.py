@@ -187,16 +187,6 @@ def machine_md(model: Model, machine_id: str) -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def _home(model: Model, action: str) -> str:
-    """The machine a card is filed under: that of the region where it has most rows of your own.
-
-    A tie, or a card with no row at all, goes to the region listed first.
-    """
-    regions = model.regions()
-    mine = [r["region"] for r in model.rows if r["action"] == action and r["actor"] == "you"]
-    return regions[max(regions, key=mine.count)]["machine"]
-
-
 def _every_answer(model: Model, action: str) -> str:
     regions = list(model.regions())
     rows = [r for r in model.rows if r["action"] == action and r["actor"] == "you"]
@@ -251,7 +241,7 @@ def endpoints_md(model: Model) -> str:
                 "where it depends on the state."
             )
     for machine in model.machines:
-        cards = [c for c in model.endpoints if _home(model, c["id"]) == machine["id"]]
+        cards = [c for c in model.endpoints if c["machine"] == machine["id"]]
         if cards:
             parts.append(f"## {machine['label']}")
             for card in cards:
