@@ -176,6 +176,41 @@ class ValidateTests(unittest.TestCase):
         model.machines[0]["regions"][0]["states"].append({"id": "ON AIR", "label": "on air", "built": False})
         self.assertIn("lamp: state id 'ON AIR' must match", self.problems(model))
 
+    def states(self, *states):
+        model = tiny()
+        model.machines[0]["regions"][0]["states"] = list(states)
+        return self.problems(model)
+
+    def test_a_region_has_exactly_one_initial_state(self):
+        off, on = {"id": "OFF", "label": "OFF"}, {"id": "ON", "label": "ON"}
+        self.assertIn("lamp: 0 states are marked initial; a region starts in exactly one", self.states(off, on))
+        both = self.states({**off, "initial": True}, {**on, "initial": True})
+        self.assertIn("lamp: 2 states are marked initial; a region starts in exactly one", both)
+
+    def test_the_initial_state_is_built(self):
+        problems = self.states({"id": "OFF", "label": "OFF"}, {"id": "ON", "label": "ON"},
+                               {"id": "BROKEN", "label": "BROKEN", "built": False, "initial": True})
+        self.assertIn("lamp: the initial state BROKEN is not built", problems)
+
+    def everywhere(self, cell, **over):
+        model = tiny([row(), cell])
+        model.everywhere[0].update(over)
+        return self.problems(model)
+
+    def test_an_everywhere_error_is_not_a_row(self):
+        cell = refusal(status=401, code="UNAUTHENTICATED")
+        sentence = "row lamp-on-press: 401 UNAUTHENTICATED can follow any call and is not a row here"
+        self.assertIn(sentence, self.everywhere(cell))
+        self.assertIn(sentence, self.everywhere(cell, rowsAllowedIn=["lamp.bulb"]))
+
+    def test_an_everywhere_error_is_a_row_where_the_data_allows_it(self):
+        cell = refusal(status=401, code="UNAUTHENTICATED")
+        self.assertEqual(self.everywhere(cell, rowsAllowedIn=["lamp"]), "")
+
+    def test_a_row_shares_a_status_with_an_everywhere_error_and_not_its_code(self):
+        self.assertEqual(self.everywhere(refusal(status=401)), "")
+        self.assertEqual(self.everywhere(refusal(code="UNAUTHENTICATED")), "")
+
     def card(self, **over):
         model = tiny()
         model.endpoints[0].update(over)

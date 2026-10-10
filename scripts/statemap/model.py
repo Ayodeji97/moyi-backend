@@ -44,6 +44,10 @@ class Model:
         states = self.regions()[region_id]["states"]
         return [s["id"] for s in states if s.get("built", True) or not built_only]
 
+    def initial(self, region_id: str) -> list:
+        """The states a region is marked as starting in; validate wants exactly one."""
+        return [s["id"] for s in self.regions()[region_id]["states"] if s.get("initial", False)]
+
     def label(self, action: str) -> str:
         for endpoint in self.endpoints:
             if endpoint["id"] == action:
@@ -88,6 +92,13 @@ def validate(model: Model) -> list:
         if len(set(ids)) != len(ids):
             problems.append(f"{region_id}: two states share an id")
         problems += [f"{region_id}: state id '{i}' must match {STATE_ID.pattern}" for i in ids if not STATE_ID.match(i)]
+        initial = model.initial(region_id)
+        if len(initial) != 1:
+            problems.append(f"{region_id}: {len(initial)} states are marked initial; a region starts in exactly one")
+        problems += [
+            f"{region_id}: the initial state {i} is not built"
+            for i in initial if i not in model.states(region_id, built_only=True)
+        ]
 
     endpoint_ids = [e.get("id") for e in model.endpoints]
     event_ids = [e["id"] for e in model.events]
@@ -176,6 +187,11 @@ def _row(row: dict, model: Model, regions: dict, endpoint_ids: set, event_ids: s
             bad("no codeRef")
         if row["evidence"] != "never-run" and not row["evidenceRef"].strip():
             bad(f"evidence is '{row['evidence']}' but no evidenceRef says what ran it")
+
+    for entry in model.everywhere:
+        if (row["status"], row["code"]) == (entry["status"], entry["code"]) \
+                and row["region"] not in entry.get("rowsAllowedIn", []):
+            bad(f"{row['status']} {row['code']} can follow any call and is not a row here")
 
     for guard in row["guards"]:
         region = guard.get("region")

@@ -154,8 +154,25 @@ class GridTests(unittest.TestCase):
     def test_an_unbuilt_state_needs_no_cell(self):
         self.assertNotIn("BROKEN", "\n".join(check_grid(tiny(), True)))
 
-    def test_strict_wants_every_built_state_touched(self):
-        self.assertIn("lamp: no row enters or leaves OFF", "\n".join(check_grid(tiny([refusal()]), True)))
+    # A full grid in every case, so that only the entered-state rule can speak.
+
+    def test_strict_wants_every_built_state_entered(self):
+        stays = [row(to="OFF"), refusal()]
+        self.assertEqual(check_grid(tiny(stays), False), [])
+        self.assertEqual(check_grid(tiny(stays), True), ["lamp: no row enters ON"])
+
+    def test_a_row_that_stays_does_not_enter_its_state(self):
+        stays = [row(to="OFF"), row(id="lamp-on-press", **{"from": "ON"}, to="ON")]
+        self.assertEqual(check_grid(tiny(stays), True), ["lamp: no row enters ON"])
+
+    def test_the_initial_state_need_not_be_entered(self):
+        self.assertEqual(check_grid(tiny(), True), [])  # nothing leads back to OFF
+        timer = row(id="lamp-on-timer", **{"from": "ON"}, to="OFF", action="event:timer", actor="system", status=None)
+        model = tiny([row(to="OFF"), refusal(), timer])
+        states = model.machines[0]["regions"][0]["states"]
+        del states[0]["initial"]
+        states[1]["initial"] = True
+        self.assertEqual(check_grid(model, True), [])  # ON is initial; OFF is entered by the timer
 
 
 class RefTests(unittest.TestCase):

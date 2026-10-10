@@ -11,7 +11,8 @@
           "states": [
             {
               "id": "ANONYMOUS",
-              "label": "no account for this address"
+              "label": "no account for this address",
+              "initial": true
             },
             {
               "id": "PENDING_VERIFICATION",
@@ -48,7 +49,8 @@
           "states": [
             {
               "id": "NO_SESSION",
-              "label": "no session (no token sent, or one that names no session)"
+              "label": "no session (no token sent, or one that names no session)",
+              "initial": true
             },
             {
               "id": "ACCESS_VALID",
@@ -70,7 +72,8 @@
           "states": [
             {
               "id": "NONE",
-              "label": "none (no link, or a token that matches none)"
+              "label": "none (no link, or a token that matches none)",
+              "initial": true
             },
             {
               "id": "REQUESTED",
@@ -98,7 +101,8 @@
           "states": [
             {
               "id": "NO_BOND",
-              "label": "no bond"
+              "label": "no bond",
+              "initial": true
             },
             {
               "id": "PENDING_MEMBER",
@@ -129,7 +133,8 @@
           "states": [
             {
               "id": "NONE",
-              "label": "none (a code never issued, or an invite not yet made)"
+              "label": "none (a code never issued, or an invite not yet made)",
+              "initial": true
             },
             {
               "id": "CREATED",
@@ -155,7 +160,8 @@
           "states": [
             {
               "id": "NONE",
-              "label": "none"
+              "label": "none",
+              "initial": true
             },
             {
               "id": "PROPOSED",
@@ -187,7 +193,8 @@
           "states": [
             {
               "id": "NOT_OPENED",
-              "label": "no row yet"
+              "label": "no row yet",
+              "initial": true
             },
             {
               "id": "OPEN",
@@ -229,7 +236,8 @@
           "states": [
             {
               "id": "NONE",
-              "label": "none"
+              "label": "none",
+              "initial": true
             },
             {
               "id": "SUBMITTED",
@@ -251,7 +259,8 @@
           "states": [
             {
               "id": "NONE",
-              "label": "nothing yet"
+              "label": "nothing yet",
+              "initial": true
             },
             {
               "id": "LOCKED",
@@ -377,7 +386,8 @@
       "status": 401,
       "code": "UNAUTHENTICATED",
       "reason": "No access token, or one that is expired or not valid. Everything under /api/v1 except the eight public auth POSTs needs one, and that is decided before the path is looked up: a path that does not exist, or a GET on a public auth route, is 401 without a token, not 404 or 405. A public route needs no token, but a token that is sent to one is still checked, and an expired or unaccepted one is 401 there too: send no Authorization header to a public route. In the account machine's own regions this answer is a row, because there the missing or expired token is the state.",
-      "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.UNAUTHENTICATED"
+      "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.UNAUTHENTICATED",
+      "rowsAllowedIn": ["account", "account.session"]
     },
     {
       "status": 403,

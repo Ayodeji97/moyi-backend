@@ -109,8 +109,10 @@ def check_grid(model: Model, strict: bool) -> list:
                 if state not in filled:
                     problems.append(f"{region_id}: '{action}' in {state} has no row")
         if strict:
-            touched = {r["from"] for r in rows} | {r["to"] for r in rows}
-            problems += [f"{region_id}: no row enters or leaves {s}" for s in states if s not in touched]
+            # A row from every state is what the cells above already demand, so the question
+            # left is whether anything leads here. Only an 'ok' row may change state (validate).
+            entered = {r["to"] for r in rows if r["to"] != r["from"]} | set(model.initial(region_id))
+            problems += [f"{region_id}: no row enters {s}" for s in states if s not in entered]
     return problems
 
 

@@ -51,7 +51,7 @@ def tiny(rows=None, **over):
                         "id": "lamp",
                         "label": "The lamp",
                         "states": [
-                            {"id": "OFF", "label": "OFF"},
+                            {"id": "OFF", "label": "OFF", "initial": True},
                             {"id": "ON", "label": "ON"},
                             {"id": "BROKEN", "label": "BROKEN", "built": False},
                         ],
@@ -98,12 +98,12 @@ def two_regions():
                 {
                     "id": "lamp",
                     "label": "The lamp",
-                    "states": [{"id": "OFF", "label": "OFF"}, {"id": "ON", "label": "ON"}],
+                    "states": [{"id": "OFF", "label": "OFF", "initial": True}, {"id": "ON", "label": "ON"}],
                 },
                 {
                     "id": "lamp.bulb",
                     "label": "The bulb",
-                    "states": [{"id": "COLD", "label": "COLD"}, {"id": "WARM", "label": "WARM"}],
+                    "states": [{"id": "COLD", "label": "COLD", "initial": True}, {"id": "WARM", "label": "WARM"}],
                 },
             ],
         }
