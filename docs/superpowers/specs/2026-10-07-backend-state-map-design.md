@@ -149,6 +149,7 @@ All five are drawn from the data in section 6.
 4. **Journeys.** J1–J5 from doc 02. Choosing one highlights its path
    across the three diagrams as numbered steps and shows the same steps
    as a sequence diagram (you, partner, API, scheduled job).
+   One request can change several regions; a journey shows that as consecutive steps marked as the same request, which the sequence diagram draws as a single call with one answer.
 5. **Search.** An error code or path highlights every place it occurs.
 
 ## 6. The data

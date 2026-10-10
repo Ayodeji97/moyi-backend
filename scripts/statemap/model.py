@@ -219,6 +219,29 @@ def _journeys(model: Model) -> list:
                 problems.append(f"journey {name}: step {number} names no row '{step.get('row')}'")
             elif row.get("outcome") == "unreachable":
                 problems.append(f"journey {name}: step {number} is a cell that cannot be reached")
+            problems += _same_request(name, number, step, row, journey["steps"][number - 2] if number > 1 else None, rows)
+    return problems
+
+
+def _same_request(name: str, number: int, step: dict, row, before, rows: dict) -> list:
+    flag = step.get("sameRequest", False)
+    if not isinstance(flag, bool):
+        return [f"journey {name}: step {number} has a sameRequest that is not true or false"]
+    if not flag:
+        return []
+    start = f"journey {name}: step {number} says it is the same request as the step before"
+    if before is None:
+        return [f"{start}, and there is none"]
+    previous = rows.get(before.get("row"))
+    if row is None or previous is None:
+        return []
+    problems = []
+    if (row.get("actor"), row.get("action")) != (previous.get("actor"), previous.get("action")):
+        problems.append(f"{start}, but who acts or what they call differs")
+    if row.get("status") != previous.get("status"):
+        problems.append(f"{start}, but the two answer with different statuses")
+    if row.get("region") == previous.get("region"):
+        problems.append(f"{start}, but both rows are in the same region")
     return problems
 
 

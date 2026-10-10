@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fixture import refusal, row, tiny
+from fixture import refusal, row, tiny, two_regions
 from statemap.model import load, validate
 
 GAP = {"endpoint": "POST /api/v1/lamp", "status": 409, "note": "It is already on."}
@@ -69,6 +69,73 @@ class ValidateTests(unittest.TestCase):
     def test_a_journey_step_must_be_a_row(self):
         journey = {"id": "J1", "title": "On", "steps": [{"row": "nope", "note": ""}]}
         self.assertIn("journey J1: step 1 names no row 'nope'", self.problems(tiny(journeys=[journey])))
+
+    def same_request(self, first, second, **over):
+        machines, rows = two_regions()
+        journey = {"id": "J1", "title": "On", "steps": [
+            {"row": first, "note": ""},
+            {"row": second, "note": "", "sameRequest": True, **over},
+        ]}
+        return self.problems(tiny(rows, machines=machines, journeys=[journey]))
+
+    def test_a_step_may_be_the_same_request_as_the_one_before(self):
+        self.assertEqual(self.same_request("lamp-off-press", "bulb-cold-press"), "")
+
+    def test_a_chain_of_same_request_steps_is_clean(self):
+        machines, rows = two_regions()
+        rows[0] = {**rows[0], "when": "first"}
+        rows.append(row(id="lamp-off-press-again", when="again"))
+        journey = {"id": "J1", "title": "On", "steps": [
+            {"row": "lamp-off-press", "note": ""},
+            {"row": "bulb-cold-press", "note": "", "sameRequest": True},
+            {"row": "lamp-off-press-again", "note": "", "sameRequest": True},
+        ]}
+        self.assertEqual(validate(tiny(rows, machines=machines, journeys=[journey])), [])
+
+    def test_the_first_step_cannot_be_the_same_request(self):
+        machines, rows = two_regions()
+        journey = {"id": "J1", "title": "On", "steps": [{"row": "lamp-off-press", "note": "", "sameRequest": True}]}
+        self.assertIn(
+            "journey J1: step 1 says it is the same request as the step before, and there is none",
+            self.problems(tiny(rows, machines=machines, journeys=[journey])),
+        )
+
+    def test_a_same_request_step_must_have_the_same_action_and_actor(self):
+        sentence = "journey J1: step 2 says it is the same request as the step before, but who acts or what they call differs"
+        self.assertIn(sentence, self.same_request("lamp-off-press", "bulb-warm-timer"))
+
+    def test_a_same_request_step_must_answer_with_the_same_status(self):
+        machines, rows = two_regions()
+        rows[1] = {**rows[1], "status": 201}
+        journey = {"id": "J1", "title": "On", "steps": [
+            {"row": "lamp-off-press", "note": ""},
+            {"row": "bulb-cold-press", "note": "", "sameRequest": True},
+        ]}
+        self.assertIn(
+            "journey J1: step 2 says it is the same request as the step before, but the two answer with different statuses",
+            self.problems(tiny(rows, machines=machines, journeys=[journey])),
+        )
+
+    def test_a_same_request_step_must_be_in_another_region(self):
+        machines, rows = two_regions()
+        rows.append(row(id="lamp-off-press-again", when="again"))
+        journey = {"id": "J1", "title": "On", "steps": [
+            {"row": "lamp-off-press", "note": ""},
+            {"row": "lamp-off-press-again", "note": "", "sameRequest": True},
+        ]}
+        self.assertIn(
+            "journey J1: step 2 says it is the same request as the step before, but both rows are in the same region",
+            self.problems(tiny(rows, machines=machines, journeys=[journey])),
+        )
+
+    def test_same_request_must_be_true_or_false(self):
+        self.assertIn(
+            "journey J1: step 2 has a sameRequest that is not true or false",
+            self.same_request("lamp-off-press", "bulb-cold-press", sameRequest="yes"),
+        )
+
+    def test_same_request_false_is_an_ordinary_step(self):
+        self.assertEqual(self.same_request("lamp-off-press", "lamp-on-timer", sameRequest=False), "")
 
     def test_two_rows_may_not_share_an_id(self):
         self.assertIn("two rows share the id", self.problems(tiny([row(when="a"), row(when="b")])))

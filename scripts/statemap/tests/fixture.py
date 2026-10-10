@@ -83,3 +83,39 @@ def tiny(rows=None, **over):
         "journeys": [],
     }
     return Model(**{**fields, **over})
+
+
+def two_regions():
+    """The lamp with a bulb inside it: one request can move both regions.
+
+    Returns (machines, rows) to pass to tiny(rows, machines=machines).
+    """
+    machines = [
+        {
+            "id": "lamp",
+            "label": "Lamp",
+            "regions": [
+                {
+                    "id": "lamp",
+                    "label": "The lamp",
+                    "states": [{"id": "OFF", "label": "OFF"}, {"id": "ON", "label": "ON"}],
+                },
+                {
+                    "id": "lamp.bulb",
+                    "label": "The bulb",
+                    "states": [{"id": "COLD", "label": "COLD"}, {"id": "WARM", "label": "WARM"}],
+                },
+            ],
+        }
+    ]
+    timer = {"action": "event:timer", "actor": "system", "status": None}
+    rows = [
+        row(),
+        row(id="bulb-cold-press", region="lamp.bulb", **{"from": "COLD"}, to="WARM"),
+        row(id="lamp-on-timer", **{"from": "ON"}, to="OFF", reason="It turns itself off.", **timer),
+        row(id="bulb-warm-timer", region="lamp.bulb", **{"from": "WARM"}, to="COLD",
+            reason="It cools down.", **timer),
+        refusal(),
+        refusal(id="bulb-warm-press", region="lamp.bulb", **{"from": "WARM"}, to="WARM"),
+    ]
+    return machines, rows

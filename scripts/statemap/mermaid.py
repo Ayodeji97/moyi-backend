@@ -170,16 +170,23 @@ def sequence_diagram(model: Model, journey: dict) -> str:
         "    participant API",
         "    participant Job as Scheduled job",
     ]
+    groups = []
     for step in journey["steps"]:
-        row = rows[step["row"]]
+        if step.get("sameRequest") is True and groups:
+            groups[-1].append(rows[step["row"]])
+        else:
+            groups.append([rows[step["row"]]])
+    for group in groups:
+        row = group[0]
         who = {"you": "You", "partner": "Partner", "system": "Job"}[row["actor"]]
         lines.append(f"    {who}->>API: {clean(model.label(row['action']))}")
+        regions = ", ".join(f"{r['region']} is {r['to']}" for r in group)
         if row["outcome"] == "refused":
             lines.append(f"    API-->>{who}: {row['status']} {row['code']}")
         elif row["status"] is None:
-            lines.append(f"    Note over API: {row['region']} is {row['to']}")
+            lines.append(f"    Note over API: {regions}")
         else:
-            lines.append(f"    API-->>{who}: {row['status']}, {row['region']} is {row['to']}")
+            lines.append(f"    API-->>{who}: {row['status']}, {regions}")
     return "\n".join(lines)
 
 
@@ -197,7 +204,8 @@ def journeys_md(model: Model) -> str:
         for number, step in enumerate(journey["steps"], start=1):
             row = rows[step["row"]]
             note = f" {step['note']}" if step.get("note") else ""
-            steps.append(f"{number}. **{row['actor']}**: {model.label(row['action'])}. {row['reason']}{note}")
+            same = "(the same request) " if step.get("sameRequest") is True else ""
+            steps.append(f"{number}. {same}**{row['actor']}**: {model.label(row['action'])}. {row['reason']}{note}")
         parts.append("\n".join(steps))
         parts.append("```mermaid\n" + sequence_diagram(model, journey) + "\n```")
     return "\n\n".join(parts) + "\n"

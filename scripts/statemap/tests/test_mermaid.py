@@ -2,9 +2,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fixture import refusal, row, tiny
+from fixture import refusal, row, tiny, two_regions
 from statemap.generate import outputs, stale, write
-from statemap.mermaid import clean, grid_table, machine_md, sequence_diagram, state_diagram
+from statemap.mermaid import clean, grid_table, journeys_md, machine_md, sequence_diagram, state_diagram
 
 TIMER = row(
     id="lamp-on-timer", **{"from": "ON"}, to="OFF", action="event:timer", actor="system",
@@ -96,6 +96,69 @@ class MermaidTests(unittest.TestCase):
                 "    Note over API: lamp is OFF",
             ],
         )
+
+
+HEAD = ["sequenceDiagram", "    actor You", "    actor Partner", "    participant API",
+        "    participant Job as Scheduled job"]
+
+
+def grouped(first, second, extra=()):
+    machines, rows = two_regions()
+    journey = {"id": "J1", "title": "Both", "steps": [
+        {"row": first, "note": ""},
+        {"row": second, "note": "", "sameRequest": True},
+        *extra,
+    ]}
+    return tiny(rows, machines=machines, journeys=[journey]), journey
+
+
+class SameRequestTests(unittest.TestCase):
+    def test_two_ok_steps_of_one_request_are_one_call_with_one_answer(self):
+        model, journey = grouped("lamp-off-press", "bulb-cold-press")
+        self.assertEqual(sequence_diagram(model, journey).splitlines(), HEAD + [
+            "    You->>API: press the switch",
+            "    API-->>You: 200, lamp is ON, lamp.bulb is WARM",
+        ])
+
+    def test_two_event_steps_are_one_call_with_one_note(self):
+        model, journey = grouped("lamp-on-timer", "bulb-warm-timer")
+        self.assertEqual(sequence_diagram(model, journey).splitlines(), HEAD + [
+            "    Job->>API: the timer runs out",
+            "    Note over API: lamp is OFF, lamp.bulb is COLD",
+        ])
+
+    def test_two_refused_steps_are_one_call_with_one_refusal(self):
+        model, journey = grouped("lamp-on-press", "bulb-warm-press")
+        self.assertEqual(sequence_diagram(model, journey).splitlines(), HEAD + [
+            "    You->>API: press the switch",
+            "    API-->>You: 409 LAMP_ALREADY_ON",
+        ])
+
+    def test_a_group_is_followed_by_an_ordinary_step_as_before(self):
+        model, journey = grouped("lamp-off-press", "bulb-cold-press", [{"row": "lamp-on-timer", "note": ""}])
+        self.assertEqual(sequence_diagram(model, journey).splitlines()[5:], [
+            "    You->>API: press the switch",
+            "    API-->>You: 200, lamp is ON, lamp.bulb is WARM",
+            "    Job->>API: the timer runs out",
+            "    Note over API: lamp is OFF",
+        ])
+
+    def test_the_same_action_without_the_flag_is_two_requests(self):
+        model, journey = grouped("lamp-off-press", "bulb-cold-press")
+        del journey["steps"][1]["sameRequest"]
+        self.assertEqual(sequence_diagram(model, journey).splitlines(), HEAD + [
+            "    You->>API: press the switch",
+            "    API-->>You: 200, lamp is ON",
+            "    You->>API: press the switch",
+            "    API-->>You: 200, lamp.bulb is WARM",
+        ])
+
+    def test_the_list_marks_the_grouped_step_and_only_that_one(self):
+        model, journey = grouped("lamp-off-press", "bulb-cold-press")
+        page = journeys_md(model)
+        self.assertIn("\n2. (the same request) **you**: press the switch.", page)
+        self.assertIn("\n1. **you**: press the switch.", page)
+        self.assertEqual(page.count("(the same request)"), 1)
 
 
 class GenerateTests(unittest.TestCase):
