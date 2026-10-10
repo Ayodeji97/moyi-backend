@@ -150,6 +150,10 @@ scaling headroom a two-people-per-Bond product will not need for years,
 at the cost of distributed transactions and multiplied ops. A ball-of-mud
 monolith would teach nothing. This is the middle.
 
+What the API does in each state (every action, where it leads, and every refusal with
+its reason) is drawn in [`docs/state-map/`](docs/state-map/README.md), generated from data
+that CI checks against the contract.
+
 ```
 moyi-backend/
 ├─ build-logic/     convention plugins shared across modules

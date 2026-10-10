@@ -22,6 +22,7 @@ boundaries are enforced by tests. The repository is **public**.
 | What went wrong before, honestly | `docs/learning-log.md` |
 | The Definition of Done and the self-review questions | `.github/PULL_REQUEST_TEMPLATE.md` |
 | The API contract | `contracts/openapi.json` (generated) |
+| What the API does in each state, and every error with its cause | `docs/state-map/` (generated from `docs/state-map/data/`) |
 | What the build enforces | `app/src/test/kotlin/com/moyi/app/ArchitectureTest.kt`, `build-logic/` |
 
 Read the ADR before changing something it decided. A decision is changed by a new or
