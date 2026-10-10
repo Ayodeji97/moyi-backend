@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from statemap.mermaid import NOTICE, journeys_md, machine_md
+from statemap.mermaid import NOTICE, endpoints_md, journeys_md, machine_md
 from statemap.model import Model
 
 
@@ -13,6 +13,8 @@ def outputs(model: Model) -> dict:
         regions = {r["id"] for r in machine["regions"]}
         if any(row["region"] in regions for row in model.rows):
             files[f"{machine['id']}.md"] = machine_md(model, machine["id"])
+    if model.endpoints:
+        files["endpoints.md"] = endpoints_md(model)
     if model.journeys:
         files["journeys.md"] = journeys_md(model)
     return files

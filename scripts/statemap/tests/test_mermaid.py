@@ -4,7 +4,9 @@ from pathlib import Path
 
 from fixture import refusal, row, tiny, two_regions
 from statemap.generate import outputs, stale, write
-from statemap.mermaid import clean, grid_table, journeys_md, machine_md, sequence_diagram, state_diagram, told
+from statemap.mermaid import (
+    NOTICE, clean, endpoints_md, grid_table, journeys_md, machine_md, sequence_diagram, state_diagram, told,
+)
 
 TIMER = row(
     id="lamp-on-timer", **{"from": "ON"}, to="OFF", action="event:timer", actor="system",
@@ -255,30 +257,174 @@ class SameRequestTests(unittest.TestCase):
         self.assertEqual(page.count("(the same request)"), 1)
 
 
+CARD_ERROR = {"status": 422, "code": "LAMP_NO_BULB", "reason": "No bulb | was named.",
+              "evidence": "smoke", "evidenceRef": "a lamp with no bulb", "codeRef": "src/Lamp.kt#fun press("}
+LOOK = {"id": "GET /api/v1/lamp", "summary": "look at it", "auth": "none",
+        "headers": ["If-None-Match (optional)", "Accept (application/json)"], "requestErrors": [],
+        "curl": 'curl "$API/lamp"'}
+
+
+class EndpointPageTests(unittest.TestCase):
+    def test_the_page_is_every_card_with_every_answer(self):
+        model = tiny(gaps=[GAP])
+        model.endpoints[0]["requestErrors"] = [CARD_ERROR]
+        model.everywhere[0]["rowsAllowedIn"] = ["lamp", "lamp.bulb"]
+        self.assertEqual(endpoints_md(model).split("\n\n"), [
+            NOTICE,
+            "# Every endpoint",
+            "Describes `main @ abc1234`. Every answer each endpoint can give, with its cause and how to try it. "
+            "How to read this: [README](README.md).",
+            "## Errors that can follow any call",
+            "Any of these can follow any endpoint below. They are not repeated under each one.",
+            "| Status | Code | Why |\n|---|---|---|\n| 401 | `UNAUTHENTICATED` | No valid token. |",
+            "`401 UNAUTHENTICATED` is also a row in the regions `lamp` and `lamp.bulb`, where it depends on the state.",
+            "## Lamp",
+            "### POST /lamp",
+            "press the switch",
+            "**Needs:** an access token.",
+            "**Try it:**",
+            '```sh\ncurl -X POST "$API/lamp" -H "Authorization: Bearer $TOKEN"\n```',
+            "#### Every answer",
+            "| Region | In | When | Answer | Why | Rule | Evidence |\n|---|---|---|---|---|---|---|\n"
+            "| `lamp` | `OFF` |  | 200 → `ON` | Pressing turns it on. | BR-1 | never-run |\n"
+            "| `lamp` | `ON` |  | 409 `LAMP_ALREADY_ON` | It is already on. | BR-1 | never-run |",
+            "#### Whatever the state",
+            "| Status | Code | Why | Evidence |\n|---|---|---|---|\n| 422 | `LAMP_NO_BULB` | No bulb \\| was named. | smoke |",
+            "#### The contract is silent on",
+            "| Status | What the code does |\n|---|---|\n| 409 | It is already on. |\n",
+        ])
+
+    def test_a_card_with_no_request_errors_and_no_gaps_prints_neither_section(self):
+        page = endpoints_md(tiny())
+        self.assertIn("#### Every answer", page)
+        self.assertNotIn("Whatever the state", page)
+        self.assertNotIn("The contract is silent on", page)
+        self.assertNotIn("is also a row", page)
+
+    def test_a_gap_is_printed_under_its_own_endpoint_only(self):
+        look = row(id="lamp-off-look", action=LOOK["id"], to="OFF")
+        looked = row(id="lamp-on-look", action=LOOK["id"], **{"from": "ON"}, to="ON")
+        page = endpoints_md(tiny([row(), refusal(), look, looked], endpoints=tiny().endpoints + [LOOK], gaps=[GAP]))
+        press, looking = page.split("### GET /lamp")
+        self.assertIn("The contract is silent on", press)
+        self.assertNotIn("The contract is silent on", looking)
+
+    def test_what_a_card_needs(self):
+        look = row(id="lamp-off-look", action=LOOK["id"], to="OFF")
+        page = endpoints_md(tiny([row(), refusal(), look], endpoints=tiny().endpoints + [LOOK]))
+        self.assertIn(
+            "### GET /lamp\n\nlook at it\n\n**Needs:** no access token.\n\n"
+            "- If-None-Match (optional)\n- Accept (application/json)\n\n**Try it:**\n\n```sh\ncurl \"$API/lamp\"\n```",
+            page,
+        )
+
+    def test_a_success_and_its_reason_are_on_the_page(self):
+        stays = row(id="lamp-on-press-again", **{"from": "ON"}, to="ON", when="it is | hot", reason="Nothing\nchanges.")
+        page = endpoints_md(tiny([row(), stays]))
+        self.assertIn("| `lamp` | `OFF` |  | 200 → `ON` | Pressing turns it on. | BR-1 | never-run |", page)
+        self.assertIn("| `lamp` | `ON` | it is \\| hot | 200 stays | Nothing changes. | BR-1 | never-run |", page)
+
+    def test_a_cell_that_cannot_occur_says_so_with_its_reason(self):
+        cell = row(id="lamp-on-press", **{"from": "ON"}, to="ON", outcome="unreachable", status=None, reason="It cannot be on.")
+        self.assertIn("| `lamp` | `ON` |  | not reachable | It cannot be on. | BR-1 | never-run |", endpoints_md(tiny([row(), cell])))
+
+    def test_answers_are_only_your_own_and_only_this_endpoints(self):
+        theirs = row(id="lamp-on-partner", **{"from": "ON"}, to="OFF", actor="partner", reason="They pressed it.")
+        look = row(id="lamp-off-look", action=LOOK["id"], to="OFF", reason="Looking changes nothing.")
+        page = endpoints_md(tiny([row(), refusal(), theirs, TIMER, look], endpoints=tiny().endpoints + [LOOK]))
+        press, looking = page.split("### GET /lamp")
+        self.assertNotIn("They pressed it.", page)
+        self.assertNotIn("It turns itself off.", page)
+        self.assertNotIn("Looking changes nothing.", press)
+        self.assertIn("Looking changes nothing.", looking)
+        self.assertNotIn("Pressing turns it on.", looking)
+
+    def test_answers_are_in_region_then_state_then_file_order(self):
+        machines, rows = two_regions()
+        rows = [
+            refusal(id="bulb-warm-press", region="lamp.bulb", **{"from": "WARM"}, to="WARM", reason="4"),
+            refusal(reason="2", when="b"),
+            row(id="bulb-cold-press", region="lamp.bulb", **{"from": "COLD"}, to="WARM", reason="3"),
+            refusal(id="lamp-on-press-c", reason="2c", when="c"),
+            row(reason="1"),
+        ]
+        table = endpoints_md(tiny(rows, machines=machines)).split("#### Every answer\n\n")[1].splitlines()[2:]
+        self.assertEqual([line.split(" | ")[4] for line in table], ["1", "2", "2c", "3", "4"])
+
+    def machines(self):
+        machines, _ = two_regions()
+        bulb = machines[0]["regions"].pop()
+        return machines + [{"id": "bulb", "label": "Bulb", "regions": [bulb]}]
+
+    def headings(self, rows):
+        cards = tiny().endpoints + [LOOK]
+        page = endpoints_md(tiny(rows, machines=self.machines(), endpoints=cards))
+        return [line for line in page.splitlines() if line.startswith(("## ", "### "))][1:]
+
+    def test_a_card_is_filed_under_the_machine_where_it_has_most_rows_of_your_own(self):
+        look = dict(action=LOOK["id"], region="lamp.bulb")
+        rows = [
+            row(), refusal(),
+            row(id="l1", **look, **{"from": "COLD"}, to="COLD"), row(id="l2", **look, **{"from": "WARM"}, to="WARM"),
+            row(id="l3", action=LOOK["id"], to="OFF"),
+            # the partner's rows are not yours and do not count
+            row(id="p1", actor="partner", action=LOOK["id"]), row(id="p2", actor="partner", action=LOOK["id"]),
+            row(id="p3", actor="partner", action=LOOK["id"]),
+        ]
+        self.assertEqual(self.headings(rows), ["## Lamp", "### POST /lamp", "## Bulb", "### GET /lamp"])
+
+    def test_a_tie_goes_to_the_machine_listed_first(self):
+        rows = [row(), refusal(), row(id="l1", action=LOOK["id"], region="lamp.bulb", **{"from": "COLD"}, to="COLD"),
+                row(id="l3", action=LOOK["id"], to="OFF")]
+        self.assertEqual(self.headings(rows), ["## Lamp", "### POST /lamp", "### GET /lamp"])
+
+    def test_a_machine_page_links_to_the_endpoints(self):
+        line = "Every answer of every endpoint, with its cause and how to try it: [endpoints](endpoints.md)"
+        self.assertEqual(machine_md(tiny(), "lamp").split("\n\n")[1:4], [
+            "# The lamp machine", "Describes `main @ abc1234`. How to read this: [README](README.md).", line,
+        ])
+        self.assertNotIn("endpoints.md", machine_md(tiny(endpoints=[], rows=[]), "lamp"))
+
+
 class GenerateTests(unittest.TestCase):
     def test_a_machine_with_no_rows_gets_no_file(self):
-        self.assertEqual(outputs(tiny(rows=[])), {})
+        self.assertEqual(list(outputs(tiny(rows=[]))), ["endpoints.md"])
+
+    def test_the_endpoints_page_is_written_while_there_is_a_card(self):
+        self.assertEqual(list(outputs(tiny())), ["lamp.md", "endpoints.md"])
+        self.assertEqual(outputs(tiny())["endpoints.md"], endpoints_md(tiny()))
+        self.assertEqual(outputs(tiny(rows=[], endpoints=[])), {})
 
     def test_written_files_are_not_stale_until_the_data_moves(self):
+        every = ["lamp.md is stale; run scripts/state-map-generate", "endpoints.md is stale; run scripts/state-map-generate"]
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
-            self.assertEqual(stale(tiny(), out), ["lamp.md is missing; run scripts/state-map-generate"])
+            self.assertEqual(stale(tiny(), out), [
+                "lamp.md is missing; run scripts/state-map-generate",
+                "endpoints.md is missing; run scripts/state-map-generate",
+            ])
             write(tiny(), out)
             self.assertEqual(stale(tiny(), out), [])
-            self.assertEqual(
-                stale(tiny([row(reason="Changed."), refusal()]), out),  # a success's reason is on the page too
-                ["lamp.md is stale; run scripts/state-map-generate"],
-            )
-            self.assertEqual(
-                stale(tiny([row(), refusal(reason="Changed.")]), out),
-                ["lamp.md is stale; run scripts/state-map-generate"],
-            )
+            # a success's reason and a refusal's are both on both pages
+            self.assertEqual(stale(tiny([row(reason="Changed."), refusal()]), out), every)
+            self.assertEqual(stale(tiny([row(), refusal(reason="Changed.")]), out), every)
+
+    def test_a_card_that_changes_makes_only_the_endpoints_page_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            write(tiny(), out)
+            model = tiny()
+            model.endpoints[0]["curl"] = 'curl -X POST "$API/lamp"'
+            self.assertEqual(stale(model, out), ["endpoints.md is stale; run scripts/state-map-generate"])
 
     def test_a_file_the_data_no_longer_produces_is_reported(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             write(tiny(), out)
-            self.assertEqual(stale(tiny(rows=[]), out), ["lamp.md is no longer generated from the data; delete it"])
+            self.assertEqual(stale(tiny(rows=[], endpoints=[]), out), [
+                "endpoints.md is no longer generated from the data; delete it",
+                "lamp.md is no longer generated from the data; delete it",
+            ])
 
     def test_a_hand_written_file_is_left_alone(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -4,6 +4,8 @@
 
 Describes `main @ 174b474`. How to read this: [README](README.md).
 
+Every answer of every endpoint, with its cause and how to try it: [endpoints](endpoints.md)
+
 Each region below has its own diagram. Each arrow says who acts: you, your partner or the system. Refusals are not drawn; they are in the tables. Grey means designed or only partly built, and no endpoint reaches it.
 
 ## The account (the one your address, link or token names), and whether you are signed in
