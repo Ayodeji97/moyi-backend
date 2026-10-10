@@ -551,6 +551,122 @@
     "curl": "curl -X DELETE \"$API/bonds/$BOND/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "GET /api/v1/bonds/{bondId}/days",
+    "summary": "list the archive",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [
+      "If-None-Match (optional; a matching strong ETag returns 304 with no body)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#throw NotFoundException(\"That bond was not found.\")"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "A supplied limit, cursor, until date or favourites flag cannot be read. The response names the field, not its value.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysQuery.kt#internal class DaysQueryNotValidException("
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/days\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/days/{date}",
+    "summary": "read one archived day",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [
+      "If-None-Match (optional; a matching strong ETag returns 304 with no body)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#throw NotFoundException(\"That bond was not found.\")"
+      },
+      {
+        "status": 404,
+        "code": "DAY_NOT_FOUND",
+        "reason": "The value is not a calendar date, or that day is not in your archive. No more specific reason is returned.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class DayNotFoundException :"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/days/$DATE\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PUT /api/v1/entries/{entryId}/favourite",
+    "summary": "bookmark an entry",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "There is no such entry, you are not a member of its bond, or the entry was never shown to you.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryNotFoundException : NotFoundException(\"That entry was not found.\")"
+      },
+      {
+        "status": 409,
+        "code": "ENTRY_NOT_REVEALED",
+        "reason": "Your own entry has not been revealed yet. A partner entry that is still locked is answered as not found.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#ErrorCode.ENTRY_NOT_REVEALED"
+      },
+      {
+        "status": 409,
+        "code": "ENTRY_IMMUTABLE",
+        "reason": "The entry is erased or is being erased.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryImmutableException :"
+      }
+    ],
+    "curl": "curl -X PUT \"$API/entries/$ENTRY/favourite\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/entries/{entryId}/favourite",
+    "summary": "remove an entry bookmark",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "There is no such entry, you are not a member of its bond, or the entry was never shown to you.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryNotFoundException : NotFoundException(\"That entry was not found.\")"
+      },
+      {
+        "status": 409,
+        "code": "FAVOURITE_BUSY",
+        "reason": "Another operation holds the bookmark. Retry the removal.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#ErrorCode.FAVOURITE_BUSY"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/entries/$ENTRY/favourite\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
     "id": "POST /api/v1/auth/register",
     "summary": "register",
     "machine": "account",

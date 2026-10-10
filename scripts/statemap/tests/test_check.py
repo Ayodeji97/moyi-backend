@@ -80,6 +80,17 @@ class ContractTests(unittest.TestCase):
         ops = {"POST /api/v1/lamp": {200, 401, 409, 412}}
         self.assertIn("documents 412 and nothing in the map explains it", self.problems(tiny(), ops))
 
+    def test_a_conditional_get_304_uses_the_mapped_200_representation(self):
+        model = tiny(rows=[row(action="GET /api/v1/lamp", status=200, to="OFF")])
+        model.endpoints[0]["id"] = "GET /api/v1/lamp"
+        self.assertEqual(check_contract(model, {"GET /api/v1/lamp": {200, 304, 401}}, True), [])
+
+    def test_a_conditional_get_304_needs_a_mapped_200_representation(self):
+        model = tiny(rows=[row(action="GET /api/v1/lamp", status=409, outcome="refused", to="OFF", code="LAMP_ALREADY_ON")])
+        model.endpoints[0]["id"] = "GET /api/v1/lamp"
+        problems = check_contract(model, {"GET /api/v1/lamp": {200, 304, 401}}, True)
+        self.assertIn("GET /api/v1/lamp documents 304 and nothing in the map explains it", problems)
+
     def test_a_row_status_the_contract_does_not_document(self):
         ops = {"POST /api/v1/lamp": {200, 401}}
         self.assertIn("answers 409, which the contract does not document", self.problems(tiny(), ops))

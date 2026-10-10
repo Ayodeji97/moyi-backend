@@ -2,7 +2,7 @@
 
 # Every endpoint
 
-Describes `main @ 174b474`. Every answer each endpoint can give, with its cause and how to try it. How to read this: [README](README.md).
+Describes `main @ 5839d47`. Every answer each endpoint can give, with its cause and how to try it. How to read this: [README](README.md).
 
 ## Errors that can follow any call
 
@@ -1463,3 +1463,140 @@ curl "$API/bonds/$BOND/streak" -H "Authorization: Bearer $TOKEN"
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | smoke |
+
+### GET /bonds/{bondId}/days
+
+list the archive
+
+**Needs:** an access token.
+
+- If-None-Match (optional; a matching strong ETag returns 304 with no body)
+
+**Try it:**
+
+```sh
+curl "$API/bonds/$BOND/days" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day` | `NOT_OPENED` |  | 200 stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `OPEN` |  | 200 stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `PARTIAL` |  | 200 stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `PENDING_REVEAL` |  | 200 stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `REVEALED` |  | 200 stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `SOLO` |  | 200 stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `EMPTY` |  | 200 stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `FROZEN` |  | 200 stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `SUSPENDED` |  | 200 stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer. | never-run |
+| 422 | `VALIDATION_FAILED` | A supplied limit, cursor, until date or favourites flag cannot be read. The response names the field, not its value. | never-run |
+
+### GET /bonds/{bondId}/days/{date}
+
+read one archived day
+
+**Needs:** an access token.
+
+- If-None-Match (optional; a matching strong ETag returns 304 with no body)
+
+**Try it:**
+
+```sh
+curl "$API/bonds/$BOND/days/$DATE" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day` | `NOT_OPENED` |  | 200 stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `OPEN` |  | 200 stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `PARTIAL` |  | 200 stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `PENDING_REVEAL` |  | 200 stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `REVEALED` |  | 200 stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `SOLO` |  | 200 stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `EMPTY` |  | 200 stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `FROZEN` |  | 200 stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+| `day` | `SUSPENDED` |  | 200 stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-090 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer. | never-run |
+| 404 | `DAY_NOT_FOUND` | The value is not a calendar date, or that day is not in your archive. No more specific reason is returned. | never-run |
+
+### PUT /entries/{entryId}/favourite
+
+bookmark an entry
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl -X PUT "$API/entries/$ENTRY/favourite" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day` | `NOT_OPENED` |  | 204 stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `OPEN` |  | 204 stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `PARTIAL` |  | 204 stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `PENDING_REVEAL` |  | 204 stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `REVEALED` |  | 204 stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `SOLO` |  | 204 stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `EMPTY` |  | 204 stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `FROZEN` |  | 204 stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `SUSPENDED` |  | 204 stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | There is no such entry, you are not a member of its bond, or the entry was never shown to you. | never-run |
+| 409 | `ENTRY_NOT_REVEALED` | Your own entry has not been revealed yet. A partner entry that is still locked is answered as not found. | never-run |
+| 409 | `ENTRY_IMMUTABLE` | The entry is erased or is being erased. | never-run |
+
+### DELETE /entries/{entryId}/favourite
+
+remove an entry bookmark
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl -X DELETE "$API/entries/$ENTRY/favourite" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day` | `NOT_OPENED` |  | 204 stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `OPEN` |  | 204 stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `PARTIAL` |  | 204 stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `PENDING_REVEAL` |  | 204 stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `REVEALED` |  | 204 stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `SOLO` |  | 204 stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `EMPTY` |  | 204 stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `FROZEN` |  | 204 stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+| `day` | `SUSPENDED` |  | 204 stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | FR-093 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | There is no such entry, you are not a member of its bond, or the entry was never shown to you. | never-run |
+| 409 | `FAVOURITE_BUSY` | Another operation holds the bookmark. Retry the removal. | never-run |

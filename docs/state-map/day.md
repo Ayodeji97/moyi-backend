@@ -2,7 +2,7 @@
 
 # The day machine
 
-Describes `main @ 174b474`. How to read this: [README](README.md).
+Describes `main @ 5839d47`. How to read this: [README](README.md).
 
 Every answer of every endpoint, with its cause and how to try it: [endpoints](endpoints.md)
 
@@ -49,6 +49,10 @@ stateDiagram-v2
 | read the streak<br>`GET /bonds/{bondId}/streak` | 200 stays (the bond takes entries, and is two people)<br>200 stays (the bond has ended or is counting down to deletion)<br>200 stays (the bond is still waiting for its second member) | 200 stays (the bond takes entries)<br>200 stays (the bond has ended or is counting down to deletion) | 200 stays (the bond takes entries)<br>200 stays (the bond has ended or is counting down to deletion) | 200 stays (the bond takes entries)<br>200 stays (the bond has ended or is counting down to deletion) | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays |
 | leave the bond<br>`POST /bonds/{bondId}/leave` | 204 stays | 204 stays | 204 → `OPEN` (the body says withdrawEntries: true, and the day's one live entry is yours)<br>204 stays (the body is absent, or does not say withdrawEntries: true; or the day's one live entry is your partner's) | 204 → `PARTIAL` (the body says withdrawEntries: true)<br>204 stays (the body is absent, or does not say withdrawEntries: true) | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays |
 | block your partner<br>`POST /bonds/{bondId}/block` | 204 stays | 204 stays | 204 → `OPEN` (the body is absent, or does not say withdrawEntries: false, and the day's one live entry is yours)<br>204 stays (the body says withdrawEntries: false; or the day's one live entry is your partner's) | 204 → `PARTIAL` (the body is absent, or does not say withdrawEntries: false)<br>204 stays (the body says withdrawEntries: false) | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays |
+| list the archive<br>`GET /bonds/{bondId}/days` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays |
+| read one archived day<br>`GET /bonds/{bondId}/days/{date}` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays |
+| bookmark an entry<br>`PUT /entries/{entryId}/favourite` | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays |
+| remove an entry bookmark<br>`DELETE /entries/{entryId}/favourite` | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays |
 
 ### You can
 
@@ -123,6 +127,42 @@ stateDiagram-v2
 | `EMPTY` | block your partner |  | stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | never-run |
 | `FROZEN` | block your partner |  | stays | A settled day is never recounted. If your entries are taken back, yours on this day becomes a tombstone and the day keeps its status. | never-run |
 | `SUSPENDED` | block your partner |  | stays | A suspended day stays suspended, with your entry or without it. | never-run |
+| `NOT_OPENED` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `NOT_OPENED` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `NOT_OPENED` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `NOT_OPENED` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `OPEN` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `OPEN` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `OPEN` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `OPEN` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `PARTIAL` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `PARTIAL` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `PARTIAL` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `PARTIAL` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `PENDING_REVEAL` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `PENDING_REVEAL` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `PENDING_REVEAL` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `PENDING_REVEAL` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `REVEALED` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `REVEALED` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `REVEALED` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `REVEALED` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `SOLO` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `SOLO` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `SOLO` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `SOLO` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `EMPTY` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `EMPTY` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `EMPTY` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `EMPTY` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `FROZEN` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `FROZEN` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `FROZEN` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `FROZEN` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `SUSPENDED` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `SUSPENDED` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `SUSPENDED` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `SUSPENDED` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
 
 ### Refused here
 

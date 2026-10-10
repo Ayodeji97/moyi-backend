@@ -63,7 +63,13 @@ def check_contract(model: Model, operations: dict, strict: bool) -> list:
         from_rows = {r["status"] for r in rows if r["status"] is not None}
         from_card = {e["status"] for e in endpoint["requestErrors"]}
         documented = operations[operation]
-        for status in sorted(documented - from_rows - from_card - everywhere):
+        explained = from_rows | from_card | everywhere
+        # A conditional GET can return 304 for the exact representation whose
+        # ordinary success is already mapped as 200; 304 has no separate
+        # application outcome or error code to put in a state row.
+        if operation.startswith("GET ") and 200 in from_rows:
+            explained.add(304)
+        for status in sorted(documented - explained):
             problems.append(f"{operation} documents {status} and nothing in the map explains it")
         listed = {g["status"] for g in model.gaps if g["endpoint"] == operation}
         for status in sorted((from_rows | from_card) - documented - listed):

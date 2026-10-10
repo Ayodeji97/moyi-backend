@@ -2,7 +2,7 @@
 
 # Journeys
 
-Describes `main @ 174b474`. Each journey is a path through the three machines, taken from doc 02. How to read this: [README](README.md).
+Describes `main @ 5839d47`. Each journey is a path through the three machines, taken from doc 02. How to read this: [README](README.md).
 
 ## J1: First run and pairing
 
