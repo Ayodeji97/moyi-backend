@@ -221,7 +221,8 @@ SELECT count(*) FROM reactable
   **As built: a held row is a conflict only on an entry the caller reads in full.** On a
   partner's tombstone a held row is `204` like any other. The rollback that the first
   ruling guards against cannot falsify a `204` there: the entry is a tombstone to the
-  caller by something that has committed (an erasure, or the marker, which is insert-only),
+  caller by something that has committed (an erasure, or the marker, which is insert-only
+  by the second review's reading of `EntryWithdrawals`),
   a tombstone renders `reaction: null` whatever rows exist, and the holder is the erasure
   that removes the row, retried until it has. On the caller's own entry there is no row of
   theirs to be held.
@@ -569,8 +570,9 @@ author's.
 - **Run for Task 2** (2026-10-13, by this record's author).
   - **The smoke run**, `MOYI_DB=moyi_c5c_smoke_1013 scripts/smoke.sh`, on the jar built
     from `cf40796`: **814 passed, 0 failed, no skips, 21 sections.** The new section is
-    167 of them. The database was dropped afterwards and seen to be gone. The section's
-    four new helpers were each fed a wrong value and seen to fail.
+    167 of them. The database was dropped afterwards and seen to be gone. Three of
+    the section's four new helpers (`rows_are`, `whole_response`, `without_reaction`) were
+    fed wrong values outside the run and seen to fail; `rx_views` was not.
     A database `moyi_c5c_smoke`, left on 2026-10-10 by the agent that stalled on this task,
     was found and dropped first: it held V23, 35 users and no reaction, and nothing was
     connected to it. That run's totals were recorded nowhere.
