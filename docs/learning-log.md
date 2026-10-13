@@ -2272,3 +2272,76 @@ conflict and succeeds on a later retry. Both reproductions were run red first.
 Validation: full build green (1,364 tests); isolated smoke run 646 passed, zero failed,
 one optional erasure-timing probe skipped. The new race test also failed with the
 per-window refresh deliberately replaced by the original membership's stale set.
+
+## 2026-10-13 · Phase 3 · Reactions — an idiom copied from a merge an hour old, and the oracle the copy made visible
+
+Expected: the smallest slice of the phase. A reaction is a bookmark that the other person
+         can see: one row keyed by entry and member, one guarded statement, one line in
+         `EraseEntry`. The plan says "as a favourite's is" of the statement, and I expected
+         the build to be the favourite's code with a column changed. The hard questions were
+         the owner's and he had answered them: one per member, the partner's revealed
+         entry only, visible, no time, four placeholder names.
+Reality: the copying was the slice.
+         The plan copied the bookmark's removal as it stood on the branch: skip a row
+         somebody else holds, answer `204`. While Task 1 was being built, #60 merged, and
+         its last commit had changed that removal. A skipped row had been reported as
+         removed, and an erasure that rolled back left it there. Unmark was now
+         `FOR UPDATE NOWAIT` and `409 FAVOURITE_BUSY`. The agent running the plan ruled
+         that reactions follow: the owner had merged that idiom an hour earlier for a
+         stated reason, and two idioms for one row lock would drift. It wrote the cost
+         down too: a reactor's `DELETE` can be refused during a withdrawal, which "tells
+         them an erasure is in flight on an entry they can already see". That sentence is
+         true and it is the wrong comparison. It compares the reactor with themselves a
+         second earlier. The comparison this codebase makes is with the twin: the same
+         history, ended by somebody who deleted each entry by hand and then left.
+         A reviewer made it. It ran nothing. It read the new service beside
+         `WithdrawalTwinArchiveTest`'s own header, which says that one old bookmark was
+         once enough to tell the two apart, and asked what holds a reaction's row on a
+         tombstone for longer than an instant. One thing: a withdrawal's delivery, which
+         keeps every row it has deleted until the whole delivery commits. So for as long
+         as a delivery ran, taking a reaction back from a withdrawn entry was `409`, and
+         from its twin `204`. Every view was identical. The verb was not. The reviewer
+         wrote out the test that would settle it; it was written and it failed, `409`
+         against `204`.
+         And the same test, pointed at bookmarks, failed on `main`. The oracle had merged
+         earlier that day inside the fix for another one. #60's log entry is titled "a lock is
+         not a commit", and it is right: a held row is not a deleted row, so `204` was a
+         lie. But "held" was then told to the caller in the one place where being held
+         means something about the other person. Nobody saw it on the bookmark route,
+         where it was a fix. It was seen on the reaction route, where it was a copy,
+         because a copy is read by somebody asking what it does and not what it repairs.
+         What was built: a held row is a conflict only on an entry the caller reads in
+         full. On a tombstone it is `204`, and a rollback cannot make that false: the
+         entry is a tombstone by something committed, a tombstone shows no reaction
+         whatever rows exist, and the holder is the erasure that removes the row. The
+         same for bookmarks, as its own commit, because it narrows what the owner merged
+         that day and he has not been asked.
+         The rest held. Twenty-one mutations of the first task, none survived. The smoke
+         section is 167 probes and all passed on the first run: 814 in all, on a database
+         of its own. This time running it found nothing that reading had not. It also
+         cannot reach the thing this entry is about: a script holds no row, so the twin
+         on a held row lives in two test classes and nowhere else.
+         Both tasks were started by an agent that stopped before committing. The second
+         one left a good draft and a database: `moyi_c5c_smoke`, three days old, V23
+         applied, its totals written nowhere. So a whole smoke run of this slice had
+         happened and told nobody anything.
+Wrong about: what "the merged idiom" is worth. An hour after a merge, the idiom had been
+         run against the defect it fixed and against nothing else. Following it was
+         argued as the safe choice, "two idioms would drift", and consistency copies a
+         defect as faithfully as a fix. The second use of a mechanism is its first
+         review by somebody who did not write it.
+         The cost I write beside a ruling. "Tells them an erasure is in flight" named
+         what the caller learns and not whom they could compare notes with. On a route
+         that is a privacy mechanism, the cost of a new answer is a question: is there
+         a twin that gets the old one?
+         Reading. The last entry here says no finding came from reading a diff and
+         agreeing with it, and that is still true. This one came from reading and
+         running nothing, but it was reading against a test's stated purpose, and it
+         ended in a test somebody else had to run red. A reviewer who cannot run can
+         still write the test.
+         Whose decisions these are. `REACTION_BUSY`, its narrowing, and the narrowing of
+         `FAVOURITE_BUSY` were all ruled by an agent in one afternoon, two of them
+         against the plan and one against a merge. The record says so in each place,
+         because "decided" in an ADR reads as the owner's unless it says otherwise.
+         And a result nobody wrote down, again. Last time it was mutations; this time a
+         smoke run. The report is written as the work goes or the work was not done.
