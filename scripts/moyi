@@ -38,6 +38,11 @@
 #   moyi favourite <entryId>                 mark a revealed entry, yours or your partner's. The mark is
 #                                            yours alone: your partner is never shown it
 #   moyi unfavourite <entryId>
+#   moyi react <entryId> <type>              leave a reaction on your partner's revealed entry, in place
+#                                            of any you had left: HEART, THANK_YOU, SMILE or MOVED. Your
+#                                            partner IS shown it, on that entry. Not on your own entry,
+#                                            and not once the bond has ended
+#   moyi unreact <entryId>                   take it back; also after the bond has ended
 #   moyi whoami
 #
 # The session (two tokens and the bond in use) is kept in
@@ -345,6 +350,19 @@ case "$cmd" in
     need_uuid "$1" "$1"
     authed DELETE "/entries/$1/favourite"; show 204
     echo "Unmarked."
+    ;;
+  react)
+    [ $# -eq 2 ] || die "usage: moyi react <entryId> <type>   (HEART, THANK_YOU, SMILE or MOVED)"
+    need_uuid "$1" "$1"
+    # The type is sent as it was typed. Which names are reactions is the server's to say, and it says 422.
+    authed PUT "/entries/$1/reaction" "$(json_of type "$2")"; show 204
+    echo "Reacted. Your partner is shown it."
+    ;;
+  unreact)
+    [ $# -eq 1 ] || die "usage: moyi unreact <entryId>"
+    need_uuid "$1" "$1"
+    authed DELETE "/entries/$1/reaction"; show 204
+    echo "Taken back."
     ;;
   edit)
     [ $# -eq 2 ] || die 'usage: moyi edit <entryId> "<text>"'

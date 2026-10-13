@@ -1,7 +1,8 @@
 # The Moyi API in Bruno
 
-The daily loop as twelve requests, the four that read the archive and keep a bookmark, and
-the two that end a bond, for running it by hand: milestone M3 is two people using the HTTP
+The daily loop as twelve requests, the four that read the archive and keep a bookmark, the
+two that leave a reaction and take it back, and the two that end a bond, for running it by
+hand: milestone M3 is two people using the HTTP
 API for a week, and there is no app yet. `scripts/moyi` is the same loop from a terminal.
 
 1. Open this folder in [Bruno](https://www.usebruno.com) as a collection and choose the
@@ -23,7 +24,9 @@ and every request in them is one the smoke run sends with curl, but the collecti
 has not been run. If a request fails to load, that is where to look first; `scripts/moyi`
 has been run end to end. That is as true of the four archive requests, which are the first
 here to switch a query parameter off (`~`), to send a header from a variable, and to read
-a response header in a script: Day's `If-None-Match` is where to look first of all.
+a response header in a script: Day's `If-None-Match` is where to look first of all. The
+two reaction requests (17 and 18, added 2026-10-13) have not been opened in Bruno either;
+`scripts/moyi react` and `unreact` send the same two requests and were run.
 
 **Leave bond and Block are last, and are not part of the loop.** Each ends the bond in
 use for both people. Their bodies are optional and their defaults are opposite: a leave
