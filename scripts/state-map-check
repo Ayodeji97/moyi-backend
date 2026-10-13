@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Is the state map complete and still true? Reads only; writes nothing.
+#   scripts/state-map-check            pending endpoints and codes are allowed
+#   scripts/state-map-check --strict   nothing may be pending
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHONPATH="$here" exec python3 -m statemap check "$@"

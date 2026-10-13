@@ -1,0 +1,918 @@
+[
+  {
+    "id": "POST /api/v1/bonds/{bondId}/entries",
+    "summary": "write today's entry",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the entry as it stands now, and no entry written)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "GratitudeCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#val membership = access.lockMembershipOf(userId, bondId)"
+      },
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued.",
+        "evidence": "test",
+        "evidenceRef": "SubmitEntryIdempotencyTest#a second request under a key whose first is still in flight is refused at once, never queued",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII.",
+        "evidence": "smoke",
+        "evidenceRef": "an entry with no Idempotency-Key is 422 VALIDATION_FAILED",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#violationOf(key)?.let { throw IdempotencyKeyNotValidException(it) }"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The text is missing or blank, is over 500 graphemes or 8192 bytes, or holds a NUL character or an unpaired surrogate. (the smoke script asserts the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntryConstraints.kt#return validate(context) { EntryText.of(value) }"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another body, or another path.",
+        "evidence": "smoke",
+        "evidenceRef": "the same key with a different body is 422 IDEMPOTENCY_KEY_REUSED",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      },
+      {
+        "status": 422,
+        "code": "MEDIA_NOT_YET_SUPPORTED",
+        "reason": "The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. It is refused, not quietly dropped.",
+        "evidence": "smoke",
+        "evidenceRef": "an entry carrying a media id is 422 MEDIA_NOT_YET_SUPPORTED",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/entries\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\" -H 'Content-Type: application/json' -d '{\"text\": \"...\"}'"
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/today",
+    "summary": "read today",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "RevealGateTest#a non-member gets the one 404, whether or not the entry has been revealed",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntriesController.kt#val membership = access.membershipOf(caller.id, bondIdOrNotFound(bondId))"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/today\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PATCH /api/v1/entries/{entryId}",
+    "summary": "edit your entry",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 200 with Idempotency-Replayed: true, the entry as it stands now, and no entry written or changed)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The id is not a UUID, names no entry, names an entry in a bond you are not in, or names the entry your partner wrote. All four get this one answer, and never 403, so that it does not confirm the entry exists.",
+        "evidence": "smoke",
+        "evidenceRef": "the partner cannot edit the author's entry",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#): Pair<Entry, BondMembership> = authorOrNull(userId, entryId, lock) ?: throw EntryNotFoundException()"
+      },
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. Only when the optional key is sent.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written. The limit holds whether or not a key is sent.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#replayable.buffered(MAX_BODY_BYTES)"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The text is missing or blank, is over 500 graphemes or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid. (a test asserts the status, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntryChangesController.kt#@field:NotNull @field:ValidEntryText val text: String? = null,"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another body, or another path. Only when the optional key is sent.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      },
+      {
+        "status": 422,
+        "code": "MEDIA_NOT_YET_SUPPORTED",
+        "reason": "The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. (a test asserts the status, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (unsupportedMedia) throw MediaNotYetSupportedException()"
+      }
+    ],
+    "curl": "curl -X PATCH \"$API/entries/$ENTRY\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"text\": \"...\"}'"
+  },
+  {
+    "id": "DELETE /api/v1/entries/{entryId}",
+    "summary": "delete your entry",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The id is not a UUID, names no entry, names an entry in a bond you are not in, or names the entry your partner wrote. All four get this one answer, and never 403, so that it does not confirm the entry exists.",
+        "evidence": "smoke",
+        "evidenceRef": "the partner cannot delete the author's entry",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#): Pair<Entry, BondMembership> = authorOrNull(userId, entryId, lock) ?: throw EntryNotFoundException()"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/entries/$ENTRY\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/streak",
+    "summary": "read the streak",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "smoke",
+        "evidenceRef": "a stranger asking for a bond's streak gets the one 404",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/StreakController.kt#val membership = access.membershipOf(caller.id, id)"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/streak\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds",
+    "summary": "list your bonds",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [],
+    "curl": "curl \"$API/bonds\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/bonds",
+    "summary": "create a bond",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "name is blank once trimmed, or over 60 characters; type is not COUPLE, FRIENDS, FAMILY or PARENT_CHILD; anchorTimezone is not a region time zone (a fixed offset such as Etc/GMT+3 is refused); revealTimeLocal is not a time such as 21:00; or reminderTimezone is not a region time zone. A required field that is missing or null is not this answer: it fails while the body is read, which is 400 MALFORMED_REQUEST (by reading; nothing sends such a body). (the tests and the smoke script assert the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/CreateBondRequest.kt#@field:ValidBondType"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"name\": \"Us\", \"type\": \"COUPLE\", \"anchorTimezone\": \"Africa/Lagos\"}'"
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}",
+    "summary": "read a bond",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [
+      "If-None-Match (optional: the ETag you already hold. While what you would be shown has not changed, the answer is 304 with no body)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -i \"$API/bonds/$BOND\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PATCH /api/v1/bonds/{bondId}",
+    "summary": "change the bond's settings",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [
+      "If-Match (required: the complete ETag of the bond as you last read it. The answer carries the new ETag; a patch that changes nothing keeps the old one)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      },
+      {
+        "status": 412,
+        "code": "PRECONDITION_FAILED",
+        "reason": "The If-Match you sent is not the bond's current ETag: somebody changed the bond since you read it, the tag is a weak one (W/\"...\"), or it cannot be parsed. Nothing is written. Read the bond again and retry. A bond that has ended or is counting down answers 409 BOND_ARCHIVED before the tag is compared.",
+        "evidence": "smoke",
+        "evidenceRef": "a stale If-Match is 412",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!ifMatch.matches(views.of(bond, membership.userId).entityTag())) throw PreconditionFailedException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The body names no setting at all; or names anchorTimezone, which only moves through /timezone with your partner's agreement; or name is blank or over 60 characters, type is unknown, or revealTimeLocal is not a time such as 21:00. The body is checked before membership is, so a stranger gets this too.",
+        "evidence": "smoke",
+        "evidenceRef": "an empty patch is 422",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/PatchBondRequest.kt#@get:AssertTrue(message = \"must name at least one setting to change\")"
+      },
+      {
+        "status": 428,
+        "code": "PRECONDITION_REQUIRED",
+        "reason": "No If-Match header, a blank one, or If-Match: *. The update must be conditional, so that two people editing at once cannot silently overwrite each other. It is checked after membership and before the bond's state is read.",
+        "evidence": "smoke",
+        "evidenceRef": "a PATCH with no If-Match is 428",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/Preconditions.kt#if (header.isNullOrBlank() || header.trim() == \"*\") throw PreconditionRequiredException()"
+      }
+    ],
+    "curl": "curl -X PATCH \"$API/bonds/$BOND\" -H \"Authorization: Bearer $TOKEN\" -H \"If-Match: $ETAG\" -H 'Content-Type: application/json' -d '{\"name\": \"Us two\"}'"
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/leave",
+    "summary": "leave the bond",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [
+      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a leave keeps them. Any other Content-Type is refused with 415, even with no body)"
+    ],
+    "requestErrors": [
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "A body was sent and it is not exactly {\"withdrawEntries\": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn.",
+        "evidence": "test",
+        "evidenceRef": "BondEndingEndpointTest#a key this route does not know, or the flag sent twice, is the standing 400 and withdraws nothing",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/EndBondRequest.kt#context.reportInputMismatch<Nothing>(EndBondRequest::class.java, \"one key, once\")"
+      },
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/leave\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"withdrawEntries\": false}'"
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/block",
+    "summary": "block your partner",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [
+      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back. Any other Content-Type is refused with 415, even with no body)"
+    ],
+    "requestErrors": [
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "A body was sent and it is not exactly {\"withdrawEntries\": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn.",
+        "evidence": "smoke",
+        "evidenceRef": "a misspelt flag to /block is 400 MALFORMED_REQUEST",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/EndBondRequest.kt#context.reportInputMismatch<Nothing>(EndBondRequest::class.java, \"one key, once\")"
+      },
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/block\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"withdrawEntries\": true}'"
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/invites",
+    "summary": "issue a new invite",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/invites\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}",
+    "summary": "revoke an invite",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/bonds/$BOND/invites/$INVITE\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/invites/{code}",
+    "summary": "look up an invite code",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The code in the path is not six characters of the invite alphabet. It is upper-cased and trimmed first, so a lowercase code is not an error. This says nothing about any bond, which is why it is not the invite's 404. (the tests and the smoke script assert the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/InvitesController.kt#errorCode = ErrorCode.VALIDATION_FAILED,"
+      }
+    ],
+    "curl": "curl \"$API/invites/$INVITE_CODE\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/invites/{code}/accept",
+    "summary": "accept an invite",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The code in the path is not six characters of the invite alphabet. It is upper-cased and trimmed first, so a lowercase code is not an error. This says nothing about any bond, which is why it is not the invite's 404. (the tests and the smoke script assert the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/InvitesController.kt#errorCode = ErrorCode.VALIDATION_FAILED,"
+      }
+    ],
+    "curl": "curl -X POST \"$API/invites/$INVITE_CODE/accept\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/members/me/settings",
+    "summary": "read your own member settings",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/members/me/settings\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PUT /api/v1/bonds/{bondId}/members/me/settings",
+    "summary": "replace your own member settings",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "reminderTimeLocal is missing or is not a time such as 21:00; one of quietHoursStart and quietHoursEnd is sent without the other; nicknameForOther is blank or over 40 characters; or reminderTimezone is not a region time zone. (the smoke script asserts the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/MemberSettingsRequest.kt#@get:AssertTrue(message = \"need both a start and an end, or neither\")"
+      }
+    ],
+    "curl": "curl -X PUT \"$API/bonds/$BOND/members/me/settings\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"reminderTimeLocal\": \"20:00\"}'"
+  },
+  {
+    "id": "PATCH /api/v1/bonds/{bondId}/timezone",
+    "summary": "propose a new time zone",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "anchorTimezone is blank, or not a region time zone; a fixed offset such as Etc/GMT+3 is refused. A required field that is missing or null is not this answer: it fails while the body is read, which is 400 MALFORMED_REQUEST (by reading; nothing sends such a body). (the tests and the smoke script assert the status and the field, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/ChangeTimezoneRequest.kt#@field:ValidRegionZone"
+      }
+    ],
+    "curl": "curl -X PATCH \"$API/bonds/$BOND/timezone\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"anchorTimezone\": \"Europe/London\"}'"
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+    "summary": "agree to the time zone change",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The body is required: {\"proposalId\": the id of the proposal you reviewed}. With no body, or with proposalId missing, null or not a UUID, the request cannot be read into the type the handler takes (a non-null UUID), and an unreadable body is this 400, before membership is looked at. Read from the code and never run: the field also carries @NotNull, which would answer 422 VALIDATION_FAILED if a null ever reached validation, and reading alone did not settle whether one can.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/ConfirmTimezoneRequest.kt#val proposalId: UUID,"
+      },
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/timezone/confirm\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"proposalId\": \"'\"$PROPOSAL\"'\"}'"
+  },
+  {
+    "id": "DELETE /api/v1/bonds/{bondId}/timezone",
+    "summary": "call off the time zone change",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/bonds/$BOND/timezone\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/bonds/{bondId}/deletion-request",
+    "summary": "ask for the bond's deletion, or agree to it",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/bonds/{bondId}/deletion-request",
+    "summary": "call off the deletion",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/bonds/$BOND/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/days",
+    "summary": "list the archive",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [
+      "If-None-Match (optional; a matching strong ETag returns 304 with no body)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#throw NotFoundException(\"That bond was not found.\")"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "A supplied limit, cursor, until date or favourites flag cannot be read. The response names the field, not its value.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysQuery.kt#internal class DaysQueryNotValidException("
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/days\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/days/{date}",
+    "summary": "read one archived day",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [
+      "If-None-Match (optional; a matching strong ETag returns 304 with no body)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#throw NotFoundException(\"That bond was not found.\")"
+      },
+      {
+        "status": 404,
+        "code": "DAY_NOT_FOUND",
+        "reason": "The value is not a calendar date, or that day is not in your archive. No more specific reason is returned.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class DayNotFoundException :"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/days/$DATE\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PUT /api/v1/entries/{entryId}/favourite",
+    "summary": "bookmark an entry",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "There is no such entry, you are not a member of its bond, or the entry was never shown to you.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryNotFoundException : NotFoundException(\"That entry was not found.\")"
+      },
+      {
+        "status": 409,
+        "code": "ENTRY_NOT_REVEALED",
+        "reason": "Your own entry has not been revealed yet. A partner entry that is still locked is answered as not found.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#ErrorCode.ENTRY_NOT_REVEALED"
+      },
+      {
+        "status": 409,
+        "code": "ENTRY_IMMUTABLE",
+        "reason": "The entry is erased or is being erased.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryImmutableException :"
+      }
+    ],
+    "curl": "curl -X PUT \"$API/entries/$ENTRY/favourite\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/entries/{entryId}/favourite",
+    "summary": "remove an entry bookmark",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "There is no such entry, you are not a member of its bond, or the entry was never shown to you.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryNotFoundException : NotFoundException(\"That entry was not found.\")"
+      },
+      {
+        "status": 409,
+        "code": "FAVOURITE_BUSY",
+        "reason": "Another operation holds the bookmark. Retry the removal.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#ErrorCode.FAVOURITE_BUSY"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/entries/$ENTRY/favourite\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/auth/register",
+    "summary": "register",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Three registrations an hour per client address, one back every twenty minutes; the limit is spent before the body is checked, so a 422 uses one too. The fourth is 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank or over 80 characters; locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created.",
+        "evidence": "smoke",
+        "evidenceRef": "a 422 spends a token too (validation runs after the limiter)",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/RegisterRequest.kt#@field:AssertTrue(message = \"must be confirmed\")"
+      },
+      {
+        "status": 503,
+        "code": "HASHING_CAPACITY_EXCEEDED",
+        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again.",
+        "evidence": "test",
+        "evidenceRef": "HashingCapacityResponseTest#saturation is 503 with a Retry-After, not 500",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/register\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"displayName\\\": \\\"Ada\\\", \\\"acceptedTermsVersion\\\": \\\"2026-09-01\\\", \\\"over18\\\": true}\""
+  },
+  {
+    "id": "POST /api/v1/auth/verify-email",
+    "summary": "verify your email",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json. The token travels in the body of a POST, never in a GET: a GET on this path without a bearer is the everywhere 401, so a mail scanner that fetches the link cannot spend it. No rate limit of its own)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "token is blank or longer than 256 characters. It is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID.",
+        "evidence": "smoke",
+        "evidenceRef": "blank token is 422 VALIDATION_FAILED",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/VerificationController.kt#internal data class VerifyEmailRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/verify-email\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$VERIFY_TOKEN\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/resend-verification",
+    "summary": "ask for a new verification link",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, spent before the body is checked. Beside it, one a minute per email address as typed, counted for every address whether or not it has an account, so the 429 says nothing either: a second request inside the minute is 429 with Retry-After: 60)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "email is blank or not shaped like an address. This says nothing about whether the address has an account.",
+        "evidence": "smoke",
+        "evidenceRef": "resend for a malformed address is 422",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/VerificationController.kt#internal data class ResendVerificationRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/resend-verification\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/login",
+    "summary": "sign in",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Two limits, both 429 with Retry-After and neither the lockout. Five attempts per fifteen minutes per email address as typed, one back every three minutes, counted for an address with no account too and spent before any password is checked: the sixth attempt is 429. And twenty an hour per client address. The lockout is separate and silent: five wrong passwords in a row lock the account for a minute, then longer, and a locked account answers 401 INVALID_CREDENTIALS, not 429. With both in force the 429 comes first. The limits are kept in Redis and fail open: if Redis cannot be reached every request is let through and these headers are absent, while the lockout, which is kept in Postgres, still applies)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "email is blank or over 254 characters; password is blank or over 512 characters; or device is sent and its platform is not ANDROID, IOS or WEAR, or its appVersion or osVersion is blank or over 40 characters. device may be left out. An address that is merely not shaped like one is not a 422: it is the 401 an unknown address gets. No password is checked for a 422.",
+        "evidence": "smoke",
+        "evidenceRef": "an oversized password is 422, not work",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/LoginController.kt#internal data class LoginRequest("
+      },
+      {
+        "status": 503,
+        "code": "HASHING_CAPACITY_EXCEEDED",
+        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. (the test of this answer drives register, not sign-in)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/login\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"device\\\": {\\\"platform\\\": \\\"ANDROID\\\", \\\"appVersion\\\": \\\"1.0\\\", \\\"osVersion\\\": \\\"16\\\"}}\""
+  },
+  {
+    "id": "POST /api/v1/auth/refresh",
+    "summary": "exchange the refresh token for a new pair",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and must not carry an expired token: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the refresh token is looked at. A client that attaches its access token to every request must leave it off this one, or it cannot refresh once the access token has expired)",
+      "Content-Type (application/json. The refresh token in the body is the credential. No rate limit of its own. Never send two refreshes of one token at once: the second is treated as a reuse and ends the session)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "refreshToken is blank or longer than 256 characters. (a test asserts the 422 for an oversized token, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/RefreshController.kt#internal data class RefreshRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/refresh\" -H 'Content-Type: application/json' -d \"{\\\"refreshToken\\\": \\\"$REFRESH\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/logout",
+    "summary": "sign out of this session",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json. The refresh token in the body is the credential. No rate limit of its own)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "refreshToken is blank or longer than 256 characters. (a test asserts the 422 for an oversized token, not the code)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/LogoutController.kt#internal data class LogoutRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/logout\" -H 'Content-Type: application/json' -d \"{\\\"refreshToken\\\": \\\"$REFRESH\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/logout-all",
+    "summary": "sign out everywhere",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X POST \"$API/auth/logout-all\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/auth/sessions",
+    "summary": "list your sessions",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/auth/sessions\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/auth/sessions/{id}",
+    "summary": "end one session",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The id in the path is not a UUID. It is the same answer as a session that is not yours, and not a 400 about its shape. The rows say what the other ids get.",
+        "evidence": "smoke",
+        "evidenceRef": "DELETE a value that is not an id is 404 too",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/SessionsController.kt#val sessionId = runCatching { UUID.fromString(id) }.getOrElse { throw SessionNotFoundException() }"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/auth/sessions/$SESSION\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/me",
+    "summary": "read your profile",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/me\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/auth/forgot-password",
+    "summary": "ask for a password reset link",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, spent before the body is checked. Beside it, three an hour per email address as typed, one back every twenty minutes, counted for every address whether or not it has an account: the fourth is 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "email is blank or not shaped like an address. This says nothing about whether the address has an account.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ForgotPasswordRequest("
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/forgot-password\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/auth/reset-password",
+    "summary": "set a new password with a reset link",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "Content-Type (application/json. The reset token in the body is the credential. No rate limit of its own)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "token is blank or over 256 characters; or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link is looked at, so a refused password does not spend the link. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ResetPasswordRequest("
+      },
+      {
+        "status": 503,
+        "code": "HASHING_CAPACITY_EXCEEDED",
+        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link is not spent. (the test of this answer drives register, not a reset)",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
+      }
+    ],
+    "curl": "curl -X POST \"$API/auth/reset-password\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$RESET_TOKEN\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\""
+  }
+]

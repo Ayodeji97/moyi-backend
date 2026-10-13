@@ -30,6 +30,7 @@ having a teammate review the PR:
 - [ ] Authorisation checked; cross-tenant test covers any new endpoint
 - [ ] No secret/token/password/entry content can reach a log
 - [ ] OpenAPI spec regenerated if the API changed
+- [ ] If an endpoint, a status or an error code changed, `docs/state-map/data/` says so and `scripts/state-map-check --strict` passes
 - [ ] Docs updated in this PR if `06`/`07`/other docs are now wrong
 - [ ] ADR written if an architectural choice was made
 - [ ] `CLAUDE.md` updated if a rule it states has changed (and `AGENTS.md`, if it is one of the four repeated there)

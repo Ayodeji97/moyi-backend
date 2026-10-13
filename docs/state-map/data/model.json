@@ -1,0 +1,589 @@
+{
+  "stamp": "5839d47",
+  "machines": [
+    {
+      "id": "account",
+      "label": "Account",
+      "regions": [
+        {
+          "id": "account",
+          "label": "The account (the one your address, link or token names), and whether you are signed in",
+          "states": [
+            {
+              "id": "ANONYMOUS",
+              "label": "no account for this address",
+              "initial": true
+            },
+            {
+              "id": "PENDING_VERIFICATION",
+              "label": "PENDING_VERIFICATION, signed out"
+            },
+            {
+              "id": "ACTIVE_SIGNED_OUT",
+              "label": "ACTIVE, signed out"
+            },
+            {
+              "id": "SIGNED_IN",
+              "label": "signed in, verified or not"
+            },
+            {
+              "id": "SUSPENDED",
+              "label": "SUSPENDED",
+              "built": false
+            },
+            {
+              "id": "PENDING_DELETION",
+              "label": "PENDING_DELETION",
+              "built": false
+            },
+            {
+              "id": "DELETED",
+              "label": "DELETED",
+              "built": false
+            }
+          ]
+        },
+        {
+          "id": "account.session",
+          "label": "The session (one sign-in, which is a refresh-token family and the access token made for it, named by the token you send)",
+          "states": [
+            {
+              "id": "NO_SESSION",
+              "label": "no session (no token sent, or one that names no session)",
+              "initial": true
+            },
+            {
+              "id": "ACCESS_VALID",
+              "label": "live, access token valid"
+            },
+            {
+              "id": "ACCESS_EXPIRED",
+              "label": "live, access token expired"
+            },
+            {
+              "id": "ENDED",
+              "label": "ended (signed out, revoked, or its refresh token ran out)"
+            }
+          ]
+        },
+        {
+          "id": "account.reset",
+          "label": "The password reset (one reset link, named by its token)",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none (no link, or a token that matches none)",
+              "initial": true
+            },
+            {
+              "id": "REQUESTED",
+              "label": "requested, the link is live"
+            },
+            {
+              "id": "USED",
+              "label": "link used"
+            },
+            {
+              "id": "EXPIRED",
+              "label": "link expired"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bond",
+      "label": "Bond",
+      "regions": [
+        {
+          "id": "bond",
+          "label": "The bond",
+          "states": [
+            {
+              "id": "NO_BOND",
+              "label": "no bond",
+              "initial": true
+            },
+            {
+              "id": "PENDING_MEMBER",
+              "label": "PENDING_MEMBER"
+            },
+            {
+              "id": "ACTIVE",
+              "label": "ACTIVE"
+            },
+            {
+              "id": "PENDING_DELETION",
+              "label": "PENDING_DELETION"
+            },
+            {
+              "id": "ARCHIVED",
+              "label": "ARCHIVED"
+            },
+            {
+              "id": "DELETED",
+              "label": "DELETED",
+              "built": false
+            }
+          ]
+        },
+        {
+          "id": "bond.invite",
+          "label": "The invite (one invite, named by its code)",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none (a code never issued, or an invite not yet made)",
+              "initial": true
+            },
+            {
+              "id": "CREATED",
+              "label": "live"
+            },
+            {
+              "id": "ACCEPTED",
+              "label": "accepted"
+            },
+            {
+              "id": "REVOKED",
+              "label": "revoked"
+            },
+            {
+              "id": "EXPIRED",
+              "label": "expired (answered in every cell exactly as revoked is, and reached differently)"
+            }
+          ]
+        },
+        {
+          "id": "bond.proposal",
+          "label": "The proposal (the latest of the kind the endpoint works on, the zone change or the deletion)",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none",
+              "initial": true
+            },
+            {
+              "id": "PROPOSED",
+              "label": "waiting for the other member"
+            },
+            {
+              "id": "CONFIRMED",
+              "label": "confirmed"
+            },
+            {
+              "id": "CANCELLED",
+              "label": "cancelled"
+            },
+            {
+              "id": "LAPSED",
+              "label": "lapsed, unanswered"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "day",
+      "label": "Day",
+      "regions": [
+        {
+          "id": "day",
+          "label": "The day",
+          "states": [
+            {
+              "id": "NOT_OPENED",
+              "label": "no row yet",
+              "initial": true
+            },
+            {
+              "id": "OPEN",
+              "label": "OPEN"
+            },
+            {
+              "id": "PARTIAL",
+              "label": "PARTIAL"
+            },
+            {
+              "id": "PENDING_REVEAL",
+              "label": "PENDING_REVEAL"
+            },
+            {
+              "id": "REVEALED",
+              "label": "REVEALED"
+            },
+            {
+              "id": "SOLO",
+              "label": "SOLO"
+            },
+            {
+              "id": "EMPTY",
+              "label": "EMPTY"
+            },
+            {
+              "id": "FROZEN",
+              "label": "FROZEN"
+            },
+            {
+              "id": "SUSPENDED",
+              "label": "SUSPENDED"
+            }
+          ]
+        },
+        {
+          "id": "day.entry",
+          "label": "Your entry",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none",
+              "initial": true
+            },
+            {
+              "id": "SUBMITTED",
+              "label": "SUBMITTED"
+            },
+            {
+              "id": "REVEALED",
+              "label": "REVEALED"
+            },
+            {
+              "id": "DELETED",
+              "label": "DELETED"
+            }
+          ]
+        },
+        {
+          "id": "day.partnerEntry",
+          "label": "What you see of your partner's entry",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "nothing yet",
+              "initial": true
+            },
+            {
+              "id": "LOCKED",
+              "label": "LOCKED"
+            },
+            {
+              "id": "VISIBLE",
+              "label": "the text"
+            },
+            {
+              "id": "REMOVED",
+              "label": "REMOVED"
+            },
+            {
+              "id": "DELETED",
+              "label": "DELETED, its words gone"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "id": "event:reveal-time-arrives",
+      "label": "the reveal time arrives",
+      "actor": "system"
+    },
+    {
+      "id": "event:day-ends",
+      "label": "the day ends and the close job runs",
+      "actor": "system"
+    },
+    {
+      "id": "event:second-member-joins",
+      "label": "your partner accepts the invite",
+      "actor": "partner"
+    },
+    {
+      "id": "event:missed-day-recorded",
+      "label": "the close job records a day nobody opened",
+      "actor": "system"
+    },
+    {
+      "id": "event:freeze-spent",
+      "label": "a banked freeze covers a missed day",
+      "actor": "system"
+    },
+    {
+      "id": "event:partner-withdraws",
+      "label": "your partner takes their entries back",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-leaves",
+      "label": "your partner leaves",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-blocks",
+      "label": "your partner blocks you",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-proposes",
+      "label": "your partner proposes a change",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-confirms",
+      "label": "your partner agrees to your proposal",
+      "actor": "partner"
+    },
+    {
+      "id": "event:partner-cancels",
+      "label": "your partner calls a proposal or the deletion off",
+      "actor": "partner"
+    },
+    {
+      "id": "event:invite-expires",
+      "label": "the invite expires, seven days on",
+      "actor": "system"
+    },
+    {
+      "id": "event:proposal-lapses",
+      "label": "the proposal lapses, seven days unanswered",
+      "actor": "system"
+    },
+    {
+      "id": "event:access-token-expires",
+      "label": "the access token expires, fifteen minutes on",
+      "actor": "system"
+    },
+    {
+      "id": "event:refresh-token-expires",
+      "label": "the refresh token expires, thirty days unused",
+      "actor": "system"
+    },
+    {
+      "id": "event:verification-token-expires",
+      "label": "the verification link expires, a day on",
+      "actor": "system"
+    },
+    {
+      "id": "event:reset-token-expires",
+      "label": "the reset link expires, an hour on",
+      "actor": "system"
+    },
+    {
+      "id": "event:reuse-detected",
+      "label": "a refresh token already used is presented again",
+      "actor": "system"
+    }
+  ],
+  "everywhere": [
+    {
+      "status": 400,
+      "code": "MALFORMED_REQUEST",
+      "reason": "The body could not be read as what the endpoint expects.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.MALFORMED_REQUEST"
+    },
+    {
+      "status": 401,
+      "code": "UNAUTHENTICATED",
+      "reason": "No access token, or one that is expired or not valid. Everything under /api/v1 except the eight public auth POSTs needs one, and that is decided before the path is looked up: a path that does not exist, or a GET on a public auth route, is 401 without a token, not 404 or 405. A public route needs no token, but a token that is sent to one is still checked, and an expired or unaccepted one is 401 there too: send no Authorization header to a public route. In the account machine's own regions this answer is a row, because there the missing or expired token is the state.",
+      "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.UNAUTHENTICATED",
+      "rowsAllowedIn": [
+        "account",
+        "account.session"
+      ]
+    },
+    {
+      "status": 403,
+      "code": "FORBIDDEN",
+      "reason": "A valid token that lacks the authority this action needs.",
+      "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.FORBIDDEN"
+    },
+    {
+      "status": 405,
+      "code": "METHOD_NOT_ALLOWED",
+      "reason": "The path exists; this verb does not.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.METHOD_NOT_ALLOWED"
+    },
+    {
+      "status": 406,
+      "code": "UNSUPPORTED_MEDIA_TYPE",
+      "reason": "An Accept header that rules out JSON. There is no code of its own: it is the one a 415 carries. Read from the code; nothing runs it, and the contract documents no 406.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#HttpStatus.UNSUPPORTED_MEDIA_TYPE.value(), HttpStatus.NOT_ACCEPTABLE.value() -> {"
+    },
+    {
+      "status": 415,
+      "code": "UNSUPPORTED_MEDIA_TYPE",
+      "reason": "A Content-Type this endpoint does not read.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.UNSUPPORTED_MEDIA_TYPE"
+    },
+    {
+      "status": 422,
+      "code": "VALIDATION_FAILED",
+      "reason": "The request parsed but a field or a required header is missing or not valid.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.VALIDATION_FAILED"
+    },
+    {
+      "status": 429,
+      "code": "RATE_LIMITED",
+      "reason": "A rate-limit bucket is empty; Retry-After says when to try again. The buckets are kept in Redis and fail open: if Redis cannot be reached every request is let through, with no X-RateLimit headers, and nothing is 429 until it is back.",
+      "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.RATE_LIMITED"
+    },
+    {
+      "status": 500,
+      "code": "INTERNAL_ERROR",
+      "reason": "Anything unanticipated. It never carries the underlying message.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.INTERNAL_ERROR"
+    }
+  ],
+  "pending": {
+    "endpoints": [],
+    "codes": []
+  },
+  "contractGaps": [
+    {
+      "endpoint": "GET /api/v1/bonds/{bondId}",
+      "status": 304,
+      "note": "Sent with an If-None-Match that equals the bond's current ETag, the answer is 304 with no body, for as long as what you would be shown has not changed. Asserted by BondSettingsEndpointTest (rotating and expiring an invite invalidate a cached bond without a row version change) and BondTimezoneEndpointTest (proposal creation cancellation and expiry invalidate the other member's cached view)."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/leave",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/block",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "PATCH /api/v1/bonds/{bondId}",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "PUT /api/v1/bonds/{bondId}/members/me/settings",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "PATCH /api/v1/bonds/{bondId}/timezone",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/timezone/confirm",
+      "status": 415,
+      "note": "Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/register",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/verify-email",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/resend-verification",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/logout",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/forgot-password",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/reset-password",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/register",
+      "status": 503,
+      "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/register",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/verify-email",
+      "status": 410,
+      "note": "410 VERIFICATION_TOKEN_EXPIRED for a verification link that is past its 24 hours or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/verify-email",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/resend-verification",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/login",
+      "status": 401,
+      "note": "401 INVALID_CREDENTIALS for every refused sign-in: a wrong password, an unknown address, a locked account; and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/login",
+      "status": 503,
+      "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; sign-in checks the password under the same limit as registration. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/login",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/refresh",
+      "status": 401,
+      "note": "401 REFRESH_TOKEN_INVALID for a refresh token that is unknown, expired or revoked, 401 TOKEN_REUSE_DETECTED for one already exchanged, and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/refresh",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/logout",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/forgot-password",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/reset-password",
+      "status": 410,
+      "note": "410 PASSWORD_RESET_TOKEN_EXPIRED for a reset link that is past its hour or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/reset-password",
+      "status": 503,
+      "note": "503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; the link is not spent. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing."
+    },
+    {
+      "endpoint": "POST /api/v1/auth/reset-password",
+      "status": 415,
+      "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    }
+  ]
+}

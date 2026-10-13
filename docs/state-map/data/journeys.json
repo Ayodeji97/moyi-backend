@@ -1,0 +1,258 @@
+[
+  {
+    "id": "J1",
+    "title": "First run and pairing",
+    "steps": [
+      {
+        "row": "account-anonymous-register",
+        "note": ""
+      },
+      {
+        "row": "account-pending-verify",
+        "note": ""
+      },
+      {
+        "row": "account-active-login-wrong",
+        "note": "A first try, with the password mistyped."
+      },
+      {
+        "row": "account-active-login",
+        "note": ""
+      },
+      {
+        "row": "bond-none-create",
+        "note": "The request carries the bond's name, its kind and its anchor time zone, and here a reveal time as well, which is optional."
+      },
+      {
+        "row": "invite-none-create-bond",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "invite-created-accept-own",
+        "note": ""
+      },
+      {
+        "row": "day-not-opened-write-waiting",
+        "note": "You do not wait for your partner."
+      },
+      {
+        "row": "bond-pending-member-joined",
+        "note": "Later the same day. Your partner has registered, verified and signed in on their own device, as you did."
+      },
+      {
+        "row": "invite-created-joined",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "day-suspended-joined-partial",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "invite-accepted-accept",
+        "note": "You try the code once more, after your partner has used it."
+      },
+      {
+        "row": "day-partial-today",
+        "note": "Both of you are now on day one, and your entry is waiting for theirs."
+      }
+    ]
+  },
+  {
+    "id": "J2",
+    "title": "The daily loop",
+    "steps": [
+      {
+        "row": "day-not-opened-write",
+        "note": ""
+      },
+      {
+        "row": "day-partial-write-again",
+        "note": ""
+      },
+      {
+        "row": "entry-submitted-edit",
+        "note": ""
+      },
+      {
+        "row": "day-partial-partner-writes-waits",
+        "note": "Later the same day."
+      },
+      {
+        "row": "partner-none-partner-writes",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "day-pending-reveal-today",
+        "note": ""
+      },
+      {
+        "row": "day-pending-reveal-time",
+        "note": ""
+      },
+      {
+        "row": "entry-submitted-reveal-time",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "day-revealed-today",
+        "note": ""
+      },
+      {
+        "row": "entry-revealed-edit",
+        "note": ""
+      },
+      {
+        "row": "entry-revealed-delete",
+        "note": "You take the words back instead."
+      },
+      {
+        "row": "day-revealed-streak",
+        "note": ""
+      },
+      {
+        "row": "day-revealed-ends",
+        "note": "That night."
+      },
+      {
+        "row": "day-not-opened-today",
+        "note": "The next morning. This is a new day, so nothing of yesterday's carries over, and the loop begins again."
+      }
+    ]
+  },
+  {
+    "id": "J3",
+    "title": "The broken streak",
+    "steps": [
+      {
+        "row": "day-not-opened-write",
+        "note": "You are some days into a run, with one rest day banked and Strict mode off."
+      },
+      {
+        "row": "day-partial-streak",
+        "note": ""
+      },
+      {
+        "row": "day-partial-ends",
+        "note": "Your partner never wrote."
+      },
+      {
+        "row": "entry-submitted-ends-solo",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "day-solo-freeze",
+        "note": ""
+      },
+      {
+        "row": "day-frozen-streak",
+        "note": "The next morning."
+      },
+      {
+        "row": "entry-revealed-edit",
+        "note": "You try to change what you wrote yesterday."
+      },
+      {
+        "row": "day-not-opened-missed-empty",
+        "note": "That day neither of you writes."
+      },
+      {
+        "row": "day-empty-streak",
+        "note": "The morning after. No freeze is left to cover the day, so the run ends here."
+      }
+    ]
+  },
+  {
+    "id": "J4",
+    "title": "Looking back",
+    "steps": [
+      {
+        "row": "day-revealed-today",
+        "note": "Both of you wrote today and the day has been revealed."
+      },
+      {
+        "row": "partner-visible-today",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "day-revealed-streak",
+        "note": ""
+      },
+      {
+        "row": "day-revealed-write",
+        "note": "You try to add to a day that is already settled."
+      },
+      {
+        "row": "day-revealed-ends",
+        "note": "After this the day is no longer today, and the journey stops here, where the API does: the archive by month, search, \"on this day\", milestone cards and export are not built."
+      }
+    ]
+  },
+  {
+    "id": "J5",
+    "title": "Ending",
+    "steps": [
+      {
+        "row": "bond-active-deletion-request",
+        "note": "First the two of you try to end it together."
+      },
+      {
+        "row": "proposal-none-deletion-request",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "bond-active-partner-confirms-deletion",
+        "note": ""
+      },
+      {
+        "row": "bond-pending-deletion-write",
+        "note": ""
+      },
+      {
+        "row": "bond-pending-deletion-deletion-cancel",
+        "note": "You change your mind inside the 30 days. What would have come at their end, the deletion itself, is not built."
+      },
+      {
+        "row": "bond-active-leave",
+        "note": "The bond is whole again, and some time later you go on your own after all. You send no body, so your entries stay."
+      },
+      {
+        "row": "entry-revealed-leave-keeps",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "bond-archived-read",
+        "note": ""
+      },
+      {
+        "row": "bond-archived-write",
+        "note": ""
+      },
+      {
+        "row": "bond-archived-leave",
+        "note": ""
+      },
+      {
+        "row": "bond-archived-block",
+        "note": "Later you decide not to leave your words with them. You send no body, so your entries go."
+      },
+      {
+        "row": "entry-revealed-block-withdraws",
+        "note": "",
+        "sameRequest": true
+      },
+      {
+        "row": "bond-archived-streak",
+        "note": ""
+      }
+    ]
+  }
+]
