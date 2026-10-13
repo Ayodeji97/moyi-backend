@@ -57,7 +57,12 @@ internal class FavouritesController(
         favourite.mark(caller.id, entryIdOrNotFound(entryId))
     }
 
-    /** `204` when absent or removed; `409 FAVOURITE_BUSY` when a competing operation holds the mark. Retry then. */
+    /**
+     * `204` when absent or removed, whatever has become of the entry or the
+     * bond; `409 FAVOURITE_BUSY` when another operation holds the mark on an
+     * entry that is not a tombstone to the caller. Retry then. On a tombstone
+     * a held mark is `204` like any other (`FavouriteEntry.unmark` has why).
+     */
     @DeleteMapping("/{entryId}/favourite")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun unfavouriteEntry(

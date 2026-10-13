@@ -598,6 +598,8 @@ class OpenApiContractTest(
         favourite.delete.operationId shouldBe "unfavouriteEntry"
         favourite.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "409", "429", "500")
         favourite.delete.description shouldContain "409 FAVOURITE_BUSY"
+        // …and never on a tombstone, where it would tell a withdrawal in flight from a deletion by hand (ADR-0037 decision 6).
+        favourite.delete.description shouldContain "never given for an entry the caller is shown as erased"
         favourite.delete.responses["204"]!!.content shouldBe null
         favourite.delete.parameters.map { it.name } shouldBe listOf("entryId")
     }
@@ -643,6 +645,7 @@ class OpenApiContractTest(
         reaction.delete.operationId shouldBe "unreactToEntry"
         reaction.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "409", "429", "500")
         reaction.delete.description shouldContain "409 REACTION_BUSY"
+        reaction.delete.description shouldContain "never given for an entry the caller is shown as erased"
         reaction.delete.responses["204"]!!.content shouldBe null
         reaction.delete.requestBody shouldBe null
         reaction.delete.parameters.map { it.name } shouldBe listOf("entryId")

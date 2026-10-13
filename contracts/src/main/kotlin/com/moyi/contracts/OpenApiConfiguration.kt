@@ -1043,8 +1043,8 @@ private val FAVOURITE_DESCRIPTIONS =
         "unfavouriteEntry" to
             "Removes the caller's bookmark. Repeatable: no bookmark is success, and so is an entry that has since been " +
             "erased. `404` is every entry the caller was never shown, the same as for an id that does not exist. " +
-            "`409 FAVOURITE_BUSY` means another operation holds the bookmark; retry the removal. " +
-            "Allowed on a bond that has ended.",
+            "`409 FAVOURITE_BUSY` means another operation holds the bookmark; retry the removal. It is never given for " +
+            "an entry the caller is shown as erased: there the answer is `204`. Allowed on a bond that has ended.",
     )
 
 /**
@@ -1067,7 +1067,8 @@ private val REACTION_DESCRIPTIONS =
             "Takes the caller's reaction back. Repeatable: no reaction is success, and so is an entry that has since " +
             "been erased, or one the caller wrote. `404` is every entry the caller was never shown, the same as for an " +
             "id that does not exist. `409 REACTION_BUSY` means another operation holds the reaction; retry the removal. " +
-            "Allowed on a bond that has ended.",
+            "It is never given for an entry the caller is shown as erased, or for one the caller wrote: there the " +
+            "answer is `204`. Allowed on a bond that has ended.",
     )
 
 /**
