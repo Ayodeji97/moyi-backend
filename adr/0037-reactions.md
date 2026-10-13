@@ -590,7 +590,11 @@ author's.
     one `response-property-enum-value-added` (the two new codes on each problem response);
     `--fail-on WARN` exits 1. The changelog adds 10 infos: two endpoints, and `reaction`
     required on eight responses. CI's own action was not run.
-  - **`./gradlew build`**: BUILD_TOTALS
+  - **`./gradlew build`**, once, at `69609dc` (everything but this paragraph): green,
+    **1,408 tests, no failures, errors or skips**, counted from the result files. `app`
+    57, `gratitude` 569 and `scheduling` 32 were executed; the other nine modules were up
+    to date and their results reused. The count is `a42409d`'s: Task 2 added assertions
+    to two existing tests and no test.
 - **Argued, not run:** that the time a held `DELETE` takes cannot be told from an absent
   one's; that a member's own second request can meet `REACTION_BUSY`; the second way to a
   leftover row after a `204`; that every erasure goes through `EraseEntry` (by search:
