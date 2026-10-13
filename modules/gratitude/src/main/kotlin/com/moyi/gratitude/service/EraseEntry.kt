@@ -77,7 +77,7 @@ internal class EraseEntry(
      * differ in it. A repeated call finds the entry erased and writes
      * nothing, this included.
      *
-     * **So does the reaction on it** (FR-048, the plan's decision 8), for
+     * **So does the reaction on it** (FR-048, ADR-0037 decision 8), for
      * the same reasons and in the same place: an acknowledgement of words
      * does not outlive them. Only the reactions ON the erased entry. What
      * its author left on the partner's entries is not touched, by a delete

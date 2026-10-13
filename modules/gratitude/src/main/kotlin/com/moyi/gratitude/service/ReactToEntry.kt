@@ -66,7 +66,7 @@ import java.util.UUID
  * ending withdrew the entry, nothing shows it (every later read is a
  * tombstone, which says `null`) and `EraseEntry` removes it. If it did not,
  * the author sees a reaction that was sent before the ending and landed
- * just after it (the plan's decision 5, recorded as the owner's to turn).
+ * just after it (ADR-0037 decision 5 and question 4: the owner's to turn).
  */
 @Service
 internal class ReactToEntry(

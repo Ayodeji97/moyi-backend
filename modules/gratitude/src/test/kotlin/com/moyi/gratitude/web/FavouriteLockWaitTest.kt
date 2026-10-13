@@ -262,7 +262,11 @@ internal class FavouriteLockWaitTest(
     fun `an unmark on a withdrawn entry whose row an eraser holds is the same 204 as on its twin deleted by hand`() {
         favourite(bea, adas).status shouldBe 204
         rig.block(ada, bond)
+        // The premise: withdrawn and committed, nothing erased. The entry is a tombstone to her by the gate alone.
         wordsOf(adas) shouldBe ADAS_WORDS
+        val beasToday = rig.today(bea, bond)
+        beasToday shouldContain "\"status\":\"DELETED\""
+        beasToday shouldNotContain ADAS_WORDS
 
         val cy = users.verified("Cy")
         val dee = users.verified("Dee")

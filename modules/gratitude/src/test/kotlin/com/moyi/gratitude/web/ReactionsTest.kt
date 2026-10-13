@@ -720,7 +720,7 @@ internal class ReactionsTest(
     /**
      * The same seam, with a withdrawal instead: the gate and the bond were
      * asked before it committed, the row is still whole, and so the statement
-     * takes the reaction (the plan's decision 5: the bond's lock is not
+     * takes the reaction (ADR-0037 decision 5: the bond's lock is not
      * taken). Nothing shows it, since the gate says tombstone from here on,
      * and the erasure removes it.
      */
@@ -743,8 +743,8 @@ internal class ReactionsTest(
     }
 
     /**
-     * The same seam, with an ending that withdraws **nothing**: the race the
-     * plan's decision 5 accepts, and the one whose outcome is seen. The bond
+     * The same seam, with an ending that withdraws **nothing**: the race
+     * ADR-0037 decision 5 accepts, and the one whose outcome is seen. The bond
      * and the gate were asked before the leave committed, no lock on the
      * bond is taken, and so the reaction lands a moment after the ending.
      * The author is shown it. Pinned here so that a change to it is noticed;

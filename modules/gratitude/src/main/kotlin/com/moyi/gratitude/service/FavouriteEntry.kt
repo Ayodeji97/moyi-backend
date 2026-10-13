@@ -112,7 +112,6 @@ internal class FavouriteEntry(
      * tombstone it still deletes, which costs nothing and takes away a mark
      * left by the one interleaving the class KDoc describes.
      *
-     * @throws EntryNotFoundException as [mark]: an unmark must not be a way to ask whether an id exists.
      * **A held row is a conflict only on an entry that is not a tombstone
      * to the caller.** There the holder may be an erasure that rolls back,
      * and the mark would then still show after a removal reported as made.
@@ -121,8 +120,10 @@ internal class FavouriteEntry(
      * whatever rows there are, and what holds the row is the erasure that
      * removes it (a delivery that fails is retried). A `409` there was the
      * one answer that differed between a withdrawal whose delivery is still
-     * open and its twin deleted by hand (review of slice C5c).
+     * open and its twin deleted by hand (ADR-0037 decision 6, found by the
+     * review of slice C5c).
      *
+     * @throws EntryNotFoundException as [mark]: an unmark must not be a way to ask whether an id exists.
      * @throws FavouriteBusyException another transaction holds the mark on an entry that is not a tombstone; retry the removal.
      */
     fun unmark(

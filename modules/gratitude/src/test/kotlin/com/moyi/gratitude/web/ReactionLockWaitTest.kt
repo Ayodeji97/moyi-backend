@@ -54,7 +54,7 @@ import javax.sql.DataSource
 
 /**
  * **Neither reaction route waits out an erasure** (ADR-0036 decision 12,
- * which found the stall on the favourite routes; the plan's decision 6).
+ * which found the stall on the favourite routes; ADR-0037 decision 6).
  *
  * The withdrawal consumer erases a member's entries one after another in one
  * transaction, and holds every row it has touched until the whole delivery
