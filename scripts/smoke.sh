@@ -122,9 +122,12 @@ for arg in "$@"; do
   esac
 done
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 pass() { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
 fail() { FAIL=$((FAIL+1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+# A check this run could not make (psql unreachable, or the timing it needs did
+# not happen): counted, so that "0 failed" is never read as "all checked".
+skip() { SKIP=$((SKIP+1)); printf '  skip %s\n' "$1"; }
 
 # The first JDK that can run the jar, in order of how deliberately it was
 # chosen: MOYI_JAVA, JAVA_HOME, SDKMAN's current and then any SDKMAN 25+,
@@ -362,7 +365,7 @@ flush_buckets
 for i in 2 3 4 5; do curl -s -o /dev/null -H 'Content-Type: application/json' -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "wrong $i")"; done
 expect "after five failures the RIGHT password is refused, identically" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
 LOCK="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT failed_attempts || '|' || CAST(EXTRACT(EPOCH FROM (locked_until - now())) AS int) FROM credentials c JOIN users u ON u.id=c.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
-case "$LOCK" in 5\|5[5-9]|5\|60) pass "locked for a minute after five failures ($LOCK)";; psql-unavailable) echo "  skip lock check (psql unavailable)";; *) fail "lockout row" "expected 5|55..60, got '$LOCK'";; esac
+case "$LOCK" in 5\|5[5-9]|5\|60) pass "locked for a minute after five failures ($LOCK)";; psql-unavailable) skip "lock check (psql unavailable)";; *) fail "lockout row" "expected 5|55..60, got '$LOCK'";; esac
 docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "UPDATE credentials SET locked_until = now() - interval '1 second' FROM users u WHERE u.id = credentials.user_id AND u.email='$EMAIL'" >/dev/null 2>&1 || true
 flush_buckets
 expect "once the lock expires the right password signs in again" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
@@ -624,7 +627,7 @@ expect "the code it carried is dead" 404 '"code":"INVITE_NOT_USABLE"' -- "$API/i
 expect "blocking an archived bond is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
 expect "blocking again is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
 BLOCK_ROWS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM blocks WHERE bond_id='$LEFT_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$BLOCK_ROWS" in psql-unavailable) echo "  skip block row count";; 1) pass "…and one row, not two";; *) fail "block rows" "expected 1, got '$BLOCK_ROWS'";; esac
+case "$BLOCK_ROWS" in psql-unavailable) skip "block row count";; 1) pass "…and one row, not two";; *) fail "block rows" "expected 1, got '$BLOCK_ROWS'";; esac
 
 # A non-member is refused before the bond's state is even looked at (T-02).
 expect "a stranger cannot leave someone else's bond" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$LEFT_BOND/leave" -H "Authorization: Bearer $STRANGER_ACCESS"
@@ -833,7 +836,7 @@ expect "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS" 409 '"
 expect "replaying the same key with the same body is 201 again" 201 "\"id\":\"$ENTRY_ID\"" -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d "{\"text\":\"$ENTRY_TEXT\"}"
 header_is "…and says it was replayed" Idempotency-Replayed true
 ENTRY_ROWS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM entries WHERE id='$ENTRY_ID'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$ENTRY_ROWS" in psql-unavailable) echo "  skip entry row count";; 1) pass "…and exactly one row landed in entries";; *) fail "entry rows" "expected 1, got '$ENTRY_ROWS'";; esac
+case "$ENTRY_ROWS" in psql-unavailable) skip "entry row count";; 1) pass "…and exactly one row landed in entries";; *) fail "entry rows" "expected 1, got '$ENTRY_ROWS'";; esac
 
 expect "the same key with a different body is 422 IDEMPOTENCY_KEY_REUSED" 422 '"code":"IDEMPOTENCY_KEY_REUSED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d '{"text":"this is not the body that key reserved"}'
 
@@ -972,7 +975,7 @@ HANDOFF_TODAY_BODY="$LAST_BODY"
 # is only asserted if Lagos midnight did not pass between the plan and the GET.
 read -r _ LAGOS_DATE_AT_READ _ <<<"$(zone_plan)"
 if [ "$LAGOS_DATE_AT_READ" != "$LAGOS_DATE" ]; then
-  echo "  skip the pre-write date check (Lagos midnight passed mid-section)"
+  skip "the pre-write date check (Lagos midnight passed mid-section)"
 else
   [[ "$HANDOFF_TODAY_BODY" == *"\"bondDay\":{\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it is still the Lagos date, $LAGOS_DATE" || fail "today's date" "expected bondDay.date $LAGOS_DATE: ${HANDOFF_TODAY_BODY:0:250}"
 fi
@@ -982,7 +985,7 @@ HANDOFF_ENTRY_BODY="$LAST_BODY"
 # entry, the date this section expects is no longer the one the server used.
 read -r _ LAGOS_DATE_AFTER _ <<<"$(zone_plan)"
 if [ "$LAGOS_DATE_AFTER" != "$LAGOS_DATE" ]; then
-  echo "  skip the landing-date checks (Lagos midnight passed mid-section)"
+  skip "the landing-date checks (Lagos midnight passed mid-section)"
 else
   [[ "$HANDOFF_ENTRY_BODY" == *"\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it lands on the old zone's date, $LAGOS_DATE" || fail "entry date" "expected date $LAGOS_DATE: ${HANDOFF_ENTRY_BODY:0:250}"
   [[ "$HANDOFF_ENTRY_BODY" != *"\"date\":\"$NEW_ZONE_DATE\""* ]] && pass "…not on $NEW_ZONE's, $NEW_ZONE_DATE" || fail "entry redated" "the entry was filed under the new zone: ${HANDOFF_ENTRY_BODY:0:250}"
@@ -990,9 +993,9 @@ else
   # The rows behind it: the day keeps the zone it began under, and the timeline
   # holds a closed Lagos interval followed by an open one that starts later.
   DAY_ZONE="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT anchor_timezone FROM bond_days WHERE bond_id='$HANDOFF_BOND' AND date='$LAGOS_DATE'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-  case "$DAY_ZONE" in psql-unavailable) echo "  skip the bond_days check";; Africa/Lagos) pass "…the day's row keeps Africa/Lagos";; *) fail "day zone" "expected Africa/Lagos, got '$DAY_ZONE'";; esac
+  case "$DAY_ZONE" in psql-unavailable) skip "the bond_days check";; Africa/Lagos) pass "…the day's row keeps Africa/Lagos";; *) fail "day zone" "expected Africa/Lagos, got '$DAY_ZONE'";; esac
   INTERVALS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT string_agg(zone || CASE WHEN effective_to IS NULL THEN ':open' ELSE ':closed' END || CASE WHEN effective_from > now() THEN ':future' ELSE ':past' END, ',' ORDER BY effective_from) FROM bond_anchor_intervals WHERE bond_id='$HANDOFF_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-  case "$INTERVALS" in psql-unavailable) echo "  skip the timeline check";; "Africa/Lagos:closed:past,$NEW_ZONE:open:future") pass "…and the timeline hands over later: $INTERVALS";; *) fail "timeline" "expected Africa/Lagos:closed:past,$NEW_ZONE:open:future, got '$INTERVALS'";; esac
+  case "$INTERVALS" in psql-unavailable) skip "the timeline check";; "Africa/Lagos:closed:past,$NEW_ZONE:open:future") pass "…and the timeline hands over later: $INTERVALS";; *) fail "timeline" "expected Africa/Lagos:closed:past,$NEW_ZONE:open:future, got '$INTERVALS'";; esac
 fi
 
 echo; echo "withdrawal — ending a bond and taking one's words back, with the poller running (FR-029a, spec §6.7, ADR-0035)"
@@ -1056,7 +1059,7 @@ await_erased() {
 # erased_check <label> — the verdict on what await_erased last saw.
 erased_check() {
   case "$ERASED_ROW" in
-    psql-unavailable) echo "  skip $1 (psql not reachable through docker compose)" ;;
+    psql-unavailable) skip "$1 (psql not reachable through docker compose)" ;;
     "1|DELETED") pass "$1 (the row has no text and is DELETED, within ${ERASED_AFTER}s)" ;;
     *) fail "$1" "ten seconds on, the row is '$ERASED_ROW', not '1|DELETED': the poller has not erased it" ;;
   esac
@@ -1092,7 +1095,7 @@ expect "…and the same body from a stranger is the same 400" 400 '"code":"MALFO
 [ "$LAST_BODY" = "$MEMBER_REFUSAL" ] && pass "…byte for byte, so it says nothing of who is in the bond" || fail "malformed-body oracle" "member: ${MEMBER_REFUSAL:0:160} stranger: ${LAST_BODY:0:160}"
 expect "…and the bond is still open" 200 '"status":"ACTIVE"' -- "$API/bonds/$KEPT_BOND" -H "Authorization: Bearer $OTHER_ACCESS"
 REFUSED_ROWS="$(sql "SELECT (SELECT count(*) FROM blocks WHERE bond_id='$KEPT_BOND') + (SELECT count(*) FROM bond_entry_withdrawals WHERE bond_id='$KEPT_BOND')")"
-case "$REFUSED_ROWS" in psql-unavailable) echo "  skip the refused-ending row check";; 0) pass "…with nothing recorded against it";; *) fail "refused ending" "expected no block and no withdrawal, got '$REFUSED_ROWS' rows";; esac
+case "$REFUSED_ROWS" in psql-unavailable) skip "the refused-ending row check";; 0) pass "…with nothing recorded against it";; *) fail "refused ending" "expected no block and no withdrawal, got '$REFUSED_ROWS' rows";; esac
 
 # The ending that keeps the words goes FIRST, on purpose. It publishes no
 # event, so there is nothing of its own to wait for; but every erasure seen
@@ -1112,7 +1115,7 @@ expect "the partner's today, once it is erased" 200 '"status":"REVEALED"' -- "$A
 [ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "null|DELETED" ] && pass "…the withdrawn entry is a tombstone: text null, DELETED" || fail "tombstone" "${LAST_BODY:0:300}"
 [ "$(today_field myEntry text)" = "$READER_TEXT" ] && pass "…and the partner's own entry is whole" || fail "partner's own entry" "${LAST_BODY:0:300}"
 READER_ROW="$(sql "SELECT (text = '$READER_TEXT')::int || '|' || status FROM entries WHERE id='$READER_ENTRY'")"
-case "$READER_ROW" in psql-unavailable) echo "  skip the partner's row check";; "1|REVEALED") pass "…in the database too: her row is untouched";; *) fail "partner's row" "expected 1|REVEALED, got '$READER_ROW'";; esac
+case "$READER_ROW" in psql-unavailable) skip "the partner's row check";; "1|REVEALED") pass "…in the database too: her row is untouched";; *) fail "partner's row" "expected 1|REVEALED, got '$READER_ROW'";; esac
 expect "the one who withdrew reads their own tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$TAKEN_BOND/today" -H "Authorization: Bearer $TAKER_ACCESS"
 [ "$(today_field myEntry text)|$(today_field myEntry status)" = "null|DELETED" ] && pass "…as myEntry, with no text" || fail "own tombstone" "${LAST_BODY:0:300}"
 
@@ -1130,7 +1133,7 @@ while [ "$(( $(date +%s) - KEPT_SINCE ))" -lt 10 ]; do sleep 1; done
 expect "ten seconds on, the kept words are still read by the other member" 200 "\"text\":\"$KEPT_TEXT\"" -- "$API/bonds/$KEPT_BOND/today" -H "Authorization: Bearer $OTHER_ACCESS"
 [ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "$KEPT_TEXT|REVEALED" ] && pass "…as the partner's entry, REVEALED" || fail "kept entry" "${LAST_BODY:0:300}"
 KEPT_ROW="$(sql "SELECT (text = '$KEPT_TEXT')::int || '|' || status FROM entries WHERE id='$KEPT_ENTRY'")"
-case "$KEPT_ROW" in psql-unavailable) echo "  skip the kept row check";; "1|REVEALED") pass "…and the row still holds them";; *) fail "kept row" "expected 1|REVEALED, got '$KEPT_ROW'";; esac
+case "$KEPT_ROW" in psql-unavailable) skip "the kept row check";; "1|REVEALED") pass "…and the row still holds them";; *) fail "kept row" "expected 1|REVEALED, got '$KEPT_ROW'";; esac
 
 # An ended bond takes no new words, and an author may still take their own
 # back (ADR-0032, question 1): were that refused, a tombstone appearing after
@@ -1144,7 +1147,7 @@ expect "…while the partner cannot delete it for them" 404 '"code":"NOT_FOUND"'
 # The outbox, after a whole run: every ending above and in the sections before
 # it published or did not, and nothing published is still owed or has failed.
 OWED="$(sql "SELECT count(*) FILTER (WHERE processed_at IS NULL) || '|' || count(*) FILTER (WHERE last_error IS NOT NULL) || '|' || (count(*) FILTER (WHERE processed_at IS NOT NULL) > 0)::int FROM outbox_deliveries WHERE consumer_id = 'gratitude.withdrawal'")"
-case "$OWED" in psql-unavailable) echo "  skip the delivery check";; "0|0|1") pass "every withdrawal was delivered: none owed, none ever failed";; *) fail "outbox deliveries" "expected owed|failed|any-delivered = 0|0|1, got '$OWED'";; esac
+case "$OWED" in psql-unavailable) skip "the delivery check";; "0|0|1") pass "every withdrawal was delivered: none owed, none ever failed";; *) fail "outbox deliveries" "expected owed|failed|any-delivered = 0|0|1, got '$OWED'";; esac
 WITHDRAWN_LOG="$(tail -n "+$((LOG_LINES_BEFORE_WITHDRAWAL + 1))" "$MOYI_LOG")"
 # The poller says nothing at INFO when it delivers: the line would sit two seconds after
 # "A member ended bond …" and say that ending took its entries back (ADR-0035 decision 11).
@@ -1315,7 +1318,7 @@ expect "PUT /entries/{id}/favourite on the partner's revealed entry is 204" 204 
 [ -z "$LAST_BODY" ] && pass "…with no body" || fail "favourite body" "${LAST_BODY:0:200}"
 expect "…and 204 again" 204 "" -- -X PUT "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_M"
 ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id='$ARC_W_ENTRY'")"
-case "$ARC_MARKS" in psql-unavailable) echo "  skip the favourite row count";; 1) pass "…leaving one row, not two";; *) fail "favourite rows" "expected 1, got '$ARC_MARKS'";; esac
+case "$ARC_MARKS" in psql-unavailable) skip "the favourite row count";; 1) pass "…leaving one row, not two";; *) fail "favourite rows" "expected 1, got '$ARC_MARKS'";; esac
 expect "the marker's archive" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
 is "…says favourited on that entry, and not on their own" "$(raw items.0.partnerEntry.id)|$(at items.0.partnerEntry.favourited)|$(at items.0.myEntry.favourited)" "$ARC_W_ENTRY|true|false"
 expect "the writer's archive" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"
@@ -1347,7 +1350,7 @@ is "…the same body as the PUT's" "$(no_instance)" "$ARC_NO_ENTRY"
 expect "a stranger unmarking a revealed entry of a bond they are not in is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_O"
 is "…the one 404: the same body as for no entry at all" "$(no_instance)" "$ARC_NO_ENTRY"
 ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id IN ('$ARC_W_ENTRY','$ARC_SOLO_ENTRY')")"
-case "$ARC_MARKS" in psql-unavailable) echo "  skip the refused-mark row count";; 0) pass "…and none of those refusals, nor the unmarking, left a row";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
+case "$ARC_MARKS" in psql-unavailable) skip "the refused-mark row count";; 0) pass "…and none of those refusals, nor the unmarking, left a row";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
 
 # The conditional read. The tag is of the bytes this caller is sent, so it moves
 # when their own mark does and stays when only the partner's does.
@@ -1441,8 +1444,8 @@ ARC_M_ITEM_AFTER="$(at items.0)"
 # ran, and that a consumer ran at all, which a deletion by hand has none of.
 case "$ARC_STILL_WHOLE" in
   t) is "…and it is the tag the feed had before the erasure: the erasure itself moved nothing" "$(tag)" "$ARC_FEED_TAG_WITHDRAWN";;
-  psql-unavailable) echo "  skip the tag across the erasure (psql unavailable)";;
-  *) echo "  skip the tag across the erasure: the poller had erased the entry before the first read (text whole: '$ARC_STILL_WHOLE')";;
+  psql-unavailable) skip "the tag across the erasure (psql unavailable)";;
+  *) skip "the tag across the erasure: the poller had erased the entry before the first read (text whole: '$ARC_STILL_WHOLE')";;
 esac
 no_times "…and nothing in the erased feed says when"
 expect "the marker's day view" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M"
@@ -1450,7 +1453,7 @@ is "…is that same item" "$(at "")" "$ARC_M_ITEM_AFTER"
 expect "…and the tag from before the withdrawal does not make it a 304" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_DAY_TAG_MARKED"
 expect "favourites=true no longer lists the day for the marker" 200 '"items":[]' -- "$API/bonds/$ARC_BOND/days?favourites=true" -H "Authorization: Bearer $ARC_M"
 ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id='$ARC_W_ENTRY'")"
-case "$ARC_MARKS" in psql-unavailable) echo "  skip the erased-mark row count";; 0) pass "…and the mark's row is gone with the words";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
+case "$ARC_MARKS" in psql-unavailable) skip "the erased-mark row count";; 0) pass "…and the mark's row is gone with the words";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
 expect "the one who withdrew still reads the archive of the ended bond" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"
 is "…their own entry a tombstone: text null, DELETED, not favourited" "$(raw items.0.myEntry.id)|$(at items.0.myEntry.text)|$(raw items.0.myEntry.status)|$(at items.0.myEntry.favourited)" "$ARC_W_ENTRY|null|DELETED|false"
 is "…beside the partner's entry, whole" "$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)|$(raw items.0.partnerEntry.status)" "$ARC_M_ENTRY|$ARC_M_TEXT|REVEALED"
@@ -1500,7 +1503,7 @@ rx_rows() { sql "SELECT count(*) || '|' || coalesce(string_agg(type, ',' ORDER B
 # rows_are <label> <entry id> <expected> — skipped, like every database check here, when psql cannot be reached.
 rows_are() {
   local got; got="$(rx_rows "$2")"
-  case "$got" in psql-unavailable) echo "  skip $1 (psql not reachable through docker compose)";; "$3") pass "$1";; *) fail "$1" "expected '$3', got '$got'";; esac
+  case "$got" in psql-unavailable) skip "$1 (psql not reachable through docker compose)";; "$3") pass "$1";; *) fail "$1" "expected '$3', got '$got'";; esac
 }
 # whole_response — the status line, every header but the ones that differ on
 # any two requests (the date, the request's id, the limiter's counters), and
@@ -1646,7 +1649,7 @@ for bad in '{"type":"HEART","note":"x"}' '{"type":"HEART","type":"SMILE"}' '{"ki
 done
 expect "a reaction sent as text/plain is 415" 415 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -H 'Content-Type: text/plain' -d '{"type":"HEART"}'
 RX_REFUSED="$(sql "SELECT count(*) FROM reactions WHERE entry_id IN ('$RX_A_ENTRY','$RX_B_ENTRY','$RX_SOLO_ENTRY')")"
-case "$RX_REFUSED" in psql-unavailable) echo "  skip the refused-reaction row count";; 0) pass "none of those refusals left a row";; *) fail "reaction rows" "expected 0, got '$RX_REFUSED'";; esac
+case "$RX_REFUSED" in psql-unavailable) skip "the refused-reaction row count";; 0) pass "none of those refusals left a row";; *) fail "reaction rows" "expected 0, got '$RX_REFUSED'";; esac
 
 # Each reacts to the other's entry. Two rows, one an entry, and neither request touches the other's.
 flush_buckets
@@ -1714,7 +1717,7 @@ RX_B_FEED_TAG_WITHDRAWN="$(tag)"
 # erasure that kept a reaction, or a reaction removed before its words.
 RX_BEFORE_ERASURE="$(sql "SELECT (text IS NOT NULL)::int || '|' || (SELECT count(*) FROM reactions WHERE entry_id='$RX_A_ENTRY') FROM entries WHERE id='$RX_A_ENTRY'")"
 case "$RX_BEFORE_ERASURE" in
-  psql-unavailable) echo "  skip the row beside its words (psql unavailable)";;
+  psql-unavailable) skip "the row beside its words (psql unavailable)";;
   "1|1") pass "…while the row is still in the table beside the words: it is the gate that hides it, not the erasure";;
   "0|0") pass "…and the poller has already erased both the words and the row";;
   *) fail "reaction row and its entry's words" "expected 1|1 or 0|0, got '$RX_BEFORE_ERASURE'";;
@@ -1732,8 +1735,8 @@ is "…the same tombstone, with no reaction" "$(raw items.0.partnerEntry.id)|$(a
 # shown to nobody, so it must not move the tag a second time.
 case "$RX_BEFORE_ERASURE" in
   "1|1") is "…under the tag the feed had before the erasure: removing the row moved nothing" "$(tag)" "$RX_B_FEED_TAG_WITHDRAWN";;
-  psql-unavailable) echo "  skip the tag across the erasure (psql unavailable)";;
-  *) echo "  skip the tag across the erasure: the poller had erased the entry before the first read ('$RX_BEFORE_ERASURE')";;
+  psql-unavailable) skip "the tag across the erasure (psql unavailable)";;
+  *) skip "the tag across the erasure: the poller had erased the entry before the first read ('$RX_BEFORE_ERASURE')";;
 esac
 expect "PUT …/reaction on the erased entry is still 409 ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"SMILE"}'
 is "…the twin's response" "$(whole_response)" "$RX_HAND_PUT"
@@ -1753,14 +1756,14 @@ for words in "$RX_A_TEXT" "$RX_B_TEXT" "$RX_SOLO_TEXT" "$RX_C_TEXT" "$RX_B2_TEXT
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.
-if [ "$ROW" = "ACTIVE|t|2|2" ]; then pass "user ACTIVE, verified, two tokens (verification + reset), both consumed"; elif [ "$ROW" = "psql-unavailable" ]; then echo "  skip database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|2|2, got '$ROW'"; fi
+if [ "$ROW" = "ACTIVE|t|2|2" ]; then pass "user ACTIVE, verified, two tokens (verification + reset), both consumed"; elif [ "$ROW" = "psql-unavailable" ]; then skip "database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|2|2, got '$ROW'"; fi
 SESSIONS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) || '|' || count(*) FILTER (WHERE revoked_at IS NULL) FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
 # Every family started here was ended: two by reuse detection and logout,
 # the phone's and the watch's by DELETE /auth/sessions, the rest by
 # logout-all and the reset. Two live tokens remain for THIS account — the
 # login after the reset and the one the bond section signed in with; the
 # joiner is a different account and is not counted here.
-case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|2") pass "refresh tokens stored as hashes; exactly two live sessions remain ($SESSIONS)";; *) fail "sessions" "expected exactly two live refresh tokens, got '$SESSIONS'";; esac
+case "$SESSIONS" in psql-unavailable) skip "session check";; *"|2") pass "refresh tokens stored as hashes; exactly two live sessions remain ($SESSIONS)";; *) fail "sessions" "expected exactly two live refresh tokens, got '$SESSIONS'";; esac
 
 # The close job (slice C3), on the wire. The run above started it on a
 # five-second schedule instead of its quarter-hour, so by now it has run many
@@ -1769,12 +1772,12 @@ case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|2") pass 
 # checked is that it ran, holds its lock by name, and failed on nothing.
 echo; echo "scheduling — the close job runs, under its lock, without error (spec §6.4, C3)"
 CLOSE_LOCK="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM shedlock WHERE name='close-days'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$CLOSE_LOCK" in psql-unavailable) echo "  skip lock check";; 1) pass "the close job has taken its ShedLock row";; *) fail "close job" "expected one shedlock row named close-days, got '$CLOSE_LOCK'";; esac
+case "$CLOSE_LOCK" in psql-unavailable) skip "lock check";; 1) pass "the close job has taken its ShedLock row";; *) fail "close job" "expected one shedlock row named close-days, got '$CLOSE_LOCK'";; esac
 if grep -qE "close: day .* failed|close: the missing days of bond|streak: bond .* could not be evaluated|FAILED [1-9]|Unexpected error occurred in scheduled task" "$MOYI_LOG"; then fail "close job" "the close job logged a failure"; else pass "…and has logged no failure"; fi
 UNCLOSED_PAST="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM bond_days WHERE closed_at IS NULL AND ends_at < now() - interval '1 minute'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$UNCLOSED_PAST" in psql-unavailable) echo "  skip unclosed-day check";; 0) pass "…and no day that has ended is still unclosed";; *) fail "close job" "$UNCLOSED_PAST ended days are still unclosed";; esac
+case "$UNCLOSED_PAST" in psql-unavailable) skip "unclosed-day check";; 0) pass "…and no day that has ended is still unclosed";; *) fail "close job" "$UNCLOSED_PAST ended days are still unclosed";; esac
 
-echo; printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+echo; printf '%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 # The exit status is the failure count, as the README says (capped at what a
 # shell can carry), so a caller can tell one failure from several.
 exit $(( FAIL > 255 ? 255 : FAIL ))

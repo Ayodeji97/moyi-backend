@@ -119,7 +119,10 @@ Three layers, cheapest first.
    compose Valkey between sections so the buckets do not decide what the
    next probe sees. `--no-build` reuses the jar; `PORT=18080`
    boots elsewhere; `--attach` probes a server you started yourself (set
-   `MOYI_LOG` to its log file). Exit status is the number of failures.
+   `MOYI_LOG` to its log file). Exit status is the number of failures. The
+   last line counts the passed, the failed and the skipped: a check the run
+   could not make (no `psql`, or a timing it needs did not happen) is a skip,
+   not a pass.
 3. **By hand.** Start the app (`SPRING_PROFILES_ACTIVE=local ./gradlew
    bootRun`), then `curl` the endpoints in `06` — the script is the worked
    example of every request body and every expected status. Rows are one
