@@ -2,7 +2,6 @@ package com.moyi.gratitude.service
 
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
-import com.moyi.common.web.NotFoundException
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
@@ -43,7 +42,7 @@ import java.util.UUID
  * archive is what an ended bond is for. (ADR-0036 decision 14 and question
  * 1: the owner's to turn.)
  *
- * **The marker is read last** ([readerNow]): the entry is loaded, and only
+ * **The marker is read last** ([entryAndMembershipNow]): the entry is loaded, and only
  * then is the membership resolved again for the reader the gate is asked
  * with. The first resolution says whether the caller is in the entry's bond
  * and which joining day to reconcile, and can be older than an ending that
@@ -137,31 +136,14 @@ internal class FavouriteEntry(
         if (!removed && answer != Favouriting.ERASED) throw FavouriteBusyException()
     }
 
-    /**
-     * The entry **as it stands now** and the reader to ask the gate with,
-     * built after it. [EntryNotFoundException] when there is no such entry or
-     * the caller is not in its bond; the guard's own "no such bond" is not
-     * passed on, since that would say the entry exists.
-     *
-     * The first read grants nothing but the entry's bond, which never
-     * changes. The joining day is reconciled as for every gratitude request
-     * (spec §12.4): on a day C1 left `SUSPENDED` with both entries, that is
-     * the reveal, and the difference between "not yet" and a mark.
-     */
+    /** [entryAndMembershipNow], and the reader the gate is asked with: a bookmark asks nothing else of the membership. */
     private fun entryAndReader(
         userId: UUID,
         entryId: EntryId,
     ): Pair<Entry, Reader> =
-        try {
-            entries.find(entryId)?.bondId?.let { bondId ->
-                val membership = access.membershipOf(userId, bondId)
-                joining.beforeRead(membership)
-                // The reader after the entry, never before: the marker is read last.
-                entries.find(entryId)?.let { entry -> entry to access.readerNow(membership) }
-            }
-        } catch (_: NotFoundException) {
-            null
-        } ?: throw EntryNotFoundException()
+        entryAndMembershipNow(access, entries, joining, userId, entryId).let { (entry, membership) ->
+            entry to membership.asReader()
+        }
 }
 
 /**

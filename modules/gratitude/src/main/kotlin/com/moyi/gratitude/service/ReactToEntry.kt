@@ -1,8 +1,6 @@
 package com.moyi.gratitude.service
 
 import com.moyi.bond.api.BondAccess
-import com.moyi.bond.api.BondMembership
-import com.moyi.common.web.NotFoundException
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
@@ -37,7 +35,7 @@ import java.util.UUID
  * other tombstone does.
  *
  * **The marker is read last, and the bond's state with it**
- * ([membershipNow]): the entry is loaded, and only then is the membership
+ * ([entryAndMembershipNow]): the entry is loaded, and only then is the membership
  * resolved again, for the reader the gate is asked with and for whether the
  * bond has ended. The first resolution says whether the caller is in the
  * entry's bond and which joining day to reconcile, and can be older than an
@@ -89,7 +87,7 @@ internal class ReactToEntry(
         entryId: EntryId,
         type: ReactionType,
     ) {
-        val (entry, membership) = entryAndMembership(userId, entryId)
+        val (entry, membership) = entryAndMembershipNow(access, entries, joining, userId, entryId)
         val refusal =
             when (entry.canBeReactedToBy(membership.asReader())) {
                 Reacting.NEVER_SHOWN -> {
@@ -146,39 +144,13 @@ internal class ReactToEntry(
         userId: UUID,
         entryId: EntryId,
     ) {
-        val (entry, membership) = entryAndMembership(userId, entryId)
+        val (entry, membership) = entryAndMembershipNow(access, entries, joining, userId, entryId)
         val answer = entry.canBeReactedToBy(membership.asReader())
         if (answer == Reacting.NEVER_SHOWN) throw EntryNotFoundException()
         val removed = reactions.remove(entryId, membership.memberId)
         // Only where a rollback could bring it back into view: the caller's own entry can hold no row of theirs.
         if (!removed && answer == Reacting.ALLOWED) throw ReactionBusyException()
     }
-
-    /**
-     * The entry **as it stands now** and the caller's membership of its
-     * bond, resolved after it. [EntryNotFoundException] when there is no
-     * such entry or the caller is not in its bond; the guard's own "no such
-     * bond" is not passed on, since that would say the entry exists.
-     *
-     * The first read grants nothing but the entry's bond, which never
-     * changes. The joining day is reconciled as for every gratitude request
-     * (spec §12.4): on a day C1 left `SUSPENDED` with both entries, that is
-     * the reveal, and the difference between the `404` and a reaction.
-     */
-    private fun entryAndMembership(
-        userId: UUID,
-        entryId: EntryId,
-    ): Pair<Entry, BondMembership> =
-        try {
-            entries.find(entryId)?.bondId?.let { bondId ->
-                val membership = access.membershipOf(userId, bondId)
-                joining.beforeRead(membership)
-                // The membership after the entry, never before: the marker is read last.
-                entries.find(entryId)?.let { entry -> entry to access.membershipNow(membership) }
-            }
-        } catch (_: NotFoundException) {
-            null
-        } ?: throw EntryNotFoundException()
 }
 
 /**
