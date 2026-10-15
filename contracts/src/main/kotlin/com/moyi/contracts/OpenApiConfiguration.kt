@@ -182,6 +182,7 @@ class OpenApiConfiguration {
             documentRevalidation(api)
             documentFavourites(api)
             documentReactions(api)
+            documentPrompts(api)
         }
 
     /**
@@ -584,7 +585,7 @@ private fun documentBondNamePattern(api: OpenAPI) {
 }
 
 /** `TodayResponse`'s schema name and its `partnerEntry` property — see [discriminatePartnerEntry] and [requireDiscriminatorProperty]. */
-private const val TODAY_RESPONSE = "TodayResponse"
+internal const val TODAY_RESPONSE = "TodayResponse"
 
 /** A day of the archive (`gratitude.web.DayResponse`): the same two entry fields as [TODAY_RESPONSE], from the same functions. */
 private const val DAY_RESPONSE = "DayResponse"

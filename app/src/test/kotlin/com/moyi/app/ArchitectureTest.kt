@@ -500,4 +500,30 @@ class ArchitectureTest {
                 "BondAccessGuard minted for that bond (doc 05 §5.5, doc 09 §4). Found: $violations",
         )
     }
+
+    @Test
+    fun `the prompt of the day is chosen from the bond, the date and the library, and nothing anybody did`() {
+        // FR-064 and the owner's Q-P1 (ADR-0038). DailyPrompt is where a read of an entry, a
+        // day, a mark, a reaction, a streak or a withdrawal would let one member's activity
+        // move what the other is offered. Its imports are an allowlist, so a new one is a
+        // decision this test makes somebody take.
+        val allowed =
+            setOf(
+                "com.moyi.bond.api.BondMembership",
+                "com.moyi.bond.api.BondType",
+                "com.moyi.gratitude.domain.PromptAudience",
+                "com.moyi.gratitude.domain.PromptId",
+                "com.moyi.gratitude.domain.PromptLocale",
+                "com.moyi.gratitude.domain.PromptOfTheDay",
+                "com.moyi.gratitude.infra.database.PromptLibrary",
+                "com.moyi.identity.api.UserDirectory",
+                "org.springframework.stereotype.Service",
+                "java.time.LocalDate",
+            )
+        val file =
+            project.files.single { it.name == "DailyPrompt" && it.normalisedProjectPath.contains("/modules/gratitude/src/main/") }
+        val extra = file.imports.map { it.name }.filterNot { it in allowed }
+
+        assertTrue(extra.isEmpty(), "DailyPrompt may read the bond, the library and the caller's locale, and nothing else. Found: $extra")
+    }
 }

@@ -4415,6 +4415,18 @@
         },
         "required" : [ "text" ]
       },
+      "TodayPromptResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "text" : {
+            "type" : "string"
+          }
+        }
+      },
       "TodayResponse" : {
         "type" : "object",
         "properties" : {
@@ -4445,6 +4457,14 @@
               "$ref" : "#/components/schemas/ErasedEntryResponse"
             }, {
               "$ref" : "#/components/schemas/LockedEntryResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "prompt" : {
+            "description" : "The bond's prompt of the day: the same prompt for both members, each in their own language. Null when the bond takes no writes from the caller (it has ended, is counting down to deletion, or the caller has left), and when the library holds nothing for this bond. Optional to answer; dismissing it is the client's alone.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/TodayPromptResponse"
             }, {
               "type" : "null"
             } ]

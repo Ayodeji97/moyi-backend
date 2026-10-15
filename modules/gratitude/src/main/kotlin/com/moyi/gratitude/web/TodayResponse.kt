@@ -4,8 +4,10 @@ import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
+import com.moyi.gratitude.service.PromptView
 import com.moyi.gratitude.service.TodayView
 import java.time.LocalDate
+import java.util.UUID
 
 /**
  * `200` from `GET /bonds/{bondId}/today` (spec §5.1).
@@ -39,11 +41,11 @@ import java.time.LocalDate
  * full [EntryResponse] instead — the failure the gate's own test is written
  * to catch.
  *
- * **`prompt` is absent, not a `null` placeholder.** It arrives in C6 (doc 06
- * §3.3's own promise for `BondResponse` makes the same call). A field that
- * does not exist yet is not part of this contract; a client reading this
- * response today learns nothing by its absence, and a later slice adding it
- * is additive, not a breaking change. `streak` arrived that way, in C4.
+ * **[prompt] is the bond's prompt of the day** (FR-047, ADR-0038): the same prompt for
+ * both members, each in their own language, and `null` when the bond takes no writes or
+ * the library has nothing for it. One `null` for every cause, so it tells a block from a
+ * leave no more than anything else here does. Whether the caller answers it is theirs;
+ * dismissing it is the client's alone, with no call (the owner's Q-P2).
  *
  * **No `partner` field.** The plan's own shape for this response names one
  * alongside `bondDay`, `myEntry` and `partnerEntry`, and it is left out of
@@ -67,6 +69,7 @@ internal data class TodayResponse(
     val partnerEntry: PartnerEntryResponse?,
     /** Doc 06 §3.4. About the bond, never about either member: see [StreakResponse]. */
     val streak: TodayStreakResponse,
+    val prompt: TodayPromptResponse?,
 ) {
     companion object {
         fun from(view: TodayView): TodayResponse =
@@ -86,7 +89,18 @@ internal data class TodayResponse(
                         PartnerEntryResponse.of(it, view.date, it.disclosed?.id in view.marked, view.reactions[it.disclosed?.id])
                     },
                 streak = TodayStreakResponse.from(view.streak),
+                prompt = view.prompt?.let(TodayPromptResponse::from),
             )
+    }
+}
+
+/** Doc 06:144, `"prompt": {"id": …, "text": …}`. Nothing says which entry answered it, or whether one did. */
+internal data class TodayPromptResponse(
+    val id: UUID,
+    val text: String,
+) {
+    companion object {
+        fun from(view: PromptView): TodayPromptResponse = TodayPromptResponse(view.id.value, view.text)
     }
 }
 
