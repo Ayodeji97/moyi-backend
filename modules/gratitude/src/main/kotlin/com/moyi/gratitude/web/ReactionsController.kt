@@ -20,8 +20,10 @@ import org.springframework.web.bind.annotation.RestController
  *
  * **One reaction per member per entry, so a resource the caller sets and
  * unsets**: `PUT` with `{"type": …}` sets or replaces it, `DELETE` removes
- * it, both `204` and both repeatable, the shape of the favourite routes
- * beside these. Doc 06 has `POST …/reactions` and `DELETE
+ * it, both `204` and both repeatable in sequence, the shape of the favourite
+ * routes beside these. Not at once: a `DELETE` that overlaps the member's own
+ * other `DELETE`, or their own `PUT`, on an entry they read in full can be
+ * `409 REACTION_BUSY`, and is retried. Doc 06 has `POST …/reactions` and `DELETE
  * …/reactions/{type}`, which is the shape for several at once. Neither
  * takes an `Idempotency-Key`, because a repeat already changes nothing, and
  * the entry's `reaction` is where a client reads it back.
@@ -64,7 +66,8 @@ internal class ReactionsController(
     /**
      * `204` when absent or removed, whatever has become of the entry or the
      * bond; `409 REACTION_BUSY` when another operation holds it on an entry
-     * the caller reads in full.
+     * the caller reads in full, the caller's own overlapping request
+     * included.
      */
     @DeleteMapping("/{entryId}/reaction")
     @ResponseStatus(HttpStatus.NO_CONTENT)

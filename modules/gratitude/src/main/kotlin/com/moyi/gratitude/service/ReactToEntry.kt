@@ -42,7 +42,12 @@ import java.util.UUID
  * ending that committed while that reconcile waited on the bond's lock.
  *
  * **No transaction and no lock of its own**, and in particular not the
- * bond's. Each step commits by itself:
+ * bond's, beyond the joining-day reconcile every gratitude request makes
+ * (ADR-0037 decision 11). That one takes the bond's lock, with no timeout,
+ * only while the joining day is still `SUSPENDED` and unclosed, which only
+ * a legacy bond's can be; there either verb can wait out a withdrawal's
+ * whole delivery, as every gratitude route on that bond can. Each step
+ * commits by itself:
  *
  * 1. The gate and the membership, which are the only things that know of a
  *    withdrawal whose entries are still whole, or of an ending.
