@@ -55,3 +55,25 @@ internal value class BondDayId(
 internal value class EntryId(
     val value: UUID,
 )
+
+/**
+ * A prompt of the library (doc 04 "Prompt", ADR-0038). Ids are written by hand in the
+ * migration that seeds the library; nothing in the application mints one.
+ */
+@JvmInline
+internal value class PromptId(
+    val value: UUID,
+) {
+    companion object {
+        /**
+         * The prompt [raw] names, or null when it is not a UUID in its canonical spelling.
+         * `UUID.fromString` alone takes `1-1-1-1-1`; a value that is not how an id is written
+         * is not an id, and the caller refuses it as it refuses one no prompt has.
+         */
+        fun parse(raw: String): PromptId? =
+            runCatching { UUID.fromString(raw) }
+                .getOrNull()
+                ?.takeIf { it.toString() == raw.lowercase() }
+                ?.let(::PromptId)
+    }
+}
