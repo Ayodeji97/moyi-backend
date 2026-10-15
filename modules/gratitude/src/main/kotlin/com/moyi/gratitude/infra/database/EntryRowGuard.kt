@@ -29,9 +29,11 @@ internal object EntryRowGuard {
     /**
      * How long a guarded write waits for a lock before it answers that the
      * entry does not qualify. Nothing that leaves a revealed entry whole
-     * holds its row, so the length decides one thing: how soon a request
-     * stuck behind a withdrawal gives its connection back. Two seconds,
-     * against a delivery that can run to sixty.
+     * holds its row for longer than an instant (an author's `PATCH` on a
+     * revealed entry locks it before refusing, and rolls back at once), so
+     * the length decides one thing: how soon a request stuck behind a
+     * withdrawal gives its connection back. Two seconds, against a delivery
+     * that can run to sixty.
      */
     val LOCK_WAIT: Duration = Duration.ofSeconds(2)
 

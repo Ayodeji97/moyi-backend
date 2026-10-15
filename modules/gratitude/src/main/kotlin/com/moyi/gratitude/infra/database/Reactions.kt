@@ -88,9 +88,10 @@ internal class Reactions(
      *
      * **It waits [lockTimeout] for a lock and no longer, and then answers
      * `false`.** A revealed entry's row is changed by one thing only, an
-     * erasure, so a row held past the wait is being erased, and "not an
-     * entry that can be reacted to" is the answer waiting would have given,
-     * sooner. If that erasure rolls back, the member was refused on an entry
+     * erasure. The one other holder is an author's `PATCH` on it, which locks
+     * the row before it refuses and lets go within milliseconds. So a row
+     * held past the wait is being erased, and "not an entry that can be
+     * reacted to" is the answer waiting would have given, sooner. If that erasure rolls back, the member was refused on an entry
      * that is still whole and may ask again. `waitingForALockAtMost` has how
      * the timeout is set and why nothing of it is logged. **Not to be called
      * inside a caller's transaction.**

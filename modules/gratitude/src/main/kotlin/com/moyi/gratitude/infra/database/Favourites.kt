@@ -90,7 +90,9 @@ internal class Favourites(
      * **It waits [lockTimeout] for a lock and no longer, and then answers
      * `false`.** An entry is revealed before it can be marked, and a
      * revealed entry's row is changed by one thing only, an erasure. An
-     * author's own delete holds the row for a moment. The withdrawal
+     * author's own delete holds the row for a moment, and so does an
+     * author's `PATCH` on it, which locks the row before it refuses and
+     * changes nothing. The withdrawal
      * consumer holds it until its whole delivery commits, and a mark that
      * waited for that would hold a connection for as long (the class's
      * note). So a row held past the timeout is being erased, and `false`,
