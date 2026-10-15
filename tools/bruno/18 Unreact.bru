@@ -17,5 +17,5 @@ auth:bearer {
 docs {
   Takes your reaction back: 204, and 204 again if there was none. Allowed after the bond has ended, and on an entry that has since been deleted. An entry you were never shown is 404.
 
-  409 REACTION_BUSY means something else is changing that reaction at this moment; send it again.
+  409 REACTION_BUSY means something else is changing that reaction at this moment, on an entry you can read in full; send it again. That can be your own other request: two of these at once, or this one over your own React. It is never the answer for an entry that has been deleted or withdrawn, or for one you wrote: those are 204.
 }

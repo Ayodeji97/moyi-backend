@@ -469,7 +469,7 @@ shape, for several reactions at once. The owner ruled one per member per entry
 
 | Method | Path | As built |
 |---|---|---|
-| PUT | `/entries/{entryId}/reaction` | Body `{"type": …}`, one of `HEART`, `THANK_YOU`, `SMILE`, `MOVED`, exactly (a placeholder set). `204`, repeatable; another type replaces the first. Only the partner's entry read in full takes one. `409 REACTION_ON_OWN_ENTRY` for an entry the caller wrote; `409 ENTRY_IMMUTABLE` for a tombstone, a withdrawn author's entry included; `409 BOND_ARCHIVED` once the bond has ended or the caller has left, told last; the one `404` for an entry the caller was never shown. `422 VALIDATION_FAILED` for a `type` that is absent, null or not one of the four; `400 MALFORMED_REQUEST` for any other key or `type` twice; both decided before the entry is looked at. No `Idempotency-Key` (decisions 1, 2, 4, 5) |
+| PUT | `/entries/{entryId}/reaction` | Body `{"type": …}`, one of `HEART`, `THANK_YOU`, `SMILE`, `MOVED`, exactly (a placeholder set). `204`, repeatable; another type replaces the first. Only the partner's entry read in full takes one. `409 REACTION_ON_OWN_ENTRY` for an entry the caller wrote; `409 ENTRY_IMMUTABLE` for a tombstone, a withdrawn author's entry included; `409 BOND_ARCHIVED` once the bond has ended or the caller has left, told last; the one `404` for an entry the caller was never shown. `422 VALIDATION_FAILED` for a `type` that is absent, null or not one of the four; `400 MALFORMED_REQUEST` for a body that is not an object, any other key, `type` twice, a value that is an object or an array, or anything after the closing brace; `415` for no `Content-Type` or one that is not JSON; all decided before the entry is looked at. No `Idempotency-Key` (decisions 1, 2, 4, 5) |
 | DELETE | `/entries/{entryId}/reaction` | `204`, repeatable, absent is success: on a tombstone, on the caller's own entry, and on an ended bond too. The same `404`. `409 REACTION_BUSY`, to be retried, when another transaction holds the row **on an entry the caller reads in full**; never on a tombstone (decisions 4, 5, 6) |
 
 - **An entry carries `reaction`**, the type or `null`, on the wide shape only: the reaction
@@ -912,7 +912,9 @@ a real `PATCH` between a day's end and the job.
   delayed erasure cannot create empty-page cursors even for a large history (decision 7,
   amended 2026-10-10). Removing a bookmark returns `204` only when absent or removed;
   a row held by another transaction gives `409 FAVOURITE_BUSY`, to be retried after that
-  transaction finishes (decision 12).
+  transaction finishes (decision 12). *(Amended 2026-10-15: since `01752a7`, only on an
+  entry that is not a tombstone to the caller; on a tombstone a held row is `204`. §5.2's
+  amendment of 2026-10-13 and ADR-0037 decision 6 have why.)*
 - **ETags** (decision 9). The second sentence of the first bullet stands and is built as a
   **keyed digest**: HMAC-SHA256, under the personal-data secret, of a domain label and the
   exact bytes sent. Not a plain hash: a tag is a header, a header reaches logs, and a bare
