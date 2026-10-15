@@ -430,7 +430,8 @@ carries the ones left on their entries is not decided anywhere.
 ## Questions that are the owner's
 
 Each is built one way. The first six are the ones the plan and the brief named; 7 and 8 are
-decisions made on 2026-10-10 by the agent running the plan, which the owner has not seen.
+decisions made on 2026-10-10 by the agent running the plan, which the owner has not seen; 11
+is a review's finding of 2026-10-15, left as built.
 
 1. **The placeholder set.** Four names, in the contract, the table's `CHECK` and the
    domain enum. Built as ruled. The final set, and whether each is drawn as a glyph or a
@@ -491,6 +492,23 @@ decisions made on 2026-10-10 by the agent running the plan, which the owner has 
     `DELETE` on one's own entry; body refusals before the entry lookup; the ended-bond
     check on the membership read after the entry; `BOND_ARCHIVED` last. The first two are
     status codes a client sees.
+11. **After a block that keeps the entries, the blocked member can still take reactions off
+    the blocker's entries.** Raised by the concurrency review of 2026-10-15 (its m1), by
+    reading; not run as a block in its own right, though `ReactionsTest` ("no reaction can
+    be left once the bond has ended…") runs the `DELETE` after an ending. `unreact` is
+    allowed on an ended bond, to either member, as deleting one's own entry is (decision 5).
+    So the person blocked can change what the blocker sees on the blocker's own words,
+    after the block: a reaction goes from `HEART` to `null`, and the tag moves, one a day if
+    they like. Decision 5 refuses the `PUT` because after an ending a reaction is contact; a
+    removal the other person sees is contact too. **Built: allowed, unchanged.** The same
+    channel already exists through ADR-0035 decision 15, under which the blocked member
+    deleting their own entries changes the blocker's archive; here it carries at most one
+    bit per reaction ever left, since none can be added again, and it is no withdrawal
+    oracle: a withdrawal and its twin answer alike. The other way is to refuse `unreact`'s
+    `ALLOWED` branch with `react`'s `hasLeft || !isOpen` check (twin-safe, since both worlds
+    are equally ended and the `ERASED` branch is untouched); it then needs a second
+    decision, whether a reaction the blocked member can no longer remove stays shown to the
+    blocker or is hidden from them. Not decided by anyone; the owner's to rule.
 
 ### The corpus
 
