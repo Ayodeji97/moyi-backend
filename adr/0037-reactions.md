@@ -57,8 +57,11 @@ things happened that the plan did not know:
 The slice was built in two tasks. Each was begun by an agent that stopped before committing
 anything, and finished by a second that treated what the first left as a draft. Task 1 had
 two independent reviews, of the task and then of its fixes, and neither ran anything. Task 2
-(the smoke section, the tools and this record) has had no reviewer. "How this was checked"
-says who ran what.
+(the smoke section, the tools and this record) and the whole branch had three independent
+reviews on 2026-10-15: of Task 2, of the branch's conformance and contract, and of its
+concurrency and privacy. They read and did not run, except that two of them ran `main`'s
+state-map check against the branch. Fix round 2 answered them the same day. "How this was
+checked" says who ran what.
 
 Terms, as in ADR-0036. The **gate** is `Entry.canBeReadBy`; its answers are `FULL`,
 `TOMBSTONE`, `LOCKED`, `TOMBSTONE_UNSEEN` and `NOT_A_MEMBER`. The **marker** is the bond's
@@ -72,8 +75,11 @@ entry it is left on.
 
 **1. The routes are `PUT /entries/{entryId}/reaction` with `{"type": …}` and
 `DELETE /entries/{entryId}/reaction`.** Both answer `204` with no body, and both are
-repeatable: a second `PUT` of the same type changes nothing, a `PUT` of another type
-replaces the first, and a `DELETE` of nothing is success. Doc 06's `POST …/reactions` and
+repeatable **in sequence**: a second `PUT` of the same type changes nothing, a `PUT` of
+another type replaces the first, and a `DELETE` of nothing is success. Not at once: a
+`DELETE` that overlaps the member's own other `DELETE`, or their own `PUT`, on an entry read
+in full finds the row held and is `409 REACTION_BUSY` (decision 6), retried. That is
+inherited from the favourite unmark (#60), and is reasoned from the code, not run. Doc 06's `POST …/reactions` and
 `DELETE …/reactions/{type}` are the shape for several reactions at once (X2). With one per
 member per entry there is one resource, which the caller sets and unsets, and a type in the
 path has nothing to select. It is the shape of the favourite routes beside it. Neither
@@ -127,9 +133,10 @@ entry).
 | `LOCKED`, `TOMBSTONE_UNSEEN`, not a member, no such entry, not a UUID | the one `404` | the one `404` |
 
 A partner's entry is `FULL` only once it is revealed, so "revealed only" has no rule of its
-own and `ENTRY_NOT_REVEALED` cannot be reached here. Like `FavouriteEntry` and unlike
-`ChangeEntry.authorOf`, the author is the one member who may **not**. What all three share
-is the refusal: everything the caller was never shown is one `404`, so no `409` on these
+own and `ENTRY_NOT_REVEALED` cannot be reached here. Like `FavouriteEntry`, the rule is
+the gate's answer for the caller. Unlike `ChangeEntry.authorOf`, and unlike a bookmark
+(which either member may leave on any entry they can read, their own included), the author
+is the one member who may **not**. What all three share is the refusal: everything the caller was never shown is one `404`, so no `409` on these
 routes can confirm an id.
 
 Two lines hold "never on one's own entry", and they are independent. The service refuses
@@ -156,8 +163,9 @@ decision 14 allows there. A bookmark is the member's own and the other person ne
 it; a reaction is made to be seen, and after an ending that is contact. Taking one's own
 reaction back is always allowed, as deleting one's own entry is (ADR-0035 decision 15).
 
-**No lock on the bond is taken.** Taking it would put a reaction behind a withdrawal's
-delivery, holding a pooled connection, which is the stall ADR-0036 decision 12 removed. So
+**No lock on the bond is taken**, beyond decision 11's reconcile. Taking it would put a
+reaction behind a withdrawal's delivery, holding a pooled connection, which is the stall
+ADR-0036 decision 12 removed. So
 **a `PUT` that races an ending can land.** The request asks the gate and the membership,
 the ending commits, and the statement, which knows nothing of bonds, writes the row. If the
 ending withdrew the entry, nothing shows that row (every later read is a tombstone) and the
@@ -277,7 +285,15 @@ review's reading); a reaction that is made writes no line.
 **11. The joining day is reconciled first**, as on every gratitude request (spec §12.4): on
 a day C1 left `SUSPENDED` with both entries, that is the reveal, and the difference between
 the `404` and a reaction. So either verb can take the bond's lock and write, once, on a
-legacy joining day, and does so even when the request then ends in `404`.
+legacy joining day, and does so even when the request then ends in `404`. **That lock is
+taken with no timeout** (`ReconcileJoiningDay.beforeRead`), whenever the joining day is
+still `SUSPENDED` and unclosed. On such a bond, a reaction verb sent while a withdrawal's
+delivery holds the bond's lock waits for the whole delivery, holding a pooled connection,
+and then erases what the delivery left (`underBondLock` runs `EraseWithdrawnEntries`). It is
+the stall decision 5 avoids, reached the one way decision 5 does not close, and every
+gratitude route on that bond shares it. Only a legacy bond's joining day can be in that
+state (the review of Task 1 and the concurrency review, by reading). Bounding the
+reconcile's wait is not this slice's (Owed).
 
 ## Consequences
 
@@ -334,7 +350,8 @@ legacy joining day, and does so even when the request then ends in `404`.
   ruling's recorded cost. A member's own quick second request can meet it (reasoned by the
   implementer, not run).
 - **The `PUT` waits at most two seconds for the entry's row and the `DELETE` never waits.**
-  Neither takes the bond's lock, apart from decision 11's legacy case.
+  Neither takes the bond's lock, apart from decision 11's legacy case, where the wait is
+  unbounded.
 - **The four ways of never having been shown an entry do different amounts of work before
   the same `404`**: not a UUID, nothing; no such id, one read; a stranger, a read and a
   membership; a partner's locked entry, two reads, two memberships and the reconcile check.
@@ -343,8 +360,11 @@ legacy joining day, and does so even when the request then ends in `404`.
 - **`reaction` spends about 2.3 KB of the archive page's margin.** The largest page
   `DaysFeedTest` builds is 230,663 octets with every `reaction` null; it was 229,063
   before the field (both the implementer's measurements). A reaction's longest name is
-  seven octets more than `null`, on each of a hundred entries. About 29 KB of the 262,144
-  are left (ADR-0036 decision 6).
+  seven octets more than `null`, on each of a hundred entries: 700 octets more. That leaves
+  about 31 KB of the 262,144 by the test's measure (262,144 − 230,663 − 700 = 30,781), and
+  about 29 KB once ADR-0036's 1.4 KB for production's microsecond timestamps (seven octets
+  in each of two fields of a hundred entries, which the test clock does not write) is
+  counted as well (ADR-0036 decision 6).
 - **The 2,000-entry withdrawal, with a bookmark and a reaction to remove from each entry,
   took 4,671 ms in one delivery**: one run, on the implementer's machine. ADR-0036 measured
   4,559 ms with bookmarks alone. The asserted bound is thirty seconds.
@@ -403,6 +423,9 @@ carries the ones left on their entries is not decided anywhere.
 - The favourites rollback test reads `/today` only, and for the caller only.
 - Nothing sets the connection pool's size or a statement timeout for a request (ADR-0036,
   unchanged).
+- The joining-day reconcile's wait for the bond's lock is unbounded (decision 11). Bounding
+  it as `EntryRowGuard` bounds the row wait would cover every gratitude route on a legacy
+  bond, not only these two.
 
 ## Questions that are the owner's
 
@@ -541,13 +564,15 @@ are the corpus's at `docs/phase-3-daily-loop`, `9be5149`, read for this record.
 - A bond can seat more than two: an entry then has more than one possible reactor, and
   `reaction` as one nullable field (decision 7) no longer holds.
 - A notification for a reaction is asked for: decision 10, and it would be a timed record.
-- A field is added to `EntryResponse`: the page's margin is about 29 KB.
+- A field is added to `EntryResponse`: the page's margin is about 29 KB, with production's
+  timestamps counted (Consequences).
 - A member row can be removed: Owed, Phase 5.
 
 ## How this was checked
 
-"Run" means executed and seen by the party named. Nothing here was run by the owner or by
-a reviewer: **both reviews of Task 1 read and did not run**, and say so. Every run below is
+"Run" means executed and seen by the party named. Nothing here was run by the owner. **The
+reviews read and did not run**, and say so, with one exception: two of the three reviews of
+2026-10-15 ran `main`'s state-map check against the branch. Every run below is
 an implementing agent's report of its own work, except Task 2's, which are this record's
 author's.
 
@@ -606,7 +631,7 @@ author's.
     **1,408 tests, no failures, errors or skips**, counted from the result files. `app`
     57, `gratitude` 569 and `scheduling` 32 were executed; the other nine modules were up
     to date and their results reused. The count is `a42409d`'s: Task 2 added assertions
-    to two existing tests and no test.
+    to three existing test functions, in two classes, and no test.
 - **Argued, not run:** that the time a held `DELETE` takes cannot be told from an absent
   one's; that a member's own second request can meet `REACTION_BUSY`; the second way to a
   leftover row after a `204`; that every erasure goes through `EraseEntry` (by search:
@@ -614,5 +639,4 @@ author's.
 - **Not run by anyone:** the smoke run on the pull request's final head (it ran on
   `cf40796`; the commits after it change the script, the tools and documents, and no
   production code); V23 against a shared database; CI's contract action; the collection in
-  Bruno; any independent re-run of the held-lock tests on a second machine; a review of
-  Task 2.
+  Bruno; any independent re-run of the held-lock tests on a second machine.

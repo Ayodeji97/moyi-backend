@@ -19,8 +19,9 @@ import java.util.UUID
  *
  * **Who may react to what is the read gate's answer for the caller**
  * ([Entry.canBeReactedToBy], which asks [Entry.canBeReadBy] and has the
- * table). Like `FavouriteEntry` and unlike `ChangeEntry.authorOf`: the
- * author is the one member who may **not**. What all three share is the
+ * table), as `FavouriteEntry`'s is. Unlike `ChangeEntry.authorOf`, and
+ * unlike a bookmark, which either member may leave on their own entry too:
+ * the author is the one member who may **not**. What all three share is the
  * refusal: everybody the entry was never shown to gets the one
  * [EntryNotFoundException], for every cause, so that no `409` here can
  * confirm an id the caller was not given.
