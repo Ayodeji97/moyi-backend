@@ -40,6 +40,9 @@
 CREATE TABLE reactions (
     entry_id  uuid NOT NULL REFERENCES entries (id) ON DELETE CASCADE,
     member_id uuid NOT NULL,
-    type      text NOT NULL CHECK (type IN ('HEART', 'THANK_YOU', 'SMILE', 'MOVED')),
-    PRIMARY KEY (entry_id, member_id)
+    type      text NOT NULL,
+    PRIMARY KEY (entry_id, member_id),
+
+    -- Named, as every constraint in the schema is: the migration that changes the set drops it by this name.
+    CONSTRAINT reactions_type_check CHECK (type IN ('HEART', 'THANK_YOU', 'SMILE', 'MOVED'))
 );

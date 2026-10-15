@@ -723,6 +723,11 @@ internal class ReactionsTest(
         shouldThrow<DataIntegrityViolationException> { row(day.beas, day.adaMember, "LOVE") }
         shouldThrow<DataIntegrityViolationException> { row(day.beas, day.adaMember, "heart") }
         rows() shouldBe listOf(Row(day.adas, day.beaMember, "HEART"))
+        // The set's one check, by the name a migration that changes the set will drop.
+        jdbc.queryForList(
+            "SELECT conname FROM pg_constraint WHERE conrelid = 'reactions'::regclass AND contype = 'c'",
+            String::class.java,
+        ) shouldBe listOf("reactions_type_check")
     }
 
     // ---- the reaction and the erasure, at the same time ----
