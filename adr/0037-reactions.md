@@ -650,11 +650,27 @@ author's.
     57, `gratitude` 569 and `scheduling` 32 were executed; the other nine modules were up
     to date and their results reused. The count is `a42409d`'s: Task 2 added assertions
     to three existing test functions, in two classes, and no test.
+- **The three reviews of 2026-10-15** (of Task 2, of conformance, of concurrency and
+  privacy; at `c57ae14`). Critical 0 in each; one important between them, found by two
+  (the state map, above, proved by running `main`'s checker); 19 minor, of which the
+  owner's coordinator skipped two. Their files, and fix round 2's brief and report, are in
+  the slice's working folder, not in this repository.
+- **Run for fix round 2** (2026-10-15, by its implementer, `f2d66ba..` this commit).
+  - `scripts/state-map-check --strict`: exit 0, "634 rows, 268 never run, 0 pending, 29
+    contract gaps. Nothing wrong."; the checker's own 154 tests pass.
+  - The new rollback test ("an erasure that rolls back after removing the entry's reaction
+    and bookmark…") was run red twice, once with each removal moved onto an autocommit
+    connection of its own, and green with the code as it is.
+  - `./gradlew build` at `dfac89b`: green, **1,409 tests, no failures, errors or skips**,
+    counted from the result files (1,408 and that test).
+  - **The smoke run**, `MOYI_DB=moyi_c5c_fix2_1015 scripts/smoke.sh`, on the jar built from
+    `dfac89b`: **814 passed, 0 failed, 0 skipped, 21 sections.** The withdrawal's
+    poller lost the race, so the tag across the erasure was checked. The database was
+    dropped afterwards and seen to be gone.
 - **Argued, not run:** that the time a held `DELETE` takes cannot be told from an absent
   one's; that a member's own second request can meet `REACTION_BUSY`; the second way to a
   leftover row after a `204`; that every erasure goes through `EraseEntry` (by search:
   three callers); what the handler logs for a refusal; rate limiting on the two routes.
 - **Not run by anyone:** the smoke run on the pull request's final head (it ran on
-  `cf40796`; the commits after it change the script, the tools and documents, and no
-  production code); V23 against a shared database; CI's contract action; the collection in
+  `dfac89b`; the commit after it changes this record and the script's header only); V23 against a shared database; CI's contract action; the collection in
   Bruno; any independent re-run of the held-lock tests on a second machine.

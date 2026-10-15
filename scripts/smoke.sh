@@ -52,9 +52,10 @@
 # REACTION_BUSY and FAVOURITE_BUSY, and the 204 a held row gets on a
 # tombstone, are the integration tests' alone.
 # Every day it reads is today: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-13, against a database of
-# its own (MOYI_DB, below): 814 passed, 0 failed, no skips, 21 sections; the
-# run before it, on 2026-10-09, was 647 and 0 in 20. A run on 2026-10-07, with the
+# days are the tests' to show. Last run on 2026-10-15, against a database of
+# its own (MOYI_DB, below), on the jar built from dfac89b: 814 passed, 0 failed,
+# 0 skipped, 21 sections (the first run to count its skips); on 2026-10-13 it
+# was 814 and 0, no skips, in 21, and on 2026-10-09 647 and 0 in 20. A run on 2026-10-07, with the
 # poller held idle, failed the four probes that then depended on it; three did
 # after that, the C5b section adds its own, and that run has not been
 # repeated. The pull request
