@@ -31,5 +31,11 @@ internal class AccountDirectory(
         return accounts.findAllById(ids.map(::UserId)).associate { it.id.value to it.toSummary() }
     }
 
-    private fun User.toSummary(): UserSummary = UserSummary(id = id.value, displayName = displayName, emailVerified = isEmailVerified)
+    private fun User.toSummary(): UserSummary =
+        UserSummary(
+            id = id.value,
+            displayName = displayName,
+            emailVerified = isEmailVerified,
+            locale = locale,
+        )
 }

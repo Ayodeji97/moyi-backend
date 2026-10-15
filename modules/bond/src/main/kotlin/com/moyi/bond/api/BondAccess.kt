@@ -111,6 +111,13 @@ interface BondAccess {
 }
 
 /**
+ * What a bond is for (cADR-0013), as another module may know it. The same four values as
+ * `bond.domain.BondType`, mapped one to one by `BondAccessAdapter`; what a type changes
+ * elsewhere (`gratitude`'s prompt overlay) is that module's rule.
+ */
+enum class BondType { COUPLE, FRIENDS, FAMILY, PARENT_CHILD }
+
+/**
  * A caller's place in a bond, and the five facts about the bond that a write
  * outside this module needs: whose calendar decides the day (doc 04 §6), when
  * a day reveals (FR-062), whether freezes are off (FR-073), whether the bond
@@ -190,7 +197,17 @@ class BondMembership internal constructor(
      * had not committed when the entries were read.
      */
     val withdrawnMemberIds: Set<UUID>,
+    /** The bond's type, as it is now: a `PATCH` can change it. */
+    val type: BondType,
 ) {
+    /**
+     * Whether this member's writes are taken: the bond is open (`PENDING_MEMBER` or `ACTIVE`)
+     * and they have not left it. The predicate every write path refuses with
+     * `409 BOND_ARCHIVED`; `gratitude`'s three older copies of it are owed a move here
+     * (ADR-0038, Owed).
+     */
+    val takesWrites: Boolean get() = isOpen && !hasLeft
+
     /** Ids only — a bond's name is the couple's words (doc 18 §9). */
     override fun toString(): String = "BondMembership(bondId=$bondId, memberId=$memberId)"
 }

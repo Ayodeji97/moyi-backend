@@ -5,6 +5,7 @@ import com.moyi.bond.api.BondAnchorTimeline
 import com.moyi.bond.api.BondClosingView
 import com.moyi.bond.api.BondDayBounds
 import com.moyi.bond.api.BondMembership
+import com.moyi.bond.api.BondType
 import com.moyi.bond.domain.AnchorTimeline
 import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.BondId
@@ -21,6 +22,7 @@ import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
 import java.util.UUID
+import com.moyi.bond.domain.BondType as DomainBondType
 
 /**
  * The port's only implementation: the guard, plus the bond facts, in one read
@@ -143,6 +145,7 @@ internal class BondAccessAdapter(
             // one whose partner withdrew as the one who did, and each must be told
             // the same set. Under `lockMembershipOf` this is read after the lock.
             withdrawnMemberIds = withdrawals.membersOf(membership.bondId),
+            type = bond.type.toApi(),
         )
 
     /**
@@ -191,3 +194,15 @@ internal class BondAccessAdapter(
             isDegenerate = isDegenerate,
         )
 }
+
+/**
+ * One to one, and exhaustive: a fifth domain type is a compile error here, not a silent default.
+ * Top-level, not a member: [BondAccessAdapter] sits at detekt's `TooManyFunctions` threshold.
+ */
+private fun DomainBondType.toApi(): BondType =
+    when (this) {
+        DomainBondType.COUPLE -> BondType.COUPLE
+        DomainBondType.FRIENDS -> BondType.FRIENDS
+        DomainBondType.FAMILY -> BondType.FAMILY
+        DomainBondType.PARENT_CHILD -> BondType.PARENT_CHILD
+    }

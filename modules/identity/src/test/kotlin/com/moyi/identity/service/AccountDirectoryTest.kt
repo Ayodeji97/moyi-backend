@@ -53,6 +53,14 @@ internal class AccountDirectoryTest(
     }
 
     @Test
+    fun `a user's locale is told as it is stored, case and all`() {
+        val ada = insertUser("ada@example.com", "Ada", verified = true, locale = "PT-pt")
+        directory.find(ada)!!.locale shouldBe "PT-pt"
+        directory.findAll(listOf(ada)).getValue(ada).locale shouldBe "PT-pt"
+        directory.find(ada)!!.toString() shouldBe "UserSummary(id=$ada)"
+    }
+
+    @Test
     fun `an unknown id is null, and findAll simply omits it`() {
         // The caller is another module asking about ids it holds; one of them
         // naming a deleted account is ordinary, not an error.
@@ -75,15 +83,17 @@ internal class AccountDirectoryTest(
         email: String,
         displayName: String,
         verified: Boolean,
+        locale: String = "en",
     ): UUID {
         val id = UUID.randomUUID()
         jdbc.update(
             "INSERT INTO users (id, email, email_verified_at, display_name, locale, status, created_at) " +
-                "VALUES (?, ?, CASE WHEN ? THEN now() END, ?, 'en', ?, now())",
+                "VALUES (?, ?, CASE WHEN ? THEN now() END, ?, ?, ?, now())",
             id,
             email,
             verified,
             displayName,
+            locale,
             if (verified) "ACTIVE" else "PENDING_VERIFICATION",
         )
         return id
