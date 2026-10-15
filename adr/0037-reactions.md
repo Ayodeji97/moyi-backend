@@ -295,6 +295,16 @@ legacy joining day, and does so even when the request then ends in `404`.
   say where its `409` stops.
 - **An existing client sees one new field**, `reaction`, on every entry it already receives
   in the wide shape.
+- **The state map has the two routes** (`docs/state-map/`, added on `main` by #59 after this
+  slice began; fix round 2, 2026-10-15). Two endpoint cards, filed under the day machine as
+  the favourite cards are, and a `204` row for each verb in each of the day's nine built
+  states, since an entry is addressed by id whatever today's day is. `REACTION_ON_OWN_ENTRY`,
+  `ENTRY_IMMUTABLE`, `BOND_ARCHIVED` and the one `404` are on the `PUT`'s card,
+  `REACTION_BUSY` and the `404` on the `DELETE`'s, each citing the smoke probe or the test
+  that asserts its code. The favourite `DELETE` card's `FAVOURITE_BUSY` now says it is never
+  given on an entry shown as erased (`01752a7`); the checker reads no reasons, so nothing
+  would have caught that sentence. The stamp stays `5839d47`: the map was not re-read in
+  full. `scripts/state-map-check --strict` exits 0.
 - **`PUT` and `DELETE` answer a held row differently, and the `PUT`'s answer sounds
   permanent** (the review's M-1). Both mean "an eraser that may yet roll back holds it". A
   `PUT` that waits two seconds behind one answers `409 ENTRY_IMMUTABLE`, whose sentence is

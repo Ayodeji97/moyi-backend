@@ -658,13 +658,99 @@
       {
         "status": 409,
         "code": "FAVOURITE_BUSY",
-        "reason": "Another operation holds the bookmark. Retry the removal.",
+        "reason": "Another operation holds the bookmark, on an entry you read in full. Nothing is removed; retry the removal. Never given on an entry shown to you as erased: there a held bookmark is 204, since what holds it is the erasure that removes it.",
         "evidence": "never-run",
         "evidenceRef": "",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#ErrorCode.FAVOURITE_BUSY"
       }
     ],
     "curl": "curl -X DELETE \"$API/entries/$ENTRY/favourite\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PUT /api/v1/entries/{entryId}/reaction",
+    "summary": "react to your partner's entry",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [
+      "Content-Type (application/json, with exactly one key, {\"type\": \"HEART\", \"THANK_YOU\", \"SMILE\" or \"MOVED\"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)"
+    ],
+    "requestErrors": [
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The body is not one JSON object with the one key: not an object, a key other than type, type twice, a value that is an object or an array, or content after the object. Nothing is set.",
+        "evidence": "smoke",
+        "evidenceRef": "…and one with a second key",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/ReactionRequest.kt#internal class ReactionRequestReader : ValueDeserializer<ReactionRequest>()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "type is missing, null, or not one of the four names exactly as written. Nothing is set.",
+        "evidence": "smoke",
+        "evidenceRef": "an unknown type once more, for its body",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/ReactionRequest.kt#internal class ReactionTypeConstraintValidator"
+      },
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "There is no such entry, the id is not an id, you are not a member of its bond, or it is your partner's entry and still locked: every entry you were never shown. No more specific reason is returned.",
+        "evidence": "smoke",
+        "evidenceRef": "PUT /entries/<an id nobody was issued>/reaction is 404",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryNotFoundException : NotFoundException(\"That entry was not found.\")"
+      },
+      {
+        "status": 409,
+        "code": "REACTION_ON_OWN_ENTRY",
+        "reason": "You wrote the entry, revealed or not. A reaction is left on your partner's entry; your own takes none.",
+        "evidence": "smoke",
+        "evidenceRef": "reacting to one's own revealed entry is 409 REACTION_ON_OWN_ENTRY",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#ErrorCode.REACTION_ON_OWN_ENTRY"
+      },
+      {
+        "status": 409,
+        "code": "ENTRY_IMMUTABLE",
+        "reason": "The entry is shown to you as erased (deleted by its author, or withdrawn at an ending, whether or not the erasure has run yet), or an erasure committed, or held the row past two seconds, while this request was deciding. Nothing is set. Told before an ending.",
+        "evidence": "smoke",
+        "evidenceRef": "PUT …/reaction on the withdrawn entry is 409 ENTRY_IMMUTABLE",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryImmutableException :"
+      },
+      {
+        "status": 409,
+        "code": "BOND_ARCHIVED",
+        "reason": "The bond has ended, or you have left it: after an ending a reaction would be contact. Told last, only to a caller who could otherwise have reacted. Taking one back is still allowed.",
+        "evidence": "smoke",
+        "evidenceRef": "PUT …/reaction by the one who stayed is 409 BOND_ARCHIVED",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#membership.hasLeft || !membership.isOpen -> BondArchivedException()"
+      }
+    ],
+    "curl": "curl -X PUT \"$API/entries/$ENTRY/reaction\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"type\": \"HEART\"}'"
+  },
+  {
+    "id": "DELETE /api/v1/entries/{entryId}/reaction",
+    "summary": "take your reaction back",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "There is no such entry, the id is not an id, you are not a member of its bond, or it is your partner's entry and still locked: every entry you were never shown. No more specific reason is returned.",
+        "evidence": "smoke",
+        "evidenceRef": "DELETE /entries/<an id nobody was issued>/reaction is 404",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryNotFoundException : NotFoundException(\"That entry was not found.\")"
+      },
+      {
+        "status": 409,
+        "code": "REACTION_BUSY",
+        "reason": "Another operation holds your reaction on a partner's entry you read in full: an erasure, which may roll back, or your own request still running (two DELETEs that overlap, or a DELETE over your own PUT). Nothing is removed; retry. Never given on an entry shown to you as erased, nor on your own entry: there it is 204.",
+        "evidence": "test",
+        "evidenceRef": "ReactionLockWaitTest#taking a reaction back returns at once with 409 REACTION_BUSY while an erasure holds its row, which is as the eraser leaves it",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#ErrorCode.REACTION_BUSY"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/entries/$ENTRY/reaction\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
     "id": "POST /api/v1/auth/register",
