@@ -599,6 +599,44 @@ internal class ReactionsTest(
         rows() shouldContainExactlyInAnyOrder listOf(Row(day.adas, day.beaMember, "HEART"), Row(day.beas, day.adaMember, "SMILE"))
     }
 
+    /**
+     * The removals are the erasure's own work, so they are undone with it.
+     * Every other rollback in these tests is an eraser written by hand, whose
+     * SQL deletes the rows itself; this one is the real [EraseEntry], under
+     * the bond's lock as each of its callers takes it, in a transaction that
+     * fails after the reaction and the bookmark are gone from inside it.
+     * Moved out of that transaction (a `REQUIRES_NEW`, an autocommit, a call
+     * after the commit), either removal would leave a whole, revealed entry
+     * without what the partner left on it, after an erasure that never
+     * happened.
+     */
+    @Test
+    fun `an erasure that rolls back after removing the entry's reaction and bookmark leaves both where they were`() {
+        val day = revealedDay()
+        react(bea, day.adas, "HEART").status shouldBe 204
+        archive.favourite(bea, day.adas)
+        val dayId = BondDayId(jdbc.queryForObject("SELECT bond_day_id FROM entries WHERE id = ?::uuid", UUID::class.java, day.adas)!!)
+
+        transactions.execute { erasure ->
+            access.lockMembershipOf(ada, UUID.fromString(day.bond))
+            eraser.erase(EntryId(UUID.fromString(day.adas)), dayId, clock.instant())
+            // Inside the erasure, both are gone: the removals ran, and on this transaction's connection.
+            withClue("inside the erasure") {
+                rows().shouldBeEmpty()
+                bookmarksOn(day.adas) shouldBe 0
+                entry(day.adas)["status"] shouldBe "DELETED"
+            }
+            erasure.setRollbackOnly()
+        }
+
+        entry(day.adas)["text"] shouldBe ADAS_WORDS
+        rows() shouldBe listOf(Row(day.adas, day.beaMember, "HEART"))
+        bookmarksOn(day.adas) shouldBe 1
+        for (user in listOf(ada, bea)) {
+            reactionShown(user, day.bond, day.adas) shouldBe listOf("HEART", "HEART", "HEART")
+        }
+    }
+
     @Test
     fun `the close job reaching a withdrawn author's day before the consumer leaves no reaction on what it erases`() {
         clock.set(NOW.minusSeconds(DAY))
@@ -950,6 +988,10 @@ internal class ReactionsTest(
     ) {
         jdbc.update("INSERT INTO reactions (entry_id, member_id, type) VALUES (?::uuid, ?, ?)", entryId, memberId, type) shouldBe 1
     }
+
+    /** How many bookmarks there are on [entryId], from either member. */
+    private fun bookmarksOn(entryId: String): Int =
+        jdbc.queryForObject("SELECT count(*) FROM entry_favourites WHERE entry_id = ?::uuid", Int::class.java, entryId)!!
 
     private fun entry(id: String): Map<String, Any?> =
         jdbc.queryForMap("SELECT text, status, deleted_at, revealed_at FROM entries WHERE id = ?::uuid", id)
