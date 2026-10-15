@@ -632,6 +632,8 @@ class OpenApiContractTest(
         reaction.put.parameters.map { it.name } shouldBe listOf("entryId")
         reaction.put.requestBody.required shouldBe true
         reaction.put.requestBody.content.keys shouldBe setOf(MediaType.APPLICATION_JSON_VALUE)
+        // 415 is not in the status list; the description says it, with the body's other rules, as the ending routes' does.
+        reaction.put.description shouldContain "415"
 
         // The body is the one key, never null, and its values are the set itself: no second list to drift.
         val body = api.components.schemas["ReactionRequest"]!!

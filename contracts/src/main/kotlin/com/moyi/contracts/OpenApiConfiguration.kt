@@ -1062,7 +1062,8 @@ private val REACTION_DESCRIPTIONS =
             "erased, or is being erased: a tombstone. `409 BOND_ARCHIVED` is a bond that has ended. `404` is every " +
             "entry the caller was never shown, the same as for an id that does not exist. A `type` that is absent, " +
             "null or not one of the listed names, exactly, is `422`. A body with any other key, or with `type` twice, " +
-            "is `400`; nothing is ignored. A body is judged before the entry is looked at.",
+            "is `400`; nothing is ignored. A body with no `Content-Type`, or one that is not JSON, is `415`. A body is " +
+            "judged before the entry is looked at.",
         "unreactToEntry" to
             "Takes the caller's reaction back. Repeatable: no reaction is success, and so is an entry that has since " +
             "been erased, or one the caller wrote. `404` is every entry the caller was never shown, the same as for an " +
