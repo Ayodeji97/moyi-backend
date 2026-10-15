@@ -177,6 +177,11 @@ internal class WithdrawEntriesTest(
         val withdrawn = rig.pair(ada, bea)
         val deleted = rig.pair(ada, bea)
         val written = threeDays(withdrawn, deleted)
+        // On the day both wrote, each has left a reaction on the other's entry (FR-048).
+        for (bond in listOf(withdrawn, deleted)) {
+            rig.react(bea, written.getValue(bond).adas.first(), "HEART")
+            rig.react(ada, written.getValue(bond).beas, "SMILE")
+        }
 
         // One bond: the member deletes her entries one at a time, and ends it keeping what is left.
         written.getValue(deleted).adas.forEach { rig.delete(ada, it) }
@@ -187,6 +192,9 @@ internal class WithdrawEntriesTest(
 
         val twin = rig.snapshot(deleted, ada, bea)
         rig.snapshot(withdrawn, ada, bea) shouldBe twin
+        // The reaction on her erased entry went with it. The one she left on the partner's entry is not an entry
+        // of hers, and stays: were a withdrawal to take it, that is what would tell it from deleting by hand.
+        twin.reactions shouldBe listOf("{entry=ENTRY_2026-09-13_MEMBER_B_1, member=MEMBER_A, type=SMILE}")
         // Not vacuous: the day that was still open stepped back, in both.
         twin.days.last().contains("status=OPEN, ") shouldBe true
         twin.read.forEach { it shouldNotContain ADAS }
@@ -276,6 +284,7 @@ internal class WithdrawEntriesTest(
         val deleteFirst = rig.pair(ada, bea)
         val consumerFirst = rig.pair(ada, bea)
         val written = threeDays(deleteFirst, consumerFirst)
+        listOf(deleteFirst, consumerFirst).forEach { rig.react(bea, written.getValue(it).adas.first(), "MOVED") }
         listOf(deleteFirst, consumerFirst).forEach { rig.block(ada, it) }
         rig.postpone(deleteFirst, clock.instant().plusSeconds(60))
 
@@ -299,6 +308,7 @@ internal class WithdrawEntriesTest(
         rig.wholeDays(deleteFirst) shouldBe deletedOnly.second
 
         rig.snapshot(deleteFirst, ada, bea) shouldBe rig.snapshot(consumerFirst, ada, bea)
+        rig.snapshot(deleteFirst, ada, bea).reactions shouldBe emptyList()
         rig.wholeDays(deleteFirst).map { it["version"] } shouldBe rig.wholeDays(consumerFirst).map { it["version"] }
         rig.wholeDays(deleteFirst).last()["status"] shouldBe "OPEN"
         rig.wholeDays(deleteFirst).last()["entry_count"].toString() shouldBe "0"
@@ -584,6 +594,12 @@ internal class WithdrawEntriesTest(
             rig.memberId(bond, bea),
             bond,
         ) shouldBe MANY
+        // And left a reaction on every one (slice C5c).
+        jdbc.update(
+            "INSERT INTO reactions (entry_id, member_id, type) SELECT id, ?, 'HEART' FROM entries WHERE bond_id = ?::uuid",
+            rig.memberId(bond, bea),
+            bond,
+        ) shouldBe MANY
         rig.block(ada, bond)
 
         val started = System.nanoTime()
@@ -598,6 +614,7 @@ internal class WithdrawEntriesTest(
         ) shouldBe
             MANY
         jdbc.queryForObject("SELECT count(*) FROM entry_favourites", Int::class.java) shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM reactions", Int::class.java) shouldBe 0
         took shouldBeLessThan Duration.ofSeconds(30)
     }
 

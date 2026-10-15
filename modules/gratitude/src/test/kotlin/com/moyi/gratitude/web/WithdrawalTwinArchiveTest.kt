@@ -11,6 +11,7 @@ import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -36,7 +37,13 @@ import javax.sql.DataSource
  * are whole, and only the gate knows. In the second, its twin, Ada deletes
  * each entry herself and then leaves. Bea walks both archives, plain and with
  * `favourites=true`, at several page sizes, and every page must be the same:
- * the same days, the same shapes and the same `nextCursor`.
+ * the same days, the same shapes and the same `nextCursor`. So must each
+ * day asked for alone, and `/today`.
+ *
+ * **Both have left reactions on the other's entries** (FR-048, slice C5c).
+ * Bea's on Ada's entries are hidden with the words and erased with them.
+ * Ada's on Bea's entries stay, in both bonds: a withdrawal that took them
+ * back would be told from a deletion by hand by their vanishing.
  *
  * It was not so. The favourites filter matched Bea's bookmark on a withdrawn
  * row, the gate turned the day into one that holds no favourite, and the page
@@ -101,12 +108,18 @@ internal class WithdrawalTwinArchiveTest(
         // Nothing has erased: every row of hers holds its words, and every bookmark is still there.
         wholeEntriesOf(withdrawn, ada) shouldBe HISTORY.size
         marksOf(withdrawn) shouldBe HISTORY.sumOf { it.marks }
+        reactionsOn(withdrawn, author = ada) shouldBe HISTORY.indices.count(::readerReacts)
 
         // The twin is two other people: Bea cannot join Ada again once Ada has blocked her.
         val byHand = history(cy, dee)
         entriesOf(byHand, cy).forEach { rig.bonds.delete(cy, it) }
         rig.bonds.leave(cy, byHand, false)
         wholeEntriesOf(byHand, cy) shouldBe 0
+        reactionsOn(byHand, author = cy) shouldBe 0
+        // What the one who left had put on the other's entries is still there, in both.
+        for ((bond, reader) in listOf(withdrawn to bea, byHand to dee)) {
+            reactionsOn(bond, author = reader) shouldBe HISTORY.indices.count(::authorReacts)
+        }
 
         for (asked in WALKS) {
             withClue("asked with $asked") {
@@ -118,6 +131,12 @@ internal class WithdrawalTwinArchiveTest(
                 }
             }
         }
+        // Each day alone, and today: the same to her as to her twin.
+        alone(bea, withdrawn) shouldBe alone(dee, byHand)
+        // Not vacuous: reactions are shown, and none of them on an entry that was taken back.
+        val shown = rig.walk(bea, withdrawn)
+        shown.count { !it["partnerEntry"]["reaction"].isNull } shouldBe 0
+        shown.count { !it["myEntry"]["reaction"].isNull } shouldBe HISTORY.indices.count(::authorReacts)
         // Not vacuous: the filter did have withdrawn days to drop, and days to keep between them.
         rig.datesOf(rig.walk(bea, withdrawn, mapOf("favourites" to "true", "limit" to "1"))) shouldBe KEPT
         rig.pages(bea, withdrawn, mapOf("favourites" to "true", "limit" to "1")).size shouldBe KEPT.size
@@ -129,13 +148,20 @@ internal class WithdrawalTwinArchiveTest(
         rig.bonds.block(ada, bond, true)
         val before = WALKS.associateWith { sent(bond, it) }
         before.getValue(mapOf("favourites" to "true", "limit" to "1")).size shouldBe KEPT.size
+        val daysBefore = daysSent(bond)
+        // Her reactions on his entries are still rows, though nothing has shown them since the ending.
+        reactionsOn(bond, author = ada) shouldBe HISTORY.indices.count(::readerReacts)
 
         dispatcher.dispatchDue(clock.instant(), 10).failed shouldBe 0
 
         wholeEntriesOf(bond, ada) shouldBe 0
+        reactionsOn(bond, author = ada) shouldBe 0
+        reactionsOn(bond, author = bea) shouldBe HISTORY.indices.count(::authorReacts)
         for (asked in WALKS) {
             withClue("asked with $asked") { sent(bond, asked) shouldBe before.getValue(asked) }
         }
+        // Each day alone, and today: the reaction's row going moved her tag no second time.
+        daysSent(bond) shouldBe daysBefore
     }
 
     /**
@@ -216,13 +242,20 @@ internal class WithdrawalTwinArchiveTest(
             val adas = rig.insertEntry(day, bond, adasMember, EntryState.REVEALED, "review-probe", at)
             rig.insertEntry(day, bond, beasMember, EntryState.REVEALED, "review-probe", at)
             mark(adas!!, beasMember, at)
+            // And she left a reaction on each (slice C5c): hidden with the words, and gone with them.
+            jdbc.update("INSERT INTO reactions (entry_id, member_id, type) VALUES (?, ?, 'HEART')", adas, beasMember) shouldBe 1
         }
         clock.set(NOW)
         rig.bonds.block(ada, bond, true)
         val asked = mapOf("favourites" to "true", "limit" to "1")
         val before = sent(bond, asked)
+        val plain = sent(bond, mapOf("limit" to "50"))
+        plain.forEach { (body, _) -> body shouldNotContain "\"reaction\":\"HEART\"" }
+        reactionsOn(bond, author = ada) shouldBe reach + 1
         dispatcher.dispatchDue(clock.instant(), 10).failed shouldBe 0
+        reactionsOn(bond, author = ada) shouldBe 0
         sent(bond, asked) shouldBe before
+        sent(bond, mapOf("limit" to "50")) shouldBe plain
     }
 
     // ---- the history ----
@@ -251,6 +284,8 @@ internal class WithdrawalTwinArchiveTest(
             val beas = rig.bonds.submit(reader, bond, "zq-second-words-$index")
             if (marked.adas) rig.favourite(reader, adas)
             if (marked.beas) rig.favourite(reader, beas)
+            if (readerReacts(index)) rig.bonds.react(reader, adas, TYPES[index % TYPES.size])
+            if (authorReacts(index)) rig.bonds.react(author, beas, TYPES[(index + 1) % TYPES.size])
         }
         clock.set(at(DAY_ONE.plusDays(HISTORY.size.toLong())))
         return bond
@@ -267,6 +302,35 @@ internal class WithdrawalTwinArchiveTest(
             UUID_PATTERN.replace(page.toString()) { found -> seen.getOrPut(found.value) { "id-${seen.size + 1}" } }
         }
     }
+
+    /** `/today` and every day of [HISTORY] asked for alone, with each UUID replaced by the order it first appears. */
+    private fun alone(
+        reader: UUID,
+        bond: String,
+    ): List<String> {
+        val seen = LinkedHashMap<String, String>()
+        val bodies =
+            listOf(rig.bonds.today(reader, bond)) +
+                HISTORY.indices.map { index ->
+                    rig
+                        .day(
+                            reader,
+                            bond,
+                            DAY_ONE.plusDays(index.toLong()).toString(),
+                        ).also { it.status shouldBe 200 }
+                        .getContentAsString(Charsets.UTF_8)
+                }
+        return bodies.map { body -> UUID_PATTERN.replace(body) { found -> seen.getOrPut(found.value) { "id-${seen.size + 1}" } } }
+    }
+
+    /** `/today` as its bytes, and every day of [HISTORY] asked for alone as its bytes and its tag: what Bea is sent. */
+    private fun daysSent(bond: String): List<Pair<String, String?>> =
+        listOf(rig.bonds.today(bea, bond) to null) +
+            HISTORY.indices.map { index ->
+                val response = rig.day(bea, bond, DAY_ONE.plusDays(index.toLong()).toString())
+                response.status shouldBe 200
+                response.getContentAsString(Charsets.UTF_8) to response.getHeader(HttpHeaders.ETAG)!!
+            }
 
     /** Every page of Bea's walk as the bytes and the tag it was sent with. */
     private fun sent(
@@ -319,6 +383,18 @@ internal class WithdrawalTwinArchiveTest(
             bond,
         )!!
 
+    /** How many reactions there are on [author]'s entries in [bond]. */
+    private fun reactionsOn(
+        bond: String,
+        author: UUID,
+    ): Int =
+        jdbc.queryForObject(
+            "SELECT count(*) FROM reactions r JOIN entries e ON e.id = r.entry_id WHERE e.bond_id = ?::uuid AND e.author_member_id = ?",
+            Int::class.java,
+            bond,
+            rig.bonds.memberId(bond, author),
+        )!!
+
     /** How many of [author]'s entries in [bond] still hold their words. */
     private fun wholeEntriesOf(
         bond: String,
@@ -357,6 +433,13 @@ internal class WithdrawalTwinArchiveTest(
                 Marked(adas = false, beas = true),
                 Marked(adas = true, beas = false),
             )
+
+        val TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED")
+
+        /** On which days of [HISTORY] Bea reacts to Ada's entry, and Ada to Bea's: some both, some one, some neither. */
+        fun readerReacts(index: Int): Boolean = index % 2 == 0
+
+        fun authorReacts(index: Int): Boolean = index % 3 != 1
 
         /** The days of [HISTORY] that are still favourites once Ada's words are gone, newest first. */
         val KEPT = listOf("2026-09-21", "2026-09-20", "2026-09-16")

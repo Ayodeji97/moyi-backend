@@ -181,6 +181,7 @@ class OpenApiConfiguration {
             documentDaysQuery(api)
             documentRevalidation(api)
             documentFavourites(api)
+            documentReactions(api)
         }
 
     /**
@@ -469,6 +470,11 @@ class OpenApiConfiguration {
                 // Removing a locked bookmark is a retryable FAVOURITE_BUSY conflict.
                 "unfavouriteEntry",
                 "favouriteEntry",
+                // Slice C5c. REACTION_ON_OWN_ENTRY, ENTRY_IMMUTABLE (a tombstone)
+                // and BOND_ARCHIVED. Taking back a locked reaction is a retryable
+                // REACTION_BUSY conflict, as `unfavouriteEntry`'s is.
+                "reactToEntry",
+                "unreactToEntry",
             )
 
         /**
@@ -1037,9 +1043,84 @@ private val FAVOURITE_DESCRIPTIONS =
         "unfavouriteEntry" to
             "Removes the caller's bookmark. Repeatable: no bookmark is success, and so is an entry that has since been " +
             "erased. `404` is every entry the caller was never shown, the same as for an id that does not exist. " +
-            "`409 FAVOURITE_BUSY` means another operation holds the bookmark; retry the removal. " +
-            "Allowed on a bond that has ended.",
+            "`409 FAVOURITE_BUSY` means another operation holds the bookmark; retry the removal. It is never given for " +
+            "an entry the caller is shown as erased: there the answer is `204`. Allowed on a bond that has ended.",
     )
+
+/**
+ * What a client of the two reaction operations has to be told: who sees a
+ * reaction, which entries take one, and what each refusal means. The shared
+ * error schema does not list the applicable codes for each operation.
+ */
+private val REACTION_DESCRIPTIONS =
+    mapOf(
+        "reactToEntry" to
+            "Leaves the caller's reaction on their partner's entry: one per member per entry, so a second one replaces " +
+            "the first. The other member is shown it, as the entry's `reaction`, and is not shown when it was left. " +
+            "Repeatable. Only the partner's entry that the caller is shown with `status: REVEALED` takes one. " +
+            "`409 REACTION_ON_OWN_ENTRY` is an entry the caller wrote. `409 ENTRY_IMMUTABLE` is an entry that has been " +
+            "erased, or is being erased: a tombstone. `409 BOND_ARCHIVED` is a bond that has ended. `404` is every " +
+            "entry the caller was never shown, the same as for an id that does not exist. A `type` that is absent, " +
+            "null or not one of the listed names, exactly, is `422`. A body with any other key, or with `type` twice, " +
+            "is `400`; nothing is ignored. A body with no `Content-Type`, or one that is not JSON, is `415`. A body is " +
+            "judged before the entry is looked at.",
+        "unreactToEntry" to
+            "Takes the caller's reaction back. Repeatable: no reaction is success, and so is an entry that has since " +
+            "been erased, or one the caller wrote. `404` is every entry the caller was never shown, the same as for an " +
+            "id that does not exist. `409 REACTION_BUSY` means another operation holds the reaction, which can be the " +
+            "caller's own request still running (two removals at once, or one over the caller's own `PUT`); retry the " +
+            "removal. " +
+            "It is never given for an entry the caller is shown as erased, or for one the caller wrote: there the " +
+            "answer is `204`. Allowed on a bond that has ended.",
+    )
+
+/**
+ * Gives the two reaction operations their [REACTION_DESCRIPTIONS], and states
+ * the set of types where springdoc cannot (slice C5c).
+ *
+ * **The set is written nowhere in this module.** `EntryResponse.reaction` is
+ * the domain's enum, so springdoc lists its names there; the request's
+ * `type` is text (so that a wrong value is a `422` naming the field, not an
+ * unreadable body) and is given that same list here. One statement of
+ * FR-048's set, the enum's, read twice.
+ *
+ * Two corrections to what is generated:
+ * - `ReactionRequest.type` is a Kotlin `String?` for the reason
+ *   `PatchEntryRequest.text` is, and springdoc documents `["string",
+ *   "null"]`. `{"type": null}` is never accepted.
+ * - `EntryResponse.reaction` is nullable, and its generated `enum` does not
+ *   list `null`. By JSON Schema an enum is the whole of what a value may be,
+ *   so a strict client would refuse every entry nobody has reacted to.
+ */
+private fun documentReactions(api: OpenAPI) {
+    api.paths.values.flatMap { it.readOperations() }.forEach { operation ->
+        REACTION_DESCRIPTIONS[operation.operationId]?.let { operation.description = it }
+    }
+    @Suppress("UNCHECKED_CAST") // A schema's `enum` is typed by the schema, and these two are read as untyped.
+    val shown =
+        api.components.schemas[ENTRY_RESPONSE]
+            ?.allOf
+            ?.lastOrNull()
+            ?.properties
+            ?.get(REACTION_PROPERTY) as Schema<Any?>? ?: return
+    val types = shown.enum.orEmpty().filterNotNull()
+    shown.enum = types + null
+    shown.description =
+        "The reaction on this entry: the one left by the member who did not write it, or null. Both members are sent " +
+        "the same value. Always null on an erased entry."
+    @Suppress("UNCHECKED_CAST")
+    val sent =
+        api.components.schemas[REACTION_REQUEST]
+            ?.properties
+            ?.get(REACTION_TYPE_PROPERTY) as Schema<Any?>? ?: return
+    sent.types = setOf("string")
+    sent.enum = types
+    sent.description = "The reaction to leave, by its exact name."
+}
+
+private const val REACTION_REQUEST = "ReactionRequest"
+private const val REACTION_TYPE_PROPERTY = "type"
+private const val REACTION_PROPERTY = "reaction"
 
 /** Gives the two bookmark operations their [FAVOURITE_DESCRIPTIONS]. */
 private fun documentFavourites(api: OpenAPI) {

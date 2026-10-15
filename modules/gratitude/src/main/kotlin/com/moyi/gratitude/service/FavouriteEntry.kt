@@ -2,7 +2,6 @@ package com.moyi.gratitude.service
 
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
-import com.moyi.common.web.NotFoundException
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
@@ -43,7 +42,7 @@ import java.util.UUID
  * archive is what an ended bond is for. (ADR-0036 decision 14 and question
  * 1: the owner's to turn.)
  *
- * **The marker is read last** ([readerNow]): the entry is loaded, and only
+ * **The marker is read last** ([entryAndMembershipNow]): the entry is loaded, and only
  * then is the membership resolved again for the reader the gate is asked
  * with. The first resolution says whether the caller is in the entry's bond
  * and which joining day to reconcile, and can be older than an ending that
@@ -63,7 +62,7 @@ import java.util.UUID
  *    erased by a withdrawal.
  *
  * **Neither verb waits out a withdrawal.** The unmark deletes only a row it
- * can lock at once; a held row is a retryable conflict ([Favourites.unmark]). Before
+ * can lock at once; a held row is a retryable conflict, except on a tombstone ([unmark]). Before
  * that, each request stuck behind a long withdrawal held a pooled
  * connection, and a few of them stalled every other request there was.
  *
@@ -112,43 +111,39 @@ internal class FavouriteEntry(
      * tombstone it still deletes, which costs nothing and takes away a mark
      * left by the one interleaving the class KDoc describes.
      *
+     * **A held row is a conflict only on an entry that is not a tombstone
+     * to the caller.** There the holder may be an erasure that rolls back,
+     * and the mark would then still show after a removal reported as made.
+     * On a tombstone it is `204` all the same: the entry is a tombstone by
+     * something that has committed, a tombstone says `favourited: false`
+     * whatever rows there are, and what holds the row is the erasure that
+     * removes it (a delivery that fails is retried). A `409` there was the
+     * one answer that differed between a withdrawal whose delivery is still
+     * open and its twin deleted by hand (ADR-0037 decision 6, found by the
+     * review of slice C5c).
+     *
      * @throws EntryNotFoundException as [mark]: an unmark must not be a way to ask whether an id exists.
-     * @throws FavouriteBusyException another transaction holds the mark; retry the removal.
+     * @throws FavouriteBusyException another transaction holds the mark on an entry that is not a tombstone; retry the removal.
      */
     fun unmark(
         userId: UUID,
         entryId: EntryId,
     ) {
         val (entry, reader) = entryAndReader(userId, entryId)
-        if (entry.canBeFavouritedBy(reader) == Favouriting.NEVER_SHOWN) throw EntryNotFoundException()
-        if (!favourites.unmark(entryId, reader.memberId)) throw FavouriteBusyException()
+        val answer = entry.canBeFavouritedBy(reader)
+        if (answer == Favouriting.NEVER_SHOWN) throw EntryNotFoundException()
+        val removed = favourites.unmark(entryId, reader.memberId)
+        if (!removed && answer != Favouriting.ERASED) throw FavouriteBusyException()
     }
 
-    /**
-     * The entry **as it stands now** and the reader to ask the gate with,
-     * built after it. [EntryNotFoundException] when there is no such entry or
-     * the caller is not in its bond; the guard's own "no such bond" is not
-     * passed on, since that would say the entry exists.
-     *
-     * The first read grants nothing but the entry's bond, which never
-     * changes. The joining day is reconciled as for every gratitude request
-     * (spec §12.4): on a day C1 left `SUSPENDED` with both entries, that is
-     * the reveal, and the difference between "not yet" and a mark.
-     */
+    /** [entryAndMembershipNow], and the reader the gate is asked with: a bookmark asks nothing else of the membership. */
     private fun entryAndReader(
         userId: UUID,
         entryId: EntryId,
     ): Pair<Entry, Reader> =
-        try {
-            entries.find(entryId)?.bondId?.let { bondId ->
-                val membership = access.membershipOf(userId, bondId)
-                joining.beforeRead(membership)
-                // The reader after the entry, never before: the marker is read last.
-                entries.find(entryId)?.let { entry -> entry to access.readerNow(membership) }
-            }
-        } catch (_: NotFoundException) {
-            null
-        } ?: throw EntryNotFoundException()
+        entryAndMembershipNow(access, entries, joining, userId, entryId).let { (entry, membership) ->
+            entry to membership.asReader()
+        }
 }
 
 /**

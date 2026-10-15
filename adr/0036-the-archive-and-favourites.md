@@ -1,6 +1,7 @@
 # ADR-0036 — The archive and favourites
 
 **Status:** Accepted · **Date:** 2026-10-09 · **Deciders:** Daniel
+**Amended:** 2026-10-13 ("Owed, C5c" discharged or carried, item by item; decision 12's unmark narrowed on a tombstone by `01752a7`, which the owner has not ruled on — ADR-0037)
 
 ## Context
 
@@ -615,6 +616,21 @@ whole-branch concurrency review proved that the unmark was the one that mattered
   row still gives `204`. A retry after either commit or rollback is covered over HTTP.
   Both variants avoid waiting for a row lock, but only `NOWAIT` distinguishes contention
   from absence ([PostgreSQL 18 locking clauses](https://www.postgresql.org/docs/18/sql-select.html#SQL-FOR-UPDATE-SHARE)).
+- **Amended 2026-10-13 (the change is of 2026-10-10, commit `01752a7`, in slice C5c): on a
+  tombstone a held row is `204`, not `409 FAVOURITE_BUSY`.** The amendment above made an
+  oracle. While a withdrawal's delivery was open, an unmark on a withdrawn entry answered
+  `409`, and on its twin deleted by hand `204`. The review of C5c's first task found it on
+  the reaction route, which had copied this idiom, and a test proved it here too.
+  `FavouriteEntry.unmark` now answers `FAVOURITE_BUSY` only when the row is held **and**
+  the entry is not a tombstone to the caller. On a tombstone the `204` cannot be made
+  false by the holder rolling back: the entry is a tombstone by something committed, a
+  tombstone says `favourited: false` whatever rows exist, and the holder is the erasure
+  that removes the row. **This was decided by the agent running C5c's plan, not by the
+  owner, and it changes what #60 merged the same day.** ADR-0037 decision 6 has the whole
+  of it, and its question 8 is the owner's. It is one commit and reverts alone. The
+  statement, its `NOWAIT`, and the `409` on an entry read in full or not yet revealed are
+  unchanged, and `main`'s two `FAVOURITE_BUSY` tests pass untouched. The statement itself
+  now lives in `EntryRowGuard`, shared with `Reactions`.
 - **The mark waits two seconds for a lock and then answers `409 ENTRY_IMMUTABLE`.** Its
   statement now runs in a transaction of its own that first sets
   `set_config('lock_timeout', '2000ms', true)`: `ConsumerRegistry`'s idiom, local to the
@@ -865,6 +881,40 @@ passes (S15). A mark is one small statement and an id that was never shown is th
   member's own reactions on the partner's entries included; and the status codes for a
   repeat, an unknown type, a tombstone and before the reveal. C5c's plan settles each
   before code. Found dropped by the conformance review.
+
+*Amended 2026-10-13 — what became of each item above (ADR-0037; C5c's code is of
+2026-10-10). The list is left as it was written.*
+
+1. *A route by entry id that is not the author's rule.* **Discharged:** ADR-0037 decision
+   4, `Entry.canBeReactedToBy`: the gate's answer for the caller, one `404` for everything
+   never shown, no `409` that confirms an id. Both routes are in `EntryChangesTest`'s route
+   set, which also discharges the item "Open for C5c" in the list above this one.
+2. *No timestamp.* **Discharged:** decisions 3 and 7. `reactions` has no time column, where
+   doc 07 gives it `created_at`, and no response carries one (`ReactionsTest`, "no response
+   carries when a reaction was made, and the table has nowhere to keep it").
+3. *`EraseEntry` must remove an entry's reactions.* **Discharged:** decision 8, beside the
+   favourites, in the same branch of the same transaction.
+4. *Whether a reaction is allowed on an ended bond.* **Discharged, the other way from
+   decision 14 here:** not allowed, `409 BOND_ARCHIVED`; taking one back is (ADR-0037
+   decision 5). **Carried, as the owner's:** no lock on the bond is taken, so a reaction
+   sent before a plain ending can land just after it (its question 4).
+5. *The owner's rulings of 2026-10-06.* **Discharged:** built as ruled (decisions 1, 2, 3,
+   4 and 7). **Carried:** the set is still the placeholder (its question 1), and whether
+   "visible to the author" was meant to accept X4's read receipt is put to the owner
+   (its question 6).
+6. *X2, X3 and S1 to S5.* **X2 discharged:** one per member per entry, in the key and in
+   the routes (decisions 1 and 3). **X3 discharged in part:** the set is fixed, as a
+   placeholder, and the gap is recorded (ADR-0037 question 9, spec §11); **carried:** no
+   screen is drawn, and none was invented. **S1, S2, S3, S5 discharged:** decisions 2, 4, 7
+   and 1, 2, 4. **S4 discharged** for a delete and a withdrawal (decision 8) and for the
+   withdrawing member's own reactions, which stay (decision 9, the owner's to turn);
+   **carried** for account deletion, to Phase 5, with the favourites.
+
+*Two things this section did not foresee.* The idiom C5c was told to copy (decision 12's
+unmark) changed under it when #60 merged, and the copy showed that the merged idiom told a
+withdrawal from a deletion by hand: decision 12's amendment of 2026-10-13. And "Revisit
+when a field is added to `EntryResponse`" came due: `reaction` spends about 2.3 KB of
+decision 6's margin, which is now about 29 KB.
 
 **C6, search.**
 

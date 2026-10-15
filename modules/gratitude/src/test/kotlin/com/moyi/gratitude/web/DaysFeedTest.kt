@@ -1008,7 +1008,8 @@ internal class DaysFeedTest(
         /** One user-perceived character, twenty-five octets. */
         const val FAMILY = "👨‍👩‍👧‍👦"
 
-        val FULL_KEYS = listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited")
+        val FULL_KEYS =
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
         val PROBLEM_KEYS = listOf("type", "title", "status", "detail", "instance", "code", "errors")
 
         /** 10:00Z: late morning of [date] in Africa/Lagos. */

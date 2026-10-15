@@ -2,6 +2,7 @@ package com.moyi.gratitude.web
 
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryStatus
+import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.service.EntryView
 import java.time.Instant
@@ -67,6 +68,16 @@ internal data class EntryResponse private constructor(
      * read in full; a tombstone says `false`, whatever was marked before.
      */
     val favourited: Boolean,
+    /**
+     * The reaction on this entry (FR-048): the one left by the member who
+     * did **not** write it, or `null`. Unlike [favourited] it is not the
+     * caller's own fact: both members are sent the same value, which is the
+     * point of a reaction (the owner's ruling). It carries no time, and no
+     * response says when it was left: that would be when the entry was read
+     * (FR-064). Only ever on an entry read in full; a tombstone says `null`,
+     * whatever rows there are.
+     */
+    val reaction: ReactionType?,
 ) : PartnerEntryResponse {
     /**
      * Never the words (doc 18 §5/§9): this is the one object in the module
@@ -78,11 +89,11 @@ internal data class EntryResponse private constructor(
     override fun toString(): String =
         "EntryResponse(id=$id, bondId=$bondId, date=$date, authorMemberId=$authorMemberId, " +
             "text=${if (text == null) "null" else "(redacted)"}, status=$status, createdAt=$createdAt, intendedAt=$intendedAt, " +
-            "favourited=$favourited)"
+            "favourited=$favourited, reaction=$reaction)"
 
     companion object {
         /** `null` exactly when [of] is: BR-1 did not grant the caller this shape. */
-        fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date, view.favourited)
+        fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date, view.favourited, view.reaction)
 
         /**
          * **The only way to build this response** — the constructor is
@@ -106,11 +117,19 @@ internal data class EntryResponse private constructor(
          * withdrawal hides an entry before anything is erased, and the mark
          * is removed with the erasure), and a tombstone that said `true`
          * would be the one thing still kept of an entry its author took back.
+         *
+         * [reaction] is the reaction on this entry, as the caller of this
+         * function found it, and is **forced `null` unless the reading is
+         * `FULL`**, here, for the same reason: a withdrawn author's entry is
+         * a tombstone from the withdrawal's commit and its reaction is
+         * removed only with the erasure. Rendered in between, it would also
+         * make the reader's response change a second time when the row went.
          */
         fun of(
             reading: EntryReading,
             date: LocalDate,
             favourited: Boolean,
+            reaction: ReactionType?,
         ): EntryResponse? =
             reading.disclosed?.let { entry ->
                 EntryResponse(
@@ -123,6 +142,7 @@ internal data class EntryResponse private constructor(
                     createdAt = entry.createdAt,
                     intendedAt = entry.intendedAt,
                     favourited = favourited && reading.readability == Readability.FULL,
+                    reaction = reaction.takeIf { reading.readability == Readability.FULL },
                 )
             }
     }

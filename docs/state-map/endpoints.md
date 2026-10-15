@@ -1599,4 +1599,76 @@ curl -X DELETE "$API/entries/$ENTRY/favourite" -H "Authorization: Bearer $TOKEN"
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 404 | `NOT_FOUND` | There is no such entry, you are not a member of its bond, or the entry was never shown to you. | never-run |
-| 409 | `FAVOURITE_BUSY` | Another operation holds the bookmark. Retry the removal. | never-run |
+| 409 | `FAVOURITE_BUSY` | Another operation holds the bookmark, on an entry you read in full. Nothing is removed; retry the removal. Never given on an entry shown to you as erased: there a held bookmark is 204, since what holds it is the erasure that removes it. | never-run |
+
+### PUT /entries/{entryId}/reaction
+
+react to your partner's entry
+
+**Needs:** an access token.
+
+- Content-Type (application/json, with exactly one key, {"type": "HEART", "THANK_YOU", "SMILE" or "MOVED"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)
+
+**Try it:**
+
+```sh
+curl -X PUT "$API/entries/$ENTRY/reaction" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"type": "HEART"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day` | `NOT_OPENED` |  | 204 stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | FR-048 | never-run |
+| `day` | `OPEN` |  | 204 stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | FR-048 | never-run |
+| `day` | `PARTIAL` |  | 204 stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | FR-048 | never-run |
+| `day` | `PENDING_REVEAL` |  | 204 stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | FR-048 | never-run |
+| `day` | `REVEALED` |  | 204 stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | FR-048 | smoke |
+| `day` | `SOLO` |  | 204 stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | FR-048 | never-run |
+| `day` | `EMPTY` |  | 204 stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | FR-048 | never-run |
+| `day` | `FROZEN` |  | 204 stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | FR-048 | never-run |
+| `day` | `SUSPENDED` |  | 204 stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | FR-048 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 400 | `MALFORMED_REQUEST` | The body is not one JSON object with the one key: not an object, a key other than type, type twice, a value that is an object or an array, or content after the object. Nothing is set. | smoke |
+| 422 | `VALIDATION_FAILED` | type is missing, null, or not one of the four names exactly as written. Nothing is set. | smoke |
+| 404 | `NOT_FOUND` | There is no such entry, the id is not an id, you are not a member of its bond, or it is your partner's entry and still locked: every entry you were never shown. No more specific reason is returned. | smoke |
+| 409 | `REACTION_ON_OWN_ENTRY` | You wrote the entry, revealed or not. A reaction is left on your partner's entry; your own takes none. | smoke |
+| 409 | `ENTRY_IMMUTABLE` | The entry is shown to you as erased (deleted by its author, or withdrawn at an ending, whether or not the erasure has run yet), or an erasure committed, or held the row past two seconds, while this request was deciding. Nothing is set. Told before an ending. | smoke |
+| 409 | `BOND_ARCHIVED` | The bond has ended, or you have left it: after an ending a reaction would be contact. Told last, only to a caller who could otherwise have reacted. Taking one back is still allowed. | smoke |
+
+### DELETE /entries/{entryId}/reaction
+
+take your reaction back
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl -X DELETE "$API/entries/$ENTRY/reaction" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day` | `NOT_OPENED` |  | 204 stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | FR-048 | never-run |
+| `day` | `OPEN` |  | 204 stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | FR-048 | never-run |
+| `day` | `PARTIAL` |  | 204 stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | FR-048 | never-run |
+| `day` | `PENDING_REVEAL` |  | 204 stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | FR-048 | never-run |
+| `day` | `REVEALED` |  | 204 stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | FR-048 | smoke |
+| `day` | `SOLO` |  | 204 stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | FR-048 | never-run |
+| `day` | `EMPTY` |  | 204 stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | FR-048 | never-run |
+| `day` | `FROZEN` |  | 204 stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | FR-048 | never-run |
+| `day` | `SUSPENDED` |  | 204 stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | FR-048 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | There is no such entry, the id is not an id, you are not a member of its bond, or it is your partner's entry and still locked: every entry you were never shown. No more specific reason is returned. | smoke |
+| 409 | `REACTION_BUSY` | Another operation holds your reaction on a partner's entry you read in full: an erasure, which may roll back, or your own request still running (two DELETEs that overlap, or a DELETE over your own PUT). Nothing is removed; retry. Never given on an entry shown to you as erased, nor on your own entry: there it is 204. | test |

@@ -426,6 +426,7 @@ for agreement, which is a second way to be wrong.
 
 **Amended 2026-10-09 — the archive and favourite rows as slice C5b built them (ADR-0036).**
 The table's four C5 rows are three of C5b's and one of C5c's (reactions, not built).
+*(2026-10-13: built; the amendment at the end of this section, ADR-0037.)*
 
 | Method | Path | As built |
 |---|---|---|
@@ -461,6 +462,32 @@ The table's four C5 rows are three of C5b's and one of C5c's (reactions, not bui
   none. That `406` is decided at the mapping, before the membership guard, and carries no
   `ETag` (decision 9).
 
+**Amended 2026-10-13 — the reaction row as slice C5c built it (ADR-0037; the code is of
+2026-10-10).** The table's `POST/DELETE /entries/{entryId}/reactions[/{type}]` is doc 06's
+shape, for several reactions at once. The owner ruled one per member per entry
+(2026-10-06), so it is one resource that the caller sets and unsets, like a favourite.
+
+| Method | Path | As built |
+|---|---|---|
+| PUT | `/entries/{entryId}/reaction` | Body `{"type": …}`, one of `HEART`, `THANK_YOU`, `SMILE`, `MOVED`, exactly (a placeholder set). `204`, repeatable; another type replaces the first. Only the partner's entry read in full takes one. `409 REACTION_ON_OWN_ENTRY` for an entry the caller wrote; `409 ENTRY_IMMUTABLE` for a tombstone, a withdrawn author's entry included; `409 BOND_ARCHIVED` once the bond has ended or the caller has left, told last; the one `404` for an entry the caller was never shown. `422 VALIDATION_FAILED` for a `type` that is absent, null or not one of the four; `400 MALFORMED_REQUEST` for a body that is not an object, any other key, `type` twice, a value that is an object or an array, or anything after the closing brace; `415` for no `Content-Type` or one that is not JSON; all decided before the entry is looked at. No `Idempotency-Key` (decisions 1, 2, 4, 5) |
+| DELETE | `/entries/{entryId}/reaction` | `204`, repeatable, absent is success: on a tombstone, on the caller's own entry, and on an ended bond too. The same `404`. `409 REACTION_BUSY`, to be retried, when another transaction holds the row **on an entry the caller reads in full**; never on a tombstone (decisions 4, 5, 6) |
+
+- **An entry carries `reaction`**, the type or `null`, on the wide shape only: the reaction
+  of the member who did not write it, the same value for both members, and `null` on
+  anything not read in full. No time of it is stored or sent (decisions 3 and 7).
+- **No lock on the bond is taken**, so a `PUT` sent before a plain ending can land a moment
+  after it, and the author sees it (decision 5; the owner's to turn). The `PUT` waits two
+  seconds at most for the entry's row, then answers `409 ENTRY_IMMUTABLE`; the `DELETE`
+  never waits.
+- **Both routes reconcile the joining day first** (§12.4), as the favourite routes do.
+- **`DELETE …/favourite` changed with it** *(2026-10-10, commit `01752a7`; ADR-0037 decision
+  6 and question 8)*. The bullet above that says the favourite `DELETE` "is `204` either
+  way" was already untrue after #60's last commit, which made a held row
+  `409 FAVOURITE_BUSY` (ADR-0036 decision 12, amended 2026-10-10). Since `01752a7` that
+  `409` is given only on an entry that is not a tombstone to the caller; on a tombstone a
+  held row is `204`. **This narrowing and `REACTION_BUSY` itself were decided by the agent
+  running the plan, not by the owner.**
+
 ### 5.3 New `ErrorCode` values (`common:web`)
 
 `ENTRY_ALREADY_EXISTS` (409) · `ENTRY_IMMUTABLE` (409) · `ENTRY_NOT_REVEALED` (409) ·
@@ -485,6 +512,15 @@ author of the entry it is about. **`DAY_NOT_FOUND` (404)** is new and was not in
 for every reason. It is only ever told to a member; a non-member gets the bond's
 `NOT_FOUND` before the date is looked at. A favourite on a tombstone reuses
 `ENTRY_IMMUTABLE`, whose sentence now reads "This entry can no longer be changed."
+
+**Amended 2026-10-13 (ADR-0037 decisions 4 and 6; the code is of 2026-10-10).** C5c adds
+two codes, and neither was in the list. **`REACTION_ON_OWN_ENTRY` (409)**: a `PUT` of a
+reaction on an entry the caller wrote; only ever told to its author. **`REACTION_BUSY`
+(409)**: a `DELETE` of a reaction whose row another transaction holds, on an entry the
+caller reads in full; retryable. It is the twin of **`FAVOURITE_BUSY` (409)**, which #60
+added on 2026-10-10 and this section had not recorded. A reaction on a tombstone reuses
+`ENTRY_IMMUTABLE`, and one on an ended bond `BOND_ARCHIVED`. The two new codes make C5c a
+breaking API change, as above.
 
 ### 5.4 Idempotency (FR-049, doc 06 §1)
 
@@ -876,7 +912,9 @@ a real `PATCH` between a day's end and the job.
   delayed erasure cannot create empty-page cursors even for a large history (decision 7,
   amended 2026-10-10). Removing a bookmark returns `204` only when absent or removed;
   a row held by another transaction gives `409 FAVOURITE_BUSY`, to be retried after that
-  transaction finishes (decision 12).
+  transaction finishes (decision 12). *(Amended 2026-10-15: since `01752a7`, only on an
+  entry that is not a tombstone to the caller; on a tombstone a held row is `204`. §5.2's
+  amendment of 2026-10-13 and ADR-0037 decision 6 have why.)*
 - **ETags** (decision 9). The second sentence of the first bullet stands and is built as a
   **keyed digest**: HMAC-SHA256, under the personal-data secret, of a domain label and the
   exact bytes sent. Not a plain hash: a tag is a header, a header reaches logs, and a bare
@@ -1001,7 +1039,9 @@ and C6 `V21__gratitude_prompts.sql`. C5 is three pull requests (§10), and §6.7
 V23, and C6 moves to V24. V22 to V24 are not written; their file names are their slices'.
 Amended 2026-10-09, ADR-0036 decision 10: V22 is written,
 `V22__gratitude_entry_favourites.sql`, and holds favourites only: one table,
-`entry_favourites`, and one index. Reactions are V23's, with C5c.)*
+`entry_favourites`, and one index. Reactions are V23's, with C5c.
+Amended 2026-10-13, ADR-0037 decision 3: V23 is written, `V23__gratitude_reactions.sql`:
+one table, `reactions (entry_id, member_id, type)`, and no index but its primary key.)*
 
 Doc 07 §2 carries the column lists and this document does not restate them, with four
 exceptions recorded in §12 because doc 07 is wrong about them.
@@ -1026,6 +1066,14 @@ key, `(entry_id, member_id)`; the table has no `id`. Its second index is
 `(member_id, entry_id)`, not `(member_id, created_at DESC)`: the favourites filter returns
 days in date order and nothing orders by when a mark was made. The archive feed needed no
 new index: `bond_days_feed_idx (bond_id, date DESC)` has existed since V12.)*
+
+*(Amended 2026-10-13, ADR-0037 decision 3. `reactions` is not unique on
+`(entry_id, member_id, type)`, which would let one member leave every type at once: its
+primary key is `(entry_id, member_id)`, one reaction per member per entry, as the owner
+ruled on 2026-10-06. The table has no `id` and **no `created_at`**: the time of a reaction
+is the time the partner read the entry (FR-064). A `CHECK` holds the four types. `entry_id`
+has a foreign key to `entries` with `ON DELETE CASCADE`, which is not what removes a
+reaction on an erasure: `EraseEntry` does, as for favourites (decision 8).)*
 
 ## 8. The outbox
 
@@ -1118,7 +1166,7 @@ the load-bearing assertions:
 | **C5** | The outbox poller, withdrawal on block (§6.7), the archive feed, per-caller favourites, reactions | The archive exists |
 | **C5a** *(2026-10-07)* | The outbox poller, withdrawal on leave and on block, an author's delete on an ended bond | A member can take their words back |
 | **C5b** *(2026-10-07)* | The archive feed and per-caller favourites *(built 2026-10-09, ADR-0036: the feed, one day, conditional reads of both, and favourites; V22)* | The archive exists |
-| **C5c** *(2026-10-07)* | Reactions | |
+| **C5c** *(2026-10-07)* | Reactions *(built 2026-10-10, recorded 2026-10-13, ADR-0037: one reaction on the partner's entry, shown to both; V23)* | |
 | **C6** | Search, prompts and `prompt_impressions`, on-this-day, milestones | Phase 3 closes |
 
 *(Amended 2026-10-07, ADR-0035: C5 is built as three pull requests, the three rows under it.
@@ -1139,6 +1187,7 @@ otherwise was an error in its first draft. They are built in C4.
 | the reveal | §5 *Reveal — the one animation* |
 | `GET /days`, `/days/{date}` | §6 *Archive*. *(Amended 2026-10-09, ADR-0036, question 5, which has the full table. Served: the list, the day view, both entries, whose entry is whose. Adaptations: the list's two-line truncation is the client's, the server sends full text; the month jump is `until`, a parameter doc 06 does not name; a short page with a `nextCursor` is not the end; today's day view before the caller has written is `GET /today`. Recorded gaps: the partner's display name is not obtainable; nothing says which months hold days, and a month picker's first month comes only from the bond's `createdAt`; the report entry point in the day view has the entry's `id` and no route yet; §6's "On this day" and "Milestone" rows are C6's; §6 draws no solo day card, no emptied day and no pre-join day, and §9 still owes the day of tombstones.)* |
 | `PUT`/`DELETE /entries/{id}/favourite`, `favourites=true` | §6 *Archive*: the `FavouriteToggle` in the day view, the day card's mark, the Favourites chip and its empty state. *(Added 2026-10-09, ADR-0036: this table had no row for favourites. Served by `favourited` on each entry, the caller's own. Adaptation: no field says an entry can be marked; the toggle is shown on an entry whose `status` is `REVEALED`. Whether the toggle shows on an archived bond is ADR-0036 question 1.)* |
+| `PUT`/`DELETE /entries/{id}/reaction`, `reaction` on an entry | **Gap** *(added 2026-10-13, ADR-0037 question 9)*. `states.md` draws no reaction in any section, and `EntryCard` (`tokens.md` §4) has two properties, `authorName` and `entryText`, and no slot for one. Nothing is drawn for leaving, changing or taking back a reaction, nor for one on an archived bond, where it can be taken back and not left. No screen was invented here. What the API gives a design to work with: `reaction` on each entry read in full, the same for both members, with no time; the control belongs on the partner's entry whose `status` is `REVEALED`, on a bond that has not ended. |
 | `GET /streak`, `/milestones` | §7 *Streak*. *(Amended 2026-10-05, ADR-0034: three gaps recorded there — no field tells a freeze-covered day from a stepped-over date; the length of a run that just broke ("ended at 23 days") is not sent; §7's Strict-mode paragraph reads as clearing banked freezes, which FR-073 forbids.)* |
 | withdrawal on block | §9 *Ending*, whose retained-access line §6.7 qualifies |
 | `PATCH`/`DELETE /entries/{id}` | §4 and §10 *Failure, offline and sync* |

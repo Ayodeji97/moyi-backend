@@ -174,6 +174,58 @@ internal class WithdrawalRaceTest(
     }
 
     /**
+     * A day that **had** revealed, with a reaction left each way (FR-048).
+     * The reaction on the withdrawn entry goes with it whichever of the
+     * close job and the consumer erases it, as it goes with a delete by
+     * hand; the one the withdrawing member left on the partner's entry is
+     * not hers to take back by withdrawing, and stays in all three. Before
+     * anything has erased, the bond the consumer has not reached already
+     * answers as the others do.
+     */
+    @Test
+    fun `a reaction on a withdrawn entry goes with it and the withdrawer's own stays, whoever reaches the day first`() {
+        val bonds = threeBonds()
+        clock.set(MIDDAY)
+        val adas = bonds.all.associateWith { rig.submit(ada, it, ADAS_WORDS) }
+        val beas = bonds.all.associateWith { rig.submit(bea, it, BEAS_WORDS) }
+        bonds.all.forEach { dayOf(it) shouldBe "REVEALED 2" }
+        bonds.all.forEach {
+            rig.react(bea, adas.getValue(it), "HEART")
+            rig.react(ada, beas.getValue(it), "SMILE")
+        }
+
+        clock.set(MIDDAY.plusSeconds(3_600))
+        endAll(bonds, adas)
+
+        // The consumer has not reached one bond: its rows are whole, both reactions among them, and nothing says so.
+        val erased = rig.snapshot(bonds.deleted, ada, bea)
+        erased.reactions.size shouldBe 1
+        val whole = rig.snapshot(bonds.closerFirst, ada, bea)
+        whole.reactions.size shouldBe 2
+        whole.read shouldBe erased.read
+        rig.snapshot(bonds.consumerFirst, ada, bea) shouldBe erased
+        // Read by both members, the one who left it included: the partner's entry still carries the withdrawer's reaction.
+        erased.read.count { "\"reaction\":\"SMILE\"" in it } shouldBe 2
+        erased.read.forEach { it shouldNotContain "\"reaction\":\"HEART\"" }
+
+        clock.set(Instant.parse("2026-09-15T23:02:00Z"))
+        closer.closeElapsedDays(clock.instant(), BUDGET).failed shouldBe 0
+
+        // The close job got to that bond before the consumer did, and left what the consumer left on the other.
+        rig.delivery(bonds.closerFirst)["processed_at"].shouldBeNull()
+        val twin = rig.snapshot(bonds.deleted, ada, bea)
+        rig.snapshot(bonds.closerFirst, ada, bea) shouldBe twin
+        rig.snapshot(bonds.consumerFirst, ada, bea) shouldBe twin
+        twin.reactions shouldBe listOf("{entry=ENTRY_2026-09-15_MEMBER_B_1, member=MEMBER_A, type=SMILE}")
+
+        // The consumer arrives second, and finds nothing left to do.
+        val before = rows(bonds.closerFirst)
+        dispatcher.dispatchDue(clock.instant(), 10) shouldBe DispatchResult(delivered = 1, failed = 0, more = false)
+        rows(bonds.closerFirst) shouldBe before
+        bonds.withdrawn.forEach { rig.snapshot(it, ada, bea) shouldBe twin }
+    }
+
+    /**
      * The other caller of the reveal: the joining day, which the first
      * request to meet it takes out of `SUSPENDED`, on an ended bond too
      * (reads are still answered there). With both entries on it, that is a

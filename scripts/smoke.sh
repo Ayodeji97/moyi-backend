@@ -40,9 +40,22 @@
 # JSON was asked for and a 406 with no tag for a caller who will take none
 # (the same 406 for a stranger), and the tombstone a withdrawal leaves in it:
 # no empty page with a cursor before the erasure, and the same tag after it.
+# Since slice C5c it reacts: a reaction set, replaced and taken back, read by
+# both members on today, the feed and the day; the author's tag moving with it
+# and with nothing else the partner does; one's own entry refused, the one 404
+# on both verbs for everything the caller was never shown, and each body that
+# is not one known type; after an ending that withdraws nothing, no new
+# reaction and the old one still removable; and after a withdrawal, the
+# reaction on the withdrawn entry gone with its words under a tag that does
+# not move twice, the withdrawer's own left where it was, and both verbs
+# answering as they do for an entry deleted by hand. It holds no row: 409
+# REACTION_BUSY and FAVOURITE_BUSY, and the 204 a held row gets on a
+# tombstone, are the integration tests' alone.
 # Every day it reads is today: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-09, against a database of
-# its own (MOYI_DB, below): 647 passed, 0 failed. A run on 2026-10-07, with the
+# days are the tests' to show. Last run on 2026-10-15, against a database of
+# its own (MOYI_DB, below), on the jar built from dfac89b: 814 passed, 0 failed,
+# 0 skipped, 21 sections (the first run to count its skips); on 2026-10-13 it
+# was 814 and 0, no skips, in 21, and on 2026-10-09 647 and 0 in 20. A run on 2026-10-07, with the
 # poller held idle, failed the four probes that then depended on it; three did
 # after that, the C5b section adds its own, and that run has not been
 # repeated. The pull request
@@ -110,9 +123,12 @@ for arg in "$@"; do
   esac
 done
 
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 pass() { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }
 fail() { FAIL=$((FAIL+1)); printf '  FAIL %s\n       %s\n' "$1" "$2"; }
+# A check this run could not make (psql unreachable, or the timing it needs did
+# not happen): counted, so that "0 failed" is never read as "all checked".
+skip() { SKIP=$((SKIP+1)); printf '  skip %s\n' "$1"; }
 
 # The first JDK that can run the jar, in order of how deliberately it was
 # chosen: MOYI_JAVA, JAVA_HOME, SDKMAN's current and then any SDKMAN 25+,
@@ -350,7 +366,7 @@ flush_buckets
 for i in 2 3 4 5; do curl -s -o /dev/null -H 'Content-Type: application/json' -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "wrong $i")"; done
 expect "after five failures the RIGHT password is refused, identically" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
 LOCK="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT failed_attempts || '|' || CAST(EXTRACT(EPOCH FROM (locked_until - now())) AS int) FROM credentials c JOIN users u ON u.id=c.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
-case "$LOCK" in 5\|5[5-9]|5\|60) pass "locked for a minute after five failures ($LOCK)";; psql-unavailable) echo "  skip lock check (psql unavailable)";; *) fail "lockout row" "expected 5|55..60, got '$LOCK'";; esac
+case "$LOCK" in 5\|5[5-9]|5\|60) pass "locked for a minute after five failures ($LOCK)";; psql-unavailable) skip "lock check (psql unavailable)";; *) fail "lockout row" "expected 5|55..60, got '$LOCK'";; esac
 docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "UPDATE credentials SET locked_until = now() - interval '1 second' FROM users u WHERE u.id = credentials.user_id AND u.email='$EMAIL'" >/dev/null 2>&1 || true
 flush_buckets
 expect "once the lock expires the right password signs in again" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
@@ -612,7 +628,7 @@ expect "the code it carried is dead" 404 '"code":"INVITE_NOT_USABLE"' -- "$API/i
 expect "blocking an archived bond is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
 expect "blocking again is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
 BLOCK_ROWS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM blocks WHERE bond_id='$LEFT_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$BLOCK_ROWS" in psql-unavailable) echo "  skip block row count";; 1) pass "…and one row, not two";; *) fail "block rows" "expected 1, got '$BLOCK_ROWS'";; esac
+case "$BLOCK_ROWS" in psql-unavailable) skip "block row count";; 1) pass "…and one row, not two";; *) fail "block rows" "expected 1, got '$BLOCK_ROWS'";; esac
 
 # A non-member is refused before the bond's state is even looked at (T-02).
 expect "a stranger cannot leave someone else's bond" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$LEFT_BOND/leave" -H "Authorization: Bearer $STRANGER_ACCESS"
@@ -821,7 +837,7 @@ expect "the same member's second entry today is 409 ENTRY_ALREADY_EXISTS" 409 '"
 expect "replaying the same key with the same body is 201 again" 201 "\"id\":\"$ENTRY_ID\"" -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d "{\"text\":\"$ENTRY_TEXT\"}"
 header_is "…and says it was replayed" Idempotency-Replayed true
 ENTRY_ROWS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM entries WHERE id='$ENTRY_ID'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$ENTRY_ROWS" in psql-unavailable) echo "  skip entry row count";; 1) pass "…and exactly one row landed in entries";; *) fail "entry rows" "expected 1, got '$ENTRY_ROWS'";; esac
+case "$ENTRY_ROWS" in psql-unavailable) skip "entry row count";; 1) pass "…and exactly one row landed in entries";; *) fail "entry rows" "expected 1, got '$ENTRY_ROWS'";; esac
 
 expect "the same key with a different body is 422 IDEMPOTENCY_KEY_REUSED" 422 '"code":"IDEMPOTENCY_KEY_REUSED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $AUTHOR_KEY" -d '{"text":"this is not the body that key reserved"}'
 
@@ -960,7 +976,7 @@ HANDOFF_TODAY_BODY="$LAST_BODY"
 # is only asserted if Lagos midnight did not pass between the plan and the GET.
 read -r _ LAGOS_DATE_AT_READ _ <<<"$(zone_plan)"
 if [ "$LAGOS_DATE_AT_READ" != "$LAGOS_DATE" ]; then
-  echo "  skip the pre-write date check (Lagos midnight passed mid-section)"
+  skip "the pre-write date check (Lagos midnight passed mid-section)"
 else
   [[ "$HANDOFF_TODAY_BODY" == *"\"bondDay\":{\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it is still the Lagos date, $LAGOS_DATE" || fail "today's date" "expected bondDay.date $LAGOS_DATE: ${HANDOFF_TODAY_BODY:0:250}"
 fi
@@ -970,7 +986,7 @@ HANDOFF_ENTRY_BODY="$LAST_BODY"
 # entry, the date this section expects is no longer the one the server used.
 read -r _ LAGOS_DATE_AFTER _ <<<"$(zone_plan)"
 if [ "$LAGOS_DATE_AFTER" != "$LAGOS_DATE" ]; then
-  echo "  skip the landing-date checks (Lagos midnight passed mid-section)"
+  skip "the landing-date checks (Lagos midnight passed mid-section)"
 else
   [[ "$HANDOFF_ENTRY_BODY" == *"\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it lands on the old zone's date, $LAGOS_DATE" || fail "entry date" "expected date $LAGOS_DATE: ${HANDOFF_ENTRY_BODY:0:250}"
   [[ "$HANDOFF_ENTRY_BODY" != *"\"date\":\"$NEW_ZONE_DATE\""* ]] && pass "…not on $NEW_ZONE's, $NEW_ZONE_DATE" || fail "entry redated" "the entry was filed under the new zone: ${HANDOFF_ENTRY_BODY:0:250}"
@@ -978,9 +994,9 @@ else
   # The rows behind it: the day keeps the zone it began under, and the timeline
   # holds a closed Lagos interval followed by an open one that starts later.
   DAY_ZONE="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT anchor_timezone FROM bond_days WHERE bond_id='$HANDOFF_BOND' AND date='$LAGOS_DATE'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-  case "$DAY_ZONE" in psql-unavailable) echo "  skip the bond_days check";; Africa/Lagos) pass "…the day's row keeps Africa/Lagos";; *) fail "day zone" "expected Africa/Lagos, got '$DAY_ZONE'";; esac
+  case "$DAY_ZONE" in psql-unavailable) skip "the bond_days check";; Africa/Lagos) pass "…the day's row keeps Africa/Lagos";; *) fail "day zone" "expected Africa/Lagos, got '$DAY_ZONE'";; esac
   INTERVALS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT string_agg(zone || CASE WHEN effective_to IS NULL THEN ':open' ELSE ':closed' END || CASE WHEN effective_from > now() THEN ':future' ELSE ':past' END, ',' ORDER BY effective_from) FROM bond_anchor_intervals WHERE bond_id='$HANDOFF_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-  case "$INTERVALS" in psql-unavailable) echo "  skip the timeline check";; "Africa/Lagos:closed:past,$NEW_ZONE:open:future") pass "…and the timeline hands over later: $INTERVALS";; *) fail "timeline" "expected Africa/Lagos:closed:past,$NEW_ZONE:open:future, got '$INTERVALS'";; esac
+  case "$INTERVALS" in psql-unavailable) skip "the timeline check";; "Africa/Lagos:closed:past,$NEW_ZONE:open:future") pass "…and the timeline hands over later: $INTERVALS";; *) fail "timeline" "expected Africa/Lagos:closed:past,$NEW_ZONE:open:future, got '$INTERVALS'";; esac
 fi
 
 echo; echo "withdrawal — ending a bond and taking one's words back, with the poller running (FR-029a, spec §6.7, ADR-0035)"
@@ -1044,7 +1060,7 @@ await_erased() {
 # erased_check <label> — the verdict on what await_erased last saw.
 erased_check() {
   case "$ERASED_ROW" in
-    psql-unavailable) echo "  skip $1 (psql not reachable through docker compose)" ;;
+    psql-unavailable) skip "$1 (psql not reachable through docker compose)" ;;
     "1|DELETED") pass "$1 (the row has no text and is DELETED, within ${ERASED_AFTER}s)" ;;
     *) fail "$1" "ten seconds on, the row is '$ERASED_ROW', not '1|DELETED': the poller has not erased it" ;;
   esac
@@ -1080,7 +1096,7 @@ expect "…and the same body from a stranger is the same 400" 400 '"code":"MALFO
 [ "$LAST_BODY" = "$MEMBER_REFUSAL" ] && pass "…byte for byte, so it says nothing of who is in the bond" || fail "malformed-body oracle" "member: ${MEMBER_REFUSAL:0:160} stranger: ${LAST_BODY:0:160}"
 expect "…and the bond is still open" 200 '"status":"ACTIVE"' -- "$API/bonds/$KEPT_BOND" -H "Authorization: Bearer $OTHER_ACCESS"
 REFUSED_ROWS="$(sql "SELECT (SELECT count(*) FROM blocks WHERE bond_id='$KEPT_BOND') + (SELECT count(*) FROM bond_entry_withdrawals WHERE bond_id='$KEPT_BOND')")"
-case "$REFUSED_ROWS" in psql-unavailable) echo "  skip the refused-ending row check";; 0) pass "…with nothing recorded against it";; *) fail "refused ending" "expected no block and no withdrawal, got '$REFUSED_ROWS' rows";; esac
+case "$REFUSED_ROWS" in psql-unavailable) skip "the refused-ending row check";; 0) pass "…with nothing recorded against it";; *) fail "refused ending" "expected no block and no withdrawal, got '$REFUSED_ROWS' rows";; esac
 
 # The ending that keeps the words goes FIRST, on purpose. It publishes no
 # event, so there is nothing of its own to wait for; but every erasure seen
@@ -1100,7 +1116,7 @@ expect "the partner's today, once it is erased" 200 '"status":"REVEALED"' -- "$A
 [ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "null|DELETED" ] && pass "…the withdrawn entry is a tombstone: text null, DELETED" || fail "tombstone" "${LAST_BODY:0:300}"
 [ "$(today_field myEntry text)" = "$READER_TEXT" ] && pass "…and the partner's own entry is whole" || fail "partner's own entry" "${LAST_BODY:0:300}"
 READER_ROW="$(sql "SELECT (text = '$READER_TEXT')::int || '|' || status FROM entries WHERE id='$READER_ENTRY'")"
-case "$READER_ROW" in psql-unavailable) echo "  skip the partner's row check";; "1|REVEALED") pass "…in the database too: her row is untouched";; *) fail "partner's row" "expected 1|REVEALED, got '$READER_ROW'";; esac
+case "$READER_ROW" in psql-unavailable) skip "the partner's row check";; "1|REVEALED") pass "…in the database too: her row is untouched";; *) fail "partner's row" "expected 1|REVEALED, got '$READER_ROW'";; esac
 expect "the one who withdrew reads their own tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$TAKEN_BOND/today" -H "Authorization: Bearer $TAKER_ACCESS"
 [ "$(today_field myEntry text)|$(today_field myEntry status)" = "null|DELETED" ] && pass "…as myEntry, with no text" || fail "own tombstone" "${LAST_BODY:0:300}"
 
@@ -1118,7 +1134,7 @@ while [ "$(( $(date +%s) - KEPT_SINCE ))" -lt 10 ]; do sleep 1; done
 expect "ten seconds on, the kept words are still read by the other member" 200 "\"text\":\"$KEPT_TEXT\"" -- "$API/bonds/$KEPT_BOND/today" -H "Authorization: Bearer $OTHER_ACCESS"
 [ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "$KEPT_TEXT|REVEALED" ] && pass "…as the partner's entry, REVEALED" || fail "kept entry" "${LAST_BODY:0:300}"
 KEPT_ROW="$(sql "SELECT (text = '$KEPT_TEXT')::int || '|' || status FROM entries WHERE id='$KEPT_ENTRY'")"
-case "$KEPT_ROW" in psql-unavailable) echo "  skip the kept row check";; "1|REVEALED") pass "…and the row still holds them";; *) fail "kept row" "expected 1|REVEALED, got '$KEPT_ROW'";; esac
+case "$KEPT_ROW" in psql-unavailable) skip "the kept row check";; "1|REVEALED") pass "…and the row still holds them";; *) fail "kept row" "expected 1|REVEALED, got '$KEPT_ROW'";; esac
 
 # An ended bond takes no new words, and an author may still take their own
 # back (ADR-0032, question 1): were that refused, a tombstone appearing after
@@ -1132,7 +1148,7 @@ expect "…while the partner cannot delete it for them" 404 '"code":"NOT_FOUND"'
 # The outbox, after a whole run: every ending above and in the sections before
 # it published or did not, and nothing published is still owed or has failed.
 OWED="$(sql "SELECT count(*) FILTER (WHERE processed_at IS NULL) || '|' || count(*) FILTER (WHERE last_error IS NOT NULL) || '|' || (count(*) FILTER (WHERE processed_at IS NOT NULL) > 0)::int FROM outbox_deliveries WHERE consumer_id = 'gratitude.withdrawal'")"
-case "$OWED" in psql-unavailable) echo "  skip the delivery check";; "0|0|1") pass "every withdrawal was delivered: none owed, none ever failed";; *) fail "outbox deliveries" "expected owed|failed|any-delivered = 0|0|1, got '$OWED'";; esac
+case "$OWED" in psql-unavailable) skip "the delivery check";; "0|0|1") pass "every withdrawal was delivered: none owed, none ever failed";; *) fail "outbox deliveries" "expected owed|failed|any-delivered = 0|0|1, got '$OWED'";; esac
 WITHDRAWN_LOG="$(tail -n "+$((LOG_LINES_BEFORE_WITHDRAWAL + 1))" "$MOYI_LOG")"
 # The poller says nothing at INFO when it delivers: the line would sit two seconds after
 # "A member ended bond …" and say that ending took its entries back (ADR-0035 decision 11).
@@ -1303,7 +1319,7 @@ expect "PUT /entries/{id}/favourite on the partner's revealed entry is 204" 204 
 [ -z "$LAST_BODY" ] && pass "…with no body" || fail "favourite body" "${LAST_BODY:0:200}"
 expect "…and 204 again" 204 "" -- -X PUT "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_M"
 ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id='$ARC_W_ENTRY'")"
-case "$ARC_MARKS" in psql-unavailable) echo "  skip the favourite row count";; 1) pass "…leaving one row, not two";; *) fail "favourite rows" "expected 1, got '$ARC_MARKS'";; esac
+case "$ARC_MARKS" in psql-unavailable) skip "the favourite row count";; 1) pass "…leaving one row, not two";; *) fail "favourite rows" "expected 1, got '$ARC_MARKS'";; esac
 expect "the marker's archive" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
 is "…says favourited on that entry, and not on their own" "$(raw items.0.partnerEntry.id)|$(at items.0.partnerEntry.favourited)|$(at items.0.myEntry.favourited)" "$ARC_W_ENTRY|true|false"
 expect "the writer's archive" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"
@@ -1335,7 +1351,7 @@ is "…the same body as the PUT's" "$(no_instance)" "$ARC_NO_ENTRY"
 expect "a stranger unmarking a revealed entry of a bond they are not in is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_O"
 is "…the one 404: the same body as for no entry at all" "$(no_instance)" "$ARC_NO_ENTRY"
 ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id IN ('$ARC_W_ENTRY','$ARC_SOLO_ENTRY')")"
-case "$ARC_MARKS" in psql-unavailable) echo "  skip the refused-mark row count";; 0) pass "…and none of those refusals, nor the unmarking, left a row";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
+case "$ARC_MARKS" in psql-unavailable) skip "the refused-mark row count";; 0) pass "…and none of those refusals, nor the unmarking, left a row";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
 
 # The conditional read. The tag is of the bytes this caller is sent, so it moves
 # when their own mark does and stays when only the partner's does.
@@ -1429,8 +1445,8 @@ ARC_M_ITEM_AFTER="$(at items.0)"
 # ran, and that a consumer ran at all, which a deletion by hand has none of.
 case "$ARC_STILL_WHOLE" in
   t) is "…and it is the tag the feed had before the erasure: the erasure itself moved nothing" "$(tag)" "$ARC_FEED_TAG_WITHDRAWN";;
-  psql-unavailable) echo "  skip the tag across the erasure (psql unavailable)";;
-  *) echo "  skip the tag across the erasure: the poller had erased the entry before the first read (text whole: '$ARC_STILL_WHOLE')";;
+  psql-unavailable) skip "the tag across the erasure (psql unavailable)";;
+  *) skip "the tag across the erasure: the poller had erased the entry before the first read (text whole: '$ARC_STILL_WHOLE')";;
 esac
 no_times "…and nothing in the erased feed says when"
 expect "the marker's day view" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M"
@@ -1438,7 +1454,7 @@ is "…is that same item" "$(at "")" "$ARC_M_ITEM_AFTER"
 expect "…and the tag from before the withdrawal does not make it a 304" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days/$ARC_DATE" -H "Authorization: Bearer $ARC_M" -H "If-None-Match: $ARC_DAY_TAG_MARKED"
 expect "favourites=true no longer lists the day for the marker" 200 '"items":[]' -- "$API/bonds/$ARC_BOND/days?favourites=true" -H "Authorization: Bearer $ARC_M"
 ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id='$ARC_W_ENTRY'")"
-case "$ARC_MARKS" in psql-unavailable) echo "  skip the erased-mark row count";; 0) pass "…and the mark's row is gone with the words";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
+case "$ARC_MARKS" in psql-unavailable) skip "the erased-mark row count";; 0) pass "…and the mark's row is gone with the words";; *) fail "favourite rows" "expected 0, got '$ARC_MARKS'";; esac
 expect "the one who withdrew still reads the archive of the ended bond" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"
 is "…their own entry a tombstone: text null, DELETED, not favourited" "$(raw items.0.myEntry.id)|$(at items.0.myEntry.text)|$(raw items.0.myEntry.status)|$(at items.0.myEntry.favourited)" "$ARC_W_ENTRY|null|DELETED|false"
 is "…beside the partner's entry, whole" "$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)|$(raw items.0.partnerEntry.status)" "$ARC_M_ENTRY|$ARC_M_TEXT|REVEALED"
@@ -1454,17 +1470,301 @@ ARC_LEAKED=""
 for words in "$ARC_W_TEXT" "$ARC_M_TEXT" "$ARC_SOLO_TEXT" "$ARC_GONE_TEXT" "$ARC_LOCKED_TEXT"; do grep -qF "$words" "$MOYI_LOG" && ARC_LEAKED="$ARC_LEAKED [$words]"; done
 [ -z "$ARC_LEAKED" ] && pass "no entry of this section is anywhere in the log" || fail "text in log" "found:$ARC_LEAKED"
 
+echo; echo "reactions — one acknowledgement on the partner's entry, shown to both (FR-048, ADR-0037)"
+flush_buckets
+# What this section is for: the two routes of slice C5c answering from the jar,
+# and the one thing in this API that a member does to be seen by the other. So
+# it reads every reaction from BOTH sides, on all three views that carry an
+# entry, and it checks what the author's bytes do when the partner does
+# anything else. Every day here is today, as in the archive section.
+#
+# What it cannot reach: a row that another transaction holds. `409
+# REACTION_BUSY`, and the 204 a held row gets on an entry that is already a
+# tombstone to the caller, need an erasure kept open on a second connection;
+# a script that only sends requests cannot hold one, and a probe that claimed
+# to would be reading luck. Those are ReactionLockWaitTest's and
+# FavouriteLockWaitTest's alone (ADR-0037, "How this was checked"). What is
+# compared here is the twin with nothing held: a withdrawn entry against one
+# its author deleted by hand before leaving.
+
+# rx_views <token> <bond> <myEntry|partnerEntry> — the reaction on that entry
+# in each of the caller's three views, today, the feed and the day, as JSON
+# values with a space between: '"HEART" "HEART" "HEART"', 'null null null',
+# and "absent" where a view has no such key. It counts nothing by itself.
+rx_views() {
+  local token="$1" bond="$2" which="$3" view out=""
+  for view in "today|$which.reaction" "days|items.0.$which.reaction" "days/$RX_DATE|$which.reaction"; do
+    LAST_BODY="$(curl -s "$API/bonds/$bond/${view%%|*}" -H "Authorization: Bearer $token")"
+    out="$out $(at "${view#*|}")"
+  done
+  printf '%s' "${out# }"
+}
+# rx_rows <entry id> — "<count>|<types>" of the reactions on one entry, straight from the table.
+rx_rows() { sql "SELECT count(*) || '|' || coalesce(string_agg(type, ',' ORDER BY type), '') FROM reactions WHERE entry_id='$1'"; }
+# rows_are <label> <entry id> <expected> — skipped, like every database check here, when psql cannot be reached.
+rows_are() {
+  local got; got="$(rx_rows "$2")"
+  case "$got" in psql-unavailable) skip "$1 (psql not reachable through docker compose)";; "$3") pass "$1";; *) fail "$1" "expected '$3', got '$got'";; esac
+}
+# whole_response — the status line, every header but the ones that differ on
+# any two requests (the date, the request's id, the limiter's counters), and
+# the body with the typed path blanked. Two responses with the same
+# whole_response differ in nothing a client could read.
+whole_response() {
+  printf '%s\n' "$LAST_HEADERS" | grep -viE '^(date|x-request-id|x-ratelimit-[a-z]+|retry-after):' | grep -v '^$' | sort
+  no_instance
+}
+# without_reaction <myEntry|partnerEntry> — LAST_BODY, a day, with that entry's
+# reaction put back to null, printed as `at ""` prints a body: what is left is
+# everything a reaction did NOT change.
+without_reaction() {
+  python3 -c '
+import json, sys
+day = json.loads(sys.stdin.read())
+day[sys.argv[1]]["reaction"] = None
+print(json.dumps(day, sort_keys=True, ensure_ascii=False))' "$1" <<<"$LAST_BODY"
+}
+
+verified_account "author" "203.0.113.100";    RX_A="$ACCOUNT_ACCESS"
+verified_account "reactor" "203.0.113.101";   RX_B="$ACCOUNT_ACCESS"
+verified_account "third" "203.0.113.102";     RX_C="$ACCOUNT_ACCESS"
+verified_account "bystander" "203.0.113.103"; RX_O="$ACCOUNT_ACCESS"
+RX_A_TEXT="thank you for the soup when I was ill"
+RX_B_TEXT="thank you for fixing the back gate"
+RX_SOLO_TEXT="thank you for the note in my coat"
+RX_C_TEXT="thank you for the early train ticket"
+RX_B2_TEXT="thank you for the spare key under the pot"
+RX_HAND_TEXT="thank you for the candle in the window"
+RX_O_TEXT="thank you for the long call on sunday"
+revealed_bond "a day to react on" "$RX_A" "$RX_B" "$RX_A_TEXT" "$RX_B_TEXT"
+RX_BOND="$RB_BOND"; RX_A_ENTRY="$RB_A_ENTRY"; RX_B_ENTRY="$RB_B_ENTRY"
+expect "today, for the date" 200 '"bondDay"' -- "$API/bonds/$RX_BOND/today" -H "Authorization: Bearer $RX_A"
+RX_DATE="$(raw bondDay.date)"
+
+# Before anybody reacts: the field is there, on both entries, and null.
+expect "the author's day before anybody has reacted" 200 "\"date\":\"$RX_DATE\"" -- "$API/bonds/$RX_BOND/days/$RX_DATE" -H "Authorization: Bearer $RX_A"
+is "…carries reaction on both entries, null" "$(at myEntry.reaction)|$(at partnerEntry.reaction)" "null|null"
+RX_A_DAY="$(at "")"; RX_A_DAY_TAG="$(tag)"
+expect "the author's feed" 200 '"items":[' -- "$API/bonds/$RX_BOND/days" -H "Authorization: Bearer $RX_A"
+RX_A_FEED_TAG="$(tag)"
+expect "the author's today" 200 '"reaction":null' -- "$API/bonds/$RX_BOND/today" -H "Authorization: Bearer $RX_A"
+RX_A_TODAY="$(at "")"
+expect "the reactor's day" 200 "\"date\":\"$RX_DATE\"" -- "$API/bonds/$RX_BOND/days/$RX_DATE" -H "Authorization: Bearer $RX_B"
+RX_B_DAY="$(at "")"
+
+# Set. One row, and the same value for both of them wherever the entry is sent.
+expect "PUT /entries/{id}/reaction on the partner's revealed entry is 204" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"HEART"}'
+[ -z "$LAST_BODY" ] && pass "…with no body" || fail "reaction body" "${LAST_BODY:0:200}"
+expect "…and 204 again" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"HEART"}'
+rows_are "…leaving one row, HEART" "$RX_A_ENTRY" "1|HEART"
+is "the one who reacted is shown it on today, the feed and the day" "$(rx_views "$RX_B" "$RX_BOND" partnerEntry)" '"HEART" "HEART" "HEART"'
+is "…and so is the author, on their own entry" "$(rx_views "$RX_A" "$RX_BOND" myEntry)" '"HEART" "HEART" "HEART"'
+is "…and nobody is shown one on the other entry" "$(rx_views "$RX_A" "$RX_BOND" partnerEntry)|$(rx_views "$RX_B" "$RX_BOND" myEntry)" 'null null null|null null null'
+expect "the author's day, with the reaction on it" 200 '"reaction":"HEART"' -- "$API/bonds/$RX_BOND/days/$RX_DATE" -H "Authorization: Bearer $RX_A" -H "If-None-Match: $RX_A_DAY_TAG"
+RX_A_DAY_TAG_HEART="$(tag)"
+[ -n "$RX_A_DAY_TAG_HEART" ] && [ "$RX_A_DAY_TAG_HEART" != "$RX_A_DAY_TAG" ] && pass "…is a 200 under a new ETag: the author's bytes moved" || fail "author's tag after a reaction" "before '$RX_A_DAY_TAG', after '$RX_A_DAY_TAG_HEART'"
+# The whole of what the author learns is the type. No key was added, so there is no time of it and no name.
+is "…and differs from the day before in that one value and nothing else" "$(without_reaction myEntry)" "$RX_A_DAY"
+if [[ "$LAST_BODY" == *'eactedAt'* || "$LAST_BODY" == *'"reactions"'* ]]; then fail "a time or a list of reactions" "${LAST_BODY:0:300}"; else pass "…no key says when it was left"; fi
+
+# Nothing else the reactor does moves a byte the author is sent: reading,
+# keeping a bookmark, and reactions that are refused.
+flush_buckets
+expect "the reactor bookmarks the author's entry" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/favourite" -H "Authorization: Bearer $RX_B"
+expect "…sends a reaction that is not one" 422 '"code":"VALIDATION_FAILED"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"LOVE"}'
+expect "…and one with a second key" 400 '"code":"MALFORMED_REQUEST"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"SMILE","note":"hello"}'
+expect "the author's day is 304 on the tag from before all that" 304 "" -- "$API/bonds/$RX_BOND/days/$RX_DATE" -H "Authorization: Bearer $RX_A" -H "If-None-Match: $RX_A_DAY_TAG_HEART"
+rows_are "…and the reaction is still the one that was set" "$RX_A_ENTRY" "1|HEART"
+expect "the reactor takes the bookmark off" 204 "" -- -X DELETE "$API/entries/$RX_A_ENTRY/favourite" -H "Authorization: Bearer $RX_B"
+
+# Replace. One per member per entry: a second type is put in place of the first.
+for type in SMILE THANK_YOU MOVED; do
+  expect "PUT {\"type\":\"$type\"} replaces it: 204" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d "{\"type\":\"$type\"}"
+  rows_are "…one row still, now $type" "$RX_A_ENTRY" "1|$type"
+done
+is "both are shown the last of them: the reactor" "$(rx_views "$RX_B" "$RX_BOND" partnerEntry)" '"MOVED" "MOVED" "MOVED"'
+is "…and the author" "$(rx_views "$RX_A" "$RX_BOND" myEntry)" '"MOVED" "MOVED" "MOVED"'
+expect "…and the author's tag has moved again" 200 '"reaction":"MOVED"' -- "$API/bonds/$RX_BOND/days/$RX_DATE" -H "Authorization: Bearer $RX_A" -H "If-None-Match: $RX_A_DAY_TAG_HEART"
+
+# Remove. Absent is success, and what is left is the day as it was.
+flush_buckets
+expect "DELETE /entries/{id}/reaction is 204" 204 "" -- -X DELETE "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
+[ -z "$LAST_BODY" ] && pass "…with no body" || fail "unreact body" "${LAST_BODY:0:200}"
+expect "…and 204 again" 204 "" -- -X DELETE "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
+rows_are "…leaving no row" "$RX_A_ENTRY" "0|"
+is "neither is shown one any longer" "$(rx_views "$RX_B" "$RX_BOND" partnerEntry)|$(rx_views "$RX_A" "$RX_BOND" myEntry)" 'null null null|null null null'
+expect "the author's day is 304 again on the tag it had before anybody reacted" 304 "" -- "$API/bonds/$RX_BOND/days/$RX_DATE" -H "Authorization: Bearer $RX_A" -H "If-None-Match: $RX_A_DAY_TAG"
+expect "…and so is the author's feed" 304 "" -- "$API/bonds/$RX_BOND/days" -H "Authorization: Bearer $RX_A" -H "If-None-Match: $RX_A_FEED_TAG"
+expect "…and today, which has no tag" 200 '"reaction":null' -- "$API/bonds/$RX_BOND/today" -H "Authorization: Bearer $RX_A"
+is "…is what it was, value for value" "$(at "")" "$RX_A_TODAY"
+expect "the reactor's day" 200 "\"date\":\"$RX_DATE\"" -- "$API/bonds/$RX_BOND/days/$RX_DATE" -H "Authorization: Bearer $RX_B"
+is "…is what it was too" "$(at "")" "$RX_B_DAY"
+
+# Whose entry. One's own takes none, and says so with a code of its own; taking
+# back from it is the success that absence always is.
+expect "reacting to one's own revealed entry is 409 REACTION_ON_OWN_ENTRY" 409 '"code":"REACTION_ON_OWN_ENTRY"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_A" -d '{"type":"HEART"}'
+expect "…and DELETE on one's own entry is 204" 204 "" -- -X DELETE "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_A"
+# A second bond in which only one has written: that entry is its author's own
+# and unrevealed, and to the other member it is an entry they were never shown.
+expect "a second bond is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $RX_A" -d "$(bond_body "Us")"
+RX_BOND2="$(printf '%s' "$LAST_BODY" | jget id)"
+RX_CODE2="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$RX_CODE2/accept" -H "Authorization: Bearer $RX_O"
+expect "only one of them writes today" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$RX_BOND2/entries" -H "Authorization: Bearer $RX_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"$RX_SOLO_TEXT\"}"
+RX_SOLO_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+expect "reacting to one's own unrevealed entry is 409 REACTION_ON_OWN_ENTRY as well" 409 '"code":"REACTION_ON_OWN_ENTRY"' -- -X PUT "$API/entries/$RX_SOLO_ENTRY/reaction" -H "Authorization: Bearer $RX_A" -d '{"type":"HEART"}'
+
+# Everything the caller was never shown is one 404, on both verbs: an id nobody
+# was issued, a value that is not an id, the partner's entry that is still
+# locked, and a revealed entry of a bond the caller is not in.
+flush_buckets
+expect "PUT /entries/<an id nobody was issued>/reaction is 404" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/entries/$(new_key)/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"HEART"}'
+RX_NO_ENTRY="$(whole_response)"
+expect "PUT /entries/not-an-id/reaction is 404" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/entries/not-an-id/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"HEART"}'
+is "…the same body, apart from the path that was typed" "$(no_instance)" "$(tail -n 1 <<<"$RX_NO_ENTRY")"
+expect "the partner reacting to that unrevealed entry, which they may not read, is 404" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/entries/$RX_SOLO_ENTRY/reaction" -H "Authorization: Bearer $RX_O" -d '{"type":"HEART"}'
+is "…the same response as for no entry at all" "$(whole_response)" "$RX_NO_ENTRY"
+expect "a stranger reacting to a revealed entry of a bond they are not in is 404" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_O" -d '{"type":"HEART"}'
+is "…the same response again" "$(whole_response)" "$RX_NO_ENTRY"
+expect "DELETE /entries/<an id nobody was issued>/reaction is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$(new_key)/reaction" -H "Authorization: Bearer $RX_B"
+is "…the PUT's response" "$(whole_response)" "$RX_NO_ENTRY"
+expect "DELETE …/reaction on the partner's unrevealed entry is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$RX_SOLO_ENTRY/reaction" -H "Authorization: Bearer $RX_O"
+is "…the same" "$(whole_response)" "$RX_NO_ENTRY"
+expect "a stranger's DELETE …/reaction on a revealed entry is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_O"
+is "…the one 404" "$(whole_response)" "$RX_NO_ENTRY"
+
+# A body that is not exactly one known type. Judged from the request alone,
+# before the entry is looked at, so a stranger is told what a member is.
+flush_buckets
+for bad in '{"type":"LOVE"}' '{"type":"heart"}' '{"type":" HEART"}' '{"type":3}' '{"type":null}' '{}'; do
+  expect "PUT $bad is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d "$bad"
+  is "…on type" "$(raw errors.0.field)" "type"
+done
+expect "an unknown type once more, for its body" 422 '"code":"VALIDATION_FAILED"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"LOVE"}'
+if repeats "LOVE"; then fail "422 repeats the value" "${LAST_BODY:0:300}"; else pass "…which does not repeat what was sent"; fi
+RX_BAD_TYPE="$(whole_response)"
+expect "the same body from a stranger to the bond is 422 too, not the 404" 422 '"code":"VALIDATION_FAILED"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_O" -d '{"type":"LOVE"}'
+is "…the member's response, so it says nothing of who may see the entry" "$(whole_response)" "$RX_BAD_TYPE"
+for bad in '{"type":"HEART","note":"x"}' '{"type":"HEART","type":"SMILE"}' '{"kind":"HEART"}' '["HEART"]' '{"type":["HEART"]}' '{"type":"HEART"} trailing'; do
+  expect "PUT $bad is 400 MALFORMED_REQUEST" 400 '"code":"MALFORMED_REQUEST"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d "$bad"
+done
+expect "a reaction sent as text/plain is 415" 415 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -H 'Content-Type: text/plain' -d '{"type":"HEART"}'
+RX_REFUSED="$(sql "SELECT count(*) FROM reactions WHERE entry_id IN ('$RX_A_ENTRY','$RX_B_ENTRY','$RX_SOLO_ENTRY')")"
+case "$RX_REFUSED" in psql-unavailable) skip "the refused-reaction row count";; 0) pass "none of those refusals left a row";; *) fail "reaction rows" "expected 0, got '$RX_REFUSED'";; esac
+
+# Each reacts to the other's entry. Two rows, one an entry, and neither request touches the other's.
+flush_buckets
+expect "the reactor reacts to the author's entry" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"HEART"}'
+expect "the author reacts to the reactor's entry" 204 "" -- -X PUT "$API/entries/$RX_B_ENTRY/reaction" -H "Authorization: Bearer $RX_A" -d '{"type":"THANK_YOU"}'
+is "the author is shown both: the one on their entry and their own on the partner's" "$(rx_views "$RX_A" "$RX_BOND" myEntry)|$(rx_views "$RX_A" "$RX_BOND" partnerEntry)" '"HEART" "HEART" "HEART"|"THANK_YOU" "THANK_YOU" "THANK_YOU"'
+is "…and the reactor the same two, the other way round" "$(rx_views "$RX_B" "$RX_BOND" partnerEntry)|$(rx_views "$RX_B" "$RX_BOND" myEntry)" '"HEART" "HEART" "HEART"|"THANK_YOU" "THANK_YOU" "THANK_YOU"'
+rows_are "…one row on the author's entry" "$RX_A_ENTRY" "1|HEART"
+rows_are "…and one on the reactor's" "$RX_B_ENTRY" "1|THANK_YOU"
+
+# An ending that withdraws nothing. A reaction is seen by the other person, so
+# none may be left once the bond has ended, by either of them: after an ending
+# that would be contact. One left before it stays, and can still be taken back.
+flush_buckets
+revealed_bond "a bond to be left with a reaction on it" "$RX_C" "$RX_B" "$RX_C_TEXT" "$RX_B2_TEXT"
+RX_BOND3="$RB_BOND"; RX_C_ENTRY="$RB_A_ENTRY"; RX_B2_ENTRY="$RB_B_ENTRY"
+expect "a reaction before the ending" 204 "" -- -X PUT "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"MOVED"}'
+expect "the author leaves, keeping their entries: 204" 204 "" -- -X POST "$API/bonds/$RX_BOND3/leave" -H "Authorization: Bearer $RX_C"
+expect "PUT …/reaction by the one who stayed is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"HEART"}'
+expect "…and by the one who left, on the other's entry" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/entries/$RX_B2_ENTRY/reaction" -H "Authorization: Bearer $RX_C" -d '{"type":"HEART"}'
+expect "…while one's own entry is still told as one's own" 409 '"code":"REACTION_ON_OWN_ENTRY"' -- -X PUT "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_C" -d '{"type":"HEART"}'
+rows_are "the refused replacement changed nothing: the reaction from before the ending is there" "$RX_C_ENTRY" "1|MOVED"
+rows_are "…and nothing was left on the other entry" "$RX_B2_ENTRY" "0|"
+is "…and both are still shown it: the one who left" "$(rx_views "$RX_C" "$RX_BOND3" myEntry)" '"MOVED" "MOVED" "MOVED"'
+is "…and the one who stayed" "$(rx_views "$RX_B" "$RX_BOND3" partnerEntry)" '"MOVED" "MOVED" "MOVED"'
+expect "DELETE …/reaction on the ended bond is 204" 204 "" -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
+rows_are "…and it is gone" "$RX_C_ENTRY" "0|"
+is "…for both of them" "$(rx_views "$RX_C" "$RX_BOND3" myEntry)|$(rx_views "$RX_B" "$RX_BOND3" partnerEntry)" 'null null null|null null null'
+expect "…and 204 again" 204 "" -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
+
+# The twin, deleted by hand: the author deletes their entry and then leaves.
+# What its reactor is answered is kept, to be compared below with what the
+# reactor of a WITHDRAWN entry is answered. Nothing holds a row in either.
+flush_buckets
+revealed_bond "a bond whose author deletes by hand and leaves" "$RX_C" "$RX_O" "$RX_HAND_TEXT" "$RX_O_TEXT"
+RX_BOND4="$RB_BOND"; RX_HAND_ENTRY="$RB_A_ENTRY"
+expect "a reaction on the entry that will be deleted" 204 "" -- -X PUT "$API/entries/$RX_HAND_ENTRY/reaction" -H "Authorization: Bearer $RX_O" -d '{"type":"HEART"}'
+expect "its author deletes it" 204 "" -- -X DELETE "$API/entries/$RX_HAND_ENTRY" -H "Authorization: Bearer $RX_C"
+rows_are "…and the reaction went with the words, in that request" "$RX_HAND_ENTRY" "0|"
+is "…a tombstone says null to both: the one who reacted" "$(rx_views "$RX_O" "$RX_BOND4" partnerEntry)" 'null null null'
+is "…and its author" "$(rx_views "$RX_C" "$RX_BOND4" myEntry)" 'null null null'
+expect "then the author leaves" 204 "" -- -X POST "$API/bonds/$RX_BOND4/leave" -H "Authorization: Bearer $RX_C"
+expect "PUT …/reaction on the tombstone is 409 ENTRY_IMMUTABLE, though the bond has ended too" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PUT "$API/entries/$RX_HAND_ENTRY/reaction" -H "Authorization: Bearer $RX_O" -d '{"type":"HEART"}'
+RX_HAND_PUT="$(whole_response)"
+expect "DELETE …/reaction on the tombstone is 204" 204 "" -- -X DELETE "$API/entries/$RX_HAND_ENTRY/reaction" -H "Authorization: Bearer $RX_O"
+RX_HAND_DELETE="$(whole_response)"
+
+# The withdrawal. Each has a reaction on the other's entry (set above). The
+# author blocks, which takes their entries back: the reaction ON the withdrawn
+# entry stops being shown at once and its row goes with the words; the
+# reaction the withdrawer LEFT on the partner's entry stays, and is theirs to
+# take back (ADR-0037 decision 9).
+flush_buckets
+expect "the reactor's feed before the ending" 200 '"reaction":"HEART"' -- "$API/bonds/$RX_BOND/days" -H "Authorization: Bearer $RX_B"
+RX_B_FEED_TAG="$(tag)"
+expect "the author blocks, with no body: 204" 204 "" -- -X POST "$API/bonds/$RX_BOND/block" -H "Authorization: Bearer $RX_A"
+# At once, whether or not the poller has run: the read is gated on the record the ending wrote.
+expect "the reactor's very next read of the feed carries a tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$RX_BOND/days" -H "Authorization: Bearer $RX_B"
+is "…text null, DELETED, and no reaction on it" "$(raw items.0.partnerEntry.id)|$(at items.0.partnerEntry.text)|$(raw items.0.partnerEntry.status)|$(at items.0.partnerEntry.reaction)" "$RX_A_ENTRY|null|DELETED|null"
+is "…beside the reactor's own entry, whole, with the withdrawer's reaction still on it" "$(raw items.0.myEntry.text)|$(raw items.0.myEntry.reaction)" "$RX_B_TEXT|THANK_YOU"
+RX_B_FEED_TAG_WITHDRAWN="$(tag)"
+[ -n "$RX_B_FEED_TAG_WITHDRAWN" ] && [ "$RX_B_FEED_TAG_WITHDRAWN" != "$RX_B_FEED_TAG" ] && pass "…under a new ETag: it moved at the ending" || fail "feed tag after a withdrawal" "still '$RX_B_FEED_TAG'"
+# One statement, so one snapshot: the words and the reaction's row are both
+# there (1|1, the poller has not come) or both gone (0|0). Anything else is an
+# erasure that kept a reaction, or a reaction removed before its words.
+RX_BEFORE_ERASURE="$(sql "SELECT (text IS NOT NULL)::int || '|' || (SELECT count(*) FROM reactions WHERE entry_id='$RX_A_ENTRY') FROM entries WHERE id='$RX_A_ENTRY'")"
+case "$RX_BEFORE_ERASURE" in
+  psql-unavailable) skip "the row beside its words (psql unavailable)";;
+  "1|1") pass "…while the row is still in the table beside the words: it is the gate that hides it, not the erasure";;
+  "0|0") pass "…and the poller has already erased both the words and the row";;
+  *) fail "reaction row and its entry's words" "expected 1|1 or 0|0, got '$RX_BEFORE_ERASURE'";;
+esac
+expect "PUT …/reaction on the withdrawn entry is 409 ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"SMILE"}'
+is "…the response its twin deleted by hand gave" "$(whole_response)" "$RX_HAND_PUT"
+await_erased "$RX_A_ENTRY"
+erased_check "the poller erases the withdrawn entry"
+rows_are "…and the reaction on it is gone with the words" "$RX_A_ENTRY" "0|"
+rows_are "…while the reaction the withdrawer left on the partner's entry is still there" "$RX_B_ENTRY" "1|THANK_YOU"
+expect "the reactor's feed, once it is erased" 200 '"status":"DELETED"' -- "$API/bonds/$RX_BOND/days" -H "Authorization: Bearer $RX_B"
+is "…the same tombstone, with no reaction" "$(raw items.0.partnerEntry.id)|$(at items.0.partnerEntry.text)|$(raw items.0.partnerEntry.status)|$(at items.0.partnerEntry.reaction)" "$RX_A_ENTRY|null|DELETED|null"
+[[ "$LAST_BODY" != *"$RX_A_TEXT"* ]] && pass "…the withdrawn words nowhere in it" || fail "withdrawn text read" "${LAST_BODY:0:300}"
+# The tag moved once, at the ending. The erasure removed a row that was already
+# shown to nobody, so it must not move the tag a second time.
+case "$RX_BEFORE_ERASURE" in
+  "1|1") is "…under the tag the feed had before the erasure: removing the row moved nothing" "$(tag)" "$RX_B_FEED_TAG_WITHDRAWN";;
+  psql-unavailable) skip "the tag across the erasure (psql unavailable)";;
+  *) skip "the tag across the erasure: the poller had erased the entry before the first read ('$RX_BEFORE_ERASURE')";;
+esac
+expect "PUT …/reaction on the erased entry is still 409 ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"SMILE"}'
+is "…the twin's response" "$(whole_response)" "$RX_HAND_PUT"
+expect "DELETE …/reaction on it is 204" 204 "" -- -X DELETE "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
+is "…the twin's response: with nothing held, a withdrawal and a deletion by hand answer alike" "$(whole_response)" "$RX_HAND_DELETE"
+is "the one who withdrew is still shown the reaction they left" "$(rx_views "$RX_A" "$RX_BOND" partnerEntry)" '"THANK_YOU" "THANK_YOU" "THANK_YOU"'
+is "…and none on their own tombstone" "$(rx_views "$RX_A" "$RX_BOND" myEntry)" 'null null null'
+expect "they cannot change it: 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/entries/$RX_B_ENTRY/reaction" -H "Authorization: Bearer $RX_A" -d '{"type":"HEART"}'
+expect "…and can take it back: 204" 204 "" -- -X DELETE "$API/entries/$RX_B_ENTRY/reaction" -H "Authorization: Bearer $RX_A"
+rows_are "…which removes it" "$RX_B_ENTRY" "0|"
+is "…for the partner too" "$(rx_views "$RX_B" "$RX_BOND" myEntry)" 'null null null'
+
+RX_LEAKED=""
+for words in "$RX_A_TEXT" "$RX_B_TEXT" "$RX_SOLO_TEXT" "$RX_C_TEXT" "$RX_B2_TEXT" "$RX_HAND_TEXT" "$RX_O_TEXT"; do grep -qF "$words" "$MOYI_LOG" && RX_LEAKED="$RX_LEAKED [$words]"; done
+[ -z "$RX_LEAKED" ] && pass "no entry of this section is anywhere in the log" || fail "text in log" "found:$RX_LEAKED"
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.
-if [ "$ROW" = "ACTIVE|t|2|2" ]; then pass "user ACTIVE, verified, two tokens (verification + reset), both consumed"; elif [ "$ROW" = "psql-unavailable" ]; then echo "  skip database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|2|2, got '$ROW'"; fi
+if [ "$ROW" = "ACTIVE|t|2|2" ]; then pass "user ACTIVE, verified, two tokens (verification + reset), both consumed"; elif [ "$ROW" = "psql-unavailable" ]; then skip "database check (psql not reachable through docker compose)"; else fail "database row" "expected ACTIVE|t|2|2, got '$ROW'"; fi
 SESSIONS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) || '|' || count(*) FILTER (WHERE revoked_at IS NULL) FROM refresh_tokens t JOIN users u ON u.id=t.user_id WHERE u.email='$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
 # Every family started here was ended: two by reuse detection and logout,
 # the phone's and the watch's by DELETE /auth/sessions, the rest by
 # logout-all and the reset. Two live tokens remain for THIS account — the
 # login after the reset and the one the bond section signed in with; the
 # joiner is a different account and is not counted here.
-case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|2") pass "refresh tokens stored as hashes; exactly two live sessions remain ($SESSIONS)";; *) fail "sessions" "expected exactly two live refresh tokens, got '$SESSIONS'";; esac
+case "$SESSIONS" in psql-unavailable) skip "session check";; *"|2") pass "refresh tokens stored as hashes; exactly two live sessions remain ($SESSIONS)";; *) fail "sessions" "expected exactly two live refresh tokens, got '$SESSIONS'";; esac
 
 # The close job (slice C3), on the wire. The run above started it on a
 # five-second schedule instead of its quarter-hour, so by now it has run many
@@ -1473,12 +1773,12 @@ case "$SESSIONS" in psql-unavailable) echo "  skip session check";; *"|2") pass 
 # checked is that it ran, holds its lock by name, and failed on nothing.
 echo; echo "scheduling — the close job runs, under its lock, without error (spec §6.4, C3)"
 CLOSE_LOCK="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM shedlock WHERE name='close-days'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$CLOSE_LOCK" in psql-unavailable) echo "  skip lock check";; 1) pass "the close job has taken its ShedLock row";; *) fail "close job" "expected one shedlock row named close-days, got '$CLOSE_LOCK'";; esac
+case "$CLOSE_LOCK" in psql-unavailable) skip "lock check";; 1) pass "the close job has taken its ShedLock row";; *) fail "close job" "expected one shedlock row named close-days, got '$CLOSE_LOCK'";; esac
 if grep -qE "close: day .* failed|close: the missing days of bond|streak: bond .* could not be evaluated|FAILED [1-9]|Unexpected error occurred in scheduled task" "$MOYI_LOG"; then fail "close job" "the close job logged a failure"; else pass "…and has logged no failure"; fi
 UNCLOSED_PAST="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM bond_days WHERE closed_at IS NULL AND ends_at < now() - interval '1 minute'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$UNCLOSED_PAST" in psql-unavailable) echo "  skip unclosed-day check";; 0) pass "…and no day that has ended is still unclosed";; *) fail "close job" "$UNCLOSED_PAST ended days are still unclosed";; esac
+case "$UNCLOSED_PAST" in psql-unavailable) skip "unclosed-day check";; 0) pass "…and no day that has ended is still unclosed";; *) fail "close job" "$UNCLOSED_PAST ended days are still unclosed";; esac
 
-echo; printf '%d passed, %d failed\n' "$PASS" "$FAIL"
+echo; printf '%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 # The exit status is the failure count, as the README says (capped at what a
 # shell can carry), so a caller can tell one failure from several.
 exit $(( FAIL > 255 ? 255 : FAIL ))

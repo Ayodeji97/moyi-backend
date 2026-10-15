@@ -99,6 +99,26 @@ internal class JoiningDayTest(
     }
 
     @Test
+    fun `a first reaction PUT by the partner reconciles a legacy joining day, and is then a reaction like any other`() {
+        // Without the reconcile the entry is still locked to him, and the answer is the 404 of an entry never shown.
+        val legacy = legacyJoiningDay()
+
+        reaction(HttpMethod.PUT, eve, legacy.caraEntry).status shouldBe 204
+
+        legacy.shouldBeRevealedOnce()
+        jdbc.queryForObject("SELECT type FROM reactions WHERE entry_id = ?::uuid", String::class.java, legacy.caraEntry) shouldBe "HEART"
+    }
+
+    @Test
+    fun `a first reaction DELETE by the partner reconciles a legacy joining day too`() {
+        val legacy = legacyJoiningDay()
+
+        reaction(HttpMethod.DELETE, eve, legacy.caraEntry).status shouldBe 204
+
+        legacy.shouldBeRevealedOnce()
+    }
+
+    @Test
     fun `a refused first PATCH still leaves a legacy joining day revealed`() {
         val legacy = legacyJoiningDay()
 
@@ -294,6 +314,20 @@ internal class JoiningDayTest(
                 MockMvcRequestBuilders
                     .request(method, "/api/v1/entries/$entryId/favourite")
                     .header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}"),
+            ).andReturn()
+            .response
+
+    private fun reaction(
+        method: HttpMethod,
+        user: UUID,
+        entryId: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .perform(
+                MockMvcRequestBuilders
+                    .request(method, "/api/v1/entries/$entryId/reaction")
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}")
+                    .apply { if (method == HttpMethod.PUT) contentType(MediaType.APPLICATION_JSON).content("""{"type":"HEART"}""") },
             ).andReturn()
             .response
 

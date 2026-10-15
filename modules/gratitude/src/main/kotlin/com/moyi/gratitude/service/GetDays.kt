@@ -6,11 +6,13 @@ import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
+import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.infra.database.ArchiveDay
 import com.moyi.gratitude.infra.database.ArchiveDays
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.Favourites
+import com.moyi.gratitude.infra.database.Reactions
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.LocalDate
@@ -31,6 +33,8 @@ internal data class DayView(
     val partnerEntry: EntryReading?,
     /** Which of this day's entries **the caller** has bookmarked. Only ever ids of entries read in full, and nobody else's marks. */
     val marked: Set<EntryId>,
+    /** The reaction on each of this day's entries that has one, which both members are shown. Only ever of entries read in full. */
+    val reactions: Map<EntryId, ReactionType>,
 )
 
 /**
@@ -118,6 +122,7 @@ internal class GetDays(
     private val entries: EntryStore,
     private val access: BondAccess,
     private val favourites: Favourites,
+    private val reactions: Reactions,
 ) {
     /**
      * At most [limit] days, newest first, strictly before [before] and on or
@@ -188,10 +193,11 @@ internal class GetDays(
             val candidates = candidates(membership, examined, until, favouritesOnly, size)
             val read = read(membership, candidates)
             val marked = marksOf(membership, read)
+            val reacted = reactionsOn(read)
             for (day in read) {
                 val kept = day.keptOf(marked)
                 // With favourites only, a day on which nothing marked can be read any more is passed over.
-                if (!favouritesOnly || kept.isNotEmpty()) page.offer(day, kept)
+                if (!favouritesOnly || kept.isNotEmpty()) page.offer(day, kept, reacted)
             }
             windows++
             older = candidates.size == size
@@ -268,7 +274,7 @@ internal class GetDays(
         val day = archive.on(membership.bondId, membership.memberId, date) ?: return null
         val read = read(membership, listOf(day))
         val marked = marksOf(membership, read)
-        return read.single().let { it.shown(it.keptOf(marked)) }
+        return read.single().let { it.shown(it.keptOf(marked), reactionsOn(read)) }
     }
 
     /**
@@ -293,6 +299,9 @@ internal class GetDays(
         membership: BondMembership,
         read: List<Read>,
     ): Set<EntryId> = favourites.markedBy(membership.memberId, read.flatMap { it.readInFull })
+
+    /** The reactions on the entries of [read]: asked after the gate, of what it answered in full, and of no member. */
+    private fun reactionsOn(read: List<Read>): Map<EntryId, ReactionType> = reactions.on(read.flatMap { it.readInFull })
 
     /**
      * A page being filled: days that will be shown are offered in order,
@@ -319,10 +328,11 @@ internal class GetDays(
         fun offer(
             day: Read,
             kept: Set<EntryId>,
+            reacted: Map<EntryId, ReactionType>,
         ) {
             more = more || taken.size == limit || (taken.isNotEmpty() && octets + day.octets > textOctets)
             if (!more) {
-                taken += day.shown(kept)
+                taken += day.shown(kept, reacted)
                 octets += day.octets
             }
         }
@@ -341,8 +351,15 @@ internal class GetDays(
         /** Which of [marked] are entries of this day read in full: the only ones that may say they are kept. */
         fun keptOf(marked: Set<EntryId>): Set<EntryId> = readInFull.filter { it in marked }.toSet()
 
-        /** This day as a caller is given it, in the feed and alone. */
-        fun shown(kept: Set<EntryId>): DayView = DayView(day.date, day.status, mine, partners, kept)
+        /**
+         * This day as a caller is given it, in the feed and alone. [reacted]
+         * may hold other days' entries; only this day's, read in full, are
+         * taken from it.
+         */
+        fun shown(
+            kept: Set<EntryId>,
+            reacted: Map<EntryId, ReactionType>,
+        ): DayView = DayView(day.date, day.status, mine, partners, kept, reacted.filterKeys { it in readInFull })
 
         /** The octets of text this day will send to this caller. A reading that discloses no text sends none. */
         val octets: Int =
@@ -373,17 +390,19 @@ internal class GetDays(
          * 192 KiB (196,608 octets) of entry text in a page, counted as
          * JSON carries it. Two of the largest days there can be fit in it
          * (196,588 octets) and a third does not. With the most a page can
-         * carry besides text (fifty days of two entries are about 32.5 KB
+         * carry besides text (fifty days of two entries are about 34 KB
          * of ids, dates and field names) the largest response there can be
-         * is about 229 KB, under the 262,144 a response may be.
-         * `DaysFeedTest` builds that page and measures it: 229,063 octets,
-         * with the test clock's whole-second timestamps. An instant in
-         * production carries microseconds, seven octets more in each of two
-         * fields of a hundred entries: about 1.4 KB.
+         * is about 231 KB, under the 262,144 a response may be.
+         * `DaysFeedTest` builds that page and measures it: 230,663 octets,
+         * with the test clock's whole-second timestamps and no reactions.
+         * An instant in production carries microseconds, seven octets more
+         * in each of two fields of a hundred entries: about 1.4 KB. A
+         * reaction's longest name is seven octets more than `null` on each
+         * of them: 0.7 KB.
          *
-         * So the margin is about 31 KB, and it is what a new field on an
+         * So the margin is about 29 KB, and it is what a new field on an
          * entry spends: a hundred entries a page, so every thirty octets
-         * added to one are 3 KB off it.
+         * added to one are 3 KB off it. `reaction` (slice C5c) spent 2.3.
          */
         const val PAGE_TEXT_OCTETS = 192 * 1024
 

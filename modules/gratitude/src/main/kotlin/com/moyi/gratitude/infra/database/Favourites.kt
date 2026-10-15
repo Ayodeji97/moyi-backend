@@ -1,13 +1,11 @@
 package com.moyi.gratitude.infra.database
 
 import com.moyi.gratitude.domain.EntryId
-import org.springframework.dao.DataAccessException
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementSetter
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
-import java.sql.SQLException
 import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
@@ -44,8 +42,8 @@ import java.util.UUID
  * pooled connection while it did, and about as many such requests as the
  * pool has connections stalled every other request in the application,
  * other bonds' included (measured by review: six unmarks 3.6 s each, and a
- * member of another bond 3.3 s on `GET /today`). So [unmark] skips a row it
- * cannot lock at once, and [mark] gives up after [MARK_LOCK_TIMEOUT].
+ * member of another bond 3.3 s on `GET /today`). So [unmark] is refused
+ * a row it cannot lock at once, and [mark] gives up after [MARK_LOCK_TIMEOUT].
  */
 @Component
 internal class Favourites(
@@ -92,7 +90,9 @@ internal class Favourites(
      * **It waits [lockTimeout] for a lock and no longer, and then answers
      * `false`.** An entry is revealed before it can be marked, and a
      * revealed entry's row is changed by one thing only, an erasure. An
-     * author's own delete holds the row for a moment. The withdrawal
+     * author's own delete holds the row for a moment, and so does an
+     * author's `PATCH` on it, which locks the row before it refuses and
+     * changes nothing. The withdrawal
      * consumer holds it until its whole delivery commits, and a mark that
      * waited for that would hold a connection for as long (the class's
      * note). So a row held past the timeout is being erased, and `false`,
@@ -100,15 +100,9 @@ internal class Favourites(
      * waiting, given sooner. If that erasure then rolls back, the member was
      * refused a mark on an entry that is still whole and may ask again.
      *
-     * The timeout is set with `set_config(…, true)`, which is `SET LOCAL`
-     * with a parameter (the idiom of `ConsumerRegistry.register`): it lasts
-     * for this transaction and is gone from the session when it ends, so a
-     * pooled connection goes back as it came. That is why there is a
-     * transaction here at all: set outside one, it would end with its own
-     * statement and bound nothing. The timeout is Postgres's
-     * `lock_not_available`, which leaves the transaction aborted; it is
-     * caught outside the transaction, after the rollback, and is not
-     * logged. **Not to be called inside a caller's transaction**: joined to
+     * The timeout is the transaction's own and nothing of it is logged
+     * (`waitingForALockAtMost`, which `Reactions.set` shares, has how and
+     * why). **Not to be called inside a caller's transaction**: joined to
      * one, a timeout would abort that transaction too.
      *
      * [lockTimeout] is [MARK_LOCK_TIMEOUT] for every caller there is. It is
@@ -128,21 +122,15 @@ internal class Favourites(
         now: Instant,
         lockTimeout: Duration = MARK_LOCK_TIMEOUT,
     ): Boolean =
-        try {
-            transactions.execute {
-                jdbc.queryForObject("SELECT set_config('lock_timeout', ?, true)", String::class.java, "${lockTimeout.toMillis()}ms")
-                jdbc.queryForObject(
-                    MARK,
-                    Int::class.java,
-                    entryId.value,
-                    memberId,
-                    Timestamp.from(now.truncatedTo(ChronoUnit.MICROS)),
-                ) == 1
-            } == true
-        } catch (failure: DataAccessException) {
-            if (!failure.isLockTimeout()) throw failure
-            false
-        }
+        transactions.waitingForALockAtMost(lockTimeout, jdbc) {
+            jdbc.queryForObject(
+                MARK,
+                Int::class.java,
+                entryId.value,
+                memberId,
+                Timestamp.from(now.truncatedTo(ChronoUnit.MICROS)),
+            ) == 1
+        } ?: false
 
     /**
      * Removes the member's mark if there is one. No mark is not an error:
@@ -155,18 +143,13 @@ internal class Favourites(
      * erasure that later rolls back cannot undo a removal we reported successful.
      * The statement runs in autocommit on the request path, so a refusal is
      * already rolled back when caught. No database message escapes this method.
+     * The statement and the refusal are `EntryRowGuard`'s ([removedUnlessHeld]),
+     * shared with `Reactions.remove`.
      */
     fun unmark(
         entryId: EntryId,
         memberId: UUID,
-    ): Boolean =
-        try {
-            jdbc.update(UNMARK, entryId.value, memberId, entryId.value, memberId)
-            true
-        } catch (failure: DataAccessException) {
-            if (!failure.isLockTimeout()) throw failure
-            false
-        }
+    ): Boolean = jdbc.removedUnlessHeld(UNMARK, entryId, memberId)
 
     /**
      * Every member's mark on one entry, for `EraseEntry` and nobody else: a
@@ -206,21 +189,16 @@ internal class Favourites(
     internal companion object {
         /**
          * How long a mark waits for a lock before it answers that the entry
-         * cannot be marked. Nothing that leaves an entry markable holds its
-         * row ([mark] says why), so the length decides one thing: how soon a
-         * request stuck behind a withdrawal gives its connection back. Two
-         * seconds, against a delivery that can run to sixty.
+         * cannot be marked: `EntryRowGuard.LOCK_WAIT`, the one wait every
+         * guarded write on an entry has, which says why it is two seconds.
          */
-        val MARK_LOCK_TIMEOUT: Duration = Duration.ofSeconds(2)
-
-        /** Postgres's `lock_not_available`: a lock that outlasted `lock_timeout`. */
-        private const val LOCK_NOT_AVAILABLE = "55P03"
+        val MARK_LOCK_TIMEOUT: Duration = EntryRowGuard.LOCK_WAIT
 
         private val MARK =
             """
             WITH markable AS (
                 SELECT e.id FROM entries e
-                WHERE e.id = ? AND e.revealed_at IS NOT NULL AND e.deleted_at IS NULL AND e.status <> 'DELETED'
+                WHERE e.id = ? AND ${EntryRowGuard.REVEALED_AND_NOT_ERASED}
                 FOR SHARE
             ), marked AS (
                 INSERT INTO entry_favourites (entry_id, member_id, created_at)
@@ -230,19 +208,6 @@ internal class Favourites(
             SELECT count(*) FROM markable
             """.trimIndent()
 
-        private val UNMARK =
-            """
-            DELETE FROM entry_favourites
-            WHERE entry_id = ? AND member_id = ?
-              AND (entry_id, member_id) IN (
-                  SELECT entry_id, member_id FROM entry_favourites
-                  WHERE entry_id = ? AND member_id = ?
-                  FOR UPDATE NOWAIT
-              )
-            """.trimIndent()
-
-        /** Whether this is Postgres saying a lock was not to be had in time, however Spring has wrapped it. */
-        private fun DataAccessException.isLockTimeout(): Boolean =
-            generateSequence<Throwable>(this) { it.cause }.filterIsInstance<SQLException>().any { it.sqlState == LOCK_NOT_AVAILABLE }
+        private val UNMARK = EntryRowGuard.deleteOrBeRefused("entry_favourites")
     }
 }

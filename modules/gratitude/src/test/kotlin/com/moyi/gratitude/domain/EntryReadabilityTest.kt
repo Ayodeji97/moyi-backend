@@ -75,6 +75,41 @@ internal class EntryReadabilityTest {
         revealed.copy(deletedAt = now).canBeFavouritedBy(stranger) shouldBe Favouriting.NEVER_SHOWN
     }
 
+    /**
+     * FR-048, as a table over the same readers: the gate's answer and one
+     * thing more, whether the reader wrote the entry. `ReactionsTest` holds
+     * what each answer becomes over HTTP.
+     */
+    @Test
+    fun `who may react to an entry is the gate's answer for that reader, and never its author`() {
+        // The partner, of an entry they read in full: which is only ever a revealed one.
+        revealed.canBeReactedToBy(partner) shouldBe Reacting.ALLOWED
+        unrevealed.canBeReactedToBy(partner) shouldBe Reacting.NEVER_SHOWN
+        unrevealed.copy(status = EntryStatus.REVEALED).canBeReactedToBy(partner) shouldBe Reacting.NEVER_SHOWN
+
+        // The author, in every state they can see their entry in: waiting, revealed, erased, withdrawn.
+        unrevealed.canBeReactedToBy(author) shouldBe Reacting.OWN_ENTRY
+        revealed.canBeReactedToBy(author) shouldBe Reacting.OWN_ENTRY
+        revealed.copy(deletedAt = now).canBeReactedToBy(author) shouldBe Reacting.OWN_ENTRY
+        unrevealed.copy(status = EntryStatus.DELETED).canBeReactedToBy(author) shouldBe Reacting.OWN_ENTRY
+        revealed.canBeReactedToBy(authorAfterWithdrawing) shouldBe Reacting.OWN_ENTRY
+
+        // A tombstone to a partner who could read it; nothing to one who never could.
+        for (erased in listOf(revealed.copy(deletedAt = now), revealed.copy(status = EntryStatus.DELETED))) {
+            erased.canBeReactedToBy(partner) shouldBe Reacting.ERASED
+        }
+        unrevealed.copy(deletedAt = now).canBeReactedToBy(partner) shouldBe Reacting.NEVER_SHOWN
+
+        // A withdrawal counts from its commit, while the row is still whole.
+        revealed.canBeReactedToBy(partnerAfterWithdrawal) shouldBe Reacting.ERASED
+        unrevealed.canBeReactedToBy(partnerAfterWithdrawal) shouldBe Reacting.NEVER_SHOWN
+
+        // Another bond's member: nothing, revealed or not, erased or not, and not "your own" by a shared member id.
+        revealed.canBeReactedToBy(stranger) shouldBe Reacting.NEVER_SHOWN
+        revealed.copy(deletedAt = now).canBeReactedToBy(stranger) shouldBe Reacting.NEVER_SHOWN
+        revealed.canBeReactedToBy(Reader(author.memberId, stranger.bondId, emptySet())) shouldBe Reacting.NEVER_SHOWN
+    }
+
     @Test
     fun `an author reads their own entry in full, revealed or not`() {
         unrevealed.canBeReadBy(author) shouldBe Readability.FULL

@@ -75,8 +75,8 @@ internal class EntryChangesController(
  * The `{entryId}` of a path, or the one `404`: a value that is not a UUID
  * cannot name an entry, and is answered exactly as a UUID that names nobody's.
  * Taken as text and parsed here for that reason, by every route that carries
- * one ([EntryChangesController], [FavouritesController]), so the routes
- * cannot come to differ in it.
+ * one ([EntryChangesController], [FavouritesController],
+ * [ReactionsController]), so the routes cannot come to differ in it.
  */
 internal fun entryIdOrNotFound(raw: String): EntryId =
     runCatching { EntryId(UUID.fromString(raw)) }.getOrElse { throw EntryNotFoundException() }

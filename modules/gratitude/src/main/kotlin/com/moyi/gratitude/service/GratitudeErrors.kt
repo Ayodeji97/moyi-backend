@@ -85,10 +85,11 @@ internal class DayClosedException :
  * erased them. The sentence says neither: it answers both, and "has been
  * revealed" was false for an entry deleted before anybody else could read it.
  *
- * Also what a bookmark is refused with on a tombstone ([FavouriteEntry]), so
- * the sentence says "changed" and not "edited": it has to be true of an edit
- * and of a mark alike. One code for "this entry is settled and takes no more
- * changes" is worth more to a client than a second one.
+ * Also what a bookmark and a reaction are refused with on a tombstone
+ * ([FavouriteEntry], [ReactToEntry]), so the sentence says "changed" and not
+ * "edited": it has to be true of an edit, a mark and a reaction alike. One
+ * code for "this entry is settled and takes no more changes" is worth more
+ * to a client than a second one.
  */
 internal class EntryImmutableException :
     ApiException(
@@ -116,14 +117,34 @@ internal class EntryNotRevealedException :
     )
 
 /**
+ * FR-048: the caller's own entry takes no reaction of theirs. Raised only
+ * for an entry the caller wrote, by [ReactToEntry]; an entry they were never
+ * shown is [EntryNotFoundException] to them, as it is on every route.
+ */
+internal class ReactionOnOwnEntryException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.REACTION_ON_OWN_ENTRY,
+        "You cannot react to your own entry.",
+    )
+
+/** A competing operation on the reaction has not finished; no successful removal is promised. */
+internal class ReactionBusyException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.REACTION_BUSY,
+        "This reaction is being changed. Please try again.",
+    )
+
+/**
  * The one answer for an entry the caller may not act on (spec §5.2, T-02):
  * no such id, an id that is not a UUID, an entry in a bond the caller is not
  * in; on the routes that change an entry, an entry the caller's partner
- * wrote; and on the favourite routes, an entry the caller was never shown
- * (locked, or erased before it was revealed), where a partner's revealed
- * entry is theirs to mark (ADR-0036 decision 11). One class, so the `404`s
- * are the same bytes because they are the same object — not because eight
- * copies of a sentence happen to agree
+ * wrote; and on the favourite and reaction routes, an entry the caller was
+ * never shown (locked, or erased before it was revealed), where a partner's
+ * revealed entry is theirs to mark and to react to (ADR-0036 decision 11).
+ * One class, so the `404`s are the same bytes because they are the same
+ * object — not because eight copies of a sentence happen to agree
  * (`bond.service.BondNotFoundException`'s own shape).
  */
 internal class EntryNotFoundException : NotFoundException("That entry was not found.")

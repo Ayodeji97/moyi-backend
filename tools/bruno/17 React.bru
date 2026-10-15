@@ -1,0 +1,29 @@
+meta {
+  name: React
+  type: http
+  seq: 17
+}
+
+put {
+  url: {{api}}/entries/{{partnerEntryId}}/reaction
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "type": "HEART"
+  }
+}
+
+docs {
+  Leaves a reaction on your partner's entry: 204, and 204 again for the same one. A second type replaces the first; there is one reaction per entry. The type is HEART, THANK_YOU, SMILE or MOVED, exactly as written here; anything else is 422, and a body with any other key is 400.
+
+  Unlike a favourite, your partner IS shown it: the entry carries it as "reaction" for both of you, on Today, Days and Day. Nothing says when it was left.
+
+  Run Days first, which keeps your partner's entry of the newest day as partnerEntryId. Only your partner's revealed entry takes one. Your own is 409 REACTION_ON_OWN_ENTRY; one that has been deleted or withdrawn is 409 ENTRY_IMMUTABLE; once the bond has ended it is 409 BOND_ARCHIVED; anything you were never shown is 404.
+}
