@@ -18,7 +18,11 @@ package com.moyi.common.web
  * client handling a case the server never produces.
  */
 enum class ErrorCode {
-    /** A bookmark is locked by another transaction. 409: retry the same removal once it finishes. */
+    /**
+     * A bookmark is locked by another transaction. 409: retry the same
+     * removal once it finishes. Never given on an entry the caller is shown
+     * as erased: there a held row is a `204` (ADR-0037 decision 6).
+     */
     FAVOURITE_BUSY,
 
     /**
@@ -261,7 +265,12 @@ enum class ErrorCode {
      */
     REACTION_ON_OWN_ENTRY,
 
-    /** A reaction is locked by another transaction. 409: retry the same removal once it finishes. */
+    /**
+     * A reaction is locked by another transaction, on an entry the caller
+     * reads in full. 409: retry the same removal once it finishes. Never
+     * given on an entry the caller is shown as erased, nor on one the caller
+     * wrote: there the answer is `204` (ADR-0037 decision 6).
+     */
     REACTION_BUSY,
 
     /**
