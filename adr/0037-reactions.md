@@ -653,7 +653,7 @@ author's.
 - **The three reviews of 2026-10-15** (of Task 2, of conformance, of concurrency and
   privacy; at `c57ae14`). Critical 0 in each; one important between them, found by two
   (the state map, above, proved by running `main`'s checker); 19 minor, of which the
-  owner's coordinator skipped two. Their files, and fix round 2's brief and report, are in
+  coordinating agent ruled two out (naming, commit length), not the owner. Their files, and fix round 2's brief and report, are in
   the slice's working folder, not in this repository.
 - **Run for fix round 2** (2026-10-15, by its implementer, `f2d66ba..` this commit).
   - `scripts/state-map-check --strict`: exit 0, "634 rows, 268 never run, 0 pending, 29
