@@ -3809,7 +3809,7 @@
     "reason": "Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself.",
     "rule": "FR-029a, ADR-0035 §11, §15",
     "evidence": "test",
-    "evidenceRef": "WithdrawalReadTest#leaving without withdrawing changes nothing either of them reads",
+    "evidenceRef": "WithdrawalReadTest#leaving without withdrawing changes no entry either of them reads",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
   },
   {

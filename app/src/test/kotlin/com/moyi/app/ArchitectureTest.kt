@@ -525,5 +525,19 @@ class ArchitectureTest {
         val extra = file.imports.map { it.name }.filterNot { it in allowed }
 
         assertTrue(extra.isEmpty(), "DailyPrompt may read the bond, the library and the caller's locale, and nothing else. Found: $extra")
+
+        // The imports cannot see this module's own services: `GetStreak`, `DayEntries`,
+        // `EntryById` and the rest share DailyPrompt's package and need no import. What it
+        // is handed is its constructor, so the constructor is pinned as well (ADR-0038).
+        val prompt = file.classes().single { it.name == "DailyPrompt" }
+        val handed =
+            prompt.primaryConstructor
+                ?.parameters
+                .orEmpty()
+                .map { it.type.name }
+        assertTrue(
+            handed.sorted() == listOf("PromptLibrary", "UserDirectory") && prompt.secondaryConstructors.isEmpty(),
+            "DailyPrompt is handed the library and the user directory, and nothing else. Found: $handed",
+        )
     }
 }

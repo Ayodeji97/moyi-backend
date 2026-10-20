@@ -187,9 +187,11 @@ internal class PromptOnTodayTest(
                 "core $id"
             }
 
-        // A member the directory no longer knows is shown en, not nothing.
+        // A member the directory no longer knows is shown en, not nothing: the en text of the bond's prompt, exactly.
         users.forget(pt)
-        today(pt, bond)["prompt"]["text"].asString().startsWith("pt-pt") shouldBe false
+        val forgotten = today(pt, bond)["prompt"]
+        val m = forgotten["id"].asString().takeLast(1).toInt()
+        forgotten["text"].asString() shouldBe if (m == 6) "couple 6" else "core $m"
     }
 
     @Test
@@ -211,7 +213,9 @@ internal class PromptOnTodayTest(
         for ((user, bond) in listOf(leaver to left, stayer to left, blocker to block, blocked to block)) {
             today(user, bond)["prompt"].isNull shouldBe true
         }
-        // What the other member is shown is the same, whichever way the bond ended (states.md §9).
+        // What the other member is shown is the same, whichever way the bond ended (states.md §9). Both are the
+        // literal `null` the loop above has already asserted, so this line adds no evidence of its own: it states the
+        // rule where a reader looks for it. The rest of the two bodies is WithdrawalReadTest's and the smoke run's.
         prompt(stayer, left) shouldBe prompt(blocked, block)
 
         val one = users.verified("Uno")

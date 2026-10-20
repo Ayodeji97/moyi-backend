@@ -239,7 +239,7 @@ internal class WithdrawalReadTest(
     }
 
     @Test
-    fun `leaving without withdrawing changes nothing either of them reads`() {
+    fun `leaving without withdrawing changes no entry either of them reads`() {
         val adasKey = UUID.randomUUID().toString()
         val adas = entryOf(submit(ada, ADAS_WORDS, key = adasKey))
         val beas = entryOf(submit(bea, BEAS_WORDS))
