@@ -66,8 +66,10 @@ internal data class SubmitEntryRequest(
      * Never the words (doc 18 §5/§9). A data class prints every property, and
      * this one holds an entry's text as a plain `String` — before
      * [EntryText] has wrapped it in something that refuses to print itself.
+     * [promptId] is printed only as present or absent: it is unchecked client text, and what
+     * an entry answered is withdrawn with its words (BR-10), which a log line would outlive.
      */
     override fun toString(): String =
         "SubmitEntryRequest(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, " +
-            "intendedAt=$intendedAt, promptId=$promptId)"
+            "intendedAt=$intendedAt, promptId=${promptId?.let { "(given)" }})"
 }

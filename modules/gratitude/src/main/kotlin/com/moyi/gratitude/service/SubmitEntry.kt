@@ -64,9 +64,10 @@ internal data class EntryDraft(
     val intendedAt: Instant?,
     val promptId: String?,
 ) {
-    /** Never the words — `SubmitEntryRequest.toString`'s own reason: [text] is still a plain `String` here. */
+    /** Never the words, nor which prompt they answered — `SubmitEntryRequest.toString`'s own reasons. */
     override fun toString(): String =
-        "EntryDraft(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, intendedAt=$intendedAt, promptId=$promptId)"
+        "EntryDraft(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, intendedAt=$intendedAt, " +
+            "promptId=${promptId?.let { "(given)" }})"
 }
 
 /**
@@ -276,6 +277,7 @@ internal class SubmitEntry(
      * @throws com.moyi.common.web.NotFoundException the caller is not a member of [bondId], or there is no such bond
      * @throws BondArchivedException `membership.hasLeft`, or the bond has ended (BR-9)
      * @throws MediaNotYetSupportedException either media id is present (spec §1)
+     * @throws PromptNotKnownException `promptId` is not the id of a prompt the library has ever held (ADR-0038)
      * @throws DayClosedException the Bond-day this entry resolves to is settled — closed, or already revealed —
      *   and BR-3a has no other day to put it on
      * @throws EntryAlreadyExistsException a second entry from this member on this day (BR-2)

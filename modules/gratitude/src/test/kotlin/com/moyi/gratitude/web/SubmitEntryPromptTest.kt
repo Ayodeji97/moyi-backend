@@ -100,6 +100,8 @@ internal class SubmitEntryPromptTest(
                 get(bea, "/api/v1/bonds/$bond/today"),
             )
         post(bea, bond, """{"text":"thank you for the walk"}""").status shouldBe 201
+        // Bea's entry revealed the day; the reveal keeps what Ada's entry answered.
+        storedPrompt(entryId) shouldBe other
         listOf(ada, bea).forEach { user ->
             views += get(user, "/api/v1/bonds/$bond/today")
             views += get(user, "/api/v1/bonds/$bond/days")

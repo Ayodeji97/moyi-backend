@@ -37,6 +37,8 @@ internal class EntryPromptTest {
             .erase(now)
             .promptId
             .shouldBeNull()
+        // The reveal shows the words to the partner; what they answered stays with the author's entry.
+        entry(prompt).reveal(now).promptId shouldBe prompt
         // An edit before the reveal changes the words, not what they answered.
         entry(prompt).edit(EntryText.of("thank you, again"), now).promptId shouldBe prompt
     }
