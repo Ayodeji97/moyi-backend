@@ -51,10 +51,17 @@
 # answering as they do for an entry deleted by hand. It holds no row: 409
 # REACTION_BUSY and FAVOURITE_BUSY, and the 204 a held row gets on a
 # tombstone, are the integration tests' alone.
+# Since slice C6a it reads the day's prompt: one for the bond before the
+# second member arrives, the same id for both members and each one's own
+# language, the same bytes after the partner opens, writes and reveals, an
+# entry recorded with the prompt it answered and nobody sent that back, one
+# 422 for every id that names no prompt after the bond's 404, the prompt gone
+# from the row with the entry's words, and none on an ended bond.
 # Every day it reads is today: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-15, against a database of
-# its own (MOYI_DB, below), on the jar built from dfac89b: 814 passed, 0 failed,
-# 0 skipped, 21 sections (the first run to count its skips); on 2026-10-13 it
+# days are the tests' to show. Last run on 2026-10-20, against a database of
+# its own (MOYI_DB, below), on the jar built from 0f04535: 850 passed, 0 failed,
+# 0 skipped, 22 sections; on 2026-10-15, from dfac89b, 814, 0 and 0 in 21 (the
+# first run to count its skips); on 2026-10-13 it
 # was 814 and 0, no skips, in 21, and on 2026-10-09 647 and 0 in 20. A run on 2026-10-07, with the
 # poller held idle, failed the four probes that then depended on it; three did
 # after that, the C5b section adds its own, and that run has not been
@@ -225,7 +232,7 @@ fi
 
 EMAIL="smoke-$(date +%s)-$RANDOM@example.com"
 PASSWORD="correct horse battery"
-register_body() { printf '{"email":"%s","password":"%s","displayName":"Smoke","locale":"en","acceptedTermsVersion":"2026-09-01","over18":true}' "$1" "$PASSWORD"; }
+register_body() { printf '{"email":"%s","password":"%s","displayName":"Smoke","locale":"%s","acceptedTermsVersion":"2026-09-01","over18":true}' "$1" "$PASSWORD" "${2:-en}"; }
 
 # A previous run's buckets must not count against this one.
 flush_buckets
@@ -550,10 +557,10 @@ LOG_LINES_BEFORE_ENDING="$(wc -l < "$MOYI_LOG" | tr -d ' ')"
 # compared byte for byte below. A different X-Forwarded-For each time, so the
 # per-IP registration bucket is not what this section ends up testing.
 verified_account() {
-  local label="$1" ip="$2" email before token
+  local label="$1" ip="$2" locale="${3:-en}" email before token
   email="end-$label-$(date +%s)-$RANDOM@example.com"
   before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
-  expect "register $label" 201 "" -- -X POST "$API/auth/register" -H "X-Forwarded-For: $ip" -d "$(register_body "$email")"
+  expect "register $label" 201 "" -- -X POST "$API/auth/register" -H "X-Forwarded-For: $ip" -d "$(register_body "$email" "$locale")"
   for _ in $(seq 1 40); do [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$before" ] && break; sleep 0.25; done
   token="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
   expect "verify $label" 200 "" -- -X POST "$API/auth/verify-email" -d "{\"token\":\"$token\"}"
@@ -1753,6 +1760,72 @@ is "…for the partner too" "$(rx_views "$RX_B" "$RX_BOND" myEntry)" 'null null 
 RX_LEAKED=""
 for words in "$RX_A_TEXT" "$RX_B_TEXT" "$RX_SOLO_TEXT" "$RX_C_TEXT" "$RX_B2_TEXT" "$RX_HAND_TEXT" "$RX_O_TEXT"; do grep -qF "$words" "$MOYI_LOG" && RX_LEAKED="$RX_LEAKED [$words]"; done
 [ -z "$RX_LEAKED" ] && pass "no entry of this section is anywhere in the log" || fail "text in log" "found:$RX_LEAKED"
+
+echo; echo "prompts — one prompt a day for the bond, in each member's language (FR-047, ADR-0038)"
+flush_buckets
+# What this section is for: the prompt as the jar serves it. Both members are offered the
+# same one, each in their own language; nothing the partner does moves it; an entry
+# records which it answered and nobody is sent that back; an id that names no prompt is
+# one 422; an ended bond has none. The library is the seed's. A translation is put in for
+# this run only, so that a second language has something to show, and taken out after.
+verified_account "prompted" "203.0.113.110";          PR_A="$ACCOUNT_ACCESS"
+verified_account "lusophone" "203.0.113.111" "pt-PT"; PR_B="$ACCOUNT_ACCESS"
+verified_account "outsider" "203.0.113.112";          PR_O="$ACCOUNT_ACCESS"
+PR_TRANSLATED="$(sql "WITH added AS (INSERT INTO prompt_texts (prompt_id, locale, text) SELECT id, 'pt-pt', 'PT~ ' || text FROM prompts ON CONFLICT DO NOTHING RETURNING 1) SELECT count(*) FROM added")"
+# db_is <label> <got> <expected> — `is` for a value read with `sql`, skipped when psql cannot be reached.
+db_is() { case "$2" in psql-unavailable) skip "$1 (psql not reachable through docker compose)";; *) is "$1" "$2" "$3";; esac; }
+
+expect "prompts: a bond" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $PR_A" -d "$(bond_body "Us")"
+PR_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+PR_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "prompts: before the second member, there is already a prompt" 200 '"prompt":{' -- "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_A"
+expect "prompts: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$PR_CODE/accept" -H "Authorization: Bearer $PR_B"
+
+expect "prompts: today for the first" 200 '"prompt":{' -- "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_A"
+PR_ID="$(raw prompt.id)"; PR_A_PROMPT="$(at prompt)"; PR_A_TEXT="$(raw prompt.text)"
+is "prompts: the prompt is an id and a text, nothing else" "$(python3 -c 'import json,sys; print(sorted(json.loads(sys.argv[1])))' "$PR_A_PROMPT")" "['id', 'text']"
+# `sql` strips whitespace from what it prints, so the comparison is made without it.
+PR_SEED_TEXT="$(sql "SELECT text FROM prompts WHERE id='$PR_ID'")"
+db_is "prompts: in en, the seed's own words" "$(printf '%s' "$PR_A_TEXT" | tr -d '[:space:]')" "$PR_SEED_TEXT"
+expect "prompts: today for the second" 200 '"prompt":{' -- "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_B"
+is "prompts: the same prompt for both" "$(raw prompt.id)" "$PR_ID"
+case "$PR_TRANSLATED" in
+  0|psql-unavailable) skip "prompts: the second member reads it in pt-PT (no translation could be put in)" ;;
+  *) is "prompts: the second member reads it in pt-PT" "$(raw prompt.text)" "PT~ $PR_A_TEXT" ;;
+esac
+
+# The partner opens the app, writes, the day reveals: the first member's prompt does not move a byte.
+for _ in 1 2 3; do curl -s -o /dev/null "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_B"; done
+expect "prompts: the second writes, with no prompt" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"thank you for the lamp"}'
+expect "prompts: the first's today, after" 200 "" -- "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_A"
+is "prompts: …her prompt is the same bytes" "$(at prompt)" "$PR_A_PROMPT"
+
+# An entry answers the prompt; nobody is sent which.
+expect "prompts: the first writes, answering it" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"thank you for the long walk\",\"promptId\":\"$PR_ID\"}"
+PR_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+is "prompts: the 201 has no promptId" "$(at promptId)" "absent"
+db_is "prompts: the entry row records it" "$(sql "SELECT prompt_id FROM entries WHERE id='$PR_ENTRY'")" "$PR_ID"
+for view in "days" "days/$(raw date)"; do
+  expect "prompts: the partner's $view" 200 "" -- "$API/bonds/$PR_BOND/$view" -H "Authorization: Bearer $PR_B"
+  if repeats "$PR_ID" || [[ "$LAST_BODY" == *promptId* ]]; then fail "prompts: $view names the prompt the entry answered" "${LAST_BODY:0:200}"; else pass "prompts: $view names no prompt"; fi
+done
+
+# One 422 for every id that names no prompt, and the guard and the ending first.
+PR_ONE="$(curl -s -X POST "$API/bonds/$PR_BOND/entries" -H 'Content-Type: application/json' -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"x\",\"promptId\":\"$(new_key)\"}" | sed 's/"instance":"[^"]*"//')"
+expect "prompts: an id no prompt has is 422 on promptId" 422 '"field":"promptId"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"x","promptId":"not-a-uuid"}'
+is "prompts: …the same body as for a uuid no prompt has" "$(no_instance | sed 's/"instance":"-"//')" "$PR_ONE"
+expect "prompts: a stranger is told the bond's 404 first" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_O" -H "Idempotency-Key: $(new_key)" -d '{"text":"x","promptId":"not-a-uuid"}'
+
+# Deleting the entry takes the prompt it answered.
+expect "prompts: the first deletes her entry" 204 "" -- -X DELETE "$API/entries/$PR_ENTRY" -H "Authorization: Bearer $PR_A"
+db_is "prompts: …and the row no longer names the prompt" "$(sql "SELECT coalesce(prompt_id::text, 'none') FROM entries WHERE id='$PR_ENTRY'")" "none"
+
+# An ended bond has no prompt, for either member.
+expect "prompts: the second leaves" 204 "" -- -X POST "$API/bonds/$PR_BOND/leave" -H "Authorization: Bearer $PR_B"
+expect "prompts: no prompt for the one who stayed" 200 '"prompt":null' -- "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_A"
+expect "prompts: …nor for the one who left" 200 '"prompt":null' -- "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_B"
+
+sql "DELETE FROM prompt_texts WHERE text LIKE 'PT~ %'" >/dev/null
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
