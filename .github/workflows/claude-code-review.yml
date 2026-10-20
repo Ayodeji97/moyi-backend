@@ -182,6 +182,14 @@ jobs:
           # causes on top (the Skill allowlist, background agents); whether
           # this one was underneath them too was not checked.
           #
+          # **Even with `--comment`, step 1 can end the run silently.** The
+          # plugin's eligibility check stops on a PR it judges trivial without
+          # posting anything: PR #63 (2026-10-15, run 38760039716, "a trivial,
+          # docs-only change that doesn't warrant a full review", 0 before,
+          # 0 after) — red, though nothing was broken. The prompt now asks for a
+          # one-line comment whenever the review declines, so the guard below
+          # keeps its meaning: silence is always a fault.
+          #
           # An earlier version of this comment said the plugin "has no
           # `--comment` flag". It has had one since 2026-02-11 (upstream
           # 6dcc7d8); the mistake was reading the flag as belonging only to the
@@ -192,6 +200,9 @@ jobs:
             ${{ github.event.pull_request.html_url }}
 
             Complete this review within this invocation and post its result before ending.
+            If you decide the PR needs no review (closed, draft, trivial, automated, or already
+            reviewed), still post one PR comment with `gh pr comment` saying so and why: a review
+            that ends silently is indistinguishable from one that failed, and the job fails it.
             Run review agents in the foreground only (run_in_background: false), wait for their
             results, and never finish with a promise to wait for background notifications:
             the action closes the session at the end of the turn. Pass these constraints to agents.
@@ -261,6 +272,9 @@ jobs:
       # ten days it was missing. If a genuinely clean PR is
       # ever seen to post nothing, this guard is wrong and should become a
       # warning — but a false red is cheap and today's false green was not.
+      # It was seen once (#63, 2026-10-15): the plugin's eligibility step
+      # declined a docs-only PR and posted nothing. The answer chosen was to
+      # make the decline post (the prompt above), not to weaken this guard.
       # Not when this PR edits this workflow. In that case claude-code-action
       # deliberately skips itself and signals it by *succeeding*, so nothing is
       # posted for a reason that has nothing to do with the review being
