@@ -539,5 +539,21 @@ class ArchitectureTest {
             handed.sorted() == listOf("PromptLibrary", "UserDirectory") && prompt.secondaryConstructors.isEmpty(),
             "DailyPrompt is handed the library and the user directory, and nothing else. Found: $handed",
         )
+
+        // Nor can the constructor see a field injected past it: an `@Autowired lateinit var`
+        // spelt fully qualified needs no import either. So every property DailyPrompt
+        // declares must be one of the two its constructor takes.
+        val params =
+            prompt.primaryConstructor
+                ?.parameters
+                .orEmpty()
+                .map { it.name }
+                .toSet()
+        val fields = prompt.properties().map { "${it.name}: ${it.type?.name}" }
+        val unhanded = prompt.properties().map { it.name }.filterNot { it in params }
+        assertTrue(
+            unhanded.isEmpty(),
+            "DailyPrompt holds only what its constructor is handed. Found properties: $fields",
+        )
     }
 }
