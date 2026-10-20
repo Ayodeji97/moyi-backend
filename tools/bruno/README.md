@@ -26,7 +26,9 @@ has been run end to end. That is as true of the four archive requests, which are
 here to switch a query parameter off (`~`), to send a header from a variable, and to read
 a response header in a script: Day's `If-None-Match` is where to look first of all. The
 two reaction requests (17 and 18, added 2026-10-13) have not been opened in Bruno either;
-`scripts/moyi react` and `unreact` send the same two requests and were run.
+`scripts/moyi react` and `unreact` send the same two requests and were run. The prompt
+(09's post-response script and 08's pre-request addition, 2026-10-15) has not been opened in
+Bruno either; `scripts/moyi write --prompt` sends the same two requests and was run.
 
 **Leave bond and Block are last, and are not part of the loop.** Each ends the bond in
 use for both people. Their bodies are optional and their defaults are opposite: a leave

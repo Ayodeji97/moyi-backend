@@ -11,7 +11,7 @@
 #   MOYI_PROFILE=ada                         whose session; one file per profile
 #   MOYI_INSECURE=1                          allow plain http to a host that is not this machine
 #
-#   moyi register <email> <display name>     then: moyi verify <token from the email>
+#   moyi register <email> <display name> [locale]   the language you are shown prompts in, e.g. pt-PT (en if not given)
 #   moyi login <email>
 #   moyi bond new <name> <timezone>          prints the invite code to send your partner
 #   moyi bond join <code>
@@ -24,7 +24,8 @@
 #                                            two flags is required: --withdraw-entries erases your entries
 #                                            for both of you, for good; --keep-entries leaves them readable.
 #                                            It may be repeated, to withdraw what an earlier one kept
-#   moyi write "<text>"                      or: moyi write -   (the text from stdin)
+#   moyi write [--prompt] "<text>"           or: moyi write [--prompt] -   (the text from stdin). With --prompt, the
+#                                            entry answers today's prompt (moyi today shows it); without, it answers none
 #   moyi today
 #   moyi edit <entryId> "<text>"             until your partner has written
 #   moyi delete <entryId>
@@ -231,10 +232,10 @@ ask_password() { local p; IFS= read -r -s -p "password: " p; echo >&2; printf '%
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   register)
-    [ $# -eq 2 ] || die "usage: moyi register <email> <display name>"
+    [ $# -eq 2 ] || [ $# -eq 3 ] || die "usage: moyi register <email> <display name> [locale]"
     password="$(ask_password)"
     ANONYMOUS=1 call POST /auth/register \
-      "$(with_json '{"locale":"en","acceptedTermsVersion":"2026-09-01","over18":true}' email "$1" password "$password" displayName "$2")"
+      "$(with_json '{"acceptedTermsVersion":"2026-09-01","over18":true}' email "$1" password "$password" displayName "$2" locale "${3:-en}")"
     [ "$STATUS" = 201 ] || show 201
     echo "Registered. Now: moyi verify <the token in the email>, then moyi login $1"
     ;;
@@ -307,10 +308,19 @@ case "$cmd" in
     esac
     ;;
   write)
-    [ $# -eq 1 ] || die 'usage: moyi write "<text>"   or: moyi write -   (the text from stdin)'
+    prompt=0; [ "${1:-}" = --prompt ] && { prompt=1; shift; }
+    [ $# -eq 1 ] || die 'usage: moyi write [--prompt] "<text>"   or: moyi write [--prompt] -   (the text from stdin)'
     signed_in; BOND="$(bond)"
     if [ "$1" = - ]; then text="$(cat)"; else text="$1"; fi
-    authed POST "/bonds/$BOND/entries" "$(json_of text "$text")"; show 201
+    if [ "$prompt" = 1 ]; then
+      authed GET "/bonds/$BOND/today"; [ "$STATUS" = 200 ] || show 200
+      prompt_id="$(printf '%s' "$BODY" | field prompt.id)"
+      [ -n "$prompt_id" ] || die "there is no prompt today; write without --prompt"
+      authed POST "/bonds/$BOND/entries" "$(json_of text "$text" promptId "$prompt_id")"
+    else
+      authed POST "/bonds/$BOND/entries" "$(json_of text "$text")"
+    fi
+    show 201
     ;;
   today)  signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/today";  show 200 ;;
   streak) signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/streak"; show 200 ;;
