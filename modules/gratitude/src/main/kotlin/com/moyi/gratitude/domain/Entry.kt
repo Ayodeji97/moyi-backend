@@ -41,7 +41,11 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  * text only where the status or `deletedAt` says why. Loosening it for
  * media-only entries is that later slice's change to make.
  *
- * [imageMediaId], [voiceMediaId], [voiceDurationMs] and [promptId] are
+ * [promptId] is the prompt the author said this entry answers (ADR-0038),
+ * never sent back to anybody; [erase] takes it with the words (BR-10: what
+ * a withdrawn entry was answering is part of what was withdrawn).
+ *
+ * [imageMediaId], [voiceMediaId] and [voiceDurationMs] are
  * carried anyway, always `null` for now, so a row [submit] builds already
  * has a value for every column V12 declared — the same reason
  * [com.moyi.bond.domain.Bond] carries `timezoneChangedAt` and
@@ -69,7 +73,7 @@ internal data class Entry(
     val imageMediaId: UUID?,
     val voiceMediaId: UUID?,
     val voiceDurationMs: Int?,
-    val promptId: UUID?,
+    val promptId: PromptId?,
     val status: EntryStatus,
     val authorDeletedAccount: Boolean,
     val createdAt: Instant,
@@ -250,6 +254,7 @@ internal data class Entry(
                 imageMediaId = null,
                 voiceMediaId = null,
                 voiceDurationMs = null,
+                promptId = null,
                 status = EntryStatus.DELETED,
                 deletedAt = now,
                 updatedAt = now,
@@ -301,6 +306,7 @@ internal data class Entry(
             bondId: UUID,
             authorMemberId: UUID,
             text: EntryText,
+            promptId: PromptId?,
             intendedAt: Instant,
             now: Instant,
         ): Entry =
@@ -313,7 +319,7 @@ internal data class Entry(
                 imageMediaId = null,
                 voiceMediaId = null,
                 voiceDurationMs = null,
-                promptId = null,
+                promptId = promptId,
                 status = EntryStatus.SUBMITTED,
                 authorDeletedAccount = false,
                 createdAt = now,

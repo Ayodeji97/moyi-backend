@@ -163,7 +163,7 @@ internal class BondDayTest {
         // that holds only because no *other* field on Entry is personal data.
         // This is the tripwire for the day somebody adds one.
         val day = BondDay.open(dayId, bondId, window, lagos, now).withEntry()
-        val mine = Entry.submit(EntryId(UUID.randomUUID()), day.id, bondId, ada, text, now, now)
+        val mine = Entry.submit(EntryId(UUID.randomUUID()), day.id, bondId, ada, text, null, now, now)
 
         "$mine" shouldNotContain "thank you for the coffee"
         mine.toString() shouldContain "EntryText(redacted)"

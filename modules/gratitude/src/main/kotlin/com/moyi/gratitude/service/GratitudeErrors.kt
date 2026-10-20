@@ -2,6 +2,7 @@ package com.moyi.gratitude.service
 
 import com.moyi.common.web.ApiException
 import com.moyi.common.web.ErrorCode
+import com.moyi.common.web.FieldViolation
 import com.moyi.common.web.NotFoundException
 import org.springframework.http.HttpStatus
 
@@ -44,6 +45,19 @@ internal class MediaNotYetSupportedException :
         HttpStatus.UNPROCESSABLE_ENTITY,
         ErrorCode.MEDIA_NOT_YET_SUPPORTED,
         "Photos and voice notes are not supported yet. Write a few words instead.",
+    )
+
+/**
+ * 422: `promptId` names no prompt (ADR-0038): not an id, or an id the library has never
+ * held. One answer for both, naming the field and never the value. Only ever told to a
+ * member of an open bond. A retired prompt is still a prompt and is not refused.
+ */
+internal class PromptNotKnownException :
+    ApiException(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        ErrorCode.VALIDATION_FAILED,
+        "One or more fields are not valid.",
+        errors = listOf(FieldViolation("promptId", "VALID_PROMPT", "must be the id of a prompt")),
     )
 
 /**

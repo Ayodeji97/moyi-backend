@@ -920,6 +920,18 @@ class OpenApiContractTest(
         prompt.description shouldContain "takes no writes"
     }
 
+    @Test
+    fun `an entry is written with an optional prompt id that no shape of an entry ever carries back`() {
+        val sent = api.components.schemas["SubmitEntryRequest"]!!
+        sent.properties["promptId"]!!.format shouldBe "uuid"
+        sent.required.orEmpty() shouldNotContain "promptId"
+        val patched = api.components.schemas["PatchEntryRequest"]!!
+        patched.properties.keys shouldNotContain "promptId"
+        for (shape in listOf("EntryResponse", "LockedEntryResponse", "ErasedEntryResponse")) {
+            api.components.schemas[shape]!!.toString() shouldNotContain "promptId"
+        }
+    }
+
     private companion object {
         /** FR-048's set, written out: the contract's enum, so a change here is a breaking change to a generated client. */
         val REACTION_TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED")

@@ -19,11 +19,13 @@ import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryText
+import com.moyi.gratitude.domain.PromptId
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.Favourites
 import com.moyi.gratitude.infra.database.GratitudeConstraints
+import com.moyi.gratitude.infra.database.PromptLibrary
 import com.moyi.gratitude.infra.database.Reactions
 import com.moyi.gratitude.infra.database.redacted
 import com.moyi.gratitude.infra.database.violates
@@ -60,10 +62,11 @@ internal data class EntryDraft(
     val imageMediaId: UUID?,
     val voiceMediaId: UUID?,
     val intendedAt: Instant?,
+    val promptId: String?,
 ) {
     /** Never the words — `SubmitEntryRequest.toString`'s own reason: [text] is still a plain `String` here. */
     override fun toString(): String =
-        "EntryDraft(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, intendedAt=$intendedAt)"
+        "EntryDraft(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, intendedAt=$intendedAt, promptId=$promptId)"
 }
 
 /**
@@ -160,7 +163,8 @@ internal data class Submission(
  * 2. `!membership.isOpen` — `409 BOND_ARCHIVED` (BR-9).
  * 3. Either media id present — `422 MEDIA_NOT_YET_SUPPORTED` (spec §1):
  *    refused, never stored and quietly ignored.
- * 4. The day: [DayAssignment.resolve] resolves which Bond-day this entry is
+ * 4. `promptId` that names no prompt — `422 VALIDATION_FAILED` on `promptId`.
+ * 5. The day: [DayAssignment.resolve] resolves which Bond-day this entry is
  *    for against the bond's **effective-zone timeline**
  *    ([BondMembership.anchorTimeline], adapted by [asCalendar]) — not
  *    [BondMembership.anchorTimezone], which is the zone the bond *requests*
@@ -190,17 +194,17 @@ internal data class Submission(
  *    is already serialised on the bond lock. The close job takes that same
  *    lock before one day per transaction, so all writers share the same
  *    order.
- * 5. The insert. `entries_one_per_member_per_day` (V12/BR-2) is what
+ * 6. The insert. `entries_one_per_member_per_day` (V12/BR-2) is what
  *    refuses a second entry from the same member on the same day — this
  *    method attempts the write and catches the conflict, it does not read
  *    first and check: a read-then-insert here would race the very index it
  *    is trying to honour. See the boundary note below for why the catch has
  *    to sit where it does.
- * 6. The event. `EntrySubmitted` goes to the outbox through
+ * 7. The event. `EntrySubmitted` goes to the outbox through
  *    [EventPublisher], in this transaction and after the insert has been
  *    flushed — so a submission BR-2 refused writes no event. It names the
  *    entry, the bond and the Bond-day by id and carries nothing else.
- * 7. The count, and the reveal. [BondDay.withEntry] counts the entry and
+ * 8. The count, and the reveal. [BondDay.withEntry] counts the entry and
  *    [RevealDay.apply] writes the day, still under its lock. With both
  *    entries in, the day is either revealed there and then — `revealed_at`
  *    stamped on both entries and `DayRevealed` published, all in this
@@ -263,6 +267,7 @@ internal class SubmitEntry(
     private val events: EventPublisher,
     private val favourites: Favourites,
     private val reactions: Reactions,
+    private val prompts: PromptLibrary,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -317,7 +322,14 @@ internal class SubmitEntry(
                             val membership = access.lockMembershipOf(userId, bondId)
                             if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
                             if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()
-                            val (view, entryId) = write(membership, text, intendedAt, now)
+                            // Named or not, decided only for a member of an open bond: a stranger has had
+                            // the bond's 404 and an ended bond its 409 by now (ADR-0038 decision 9). Any prompt
+                            // the library holds, retired or not: an offline draft names the one it cached.
+                            val promptId =
+                                draft.promptId?.let { raw ->
+                                    PromptId.parse(raw)?.takeIf(prompts::exists) ?: throw PromptNotKnownException()
+                                }
+                            val (view, entryId) = write(membership, text, intendedAt, now, promptId)
                             // The key records what this produced by identity, never the words.
                             IdempotentResult(view, entryId.value, ResultKind.ENTRY, CREATED)
                         }
@@ -398,7 +410,7 @@ internal class SubmitEntry(
     }
 
     /**
-     * Steps 4 to 7 of the class KDoc, under the bond lock [submit] already
+     * Steps 5 to 8 of the class KDoc, under the bond lock [submit] already
      * holds. Returns the entry's id beside its view: the key records the id,
      * and a reading only discloses one to a reader BR-1 grants it to.
      */
@@ -407,6 +419,7 @@ internal class SubmitEntry(
         text: EntryText,
         intendedAt: Instant?,
         now: Instant,
+        promptId: PromptId?,
     ): Pair<EntryView, EntryId> {
         val bondId = membership.bondId
         val timeline = membership.anchorTimeline
@@ -443,7 +456,7 @@ internal class SubmitEntry(
         // BR-3a, rechecked under the day's own lock (spec §6.1.3). The check
         // inside `resolve` read the day before this lock was held. The close
         // job also takes the bond lock first, so only a prior settlement can
-        // be found here. See step 4 of the class KDoc.
+        // be found here. See step 5 of the class KDoc.
         val (resolution, day) =
             if (!claimedDay.isSettled) {
                 claimed to claimedDay
@@ -458,6 +471,7 @@ internal class SubmitEntry(
                 bondId = bondId,
                 authorMemberId = membership.memberId,
                 text = text,
+                promptId = promptId,
                 intendedAt = resolution.resolvedAt,
                 now = now,
             )

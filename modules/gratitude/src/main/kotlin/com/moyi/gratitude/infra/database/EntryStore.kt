@@ -56,6 +56,8 @@ internal class EntryStore(
         entity.imageMediaId = entry.imageMediaId
         entity.voiceMediaId = entry.voiceMediaId
         entity.voiceDurationMs = entry.voiceDurationMs
+        // An erasure nulls it (ADR-0038); nothing else changes it.
+        entity.promptId = entry.promptId?.value
         entries.saveAndFlush(entity)
     }
 

@@ -45,6 +45,13 @@ internal data class SubmitEntryRequest(
     val imageMediaId: UUID? = null,
     val voiceMediaId: UUID? = null,
     val intendedAt: Instant? = null,
+    /**
+     * The prompt this entry answers (doc 06:153; ADR-0038), or absent. Text, not a `UUID`:
+     * a value that is not an id names no prompt either, and is told so in the same words as
+     * an id no prompt has (decision 9), by the service, after the bond's guard. Never read
+     * back: no response carries it (the owner's Q-P3).
+     */
+    val promptId: String? = null,
 ) {
     fun toDraft(): EntryDraft =
         EntryDraft(
@@ -52,6 +59,7 @@ internal data class SubmitEntryRequest(
             imageMediaId = imageMediaId,
             voiceMediaId = voiceMediaId,
             intendedAt = intendedAt,
+            promptId = promptId,
         )
 
     /**
@@ -60,5 +68,6 @@ internal data class SubmitEntryRequest(
      * [EntryText] has wrapped it in something that refuses to print itself.
      */
     override fun toString(): String =
-        "SubmitEntryRequest(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, intendedAt=$intendedAt)"
+        "SubmitEntryRequest(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, " +
+            "intendedAt=$intendedAt, promptId=$promptId)"
 }

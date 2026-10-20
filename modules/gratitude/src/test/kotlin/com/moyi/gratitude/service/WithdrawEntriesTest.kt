@@ -173,6 +173,21 @@ internal class WithdrawEntriesTest(
     }
 
     @Test
+    fun `a withdrawal takes the prompt each entry answered, and leaves the partner's`() {
+        val bond = rig.pair(ada, bea)
+        val written = threeDays(bond, rig.pair(ada, bea)).getValue(bond)
+        val prompt = UUID.fromString("0199e8a0-6a00-7000-8000-000000000001")
+        (written.adas + written.beas).forEach { rig.jdbc.update("UPDATE entries SET prompt_id = ? WHERE id = ?::uuid", prompt, it) }
+
+        rig.block(ada, bond)
+        dispatcher.dispatchDue(clock.instant(), 10) shouldBe DispatchResult(delivered = 1, failed = 0, more = false)
+
+        val after = rig.wholeEntries(bond).associateBy { it["id"].toString() }
+        written.adas.forEach { after.getValue(it)["prompt_id"].shouldBeNull() }
+        after.getValue(written.beas)["prompt_id"] shouldBe prompt
+    }
+
+    @Test
     fun `a withdrawal leaves the rows and the answers that a run of single deletes leaves, and the close job then settles both alike`() {
         val withdrawn = rig.pair(ada, bea)
         val deleted = rig.pair(ada, bea)

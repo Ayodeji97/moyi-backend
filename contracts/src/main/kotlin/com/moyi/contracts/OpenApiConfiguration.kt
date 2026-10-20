@@ -416,7 +416,7 @@ class OpenApiConfiguration {
         private const val IF_MATCH = "If-Match"
 
         /** `SubmitEntryRequest`'s schema name and its `text` property — see [documentEntryTextLimits]. */
-        private const val SUBMIT_ENTRY_REQUEST = "SubmitEntryRequest"
+        internal const val SUBMIT_ENTRY_REQUEST = "SubmitEntryRequest"
         private const val PATCH_ENTRY_REQUEST = "PatchEntryRequest"
         private const val ENTRY_TEXT_PROPERTY = "text"
         private const val STRING_TYPE = "string"

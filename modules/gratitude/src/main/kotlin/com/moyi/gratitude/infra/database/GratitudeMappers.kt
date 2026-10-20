@@ -5,6 +5,7 @@ import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryText
+import com.moyi.gratitude.domain.PromptId
 import java.time.ZoneId
 
 /**
@@ -97,7 +98,7 @@ internal fun EntryEntity.toDomain(): Entry =
         imageMediaId = imageMediaId,
         voiceMediaId = voiceMediaId,
         voiceDurationMs = voiceDurationMs,
-        promptId = promptId,
+        promptId = promptId?.let(::PromptId),
         status = status,
         authorDeletedAccount = authorDeletedAccount,
         createdAt = createdAt,
@@ -118,7 +119,7 @@ internal fun Entry.toEntity(): EntryEntity =
         imageMediaId = imageMediaId,
         voiceMediaId = voiceMediaId,
         voiceDurationMs = voiceDurationMs,
-        promptId = promptId,
+        promptId = promptId?.value,
         status = status,
         authorDeletedAccount = authorDeletedAccount,
         createdAt = createdAt,

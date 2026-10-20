@@ -41,6 +41,7 @@ internal class EntryRenderingTest {
             bondId = bondId,
             authorMemberId = author.memberId,
             text = EntryText.of("thank you for the coffee"),
+            promptId = null,
             intendedAt = now,
             now = now,
         )
@@ -245,8 +246,8 @@ internal class EntryRenderingTest {
 
         printed.forEach { it shouldNotContain words }
         // What is useful in a log is still there: which entry, and when.
-        printed[0] shouldBe "SubmitEntryRequest(text=(redacted), imageMediaId=null, voiceMediaId=null, intendedAt=$now)"
-        printed[1] shouldBe "EntryDraft(text=(redacted), imageMediaId=null, voiceMediaId=null, intendedAt=$now)"
+        printed[0] shouldBe "SubmitEntryRequest(text=(redacted), imageMediaId=null, voiceMediaId=null, intendedAt=$now, promptId=null)"
+        printed[1] shouldBe "EntryDraft(text=(redacted), imageMediaId=null, voiceMediaId=null, intendedAt=$now, promptId=null)"
         printed[2] shouldContain "id=${entry.id.value}"
         printed[2] shouldContain "text=(redacted)"
         // A tombstone has no words, and says so rather than claiming to hide some.

@@ -118,6 +118,7 @@ internal class RevealFreshReadTest(
             bondId = bondId,
             authorMemberId = author,
             text = EntryText.of("thank you for the coffee"),
+            promptId = null,
             intendedAt = now,
             now = now,
         )

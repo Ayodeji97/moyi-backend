@@ -4401,6 +4401,11 @@
             "type" : [ "string", "null" ],
             "format" : "date-time"
           },
+          "promptId" : {
+            "type" : [ "string", "null" ],
+            "format" : "uuid",
+            "description" : "The id of the prompt this entry answers, from today's `prompt` or any earlier one; optional. A value that names no prompt is 422 VALIDATION_FAILED on this field. Never sent back, on any entry."
+          },
           "text" : {
             "type" : "string",
             "description" : "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does not count either), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted. The text is stored and returned exactly as sent — not normalised, not trimmed. The 500 are counted on its NFKC-normalised, trimmed form (so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused.",
