@@ -67,7 +67,7 @@ internal data class SubmitEntryRequest(
      * this one holds an entry's text as a plain `String` — before
      * [EntryText] has wrapped it in something that refuses to print itself.
      * [promptId] is printed only as present or absent: it is unchecked client text, and what
-     * an entry answered is withdrawn with its words (BR-10), which a log line would outlive.
+     * an entry answered is erased with its words (BR-10a, FR-046), which a log line would outlive.
      */
     override fun toString(): String =
         "SubmitEntryRequest(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, " +

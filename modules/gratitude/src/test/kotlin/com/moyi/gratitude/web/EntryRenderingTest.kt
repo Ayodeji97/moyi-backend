@@ -248,7 +248,7 @@ internal class EntryRenderingTest {
         // What is useful in a log is still there: which entry, and when.
         printed[0] shouldBe "SubmitEntryRequest(text=(redacted), imageMediaId=null, voiceMediaId=null, intendedAt=$now, promptId=null)"
         printed[1] shouldBe "EntryDraft(text=(redacted), imageMediaId=null, voiceMediaId=null, intendedAt=$now, promptId=null)"
-        // A prompt id is unchecked client text, and is withdrawn with the words (BR-10): its presence, never its value.
+        // A prompt id is unchecked client text, erased with the words (BR-10a, FR-046): its presence, never its value.
         val raw = "0199e8a0-6a00-7000-8000-000000000001\nforged log line"
         SubmitEntryRequest(text = words, intendedAt = now, promptId = raw).let { named ->
             listOf(named.toString(), named.toDraft().toString()).forEach {

@@ -42,8 +42,9 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  * media-only entries is that later slice's change to make.
  *
  * [promptId] is the prompt the author said this entry answers (ADR-0038),
- * never sent back to anybody; [erase] takes it with the words (BR-10: what
- * a withdrawn entry was answering is part of what was withdrawn).
+ * never sent back to anybody; [erase] takes it with the words, on a withdrawal
+ * (BR-10a) and on the author's own delete (FR-046) alike: what an erased entry
+ * was answering goes with what it said.
  *
  * [imageMediaId], [voiceMediaId] and [voiceDurationMs] are
  * carried anyway, always `null` for now, so a row [submit] builds already
