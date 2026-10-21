@@ -81,14 +81,19 @@ Two questions were not asked; the defaults below are recorded as his to turn:
 
 ### The controller's rulings
 
-Made by the controller of the C6 session on 2026-10-15 (`.superpowers/sdd/2026-10-15-c6/progress.md`),
-each the owner's to turn:
+Made by the controller of the C6 session (controller ruling, 2026-10-15), each the owner's to
+turn:
 
 1. **Selection is a pure function of the bond, the bond-local date and the active library
    for the bond's audience**: a per-bond permutation of the eligible prompts, ordered by a
-   hash of bond id and prompt id, indexed by the date's day number. It reads no member's
-   activity, no entry and no impression. "Avoids recent repeats" means no repeat within one
-   cycle. (H-P1, H-P3, P6.)
+   **keyed** hash of bond id and prompt id, indexed by the date's day number. It reads no
+   member's activity, no entry and no impression. "Avoids recent repeats" means no repeat
+   within one cycle. (H-P1, H-P3, P6.)
+   **The ruling says keyed; the plan built a plain, unkeyed SHA-256 (decision 1)**, and so
+   overrode it. The consequence: anyone who knows a bond's id and the seed (which is in this
+   public repository) can compute that bond's prompt for any day, past or future. Prompts
+   are not secret and a bond's id is not public, so this was judged harmless, but it is the
+   plan's decision against the controller's, and the owner's to turn (question 5).
 2. **No `prompt_impressions` table.** Recording what was shown when is a presence log
    (FR-064), and ruling 1 needs none. V24 is `prompts` plus per-locale text. Spec §7 and doc 07
    are amended. (H-P1, P5.)
@@ -121,8 +126,8 @@ the session's ledger:
 - **Task 3's review, M2 (2026-10-20).** The request's and the draft's `toString` print
   `promptId` only as `(given)` or `null`, never its value, against the brief's literal
   `toString`. The value is unchecked client text of any length until the service parses
-  it, and what an erased entry answered is part of what was withdrawn (BR-10); a DEBUG line
-  that held the id would outlive the erasure.
+  it, and what an erased entry answered goes with its words, on a withdrawal (BR-10a) and on
+  the author's own delete (FR-046); a DEBUG line that held the id would outlive the erasure.
 - **Task 3's review, M1 (2026-10-20).** A reveal keeps the prompt; asserted in
   `EntryPromptTest` and `SubmitEntryPromptTest`, since the only guard until then was
   incidental.
@@ -191,7 +196,7 @@ Numbered as the plan numbers them, because code and tests cite them by number.
      corrected body under the same key is a `201`, and the bad body after it is
      `IDEMPOTENCY_KEY_REUSED`.
    - The request's and the draft's `toString` print the prompt id only as `(given)` or `null`
-     (BR-10; the controller's ruling above).
+     (BR-10a, FR-046; the controller's ruling above).
 10. **`promptId` is never sent back**, on any shape and to anybody, its author included. The
     ruling covers the partner's locked and revealed shapes; one rule for every shape is simpler
     to hold, and no screen draws it. `EntryResponse` is built from `DisclosedEntry`, which has
@@ -224,7 +229,12 @@ Numbered as the plan numbers them, because code and tests cite them by number.
     file's imports. Task 2's review found that it cannot see a dependency in the same package
     (`GetStreak`, `DayEntries`, `EntryById` and the rest need no import), and on 2026-10-20 the
     rule gained a second assertion: `DailyPrompt`'s constructor takes exactly `PromptLibrary`
-    and `UserDirectory`, and it has no secondary constructor.
+    and `UserDirectory`, and it has no secondary constructor. Task 4's review got past both
+    with an `@Autowired` field, its annotation spelt in full so that it needs no import, and
+    a third assertion now holds every property `DailyPrompt` declares to one of the two its
+    constructor takes. What the rule holds is what `DailyPrompt` is given: its imports, its
+    constructor and its fields. It does not see a call to a top-level function or an
+    `object` in its own package, which needs none of the three.
 19. **`GET /today` gains three reads**: the active library (24 rows today, about 100 planned),
     the chosen prompt's texts, and the caller's own user row. NFR-001 (p95 ≤ 150 ms) is not
     measured here; owed.
@@ -284,13 +294,37 @@ One line each: what was decided, what the alternative was, what turning it would
    decision 10 guard (`DisclosedEntry`) to undo.
 2. **Q-P6, the seed's wording and the split per overlay.** 24 placeholder prompts, 12 and
    4/4/4. Changing it is a migration; changing the ids reshuffles every bond's cycle.
-3. **Each of the controller's eight rulings.** Ruling 2 (no impressions) and ruling 5 (no
-   `/prompts/daily`) are the two that deviate from the corpus: the first is a table the
-   choice does not need and FR-064 forbids; the second is a route that would duplicate a
-   field. Turning ruling 1 to a personalised choice is FR-201, Phase 10.
+3. **Each of the controller's eight rulings** (2026-10-15). Rulings 2 and 5 are the two that
+   deviate from the corpus.
+   1. *Ruling 1, a pure function of bond, date and library.* The other way is a choice that
+      reads history (FR-201, Phase 10) or impressions; it lets one member's activity move
+      the other's prompt (H-P1) and needs today kept out of it (H-P3). Built unkeyed against
+      the ruling's "keyed": question 5.
+   2. *Ruling 2, no `prompt_impressions`.* The other way is doc 07's table; it is a presence
+      log FR-064 forbids, a write on every read of today, and nothing would read it.
+   3. *Ruling 3, the member's own locale, then its language, then `en`.* The other way is
+      one locale for the bond; it tells one member the other's language (H-P7), or serves a
+      language the member never chose.
+   4. *Ruling 4, CORE plus an overlay by type, PARENT_CHILD given FAMILY.* The other way is
+      a fourth overlay for PARENT_CHILD; it costs a fourth set of prompts to write and
+      translate, and a new `audience` value in a migration.
+   5. *Ruling 5, `prompt` on `GET /today` only.* The other way is to build `GET
+      /prompts/daily`; it is a second route for the same value, and needs a bond-scoped
+      path and a cross-tenant fixture where doc 06's `?bondId=` form would have none.
+   6. *Ruling 6, no prompt once the bond takes no writes.* The other way is to keep offering
+      one on an ended or read-only bond; it is a suggestion to write where no entry can be
+      written. (`null` rather than absent is question 7.)
+   7. *Ruling 7, an optional `promptId`, `422` when it names no prompt, erased with the
+      words.* The other ways are to ignore an unknown id, which hides a client's bug as a
+      silent success, or to store it unchecked, which `entries_prompt_fk` would turn into a
+      `500`; taking it on `PATCH` would let a locked entry change what it answered.
+   8. *Ruling 8, no `used` flag.* The other way is doc 07's `used`; it is a second copy of
+      `entries.prompt_id` that can drift, on the table ruling 2 refuses.
 4. **The C6 split** (Q-X1): three pull requests. Turning it moves version numbers only.
-5. **Decision 1, unkeyed.** A plain hash. Keying it with the application secret would make
-   the order unguessable and make it change on every local boot and every rotation.
+5. **Decision 1, unkeyed, against controller ruling 1's "keyed hash".** A plain hash: anyone
+   who knows a bond's id and the seed can compute its prompt for any day; prompts are not
+   secret, so judged harmless. Keying it with the application secret, as the ruling asked,
+   would make the order unguessable and make it change on every local boot and every rotation.
 6. **Decision 2, a library change can change today's prompt mid-day**, for both at once. The
    other way is to fix the day's prompt the first time it is computed, which needs a write
    on a read, the record ruling 2 refuses.
@@ -331,8 +365,10 @@ For the owner to carry into the corpus repository, which is not edited here.
 7. **Spec §11's "search, `/prompts`, `/on-this-day` | Gaps"** for the prompt: `prompt` is
    served by §3 *Today* ("Prompt visible", `states.md`:304) and §4 *Compose* ("Prompt above,
    dismissible", `states.md`:378; `tokens.md`:278's dismissible prompt slot). Amended in place.
-8. **Doc 04 BR-10** names "text and media references" as what an erasure nulls; `prompt_id`
-   is nulled too (ruling 7, H-P5).
+8. **Doc 04 BR-10a** names "text and media references nulled" as what a withdrawal erases,
+   and **doc 03 FR-046** says an author's delete after the reveal leaves a tombstone without
+   saying what it nulls; `prompt_id` is nulled by both (ruling 7, H-P5). BR-10 (account
+   deletion) will owe the same when its path is built; none exists yet.
 
 ## Revisit when
 
