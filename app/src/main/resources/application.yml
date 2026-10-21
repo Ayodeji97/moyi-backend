@@ -88,8 +88,8 @@ logging:
     # authenticator valve still prints it.
     #
     # SecretsNeverLoggedTest raises every level above these by property and
-    # fails if any one of the fourteen pins from here to the end of this block
-    # is removed: these six and the eight below. Each was removed in turn and
+    # fails if any one of the fifteen pins from here to the end of this block
+    # is removed: these six and the nine below. Each was removed in turn and
     # seen failing on 2026-10-21 (slice C6b, task 2 review m3).
     org.hibernate.orm.core: INFO
     org.hibernate.orm.jdbc.bind: "OFF"
@@ -97,6 +97,13 @@ logging:
     org.hibernate.orm.resource.registry: INFO
     org.postgresql: INFO
     org.apache.coyote.http11.Http11InputBuffer: INFO
+    # Tomcat's Http11Processor, at INFO the first time and at DEBUG after: a
+    # request target holding a character Tomcat refuses (`|`, `"`, `{`, a raw
+    # non-ASCII byte) is answered 400 by the connector, before any filter, and
+    # the whole target is logged, a search's `q` and an invite code in the path
+    # with it (task 2 re-review I1, seen 2026-10-21). So WARN, not INFO. What
+    # is given up: Tomcat's report of request lines it could not parse.
+    org.apache.coyote.http11.Http11Processor: WARN
     # A @Transactional consumer's proxy sees its exception before the outbox
     # dispatcher can catch it. It logs the message and throwable at TRACE,
     # and at ERROR if rollback itself fails. INFO is therefore insufficient.

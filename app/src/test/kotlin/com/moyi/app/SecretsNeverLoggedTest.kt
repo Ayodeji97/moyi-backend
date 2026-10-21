@@ -15,6 +15,7 @@ import com.moyi.common.testing.IntegrationTest
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -39,6 +40,7 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
+import java.net.Socket
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -109,7 +111,8 @@ import javax.sql.DataSource
  * naming the logger that line holds. The transactional interceptor regression
  * was also seen failing before its pin was added, and so was the pin on
  * `StatementCreatorUtils`. On 2026-10-21 all fourteen pins were removed in turn,
- * the six search and error-resolver ones among them, and it failed for each.
+ * the six search and error-resolver ones among them, and it failed for each; the
+ * fifteenth, `Http11Processor`, was seen failing before it was added.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -238,6 +241,10 @@ class SecretsNeverLoggedTest(
         get("/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", bea).malformed(like = refused)
         get("/bonds/$bond/days?cursor=%FF", ada).malformed(like = refused)
         get("/bonds/$bond/days?unknown=$SEARCH_TERMS%20x%FF", ada).malformed(like = refused)
+        // A character Tomcat refuses in the request target (re-review I1): refused by the connector before any
+        // filter, and Http11Processor logged the whole target, the words in it, at INFO. Sent over a plain socket,
+        // because java.net.http will not send it.
+        requestLine("/api/v1/bonds/$bond/search?q=$SEARCH_TERMS%20x|y") shouldStartWith "HTTP/1.1 400"
         send("DELETE", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         send("PUT", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         // A reaction each way; hers replaced, refused twice, taken back, and set again for the erasure to remove.
@@ -407,6 +414,15 @@ class SecretsNeverLoggedTest(
         val json: JsonNode by lazy { mapper.readTree(body) }
     }
 
+    /** Sends [target] as it is, unchecked, on a socket of its own, and returns the whole answer. */
+    private fun requestLine(target: String): String =
+        Socket("localhost", port).use { socket ->
+            socket.soTimeout = SOCKET_TIMEOUT_MILLIS
+            socket.getOutputStream().write("GET $target HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".toByteArray())
+            socket.getOutputStream().flush()
+            String(socket.getInputStream().readAllBytes())
+        }
+
     private fun Answer.malformed(like: Answer) {
         status shouldBe 400
         // Null-safe: should the answer ever be Boot's error body, it has no `code`.
@@ -536,6 +552,7 @@ class SecretsNeverLoggedTest(
         const val HANDLER_SECRET = "private~handler~exception"
         const val CONTROL = "control~marker~"
         const val RUN_ID_LENGTH = 8
+        const val SOCKET_TIMEOUT_MILLIS = 15_000
         const val DISPATCH_BUDGET = 10
 
         val ENTRY_MARKERS =
