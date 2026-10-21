@@ -165,6 +165,13 @@ internal class ArchiveDays(
      *
      * Driven from `entries`, so the planner may start from `entries_search_idx`; the measured
      * cost is in ADR-0039.
+     *
+     * **The join names the bond on both sides** (`d.bond_id = e.bond_id`). Without it nothing
+     * bounds `bond_days` to the bond, and for a word the bond uses often the planner was free to
+     * hash-join a sequential scan of every bond's days: 49,980 rows at 100k entries
+     * (`SearchPlanMeasurement`, task 2 review I2). With it Postgres derives `d.bond_id = ?` and
+     * reads the bond's days alone. It also holds, in the query, that an entry and its day belong
+     * to one bond, which no foreign key does.
      */
     @Suppress("LongParameterList") // The search's own bounds, each a separate fact of the request.
     fun matching(
@@ -260,7 +267,7 @@ internal class ArchiveDays(
             val sql =
                 listOfNotNull(
                     "SELECT d.id, d.date, d.status, array_agg(e.id) AS matched",
-                    "FROM entries e JOIN bond_days d ON d.id = e.bond_day_id",
+                    "FROM entries e JOIN bond_days d ON d.id = e.bond_day_id AND d.bond_id = e.bond_id",
                     "WHERE e.bond_id = ?",
                     before?.let { "AND d.date < ?" },
                     "AND e.search_vector @@ plainto_tsquery('simple', public.immutable_unaccent(?))",

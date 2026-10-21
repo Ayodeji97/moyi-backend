@@ -31,7 +31,11 @@ import javax.sql.DataSource
  * entry (`thank`), one in an eighth (`lamp`), one in a single entry of the measured bond
  * (`zebra`). **The criterion:** no index scan in the plan returns more rows than the measured
  * bond has entries, at either size. A scan that returns more is reading other bonds' entries:
- * its cost grows with the table. And the warm execution time at 500k is under 300 ms.
+ * its cost grows with the table. **No sequential scan of `bond_days` or `entries`** at either
+ * size, which reads every bond's rows by definition: the first version of this criterion
+ * looked at index scans only, and a Hash Join over a Seq Scan of all of `bond_days` (49,980
+ * rows at 100k, for `thank`) passed it unseen (task 2 review I2). And the warm execution time
+ * at 500k is under 300 ms.
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @EnabledIfEnvironmentVariable(named = "MOYI_MEASURE", matches = "1")
@@ -57,17 +61,21 @@ internal class SearchPlanMeasurement(
 
         println("C6b SEARCH MEASUREMENT 100k: $small")
         println("C6b SEARCH MEASUREMENT 500k: $large")
-        for ((size, measured) in listOf("100k" to small, "500k" to large)) {
-            measured.forEach { (word, plan) ->
-                withClue("$size, $word: $plan") { (plan.widestIndexScan <= TARGET_DAYS * 2) shouldBe true }
+        // Every size and word judged before any assertion, so that a failure names all of them.
+        val tableWide =
+            listOf("100k" to small, "500k" to large).flatMap { (size, measured) ->
+                measured.mapNotNull { (word, plan) ->
+                    "$size $word: $plan".takeIf { plan.widestIndexScan > TARGET_DAYS * 2 || plan.seqScans.isNotEmpty() }
+                }
             }
-        }
+        withClue("plans that read beyond the measured bond: $tableWide") { tableWide shouldBe emptyList() }
         large.forEach { (word, plan) -> withClue("500k, $word: $plan") { (plan.milliseconds < NFR_004_MS) shouldBe true } }
     }
 
     private data class Plan(
         val buffers: Long,
         val widestIndexScan: Double,
+        val seqScans: List<String>,
         val milliseconds: Double,
         val shape: String,
     )
@@ -87,15 +95,19 @@ internal class SearchPlanMeasurement(
             Plan(
                 buffers = plan["Shared Hit Blocks"].asLong() + plan["Shared Read Blocks"].asLong(),
                 widestIndexScan = indexScans(plan).maxOfOrNull { it["Actual Rows"].asDouble() } ?: 0.0,
+                seqScans =
+                    nodes(plan)
+                        .filter { it["Node Type"].asString() == "Seq Scan" && it["Relation Name"]?.asString() in SEQ_SCAN_FORBIDDEN }
+                        .map { "Seq Scan on ${it["Relation Name"].asString()} (${it["Actual Rows"].asDouble()} rows)" },
                 milliseconds = root["Execution Time"].asDouble(),
                 shape = indexScans(plan).joinToString { "${it["Node Type"].asString()} on ${it["Index Name"]?.asString()}" },
             )
         }
     }
 
-    private fun indexScans(node: JsonNode): List<JsonNode> =
-        listOfNotNull(node.takeIf { it["Node Type"].asString().contains("Index") }) +
-            node["Plans"]?.toList().orEmpty().flatMap(::indexScans)
+    private fun indexScans(node: JsonNode): List<JsonNode> = nodes(node).filter { it["Node Type"].asString().contains("Index") }
+
+    private fun nodes(node: JsonNode): List<JsonNode> = listOf(node) + node["Plans"]?.toList().orEmpty().flatMap(::nodes)
 
     /** For each bond, [days] revealed days from 2024-01-01, two entries a day, every one holding `thank`. */
     private fun seed(
@@ -142,5 +154,6 @@ internal class SearchPlanMeasurement(
         const val CHUNK = 50
         const val NFR_004_MS = 300.0
         val WORDS = listOf("thank", "lamp", "zebra")
+        val SEQ_SCAN_FORBIDDEN = setOf("bond_days", "entries")
     }
 }
