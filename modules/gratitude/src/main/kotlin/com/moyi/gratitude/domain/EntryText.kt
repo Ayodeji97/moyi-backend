@@ -1,8 +1,6 @@
 package com.moyi.gratitude.domain
 
-import java.text.BreakIterator
 import java.text.Normalizer
-import java.util.Locale
 
 /**
  * An entry's body, validated once at the boundary so every later reader
@@ -51,7 +49,7 @@ import java.util.Locale
  * - **Grapheme count, on the NFKC form, trimmed** — spec §3.2's rule:
  *   "NFKC-normalised before counting". `500` is what a person means by
  *   "characters": a ZWJ family emoji, a flag (two regional indicators) and a
- *   base letter with combining marks are each one. [graphemes] walks the text
+ *   base letter with combining marks are each one. [Graphemes.count] walks the text
  *   with a `BreakIterator` so the count is of what was typed, not of how it
  *   is encoded. **Counting on the NFKC form has a cost the spec accepted and
  *   the owner has been asked about** (ADR-0031, P12): a typographic ellipsis
@@ -103,7 +101,7 @@ internal value class EntryText private constructor(
             // Only to decide. What is returned, and stored, is `raw`.
             val counted = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
             require(counted.isNotBlank()) { "an entry must say something" }
-            require(graphemes(counted) <= MAX_GRAPHEMES) { "an entry is at most $MAX_GRAPHEMES characters" }
+            require(Graphemes.count(counted) <= MAX_GRAPHEMES) { "an entry is at most $MAX_GRAPHEMES characters" }
             return EntryText(raw)
         }
 
@@ -120,19 +118,5 @@ internal value class EntryText private constructor(
                 (unit.isHighSurrogate() && text.getOrNull(i + 1)?.isLowSurrogate() != true) ||
                     (unit.isLowSurrogate() && text.getOrNull(i - 1)?.isHighSurrogate() != true)
             }
-
-        /**
-         * User-perceived characters, per Unicode text segmentation
-         * ([UAX #29](https://unicode.org/reports/tr29/)) rather than
-         * `String.length`'s UTF-16 code units — a ZWJ emoji sequence is one
-         * of these and several of those.
-         */
-        private fun graphemes(text: String): Int {
-            val boundary = BreakIterator.getCharacterInstance(Locale.ROOT)
-            boundary.setText(text)
-            var count = 0
-            while (boundary.next() != BreakIterator.DONE) count++
-            return count
-        }
     }
 }
