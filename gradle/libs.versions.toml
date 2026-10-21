@@ -1,12 +1,12 @@
 [versions]
-kotlin = "2.4.20"
+kotlin = "2.4.21"
 springBoot = "4.1.1"
 detekt = "1.23.8"
 ktlintPlugin = "14.2.0"
-konsist = "0.17.3"
+konsist = "0.18.1"
 junit = "6.1.3"
 mockk = "1.14.11"
-kotest = "6.2.5"
+kotest = "6.2.6"
 owaspDependencyCheck = "13.0.0"
 # Argon2id itself. Spring Security's Argon2PasswordEncoder is a thin wrapper
 # over BouncyCastle's Argon2BytesGenerator — verified by decompiling it — so
@@ -17,7 +17,7 @@ bouncycastle = "1.86"
 # against Lettuce 6 and declares it `provided`; Spring Boot 4 supplies Lettuce
 # 7, and the three calls the adapter makes (EVAL, GET, DEL) exist in both —
 # verified by the limiter's integration tests against a real Valkey 8.
-bucket4j = "8.20.0"
+bucket4j = "8.21.0"
 # OpenAPI generation (doc 05, doc 06 §5, ADR-0024). springdoc 3.x is the line
 # built for Spring Boot 4 / Jackson 3; swagger-parser validates the document
 # the contract test reads back.
