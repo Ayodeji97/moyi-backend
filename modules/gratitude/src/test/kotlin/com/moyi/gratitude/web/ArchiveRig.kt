@@ -189,15 +189,16 @@ internal class ArchiveRig(
         val later = Timestamp.from(at.plusSeconds(60))
         jdbc.update(
             """
-            INSERT INTO entries (id, bond_day_id, bond_id, author_member_id, text, status, created_at, intended_at, updated_at,
-                                 revealed_at, deleted_at)
-            VALUES (?, ?, ?::uuid, ?, ?, ?, ?, ?, ?, CASE WHEN ? THEN ?::timestamptz ELSE NULL END,
+            INSERT INTO entries (id, bond_day_id, bond_id, author_member_id, text, text_search, status, created_at, intended_at,
+                                 updated_at, revealed_at, deleted_at)
+            VALUES (?, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? THEN ?::timestamptz ELSE NULL END,
                     CASE WHEN ? THEN ?::timestamptz ELSE NULL END)
             """.trimIndent(),
             id,
             day,
             bond,
             author,
+            words.takeUnless { state.erased },
             words.takeUnless { state.erased },
             when {
                 state.erased -> "DELETED"

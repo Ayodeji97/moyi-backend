@@ -23,16 +23,15 @@ import java.util.UUID
  * [BondDayEntity] and this one (ADR-0026), and `bondId`/`authorMemberId` are
  * ids `bond` owns, never a foreign key across the module boundary.
  *
- * **`text_search` has no field here.** It is Postgres's own derived search
- * artifact (C6's `tsvector`); nothing in this task writes it, and an
- * unmapped nullable column is not a validation failure under
- * `ddl-auto: validate` — only a mapped column that disagrees with the schema
- * is. `[Entry]`'s own KDoc makes the same call for the domain object.
+ * **`textSearch` is the search projection** (V25, ADR-0039): what [searchProjectionOf] makes
+ * of the text, written on the insert and on every update, so it is emptied with the words.
+ * `search_vector` is generated from it by Postgres and is not mapped: nothing here reads or
+ * writes it, and an unmapped column is not a validation failure under `ddl-auto: validate`.
  *
  * No `version`: unlike [BondDayEntity], nothing in this slice — or the next
  * one BR-1 anticipates — compares an entry against a client-supplied ETag.
  *
- * `toString` never prints `text`: an entry's words are exactly what doc 18
+ * `toString` never prints `text` or `textSearch`: an entry's words are exactly what doc 18
  * §5/§9 forbids leaking into a log, the same reason `EntryText.toString` is
  * redacted in the domain.
  */
@@ -49,6 +48,8 @@ internal class EntryEntity(
     @Column(nullable = false, updatable = false)
     var authorMemberId: UUID,
     var text: String?,
+    /** [searchProjectionOf] of the text, and nothing else ever (ADR-0039). Never printed: see [toString]. */
+    var textSearch: String?,
     var imageMediaId: UUID?,
     var voiceMediaId: UUID?,
     var voiceDurationMs: Int?,

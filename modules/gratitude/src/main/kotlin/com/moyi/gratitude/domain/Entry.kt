@@ -51,10 +51,9 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  * has a value for every column V12 declared — the same reason
  * [com.moyi.bond.domain.Bond] carries `timezoneChangedAt` and
  * `deletionRequestedAt` long before the slices that ever set them exist.
- * `entries.text_search` is deliberately **not** one of them: it is
- * Postgres's own derived search artifact (C6), never read or written by
- * anything this aggregate does, so it has no seat on the domain object at
- * all — it belongs on the persistence entity alone, once C6 populates it.
+ * `entries.text_search` is deliberately **not** one of them: it is the search projection
+ * (ADR-0039), derived from [text] by the persistence layer (`searchProjectionOf`), and no
+ * rule of an entry reads it, so it has no seat on the domain object.
  *
  * No `@Suppress("LongParameterList")` needed for the sixteen properties
  * below: detekt's `LongParameterList` ships with `ignoreDataClasses: true`

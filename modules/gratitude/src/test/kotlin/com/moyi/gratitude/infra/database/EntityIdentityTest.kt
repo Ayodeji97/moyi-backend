@@ -94,6 +94,7 @@ internal class EntityIdentityTest {
             bondId = UUID.randomUUID(),
             authorMemberId = UUID.randomUUID(),
             text = text,
+            textSearch = text,
             imageMediaId = null,
             voiceMediaId = null,
             voiceDurationMs = null,
