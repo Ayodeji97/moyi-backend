@@ -22,13 +22,24 @@
 -- (UPDATE entries SET text_search = text_search). The search's query folds its words with
 -- this same function, so the two sides cannot fold differently.
 --
--- The backfill fills the projection of every live row, before the column is added, so the
--- table is rewritten once. An erased row keeps NULL: its words are gone (BR-10). Both marks
--- of an erasure are asked, as Entry.isErased asks them.
+-- The backfill fills the projection of every live row before the column is added. That is
+-- two passes over entries, not one: the UPDATE writes a new version of every live row, then
+-- ADD COLUMN ... STORED rewrites the whole table under ACCESS EXCLUSIVE, and the index is
+-- built under the same lock. Measured on 190k live rows (Task 1 review, 2026-10-21): 2.7 s,
+-- 5.5 s and 0.4 s; entries is unreadable for about 6 s per 200k rows, and grows 136 -> 362 MB.
+-- An erased row keeps NULL: its words are gone (BR-10). Both marks of an erasure are asked,
+-- as Entry.isErased asks them.
+--
+-- lock_timeout: the rewrite must not queue every request behind a long transaction (the
+-- withdrawal consumer holds one for up to 60 s). If the lock is not granted in 5 s the
+-- migration fails, rolls back whole, and the deploy is retried; it never waits with the
+-- table's traffic queued behind it. SET LOCAL ends with Flyway's transaction.
 --
 -- entries_search_idx: GIN on the vector. Whether a query on one bond's entries reads in
 -- proportion to that bond or to the table (NFR-033) was measured on this branch; ADR-0039
 -- has the numbers and says whether this became btree_gin (bond_id, search_vector).
+SET LOCAL lock_timeout = '5s';
+
 CREATE EXTENSION IF NOT EXISTS unaccent SCHEMA public;
 
 CREATE FUNCTION public.immutable_unaccent(text) RETURNS text
