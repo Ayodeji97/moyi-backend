@@ -110,11 +110,16 @@ internal class GratitudeCrossTenantTest(
             // The date is whatever the suite puts there, which is not a date: a stranger must get the bond's 404 all the
             // same, and not the day's. `DayViewTest` sends a stranger real dates and expects this answer too.
             "GET /api/v1/bonds/{bondId}/days/{date}" to Fixture(),
+            // Slice C6b. A q that would be searched: a stranger must get the bond's 404 before q is read. `SearchTest` sends a
+            // stranger q values that cannot be read, and none at all, and expects this same 404.
+            "GET /api/v1/bonds/{bondId}/search" to Fixture(query = "q=cross-tenant"),
         )
 
     private data class Fixture(
         val body: String? = null,
         val headers: Map<String, String> = emptyMap(),
+        /** Appended to the path after `?`, as it stands. */
+        val query: String? = null,
     )
 
     @AfterEach
@@ -180,9 +185,10 @@ internal class GratitudeCrossTenantTest(
             pattern
                 .replace("{bondId}", bondId)
                 .replace(Regex("\\{[^}]+}"), UUID.randomUUID().toString())
+        val target = fixture.query?.let { "$path?$it" } ?: path
         val request =
             MockMvcRequestBuilders
-                .request(HttpMethod.valueOf(method), path)
+                .request(HttpMethod.valueOf(method), target)
                 .header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(userId).token}")
                 .header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)

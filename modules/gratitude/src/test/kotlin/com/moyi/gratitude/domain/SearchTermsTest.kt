@@ -16,7 +16,9 @@ internal class SearchTermsTest {
 
     @Test
     fun `blank is not a search, by the Unicode reading of blank`() {
-        listOf("", " ", "\t\n", " ", " ", "　").forEach { withClue(it.codePoints().toArray().toList()) { SearchTerms.of(it).shouldBeNull() } }
+        listOf("", " ", "\t\n", "\u00A0", "\u2003", "\u3000").forEach {
+            withClue(it.codePoints().toArray().toList()) { SearchTerms.of(it).shouldBeNull() }
+        }
     }
 
     @Test
@@ -25,7 +27,7 @@ internal class SearchTermsTest {
         SearchTerms.of("z".repeat(100)).shouldNotBeNull()
         SearchTerms.of("z".repeat(101)).shouldBeNull()
         // A letter and a combining accent is one character: NFKC makes it one, and so does the count.
-        SearchTerms.of("é".repeat(100)).shouldNotBeNull()
+        SearchTerms.of("e\u0301".repeat(100)).shouldNotBeNull()
         SearchTerms.of(" ".repeat(50) + "z" + " ".repeat(50)).shouldNotBeNull()
         SearchTerms.of(FAMILY.repeat(40)).shouldNotBeNull()
     }
@@ -36,8 +38,8 @@ internal class SearchTermsTest {
         SearchTerms.of(FAMILY.repeat(41)).shouldBeNull()
         // A hundred characters either way (the acutes all sit on the last z, which NFKC makes one ź):
         // 100 + 2 × 462 = 1,024 octets is taken, and 1,026 is not.
-        SearchTerms.of("z".repeat(100) + "́".repeat(462)).shouldNotBeNull()
-        SearchTerms.of("z".repeat(100) + "́".repeat(463)).shouldBeNull()
+        SearchTerms.of("z".repeat(100) + "\u0301".repeat(462)).shouldNotBeNull()
+        SearchTerms.of("z".repeat(100) + "\u0301".repeat(463)).shouldBeNull()
     }
 
     @Test

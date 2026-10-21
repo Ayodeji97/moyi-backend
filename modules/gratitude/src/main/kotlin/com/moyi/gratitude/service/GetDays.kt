@@ -8,6 +8,7 @@ import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
+import com.moyi.gratitude.domain.SearchTerms
 import com.moyi.gratitude.infra.database.ArchiveDay
 import com.moyi.gratitude.infra.database.ArchiveDays
 import com.moyi.gratitude.infra.database.EntryStore
@@ -182,22 +183,90 @@ internal class GetDays(
         textOctets: Int = PAGE_TEXT_OCTETS,
     ): DaysPage {
         require(limit in 1..MAX_LIMIT) { "a page of the archive is 1 to $MAX_LIMIT days" }
+        return fill(
+            membership,
+            before,
+            limit,
+            textOctets,
+            select = { from, size -> candidates(membership, from, until, favouritesOnly, size) },
+            // With favourites only, a day on which nothing marked can be read any more is passed over.
+            shows = { _, kept -> !favouritesOnly || kept.isNotEmpty() },
+        )
+    }
+
+    /**
+     * `GET /bonds/{bondId}/search` (FR-050, FR-091; ADR-0039): the days of the archive on which
+     * one entry the caller can read in full holds every word of [terms], a page at a time.
+     *
+     * **[page]'s reading with another query.** The candidates are [ArchiveDays.matching]'s,
+     * which excludes the known withdrawn before its `LIMIT`, asked afresh for every window
+     * as the favourites feed asks. Every day is read through the gate, the marker last, and
+     * **shown only if an entry that matched was read in full**: a withdrawal that commits
+     * after the candidates were read makes that entry a tombstone, and the day is passed over
+     * as `favourites=true` passes one over, leaving no trace in the page or its cursor
+     * (ADR-0036 decision 7). A shown day is the whole day: both entries as the gate renders
+     * them, and nothing to say which matched.
+     *
+     * **No `hasLeft` or `isOpen` check**: an ended bond is its archive, and is searched as it
+     * is read (the controller's default 3).
+     *
+     * @throws IllegalArgumentException [limit] is outside 1..[MAX_LIMIT], as for [page].
+     */
+    @Transactional(readOnly = true)
+    fun search(
+        membership: BondMembership,
+        terms: SearchTerms,
+        before: LocalDate?,
+        limit: Int,
+        textOctets: Int = PAGE_TEXT_OCTETS,
+    ): DaysPage {
+        require(limit in 1..MAX_LIMIT) { "a page of the archive is 1 to $MAX_LIMIT days" }
+        return fill(
+            membership,
+            before,
+            limit,
+            textOctets,
+            select = { from, size ->
+                // Asked again for every window: see `candidates`.
+                val withdrawn = access.readerNow(membership).withdrawnAuthors
+                archive.matching(membership.bondId, membership.memberId, terms, from, size, withdrawn)
+            },
+            shows = { day, _ -> day.matchedInFull },
+        )
+    }
+
+    /**
+     * The reading [page] and [search] share, which [page]'s KDoc describes: candidates from
+     * [select] in windows, each window's entries read through the gate with the marker read
+     * after them, the days [shows] keeps offered in order to a [Filling], and the look-ahead
+     * at the bound. [select] is asked for the days strictly before its date (none: from the
+     * newest), at most its count. [shows] is given each day after the gate and the caller's
+     * own marks among what it read in full.
+     */
+    @Suppress("LongParameterList") // Each a separate fact of the reading.
+    private fun fill(
+        membership: BondMembership,
+        before: LocalDate?,
+        limit: Int,
+        textOctets: Int,
+        select: (LocalDate?, Int) -> List<ArchiveDay>,
+        shows: (Read, Set<EntryId>) -> Boolean,
+    ): DaysPage {
         val page = Filling(limit, textOctets)
         var examined = before
         var older = true
         var windows = 0
         while (older && !page.more && windows < MAX_WINDOWS) {
             // The first window is one more than the page: that day's presence is how "there is more" is known.
-            // `addExact`, though `limit` is at most MAX_LIMIT by the check above: a sum that cannot wrap, whoever calls.
+            // `addExact`, though `limit` is at most MAX_LIMIT by the callers' checks: a sum that cannot wrap, whoever calls.
             val size = if (windows == 0) Math.addExact(limit, 1) else REFILL_WINDOW
-            val candidates = candidates(membership, examined, until, favouritesOnly, size)
+            val candidates = select(examined, size)
             val read = read(membership, candidates)
             val marked = marksOf(membership, read)
             val reacted = reactionsOn(read)
             for (day in read) {
                 val kept = day.keptOf(marked)
-                // With favourites only, a day on which nothing marked can be read any more is passed over.
-                if (!favouritesOnly || kept.isNotEmpty()) page.offer(day, kept, reacted)
+                if (shows(day, kept)) page.offer(day, kept, reacted)
             }
             windows++
             older = candidates.size == size
@@ -211,20 +280,12 @@ internal class GetDays(
                 // more": the archive may end exactly there, and a cursor would then promise a page that does
                 // not exist. So look once more, for one day, before giving it; then go on from the last day
                 // examined, shown or not.
-                older -> examined.takeIf { anyBefore(membership, it, until, favouritesOnly) }
+                older -> examined.takeIf { select(it, 1).isNotEmpty() }
 
                 else -> null
             }
         return DaysPage(page.days, next)
     }
-
-    /** Whether the feed has a day older than [date] for this member: one row asked for, nothing read. */
-    private fun anyBefore(
-        membership: BondMembership,
-        date: LocalDate?,
-        until: LocalDate?,
-        favouritesOnly: Boolean,
-    ): Boolean = candidates(membership, date, until, favouritesOnly, 1).isNotEmpty()
 
     /**
      * Omit known withdrawals before applying LIMIT. Ask again for every window,
@@ -347,6 +408,12 @@ internal class GetDays(
         private val readings = listOfNotNull(mine, partners)
 
         val readInFull: List<EntryId> = readings.filter { it.readability == Readability.FULL }.mapNotNull { it.disclosed?.id }
+
+        /**
+         * Whether an entry of this day that matched a search ([ArchiveDay.matched]) was read in full:
+         * the only reason a search shows a day.
+         */
+        val matchedInFull: Boolean get() = readInFull.any { it in day.matched }
 
         /** Which of [marked] are entries of this day read in full: the only ones that may say they are kept. */
         fun keptOf(marked: Set<EntryId>): Set<EntryId> = readInFull.filter { it in marked }.toSet()

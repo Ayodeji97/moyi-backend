@@ -31,11 +31,13 @@ internal value class SearchTerms private constructor(
         private const val NUL = '\u0000'
 
         /** [raw] as a search, or `null` when it cannot be one. Which limit it crossed is not said: the answer is one `422`. */
-        fun of(raw: String): SearchTerms? {
-            if (NUL in raw || raw.toByteArray(Charsets.UTF_8).size > MAX_OCTETS) return null
+        fun of(raw: String): SearchTerms? = raw.takeIf(::searchable)?.let(::SearchTerms)
+
+        /** The cheap checks on the raw text first, so a long `q` is refused before it is normalised and walked. */
+        private fun searchable(raw: String): Boolean {
+            if (NUL in raw || raw.toByteArray(Charsets.UTF_8).size > MAX_OCTETS) return false
             val counted = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
-            if (counted.isBlank() || Graphemes.count(counted) > MAX_GRAPHEMES) return null
-            return SearchTerms(raw)
+            return !counted.isBlank() && Graphemes.count(counted) <= MAX_GRAPHEMES
         }
     }
 }
