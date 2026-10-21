@@ -1816,10 +1816,12 @@ is "prompts: …her prompt is the same bytes" "$(at prompt)" "$PR_A_PROMPT"
 
 # An entry answers the prompt; nobody is sent which.
 expect "prompts: the first writes, answering it" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"thank you for the long walk\",\"promptId\":\"$PR_ID\"}"
-PR_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+PR_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"; PR_DATE="$(raw date)"
 is "prompts: the 201 has no promptId" "$(at promptId)" "absent"
+expect "prompts: the first's today, revealed" 200 '"status":"REVEALED"' -- "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_A"
+is "prompts: …her prompt is still the same bytes" "$(at prompt)" "$PR_A_PROMPT"
 db_is "prompts: the entry row records it" "$(sql "SELECT prompt_id FROM entries WHERE id='$PR_ENTRY'")" "$PR_ID"
-for view in "days" "days/$(raw date)"; do
+for view in "days" "days/$PR_DATE"; do
   expect "prompts: the partner's $view" 200 "" -- "$API/bonds/$PR_BOND/$view" -H "Authorization: Bearer $PR_B"
   if repeats "$PR_ID" || [[ "$LAST_BODY" == *promptId* ]]; then fail "prompts: $view names the prompt the entry answered" "${LAST_BODY:0:200}"; else pass "prompts: $view names no prompt"; fi
 done
