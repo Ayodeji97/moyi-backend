@@ -2346,7 +2346,7 @@ Wrong about: what "the merged idiom" is worth. An hour after a merge, the idiom 
          And a result nobody wrote down, again. Last time it was mutations; this time a
          smoke run. The report is written as the work goes or the work was not done.
 
-## 2026-10-15 · Phase 3 · The prompt library — three guards that held for a reason other than the one written beside them
+## 2026-10-20 · Phase 3 · The prompt library — three guards that held for a reason other than the one written beside them
 
 Expected: the quietest slice of the phase. A prompt is a sentence nobody wrote to anybody.
          It holds nothing private, so the hard part looked like the choice: one prompt for
@@ -2381,7 +2381,13 @@ Reality: the plumbing was right first time, and three of its guards were right b
          caller's locale, and nothing else". The services that read what a member did share
          its package and need no import. A reviewer saw it by reading; on 2026-10-20 the
          rule gained a constructor check, and a mutation that handed it `GetStreak` with no
-         import was green under the old rule and red under the new.
+         import was green under the old rule and red under the new. The next review got
+         past both: an `@Autowired` field, its annotation spelt in full, needs no import
+         and is no constructor parameter, and it stayed green. The rule now holds every
+         property the class declares to the two it is handed, and that mutation is red.
+         It still cannot see a call to a top-level function or an `object` in the same
+         package; that is a rule about what it is given, not about everything it can
+         reach.
          And the reveal. Nothing said a reveal keeps the prompt, and the one test that went
          red when a reveal dropped it did so because the partner's write happened to reveal
          the day in the same request. The review found it by making the mutation and asking
