@@ -10,7 +10,7 @@ Any of these can follow any endpoint below. They are not repeated under each one
 
 | Status | Code | Why |
 |---|---|---|
-| 400 | `MALFORMED_REQUEST` | The body could not be read as what the endpoint expects. |
+| 400 | `MALFORMED_REQUEST` | The body could not be read as what the endpoint expects, or a query parameter is not UTF-8. A parameter that cannot be decoded is answered after authentication, so a caller without a valid token is told 401 first. |
 | 401 | `UNAUTHENTICATED` | No access token, or one that is expired or not valid. Everything under /api/v1 except the eight public auth POSTs needs one, and that is decided before the path is looked up: a path that does not exist, or a GET on a public auth route, is 401 without a token, not 404 or 405. A public route needs no token, but a token that is sent to one is still checked, and an expired or unaccepted one is 401 there too: send no Authorization header to a public route. In the account machine's own regions this answer is a row, because there the missing or expired token is the state. |
 | 403 | `FORBIDDEN` | A valid token that lacks the authority this action needs. |
 | 405 | `METHOD_NOT_ALLOWED` | The path exists; this verb does not. |

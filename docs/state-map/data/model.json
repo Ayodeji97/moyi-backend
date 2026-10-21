@@ -379,7 +379,7 @@
     {
       "status": 400,
       "code": "MALFORMED_REQUEST",
-      "reason": "The body could not be read as what the endpoint expects.",
+      "reason": "The body could not be read as what the endpoint expects, or a query parameter is not UTF-8. A parameter that cannot be decoded is answered after authentication, so a caller without a valid token is told 401 first.",
       "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.MALFORMED_REQUEST"
     },
     {
