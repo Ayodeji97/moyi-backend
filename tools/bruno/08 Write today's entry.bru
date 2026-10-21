@@ -23,6 +23,13 @@ body:json {
 script:pre-request {
   // A new key on every send: a retry of one send is then the same write (doc 06 section 1).
   req.setHeader("Idempotency-Key", require("uuid").v4());
+  // Answers today's prompt when Today has been run first and there was one; otherwise answers none.
+  const promptId = bru.getVar("promptId");
+  if (promptId) {
+    const body = req.getBody();
+    body.promptId = promptId;
+    req.setBody(body);
+  }
 }
 
 script:post-response {
@@ -30,5 +37,5 @@ script:post-response {
 }
 
 docs {
-  One entry a day each. A second is 409. The Idempotency-Key is made new on every send by the pre-request script; to try a replay, replace it there with a fixed UUID and send twice.
+  One entry a day each. A second is 409. The Idempotency-Key is made new on every send by the pre-request script; to try a replay, replace it there with a fixed UUID and send twice. Run Today first to answer its prompt.
 }

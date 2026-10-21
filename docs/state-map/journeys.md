@@ -18,7 +18,7 @@ Describes `main @ 5839d47`. Each journey is a path through the three machines, t
 10. (the same request) **partner**: your partner accepts the invite. Somebody accepts the code you shared. It is spent, and the bond shows no invite from then on.
 11. (the same request) **partner**: your partner accepts the invite. What the creator wrote while waiting counts from the pairing on: the joining day resumes with one entry, locked to the member who has just joined. A joining day left with both entries on it by the first build of this slice resumes straight to REVEALED or PENDING_REVEAL; nothing the current code writes can be in that state.
 12. **you**: accept an invite. The code was used, by you or by somebody else: an invite works once. The one answer, identical to a code that never existed. You try the code once more, after your partner has used it.
-13. **you**: read today. One of you has written. The status is shared on purpose, so a member who has not written can tell that their partner has. Both of you are now on day one, and your entry is waiting for theirs.
+13. **you**: read today: the day, both entries, the streak and the bond's prompt of the day. One of you has written. The status is shared on purpose, so a member who has not written can tell that their partner has. Both of you are now on day one, and your entry is waiting for theirs.
 
 ```mermaid
 sequenceDiagram
@@ -44,7 +44,7 @@ sequenceDiagram
     Note over API: bond is ACTIVE, bond.invite is ACCEPTED, day is PARTIAL
     You->>API: accept an invite
     API-->>You: 404 INVITE_NOT_USABLE
-    You->>API: read today
+    You->>API: read today the day, both entries, the streak and the bond's prompt of the day
     API-->>You: 200, day is PARTIAL
 ```
 
@@ -55,15 +55,15 @@ sequenceDiagram
 3. **you**: edit your entry. Nobody else has been entitled to read it yet, so the text is replaced. Only the text can change. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.
 4. **partner**: write today's entry. You had written and your partner's entry is the second, but the bond's reveal time has not come. Later the same day.
 5. (the same request) **partner**: write today's entry. Your partner has written. Until the reveal you are shown who wrote and nothing else.
-6. **you**: read today. Both of you have written and the bond's reveal time has not come. Each sees their own entry in full and the other's locked.
+6. **you**: read today: the day, both entries, the streak and the bond's prompt of the day. Both of you have written and the bond's reveal time has not come. Each sees their own entry in full and the other's locked.
 7. **system**: the reveal time arrives. Nothing watches the clock for one day. The close job looks at every day waiting on a reveal time on each run and reveals those whose time has come, so the reveal lands up to a quarter of an hour after the time set. No request does this, not even GET /today.
 8. (the same request) **system**: the reveal time arrives. Both entries of a day that was waiting are stamped revealed together, by the close job's first run after the time.
-9. **you**: read today. Both entries are readable by both of you, and today is counted in the streak the response carries.
+9. **you**: read today: the day, both entries, the streak and the bond's prompt of the day. Both entries are readable by both of you, and today is counted in the streak the response carries.
 10. **you**: edit your entry. Your partner may already have read these words, so they can no longer be changed. You can still delete the entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.
 11. **you**: delete your entry. The words are erased for both of you; your partner is left a tombstone. The reveal stamp is kept and the day stays as it was. You take the words back instead.
 12. **you**: read the streak. The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; after midnight the close job evaluates it and stores the same number.
 13. **system**: the day ends and the close job runs. A day revealed while it was running is stamped closed and nothing else about it changes. That night.
-14. **you**: read today. The response says OPEN with both entries null: what the day would open as. Reading opens nothing; that no row is written is asserted by a separate test, not by the one cited. The next morning. This is a new day, so nothing of yesterday's carries over, and the loop begins again.
+14. **you**: read today: the day, both entries, the streak and the bond's prompt of the day. The response says OPEN with both entries null: what the day would open as. Reading opens nothing; that no row is written is asserted by a separate test, not by the one cited. The next morning. This is a new day, so nothing of yesterday's carries over, and the loop begins again.
 
 ```mermaid
 sequenceDiagram
@@ -79,11 +79,11 @@ sequenceDiagram
     API-->>You: 200, day.entry is SUBMITTED
     Partner->>API: write today's entry
     API-->>Partner: 201, day is PENDING_REVEAL, day.partnerEntry is LOCKED
-    You->>API: read today
+    You->>API: read today the day, both entries, the streak and the bond's prompt of the day
     API-->>You: 200, day is PENDING_REVEAL
     Job->>API: the reveal time arrives
     Note over API: day is REVEALED, day.entry is REVEALED
-    You->>API: read today
+    You->>API: read today the day, both entries, the streak and the bond's prompt of the day
     API-->>You: 200, day is REVEALED
     You->>API: edit your entry
     API-->>You: 409 ENTRY_IMMUTABLE
@@ -93,7 +93,7 @@ sequenceDiagram
     API-->>You: 200, day is REVEALED
     Job->>API: the day ends and the close job runs
     Note over API: day is REVEALED
-    You->>API: read today
+    You->>API: read today the day, both entries, the streak and the bond's prompt of the day
     API-->>You: 200, day is NOT_OPENED
 ```
 
@@ -135,8 +135,8 @@ sequenceDiagram
 
 ## J4: Looking back
 
-1. **you**: read today. Both entries are readable by both of you, and today is counted in the streak the response carries. Both of you wrote today and the day has been revealed.
-2. (the same request) **you**: read today. The entry has been revealed, so you read it in full. What decides this is the entry's own reveal stamp, never the day's status.
+1. **you**: read today: the day, both entries, the streak and the bond's prompt of the day. Both entries are readable by both of you, and today is counted in the streak the response carries. Both of you wrote today and the day has been revealed.
+2. (the same request) **you**: read today: the day, both entries, the streak and the bond's prompt of the day. The entry has been revealed, so you read it in full. What decides this is the entry's own reveal stamp, never the day's status.
 3. **you**: read the streak. The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; after midnight the close job evaluates it and stores the same number.
 4. **you**: write today's entry. A revealed day is settled: its words have been read. The day is checked before the entry is inserted, so this is the answer whether you still have an entry on it or deleted yours, which is what stops delete-then-rewrite replacing words already read. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. You try to add to a day that is already settled.
 5. **system**: the day ends and the close job runs. A day revealed while it was running is stamped closed and nothing else about it changes. After this the day is no longer today, and the journey stops here, where the API does: the archive by month, search, "on this day", milestone cards and export are not built.
@@ -147,7 +147,7 @@ sequenceDiagram
     actor Partner
     participant API
     participant Job as The service, on its own schedule
-    You->>API: read today
+    You->>API: read today the day, both entries, the streak and the bond's prompt of the day
     API-->>You: 200, day is REVEALED, day.partnerEntry is VISIBLE
     You->>API: read the streak
     API-->>You: 200, day is REVEALED

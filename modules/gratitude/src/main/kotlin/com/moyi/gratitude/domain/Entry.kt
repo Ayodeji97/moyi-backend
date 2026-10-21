@@ -41,7 +41,12 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  * text only where the status or `deletedAt` says why. Loosening it for
  * media-only entries is that later slice's change to make.
  *
- * [imageMediaId], [voiceMediaId], [voiceDurationMs] and [promptId] are
+ * [promptId] is the prompt the author said this entry answers (ADR-0038),
+ * never sent back to anybody; [erase] takes it with the words, on a withdrawal
+ * (BR-10a) and on the author's own delete (FR-046) alike: what an erased entry
+ * was answering goes with what it said.
+ *
+ * [imageMediaId], [voiceMediaId] and [voiceDurationMs] are
  * carried anyway, always `null` for now, so a row [submit] builds already
  * has a value for every column V12 declared — the same reason
  * [com.moyi.bond.domain.Bond] carries `timezoneChangedAt` and
@@ -69,7 +74,7 @@ internal data class Entry(
     val imageMediaId: UUID?,
     val voiceMediaId: UUID?,
     val voiceDurationMs: Int?,
-    val promptId: UUID?,
+    val promptId: PromptId?,
     val status: EntryStatus,
     val authorDeletedAccount: Boolean,
     val createdAt: Instant,
@@ -87,6 +92,18 @@ internal data class Entry(
             "only an erased entry has no text"
         }
     }
+
+    /**
+     * The generated one, but for [promptId]: whether there is one, never which. An erasure
+     * forgets the prompt an entry answered (ADR-0038, ruling 7), and a log line that printed
+     * it would not — the same reason `SubmitEntryRequest` and `EntryDraft` print `(given)`.
+     * [text] needs nothing here: [EntryText] redacts itself.
+     */
+    override fun toString(): String =
+        "Entry(id=$id, bondDayId=$bondDayId, bondId=$bondId, authorMemberId=$authorMemberId, text=$text, " +
+            "imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, voiceDurationMs=$voiceDurationMs, " +
+            "promptId=${promptId?.let { "(given)" }}, status=$status, authorDeletedAccount=$authorDeletedAccount, " +
+            "createdAt=$createdAt, intendedAt=$intendedAt, updatedAt=$updatedAt, revealedAt=$revealedAt, deletedAt=$deletedAt)"
 
     /**
      * BR-1, in the order the spec states it (§4, as revised):
@@ -250,6 +267,7 @@ internal data class Entry(
                 imageMediaId = null,
                 voiceMediaId = null,
                 voiceDurationMs = null,
+                promptId = null,
                 status = EntryStatus.DELETED,
                 deletedAt = now,
                 updatedAt = now,
@@ -301,6 +319,7 @@ internal data class Entry(
             bondId: UUID,
             authorMemberId: UUID,
             text: EntryText,
+            promptId: PromptId?,
             intendedAt: Instant,
             now: Instant,
         ): Entry =
@@ -313,7 +332,7 @@ internal data class Entry(
                 imageMediaId = null,
                 voiceMediaId = null,
                 voiceDurationMs = null,
-                promptId = null,
+                promptId = promptId,
                 status = EntryStatus.SUBMITTED,
                 authorDeletedAccount = false,
                 createdAt = now,

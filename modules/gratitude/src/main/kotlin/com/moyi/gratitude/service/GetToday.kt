@@ -48,6 +48,12 @@ internal data class TodayView(
      * both members are shown. Only ever of entries read in full.
      */
     val reactions: Map<EntryId, ReactionType>,
+    /**
+     * The bond's prompt of the day as the caller is shown it, or null when the bond takes
+     * no writes from them or the library has nothing for it ([DailyPrompt]). The same id
+     * for both members; never anything about either.
+     */
+    val prompt: PromptView?,
 )
 
 /**
@@ -126,7 +132,12 @@ internal data class TodayView(
  * write paths, not the reads, that have to refuse a member who has left or
  * a bond that has ended). This is a read, and BR-1 governs what it may show
  * regardless of bond status — the same reason `GetBond`'s own `view` takes
- * no such check either.
+ * no such check either, for the entries. The prompt is the one thing here that asks,
+ * through `BondMembership.takesWrites` in [DailyPrompt]: a suggestion to write is not
+ * offered where no write is taken.
+ *
+ * **`prompt` is the bond's, not the caller's** — [DailyPrompt] has the rule; it reads
+ * nothing of the day, so its place here is first, not last.
  */
 @Service
 @Suppress("LongParameterList") // What today is read from, each named.
@@ -138,6 +149,7 @@ internal class GetToday(
     private val access: BondAccess,
     private val favourites: Favourites,
     private val reactions: Reactions,
+    private val prompts: DailyPrompt,
 ) {
     @Transactional(readOnly = true)
     fun today(membership: BondMembership): TodayView {
@@ -147,6 +159,9 @@ internal class GetToday(
         // change is deferred, report a date the caller's own write would not
         // land on.
         val date = DayAssignment.dateFor(clock.instant(), null, membership.anchorTimeline.asCalendar()) { false }
+        // From the bond, the date and the library alone (ADR-0038), and before the day is
+        // read: nothing read below is in reach of it.
+        val prompt = prompts.on(membership, date)
         val day = days.findByBondAndDate(membership.bondId, date)
 
         if (day == null) {
@@ -160,6 +175,7 @@ internal class GetToday(
                 streak = unwritten,
                 marked = emptySet(),
                 reactions = emptyMap(),
+                prompt = prompt,
             )
         }
 
@@ -179,6 +195,7 @@ internal class GetToday(
             streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),
             marked = favourites.markedBy(membership.memberId, readInFull),
             reactions = reactions.on(readInFull),
+            prompt = prompt,
         )
     }
 }

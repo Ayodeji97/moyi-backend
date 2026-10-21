@@ -17,11 +17,19 @@ import java.util.concurrent.ConcurrentHashMap
 internal class FakeUserDirectory : UserDirectory {
     private val users = ConcurrentHashMap<UUID, UserSummary>()
 
-    /** A user who has confirmed their address, so FR-002 lets them create and join. */
-    fun verified(displayName: String): UUID = add(displayName, verified = true)
+    /** A user who has confirmed their address, so FR-002 lets them create and join; in [locale], `en` unless said. */
+    fun verified(
+        displayName: String,
+        locale: String = "en",
+    ): UUID = add(displayName, verified = true, locale)
 
     /** Registered, not yet verified: may sign in, may not create or join a bond. */
-    fun unverified(displayName: String): UUID = add(displayName, verified = false)
+    fun unverified(displayName: String): UUID = add(displayName, verified = false, "en")
+
+    /** The directory no longer knows [id]: an account deleted under a bond that still names it. */
+    fun forget(id: UUID) {
+        users.remove(id)
+    }
 
     fun clear() = users.clear()
 
@@ -32,9 +40,10 @@ internal class FakeUserDirectory : UserDirectory {
     private fun add(
         displayName: String,
         verified: Boolean,
+        locale: String,
     ): UUID {
         val id = UUID.randomUUID()
-        users[id] = UserSummary(id, displayName, verified)
+        users[id] = UserSummary(id, displayName, verified, locale)
         return id
     }
 }

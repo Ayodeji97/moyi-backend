@@ -500,4 +500,60 @@ class ArchitectureTest {
                 "BondAccessGuard minted for that bond (doc 05 §5.5, doc 09 §4). Found: $violations",
         )
     }
+
+    @Test
+    fun `the prompt of the day is chosen from the bond, the date and the library, and nothing anybody did`() {
+        // FR-064 and the owner's Q-P1 (ADR-0038). DailyPrompt is where a read of an entry, a
+        // day, a mark, a reaction, a streak or a withdrawal would let one member's activity
+        // move what the other is offered. Its imports are an allowlist, so a new one is a
+        // decision this test makes somebody take.
+        val allowed =
+            setOf(
+                "com.moyi.bond.api.BondMembership",
+                "com.moyi.bond.api.BondType",
+                "com.moyi.gratitude.domain.PromptAudience",
+                "com.moyi.gratitude.domain.PromptId",
+                "com.moyi.gratitude.domain.PromptLocale",
+                "com.moyi.gratitude.domain.PromptOfTheDay",
+                "com.moyi.gratitude.infra.database.PromptLibrary",
+                "com.moyi.identity.api.UserDirectory",
+                "org.springframework.stereotype.Service",
+                "java.time.LocalDate",
+            )
+        val file =
+            project.files.single { it.name == "DailyPrompt" && it.normalisedProjectPath.contains("/modules/gratitude/src/main/") }
+        val extra = file.imports.map { it.name }.filterNot { it in allowed }
+
+        assertTrue(extra.isEmpty(), "DailyPrompt may read the bond, the library and the caller's locale, and nothing else. Found: $extra")
+
+        // The imports cannot see this module's own services: `GetStreak`, `DayEntries`,
+        // `EntryById` and the rest share DailyPrompt's package and need no import. What it
+        // is handed is its constructor, so the constructor is pinned as well (ADR-0038).
+        val prompt = file.classes().single { it.name == "DailyPrompt" }
+        val handed =
+            prompt.primaryConstructor
+                ?.parameters
+                .orEmpty()
+                .map { it.type.name }
+        assertTrue(
+            handed.sorted() == listOf("PromptLibrary", "UserDirectory") && prompt.secondaryConstructors.isEmpty(),
+            "DailyPrompt is handed the library and the user directory, and nothing else. Found: $handed",
+        )
+
+        // Nor can the constructor see a field injected past it: an `@Autowired lateinit var`
+        // spelt fully qualified needs no import either. So every property DailyPrompt
+        // declares must be one of the two its constructor takes.
+        val params =
+            prompt.primaryConstructor
+                ?.parameters
+                .orEmpty()
+                .map { it.name }
+                .toSet()
+        val fields = prompt.properties().map { "${it.name}: ${it.type?.name}" }
+        val unhanded = prompt.properties().map { it.name }.filterNot { it in params }
+        assertTrue(
+            unhanded.isEmpty(),
+            "DailyPrompt holds only what its constructor is handed. Found properties: $fields",
+        )
+    }
 }

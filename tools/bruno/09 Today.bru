@@ -14,6 +14,11 @@ auth:bearer {
   token: {{accessToken}}
 }
 
+script:post-response {
+  // The prompt's id, for Write to answer it. Cleared when there is none (an ended bond, or nothing in the library).
+  bru.setVar("promptId", res.body.prompt ? res.body.prompt.id : "");
+}
+
 docs {
-  Your entry, your partner's — locked until you have both written — the day's status, and the streak.
+  Your entry, your partner's — locked until you have both written — the day's status, the streak, and today's prompt: the same for both of you, in your own language, or null once the bond has ended.
 }

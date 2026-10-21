@@ -32,6 +32,7 @@ import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import tools.jackson.databind.node.ObjectNode
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -238,7 +239,7 @@ internal class WithdrawalReadTest(
     }
 
     @Test
-    fun `leaving without withdrawing changes nothing either of them reads`() {
+    fun `leaving without withdrawing changes no entry either of them reads`() {
         val adasKey = UUID.randomUUID().toString()
         val adas = entryOf(submit(ada, ADAS_WORDS, key = adasKey))
         val beas = entryOf(submit(bea, BEAS_WORDS))
@@ -246,7 +247,12 @@ internal class WithdrawalReadTest(
 
         leave(ada, body = null).status shouldBe 204
 
-        listOf(ada, bea).map { todayResponse(it).contentAsString } shouldBe before
+        // Ruling 6 (ADR-0038): a leave ends the bond, which both already see, so `prompt` going null for both tells
+        // nothing new; this test's subject is the entries, and everything but `prompt` stays byte for byte the same.
+        val after = listOf(ada, bea).map { todayResponse(it).contentAsString }
+        after.map(::withoutPrompt) shouldBe before.map(::withoutPrompt)
+        before.forEach { json.readTree(it)["prompt"].isObject shouldBe true }
+        after.forEach { json.readTree(it)["prompt"].isNull shouldBe true }
         before[0] shouldContain ADAS_WORDS
         before[1] shouldContain ADAS_WORDS
         json.readTree(submit(ada, ADAS_WORDS, key = adasKey).contentAsString)["text"].asString() shouldBe ADAS_WORDS
@@ -357,6 +363,9 @@ internal class WithdrawalReadTest(
         user: UUID,
         bond: String = bondId,
     ): JsonNode = json.readTree(todayResponse(user, bond).contentAsString)
+
+    /** [body] as sent, less its `prompt` key: every other byte in the order it was sent. */
+    private fun withoutPrompt(body: String): String = (json.readTree(body) as ObjectNode).apply { remove("prompt") }.toString()
 
     private fun todayResponse(
         user: UUID,

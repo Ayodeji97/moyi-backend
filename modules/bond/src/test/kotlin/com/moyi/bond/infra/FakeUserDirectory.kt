@@ -45,7 +45,7 @@ internal class FakeUserDirectory : UserDirectory {
         verified: Boolean,
     ): UUID {
         val id = UUID.randomUUID()
-        users[id] = UserSummary(id, displayName, verified)
+        users[id] = UserSummary(id, displayName, verified, "en")
         return id
     }
 }

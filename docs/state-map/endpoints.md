@@ -1289,10 +1289,11 @@ curl -X POST "$API/bonds/$BOND/entries" -H "Authorization: Bearer $TOKEN" -H "Id
 | 422 | `VALIDATION_FAILED` | The text is missing or blank, is over 500 graphemes or 8192 bytes, or holds a NUL character or an unpaired surrogate. (the smoke script asserts the status and the field, not the code) | never-run |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another path. | smoke |
 | 422 | `MEDIA_NOT_YET_SUPPORTED` | The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. It is refused, not quietly dropped. | smoke |
+| 422 | `VALIDATION_FAILED` | promptId names no prompt: it is not an id, or no prompt in the library has it. One answer for both, on the field promptId, and only for a member of an open bond: a stranger gets the bond's 404 and an ended bond 409 BOND_ARCHIVED first. A retired prompt, another bond type's, or an earlier day's is accepted. | smoke |
 
 ### GET /bonds/{bondId}/today
 
-read today
+read today: the day, both entries, the streak and the bond's prompt of the day
 
 **Needs:** an access token.
 

@@ -201,6 +201,7 @@ flowchart TD
     notification & scheduling & admin & analytics --> common
 
     gratitude -. "only via bond's api" .-> bond
+    gratitude -. "only via identity's api" .-> identity
     scheduling -. "only via gratitude's api" .-> gratitude
 
     classDef wiring fill:#f4cccc,stroke:#a61c00,stroke-width:2px,color:#1a1a1a
@@ -211,7 +212,8 @@ flowchart TD
 
 Those dotted arrows are the ones that matter. The reveal gate needs
 `gratitude` to ask `bond` "is this person really a member here?"
-synchronously, mid-request, and `scheduling`'s close job has to ask
+synchronously, mid-request, and, since C6a, `identity` "which language
+does this member read?", for the day's prompt; and `scheduling`'s close job has to ask
 `gratitude` to settle the days that have ended — so unlike the course
 (whose modules never
 call each other and communicate over RabbitMQ), we do have direct

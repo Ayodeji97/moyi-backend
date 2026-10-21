@@ -47,6 +47,12 @@ data class UserSummary(
     val id: UUID,
     val displayName: String,
     val emailVerified: Boolean,
+    /**
+     * The language tag the user chose (`users.locale`, doc 06 `PATCH /me`), exactly as
+     * stored: not normalised, any case `RegisterRequest` admitted. Matching it is the
+     * caller's. Not printed by [toString], as the display name is not.
+     */
+    val locale: String,
 ) {
     override fun toString(): String = "UserSummary(id=$id)"
 }

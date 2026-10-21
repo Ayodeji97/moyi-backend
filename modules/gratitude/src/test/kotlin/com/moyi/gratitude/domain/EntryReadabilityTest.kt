@@ -36,6 +36,7 @@ internal class EntryReadabilityTest {
             bondId = bondId,
             authorMemberId = author.memberId,
             text = EntryText.of("thank you for the coffee"),
+            promptId = null,
             intendedAt = now,
             now = now,
         )

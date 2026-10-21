@@ -2345,3 +2345,66 @@ Wrong about: what "the merged idiom" is worth. An hour after a merge, the idiom 
          because "decided" in an ADR reads as the owner's unless it says otherwise.
          And a result nobody wrote down, again. Last time it was mutations; this time a
          smoke run. The report is written as the work goes or the work was not done.
+
+## 2026-10-20 · Phase 3 · The prompt library — three guards that held for a reason other than the one written beside them
+
+Expected: the quietest slice of the phase. A prompt is a sentence nobody wrote to anybody.
+         It holds nothing private, so the hard part looked like the choice: one prompt for
+         two people, the same whatever either of them does, and nothing recorded when it is
+         shown. That was settled before a line was written, by making the choice a pure
+         function of the bond, the date and the library, with no parameter that could carry
+         a person. I expected the rest to be plumbing: a type through `bond`'s api, a locale
+         through `identity`'s, a field on a request.
+Reality: the plumbing was right first time, and three of its guards were right by accident.
+         The run that started it. Decision 12 was not read, it was run: a throwaway MockMvc
+         test on 2026-10-15 posted `promptId` to the route as it stood, and a random UUID
+         came back `201`. Reading `SubmitEntryRequest` said the field did not exist; it did
+         not say what the route did when a client sent it anyway. It accepted it silently,
+         so "an unknown id is a `422`" is a change a client can feel, and the record says
+         so.
+         The first accident. The plan's mutation for the id parser said the body
+         `1-1-1-1-1` would catch a lenient parse. It did not. `UUID.fromString` reads it as
+         an id no prompt has, which is refused with the same `422` either way, so the test
+         stayed green with the mutation in. What turned it red was a body the first
+         implementer of Task 3 had added, for a reason it never wrote down, and left behind
+         when cut off: a real prompt's id with its leading zero dropped, which a lenient
+         parser accepts and stores. Its successor ran the mutation without it, saw it survive, and kept it;
+         the review ran it again and saw the same. The plan named the wrong body as the
+         guard, and nobody would have known if the right one had been tidied away as a
+         duplicate.
+         The second. The plan's other mutation, `promptId` added to the response, does not
+         compile: `EntryResponse` is built from `DisclosedEntry`, which has no such field.
+         The type is the first guard and the test the second. That is good news written
+         as a wrong prediction.
+         The third. The architecture rule for `DailyPrompt` held its imports to an
+         allowlist, and its message said the class "may read the bond, the library and the
+         caller's locale, and nothing else". The services that read what a member did share
+         its package and need no import. A reviewer saw it by reading; on 2026-10-20 the
+         rule gained a constructor check, and a mutation that handed it `GetStreak` with no
+         import was green under the old rule and red under the new. The next review got
+         past both: an `@Autowired` field, its annotation spelt in full, needs no import
+         and is no constructor parameter, and it stayed green. The rule now holds every
+         property the class declares to the two it is handed, and that mutation is red.
+         It still cannot see a call to a top-level function or an `object` in the same
+         package; that is a rule about what it is given, not about everything it can
+         reach.
+         And the reveal. Nothing said a reveal keeps the prompt, and the one test that went
+         red when a reveal dropped it did so because the partner's write happened to reveal
+         the day in the same request. The review found it by making the mutation and asking
+         why the test that failed was that one.
+         One ruling met a test. `WithdrawalReadTest` said a leave without a withdrawal
+         changes nothing either member reads from today, byte for byte, and the controller's
+         ruling 6 makes the prompt vanish on a leave. The implementer stopped rather than
+         choose. The ruling narrowed the test to the entries, which is what it was for.
+         The smoke run found nothing the tests had not: 850, none failed, none skipped. It
+         was owed since Task 3 and was the first time the jar served a prompt to anybody.
+Wrong about: what a guard is guarding. Each of these passed, each was named beside a
+         reason, and in three of them the reason was not the one that made it pass. A
+         mutation that goes red tells you a test can fail; only the failure message tells
+         you which line of the test did it, and that is the line to keep.
+         "Nothing private" as a reason to relax. A prompt holds no words, but which prompt
+         an erased entry answered was still part of what was taken back, and a `toString`
+         that printed it would have kept it in a log after the row forgot it.
+         Where the slice's work was. Half the commits were not code: smoke, CLI, state map,
+         a record with eight rulings in it that nobody but an agent made. Those were the
+         parts most likely to be wrong in a way no build would notice.

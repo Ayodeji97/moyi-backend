@@ -83,6 +83,24 @@ internal class BondAccessTest(
     }
 
     @Test
+    fun `a membership names the bond's type, exactly as the bond has it, and whether it takes writes`() {
+        for (type in com.moyi.bond.domain.BondType.entries) {
+            val ada = users.verified("Ada $type")
+            val bond = create.create(draft(ada, type))
+            val membership = access.membershipOf(ada, bond.bond.id.value)
+            // The type as it is, PARENT_CHILD included: which prompts a type is offered is gratitude's rule, not bond's.
+            membership.type.name shouldBe type.name
+            membership.takesWrites shouldBe true
+        }
+        val bea = users.verified("Bea")
+        val cy = users.verified("Cy")
+        val ended = bondForTwo(bea, cy)
+        endBond.leave(guard.membershipOf(UserId(bea), BondId(ended)), withdrawEntries = false)
+        access.membershipOf(bea, ended).takesWrites shouldBe false
+        access.membershipOf(cy, ended).takesWrites shouldBe false
+    }
+
+    @Test
     fun `a withdrawal is reported to both members, by both reads, whoever has left`() {
         // `gratitude`'s read gate asks this of whoever is reading: the
         // withdrawer must stop seeing their own words too, and the other
@@ -175,13 +193,15 @@ internal class BondAccessTest(
     }
 
     /** The same shape `BondPersistenceTest` builds by hand: a couple, anchored in Lagos, with no reveal time set. */
-    private fun draft(creator: UUID) =
-        BondDraft(
-            creator = UserId(creator),
-            type = BondType.COUPLE,
-            name = "Us",
-            anchorTimezone = RegionZone.of("Africa/Lagos"),
-            revealTimeLocal = null,
-            reminderTimezone = null,
-        )
+    private fun draft(
+        creator: UUID,
+        type: BondType = BondType.COUPLE,
+    ) = BondDraft(
+        creator = UserId(creator),
+        type = type,
+        name = "Us",
+        anchorTimezone = RegionZone.of("Africa/Lagos"),
+        revealTimeLocal = null,
+        reminderTimezone = null,
+    )
 }
