@@ -507,7 +507,7 @@ field of today.
 | Method | Path | As built |
 |---|---|---|
 | GET | `/bonds/{bondId}/today` | Gains `prompt`, `{id, text}` or `null` (§5.1). Additive |
-| POST | `/bonds/{bondId}/entries` | Takes an optional `promptId`: any prompt the library holds, active or retired, of any audience, today's or not (decision 8). Anything else, including a value that is not a UUID in its canonical spelling, is one `422 VALIDATION_FAILED` on the field `promptId` (code `VALID_PROMPT`), decided after the bond's `404`, `BOND_ARCHIVED` and the media refusal (decision 9). It is recorded on the entry and never sent back, on any shape and to anybody (decision 10). `PATCH /entries/{entryId}` ignores the key (decision 11) |
+| POST | `/bonds/{bondId}/entries` | Takes an optional `promptId`: any prompt the library holds, active or retired, of any audience, today's or not (decision 8). Anything else, including a value that is not a UUID in its canonical spelling (in any letter case, upper, lower or mixed: `PromptId.parse` compares lower case), is one `422 VALIDATION_FAILED` on the field `promptId` (code `VALID_PROMPT`), decided after the bond's `404`, `BOND_ARCHIVED` and the media refusal (decision 9). It is recorded on the entry and never sent back, on any shape and to anybody (decision 10). `PATCH /entries/{entryId}` ignores the key (decision 11) |
 | GET | `/prompts/daily` | **Not built.** Owed (controller ruling 5): if built, `GET /bonds/{bondId}/prompts/daily`, served by the same function as `today.prompt`, with a cross-tenant fixture |
 | GET | `/prompts` | **Deferred** by the owner (Q-P5), until a screen needs it |
 
