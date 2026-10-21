@@ -100,11 +100,15 @@ class GlobalExceptionHandler(
     }
 
     /**
+     * The second guard: [UndecodableParameterFilter] is the first, and answers before Spring is reached. This one
+     * answers should anything reach a handler with the parameters still unparsed, the filter removed included.
+     *
      * A query parameter whose bytes are not UTF-8: `400 MALFORMED_REQUEST`. Malformed, not semantically invalid,
      * so 400 and not 422 (doc 06 §2), and the code a body that cannot be read already has.
      *
-     * Tomcat decodes the whole query string the first time any parameter is asked for, which is while a
-     * handler's arguments are resolved, before any guard has run. On bytes it cannot decode it throws this, and
+     * Tomcat decodes the whole query string the first time any parameter is asked for: in the filter, and were
+     * it passed, while a handler's arguments are resolved, before any guard has run. On bytes it cannot decode
+     * it throws this, and
      * **its message quotes the parameter's value** as far as it could read it. For a search that value is
      * somebody's words (slice C6b, task 2 review I1). So the exception is not even taken as an argument: neither
      * it nor its message is logged or answered. Spring's `ExceptionHandlerExceptionResolver` prints it at DEBUG
@@ -115,13 +119,8 @@ class GlobalExceptionHandler(
      */
     @ExceptionHandler(InvalidParameterException::class)
     fun handleUndecodableParameter(request: WebRequest): ResponseEntity<Any> {
-        log.warn("{} -> 400 a request parameter could not be decoded", ErrorCode.MALFORMED_REQUEST)
-        return respond(
-            status = HttpStatus.BAD_REQUEST,
-            errorCode = ErrorCode.MALFORMED_REQUEST,
-            detail = "A request parameter could not be read.",
-            request = request,
-        )
+        log.warn(UndecodableParameterFilter.LOG_LINE, ErrorCode.MALFORMED_REQUEST)
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problems.undecodableParameter(request.instanceUri()))
     }
 
     @ExceptionHandler(Exception::class)

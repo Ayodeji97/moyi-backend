@@ -57,6 +57,19 @@ class ProblemDetails(
             setProperty("code", errorCode.name)
             errors?.let { setProperty("errors", it) }
         }
+
+    /**
+     * The answer to a query parameter Tomcat could not decode, its one source: [UndecodableParameterFilter] gives
+     * it, and `GlobalExceptionHandler` gives it too should the filter ever be passed. Its detail names no
+     * parameter and quotes no value.
+     */
+    fun undecodableParameter(instance: URI?): ProblemDetail =
+        of(
+            status = HttpStatus.BAD_REQUEST,
+            errorCode = ErrorCode.MALFORMED_REQUEST,
+            detail = "A request parameter could not be read.",
+            instance = instance,
+        )
 }
 
 /**

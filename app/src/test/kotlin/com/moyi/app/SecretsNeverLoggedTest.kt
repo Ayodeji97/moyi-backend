@@ -230,12 +230,14 @@ class SecretsNeverLoggedTest(
         get("/bonds/$bond/search?q=$SEARCH_TERMS", bea).body shouldBe """{"items":[],"nextCursor":null}"""
         // `after`, not `wrote`: the parser reads `~wrote` as one `file` token, so `wrote` is no lexeme of these texts.
         get("/bonds/$bond/search?q=after", bea).body.contains(BEA_TEXT) shouldBe true
-        get("/bonds/$bond/search?q=$SEARCH_TERMS&limit=0", bea).status shouldBe 422
+        val refused = get("/bonds/$bond/search?q=$SEARCH_TERMS&limit=0", bea)
+        refused.status shouldBe 422
         // Bytes that are not UTF-8 (task 2 review I1): Tomcat's exception quotes what it could decode, the words
-        // included, so it is answered 400 and logged without it. Any route, any parameter, known or not.
-        get("/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", bea).malformed()
-        get("/bonds/$bond/days?cursor=%FF", ada).malformed()
-        get("/bonds/$bond/days?unknown=$SEARCH_TERMS%20x%FF", ada).malformed()
+        // included, so it is answered 400 and logged without it. Any route, any parameter, known or not. The answer
+        // is written before Spring Security's chain, so it is held to carry the headers that chain gives a refusal.
+        get("/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", bea).malformed(like = refused)
+        get("/bonds/$bond/days?cursor=%FF", ada).malformed(like = refused)
+        get("/bonds/$bond/days?unknown=$SEARCH_TERMS%20x%FF", ada).malformed(like = refused)
         send("DELETE", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         send("PUT", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         // A reaction each way; hers replaced, refused twice, taken back, and set again for the erasure to remove.
@@ -399,14 +401,17 @@ class SecretsNeverLoggedTest(
         val body: String,
         val etag: String?,
         mapper: JsonMapper,
+        /** By lower-case name. */
+        val headers: Map<String, List<String>> = emptyMap(),
     ) {
         val json: JsonNode by lazy { mapper.readTree(body) }
     }
 
-    private fun Answer.malformed() {
+    private fun Answer.malformed(like: Answer) {
         status shouldBe 400
-        // Null-safe: with the dispatcher servlet's pin removed the answer is Boot's error body, which has no `code`.
+        // Null-safe: should the answer ever be Boot's error body, it has no `code`.
         json["code"]?.asString() shouldBe "MALFORMED_REQUEST"
+        headers.comparable() shouldBe like.headers.comparable()
     }
 
     private fun get(
@@ -440,7 +445,13 @@ class SecretsNeverLoggedTest(
         if (forwardedFor != null) request.header("X-Forwarded-For", forwardedFor)
         if (ifNoneMatch != null) request.header("If-None-Match", ifNoneMatch)
         val response = http.send(request.build(), HttpResponse.BodyHandlers.ofString())
-        return Answer(response.statusCode(), response.body(), response.headers().firstValue("ETag").orElse(null), json)
+        return Answer(
+            response.statusCode(),
+            response.body(),
+            response.headers().firstValue("ETag").orElse(null),
+            json,
+            response.headers().map().mapKeys { it.key.lowercase() },
+        )
     }
 
     /**
@@ -569,6 +580,15 @@ class SecretsNeverLoggedTest(
                 "sql",
                 "web",
             )
+
+        /**
+         * Headers that differ from one response to the next whatever wrote it; and the rate limiter's, which
+         * counts a request Spring Security's chain admits, and a parameter that cannot be decoded is answered
+         * before that chain (`UndecodableParameterFilter`).
+         */
+        val PER_RESPONSE_HEADERS = setOf("date", "content-length", "transfer-encoding", "connection", "keep-alive")
+
+        fun Map<String, List<String>>.comparable() = filterKeys { it !in PER_RESPONSE_HEADERS && !it.startsWith("x-ratelimit-") }
 
         /** Libraries that must be seen logging below INFO for the test to mean anything. */
         val RAISED_EXPECTED_FROM = listOf("org.hibernate.", "org.springframework.", "org.apache.")

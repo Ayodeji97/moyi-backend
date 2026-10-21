@@ -6,7 +6,11 @@ import io.kotest.matchers.string.shouldNotContain
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Size
+import org.apache.tomcat.util.http.InvalidParameterException
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter
@@ -26,6 +30,7 @@ import tools.jackson.module.kotlin.KotlinModule
  * binding that to one endpoint's request model would make the next endpoint's
  * author assume it only applies there.
  */
+@ExtendWith(OutputCaptureExtension::class)
 class GlobalExceptionHandlerTest {
     data class Body(
         @field:NotBlank
@@ -42,6 +47,11 @@ class GlobalExceptionHandlerTest {
 
         @PostMapping("/boom")
         fun boom(): Nothing = error("connection string: postgres://user:hunter2@db/moyi")
+
+        /** What Tomcat throws, its message quoting the value as Tomcat's does. */
+        @PostMapping("/undecodable")
+        fun undecodable(): Nothing =
+            throw InvalidParameterException("Character decoding failed. Parameter [q] with value [hunter2 x] has been ignored.")
 
         @PostMapping("/teapot")
         fun teapot(): Nothing = throw Teapot()
@@ -131,6 +141,25 @@ class GlobalExceptionHandlerTest {
         // The thrown message was a credential-shaped string on purpose.
         response.contentAsString shouldNotContain "hunter2"
         response.contentAsString shouldNotContain "postgres://"
+    }
+
+    /**
+     * The second guard. [UndecodableParameterFilter] answers first in a real server, so nothing over a socket
+     * reaches this handler while the filter is in place: it is held here, by throwing what Tomcat throws.
+     */
+    @Test
+    fun `a parameter Tomcat could not decode is 400 MALFORMED_REQUEST, and its value is not repeated`(output: CapturedOutput) {
+        val response =
+            mockMvc
+                .post("/undecodable") { contentType = MediaType.APPLICATION_JSON }
+                .andReturn()
+                .response
+
+        response.status shouldBe 400
+        response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+        response.contentAsString shouldNotContain "hunter2"
+        output.all shouldContain "MALFORMED_REQUEST -> 400 a request parameter could not be decoded"
+        output.all shouldNotContain "hunter2"
     }
 
     @Test
