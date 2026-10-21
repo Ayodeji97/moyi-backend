@@ -94,6 +94,18 @@ internal data class Entry(
     }
 
     /**
+     * The generated one, but for [promptId]: whether there is one, never which. An erasure
+     * forgets the prompt an entry answered (ADR-0038, ruling 7), and a log line that printed
+     * it would not — the same reason `SubmitEntryRequest` and `EntryDraft` print `(given)`.
+     * [text] needs nothing here: [EntryText] redacts itself.
+     */
+    override fun toString(): String =
+        "Entry(id=$id, bondDayId=$bondDayId, bondId=$bondId, authorMemberId=$authorMemberId, text=$text, " +
+            "imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId, voiceDurationMs=$voiceDurationMs, " +
+            "promptId=${promptId?.let { "(given)" }}, status=$status, authorDeletedAccount=$authorDeletedAccount, " +
+            "createdAt=$createdAt, intendedAt=$intendedAt, updatedAt=$updatedAt, revealedAt=$revealedAt, deletedAt=$deletedAt)"
+
+    /**
      * BR-1, in the order the spec states it (§4, as revised):
      *
      * 1. **Membership first.** A revealed entry is not public: a [reader]

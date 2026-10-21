@@ -5,6 +5,7 @@ import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryStatus
 import com.moyi.gratitude.domain.EntryText
+import com.moyi.gratitude.domain.PromptId
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Reader
 import io.kotest.matchers.nulls.shouldBeNull
@@ -256,6 +257,16 @@ internal class EntryRenderingTest {
                 it shouldNotContain "0199e8a0"
             }
         }
+        // The entry itself, once parsed, keeps the same silence: an erased entry forgets which prompt
+        // it answered, and a log line that printed it would not. Everything else prints as before.
+        val answering = entry.copy(promptId = PromptId(UUID.fromString("0199e8a0-6a00-7000-8000-000000000001")))
+        answering.toString() shouldBe
+            "Entry(id=${entry.id}, bondDayId=${entry.bondDayId}, bondId=$bondId, authorMemberId=${author.memberId}, " +
+            "text=EntryText(redacted), imageMediaId=null, voiceMediaId=null, voiceDurationMs=null, promptId=(given), " +
+            "status=SUBMITTED, authorDeletedAccount=false, createdAt=$now, intendedAt=$now, updatedAt=$now, " +
+            "revealedAt=null, deletedAt=null)"
+        answering.toString() shouldNotContain "0199e8a0"
+        entry.toString() shouldContain "promptId=null,"
         printed[2] shouldContain "id=${entry.id.value}"
         printed[2] shouldContain "text=(redacted)"
         // A tombstone has no words, and says so rather than claiming to hide some.
