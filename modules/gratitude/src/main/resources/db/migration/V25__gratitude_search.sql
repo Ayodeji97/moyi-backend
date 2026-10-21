@@ -35,12 +35,19 @@
 -- migration fails, rolls back whole, and the deploy is retried; it never waits with the
 -- table's traffic queued behind it. SET LOCAL ends with Flyway's transaction.
 --
--- entries_search_idx: GIN on the vector. Whether a query on one bond's entries reads in
--- proportion to that bond or to the table (NFR-033) was measured on this branch; ADR-0039
--- has the numbers and says whether this became btree_gin (bond_id, search_vector).
+-- entries_search_idx: GIN on (bond_id, search_vector), through btree_gin. Measured on this
+-- branch (SearchPlanMeasurement, 2026-10-21; the numbers are in ADR-0039): with GIN on the
+-- vector alone, a search for a common word in one bond read that word's posting list for
+-- the whole table, 62,509 rows of 500,000 for a bond of 1,460 entries, and ANDed it with
+-- the bond's btree scan, so its cost grew with the table (NFR-033). GIN keeps one posting
+-- list per key across the whole table; with bond_id as a second key of the same index, the
+-- intersection is made inside the index, and Postgres can skip through the word's posting
+-- tree using the bond's. bond_id is a uuid, which plain GIN cannot index: btree_gin gives it
+-- the operator class.
 SET LOCAL lock_timeout = '5s';
 
 CREATE EXTENSION IF NOT EXISTS unaccent SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS btree_gin SCHEMA public;
 
 CREATE FUNCTION public.immutable_unaccent(text) RETURNS text
     LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
@@ -54,4 +61,4 @@ ALTER TABLE entries
     ADD COLUMN search_vector tsvector
         GENERATED ALWAYS AS (to_tsvector('simple', public.immutable_unaccent(coalesce(text_search, '')))) STORED;
 
-CREATE INDEX entries_search_idx ON entries USING gin (search_vector);
+CREATE INDEX entries_search_idx ON entries USING gin (bond_id, search_vector);

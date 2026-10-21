@@ -82,12 +82,12 @@ class FlywayMigrationTest(
 
         val extensions =
             jdbcTemplate.queryForList(
-                "SELECT extname FROM pg_extension WHERE extname IN ('citext', 'pgcrypto', 'unaccent')",
+                "SELECT extname FROM pg_extension WHERE extname IN ('citext', 'pgcrypto', 'unaccent', 'btree_gin')",
                 String::class.java,
             )
         assertTrue(
-            extensions.containsAll(listOf("citext", "pgcrypto", "unaccent")),
-            "Expected citext, pgcrypto and unaccent (V25, search) extensions, found: $extensions",
+            extensions.containsAll(listOf("citext", "pgcrypto", "unaccent", "btree_gin")),
+            "Expected citext, pgcrypto, unaccent and btree_gin (V25, search) extensions, found: $extensions",
         )
 
         val identityTables =
