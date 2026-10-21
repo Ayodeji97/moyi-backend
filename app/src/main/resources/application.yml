@@ -23,6 +23,15 @@ spring:
   threads:
     virtual:
       enabled: true
+  servlet:
+    multipart:
+      # No route of this API takes multipart. Left on, the dispatcher servlet
+      # parses every part before any interceptor or handler, writing each to
+      # Tomcat's temporary directory: on a public route a stranger's upload
+      # reached the disk before the 415 (task 2 re-review m3, seen 2026-10-21).
+      # Off, a multipart body is never read and is the 415 any non-JSON body
+      # is. MultipartRefusedTest holds it.
+      enabled: false
   data:
     redis:
       # Rate limiting only (doc 25 D6, ADR-0023). Host and port from the
