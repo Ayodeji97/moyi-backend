@@ -54,7 +54,7 @@ jobs:
         # The action fails its step on a breaking change; the verdict is
         # taken below so that the label can override it.
         continue-on-error: true
-        uses: oasdiff/oasdiff-action/breaking@v0.1.17
+        uses: oasdiff/oasdiff-action/breaking@v0.1.18
         with:
           base: base-openapi.json
           revision: contracts/openapi.json
