@@ -140,6 +140,13 @@ logging:
     #     builds the same line, without headers, at DEBUG. What is given up: its
     #     request and "Completed 200 OK" lines, at DEBUG and TRACE, every route.
     org.springframework.web.servlet.DispatcherServlet: INFO
+    #   - Spring MVC's ExceptionHandlerExceptionResolver, at DEBUG: "Resolved
+    #     [<exception>]", the exception's message included. A query parameter
+    #     that is not UTF-8 makes Tomcat throw one quoting the parameter's value,
+    #     a search's words among them (task 2 review I1; GlobalExceptionHandler
+    #     answers it without logging it). What is given up: its "Using
+    #     @ExceptionHandler" and "Resolved" lines, at DEBUG, for every exception.
+    org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO
 
 management:
   endpoints:

@@ -71,7 +71,7 @@ import javax.sql.DataSource
  * tokens, across register, sign-in, pairing, submit, read, edit, the reveal,
  * the archive (the feed with and without `favourites`, one day, a bookmark
  * set and removed, a conditional read that answers `304`), a search, by a
- * word that is watched, a reaction set,
+ * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), a reaction set,
  * replaced, refused and taken back, delete, an ending
  * that withdraws, the withdrawal's erasure by the dispatcher, a failing
  * transactional consumer, and a refresh. An `ETag` is not scanned for: it is
@@ -230,6 +230,11 @@ class SecretsNeverLoggedTest(
         // `after`, not `wrote`: the parser reads `~wrote` as one `file` token, so `wrote` is no lexeme of these texts.
         get("/bonds/$bond/search?q=after", bea).body.contains(BEA_TEXT) shouldBe true
         get("/bonds/$bond/search?q=$SEARCH_TERMS&limit=0", bea).status shouldBe 422
+        // Bytes that are not UTF-8 (task 2 review I1): Tomcat's exception quotes what it could decode, the words
+        // included, so it is answered 400 and logged without it. Any route, any parameter, known or not.
+        get("/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", bea).malformed()
+        get("/bonds/$bond/days?cursor=%FF", ada).malformed()
+        get("/bonds/$bond/days?unknown=$SEARCH_TERMS%20x%FF", ada).malformed()
         send("DELETE", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         send("PUT", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         // A reaction each way; hers replaced, refused twice, taken back, and set again for the erasure to remove.
@@ -395,6 +400,11 @@ class SecretsNeverLoggedTest(
         mapper: JsonMapper,
     ) {
         val json: JsonNode by lazy { mapper.readTree(body) }
+    }
+
+    private fun Answer.malformed() {
+        status shouldBe 400
+        json["code"].asString() shouldBe "MALFORMED_REQUEST"
     }
 
     private fun get(

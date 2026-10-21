@@ -1,5 +1,6 @@
 package com.moyi.common.web
 
+import org.apache.tomcat.util.http.InvalidParameterException
 import org.slf4j.LoggerFactory
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
@@ -96,6 +97,31 @@ class GlobalExceptionHandler(
         // people learn to ignore.
         log.warn("{} -> {} {}", ex.errorCode, ex.status.value(), ex.detail)
         return respond(ex.status, ex.errorCode, ex.detail, request, ex.errors)
+    }
+
+    /**
+     * A query parameter whose bytes are not UTF-8: `400 MALFORMED_REQUEST`. Malformed, not semantically invalid,
+     * so 400 and not 422 (doc 06 §2), and the code a body that cannot be read already has.
+     *
+     * Tomcat decodes the whole query string the first time any parameter is asked for, which is while a
+     * handler's arguments are resolved, before any guard has run. On bytes it cannot decode it throws this, and
+     * **its message quotes the parameter's value** as far as it could read it. For a search that value is
+     * somebody's words (slice C6b, task 2 review I1). So the exception is not even taken as an argument: neither
+     * it nor its message is logged or answered. Spring's `ExceptionHandlerExceptionResolver` prints it at DEBUG
+     * all the same, and is pinned at INFO in `application.yml` for that.
+     *
+     * **The request ends here, and is never carried on.** Tomcat marks the parameters parsed before it throws
+     * and keeps no record of the failure, so a later `getParameter` would answer from a partial map in silence.
+     */
+    @ExceptionHandler(InvalidParameterException::class)
+    fun handleUndecodableParameter(request: WebRequest): ResponseEntity<Any> {
+        log.warn("{} -> 400 a request parameter could not be decoded", ErrorCode.MALFORMED_REQUEST)
+        return respond(
+            status = HttpStatus.BAD_REQUEST,
+            errorCode = ErrorCode.MALFORMED_REQUEST,
+            detail = "A request parameter could not be read.",
+            request = request,
+        )
     }
 
     @ExceptionHandler(Exception::class)
@@ -227,9 +253,10 @@ class GlobalExceptionHandler(
 
     private fun WebRequest.instanceUri(): URI? = (this as? ServletWebRequest)?.request?.requestURI?.let(URI::create)
 
-    private fun String.screamingSnakeCase(): String = replace(Regex("([a-z0-9])([A-Z])"), "$1_$2").uppercase()
-
     private companion object {
         val CLIENT_ERROR_RANGE = 400..499
     }
 }
+
+/** Top-level, not a member: [GlobalExceptionHandler] sits at detekt's `TooManyFunctions` threshold. */
+private fun String.screamingSnakeCase(): String = replace(Regex("([a-z0-9])([A-Z])"), "$1_$2").uppercase()
