@@ -55,7 +55,7 @@ The slice was built in four tasks (`docs/superpowers/plans/2026-10-15-prompts-c6
 Tasks 1 and 2 were built on 2026-10-15; the branch was then rebased onto `main` at `3811f0d`
 after #62 merged. Task 3's first implementer was cut off with its work uncommitted, and a
 second finished it on 2026-10-20. Task 4 (the smoke section, the tools, the state map and
-this record) was built on 2026-10-20. Each of Tasks 1 to 3 had one independent review,
+this record) was built on 2026-10-20. Each of the four tasks had one independent review,
 which ran some probes and mutations of its own ("How this was checked").
 
 ## Decision
@@ -243,8 +243,9 @@ Numbered as the plan numbers them, because code and tests cite them by number.
 
 - **Migration V24 (`modules:gratitude`), `V24__gratitude_prompts.sql`**: `prompts`,
   `prompt_texts`, `entries_prompt_fk` and the 24-prompt seed. No `prompt_impressions`. It has
-  been applied to no shared database: one throwaway database, `moyi_c6a_smoke`, was created for
-  the smoke run and the CLI run and dropped (How this was checked).
+  been applied to no shared database, only to throwaway ones, each dropped after: two in this
+  record, `moyi_c6a_smoke` for Task 4's smoke and CLI runs and another for the smoke run at
+  `683af97` (How this was checked).
 - **`GET /today` gains `prompt`**, `{id, text}` or `null`, additive. In the contract it is a
   new schema `TodayPromptResponse` and `TodayResponse.prompt` as `oneOf [TodayPromptResponse,
   null]`.
