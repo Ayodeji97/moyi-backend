@@ -1016,9 +1016,22 @@ LOG_LINES_BEFORE_WITHDRAWAL="$(wc -l < "$MOYI_LOG" | tr -d ' ')"
 # nothing does, and an entry is only erased if the poller, the registration at
 # start-up and the consumer are all really wired in the jar.
 
-# sql <query> — one value from the run's database, whitespace removed, or
-# "psql-unavailable". The checks that read it skip on that, as the others do.
-sql() { docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "$1" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable; }
+# sql <query> — one value from the run's database, whitespace removed.
+# Whether psql can be reached at all is asked once, here: when it cannot, every
+# sql read is "psql-unavailable" and the checks that read it skip, counted. When
+# it can, a query that fails is a broken check, not a missing tool: it prints
+# "psql-error: <psql's message>", which no check expects, so it is a FAIL.
+if docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT 1" >/dev/null 2>&1; then PSQL_OK=1; else PSQL_OK=0; fi
+sql() {
+  [ "$PSQL_OK" = 1 ] || { echo psql-unavailable; return 0; }
+  local out err; err="$(mktemp)"
+  if out="$(docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U moyi -d "$MOYI_DB" -Atc "$1" 2>"$err")"; then
+    printf '%s\n' "$out" | tr -d '[:space:]'
+  else
+    printf 'psql-error: %s\n' "$(tr -s '[:space:]' ' ' <"$err" | cut -c1-200)"
+  fi
+  rm -f "$err"
+}
 new_key() { python3 -c 'import uuid; print(uuid.uuid4())'; }
 
 # revealed_bond <label> <a's token> <b's token> <a's text> <b's text> — a bond
@@ -1508,7 +1521,7 @@ rx_views() {
 }
 # rx_rows <entry id> — "<count>|<types>" of the reactions on one entry, straight from the table.
 rx_rows() { sql "SELECT count(*) || '|' || coalesce(string_agg(type, ',' ORDER BY type), '') FROM reactions WHERE entry_id='$1'"; }
-# rows_are <label> <entry id> <expected> — skipped, like every database check here, when psql cannot be reached.
+# rows_are <label> <entry id> <expected> — skipped when psql cannot be reached, failed when the query does (`sql`).
 rows_are() {
   local got; got="$(rx_rows "$2")"
   case "$got" in psql-unavailable) skip "$1 (psql not reachable through docker compose)";; "$3") pass "$1";; *) fail "$1" "expected '$3', got '$got'";; esac
@@ -1772,7 +1785,7 @@ verified_account "prompted" "203.0.113.110";          PR_A="$ACCOUNT_ACCESS"
 verified_account "lusophone" "203.0.113.111" "pt-PT"; PR_B="$ACCOUNT_ACCESS"
 verified_account "outsider" "203.0.113.112";          PR_O="$ACCOUNT_ACCESS"
 PR_TRANSLATED="$(sql "WITH added AS (INSERT INTO prompt_texts (prompt_id, locale, text) SELECT id, 'pt-pt', 'PT~ ' || text FROM prompts ON CONFLICT DO NOTHING RETURNING 1) SELECT count(*) FROM added")"
-# db_is <label> <got> <expected> — `is` for a value read with `sql`, skipped when psql cannot be reached.
+# db_is <label> <got> <expected> — `is` for a value read with `sql`: skipped when psql cannot be reached, failed when the query does.
 db_is() { case "$2" in psql-unavailable) skip "$1 (psql not reachable through docker compose)";; *) is "$1" "$2" "$3";; esac; }
 
 expect "prompts: a bond" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $PR_A" -d "$(bond_body "Us")"
@@ -1791,6 +1804,7 @@ expect "prompts: today for the second" 200 '"prompt":{' -- "$API/bonds/$PR_BOND/
 is "prompts: the same prompt for both" "$(raw prompt.id)" "$PR_ID"
 case "$PR_TRANSLATED" in
   0|psql-unavailable) skip "prompts: the second member reads it in pt-PT (no translation could be put in)" ;;
+  psql-error*) fail "prompts: the second member reads it in pt-PT" "the translation could not be put in: $PR_TRANSLATED" ;;
   *) is "prompts: the second member reads it in pt-PT" "$(raw prompt.text)" "PT~ $PR_A_TEXT" ;;
 esac
 
