@@ -197,6 +197,19 @@ header_is() {
   if [ "$got" = "$want" ]; then pass "$label ($name: $got)"; else fail "$label" "expected $name: $want, got '${got:-<absent>}'"; fi
 }
 
+# What has to be undone however the script ends: the app it booted, and the
+# prompts section's translations, which it puts into the shared library for one
+# run. Under `set -e` a run can die anywhere; left behind, those `PT~` texts
+# would be served to every pt-* user of this database, and the next run's
+# insert would find them already there and skip its pt-PT probe.
+APP_PID=""
+PR_TRANSLATIONS_IN=0
+on_exit() {
+  if [ "$PR_TRANSLATIONS_IN" = 1 ]; then sql "DELETE FROM prompt_texts WHERE text LIKE 'PT~ %'" >/dev/null || true; fi
+  if [ -n "$APP_PID" ]; then kill "$APP_PID" 2>/dev/null || true; wait "$APP_PID" 2>/dev/null || true; fi
+}
+trap on_exit EXIT
+
 if [ "$ATTACH" = 0 ]; then
   command -v docker >/dev/null || { echo "docker is required"; exit 1; }
   docker compose up -d postgres >/dev/null
@@ -219,7 +232,6 @@ if [ "$ATTACH" = 0 ]; then
     --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" \
     --moyi.scheduling.close.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
-  trap 'kill $APP_PID 2>/dev/null; wait $APP_PID 2>/dev/null || true' EXIT
   for _ in $(seq 1 90); do
     grep -q "Started MoyiApplication" "$MOYI_LOG" && break
     grep -q "APPLICATION FAILED" "$MOYI_LOG" && { echo "the application failed to start:"; grep -A3 "APPLICATION FAILED" "$MOYI_LOG"; exit 1; }
@@ -1787,6 +1799,7 @@ flush_buckets
 verified_account "prompted" "203.0.113.110";          PR_A="$ACCOUNT_ACCESS"
 verified_account "lusophone" "203.0.113.111" "pt-PT"; PR_B="$ACCOUNT_ACCESS"
 verified_account "outsider" "203.0.113.112";          PR_O="$ACCOUNT_ACCESS"
+PR_TRANSLATIONS_IN=1
 PR_TRANSLATED="$(sql "WITH added AS (INSERT INTO prompt_texts (prompt_id, locale, text) SELECT id, 'pt-pt', 'PT~ ' || text FROM prompts ON CONFLICT DO NOTHING RETURNING 1) SELECT count(*) FROM added")"
 # db_is <label> <got> <expected> — `is` for a value read with `sql`: skipped when psql cannot be reached, failed when the query does.
 db_is() { case "$2" in psql-unavailable) skip "$1 (psql not reachable through docker compose)";; *) is "$1" "$2" "$3";; esac; }
@@ -1844,6 +1857,8 @@ expect "prompts: the second leaves" 204 "" -- -X POST "$API/bonds/$PR_BOND/leave
 expect "prompts: no prompt for the one who stayed" 200 '"prompt":null' -- "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_A"
 expect "prompts: …nor for the one who left" 200 '"prompt":null' -- "$API/bonds/$PR_BOND/today" -H "Authorization: Bearer $PR_B"
 
+# Taken out here, so the sections after this one see the seed alone; the EXIT trap
+# takes them out again (a no-op by then) and is what does it when a run dies first.
 sql "DELETE FROM prompt_texts WHERE text LIKE 'PT~ %'" >/dev/null
 
 echo; echo "database state"
