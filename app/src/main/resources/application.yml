@@ -88,7 +88,9 @@ logging:
     # authenticator valve still prints it.
     #
     # SecretsNeverLoggedTest raises every level above these by property and
-    # fails if any one of the six lines is removed.
+    # fails if any one of the fourteen pins from here to the end of this block
+    # is removed: these six and the eight below. Each was removed in turn and
+    # seen failing on 2026-10-21 (slice C6b, task 2 review m3).
     org.hibernate.orm.core: INFO
     org.hibernate.orm.jdbc.bind: "OFF"
     org.hibernate.orm.jdbc.extract: "OFF"
@@ -139,6 +141,11 @@ logging:
     #     "/api/v1/bonds/<id>/search?q=…", parameters={masked}". Its source
     #     builds the same line, without headers, at DEBUG. What is given up: its
     #     request and "Completed 200 OK" lines, at DEBUG and TRACE, every route.
+    #     Below INFO it also reads the parameters before any handler does, so a
+    #     query parameter that is not UTF-8 fails there, outside the exception
+    #     handler: Tomcat then logs the exception at ERROR, the value quoted,
+    #     and answers with Boot's error body (seen 2026-10-21 with this line
+    #     removed). Setting this exact logger's level below INFO brings that back.
     org.springframework.web.servlet.DispatcherServlet: INFO
     #   - Spring MVC's ExceptionHandlerExceptionResolver, at DEBUG: "Resolved
     #     [<exception>]", the exception's message included. A query parameter

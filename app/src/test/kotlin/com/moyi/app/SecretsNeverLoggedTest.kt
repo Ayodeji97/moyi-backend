@@ -108,7 +108,8 @@ import javax.sql.DataSource
  * Each of the original six pins was removed in turn and this test failed each time,
  * naming the logger that line holds. The transactional interceptor regression
  * was also seen failing before its pin was added, and so was the pin on
- * `StatementCreatorUtils`.
+ * `StatementCreatorUtils`. On 2026-10-21 all fourteen pins were removed in turn,
+ * the six search and error-resolver ones among them, and it failed for each.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -404,7 +405,8 @@ class SecretsNeverLoggedTest(
 
     private fun Answer.malformed() {
         status shouldBe 400
-        json["code"].asString() shouldBe "MALFORMED_REQUEST"
+        // Null-safe: with the dispatcher servlet's pin removed the answer is Boot's error body, which has no `code`.
+        json["code"]?.asString() shouldBe "MALFORMED_REQUEST"
     }
 
     private fun get(
