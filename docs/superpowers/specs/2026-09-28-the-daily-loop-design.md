@@ -43,7 +43,11 @@ paired with; nothing built so far does the thing the product exists for.
   `GET /bonds/{id}/milestones` is in C6; the rendered shareable card is Phase 4.
 - **The 100-prompt library.** C6 builds the table, the selection rule and the endpoints, and
   ships with a small seed. The library itself is editorial work doc 15 budgets at ~6 h and is
-  Daniel's, not the implementation's.
+  Daniel's, not the implementation's. *(Amended 2026-10-20, ADR-0038: C6a built the tables
+  `prompts` and `prompt_texts`, the selection rule and a 24-prompt seed, and **no endpoint of
+  its own**: today's prompt is the `prompt` field on `GET /today`, and a new entry may name it
+  with `promptId`. `GET /prompts/daily` is owed and `GET /prompts` is deferred by the owner;
+  there is no `prompt_impressions`.)*
 - **Encryption at rest (D-13).** Phase 5. `entries.text_search` exists in V12 so that the
   Phase 5 migration is additive rather than a rewrite of the search path.
 
@@ -375,7 +379,7 @@ member, so `gratitude` has no id to resolve a display name for. It is a recorded
 doc 06 §3.4, to be closed when `bond.api.BondAccess` gains a way to name the other member —
 not a field to be guessed at in the meantime.
 
-**Amended 2026-10-15, ADR-0038.** C6a fills `prompt`: `{id, text}`, the bond's prompt of the
+**Amended 2026-10-20, ADR-0038.** C6a fills `prompt`: `{id, text}`, the bond's prompt of the
 day, the same `id` for both members, each in their own locale (the exact tag, then its
 language, then `en`). It is `null`, a key with a null value, when the bond takes no writes
 from the caller (ended, blocked or read only, all alike; the caller has left) or the library
@@ -496,7 +500,7 @@ shape, for several reactions at once. The owner ruled one per member per entry
   held row is `204`. **This narrowing and `REACTION_BUSY` itself were decided by the agent
   running the plan, not by the owner.**
 
-**Amended 2026-10-15, ADR-0038 — the prompt rows as slice C6a built them.** The table's
+**Amended 2026-10-20, ADR-0038 — the prompt rows as slice C6a built them.** The table's
 `GET /prompts/daily`, `/prompts` row is doc 06's. C6a builds neither route: today's prompt is a
 field of today.
 
@@ -1063,7 +1067,7 @@ Amended 2026-10-09, ADR-0036 decision 10: V22 is written,
 `entry_favourites`, and one index. Reactions are V23's, with C5c.
 Amended 2026-10-13, ADR-0037 decision 3: V23 is written, `V23__gratitude_reactions.sql`:
 one table, `reactions (entry_id, member_id, type)`, and no index but its primary key.
-Amended 2026-10-15, ADR-0038: C6 is three pull requests (§10). C6a takes V24,
+Amended 2026-10-20, ADR-0038: C6 is three pull requests (§10). C6a takes V24,
 `V24__gratitude_prompts.sql`: `prompts` (the `en` text, the audience, `active`),
 `prompt_texts` (every other locale, lower case), a foreign key from `entries.prompt_id`, and
 a 24-prompt placeholder seed. There is **no `prompt_impressions`**: written when a member
@@ -1195,7 +1199,7 @@ the load-bearing assertions:
 | **C5a** *(2026-10-07)* | The outbox poller, withdrawal on leave and on block, an author's delete on an ended bond | A member can take their words back |
 | **C5b** *(2026-10-07)* | The archive feed and per-caller favourites *(built 2026-10-09, ADR-0036: the feed, one day, conditional reads of both, and favourites; V22)* | The archive exists |
 | **C5c** *(2026-10-07)* | Reactions *(built 2026-10-10, recorded 2026-10-13, ADR-0037: one reaction on the partner's entry, shown to both; V23)* | |
-| **C6** | Search, prompts and `prompt_impressions`, on-this-day, milestones | Phase 3 closes |
+| **C6** | Search, prompts and `prompt_impressions`, on-this-day, milestones *(`prompt_impressions`: not built, ADR-0038)* | Phase 3 closes |
 | **C6a** *(2026-10-15, controller's ruling; the owner's to turn)* | Prompts *(built 2026-10-15 to 2026-10-20, ADR-0038: `prompt` on today, `promptId` on a new entry, no impressions; V24)* | |
 | **C6b** *(2026-10-15, controller's ruling; the owner's to turn)* | Search and on-this-day | |
 | **C6c** *(2026-10-15, controller's ruling; the owner's to turn)* | Milestones | Phase 3 closes |
@@ -1222,8 +1226,8 @@ otherwise was an error in its first draft. They are built in C4.
 | `GET /streak`, `/milestones` | §7 *Streak*. *(Amended 2026-10-05, ADR-0034: three gaps recorded there — no field tells a freeze-covered day from a stepped-over date; the length of a run that just broke ("ended at 23 days") is not sent; §7's Strict-mode paragraph reads as clearing banked freezes, which FR-073 forbids.)* |
 | withdrawal on block | §9 *Ending*, whose retained-access line §6.7 qualifies |
 | `PATCH`/`DELETE /entries/{id}` | §4 and §10 *Failure, offline and sync* |
-| search, `/prompts`, `/on-this-day` | **Gaps** — record them in `states.md` before C6 *(Amended 2026-10-15, ADR-0038: split. The prompt is the row below. Search and on-this-day stay C6b's to amend.)* |
-| `prompt` on `GET /today`, `promptId` on `POST /entries` | *(Added 2026-10-15, ADR-0038.)* Served by §3 *Today* ("Prompt visible", `states.md`:304) and §4 *Compose* ("Prompt above, dismissible", `states.md`:378; `tokens.md`:278's dismissible prompt slot). Adaptation: dismissal is the client's alone, with no call and no server state (the owner's Q-P2); an offline draft posts the `promptId` it cached. A revealed entry's prompt is neither drawn nor sent (Q-P3). `/prompts` has no screen and is deferred (Q-P5). |
+| search, `/prompts`, `/on-this-day` | **Gaps** — record them in `states.md` before C6 *(Amended 2026-10-20, ADR-0038: split. The prompt is the row below. Search and on-this-day stay C6b's to amend.)* |
+| `prompt` on `GET /today`, `promptId` on `POST /entries` | *(Added 2026-10-20, ADR-0038.)* Served by §3 *Today* ("Prompt visible", `states.md`:304) and §4 *Compose* ("Prompt above, dismissible", `states.md`:378; `tokens.md`:278's dismissible prompt slot). Adaptation: dismissal is the client's alone, with no call and no server state (the owner's Q-P2); an offline draft posts the `promptId` it cached. A revealed entry's prompt is neither drawn nor sent (Q-P3). `/prompts` has no screen and is deferred (Q-P5). |
 
 ## 12. Corpus corrections this phase forces
 
@@ -1381,4 +1385,4 @@ document, and so that a reviewer can check the list rather than reconstruct it.
 12. `/entries/{entryId}` is **not bond-scoped in its path**; the guard derives the Bond from the
     entry (§5.2).
 13. The prompt of the day is a pure function of the bond, the bond-local date and the library,
-    and nothing records what was shown (ADR-0038). *(Amended 2026-10-15, ADR-0038.)*
+    and nothing records what was shown (ADR-0038). *(Amended 2026-10-20, ADR-0038.)*
