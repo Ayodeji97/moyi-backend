@@ -31,6 +31,7 @@ import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.put
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -110,7 +111,11 @@ internal class PromptOnTodayTest(
         val bea = users.verified("Bea")
         val bond = pair(ada, bea)
         val adas = prompt(ada, bond)
-        promptId(bea, bond) shouldBe promptId(ada, bond)
+        // Each held to the bond's own choice, not only to the other: two members' choices made
+        // per member would agree by chance about one day in six (six prompts are eligible here).
+        val date = LocalDate.of(2026, 9, 15)
+        promptId(ada, bond) shouldBe expected(bond, date, PromptAudience.COUPLE)
+        promptId(bea, bond) shouldBe expected(bond, date, PromptAudience.COUPLE)
 
         // Bea opens the app, again and again; then writes; Ada sees her entry locked; Ada writes, and the day reveals.
         repeat(3) { today(bea, bond) }
@@ -147,6 +152,16 @@ internal class PromptOnTodayTest(
             .response.status shouldBe 204
 
         prompt(ada, bond) shouldBe adas
+
+        // And on each day of the week after, both are offered the bond's prompt of that day. A
+        // choice made per member would match it for both by chance about one day in thirty-six;
+        // eight days running, today's included, about one run in 3 * 10^12.
+        (1L..7L).forEach { later ->
+            clock.set(Instant.parse("2026-09-15T10:00:00Z").plus(Duration.ofDays(later)))
+            val day = date.plusDays(later)
+            promptId(ada, bond) shouldBe expected(bond, day, PromptAudience.COUPLE)
+            promptId(bea, bond) shouldBe expected(bond, day, PromptAudience.COUPLE)
+        }
     }
 
     @Test
