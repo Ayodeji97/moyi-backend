@@ -22,7 +22,8 @@ internal data class PromptView(
  *
  * **Which prompt** is [PromptOfTheDay]'s, from the bond, the date and the library alone.
  * **Its words** are the caller's own locale's, from their own stored locale; the partner's
- * is never read, so the prompt tells neither member the other's language (c6-corpus H-P7).
+ * is never read, so the prompt tells neither member the other's language (c6-corpus H-P7,
+ * ADR-0038).
  * **Whether there is one** is the bond's and the caller's own state: none once the bond
  * takes no writes from them (ruling 6), whoever ended it and however.
  *

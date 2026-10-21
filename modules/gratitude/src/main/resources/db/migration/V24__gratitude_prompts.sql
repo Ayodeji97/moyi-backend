@@ -10,7 +10,8 @@
 -- (bond_id, prompt_id, shown_on, used). Written when a member opens the app, it would
 -- be a log of which days each member opened it, which FR-064 forbids; read by the
 -- choice, it would let what one member did move what the other is offered (c6-corpus
--- H-P1). The choice needs neither. "used" is entries.prompt_id (c6-corpus P5).
+-- H-P1, ADR-0038). The choice needs neither. "used" is entries.prompt_id (c6-corpus P5,
+-- ADR-0038).
 --
 -- prompts.text is the `en` text, NOT NULL: `en` is the launch locale (FR-122) and every
 -- member's last fallback, so every prompt can be shown to everybody and a missing
