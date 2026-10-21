@@ -237,10 +237,15 @@ class SecretsNeverLoggedTest(
         refused.status shouldBe 422
         // Bytes that are not UTF-8 (task 2 review I1): Tomcat's exception quotes what it could decode, the words
         // included, so it is answered 400 and logged without it. Any route, any parameter, known or not. The answer
-        // is written before Spring Security's chain, so it is held to carry the headers that chain gives a refusal.
+        // is written by a filter of our own, so it is held to carry the headers Security gives any other refusal.
         get("/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", bea).malformed(like = refused)
         get("/bonds/$bond/days?cursor=%FF", ada).malformed(like = refused)
         get("/bonds/$bond/days?unknown=$SEARCH_TERMS%20x%FF", ada).malformed(like = refused)
+        // Authentication first (re-review m1): the filter runs after Spring Security's chain, so a caller who is not
+        // signed in, or whose token is not one, is told 401 as for any other request, and nothing is parsed for them.
+        send("GET", "/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", null, null).status shouldBe 401
+        send("GET", "/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", Session("not.a.token", ""), null).status shouldBe 401
+        undecodableWithTheRequestLoggersSetByName(bea, bond)
         // A character Tomcat refuses in the request target (re-review I1): refused by the connector before any
         // filter, and Http11Processor logged the whole target, the words in it, at INFO. Sent over a plain socket,
         // because java.net.http will not send it.
@@ -318,6 +323,31 @@ class SecretsNeverLoggedTest(
                 .filter { (_, watched) -> watched.exceptFrom.isEmpty() && watched.pattern.containsMatchIn(output.all) }
                 .map { it.first }
                 .shouldBeEmpty()
+        }
+    }
+
+    /**
+     * The dispatcher servlet at TRACE and Security's filter chain at DEBUG, **set by their exact names**, which
+     * outranks their pins. Below INFO the dispatcher servlet reads every parameter before any handler, so without
+     * `UndecodableParameterFilter` Tomcat's exception escapes Spring and Tomcat logs it at ERROR, the value quoted.
+     * The filter chain at DEBUG prints the request line, the query string in it: that is what its pin is for, and
+     * a level set by name gives it way, so it alone may print these words. Nothing else may.
+     */
+    private fun undecodableWithTheRequestLoggersSetByName(
+        session: Session,
+        bond: String,
+    ) {
+        scan.watch("undecodable search terms", UNDECODABLE_TERMS, wholeWord = true, exceptFrom = listOf(FILTER_CHAIN_PROXY))
+        try {
+            logging.setLogLevel(DISPATCHER_SERVLET, LogLevel.TRACE)
+            logging.setLogLevel(FILTER_CHAIN_PROXY, LogLevel.DEBUG)
+            val answer = get("/bonds/$bond/search?q=$UNDECODABLE_TERMS%20x%FF", session)
+            answer.status shouldBe 400
+            answer.json["code"]?.asString() shouldBe "MALFORMED_REQUEST"
+        } finally {
+            // Back to the pins in application.yml.
+            logging.setLogLevel(DISPATCHER_SERVLET, LogLevel.INFO)
+            logging.setLogLevel(FILTER_CHAIN_PROXY, LogLevel.INFO)
         }
     }
 
@@ -549,6 +579,9 @@ class SecretsNeverLoggedTest(
         const val BEA_TEXT = "Bea~wrote~hers after"
         const val PASSWORD = "seven~green~kettles~at~dawn"
         const val SEARCH_TERMS = "zqkettlesearch"
+        const val UNDECODABLE_TERMS = "zqundecodablesearch"
+        const val DISPATCHER_SERVLET = "org.springframework.web.servlet.DispatcherServlet"
+        const val FILTER_CHAIN_PROXY = "org.springframework.security.web.FilterChainProxy"
         const val HANDLER_SECRET = "private~handler~exception"
         const val CONTROL = "control~marker~"
         const val RUN_ID_LENGTH = 8
@@ -599,9 +632,8 @@ class SecretsNeverLoggedTest(
             )
 
         /**
-         * Headers that differ from one response to the next whatever wrote it; and the rate limiter's, which
-         * counts a request Spring Security's chain admits, and a parameter that cannot be decoded is answered
-         * before that chain (`UndecodableParameterFilter`).
+         * Headers that differ from one response to the next whatever wrote it; and the rate limiter's, an
+         * interceptor that a parameter which cannot be decoded never reaches (`UndecodableParameterFilter`).
          */
         val PER_RESPONSE_HEADERS = setOf("date", "content-length", "transfer-encoding", "connection", "keep-alive")
 

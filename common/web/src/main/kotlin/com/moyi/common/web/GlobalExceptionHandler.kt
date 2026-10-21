@@ -100,7 +100,7 @@ class GlobalExceptionHandler(
     }
 
     /**
-     * The second guard: [UndecodableParameterFilter] is the first, and answers before Spring is reached. This one
+     * The second guard: [UndecodableParameterFilter] is the first, and answers before Spring MVC is reached. This one
      * answers should anything reach a handler with the parameters still unparsed, the filter removed included.
      *
      * A query parameter whose bytes are not UTF-8: `400 MALFORMED_REQUEST`. Malformed, not semantically invalid,
