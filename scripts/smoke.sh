@@ -58,9 +58,12 @@
 # 422 for every id that names no prompt after the bond's 404, the prompt gone
 # from the row with the entry's words, and none on an ended bond.
 # Every day it reads is today: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-20, against a database of
-# its own (MOYI_DB, below), on the jar built from 0f04535: 850 passed, 0 failed,
-# 0 skipped, 22 sections; on 2026-10-15, from dfac89b, 814, 0 and 0 in 21 (the
+# days are the tests' to show. Last run on 2026-10-21, against a database of
+# its own (MOYI_DB, below), at 683af97 (its jar's code is 0f04535's): 852
+# passed, 0 failed, 0 skipped, 22 sections; the run before it, on the same
+# head, skipped the two tag-across-the-erasure checks because the poller won
+# the race, which is what they skip on. On 2026-10-20, from 0f04535, 850, 0
+# and 0 in 22; on 2026-10-15, from dfac89b, 814, 0 and 0 in 21 (the
 # first run to count its skips); on 2026-10-13 it
 # was 814 and 0, no skips, in 21, and on 2026-10-09 647 and 0 in 20. A run on 2026-10-07, with the
 # poller held idle, failed the four probes that then depended on it; three did

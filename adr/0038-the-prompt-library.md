@@ -465,6 +465,12 @@ record's author's.
   foreign key's `KEY SHARE` lock does not conflict with an `UPDATE … active`; Task 3's
   review); that no account-deletion path exists to erase a prompt id (none exists); that
   production logging does not print request `toString`s at DEBUG.
+- **Task 4's review fixes** (2026-10-20 and 21, their implementer). `ArchitectureTest`'s
+  property assertion: a fully qualified `@Autowired lateinit var streaks: GetStreak` red on
+  it; `GetStreak` as a constructor parameter still red on the constructor assertion; each
+  restored. The smoke's `sql()` with one column misspelt: a counted FAIL carrying psql's
+  message, where it had been a skip. `./gradlew build` green, 1,446 tests. The smoke at
+  `683af97`, on its own throwaway database, dropped after: 852 passed, 0 failed, 0 skipped,
+  22 sections (a first run on that head skipped two timing checks the poller raced).
 - **Not run by anyone:** V24 against a shared database; NFR-001 with the prompt in; the
-  Bruno collection; CI's contract action; the smoke run on the pull request's final head
-  (it ran on `0f04535`; later commits change tests, tools and documents, not the jar's code).
+  Bruno collection; CI's contract action.
