@@ -69,7 +69,7 @@
         "code": "VALIDATION_FAILED",
         "reason": "promptId names no prompt: it is not an id, or no prompt in the library has it. One answer for both, on the field promptId, and only for a member of an open bond: a stranger gets the bond's 404 and an ended bond 409 BOND_ARCHIVED first. A retired prompt, another bond type's, or an earlier day's is accepted.",
         "evidence": "smoke",
-        "evidenceRef": "prompts: an id no prompt has is 422 on promptId",
+        "evidenceRef": "prompts: an id no prompt has is 422 VALIDATION_FAILED",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#PromptId.parse(raw)?.takeIf(prompts::exists) ?: throw PromptNotKnownException()"
       }
     ],

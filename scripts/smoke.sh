@@ -1844,7 +1844,8 @@ done
 
 # One 422 for every id that names no prompt, and the guard and the ending first.
 PR_ONE="$(curl -s -X POST "$API/bonds/$PR_BOND/entries" -H 'Content-Type: application/json' -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"x\",\"promptId\":\"$(new_key)\"}" | sed 's/"instance":"[^"]*"//')"
-expect "prompts: an id no prompt has is 422 on promptId" 422 '"field":"promptId"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"x","promptId":"not-a-uuid"}'
+expect "prompts: an id no prompt has is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"x","promptId":"not-a-uuid"}'
+if [[ "$LAST_BODY" == *'"field":"promptId"'* ]]; then pass "prompts: …on the field promptId"; else fail "prompts: …on the field promptId" "${LAST_BODY:0:200}"; fi
 is "prompts: …the same body as for a uuid no prompt has" "$(no_instance | sed 's/"instance":"-"//')" "$PR_ONE"
 expect "prompts: a stranger is told the bond's 404 first" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_O" -H "Idempotency-Key: $(new_key)" -d '{"text":"x","promptId":"not-a-uuid"}'
 
