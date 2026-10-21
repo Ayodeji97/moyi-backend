@@ -82,8 +82,10 @@ logging:
     # outranks this file. `spring.mvc.log-request-details=true` is another
     # switch altogether and prints every request header at TRACE, the bearer
     # token among them: leave it off. And an invite code is part of the path
-    # (/invites/{code}/accept), so every logger that prints a request line
-    # prints it at DEBUG; those are not pinned (ADR-0035, question 10).
+    # (/invites/{code}/accept), so a logger that prints a request line prints
+    # it below INFO. Those were not pinned for it (ADR-0035, question 10); four
+    # of them are now, for a search's words (below), and Tomcat's
+    # authenticator valve still prints it.
     #
     # SecretsNeverLoggedTest raises every level above these by property and
     # fails if any one of the six lines is removed.
@@ -110,6 +112,34 @@ logging:
     # where each value goes, and is left alone. SecretsNeverLoggedTest fails
     # if this line is removed.
     org.springframework.jdbc.core.StatementCreatorUtils: INFO
+    # ADR-0039 decision 22: a search's words travel in the query string, and the
+    # five loggers below print the request line or the handler's arguments below
+    # INFO. Each was seen on 2026-10-21 with everything at TRACE, printing `q`
+    # (shown here as …). Pinned, so a search's words are held as an entry's are.
+    # An invite code in the path is printed by others still (ADR-0035,
+    # question 10). SecretsNeverLoggedTest fails if any one of these is removed.
+    #   - Tomcat's Parameters, at DEBUG: "Start processing with input [q=…]".
+    #     What is given up: Tomcat's DEBUG trace of how it parsed a query
+    #     string or form body.
+    org.apache.tomcat.util.http.Parameters: INFO
+    #   - Spring Security's FilterChainProxy, at DEBUG: "Securing GET
+    #     /api/v1/bonds/<id>/search?q=…". What is given up: its "Securing" and
+    #     "Secured" lines and its TRACE walk through each filter of the chain.
+    #     Every other logger of Spring Security keeps its DEBUG.
+    org.springframework.security.web.FilterChainProxy: INFO
+    #   - Spring Security's RequestMatcherDelegatingAuthorizationManager, at
+    #     TRACE: "Authorizing GET /api/v1/bonds/<id>/search?q=…". What is given
+    #     up: which request matcher authorised a request, at TRACE.
+    org.springframework.security.web.access.intercept.RequestMatcherDelegatingAuthorizationManager: INFO
+    #   - Spring MVC's HandlerMethod, at TRACE: "Arguments: [CurrentUser(…),
+    #     <bond>, …, null, null]". What is given up: every handler's resolved
+    #     arguments, at TRACE, for every route.
+    org.springframework.web.method.HandlerMethod: INFO
+    #   - Spring MVC's DispatcherServlet, at TRACE: "GET
+    #     "/api/v1/bonds/<id>/search?q=…", parameters={masked}". Its source
+    #     builds the same line, without headers, at DEBUG. What is given up: its
+    #     request and "Completed 200 OK" lines, at DEBUG and TRACE, every route.
+    org.springframework.web.servlet.DispatcherServlet: INFO
 
 management:
   endpoints:

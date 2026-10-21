@@ -183,6 +183,7 @@ class OpenApiConfiguration {
             documentFavourites(api)
             documentReactions(api)
             documentPrompts(api)
+            documentSearch(api)
         }
 
     /**
@@ -904,10 +905,10 @@ private const val DAYS_DESCRIPTION =
         "**A day's `status` does not say whether there is anything to draw.** A day whose author deleted their only " +
         "entry is still listed, for that author alone, with their tombstone as `myEntry`; once that day has closed " +
         "it carries `status: EMPTY`. Draw a day from its entries, not from its status."
-private const val DAYS_MIN_LIMIT = 1
-private const val DAYS_MAX_LIMIT = 50
-private const val DAYS_DEFAULT_LIMIT = 20
-private const val DAYS_MAX_CURSOR_LENGTH = 32
+internal const val DAYS_MIN_LIMIT = 1
+internal const val DAYS_MAX_LIMIT = 50
+internal const val DAYS_DEFAULT_LIMIT = 20
+internal const val DAYS_MAX_CURSOR_LENGTH = 32
 
 /**
  * States what a **conditional read** is on the operations that are one

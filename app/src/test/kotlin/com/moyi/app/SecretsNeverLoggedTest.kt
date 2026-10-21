@@ -70,7 +70,8 @@ import javax.sql.DataSource
  * edited, and the partner's), a password, two access tokens and two refresh
  * tokens, across register, sign-in, pairing, submit, read, edit, the reveal,
  * the archive (the feed with and without `favourites`, one day, a bookmark
- * set and removed, a conditional read that answers `304`), a reaction set,
+ * set and removed, a conditional read that answers `304`), a search, by a
+ * word that is watched, a reaction set,
  * replaced, refused and taken back, delete, an ending
  * that withdraws, the withdrawal's erasure by the dispatcher, a failing
  * transactional consumer, and a refresh. An `ETag` is not scanned for: it is
@@ -222,6 +223,13 @@ class SecretsNeverLoggedTest(
         get("/bonds/$bond/days/$today", bea, ifNoneMatch = day.etag).body.contains(ADA_EDITED) shouldBe true
         get("/bonds/$bond/days?limit=zz", ada).status shouldBe 422
         get("/bonds/$bond/days/nonsense", ada).status shouldBe 404
+        // Search (slice C6b): what somebody looks for is their words, held to the entry's standard, the
+        // request line included (ADR-0039 decision 22). One word that matches nothing, and one that finds both entries.
+        scan.watch("search terms", SEARCH_TERMS, wholeWord = true)
+        get("/bonds/$bond/search?q=$SEARCH_TERMS", bea).body shouldBe """{"items":[],"nextCursor":null}"""
+        // `after`, not `wrote`: the parser reads `~wrote` as one `file` token, so `wrote` is no lexeme of these texts.
+        get("/bonds/$bond/search?q=after", bea).body.contains(BEA_TEXT) shouldBe true
+        get("/bonds/$bond/search?q=$SEARCH_TERMS&limit=0", bea).status shouldBe 422
         send("DELETE", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         send("PUT", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         // A reaction each way; hers replaced, refused twice, taken back, and set again for the erasure to remove.
@@ -501,6 +509,7 @@ class SecretsNeverLoggedTest(
         const val ADA_EDITED = "Ada~edited~it to this"
         const val BEA_TEXT = "Bea~wrote~hers after"
         const val PASSWORD = "seven~green~kettles~at~dawn"
+        const val SEARCH_TERMS = "zqkettlesearch"
         const val HANDLER_SECRET = "private~handler~exception"
         const val CONTROL = "control~marker~"
         const val RUN_ID_LENGTH = 8
@@ -511,13 +520,17 @@ class SecretsNeverLoggedTest(
 
         /**
          * An invite code travels in the path (`/invites/{code}/accept`), so a
-         * logger that prints a request line prints the code: Spring Security's
-         * filter chain at DEBUG, the dispatcher servlet and the handler's
-         * arguments at TRACE, Tomcat's authenticator valve at DEBUG. Those are
-         * the lines an operator lowers the level to read, and they are not
-         * pinned. **So an invite code does reach the log at DEBUG**, by these
-         * loggers; what is held here is that it reaches it by no other, the
-         * ones that print stored and bound values in particular.
+         * logger that prints a request line prints the code. Spring Security's
+         * filter chain at DEBUG, its authorization manager, the dispatcher
+         * servlet and the handler's arguments at TRACE did, until slice C6b
+         * pinned them for a search's words (ADR-0039 decision 22). Seen on
+         * 2026-10-21 with those pins in: Tomcat's authenticator valve still
+         * prints the path at DEBUG, and Spring MVC's `HttpEntityMethodProcessor`
+         * prints the body it writes at TRACE, which for `POST /bonds` holds the
+         * code. Those are not pinned. **So an invite code does reach the log
+         * below INFO**, by these loggers; what is held here is that it reaches
+         * it by no other, the ones that print stored and bound values in
+         * particular.
          */
         val PRINTS_THE_REQUEST_PATH =
             listOf("org.springframework.security.web.", "org.springframework.web.", "org.apache.catalina.")
