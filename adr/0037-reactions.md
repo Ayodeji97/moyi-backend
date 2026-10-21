@@ -135,9 +135,9 @@ entry).
 A partner's entry is `FULL` only once it is revealed, so "revealed only" has no rule of its
 own and `ENTRY_NOT_REVEALED` cannot be reached here. Like `FavouriteEntry`, the rule is
 the gate's answer for the caller. Unlike `ChangeEntry.authorOf`, and unlike a bookmark
-(which either member may leave on any entry they can read, their own included), the author
-is the one member who may **not**. What all three share is the refusal: everything the caller was never shown is one `404`, so no `409` on these
-routes can confirm an id.
+(which either member may leave on any revealed entry, their own included), the author is
+the one member who may **not**. What all three share is the refusal: everything the caller
+was never shown is one `404`, so no `409` on these routes can confirm an id.
 
 Two lines hold "never on one's own entry", and they are independent. The service refuses
 first, with a code of its own. The statement refuses again

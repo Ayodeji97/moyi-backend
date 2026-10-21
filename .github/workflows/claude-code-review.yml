@@ -191,6 +191,13 @@ jobs:
             /code-review:code-review --comment
             ${{ github.event.pull_request.html_url }}
 
+            Do not apply the plugin's eligibility stop condition for trivial, documentation-only,
+            comment-only, or automated PRs. These PRs still require a review in this repository.
+            Inspect their diff and relevant source of truth, then post the review using gh pr comment,
+            including a concise no-findings result when appropriate. This overrides the plugin's
+            instruction to stop without commenting for those categories. Keep its stop conditions
+            for closed, draft, or already-reviewed PRs.
+
             Complete this review within this invocation and post its result before ending.
             Run review agents in the foreground only (run_in_background: false), wait for their
             results, and never finish with a promise to wait for background notifications:
