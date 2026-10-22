@@ -81,10 +81,11 @@ the way the rule would have judged it.
   produces: that diff is the API changing.
 - **Entry text, search terms, passwords and tokens never reach a log**, an exception
   message, or a second column (one exception: `entries.text_search`, the search
-  projection, which every erasure empties: ADR-0039); nor does an invite code, except
-  a log at a level below the default (DEBUG or TRACE), where a request line carries it
-  (ADR-0035 question 10). Types that hold them redact their `toString`. What two people write to each other is the one
-  thing this product must not leak.
+  projection, and the `search_vector` Postgres generates from it, with its index, all
+  emptied by every erasure: ADR-0039); nor does an invite code, except a log at a level
+  below the default (DEBUG or TRACE), where a request line carries it (ADR-0035
+  question 10). Types that hold them redact their `toString`. What two people write to
+  each other is the one thing this product must not leak.
 - **Authorisation comes before any read, and a non-member gets `404`, never `403`.** A
   `403` would confirm the bond exists. A new bond-scoped route needs a cross-tenant test,
   and the suite fails if it has none.
