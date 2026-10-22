@@ -288,6 +288,86 @@ internal class CloseDayTest(
         events("DayClosed") shouldBe 1
     }
 
+    // --- ADR-0035 question 9: an ended bond reveals nothing new (ruled 2026-10-21; counted, 2026-10-22) ---
+
+    @Test
+    fun `a day both wrote on is withheld when the bond was archived before its reveal - nothing revealed, closed pending`() {
+        val bond = pairedBond()
+        jdbc.update("UPDATE bonds SET reveal_time_local = '20:00' WHERE id = ?::uuid", bond)
+        submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
+        submit(bea, bond, """{"text":"his"}""").status shouldBe 201
+        // Bea leaves at 16:00 in Lagos; the reveal was to come at 20:00 (19:00Z).
+        clock.set(Instant.parse("2026-09-15T15:00:00Z"))
+        leave(bea, bond)
+
+        closeDay.settle(dayOf(bond), Instant.parse("2026-09-15T19:01:00Z")) shouldBe Outcome.NOT_YET
+        status(bond) shouldBe "PENDING_REVEAL"
+        closeDay.settle(dayOf(bond), END) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "PENDING_REVEAL"
+        closedAt(bond) shouldBe END
+        jdbc.queryForObject("SELECT count(*) FROM bond_days WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL OR status = 'REVEALED'", Int::class.java) shouldBe 0
+        events("DayRevealed") shouldBe 0
+        events("DayClosed") shouldBe 1
+        closeDay.settle(dayOf(bond), END.plusSeconds(900)) shouldBe Outcome.ALREADY_CLOSED
+    }
+
+    @Test
+    fun `a reveal that fell due before the bond was archived is made, however late the job runs`() {
+        val bond = pairedBond()
+        jdbc.update("UPDATE bonds SET reveal_time_local = '20:00' WHERE id = ?::uuid", bond)
+        submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
+        submit(bea, bond, """{"text":"his"}""").status shouldBe 201
+        // Five minutes after the reveal fell due, and before any run of the job came to it.
+        clock.set(Instant.parse("2026-09-15T19:05:00Z"))
+        leave(bea, bond)
+
+        closeDay.settle(dayOf(bond), Instant.parse("2026-09-15T19:16:00Z")) shouldBe Outcome.REVEALED
+
+        status(bond) shouldBe "REVEALED"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL AND status = 'REVEALED'", Int::class.java) shouldBe
+            2
+        events("DayRevealed") shouldBe 1
+    }
+
+    @Test
+    fun `a day still pending at its end is withheld when the bond was archived before the end`() {
+        val bond = pairedBond()
+        // 23:59 in Lagos is 22:59Z: it falls due before the day ends, and after Bea has gone.
+        jdbc.update("UPDATE bonds SET reveal_time_local = '23:59' WHERE id = ?::uuid", bond)
+        submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
+        submit(bea, bond, """{"text":"his"}""").status shouldBe 201
+        clock.set(Instant.parse("2026-09-15T15:00:00Z"))
+        leave(bea, bond)
+
+        closeDay.settle(dayOf(bond), END) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "PENDING_REVEAL"
+        closedAt(bond) shouldBe END
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL OR status = 'REVEALED'", Int::class.java) shouldBe 0
+        events("DayRevealed") shouldBe 0
+        events("DayClosed") shouldBe 1
+    }
+
+    @Test
+    fun `a day both wrote on whose reveal comes during a deletion countdown is revealed`() {
+        val bond = pairedBond()
+        jdbc.update("UPDATE bonds SET reveal_time_local = '20:00' WHERE id = ?::uuid", bond)
+        submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
+        submit(bea, bond, """{"text":"his"}""").status shouldBe 201
+        // A countdown can be called off with the two still together: it is not a separation.
+        clock.set(Instant.parse("2026-09-15T15:00:00Z"))
+        countDown(bond)
+
+        closeDay.settle(dayOf(bond), Instant.parse("2026-09-15T19:01:00Z")) shouldBe Outcome.REVEALED
+
+        status(bond) shouldBe "REVEALED"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL AND status = 'REVEALED'", Int::class.java) shouldBe
+            2
+        events("DayRevealed") shouldBe 1
+    }
+
     // --- a stale span: the day ends when the timeline says, not when the row said ---
 
     @Test

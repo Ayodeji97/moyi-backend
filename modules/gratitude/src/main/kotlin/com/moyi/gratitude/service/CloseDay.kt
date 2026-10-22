@@ -52,13 +52,21 @@ import java.time.temporal.ChronoUnit
  *    code, that the first request to meet the day would have taken. A
  *    joining day stamped closed before this would never be evaluated at all.
  *    This is also the second sweep of spec §6.3: a `PENDING_REVEAL` day
- *    whose time has come is revealed here, ended or not.
+ *    whose time has come is revealed here, ended or not. **Unless the bond
+ *    separated before that time** ([BondDay.isWithheldBy], ADR-0035
+ *    question 9): an ended bond reveals nothing new, so the day waits as
+ *    `PENDING_REVEAL` instead. Judged by when the reveal fell due, never by
+ *    when this run came: a job a quarter-hour late must not decide who reads
+ *    what. A countdown alone is not a separation, as for the lone entry.
  * 5. Only now ask whether the day has ended. If not, keep what steps 2 to 4
  *    changed and stop.
  * 6. Close it ([BondDay.close]). A day both wrote on that was still waiting
- *    for its time is revealed first, as a reveal; on a `SOLO` day the lone
- *    entry is revealed (FR-063), read fresh under the lock — unless the bond
- *    separated before the day ended (ADR-0033 decision 9).
+ *    for its time is revealed first, as a reveal — unless step 4 withheld
+ *    it, when it closes `PENDING_REVEAL` with no entry stamped and no
+ *    `DayRevealed`, and counts as a day both wrote on (the owner,
+ *    2026-10-22). On a `SOLO` day the lone entry is revealed (FR-063), read
+ *    fresh under the lock — unless the bond separated before the day ended
+ *    (ADR-0033 decision 9).
  */
 @Service
 // Eight collaborators: what settling one day touches — the bond's view, the day, its
@@ -142,11 +150,21 @@ internal class CloseDay(
             checkNotNull(view.anchorTimeline.asCalendar().dayAt(locked.startsAt)) {
                 "a bond-day starts no earlier than its bond's timeline: $dayId"
             }
-        val current = reveal.apply(locked.extendedTo(window).resumeJoiningDay(view.activeSince), view.revealTimeLocal, at)
+        val prepared = locked.extendedTo(window).resumeJoiningDay(view.activeSince)
+        // ADR-0035 question 9, ruled 2026-10-21: an ended bond reveals nothing
+        // new. Asked once, of the day as the reveal rule would meet it, and for
+        // both places this could reveal it: now, and at its end.
+        val withheld = prepared.isWithheldBy(view.separatedAt, view.revealTimeLocal)
+        val current =
+            if (withheld) {
+                prepared.withholdReveal().also(days::update)
+            } else {
+                reveal.apply(prepared, view.revealTimeLocal, at)
+            }
         return if (endedAsOf.isBefore(current.endsAt)) {
             if (locked.revealedAt == null && current.revealedAt != null) Outcome.REVEALED else Outcome.NOT_YET
         } else {
-            close(current, at, view.separatedAt)
+            close(current, at, view.separatedAt, withheld)
             Outcome.CLOSED
         }
     }
@@ -154,16 +172,20 @@ internal class CloseDay(
     /**
      * @param bondSeparatedAt when the bond stopped being two people's, or `null` while it is
      * (`BondClosingView.separatedAt`: archived, or a member left; a deletion countdown alone is not).
+     * @param withheld both wrote, and the bond separated before the reveal fell due
+     * ([BondDay.isWithheldBy]): the day closes `PENDING_REVEAL` and nothing is revealed.
      */
     private fun close(
         ended: BondDay,
         now: Instant,
         bondSeparatedAt: Instant?,
+        withheld: Boolean,
     ) {
         // The day's own end outranks a reveal time later than it. Done as a
-        // reveal, so both entries are stamped and DayRevealed is written.
-        val day = if (ended.status == BondDayStatus.PENDING_REVEAL) reveal.apply(ended, null, now) else ended
-        val closed = day.close(now)
+        // reveal, so both entries are stamped and DayRevealed is written —
+        // unless it is withheld, when nothing is stamped and nothing is said.
+        val day = if (ended.status == BondDayStatus.PENDING_REVEAL && !withheld) reveal.apply(ended, null, now) else ended
+        val closed = day.close(now, withheld)
         val closedAt = checkNotNull(closed.closedAt)
         // A lone entry is unlocked to a partner who did not write (FR-063), but
         // not when the bond had separated before the day ended: the partner left,
