@@ -142,17 +142,21 @@ internal class ArchiveDays(
     /**
      * At most [limit] days of [bondId], newest first and strictly before [before] where given,
      * on which **one entry** matches [terms] and that same entry is one [memberId] may read in
-     * full as far as rows can say: they wrote it or it was revealed ([SEEN_ROW]), and its
-     * author is not in [withdrawnMemberIds]. Each day carries the ids of its entries that
-     * matched (ADR-0039 decisions 2 and 3).
+     * full as far as rows can say: they wrote it or it was revealed ([SEEN_ROW]), it is not
+     * erased ([LIVE_ROW]), and its author is not in [withdrawnMemberIds]. Each day carries the
+     * ids of its entries that matched (ADR-0039 decisions 2 and 3).
      *
      * **The match and the visibility are asked of one row.** Asked of the day, "a day with an
      * entry the caller can see, and an entry that matches", the partner's unrevealed words
      * would list a day the caller wrote on, and say what the partner wrote before the reveal
      * (c6-corpus H-S2).
      *
-     * **An erased entry cannot match**: its projection is `NULL` and its vector empty
-     * (`searchProjectionOf`, V25), so nothing here asks about erasure again.
+     * **An erased entry never matches, whatever its projection still holds** ([LIVE_ROW]).
+     * This build empties the projection with every erasure (`searchProjectionOf`, V25), but a
+     * build from before V25 does not map the column, so an entry it erases keeps its words
+     * there, during a blue/green overlap or after a rollback across V25 (final review I1;
+     * ADR-0039's deploy prerequisites reconcile the rows). The search does not rely on a
+     * column write it does not own; the gate behind it would drop the day too.
      *
      * **The known withdrawn are excluded before `LIMIT`**, as the favourites feed does
      * (ADR-0036 decision 7): a history of words taken back but not yet erased cannot fill a
@@ -302,6 +306,7 @@ internal class ArchiveDays(
                     before?.let { "AND d.date < ?" },
                     "AND e.search_vector @@ plainto_tsquery('simple', public.immutable_unaccent(?))",
                     "AND $SEEN_ROW",
+                    "AND $LIVE_ROW",
                     withdrawnMemberIds
                         .takeIf { it.isNotEmpty() }
                         ?.let { ids -> "AND e.author_member_id NOT IN (${ids.joinToString { "?" }})" },
