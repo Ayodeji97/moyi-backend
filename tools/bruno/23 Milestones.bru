@@ -1,0 +1,19 @@
+meta {
+  name: Milestones
+  type: http
+  seq: 23
+}
+
+get {
+  url: {{api}}/bonds/{{bondId}}/milestones
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  The milestones the bond has reached, at 7, 30, 100 and 365 days on which you both wrote, each with the date of the day that reached it, and the next threshold. Today counts once it has revealed. Nothing is next once the bond has ended, whether it was left or blocked, or while it counts down to deletion; what was reached stays.
+}

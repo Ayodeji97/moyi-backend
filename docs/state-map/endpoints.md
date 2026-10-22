@@ -1211,6 +1211,34 @@ curl -X DELETE "$API/bonds/$BOND/deletion-request" -H "Authorization: Bearer $TO
 |---|---|---|---|
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
 
+### GET /bonds/{bondId}/milestones
+
+the milestones reached, and the next
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl "$API/bonds/$BOND/milestones" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 200 stays | A bond of one has reached nothing, whatever its creator wrote: achieved is empty and 7 is next. | doc 04 §8.3a | test |
+| `bond` | `ACTIVE` |  | 200 stays | Each of 7, 30, 100 and 365 complete days reached, with the date of the day that reached it, and the next threshold, with no count. Today counts once it has revealed and follows the last evaluated day, as the streak's numbers do. | FR-075, ADR-0041 | smoke |
+| `bond` | `PENDING_DELETION` |  | 200 stays | What was reached is kept and nothing is next: the bond takes no writes while it counts down. Calling the deletion off brings next back. The same bytes as an ended bond's. | ADR-0041 §7 | test |
+| `bond` | `ARCHIVED` |  | 200 stays | An ended bond keeps what it reached, and nothing is next: the same bytes for both members, whether it was left or blocked. | ADR-0041 §7, states.md §9 | smoke |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer. | smoke |
+
 ## Day
 
 ### POST /bonds/{bondId}/entries

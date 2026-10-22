@@ -659,6 +659,24 @@
     "curl": "curl \"$API/bonds/$BOND/on-this-day\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "GET /api/v1/bonds/{bondId}/milestones",
+    "summary": "the milestones reached, and the next",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer.",
+        "evidence": "smoke",
+        "evidenceRef": "milestones: a stranger is told the bond's 404",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/BondGuard.kt#throw NotFoundException(\"That bond was not found.\")"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/milestones\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
     "id": "PUT /api/v1/entries/{entryId}/favourite",
     "summary": "bookmark an entry",
     "machine": "day",

@@ -2148,7 +2148,7 @@
     "rule": "FR-071",
     "evidence": "smoke",
     "evidenceRef": "the streak counts today once both have written",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#if (todayComplete && todayFollows(membership, today)) {"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#if (countsToday(membership, today, todayComplete)) {"
   },
   {
     "id": "day-solo-streak",

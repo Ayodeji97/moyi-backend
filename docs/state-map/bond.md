@@ -56,6 +56,7 @@ stateDiagram-v2
 | edit your entry<br>`PATCH /entries/{entryId}` | 404 `NOT_FOUND` | 200 stays (the entry is yours and can still be edited) | 200 stays (the entry is yours and can still be edited) | 409 `BOND_ARCHIVED` (a new request for an entry of your own)<br>404 `NOT_FOUND` (a new request for an entry that is not yours)<br>200 stays (the request repeats an Idempotency-Key and body you already sent) | 409 `BOND_ARCHIVED` (a new request for an entry of your own)<br>404 `NOT_FOUND` (a new request for an entry that is not yours)<br>200 stays (the request repeats an Idempotency-Key and body you already sent) |
 | read today: the day, both entries, the streak and the bond's prompt of the day<br>`GET /bonds/{bondId}/today` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
 | read the streak<br>`GET /bonds/{bondId}/streak` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
+| the milestones reached, and the next<br>`GET /bonds/{bondId}/milestones` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
 
 ### You can
 
@@ -125,6 +126,10 @@ stateDiagram-v2
 | `ACTIVE` | read the streak |  | stays | The streak and a calendar from the day the bond became two people. Today is always on it, OPEN until both have written. | test |
 | `PENDING_DELETION` | read the streak |  | stays | The streak is readable, and no day is drawn as open: nobody can write while the bond counts down. | never-run |
 | `ARCHIVED` | read the streak |  | stays | An ended bond keeps the streak it had, and its calendar ends on the day the bond did, for both members. | test |
+| `PENDING_MEMBER` | the milestones reached, and the next |  | stays | A bond of one has reached nothing, whatever its creator wrote: achieved is empty and 7 is next. | test |
+| `ACTIVE` | the milestones reached, and the next |  | stays | Each of 7, 30, 100 and 365 complete days reached, with the date of the day that reached it, and the next threshold, with no count. Today counts once it has revealed and follows the last evaluated day, as the streak's numbers do. | smoke |
+| `PENDING_DELETION` | the milestones reached, and the next |  | stays | What was reached is kept and nothing is next: the bond takes no writes while it counts down. Calling the deletion off brings next back. The same bytes as an ended bond's. | test |
+| `ARCHIVED` | the milestones reached, and the next |  | stays | An ended bond keeps what it reached, and nothing is next: the same bytes for both members, whether it was left or blocked. | smoke |
 
 ### Refused here
 
@@ -200,6 +205,7 @@ stateDiagram-v2
 | `ARCHIVED` | edit your entry | a new request for an entry that is not yours | 404 `NOT_FOUND` | Whose entry it is comes first: your partner's entry, or an id that names none, is the 404 everybody else gets, and the bond's state is never reached. The day machine's cards have it. (the test asserts the 404 for the partner after leaving and that the body is identical to the one the partner gets on an open bond; the smoke probe "the partner cannot edit the author's entry" asserts that body's code) | T-02 | test |
 | `NO_BOND` | read today: the day, both entries, the streak and the bond's prompt of the day |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | test |
 | `NO_BOND` | read the streak |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `NO_BOND` | the milestones reached, and the next |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
 | `ACTIVE` | agree to the time zone change | your partner's zone change is waiting, the proposalId you send is its id, and the zone moved in the last 30 days (not reachable by requests) | 409 `TIMEZONE_CHANGE_TOO_SOON` | The 30-day rule is asked again at agreement, and the proposal stays waiting. No sequence of requests reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database. | ADR-0030 §6 | test |
 
 ### Happens without you

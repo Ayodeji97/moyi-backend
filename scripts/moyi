@@ -41,6 +41,8 @@
 #                                            Days on which one entry you can read holds every word; case and accents
 #                                            do not matter, whole words only
 #   moyi on-this-day                         this date in earlier years, in the bond in use; nothing once it has ended
+#   moyi milestones                          the milestones reached at 7, 30, 100 and 365 days you both wrote,
+#                                            each with its date, and the next; nothing next once it has ended
 #   moyi favourite <entryId>                 mark a revealed entry, yours or your partner's. The mark is
 #                                            yours alone: your partner is never shown it
 #   moyi unfavourite <entryId>
@@ -381,6 +383,10 @@ case "$cmd" in
   on-this-day)
     [ $# -eq 0 ] || die "usage: moyi on-this-day"
     signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/on-this-day"; show 200
+    ;;
+  milestones)
+    [ $# -eq 0 ] || die "usage: moyi milestones"
+    signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/milestones"; show 200
     ;;
   favourite)
     [ $# -eq 1 ] || die "usage: moyi favourite <entryId>"
