@@ -3470,8 +3470,8 @@
     "code": null,
     "reason": "An ended bond keeps what it reached, and nothing is next: the same bytes for both members, whether it was left or blocked.",
     "rule": "ADR-0041 §7, states.md §9",
-    "evidence": "smoke",
-    "evidenceRef": "milestones: nothing next once the bond has ended, for the one who stayed",
+    "evidence": "test",
+    "evidenceRef": "MilestonesEndpointTest#an ended bond keeps what it reached with nothing next, the same bytes left, blocked or counting down, for both members",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#next = if (now.takesWrites) Milestones.next(total) else null,"
   },
   {

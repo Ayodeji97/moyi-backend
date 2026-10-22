@@ -1231,7 +1231,7 @@ curl "$API/bonds/$BOND/milestones" -H "Authorization: Bearer $TOKEN"
 | `bond` | `PENDING_MEMBER` |  | 200 stays | A bond of one has reached nothing, whatever its creator wrote: achieved is empty and 7 is next. | doc 04 §8.3a | test |
 | `bond` | `ACTIVE` |  | 200 stays | Each of 7, 30, 100 and 365 complete days reached, with the date of the day that reached it, and the next threshold, with no count. Today counts once it has revealed and follows the last evaluated day, as the streak's numbers do. | FR-075, ADR-0041 | smoke |
 | `bond` | `PENDING_DELETION` |  | 200 stays | What was reached is kept and nothing is next: the bond takes no writes while it counts down. Calling the deletion off brings next back. The same bytes as an ended bond's. | ADR-0041 §7 | test |
-| `bond` | `ARCHIVED` |  | 200 stays | An ended bond keeps what it reached, and nothing is next: the same bytes for both members, whether it was left or blocked. | ADR-0041 §7, states.md §9 | smoke |
+| `bond` | `ARCHIVED` |  | 200 stays | An ended bond keeps what it reached, and nothing is next: the same bytes for both members, whether it was left or blocked. | ADR-0041 §7, states.md §9 | test |
 
 #### Whatever the state
 

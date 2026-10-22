@@ -129,7 +129,7 @@ stateDiagram-v2
 | `PENDING_MEMBER` | the milestones reached, and the next |  | stays | A bond of one has reached nothing, whatever its creator wrote: achieved is empty and 7 is next. | test |
 | `ACTIVE` | the milestones reached, and the next |  | stays | Each of 7, 30, 100 and 365 complete days reached, with the date of the day that reached it, and the next threshold, with no count. Today counts once it has revealed and follows the last evaluated day, as the streak's numbers do. | smoke |
 | `PENDING_DELETION` | the milestones reached, and the next |  | stays | What was reached is kept and nothing is next: the bond takes no writes while it counts down. Calling the deletion off brings next back. The same bytes as an ended bond's. | test |
-| `ARCHIVED` | the milestones reached, and the next |  | stays | An ended bond keeps what it reached, and nothing is next: the same bytes for both members, whether it was left or blocked. | smoke |
+| `ARCHIVED` | the milestones reached, and the next |  | stays | An ended bond keeps what it reached, and nothing is next: the same bytes for both members, whether it was left or blocked. | test |
 
 ### Refused here
 
