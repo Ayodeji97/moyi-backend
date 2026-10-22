@@ -164,7 +164,9 @@ reason; each mutation was restored and the restore checked.
 6. **The response is `{achieved: [{threshold, achievedOn}], next: {threshold} | null}` and
    nothing else**, `achieved` oldest first. **No `totalCompleteDays`**: Q-M3, and M3's reason,
    that leaving the count out keeps "days to next" from being one subtraction on one response.
-   `GET /streak` already sends `totalCompleteDays` and keeps it (an owner question, below).
+   `GET /streak` already sends `totalCompleteDays` and keeps it; the count is derivable
+   elsewhere too (its calendar, the archive), so Q-M3 is held as "no countdown on this
+   response", not "no countdown anywhere" (an owner question, below).
    *Run:* the payload test and the contract test (both red with the field added, Task 2 G2);
    the smoke compares the bytes exactly, field order included (`achieved`, then `next`).
 7. **`next` is `null` whenever the caller's membership takes no writes** (archived by a leave
@@ -323,10 +325,14 @@ turning it would cost:
 
 Then the plan's decisions most worth his eye, one line each:
 
-- **Decision 6, no `totalCompleteDays` here, while `GET /streak` keeps sending it.** Whether
-  the streak screen shows the total at all is design, and that field is the one way left to
-  make a countdown (`next.threshold − totalCompleteDays`). Leaving it on `/streak` costs
-  nothing now; taking it off is a breaking change to that response.
+- **Decision 6, no `totalCompleteDays` here, while `GET /streak` keeps sending it.** Q-M3 is
+  held as "no countdown field on `/milestones`". A countdown stays derivable whatever that
+  field does: `/streak` also sends its calendar, 371 days of squares (`GetStreak.CALENDAR_DAYS`),
+  and counting the `COMPLETE` ones gives the exact total on any bond up to 371 days old, which
+  covers every threshold through 365; the archive (`GET /days`) lists the days as well. So
+  dropping `totalCompleteDays` from `/streak` would be a breaking change to that response and
+  would not close the gap. Whether any surface should make counting hard, and whether the
+  streak screen shows the total at all, is the owner's and design's, not this slice's to close.
 - **Decision 7, `next` asked of the membership resolved again**, not the guard's (ruling 1):
   one more lookup per request, for an answer that cannot lag an ending.
 - **Decision 9, the event is written on an ended bond**; the consumer decides not to notify.
