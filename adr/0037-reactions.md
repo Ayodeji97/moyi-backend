@@ -1,8 +1,9 @@
 # ADR-0037 — Reactions
 
 **Status:** Accepted · **Date:** 2026-10-13 · **Deciders:** Daniel, for the five rulings of
-2026-10-06 only. Every other decision here was made by the plan or by the agents that ran
-it, and "Questions that are the owner's" lists each one that is his to turn.
+2026-10-06 and for his rulings of 2026-10-21 on every question in "Questions that are the
+owner's" except the third, which was not put to him. Every other decision here was made by
+the plan or by the agents that ran it.
 
 ## Context
 

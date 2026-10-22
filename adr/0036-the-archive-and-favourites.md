@@ -1,7 +1,7 @@
 # ADR-0036 — The archive and favourites
 
 **Status:** Accepted · **Date:** 2026-10-09 · **Deciders:** Daniel
-**Amended:** 2026-10-13 ("Owed, C5c" discharged or carried, item by item; decision 12's unmark narrowed on a tombstone by `01752a7`, which the owner has not ruled on — ADR-0037)
+**Amended:** 2026-10-13 ("Owed, C5c" discharged or carried, item by item; decision 12's unmark narrowed on a tombstone by `01752a7`, which the owner accepted on 2026-10-21 — ADR-0037 question 8)
 
 ## Context
 
