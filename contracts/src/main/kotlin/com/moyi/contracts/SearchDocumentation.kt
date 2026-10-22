@@ -66,3 +66,20 @@ private const val SEARCH_DESCRIPTION =
         "`nextCursor`, because it is also bounded by its size. There is no count of matches, and nothing says which " +
         "entry of a day matched or where: a client that highlights does so itself.\n\n" +
         "`q` is never echoed in a refusal, and the response is never to be stored."
+
+private const val ON_THIS_DAY_OPERATION = "onThisDay"
+
+/** `GET /bonds/{bondId}/on-this-day` says what its one field cannot: what is in it and when it is empty. */
+internal fun documentOnThisDay(api: OpenAPI) {
+    api.paths.values
+        .flatMap { it.readOperations() }
+        .filter { it.operationId == ON_THIS_DAY_OPERATION }
+        .forEach { it.description = ON_THIS_DAY_DESCRIPTION }
+}
+
+private const val ON_THIS_DAY_DESCRIPTION =
+    "The days of the bond dated today's month and day in an earlier year, newest first, each in the feed's day " +
+        "shape. Today is the bond's date. 29 February is found on 29 February only. A day is included when an entry on " +
+        "it can be read in full by the caller; a day of tombstones is not.\n\n" +
+        "Empty when the bond takes no writes from the caller: it has ended, the caller has left, or it is counting " +
+        "down to deletion. There is no cursor: it is every such day, within the size of one response."

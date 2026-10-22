@@ -526,6 +526,25 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `on-this-day takes nothing but its path and returns days and no cursor`() {
+        val onThisDay = api.paths["/api/v1/bonds/{bondId}/on-this-day"]!!.get
+        onThisDay.operationId shouldBe "onThisDay"
+        onThisDay.parameters.filter { it.`in` == "query" } shouldBe emptyList()
+        onThisDay.responses.keys shouldContainAll listOf("200", "401", "404", "429")
+        onThisDay.responses.keys shouldNotContain "422"
+        onThisDay.responses["200"]!!
+            .content["application/json"]!!
+            .schema.`$ref` shouldBe "#/components/schemas/OnThisDayResponse"
+        val page = api.components.schemas["OnThisDayResponse"]!!
+        page.properties.keys shouldBe setOf("items")
+        page.properties["items"]!!.items.`$ref` shouldBe "#/components/schemas/DayResponse"
+        val told = onThisDay.description.shouldNotBeNull()
+        told shouldContain "earlier year"
+        told shouldContain "29 February"
+        told shouldContain "takes no writes"
+    }
+
+    @Test
     fun `search documents q as required and bounded, the feed's limit and cursor, its 422 and 404, and the feed's page`() {
         val search = api.paths["/api/v1/bonds/{bondId}/search"]!!.get
         search.operationId shouldBe "search"

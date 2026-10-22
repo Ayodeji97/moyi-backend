@@ -92,6 +92,17 @@ internal class OnThisDayCandidatesTest(
         dates(archive.onThisDay(UUID.fromString(bond), me, LocalDate.of(2028, 3, 1), emptySet())) shouldBe listOf("2027-03-01")
     }
 
+    @Test
+    fun `another bond's day on today's date is no candidate`() {
+        both("2025-09-15")
+        val other = UUID.randomUUID().toString()
+        val theirs = rig.insertDay(other, LocalDate.parse("2024-09-15"), "REVEALED")
+        rig.insertEntry(theirs, other, UUID.randomUUID(), EntryState.REVEALED, "a stranger's", Instant.parse("2024-09-15T10:00:00Z"))
+
+        // The gate would refuse its entries (NOT_A_MEMBER) and the reader drop the day; this is the statement's own bound.
+        dates(archive.onThisDay(UUID.fromString(bond), me, TODAY, emptySet())) shouldBe listOf("2025-09-15")
+    }
+
     private fun both(date: String) = day(date, mine = EntryState.REVEALED, partners = EntryState.REVEALED)
 
     private fun day(

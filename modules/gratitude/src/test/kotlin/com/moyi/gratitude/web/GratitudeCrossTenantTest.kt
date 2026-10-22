@@ -113,6 +113,8 @@ internal class GratitudeCrossTenantTest(
             // Slice C6b. A q that would be searched: a stranger must get the bond's 404 before q is read. `SearchTest` sends a
             // stranger q values that cannot be read, and none at all, and expects this same 404.
             "GET /api/v1/bonds/{bondId}/search" to Fixture(query = "q=cross-tenant"),
+            // No parameters: a stranger gets the bond's 404, never an empty list of memories.
+            "GET /api/v1/bonds/{bondId}/on-this-day" to Fixture(),
         )
 
     private data class Fixture(

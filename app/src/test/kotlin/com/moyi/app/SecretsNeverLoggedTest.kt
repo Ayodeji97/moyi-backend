@@ -73,7 +73,7 @@ import javax.sql.DataSource
  * tokens, across register, sign-in, pairing, submit, read, edit, the reveal,
  * the archive (the feed with and without `favourites`, one day, a bookmark
  * set and removed, a conditional read that answers `304`), a search, by a
- * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), a reaction set,
+ * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), on this day, a reaction set,
  * replaced, refused and taken back, delete, an ending
  * that withdraws, the withdrawal's erasure by the dispatcher, a failing
  * transactional consumer, and a refresh. An `ETag` is not scanned for: it is
@@ -235,6 +235,8 @@ class SecretsNeverLoggedTest(
         get("/bonds/$bond/search?q=after", bea).body.contains(BEA_TEXT) shouldBe true
         val refused = get("/bonds/$bond/search?q=$SEARCH_TERMS&limit=0", bea)
         refused.status shouldBe 422
+        // On this day (slice C6b): the archive's day shape, held to the archive's pins.
+        get("/bonds/$bond/on-this-day", bea).status shouldBe 200
         // Bytes that are not UTF-8 (task 2 review I1): Tomcat's exception quotes what it could decode, the words
         // included, so it is answered 400 and logged without it. Any route, any parameter, known or not. The answer
         // is written by a filter of our own, so it is held to carry the headers Security gives any other refusal.

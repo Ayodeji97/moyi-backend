@@ -3,6 +3,7 @@ package com.moyi.gratitude.service
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.BondDayStatus
+import com.moyi.gratitude.domain.DayAssignment
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
@@ -16,6 +17,7 @@ import com.moyi.gratitude.infra.database.Favourites
 import com.moyi.gratitude.infra.database.Reactions
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
 import java.time.LocalDate
 
 /**
@@ -124,6 +126,7 @@ internal class GetDays(
     private val access: BondAccess,
     private val favourites: Favourites,
     private val reactions: Reactions,
+    private val clock: Clock,
 ) {
     /**
      * At most [limit] days, newest first, strictly before [before] and on or
@@ -233,6 +236,45 @@ internal class GetDays(
             },
             shows = { day, _ -> day.matchedInFull },
         )
+    }
+
+    /**
+     * `GET /bonds/{bondId}/on-this-day` (FR-092; ADR-0039): the days of earlier years dated the
+     * bond's today, newest first, as the archive shows each.
+     *
+     * **Nothing, before anything is read, when the bond takes no writes from the caller**:
+     * ended, left, blocked or counting down to deletion (the owner's Q-O3, decision 14). One
+     * answer for every cause, so a block is not told from a leave.
+     *
+     * **Today is the bond's** (BR-3): [GetToday]'s own call, so both members are given the
+     * same date and a memory changes at the bond's midnight.
+     *
+     * The candidates exclude days of tombstones and the known withdrawn ([ArchiveDays.onThisDay]);
+     * the gate then reads every day, the marker last, and **a day is shown only if something on
+     * it was read in full**: a withdrawal that commits after the candidates were read leaves its
+     * author's days as tombstones, and those are not memories. Unpaginated: at most
+     * [ArchiveDays.ON_THIS_DAY_YEARS] days, taken newest first while the text stays within
+     * [textOctets] (the archive's bound, the first day always taken). Days past it are left out,
+     * and are in the archive (decision 13).
+     *
+     * No opt-in is read: the owner's Q-O2 puts the opt-in on the weekly push (Phase 4), and
+     * nothing of the partner's settings could reach this answer.
+     */
+    @Transactional(readOnly = true)
+    fun onThisDay(
+        membership: BondMembership,
+        textOctets: Int = PAGE_TEXT_OCTETS,
+    ): List<DayView> {
+        if (!membership.takesWrites) return emptyList()
+        val today = DayAssignment.dateFor(clock.instant(), null, membership.anchorTimeline.asCalendar()) { false }
+        val candidates =
+            archive.onThisDay(membership.bondId, membership.memberId, today, access.readerNow(membership).withdrawnAuthors)
+        val read = read(membership, candidates).filter { it.readInFull.isNotEmpty() }
+        val marked = marksOf(membership, read)
+        val reacted = reactionsOn(read)
+        val memories = Filling(ArchiveDays.ON_THIS_DAY_YEARS, textOctets)
+        read.forEach { memories.offer(it, it.keptOf(marked), reacted) }
+        return memories.days
     }
 
     /**

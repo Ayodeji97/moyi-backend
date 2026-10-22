@@ -184,6 +184,7 @@ class OpenApiConfiguration {
             documentReactions(api)
             documentPrompts(api)
             documentSearch(api)
+            documentOnThisDay(api)
         }
 
     /**

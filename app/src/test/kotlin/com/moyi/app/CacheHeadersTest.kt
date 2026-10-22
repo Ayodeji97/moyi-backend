@@ -113,6 +113,8 @@ class CacheHeadersTest(
         neverStored("GET /search", get("/bonds/$bond/search?q=anything", ada), 200)
         neverStored("GET /search, a q that cannot be searched", get("/bonds/$bond/search?q=", ada), 422)
         neverStored("GET /search, a stranger", get("/bonds/$bond/search?q=anything", eve), 404)
+        neverStored("GET /on-this-day", get("/bonds/$bond/on-this-day", ada), 200)
+        neverStored("GET /on-this-day, a stranger", get("/bonds/$bond/on-this-day", eve), 404)
 
         // The archive: the two responses a client may keep, and must ask about before it uses them again.
         val days = "/bonds/$bond/days"

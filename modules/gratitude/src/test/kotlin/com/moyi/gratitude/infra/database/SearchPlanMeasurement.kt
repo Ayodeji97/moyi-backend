@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.RowCallbackHandler
 import org.springframework.jdbc.core.RowMapper
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
+import java.time.LocalDate
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -80,29 +81,60 @@ internal class SearchPlanMeasurement(
         val shape: String,
     )
 
-    private fun measure(): Map<String, Plan> {
+    /**
+     * On this day (task 3, the controller's note on review I2): `ArchiveDays.onThisDayQuery` over the same seed, for
+     * a date with two earlier years in the measured bond. The same criterion: no index scan wider than the bond, no
+     * sequential scan of `bond_days` or `entries`, under 300 ms at 500k.
+     */
+    @Test
+    fun `on this day reads in proportion to its bond, not to the table`() {
+        jdbc.execute("TRUNCATE TABLE entries, bond_days CASCADE")
+        seed(bonds = listOf(BOND), days = TARGET_DAYS)
+        seed(bonds = List((SMALL - TARGET_DAYS * 2) / OTHER_ENTRIES) { UUID.randomUUID() }, days = OTHER_ENTRIES / 2)
+        val small = analyzed { explain(ArchiveDays.onThisDayQuery(BOND, MEMBER, ON_THIS_DAY, emptySet())) }
+        seed(bonds = List((LARGE - SMALL) / OTHER_ENTRIES) { UUID.randomUUID() }, days = OTHER_ENTRIES / 2)
+        val large = analyzed { explain(ArchiveDays.onThisDayQuery(BOND, MEMBER, ON_THIS_DAY, emptySet())) }
+
+        println("C6b ON-THIS-DAY MEASUREMENT 100k: $small")
+        println("C6b ON-THIS-DAY MEASUREMENT 500k: $large")
+        val tableWide =
+            listOf("100k" to small, "500k" to large).mapNotNull { (size, plan) ->
+                "$size: $plan".takeIf { plan.widestIndexScan > TARGET_DAYS * 2 || plan.seqScans.isNotEmpty() }
+            }
+        withClue("plans that read beyond the measured bond: $tableWide") { tableWide shouldBe emptyList() }
+        withClue("500k: $large") { (large.milliseconds < NFR_004_MS) shouldBe true }
+    }
+
+    private fun <T> analyzed(measured: () -> T): T {
         jdbc.execute("ANALYZE entries")
         jdbc.execute("ANALYZE bond_days")
-        return WORDS.associateWith { word ->
-            val (sql, arguments) = ArchiveDays.matchingQuery(BOND, MEMBER, SearchTerms.of(word)!!, null, PAGE, emptySet())
-            val explain = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) $sql"
-            val bind = PreparedStatementSetter { s -> arguments.forEachIndexed { i, v -> s.setObject(i + 1, v) } }
-            // Twice first, so that what is measured is a warm run.
-            repeat(2) { jdbc.query(explain, bind, RowCallbackHandler { }) }
-            val text = jdbc.query(explain, bind, RowMapper { rs, _ -> rs.getString(1) }).single()
-            val root = json.readTree(text)[0]
-            val plan = root["Plan"]
-            Plan(
-                buffers = plan["Shared Hit Blocks"].asLong() + plan["Shared Read Blocks"].asLong(),
-                widestIndexScan = indexScans(plan).maxOfOrNull { it["Actual Rows"].asDouble() } ?: 0.0,
-                seqScans =
-                    nodes(plan)
-                        .filter { it["Node Type"].asString() == "Seq Scan" && it["Relation Name"]?.asString() in SEQ_SCAN_FORBIDDEN }
-                        .map { "Seq Scan on ${it["Relation Name"].asString()} (${it["Actual Rows"].asDouble()} rows)" },
-                milliseconds = root["Execution Time"].asDouble(),
-                shape = indexScans(plan).joinToString { "${it["Node Type"].asString()} on ${it["Index Name"]?.asString()}" },
-            )
+        return measured()
+    }
+
+    private fun measure(): Map<String, Plan> =
+        analyzed {
+            WORDS.associateWith { word -> explain(ArchiveDays.matchingQuery(BOND, MEMBER, SearchTerms.of(word)!!, null, PAGE, emptySet())) }
         }
+
+    private fun explain(query: Pair<String, List<Any>>): Plan {
+        val (sql, arguments) = query
+        val explain = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) $sql"
+        val bind = PreparedStatementSetter { s -> arguments.forEachIndexed { i, v -> s.setObject(i + 1, v) } }
+        // Twice first, so that what is measured is a warm run.
+        repeat(2) { jdbc.query(explain, bind, RowCallbackHandler { }) }
+        val text = jdbc.query(explain, bind, RowMapper { rs, _ -> rs.getString(1) }).single()
+        val root = json.readTree(text)[0]
+        val plan = root["Plan"]
+        return Plan(
+            buffers = plan["Shared Hit Blocks"].asLong() + plan["Shared Read Blocks"].asLong(),
+            widestIndexScan = indexScans(plan).maxOfOrNull { it["Actual Rows"].asDouble() } ?: 0.0,
+            seqScans =
+                nodes(plan)
+                    .filter { it["Node Type"].asString() == "Seq Scan" && it["Relation Name"]?.asString() in SEQ_SCAN_FORBIDDEN }
+                    .map { "Seq Scan on ${it["Relation Name"].asString()} (${it["Actual Rows"].asDouble()} rows)" },
+            milliseconds = root["Execution Time"].asDouble(),
+            shape = indexScans(plan).joinToString { "${it["Node Type"].asString()} on ${it["Index Name"]?.asString()}" },
+        )
     }
 
     private fun indexScans(node: JsonNode): List<JsonNode> = nodes(node).filter { it["Node Type"].asString().contains("Index") }
@@ -154,6 +186,7 @@ internal class SearchPlanMeasurement(
         const val CHUNK = 50
         const val NFR_004_MS = 300.0
         val WORDS = listOf("thank", "lamp", "zebra")
+        val ON_THIS_DAY: LocalDate = LocalDate.of(2026, 6, 1)
         val SEQ_SCAN_FORBIDDEN = setOf("bond_days", "entries")
     }
 }
