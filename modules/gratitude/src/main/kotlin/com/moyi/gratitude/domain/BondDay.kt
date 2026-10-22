@@ -27,7 +27,11 @@ import java.util.UUID
  * itself about what "closed" means.
  *
  * **"Closed" is a fact about the status; BR-3a's "settled" is not**, and is
- * [BondDay.isSettled]: it needs `closedAt`, which no status carries.
+ * [BondDay.isSettled]: it needs `closedAt`, which no status carries. Three
+ * statuses can be settled without being closed: an elapsed [SUSPENDED] day,
+ * a called-off deletion's [SUSPENDED] day, and a [PENDING_REVEAL] day the
+ * close job withheld because its bond had ended before the reveal fell due
+ * (ADR-0035 question 9) — both wrote, and neither will read the other's.
  */
 internal enum class BondDayStatus(
     val isClosed: Boolean,
@@ -174,14 +178,59 @@ internal data class BondDay(
         revealTime: LocalTime?,
         now: Instant,
     ): BondDay {
-        if (entryCount != MAX_ENTRIES || status !in setOf(BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL)) return this
-        val due = revealTime?.let { date.atTime(it).atZone(anchorTimezone).toInstant() }
+        if (entryCount != MAX_ENTRIES || status !in REVEALABLE) return this
+        val due = revealTime?.let(::onThisDaysCalendar)
         return if (due != null && now.isBefore(due)) {
             copy(status = BondDayStatus.PENDING_REVEAL)
         } else {
             copy(status = BondDayStatus.REVEALED, revealedAt = revealedAt ?: now.truncatedTo(ChronoUnit.MICROS))
         }
     }
+
+    /**
+     * When this day's reveal fell due: the reveal time on its own calendar,
+     * or its end if that comes first (a day's end outranks a later reveal
+     * time, [close]). With no reveal time a two-entry day reveals as the
+     * second entry lands and is never pending; a pending day whose time was
+     * cleared afterwards is taken to fall due at its end, the side on which
+     * nothing is revealed early.
+     */
+    fun revealFallsDueAt(revealTime: LocalTime?): Instant = revealTime?.let { minOf(onThisDaysCalendar(it), endsAt) } ?: endsAt
+
+    /**
+     * Both wrote and the two have not been read together, and the bond
+     * separated — archived, or a member left (`BondClosingView.separatedAt`)
+     * — before the reveal fell due: an ended bond reveals nothing new
+     * (ADR-0035 question 9, ruled 2026-10-21). Asked of when the reveal fell
+     * due, never of when the job came to it: a run a quarter-hour late must
+     * not decide who reads what. A separation at the very instant it fell
+     * due is too late to withhold it. A lone entry is not asked here; that is
+     * the close's own rule (ADR-0033 question 1).
+     */
+    fun isWithheldBy(
+        separatedAt: Instant?,
+        revealTime: LocalTime?,
+    ): Boolean =
+        entryCount == MAX_ENTRIES &&
+            revealedAt == null &&
+            status in REVEALABLE &&
+            separatedAt?.isBefore(revealFallsDueAt(revealTime)) == true
+
+    /**
+     * The day [isWithheldBy] says is withheld, as it waits: `PENDING_REVEAL`,
+     * and closed so ([close] with `withheld`), never `REVEALED`. A resumed
+     * joining day both wrote on is still `PARTIAL` here, and becomes pending
+     * like any other. Anything else is returned as it is.
+     */
+    fun withholdReveal(): BondDay =
+        if (entryCount == MAX_ENTRIES && revealedAt == null && status in REVEALABLE) {
+            copy(status = BondDayStatus.PENDING_REVEAL)
+        } else {
+            this
+        }
+
+    /** [revealTime] on this day's own date, in the zone it began under. */
+    private fun onThisDaysCalendar(revealTime: LocalTime): Instant = date.atTime(revealTime).atZone(anchorTimezone).toInstant()
 
     /**
      * Spec §12.4: only the suspended day containing the recorded activation
@@ -209,6 +258,10 @@ internal data class BondDay(
      *   because it records the two being read together, which did not happen.
      * - `PENDING_REVEAL` becomes `REVEALED`: a reveal time later than the
      *   day's own end cannot hold both entries back past it.
+     * - Unless [withheld]: the bond separated before the reveal fell due
+     *   ([isWithheldBy]). Then `PENDING_REVEAL` gains [closedAt] and nothing
+     *   else, and the two are never read together. It is still a day both
+     *   wrote on, and counts so (`DayOutcome.of`; the owner, 2026-10-22).
      * - A day revealed while it was open, and a `SUSPENDED` day, gain
      *   [closedAt] and nothing else. A suspended day is excluded from
      *   evaluation (doc 04 §8.3a), so closing it reveals nothing and counts
@@ -219,18 +272,37 @@ internal data class BondDay(
      * already applied [resumeJoiningDay] and [revealWhenDue], under the day's
      * lock. Idempotent: a closed day is returned as it is.
      */
-    fun close(now: Instant): BondDay {
+    fun close(
+        now: Instant,
+        withheld: Boolean = false,
+    ): BondDay {
         if (closedAt != null) return this
         require(!now.isBefore(endsAt)) { "a bond-day cannot be closed before it has ended" }
         check(
             status != BondDayStatus.PARTIAL || entryCount == 1,
         ) { "a two-entry day is revealed or pending, never PARTIAL, by the time it closes" }
         val at = now.truncatedTo(ChronoUnit.MICROS)
-        return when (status) {
-            BondDayStatus.OPEN -> copy(status = BondDayStatus.EMPTY, closedAt = at)
-            BondDayStatus.PARTIAL -> copy(status = BondDayStatus.SOLO, closedAt = at)
-            BondDayStatus.PENDING_REVEAL -> copy(status = BondDayStatus.REVEALED, revealedAt = revealedAt ?: at, closedAt = at)
-            else -> copy(closedAt = at)
+        return when {
+            status == BondDayStatus.OPEN -> {
+                copy(status = BondDayStatus.EMPTY, closedAt = at)
+            }
+
+            status == BondDayStatus.PARTIAL -> {
+                copy(status = BondDayStatus.SOLO, closedAt = at)
+            }
+
+            status == BondDayStatus.PENDING_REVEAL && !withheld -> {
+                copy(
+                    status = BondDayStatus.REVEALED,
+                    revealedAt = revealedAt ?: at,
+                    closedAt = at,
+                )
+            }
+
+            // Withheld, revealed while open, or suspended: closed, and nothing else.
+            else -> {
+                copy(closedAt = at)
+            }
         }
     }
 
@@ -288,6 +360,9 @@ internal data class BondDay(
     companion object {
         /** V12's `bond_days_entry_count_check`, restated here so the schema and the domain agree by reading. */
         const val MAX_ENTRIES = 2
+
+        /** The statuses a day both wrote on is in until it is read together: [revealWhenDue] and [withholdReveal] act on these alone. */
+        private val REVEALABLE = setOf(BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL)
 
         /**
          * The ordinary open (doc 04 §3): the first thing either member's

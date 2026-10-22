@@ -233,7 +233,8 @@ internal class StreakRulesTest {
             mapOf(
                 BondDayStatus.OPEN to null,
                 BondDayStatus.PARTIAL to null,
-                BondDayStatus.PENDING_REVEAL to null,
+                // Only a closed one is asked: a day both wrote on that an ended bond withheld (owner, 2026-10-22).
+                BondDayStatus.PENDING_REVEAL to DayOutcome.COMPLETE,
                 BondDayStatus.REVEALED to DayOutcome.COMPLETE,
                 BondDayStatus.SOLO to DayOutcome.MISSED,
                 BondDayStatus.EMPTY to DayOutcome.MISSED,
