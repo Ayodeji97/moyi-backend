@@ -260,6 +260,8 @@ pull request that follows the slice's.
    members who hold a countdown across midnight, together, get that one day. It takes both
    of them and is the shape of the real case; it is not prevented.
 
+   *Ruled by the owner on 2026-10-21: this narrowing is confirmed, and stands as built.*
+
    A missing day that ended in a countdown is written `SUSPENDED`, not `EMPTY`, with no
    `DayClosed`. A day that already had a row and was missed (one member had written
    before the two of them asked) keeps its status and is *evaluated* as suspended. If the
@@ -279,6 +281,9 @@ pull request that follows the slice's.
    turns a past rest day into a missed one, is to be redrawn.
 4. **A rest day keeps a run and does not start one** (decision 5): not ruled on, and stands
    as built.
+
+   *Ruled by the owner on 2026-10-21: confirmed. It stands as built, and the question is
+   closed.*
 
 ## Revisit when
 

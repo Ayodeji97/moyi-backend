@@ -624,19 +624,31 @@ Each is built one way and cheap to turn.
    FR-029a's wording ("given by default") and doc 26's reason: the person blocking should
    not have to ask. A client that sends `{"withdrawEntries": false}` keeps the entries.
    Turning it is one `?: true` in `BondsController`.
+
+   *Ruled by the owner on 2026-10-21, with question 11, to be built: `withdrawEntries` is
+   required on `POST /block`, and a request without it is `400`.* It is a breaking change to
+   the contract and carries the `breaking-api-change` label.
 2. **No working export exists before the destructive act.** Doc 04 rests the destructive
    reading on "the confirm flow offers an export first". Export is Phase 5. Until then a
    withdrawal destroys the only copy. The spec said to reject withdrawal as unsupported
    until the read path was complete; it is complete, and it is not rejected.
+
+   *Ruled by the owner on 2026-10-21: it stands as built for now. An export that works
+   before launch is a condition of M5.*
 3. **Withdrawal on leave is the same destructive mechanism.** BR-10a speaks of "the
    blocker's own entries" and the leave screen's copy still promises "you keep your archive"
    (X7). Built: one mechanism, off by default on leave.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.* The
+   leave confirm's copy, "you keep your archive" (X7), still owes a change.
 4. **Before the erasure, a day's status can tell a withdrawal from a delete.** A lone
    withdrawn entry leaves the day `PARTIAL` where a deleted one leaves `OPEN`; two pending
    entries leave `PENDING_REVEAL` where a delete leaves `PARTIAL`. The partner sees
    `REMOVED` beside a day that still counts the entry, and the status changes when the
    consumer runs, normally within two seconds. Accepted, so that a read never rewrites a
    day. A reviewer's twin-bond comparison; `WithdrawalReadTest` pins `PARTIAL`.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 5. **A read that began before an ending can answer as if the ending had not happened.**
    `GET /today` and the two replays read the entries and then the marker, as two
    statements at `READ COMMITTED`, and those are two instants. A response whose marker
@@ -654,15 +666,24 @@ Each is built one way and cheap to turn.
    it: the withdrawn words, in a response read after the withdrawal. And the gap between
    the two reads holds a lock wait, on the very lock the ending holds. Fixed by decision
    12's rule; `MarkerReadLastTest`.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 6. **On a legacy joining day, a withdrawal and a manual delete differ.** A day `SUSPENDED`
    with two entries, which no request can produce now. A withdrawal leaves it unrevealed in
    every order. The author's own `DELETE` is itself a gratitude operation, so it resumes and
    reveals the day before erasing. The two cannot be made equal there.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 7. **Postgres `transaction_timeout` is not used.** It would bound a handler parked outside
    the database (decision 7) by killing its session. The only handler does database work
    only.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 8. **Retries never stop** (decision 5). A delivery that can never succeed is retried every
    fifteen minutes for ever and stays in the failing gauge until somebody acts.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
+   Alerting on it is Phase 5's.
 9. **The close job reveals a day both wrote on after the bond has ended, when neither
    withdrew.** Found by this slice's last reviewer and not this slice's code. Ada and Bea
    both write on a day waiting for its reveal time; Bea leaves, or blocks and keeps her
@@ -675,6 +696,9 @@ Each is built one way and cheap to turn.
    after the leaving. Built: revealed. The reviewer ran it at `6de2a67`, and the privacy
    review saw it again at `33351ad` (the closer reported two entries revealed on a bond
    that had ended eight and a half hours earlier); no test pins it either way.
+
+   *Ruled by the owner on 2026-10-21, to be built: withheld. An ended bond reveals nothing
+   new, which agrees with ADR-0033 decision 9 and doc 09 T-20.*
 10. **An invite code reaches the log at DEBUG, and CLAUDE.md says it never does.** The
     code is part of the path (`GET /invites/{code}`, `POST /invites/{code}/accept`), so
     every logger that prints a request line prints it: Spring Security's `FilterChainProxy`
@@ -687,10 +711,18 @@ Each is built one way and cheap to turn.
     codes; move the code out of the path into a body, which changes the contract; or pin
     the five loggers and lose the request line at DEBUG. Built: none of them. CLAUDE.md is
     not edited here.
+
+    *Ruled by the owner on 2026-10-21: accepted.* CLAUDE.md's sentence, and the same rule
+    in AGENTS.md, now say that an invite code never reaches a log at the default level.
+    They were narrowed in the pull request that records this ruling.
+
 11. **Question 1 again, now that the contract says it.** The bare `POST /block` still
     erases. The contract states it and the CLI refuses to send it; a client that ignores
     the description still destroys by omission. Requiring the flag on that route would be
     a `400` where there is a `204` today.
+
+    *Ruled by the owner on 2026-10-21, with question 1, to be built: the flag is required,
+    and a bare `POST /block` is `400`.*
 
 ### The corpus
 

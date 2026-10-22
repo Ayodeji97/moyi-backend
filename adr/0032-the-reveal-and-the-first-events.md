@@ -233,7 +233,13 @@ Each is built one way, pinned by one test, and cheap to turn.
    `{authorMemberId, status: REMOVED}` and the day steps back to `OPEN`. ADR-0031 decision 10
    ruled that shape before any request could produce it. FR-064 forbids disclosing activity;
    whether "wrote and thought better of it" is activity is a product question.
+
+   *Ruled by the owner on 2026-10-21, to be built: the partner sees nothing, in `GET /today`
+   and in the archive.* The same ruling as ADR-0036's sixth question. Until it is built, the
+   shape above is what is served.
 3. **A replay spends a rate-limit token** (decision 11).
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 
 ## Revisit when
 
