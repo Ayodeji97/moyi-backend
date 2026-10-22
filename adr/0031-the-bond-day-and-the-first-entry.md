@@ -572,6 +572,9 @@ client's counter must normalise the same way or a member sees "fits" and gets a 
 spec chose this; a test (`the 500 is counted on the NFKC form`) pins it and is the one to
 change if he decides otherwise.
 
+*(Ruled by the owner on 2026-10-21: counted on the text as typed, to be built. See
+"Rulings — the owner, 2026-10-21", below.)*
+
 **24. An `@Idempotent` request's body is buffered by the interceptor, bounded, and a body
 it cannot take is a `4xx`.** The caching filter used to read every `POST`/`PUT`/`PATCH` body
 eagerly, on every path, and — to bound that — declined any request without a
@@ -926,6 +929,8 @@ and the rows asserted still whole.*
   first): whether the 500 should be counted on the raw text rather than the NFKC form, and
   whether an entry made only of zero-width characters should be refused. The C1 follow-up
   left both alone on purpose.
+  *(Both ruled by the owner on 2026-10-21, and both to be built: "Rulings — the owner,
+  2026-10-21", below.)*
 - **V13's backfill is covered twice.** `AnchorIntervalBackfillTest` migrates a database to
   just before V13, inserts bonds in every state and in the zones where a date is easiest to
   get wrong, runs V13, and loads each timeline through the application's own loader; the
@@ -933,6 +938,24 @@ and the rows asserted still whole.*
   the development database (16 `PENDING_MEMBER`, 6 `ARCHIVED`, 4 `ACTIVE`; `Africa/Lagos` and
   `Europe/London`): every bond got one open interval starting at its `created_at`, and no
   `first_label` disagreed with its zone.
+
+## Rulings — the owner, 2026-10-21
+
+The two questions about `EntryText` that decision 23 and "Owed" left open. They were put to
+the owner on 2026-10-03 and not recorded then as his. Neither ruling is built here; both are
+to be built in a later pull request.
+
+1. **The 500 are counted on the NFKC form** (decision 23), so an iOS typographic ellipsis
+   counts as three of them.
+
+   *Ruled by the owner on 2026-10-21, to be built: the 500 are counted as typed, as
+   user-perceived characters (grapheme clusters) of the text as sent.* The test `the 500 is
+   counted on the NFKC form` is the one to turn. The blank check and the 8192 octets are
+   not part of the ruling.
+2. **An entry made only of zero-width characters is accepted.** NFKC and `trim` leave a
+   zero-width character in place, so such a text passes the blank check and is stored.
+
+   *Ruled by the owner on 2026-10-21, to be built: it is refused as empty, a `422`.*
 
 ## Revisit when
 
@@ -949,6 +972,7 @@ and the rows asserted still whole.*
   decision 13's argument that the `require`s cannot fire rests on changes being far apart.
 - Daniel answers decision 23's open question — whether the 500 are counted on the NFKC form
   or on the text as typed. One test pins the current answer.
+  *(Answered on 2026-10-21: on the text as typed. To be built.)*
 - Phase 4 builds somewhere for `imageMediaId`/`voiceMediaId` to go, and `422
   MEDIA_NOT_YET_SUPPORTED` needs to become an actual write path rather than a refusal.
 - Phase 5 encrypts `entries.text` — `idempotency_keys` no longer holds a copy to encrypt

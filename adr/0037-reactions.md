@@ -437,20 +437,34 @@ is a review's finding of 2026-10-15, left as built.
    domain enum. Built as ruled. The final set, and whether each is drawn as a glyph or a
    word, is the owner's and the design's. Changing it after merge is a migration and a
    breaking change, so it is cheapest to turn before a client is generated.
+
+   *Ruled by the owner on 2026-10-21, to be built: five, `HEART`, `THANK_YOU`, `SMILE`,
+   `MOVED` and `ME_TOO` ("I'm grateful for that too"), in the contract's enum, the table's
+   `CHECK` and the domain enum.* Whether each is drawn as a glyph or a word is left to the
+   design.
 2. **The routes' shape against doc 06.** `PUT`/`DELETE …/reaction` where doc 06 has
    `POST …/reactions` and `DELETE …/reactions/{type}` (decision 1). It follows from "one
    per member per entry". Turning it is a rename, and doc 06 is to be corrected either way:
    as written it permits every type at once.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.* Doc 06
+   still owes the correction.
 3. **No stored time.** Doc 07 specifies `created_at`; V23 has none (decision 3). Built
    without because the only thing it could record is when the partner read. Adding it later
    is a new migration, and the column would be empty for every reaction made before it.
+
+   *Not put to the owner on 2026-10-21; it stands as built.*
 4. **The millisecond race in decision 5.** A reaction sent before a plain ending can land
    just after it, and the author sees it. Built: accepted, pinned by a test. The other way
    is the bond's lock on every `PUT`, which waits behind a withdrawal's delivery with a
    pooled connection.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 5. **Decision 9.** A withdrawal leaves the withdrawer's own reactions on the partner's
    entries. Built: kept, for the twin's sake. The other way is to remove them in the
    consumer, and then a deletion by hand must be made to do the same or the two differ.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 6. **A visible reaction is, by the corpus's own argument, a read receipt.** The corpus read
    said so (X4): a reaction cannot be made without reading, so showing it shows that the
    partner read. FR-064 forbids read receipts. The owner ruled "visible to the author" on
@@ -466,16 +480,23 @@ is a review's finding of 2026-10-15, left as built.
    between two of their own reads. No sentence of the owner's in this repository says a
    read receipt of this kind is acceptable; if "visible" was not meant to carry that, this
    is the question.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.* A
+   reaction is something the reactor chooses to send, and showing it is acceptable.
 7. **`409 REACTION_BUSY`, and where it stops** (decision 6). Not in the plan and not ruled
    by the owner. Built: a held row on an entry read in full is a retryable `409`; on a
    tombstone, `204`. The other ways are the plan's (`204` always, which can report a
    removal that an eraser's rollback undoes) and the first ruling's (`409` always, which
    tells a withdrawal from its twin for as long as the delivery runs).
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 8. **The same narrowing on a bookmark's unmark** (`01752a7`). It changes what #60 merged:
    `DELETE …/favourite` on a tombstone whose row is held was `409 FAVOURITE_BUSY` and is
    `204`. Built because the codebase treats a withdrawal oracle as a defect and the twin
    test proved one. It is its own commit and reverts alone; reverting it without reverting
    `6630c56` leaves the two tables answering differently.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 9. **No reaction is drawn.** The Figma-alignment record for the two routes and the field,
    from `states.md` and `tokens.md` as read at the corpus's `9be5149`:
 
@@ -488,10 +509,16 @@ is a review's finding of 2026-10-15, left as built.
    | When a reaction was left | not sent | none may be drawn (`tokens.md`: no timestamp slot on an entry card) |
 
    No screen was invented and Figma was not touched.
+
+   *Ruled by the owner on 2026-10-21, as ADR-0036's fifth question was: the gaps are to be
+   written into `states.md` as specifications to draw from, and drawn when Figma is available
+   again.*
 10. **The four decisions the implementer made** (decisions 2, 4 and 5): `204` for a
     `DELETE` on one's own entry; body refusals before the entry lookup; the ended-bond
     check on the membership read after the entry; `BOND_ARCHIVED` last. The first two are
     status codes a client sees.
+
+    *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 11. **After a block that keeps the entries, the blocked member can still take reactions off
     the blocker's entries.** Raised by the concurrency review of 2026-10-15 (its m1), by
     reading; not run as a block in its own right, though `ReactionsTest` ("no reaction can
@@ -509,6 +536,10 @@ is a review's finding of 2026-10-15, left as built.
     are equally ended and the `ERASED` branch is untouched); it then needs a second
     decision, whether a reaction the blocked member can no longer remove stays shown to the
     blocker or is hidden from them. Not decided by anyone; the owner's to rule.
+
+    *Ruled by the owner on 2026-10-21, to be built: `unreact` is refused once the bond has
+    ended, by `react`'s `hasLeft || !isOpen` check. A reaction the blocked member can no
+    longer remove stays shown to the blocker.*
 
 ### The corpus
 

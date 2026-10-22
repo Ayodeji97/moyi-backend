@@ -969,11 +969,15 @@ Each is built one way and cheap to turn.
    member who left too (decision 14), reading BR-9 as writes to what the two share. Turning
    it is one check in `FavouriteEntry`, and then the bookmark control on an archived bond's
    day view must be absent.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 2. **The emptied day is listed for its author** (decision 1). A day that closed `EMPTY`
    because its author deleted their only entry shows that author `status: EMPTY` and their
    own tombstone, and shows the partner nothing. It follows from the rule and from "a
    tombstone the member could once read is still shown". Hiding it would be one predicate
    more, and the first place the list was decided from a day's status.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 3. **An empty favourites page with a cursor** (decision 7). **Answered on 2026-10-09, the
    other way.** This question framed it as a matter of round trips; the whole-branch
    privacy review showed it told a withdrawal from a deletion by hand. The request now
@@ -983,6 +987,8 @@ Each is built one way and cheap to turn.
 4. **`until`** is an API the corpus does not name (decision 5). Doc 06 gives the feed three
    parameters. Built as a fourth, and inclusive, so the client sends the last day of the
    month it jumps to.
+
+   *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
 5. **Whether a day item carries what the screens need.** `states.md` §6 read against the
    response; this is the Figma-alignment record for the four routes.
 
@@ -1014,15 +1020,26 @@ Each is built one way and cheap to turn.
    for the first three. The rows for the report entry point, on-this-day and milestones,
    the toggle's manner and the month picker's range were added after the conformance
    review found them missing.
+
+   *Ruled by the owner on 2026-10-21.* The design gaps are to be written into `states.md` as
+   specifications precise enough to draw from when Figma is available again; the drawing is
+   deferred. The partner's display name is added to the archive response, to be built;
+   `bond` owes it.
 6. **A partner's entry that was written and erased before you saw it is a permanent
    `REMOVED` in the archive** (decision 1). BR-8 allows the shape, and `today` has shown it
    for the day since C5a. Built: shown for good, on every walk. Hiding it once the day has
    closed would be one more rule, and the first that renders an entry from its day's
    state.
+
+   *Ruled by the owner on 2026-10-21, to be built: hidden.* The same ruling as ADR-0032's
+   second question.
 7. **`entry_favourites.created_at`** (decision 10). The corpus specifies the column;
    nothing returns it, orders by it or filters on it; to an operator it is the time a
    person was reading. Built: kept, as specified. Dropping it is an edit to V22 while the
    branch is unmerged, and a new migration after.
+
+   *Ruled by the owner on 2026-10-21, to be built: the column is dropped, by a new
+   migration.*
 8. **What a client may cache** (decision 9). `private, no-cache` lets a client's HTTP cache
    keep entry text, where every other response is `no-store`. Withdrawn words then stay on
    the other member's device until that page is asked for again, and two accounts on one
@@ -1030,6 +1047,10 @@ Each is built one way and cheap to turn.
    no `Vary`. The other ways are `no-store` (the tag then serves only a client that keeps
    its own copy, as the bond route's does) or a rule for the client: one cache per account,
    cleared at sign-out. The KMP client is not written yet.
+
+   *Ruled by the owner on 2026-10-21: the header stands as built.* The KMP client must keep
+   one cache per account and clear it at sign-out; that is a requirement on the client, and
+   the question is closed for the backend.
 
 ### The corpus
 
