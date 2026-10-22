@@ -425,6 +425,30 @@ internal class CloseDayTest(
         events("DayClosed") shouldBe 1
     }
 
+    /** The same joining day, but Bea left that afternoon: resumed, it is PARTIAL with two entries, and is withheld (ADR-0035 q9). */
+    @Test
+    fun `a joining day both wrote on is withheld, and closes pending, when the bond separated before its end`() {
+        clock.set(NOW)
+        val created = createBond(ada)
+        val bond = idOf(created)
+        submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
+        accept(bea, codeOf(created)).status shouldBe 200
+        submit(bea, bond, """{"text":"his"}""").status shouldBe 201
+        jdbc.update("UPDATE bond_days SET status = 'SUSPENDED', revealed_at = NULL WHERE bond_id = ?::uuid", bond)
+        jdbc.update("UPDATE entries SET status = 'SUBMITTED', revealed_at = NULL WHERE bond_id = ?::uuid", bond)
+        jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
+        clock.set(Instant.parse("2026-09-15T15:00:00Z"))
+        leave(bea, bond)
+
+        closeDay.settle(dayOf(bond), END) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "PENDING_REVEAL"
+        closedAt(bond) shouldBe END
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 0
+        events("DayRevealed") shouldBe 0
+        events("DayClosed") shouldBe 1
+    }
+
     @Test
     fun `a day from before the pairing is closed as it stands - still suspended, nothing revealed, no event`() {
         clock.set(NOW.minusSeconds(86_400))
