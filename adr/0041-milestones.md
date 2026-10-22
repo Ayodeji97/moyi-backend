@@ -488,4 +488,6 @@ author's.
   is today; decision 5's read order; that an account deletion leaves a day's status as it was,
   which no test here drives, being `identity`'s route (the withdrawal's erasure is the test).
 - **Not run by anyone:** the Bruno request; CI's contract action; the peer's `PENDING_REVEAL`
-  ruling against these tests (it is not yet built).
+  ruling against these tests (it is not yet built). *(Amended 2026-10-22, ADR-0040: it is built,
+  and `MilestoneReachedTest` covers it: a withheld day 7 is evaluated `COMPLETE`, writes one
+  `MilestoneReached`, and dates the 7 milestone.)*

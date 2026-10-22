@@ -44,7 +44,8 @@ branch only; and `BondDay.close` turned every `PENDING_REVEAL` day into `REVEALE
 
 ### The controller's decisions
 
-1. **"Ended" is "separated", for both rulings, and separated is `separatedAt`.**
+1. **"Ended" is "separated", for both rulings (q1 and q9), and separated is `separatedAt`.**
+   A countdown can be called off, so a day whose reveal fell due inside one is revealed.
    `BondClosingView.separatedAt` is the earliest of `bond.archivedAt` and any member's
    `leftAt`, and `null` while neither is set. `BondMembership.separatedAt` is the same value,
    computed by one file-level function in the adapter (`separatedAtOf`), so the closer and
@@ -67,8 +68,6 @@ branch only; and `BondDay.close` turned every `PENDING_REVEAL` day into `REVEALE
    the very instant the reveal falls due is too late to withhold it. The close job runs up to
    a quarter of an hour late; a late run must not decide who reads what. A reveal that fell
    due before the bond separated is made, however late the job comes to it.
-3. **"Ended" for q9 is separated, as for q1.** The same reason: a countdown can be called
-   off, and a day whose reveal fell due inside one is revealed.
 
 ### What the plan decided
 
@@ -112,6 +111,16 @@ branch only; and `BondDay.close` turned every `PENDING_REVEAL` day into `REVEALE
   day's status (`Entry.canBeReadBy`). So a withheld day's partner entry is `LOCKED` with no
   further mechanism: the day view shows `{authorMemberId, status: LOCKED}` and the search
   does not find it. Run, not read (DayViewTest, How this was checked).
+- **The due instant is read from the bond's current reveal time**, so a move made while the
+  bond is live shifts it, earlier or later, and a clear makes it the day's end. Once the bond
+  has separated the time cannot change: `UpdateBond.patch` refuses a bond that is not open
+  (`Bond.isOpen` is `PENDING_MEMBER` or `ACTIVE`; `BondArchivedException`, 409), which covers
+  `ARCHIVED` and `PENDING_DELETION`. A leave on an open bond archives it (`Bond.end`), and a
+  leave during a countdown leaves the status `PENDING_DELETION`; either way the time is
+  frozen from then on. So the time read at the close is the one in force at the separation,
+  which is what the rule needs. Read in the code, not run: no test moves the time and then
+  separates. A countdown called off reopens the bond and the time can move again, but a
+  member who left in it has `leftAt` set and `separatedAt` already fixes the separation.
 - **`DayOutcome.of(PENDING_REVEAL)` is `COMPLETE`.** `OPEN` and `PARTIAL` are still null.
 - **The lone-entry rule changes for a countdown.** A lone entry on a day that ends inside a
   deletion countdown is revealed (the couple may be together after the countdown is called
@@ -133,10 +142,14 @@ branch only; and `BondDay.close` turned every `PENDING_REVEAL` day into `REVEALE
 
 The three rulings are his. Then, one line each, with the alternative and what it costs:
 
-1. *A cleared reveal time is taken as due at the end of the day.* A day pending on a reveal
-   time that the bond's owner later clears is withheld only if the bond separates before the
-   day's end. Alternative: treat it as having fallen due at the instant it was cleared. Costs
-   a stored fact (when the time was cleared) the schema does not hold.
+1. *A moved or cleared reveal time is read as it stands, and a clear is taken as due at the
+   end of the day.* Either member of an open bond may change the reveal time (`PATCH
+   /bonds/{bondId}`, `PatchBondRequest.revealTimeLocal`; the route checks membership and that
+   the bond is open, and no role), and nothing remembers what it was. A day pending on a time
+   that was moved is judged against the new time; one pending on a time that was cleared is
+   withheld only if the bond separates before the day's end. Alternative: record each change
+   and judge a day by the time in force when the second entry landed. Costs a stored history
+   the schema does not hold. See the consequence on this under Consequences.
 2. *The leaver's archive.* After a leave the leaver's own archive shows the withheld day
    exactly as the stayer's does: `PENDING_REVEAL`, the caller's entry in full, the partner's
    as a lock. Alternative: show the leaver nothing of a day on the bond they left. Costs
@@ -173,8 +186,6 @@ For the owner to carry into the corpus repository, which is not edited here.
 
 - The owner turns Question 4 (`archivedAt` alone): `separatedAt` becomes `archivedAt`, and the
   tests of the countdown-leave cases flip.
-- A reveal can be rescheduled after both have written: `revealFallsDueAt` is read at the
-  moment of the close, from the bond's current reveal time.
 - The streak or the day view acquires a reader that treats `isClosed` as "settled".
 
 ## How this was checked
