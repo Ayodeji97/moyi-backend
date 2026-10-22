@@ -67,12 +67,16 @@
 # And it reads on-this-day: last year's day, put in by hand, for both members;
 # and after a leave, the same nothing for both, while search still reads.
 # Every day it reads is today, but for last year's, put in by hand: no day
-# ends during a run, so paging and past days are the tests' to show. Last run on 2026-10-22, against a database of
-# its own (MOYI_DB, below), from e1ac2be (its jar's code is 50c269a's; both
-# named as they stand after the rebase onto 25fa9c1, which changed only ADRs), with
-# --attach to a jar booted by hand exactly as below but on Postgres's port
-# 55432, because another project's container held 5432: 902 passed, 0
-# failed, 0 skipped, 23 sections. On 2026-10-21, at 683af97 (its jar's code
+# ends during a run, so paging and past days are the tests' to show. Last run
+# on 2026-10-22, after the final reviews' fix round, against a database of its
+# own (MOYI_DB, below), from 569b420 (the jar built from it; the commit after
+# it changed only this header and ADR-0039), with --attach to a jar booted by
+# hand exactly as below but on Postgres's port 55432, because another
+# project's container held 5432: 902 passed, 0 failed, 0 skipped, 23 sections.
+# Before it, from e1ac2be (its jar's code 50c269a's, both named as they stand
+# after the rebase onto 25fa9c1), 902, 0 and 0 in 23; the final review's run at
+# c5b98b6 skipped one tag-across-the-erasure check, the poller having won the
+# race. On 2026-10-21, at 683af97 (its jar's code
 # is 0f04535's), 852, 0 and 0 in 22; the run before that, on the same
 # head, skipped the two tag-across-the-erasure checks because the poller won
 # the race, which is what they skip on. On 2026-10-20, from 0f04535, 850, 0

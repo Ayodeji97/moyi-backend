@@ -629,6 +629,27 @@ record's author's.
     never reach a log, an exception message, or a second column (one exception:
     `entries.text_search`, … ADR-0039); nor does an invite code, except …". AGENTS.md's rule 3
     carries the same words.
+- **The two final reviews** (2026-10-22, at `c5b98b6`). Conformance: Critical 0, Important 1
+  (ADR-0031's ruling on counting, decision 9), Minor 9, documentation only; oasdiff run.
+  Concurrency: Critical 0, Important 1 (an older build's erasure keeps the projection), Minor 3
+  (V25's deadlock, on-this-day's stale membership, the boot-time budget), each reproduced on a
+  scratch database or by a probe; `./gradlew build --rerun-tasks` 1,503 tests, 0 failed, 2
+  skipped; the smoke 901, 0 and 1 skipped (a reactions timing check) in 23 sections; the
+  measurement under 1 ms with no sequential scan.
+- **The fix round** (2026-10-22, its implementer; `c0cb14e` to the head). Each code change seen
+  red first and its mutation red, restored: `LIVE_ROW` (decision 5), V25's lock (Consequences),
+  the fresh membership (decision 14), the 400 and the mirrored limits (decision 12).
+  `./gradlew build --rerun-tasks` at `569b420`: green, 217 tasks executed, **1,507 tests, 0
+  failures, 0 errors, 2 skipped** (the measurements), counted from all 175 result files.
+  `MOYI_MEASURE=1`: search at 100k and 500k and on-this-day at both, every statement under
+  1 ms (at most 0.805 ms), no `Seq Scan`, no index scan wider than the bond's 1,460; the
+  shapes those of the final review's run. **The smoke**, on a fresh database
+  `moyi_c6b_fixsmoke` in the compose Postgres on 55432, the jar built from `569b420` booted by
+  hand as `scripts/smoke.sh` boots it and the script run with `--attach`: **902 passed, 0
+  failed, 0 skipped, 23 sections**, the search and on-this-day section 49; the application's
+  log held no `ERROR` line, no `q=` and none of the searched words. The database was dropped
+  and seen gone, the jar stopped, Postgres stopped again. `scripts/state-map-check --strict`
+  exit 0.
 - **Argued, not run:** that `q` sent twice is joined by a comma (decision 11); that no
   Security filter reads a request parameter (the re-review ran every level at TRACE and saw
   nothing, which is evidence for today's filters only); that the backfill's cost grows linearly
