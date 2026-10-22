@@ -9,9 +9,11 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only by default. The two jobs that push to GHCR (image, manifest)
+# ask for packages: write themselves; quality and gitleaks never needed it
+# and held it only because it used to be granted to the whole workflow.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   # ktlint, detekt, compile, unit + integration tests (including the
@@ -78,16 +80,62 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+
   # Builds the deployable image (Spring Boot's own Cloud Native Buildpacks
-  # support — no hand-maintained Dockerfile) and publishes it to GHCR.
-  # Only on a real merge to main, never on PRs. No deploy stage: nothing
+  # support — no hand-maintained Dockerfile) once per CPU architecture, and
+  # on a real merge to main publishes it to GHCR. No deploy stage: nothing
   # pulls this image anywhere yet (CD is a follow-up plan, per doc 25 §7
   # steps 10-12 being out of scope here) — this just makes the artifact a
   # future deploy stage will need exist on every merge.
-  publish:
+  #
+  # Two architectures because the planned host is a Hetzner CAX server,
+  # which is ARM (linux/arm64); amd64 stays so the same tag still runs on
+  # an x86 machine. Each is built NATIVELY on a runner of its own
+  # architecture (ubuntu-24.04-arm is GitHub's hosted ARM runner, free for
+  # public repositories) rather than under QEMU emulation on one runner:
+  # emulating a whole buildpack build is several times slower, and
+  # bootBuildImage drives the Docker daemon directly, so there is no
+  # buildx --platform to hand it anyway.
+  #
+  # No imagePlatform is set in app/build.gradle.kts: Boot (4.1.1 here)
+  # asks the daemon for its own platform and pulls the builder and run
+  # image for it. The default builder, paketobuildpacks/builder-noble-java-tiny,
+  # and its run image, ubuntu-noble-run-tiny, are both published for
+  # linux/amd64 and linux/arm64. Checked 2026-10-22 on an Apple Silicon
+  # Mac: Boot logged "Pulling run image ... for platform 'linux/arm64'",
+  # the image's Architecture was arm64, and it started on Java 25.
+  #
+  # Runs on pull requests too, without pushing, so a PR proves both
+  # architectures still build. It waits for quality and gitleaks, as the
+  # old single-arch publish job did, so nothing is ever pushed for a
+  # commit that failed them; on a PR that costs a few minutes of
+  # wall-clock after quality, which was judged cheaper than giving that
+  # guarantee up.
+  #
+  # A PR that changes this job proves only the build half on its own run.
+  # The login, the push and the manifest job below run only on
+  # push-to-main, so they are proven by the first run after merge and by
+  # nothing before it.
+  image:
     needs: [quality, gitleaks]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    strategy:
+      # One architecture failing should not cancel the other: on a PR the
+      # useful answer is which of the two broke, not just that one did.
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    # Job-level permissions replace the workflow's, so contents: read is
+    # restated. packages: write is held on PRs too, where nothing is
+    # pushed — permissions cannot depend on the event — and a PR from a
+    # fork gets a read-only token whatever this says.
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
 
@@ -96,11 +144,12 @@ jobs:
       # gradle/gradle-daemon-jvm.properties, so EVERY Gradle invocation
       # needs a 21 available — including this one. Without it Gradle falls
       # back to downloading 21 from the foojay URLs in that file, which
-      # adds a download to every publish and fails outright if those
+      # adds a download to every build and fails outright if those
       # pinned URLs ever rot.
       #
-      # This job only runs on push-to-main, so a PR can never prove this
-      # line is right. It was found by reading, not by a green check.
+      # Before this job ran on pull requests, a PR could never prove this
+      # line was right; it was found by reading, not by a green check. It
+      # now runs on every PR, on both architectures.
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -113,9 +162,55 @@ jobs:
       - id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
+      # The per-architecture tag (<sha>-amd64, <sha>-arm64) is a staging
+      # name: the manifest job below gathers both under <sha> and latest,
+      # which are the tags anything should pull.
       - run: |
           ./gradlew :app:bootBuildImage \
-            --imageName=${{ steps.image.outputs.name }}:${{ github.sha }}
+            --imageName=${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }}
+
+      # The tag claims an architecture; this makes the image prove it. If a
+      # runner label ever maps to a different machine than its name says,
+      # or Boot stops following the daemon's platform, the manifest below
+      # would list the wrong platform under the right name, and nothing
+      # else here would notice until an ARM server failed to start it.
+      - run: |
+          built=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' \
+            ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }})
+          echo "built $built"
+          test "$built" = "linux/${{ matrix.arch }}"
+
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker push ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }}
+
+  # Publishes <sha> and latest as one multi-arch tag: an OCI index that
+  # points at both per-architecture images, so a docker pull on the ARM
+  # host and on an x86 machine each get their own. Built in the registry
+  # by buildx imagetools (preinstalled on GitHub's Ubuntu runners), which
+  # copies no layers — it only writes the index.
+  #
+  # Only on push-to-main, so no PR, including one that edits this job, can
+  # prove it; the first run after merge is its test. If a later merge
+  # cancels this run (the concurrency group above), the per-arch tags of
+  # the cancelled commit stay behind without a <sha> or latest; nothing
+  # pulls them, and the next run publishes its own.
+  manifest:
+    needs: [image]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/login-action@v4
         with:
@@ -123,7 +218,34 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - run: |
-          docker tag ${{ steps.image.outputs.name }}:${{ github.sha }} ${{ steps.image.outputs.name }}:latest
-          docker push ${{ steps.image.outputs.name }}:${{ github.sha }}
-          docker push ${{ steps.image.outputs.name }}:latest
+      - env:
+          NAME: ${{ steps.image.outputs.name }}
+          SHA: ${{ github.sha }}
+        run: |
+          docker buildx imagetools create \
+            --tag "$NAME:$SHA" \
+            --tag "$NAME:latest" \
+            "$NAME:$SHA-amd64" \
+            "$NAME:$SHA-arm64"
+
+      # Reads back what the registry now holds rather than trusting that
+      # create succeeded: both tags must be an index listing exactly
+      # linux/amd64 and linux/arm64, and must be the same index. Entries
+      # whose platform is unknown/unknown are attestations, not images, and
+      # are left out of the comparison.
+      - env:
+          NAME: ${{ steps.image.outputs.name }}
+          SHA: ${{ github.sha }}
+        run: |
+          expected=$'linux/amd64\nlinux/arm64'
+          for tag in "$SHA" latest; do
+            platforms=$(docker buildx imagetools inspect --raw "$NAME:$tag" \
+              | jq -r '.manifests[].platform
+                       | select(.os != "unknown")
+                       | "\(.os)/\(.architecture)"' \
+              | sort)
+            echo "$NAME:$tag -> ${platforms//$'\n'/ }"
+            test "$platforms" = "$expected"
+          done
+          test "$(docker buildx imagetools inspect --raw "$NAME:$SHA" | sha256sum)" \
+            = "$(docker buildx imagetools inspect --raw "$NAME:latest" | sha256sum)"
