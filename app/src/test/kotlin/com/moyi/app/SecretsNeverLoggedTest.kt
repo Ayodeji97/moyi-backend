@@ -73,7 +73,8 @@ import javax.sql.DataSource
  * tokens, across register, sign-in, pairing, submit, read, edit, the reveal,
  * the archive (the feed with and without `favourites`, one day, a bookmark
  * set and removed, a conditional read that answers `304`), a search, by a
- * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), on this day with a memory, a reaction set,
+ * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), on this day with a memory, the
+ * milestones, a reaction set,
  * replaced, refused and taken back, delete, an ending
  * that withdraws, the withdrawal's erasure by the dispatcher, a failing
  * transactional consumer, and a refresh. An `ETag` is not scanned for: it is
@@ -209,6 +210,8 @@ class SecretsNeverLoggedTest(
         get("/bonds/$bond/today", bea).body.contains(ADA_EDITED) shouldBe true
         get("/bonds/$bond/today", ada).body.contains(BEA_TEXT) shouldBe true
         get("/bonds/$bond/streak", ada).status shouldBe 200
+        // Milestones (slice C6c): a read of the bond's days that binds the bond id and the thresholds, nothing written.
+        get("/bonds/$bond/milestones", ada).status shouldBe 200
 
         // The archive: the feed, one day, a bookmark set and removed, and a conditional read.
         val today = get("/bonds/$bond/today", ada).json["bondDay"]["date"].asString()

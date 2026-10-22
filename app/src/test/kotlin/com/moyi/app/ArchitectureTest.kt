@@ -556,4 +556,27 @@ class ArchitectureTest {
             "DailyPrompt holds only what its constructor is handed. Found properties: $fields",
         )
     }
+
+    @Test
+    fun `the milestones are read from the bond's days, and from nothing a member did alone`() {
+        // H-M1 (ADR-0041 decision 12): no server-side "seen" or "celebrated" state per member. A
+        // store that remembered who had been shown a milestone would be a read receipt (FR-064),
+        // and it would have to be handed to GetMilestones. So what it is handed is pinned. The
+        // bond's access port is for the membership resolved again after the joining-day
+        // reconcile, which decides `next` (the controller's ruling 1).
+        val file =
+            project.files.single { it.name == "GetMilestones" && it.normalisedProjectPath.contains("/modules/gratitude/src/main/") }
+        val milestones = file.classes().single { it.name == "GetMilestones" }
+        val handed =
+            milestones.primaryConstructor
+                ?.parameters
+                .orEmpty()
+                .map { it.type.name }
+        assertTrue(
+            handed.sorted() == listOf("BondAccess", "Clock", "GetStreak", "StreakCalendar") &&
+                milestones.secondaryConstructors.isEmpty(),
+            "GetMilestones is handed the bond's access port, the calendar, the streak's rule for today and the clock, " +
+                "and nothing else. Found: $handed",
+        )
+    }
 }

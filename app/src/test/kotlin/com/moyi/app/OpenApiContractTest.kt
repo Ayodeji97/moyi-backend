@@ -545,6 +545,29 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `milestones are what was reached and the next threshold, and no count`() {
+        val milestones = api.paths["/api/v1/bonds/{bondId}/milestones"]!!.get
+        milestones.operationId shouldBe "milestones"
+        milestones.parameters.filter { it.`in` == "query" } shouldBe emptyList()
+        milestones.responses.keys shouldContainAll listOf("200", "401", "404", "429")
+        milestones.responses.keys shouldNotContain "422"
+        milestones.responses["200"]!!
+            .content["application/json"]!!
+            .schema.`$ref` shouldBe "#/components/schemas/MilestonesResponse"
+        // FR-076, H-M2, H-M3, Q-M3: thresholds and dates, nothing about a member, and no count.
+        api.components.schemas["MilestonesResponse"]!!
+            .properties.keys shouldBe setOf("achieved", "next")
+        api.components.schemas["AchievedMilestoneResponse"]!!
+            .properties.keys shouldBe setOf("threshold", "achievedOn")
+        api.components.schemas["NextMilestoneResponse"]!!
+            .properties.keys shouldBe setOf("threshold")
+        val told = milestones.description.shouldNotBeNull()
+        // ADR-0041 decision 14: the thresholds in words, a mirror of Milestones.THRESHOLDS.
+        told shouldContain "7, 30, 100 and 365"
+        told shouldContain "takes no writes"
+    }
+
+    @Test
     fun `search documents q as required and bounded, the feed's limit and cursor, its 400, 422 and 404, and the feed's page`() {
         val search = api.paths["/api/v1/bonds/{bondId}/search"]!!.get
         search.operationId shouldBe "search"

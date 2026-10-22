@@ -185,6 +185,7 @@ class OpenApiConfiguration {
             documentPrompts(api)
             documentSearch(api)
             documentOnThisDay(api)
+            documentMilestones(api)
         }
 
     /**
