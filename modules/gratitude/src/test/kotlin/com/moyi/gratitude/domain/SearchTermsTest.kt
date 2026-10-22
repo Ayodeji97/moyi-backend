@@ -4,8 +4,11 @@ import io.kotest.assertions.withClue
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import tools.jackson.databind.json.JsonMapper
+import java.io.File
 
 /** `q` (ADR-0039 decision 9): 1 to 100 graphemes as an entry counts them, 1,024 octets, never blank, never NUL. */
 internal class SearchTermsTest {
@@ -54,8 +57,29 @@ internal class SearchTermsTest {
         "$terms" shouldNotContain "secret"
     }
 
+    @Test
+    fun `the contract states these limits, not others`() {
+        // contracts mirrors the two constants, which are internal here (final review m9); this is the drift guard. The
+        // committed document is held to the generated one by OpenApiContractTest, so the chain is closed.
+        val q =
+            JsonMapper()
+                .readTree(CONTRACT)
+                .path("paths")
+                .path("/api/v1/bonds/{bondId}/search")
+                .path("get")
+                .path("parameters")
+                .single { it.path("name").asString() == "q" }
+        q.path("schema").path("maxLength").asInt() shouldBe SearchTerms.MAX_OCTETS
+        val told = q.path("description").asString()
+        told shouldContain "1 to ${SearchTerms.MAX_GRAPHEMES} characters"
+        told shouldContain "at most ${SearchTerms.MAX_OCTETS} UTF-8 octets"
+    }
+
     private companion object {
         /** One user-perceived character, twenty-five octets. */
         const val FAMILY = "👨‍👩‍👧‍👦"
+
+        /** The committed contract, from this module's directory (the test's working directory). */
+        val CONTRACT = File("../../contracts/openapi.json")
     }
 }

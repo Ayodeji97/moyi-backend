@@ -31,3 +31,12 @@ dependencies {
     testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     testRuntimeOnly("org.postgresql:postgresql")
 }
+
+// SearchTermsTest holds the committed contract's search limits to SearchTerms (ADR-0039): the
+// document is an input, so a change to it alone reruns the test rather than reusing a result.
+tasks.test {
+    inputs
+        .file(rootProject.layout.projectDirectory.file("contracts/openapi.json"))
+        .withPropertyName("contract")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}

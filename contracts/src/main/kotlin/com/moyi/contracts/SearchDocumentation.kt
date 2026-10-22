@@ -4,10 +4,17 @@ import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.media.IntegerSchema
 import io.swagger.v3.oas.models.media.StringSchema
 
-private const val SEARCH_OPERATION = "search"
+internal const val SEARCH_OPERATION = "search"
 
-/** `gratitude.domain.SearchTerms.MAX_OCTETS`, internal to that module and mirrored here as the archive's bounds are. */
+/**
+ * Mirrors `gratitude.domain.SearchTerms.MAX_OCTETS`, internal to that module, as `ENTRY_TEXT_MAX_OCTETS`
+ * mirrors `EntryText`'s. The drift guard is on the other side: `SearchTermsTest` reads the committed
+ * `contracts/openapi.json` and holds both limits stated there to `SearchTerms`'s constants.
+ */
 private const val SEARCH_MAX_OCTETS = 1024
+
+/** Mirrors `gratitude.domain.SearchTerms.MAX_GRAPHEMES`; see [SEARCH_MAX_OCTETS]. */
+private const val SEARCH_MAX_GRAPHEMES = 100
 
 /**
  * `GET /bonds/{bondId}/search` (ADR-0039). The handler takes `q`, `limit` and `cursor` as
@@ -32,11 +39,13 @@ internal fun documentSearch(api: OpenAPI) {
                     parameter.required = true
                     parameter.schema = StringSchema().minLength(1).maxLength(SEARCH_MAX_OCTETS)
                     parameter.description =
-                        "The words to look for: 1 to 100 characters (graphemes, counted on the NFKC-normalised, trimmed " +
-                        "text), at most $SEARCH_MAX_OCTETS UTF-8 octets, not only space, no U+0000. `maxLength` states " +
-                        "the octet cap in UTF-16 characters, a coarse hint. A value that cannot be searched is 422 " +
-                        "VALIDATION_FAILED on `q`, and is never sent back. Words with no letter or digit in them " +
-                        "(punctuation, emoji) match nothing."
+                        "The words to look for: 1 to $SEARCH_MAX_GRAPHEMES characters (graphemes, counted on the " +
+                        "NFKC-normalised, trimmed text), at most $SEARCH_MAX_OCTETS UTF-8 octets, not only space, no " +
+                        "U+0000. `maxLength` states the octet cap in UTF-16 characters, a coarse hint. A value that " +
+                        "cannot be searched is 422 VALIDATION_FAILED on `q`, and is never sent back. A value whose " +
+                        "percent-decoded bytes are not UTF-8 is 400 MALFORMED_REQUEST, for a member and a stranger " +
+                        "alike, after authentication and before the membership check. Words with no letter or digit " +
+                        "in them (punctuation, emoji) match nothing."
                 }
 
                 "limit" -> {

@@ -545,10 +545,15 @@ class OpenApiContractTest(
     }
 
     @Test
-    fun `search documents q as required and bounded, the feed's limit and cursor, its 422 and 404, and the feed's page`() {
+    fun `search documents q as required and bounded, the feed's limit and cursor, its 400, 422 and 404, and the feed's page`() {
         val search = api.paths["/api/v1/bonds/{bondId}/search"]!!.get
         search.operationId shouldBe "search"
-        search.responses.keys shouldContainAll listOf("200", "401", "404", "422", "429")
+        search.responses.keys shouldContainAll listOf("200", "400", "401", "404", "422", "429")
+        // An undecodable q is UndecodableParameterFilter's 400 MALFORMED_REQUEST, a problem like every refusal.
+        search.responses["400"]!!
+            .content[MediaType.APPLICATION_PROBLEM_JSON_VALUE]!!
+            .schema.`$ref` shouldBe "#/components/schemas/ProblemDetail"
+        search.parameters.single { it.name == "q" }.description shouldContain "400 MALFORMED_REQUEST"
         search.responses.keys shouldNotContain "406"
         search.responses.keys shouldNotContain "409"
         search.requestBody.shouldBeNull()
