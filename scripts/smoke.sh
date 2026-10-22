@@ -66,13 +66,23 @@
 # from the row and from search.
 # And it reads on-this-day: last year's day, put in by hand, for both members;
 # and after a leave, the same nothing for both, while search still reads.
-# Every day it reads is today, but for last year's, put in by hand: no day
-# ends during a run, so paging and past days are the tests' to show. Last run
-# on 2026-10-22, after the final reviews' fix round, against a database of its
-# own (MOYI_DB, below), from 569b420 (the jar built from it; the commit after
-# it changed only this header and ADR-0039), with --attach to a jar booted by
-# hand exactly as below but on Postgres's port 55432, because another
-# project's container held 5432: 902 passed, 0 failed, 0 skipped, 23 sections.
+# Since slice C6c it reads milestones: nothing reached and 7 next on a new bond; the seventh
+# complete day today, six earlier ones put in by hand, reached the moment both wrote and the
+# same for both; and after a leave, what was reached kept and nothing next, for both alike.
+# Every day it reads is today, but for last year's and the milestones' six
+# before today, put in by hand: no day ends during a run, so paging and past
+# days are the tests' to show. Last run on 2026-10-22, for slice C6c, by its
+# final review, from 95ba089's jar: 930 passed, 0 failed, 0 skipped, 24
+# sections. Before it, against a database of its own (MOYI_DB, below), from
+# 1e1fc07 (named as it stands after the rebase onto dcb3b36; the jar was built
+# from the same tree before it; the commits after it change only tools, the
+# state map and the record), with
+# --attach to a jar booted by hand exactly as below but on Postgres's port
+# 55432, because another project's container held 5432: 930 passed, 0 failed,
+# 0 skipped, 24 sections. The run before it, on the same jar and a fresh
+# database, 929, 1 skipped (a tag-across-the-erasure check, the poller having
+# won the race) and 0 failed in 24. Before them, for C6b, from 569b420 (the
+# commit after it changed only this header and ADR-0039), 902, 0 and 0 in 23.
 # Before it, from e1ac2be (its jar's code 50c269a's, both named as they stand
 # after the rebase onto 25fa9c1), 902, 0 and 0 in 23; the final review's run at
 # c5b98b6 skipped one tag-across-the-erasure check, the poller having won the
@@ -1959,6 +1969,48 @@ is "on this day: …exactly nothing" "$LAST_BODY" '{"items":[]}'
 expect "on this day: nothing for the one who left" 200 "" -- "$API/bonds/$SE_BOND/on-this-day" -H "Authorization: Bearer $SE_B"
 is "on this day: …the same bytes" "$LAST_BODY" '{"items":[]}'
 search "search: the ended bond is still searched, by the one who left" 200 'thank you for the long walk home' "walk" "$SE_B"
+
+echo; echo "milestones — what the bond has reached of 7, 30, 100 and 365 complete days, and what is next (FR-075, ADR-0041)"
+flush_buckets
+# What this section is for: milestones as the jar serves them. A bond one day old has reached
+# nothing and 7 is next. Six earlier complete days, put in by hand (no day ends during a run),
+# make today the seventh: reached the moment both have written, the same bytes for both, with
+# nothing in the answer but what was reached and what is next. A stranger gets the bond's 404;
+# no cache may keep the answer. Once the bond has ended, what was reached stays and nothing is
+# next, the same bytes for both. MilestoneReached is the close job's, and no day ends during a
+# run: MilestoneReachedTest holds it.
+verified_account "milestoner" "203.0.113.130"; MI_A="$ACCOUNT_ACCESS"
+verified_account "milestoned" "203.0.113.131"; MI_B="$ACCOUNT_ACCESS"
+verified_account "outsider-m" "203.0.113.132"; MI_O="$ACCOUNT_ACCESS"
+revealed_bond "milestones" "$MI_A" "$MI_B" "thank you for the first week" "and thank you for the seventh day"
+MI_BOND="$RB_BOND"
+expect "milestones: a bond one day old has reached nothing, and seven is next" 200 '"next":{"threshold":7}' -- "$API/bonds/$MI_BOND/milestones" -H "Authorization: Bearer $MI_A"
+is "milestones: …exactly that" "$LAST_BODY" '{"achieved":[],"next":{"threshold":7}}'
+header_is "milestones: never stored" "Cache-Control" "no-cache, no-store, max-age=0, must-revalidate"
+expect "milestones: a stranger is told the bond's 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$MI_BOND/milestones" -H "Authorization: Bearer $MI_O"
+
+# Six complete days before today, evaluated, as the job would have left them.
+MI_TODAY="$(sql "SELECT (now() AT TIME ZONE 'Africa/Lagos')::date")"
+case "$MI_TODAY" in
+  psql-unavailable|psql-error*) MI_MADE=0 ;;
+  *) MI_MADE="$(sql "WITH d AS (INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, entry_count, created_at, closed_at, version, evaluated_at, evaluated_as, evaluated_strict, freeze_applied) SELECT gen_random_uuid(), '$MI_BOND', g::date, 'REVEALED', 'Africa/Lagos', g::date::timestamptz, (g::date + 1)::timestamptz, 2, now(), (g::date + 1)::timestamptz, 0, now(), 'COMPLETE', false, false FROM generate_series('$MI_TODAY'::date - 6, '$MI_TODAY'::date - 1, interval '1 day') AS g RETURNING 1) SELECT count(*) FROM d")" ;;
+esac
+if [ "$MI_MADE" = 6 ]; then
+  MI_SEVEN="{\"achieved\":[{\"threshold\":7,\"achievedOn\":\"$MI_TODAY\"}],\"next\":{\"threshold\":30}}"
+  MI_ENDED="{\"achieved\":[{\"threshold\":7,\"achievedOn\":\"$MI_TODAY\"}],\"next\":null}"
+  expect "milestones: the seventh complete day is today, reached the moment both wrote" 200 "\"achievedOn\":\"$MI_TODAY\"" -- "$API/bonds/$MI_BOND/milestones" -H "Authorization: Bearer $MI_A"
+  is "milestones: …the threshold and its date, and thirty next" "$LAST_BODY" "$MI_SEVEN"
+  is "milestones: the answer is what was reached and what is next, and nothing else" "$(python3 -c 'import json,sys; print(sorted(json.loads(sys.argv[1])))' "$LAST_BODY")" "['achieved', 'next']"
+  expect "milestones: …the same for him" 200 "" -- "$API/bonds/$MI_BOND/milestones" -H "Authorization: Bearer $MI_B"
+  is "milestones: …the same bytes for him" "$LAST_BODY" "$MI_SEVEN"
+  expect "milestones: he leaves" 204 "" -- -X POST "$API/bonds/$MI_BOND/leave" -H "Authorization: Bearer $MI_B"
+  expect "milestones: nothing next once the bond has ended, for the one who stayed" 200 '"next":null' -- "$API/bonds/$MI_BOND/milestones" -H "Authorization: Bearer $MI_A"
+  is "milestones: …and what was reached is kept" "$LAST_BODY" "$MI_ENDED"
+  expect "milestones: …and for the one who left" 200 '"next":null' -- "$API/bonds/$MI_BOND/milestones" -H "Authorization: Bearer $MI_B"
+  is "milestones: …the same bytes for the one who left" "$LAST_BODY" "$MI_ENDED"
+else
+  skip "milestones: the seventh day and the ending (the days could not be put in by hand)"
+fi
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

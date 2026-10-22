@@ -13,6 +13,8 @@ spring:
       # ("FATAL: sorry, too many clients already") — which is what adding one
       # more test class did, with nothing wrong in the code it tested. Same
       # note as `modules/bond`'s own test `application.yml`.
+      # The other half of the limit is the container's max_connections, raised in
+      # PostgresIntegrationTest (common/testing).
       maximum-pool-size: 4
   data:
     redis:

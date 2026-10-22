@@ -2474,3 +2474,51 @@ Wrong about: how many tests a guard has. A design with two guards for one hazard
          That a merged pull request leaves a sentence where the plan last saw it. The plan's
          amendment to CLAUDE.md was written against a rule another session rewrote and merged
          the morning this task ran; applied as written, it would have undone an owner's ruling.
+
+## 2026-10-22 · Phase 3 · Milestones — an event and a read that counted from two places, and two reads in the wrong order
+
+Expected: the smallest slice of the phase. Four thresholds, a rule that is one line, an event
+         beside one that already exists, and a read that the plan said was "three indexed
+         statements on one bond". The owner had ruled the four questions that mattered in the
+         morning. I expected the work to be in the ended bond (left, blocked, the countdown,
+         byte for byte) and in keeping the two screens agreed about today, which is why
+         `countsToday` was extracted before anything read it a second time.
+Reality: the ended bond and today both held at the first run. The defects were in where
+         things were counted from and in what order they were read.
+         One source. The plan had the event cross a threshold on the stored
+         `totalCompleteDays` and the read date it by the timeline, and called them equal
+         "while the projection is true". Drift is the reason `recalculate` exists. The Task 1
+         review showed what one row set too high would do: the event fires on the timeline's
+         sixth day, a recalculation lowers the total, and the seventh day crosses 7 again, so
+         two announcements of one milestone, neither naming the day the read shows. The fix
+         counts both from the timeline, once per bond per run, under the locks the evaluation
+         already takes. The drift test was seen red on the old code first: `[day 4, day 7]`.
+         The transaction. Moving the publish into `REQUIRES_NEW` left all 28 relevant tests
+         green. Nothing failed a bond after its announcement; the reviewer's probe did, with a
+         trigger on the streak row, and became the fifth test.
+         Two reads in the wrong order. With the timeline read first and the last evaluated date
+         read last, a close committing between them gives "7 reached today" for the day the
+         event dates yesterday: an answer no single moment gives. Found by reading, not by a
+         test, and fixed by swapping two lines, so that a stale read can only make the answer a
+         day behind. No test holds it; the argument is in the ADR.
+         The survivors, each explained: `takesWrites` → `isOpen` (no membership is open and
+         left at once), the joining-day reconcile (owned by `JoiningDayTest`, and untested on
+         every read route alike), and `crossed`'s lower bound against the break test, which
+         reaches 7 on its last day, so no later day could re-cross.
+         `countsToday` turned up no place where the two reads had already disagreed:
+         `StreakEndpointTest` passed unchanged after the extraction, and mutating the one
+         function turned both suites red.
+         A limit that was not this slice's. One new test context made an unrelated class fail
+         to load with "too many clients": about 25 cached contexts, four idle connections each,
+         against Postgres's default 100. It had been one context away for some time.
+         The predictions marked "to be confirmed by running" all held: the reveal at 19:01Z, no
+         row for day 0, two requests to start a countdown, the `int[]` cast. The smoke ran 930
+         checks, none failed, after a first run that skipped one race-dependent check in
+         another section.
+Wrong about: "while the projection is true". A clause like that is a precondition someone has
+         to keep, and the only thing that kept it was a hope; the cheaper design was to have
+         one source and not need the clause.
+         Statements in a read-only transaction being one moment. At `READ COMMITTED` each
+         statement is its own moment, and the order of them is a decision, not a detail.
+         Which test sees a transaction boundary. None of the tests that wrote an event failed
+         after writing it, so none could tell inside the transaction from outside it.

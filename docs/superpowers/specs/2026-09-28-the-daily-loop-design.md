@@ -40,7 +40,9 @@ paired with; nothing built so far does the thing the product exists for.
   consumes them until Phase 4. FR-061's "within 60 seconds" is Phase 4's obligation, and the
   event that makes it possible is this phase's.
 - **Milestone cards (FR-075).** The milestone *dates* are derivable from the streak state and
-  `GET /bonds/{id}/milestones` is in C6; the rendered shareable card is Phase 4.
+  `GET /bonds/{id}/milestones` is in C6; the rendered shareable card is Phase 4. *(Amended
+  2026-10-22, ADR-0041: the dates are the `bond_days` timeline's, the Nth day evaluated
+  `COMPLETE`; the streak state holds no dates. Built in C6c, with `MilestoneReached`.)*
 - **The 100-prompt library.** C6 builds the table, the selection rule and the endpoints, and
   ships with a small seed. The library itself is editorial work doc 15 budgets at ~6 h and is
   Daniel's, not the implementation's. *(Amended 2026-10-20, ADR-0038: C6a built the tables
@@ -533,6 +535,12 @@ archive lists (the owner's Q-S2), and what comes back is days.
 | GET | `/bonds/{bondId}/search` | `q` required: 1 to 100 graphemes (NFKC, trimmed, as an entry is counted today; ADR-0031's ruling of 2026-10-21, to be built, counts an entry as typed, and whether `q` follows is ADR-0039's question 11), at most 1,024 UTF-8 octets, no U+0000. `limit` and `cursor` as the feed's (`DaysQuery`: 1–50, default 20; the archive's date cursor). A page of days in the feed's shape, `DaysResponse` `{items, nextCursor}`, newest first, no count. Every `q` that cannot be searched is one `422 VALIDATION_FAILED` on `q` (codes `REQUIRED`, `VALID_SEARCH`), decided after the bond's `404` and never echoing it. A `q` whose bytes are not UTF-8 is `400 MALFORMED_REQUEST` for a member and a stranger alike, after authentication and before the bond's `404` (`UndecodableParameterFilter`, every route; declared in the contract on this one). A `q` with no lexeme is `200` and empty. The API's default `Cache-Control` (`no-cache, no-store, max-age=0, must-revalidate`); no `ETag`. Reads on an ended bond, for the member who left too (decisions 7–12, 17, 25) |
 | GET | `/bonds/{bondId}/on-this-day` | `{items}` (`OnThisDayResponse`): the days on the bond's today's month and day in earlier years, newest first, each as the archive gives it, bounded by the archive's 192 KiB of text, with no cursor. Empty (`{"items":[]}`, the same bytes for every cause) when the bond takes no writes from the caller: ended, left, blocked, or counting down to deletion. The default `Cache-Control`; no `ETag` (decisions 13–17) |
 
+*Amended 2026-10-22, ADR-0041 — the milestones row as slice C6c built it.*
+
+| Method | Path | As built |
+|---|---|---|
+| GET | `/bonds/{bondId}/milestones` | `{achieved: [{threshold, achievedOn}], next: {threshold} \| null}` (`MilestonesResponse`). The thresholds are 7, 30, 100 and 365 complete days, cumulative (the owner's Q-M1, Q-M2), oldest first, each dated by the day that reached it: the Nth day evaluated `COMPLETE`, or today once it has revealed and follows the last evaluated day, by `GET /streak`'s own rule (Q-M5). `next` is the threshold only (Q-M3); `null` after 365 and whenever the bond takes no writes from the caller (ended, left, blocked, counting down), the same bytes for every cause. No count. No parameters. The default `Cache-Control`; no `ETag` (decisions 2–7, 11) |
+
 ### 5.3 New `ErrorCode` values (`common:web`)
 
 `ENTRY_ALREADY_EXISTS` (409) · `ENTRY_IMMUTABLE` (409) · `ENTRY_NOT_REVEALED` (409) ·
@@ -897,6 +905,19 @@ apart, and a member crossing the date line.
   **is** drawn on the calendar, as `SOLO`: the vocabulary is `COMPLETE`, `FROZEN`, `SOLO`,
   `MISSED`, `OPEN`. FR-073 stands over `states.md` §7's Strict-mode paragraph.
 
+**Amended 2026-10-22 — milestones (ADR-0041).**
+
+- **FR-075's milestones count `totalCompleteDays`**, days both wrote on, over the bond's life
+  (the owner's Q-M1): a covered or stepped-over day reaches nothing, and a break loses
+  nothing. Four thresholds, 7, 30, 100 and 365, and nothing after (Q-M2).
+- **A milestone is dated by the Nth day evaluated `COMPLETE`**, read from `bond_days`, not
+  from `streak_states`, which holds no dates.
+- **Today is added by one function for both reads**, `GetStreak.countsToday`: complete
+  (revealed) and following the last evaluated day. A day waiting for its reveal time counts
+  for neither.
+- **`MilestoneReached {bondId, bondDayId}`** is written by the evaluation, in the day's
+  transaction, for each threshold the day crosses; never by `recalculate`.
+
 **Property-based tests belong here and nowhere else in the phase.** Generate a random timeline
 of day statuses, apply the rules, and assert the invariants: `longestStreak` never decreases;
 `recalculate` is a fixed point; a `SUSPENDED` run of any length leaves the streak unchanged;
@@ -1101,7 +1122,7 @@ slice order. `V10` is the last one Phase 2 uses.
 | C5c | `V23` | `modules:gratitude` | `reactions` |
 | C6a | `V24__gratitude_prompts.sql` *(2026-10-15)* | `modules:gratitude` | `prompts`, `prompt_texts`, `entries_prompt_fk`, the seed, and **no `prompt_impressions`** |
 | C6b | `V25__gratitude_search.sql` *(2026-10-21)* | `modules:gratitude` | `unaccent`, `btree_gin`, `immutable_unaccent`, the backfill of `text_search`, `search_vector`, `entries_search_idx` |
-| C6c | none expected | | milestones are derived from streak state |
+| C6c | none *(2026-10-22, ADR-0041)* | | milestones are derived from the `bond_days` timeline (the Nth day evaluated `COMPLETE`), not from `streak_states`, which holds no dates |
 
 C1 owns V11–V13. The first draft of this table gave C1 two versions and C2 `V13`; see §12.5.
 *(Amended 2026-10-05, ADR-0033: C3 took two versions, V15 and V16, so C4 to C6 each moved one later.
@@ -1121,7 +1142,8 @@ Amended 2026-10-20, ADR-0038: C6 is three pull requests (§10). C6a takes V24,
 a 24-prompt placeholder seed. There is **no `prompt_impressions`**: written when a member
 opens the app it would be a presence log, which FR-064 forbids, and the choice, a pure
 function of the bond, the date and the library, needs none (controller rulings 1, 2 and 8).
-C6b takes V25; C6c is expected to need none.
+C6b takes V25; C6c is expected to need none. Amended 2026-10-22,
+ADR-0041: it needed none.
 Amended 2026-10-21, ADR-0039: V25 is written, `V25__gratitude_search.sql`. It creates the
 `unaccent` and `btree_gin` extensions and `public.immutable_unaccent(text)`, an `IMMUTABLE`
 wrapper a generated column can use; fills `entries.text_search` from `text` for every live
@@ -1178,8 +1200,10 @@ a poller with nothing to poll would be the other failure — the mechanism that 
 right, and is not load-bearing, which is the lesson ADR-0029 already cost a slice.
 
 Phase 3 writes: `EntrySubmitted`, `DayRevealed`, `DayClosed`, `StreakBroken`, `StreakExtended`,
-`MilestoneReached`. C5 adds the first consumer (§6.7). `gratitude_outbox_pending` is the gauge
-that says the poller is stuck.
+`MilestoneReached`. *(Amended 2026-10-22, ADR-0041: `MilestoneReached` is `{bondId, bondDayId}`
+on the day's aggregate, one for each threshold of complete days the day crossed, written by the
+close job's evaluation.)* C5 adds the first consumer (§6.7). `gratitude_outbox_pending` is the
+gauge that says the poller is stuck.
 
 Delivery state belongs to `(eventId, consumerId)`, not a global `processed_at` on the event.
 The withdrawal consumer must not mark events as consumed for later notifications or analytics.
@@ -1260,7 +1284,7 @@ the load-bearing assertions:
 | **C6** | Search, prompts and `prompt_impressions`, on-this-day, milestones *(`prompt_impressions`: not built, ADR-0038)* | Phase 3 closes |
 | **C6a** *(2026-10-15, controller's ruling; the owner's to turn)* | Prompts *(built 2026-10-15 to 2026-10-20, ADR-0038: `prompt` on today, `promptId` on a new entry, no impressions; V24)* | |
 | **C6b** *(2026-10-15, controller's ruling; the owner's to turn)* | Search and on-this-day *(built 2026-10-21 to 2026-10-22, ADR-0039: search through the archive's gate, on-this-day empty once the bond takes no writes; V25)* | |
-| **C6c** *(2026-10-15, controller's ruling; the owner's to turn)* | Milestones | Phase 3 closes |
+| **C6c** *(2026-10-15, controller's ruling; the owner's to turn)* | Milestones *(built 2026-10-22, ADR-0041: `GET /milestones` dated by the bond's days and counting today by the streak's own rule; `MilestoneReached` from the evaluation; no migration)* | Phase 3 closes |
 
 *(Amended 2026-10-07, ADR-0035: C5 is built as three pull requests, the three rows under it.
 A read of the corpus against this document found 22 contradictions in what C5 touches, and
@@ -1281,7 +1305,7 @@ otherwise was an error in its first draft. They are built in C4.
 | `GET /days`, `/days/{date}` | §6 *Archive*. *(Amended 2026-10-09, ADR-0036, question 5, which has the full table. Served: the list, the day view, both entries, whose entry is whose. Adaptations: the list's two-line truncation is the client's, the server sends full text; the month jump is `until`, a parameter doc 06 does not name; a short page with a `nextCursor` is not the end; today's day view before the caller has written is `GET /today`. Recorded gaps: the partner's display name is not obtainable; nothing says which months hold days, and a month picker's first month comes only from the bond's `createdAt`; the report entry point in the day view has the entry's `id` and no route yet; §6's "On this day" and "Milestone" rows are C6's; §6 draws no solo day card, no emptied day and no pre-join day, and §9 still owes the day of tombstones.)* |
 | `PUT`/`DELETE /entries/{id}/favourite`, `favourites=true` | §6 *Archive*: the `FavouriteToggle` in the day view, the day card's mark, the Favourites chip and its empty state. *(Added 2026-10-09, ADR-0036: this table had no row for favourites. Served by `favourited` on each entry, the caller's own. Adaptation: no field says an entry can be marked; the toggle is shown on an entry whose `status` is `REVEALED`. Whether the toggle shows on an archived bond is ADR-0036 question 1.)* |
 | `PUT`/`DELETE /entries/{id}/reaction`, `reaction` on an entry | **Gap** *(added 2026-10-13, ADR-0037 question 9)*. `states.md` draws no reaction in any section, and `EntryCard` (`tokens.md` §4) has two properties, `authorName` and `entryText`, and no slot for one. Nothing is drawn for leaving, changing or taking back a reaction, nor for one on an archived bond, where it can be taken back and not left. No screen was invented here. What the API gives a design to work with: `reaction` on each entry read in full, the same for both members, with no time; the control belongs on the partner's entry whose `status` is `REVEALED`, on a bond that has not ended. |
-| `GET /streak`, `/milestones` | §7 *Streak*. *(Amended 2026-10-05, ADR-0034: three gaps recorded there — no field tells a freeze-covered day from a stepped-over date; the length of a run that just broke ("ended at 23 days") is not sent; §7's Strict-mode paragraph reads as clearing banked freezes, which FR-073 forbids.)* |
+| `GET /streak`, `/milestones` | §7 *Streak*. *(Amended 2026-10-05, ADR-0034: three gaps recorded there — no field tells a freeze-covered day from a stepped-over date; the length of a run that just broke ("ended at 23 days") is not sent; §7's Strict-mode paragraph reads as clearing banked freezes, which FR-073 forbids.)* *(Amended 2026-10-22, ADR-0041: `/milestones` is not §7's. `states.md` puts the Milestone row in §6 *Archive*'s table and doc 27:85 says it has no frame: a **design gap** (the controller's default 8). What the API gives a design: `achieved` with dates, from which a device knows a milestone is new to it (there is no server state, H-M1), and `next` as a threshold with no count. The shareable card is Phase 4's.)* |
 | withdrawal on block | §9 *Ending*, whose retained-access line §6.7 qualifies |
 | `PATCH`/`DELETE /entries/{id}` | §4 and §10 *Failure, offline and sync* |
 | search, `/prompts`, `/on-this-day` | **Gaps** — record them in `states.md` before C6 *(Amended 2026-10-20, ADR-0038: split. The prompt is the row below. Search and on-this-day stay C6b's to amend.)* *(Amended 2026-10-21, ADR-0039.)* **Search** is served by `states.md` §6's search states: the field, the list of day cards (days in the archive's shape, newest first), and "Nothing matched that." (`items: []` with a null `nextCursor`). The snippet or highlight is a client's choice (Q-S1); the server sends none. **On-this-day** is a design gap: there is no frame, and its placement (Today or Archive) is undecided (the controller's default 6). Recorded here because `states.md` is outside this repository; the weekly push and its opt-in are Phase 4's. |
@@ -1446,3 +1470,5 @@ document, and so that a reviewer can check the list rather than reconstruct it.
     and nothing records what was shown (ADR-0038). *(Amended 2026-10-20, ADR-0038.)*
 14. Search is the archive's reading with another candidate query: the predicate asked of the
     matching row, one fill for both (ADR-0039). *(Amended 2026-10-21, ADR-0039.)*
+15. Milestones are dated by the bond's days and today is counted by the streak's own function;
+    the event is the evaluation's, ids only (ADR-0041). *(Amended 2026-10-22, ADR-0041.)*

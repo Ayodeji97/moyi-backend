@@ -7,6 +7,8 @@ spring:
       # number of contexts in this JVM exhausts the Testcontainers Postgres
       # ("FATAL: sorry, too many clients already") — which is what adding one
       # more test class did, with nothing wrong in the code it tested.
+      # The other half of the limit is the container's max_connections, raised in
+      # PostgresIntegrationTest (common/testing).
       maximum-pool-size: 4
   data:
     redis:

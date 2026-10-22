@@ -20,6 +20,18 @@ import org.testcontainers.postgresql.PostgreSQLContainer
  * check waited thirty seconds on a container that no longer existed. The
  * singleton pattern is Testcontainers' own answer to this.
  *
+ * **`max_connections=300`, not Postgres's 100.** Spring caches up to 32
+ * distinct test contexts for the run, and evicts (and closes) the least
+ * recently used one only past that; each cached
+ * context's Hikari pool keeps its connections open (`minimumIdle` defaults to
+ * the pool size, 4 in the modules' test `application.yml`). The gratitude
+ * suite reached about 25 contexts, 100 connections, in slice C6c: one more
+ * context made an unrelated class fail to load with "sorry, too many clients
+ * already", in whatever class happened to start next. 300 is the headroom
+ * for 32 contexts at 4 and the tests' own `DataSource` connections.
+ * `fsync=off` is the flag `PostgreSQLContainer` starts with by default, kept:
+ * `withCommand` replaces the whole command. `PostgresContainerTest` holds both.
+ *
  * `UtilityClassWithPublicConstructor` is suppressed below: detekt's rule
  * doesn't distinguish "utility class" from "abstract base meant only for
  * subclassing" (the standard Testcontainers+Spring pattern) — an abstract
@@ -31,6 +43,12 @@ abstract class PostgresIntegrationTest {
         @Suppress("unused")
         @ServiceConnection
         @JvmStatic
-        val postgres: PostgreSQLContainer = PostgreSQLContainer("postgres:18").also { it.start() }
+        val postgres: PostgreSQLContainer =
+            PostgreSQLContainer("postgres:18")
+                .withCommand("postgres", "-c", "fsync=off", "-c", "max_connections=$MAX_CONNECTIONS")
+                .also { it.start() }
+
+        /** See the class KDoc: room for every context the run caches. */
+        const val MAX_CONNECTIONS = 300
     }
 }

@@ -98,6 +98,7 @@ scripts/moyi today
 scripts/moyi streak
 scripts/moyi search "the long walk"       # the days whose entries hold those words
 scripts/moyi on-this-day
+scripts/moyi milestones                   # 7, 30, 100 and 365 days you both wrote: which, and when
 ```
 
 `scripts/moyi help` lists the rest. It talks to `MOYI_API` (this machine by default), and

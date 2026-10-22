@@ -115,6 +115,9 @@ class CacheHeadersTest(
         neverStored("GET /search, a stranger", get("/bonds/$bond/search?q=anything", eve), 404)
         neverStored("GET /on-this-day", get("/bonds/$bond/on-this-day", ada), 200)
         neverStored("GET /on-this-day, a stranger", get("/bonds/$bond/on-this-day", eve), 404)
+        // Milestones (slice C6c): the API's default, as search and on-this-day (ADR-0041 decision 11).
+        neverStored("GET /milestones", get("/bonds/$bond/milestones", ada), 200)
+        neverStored("GET /milestones, a stranger", get("/bonds/$bond/milestones", eve), 404)
 
         // The archive: the two responses a client may keep, and must ask about before it uses them again.
         val days = "/bonds/$bond/days"

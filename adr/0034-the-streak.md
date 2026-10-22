@@ -1,7 +1,8 @@
 # ADR-0034 — The streak
 
 **Status:** Accepted · **Date:** 2026-10-05 · **Deciders:** Daniel
-**Amended:** 2026-10-09 (the status; "Owed — C5, the archive" discharged — ADR-0036)
+**Amended:** 2026-10-09 (the status; "Owed — C5, the archive" discharged — ADR-0036);
+2026-10-22 ("Owed — C6" discharged — ADR-0041)
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #55, and its rulings as #56, on 2026-10-06. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -228,6 +229,11 @@ solo day card, which ADR-0036 records as a gap in the design (its question 5), n
 response.)*
 
 **C6.** `MilestoneReached` and the milestones endpoint.
+
+*(Discharged 2026-10-22, ADR-0041. `MilestoneReached` is written by the evaluation, beside
+`StreakExtended`, for each threshold of complete days a day crosses: decision 11's "the outbox
+gets two" is now three. The endpoint dates each milestone by the bond's days and counts today
+by decision 8's rule, now one function, `GetStreak.countsToday`.)*
 
 **`modules/admin`.** The route for `recalculate`.
 

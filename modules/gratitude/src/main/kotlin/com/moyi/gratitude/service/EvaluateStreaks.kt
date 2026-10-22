@@ -7,10 +7,12 @@ import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
 import com.moyi.gratitude.domain.DayOutcome
 import com.moyi.gratitude.domain.Evaluation
+import com.moyi.gratitude.domain.Milestones
 import com.moyi.gratitude.domain.StreakChange
 import com.moyi.gratitude.domain.StreakRules
 import com.moyi.gratitude.domain.StreakState
 import com.moyi.gratitude.infra.database.DayToEvaluate
+import com.moyi.gratitude.infra.database.StreakCalendar
 import com.moyi.gratitude.infra.database.StreakStore
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -49,12 +51,16 @@ import java.util.UUID
  * **What is decided is written on the day** ([StreakStore.recordDay]): what
  * it was to the streak, whether Strict mode was on, whether it spent a
  * freeze. `RecalculateStreak` replays those and never asks again.
+ *
+ * **And what each day reached** ([announceMilestones]): a `MilestoneReached` for a day that
+ * takes the bond's complete days across 7, 30, 100 or 365 (ADR-0041).
  */
 @Service
 @Suppress("LongParameterList") // What one bond's evaluation touches, each named.
 internal class EvaluateStreaks(
     private val access: BondAccess,
     private val streaks: StreakStore,
+    private val calendar: StreakCalendar,
     private val events: EventPublisher,
     private val ids: IdGenerator,
     private val transactions: TransactionTemplate,
@@ -114,6 +120,10 @@ internal class EvaluateStreaks(
         var state = streaks.lock(bondId, now)
         val joiningDate = view.activeSince?.let(view.anchorTimeline::dateAt)
         var previous = streaks.lastEvaluatedDate(bondId)
+        // The timeline's count, once, under the locks: what a milestone is
+        // counted from (announceMilestones). Never the stored total, which
+        // can drift from the days it was folded from (FR-074).
+        var complete = calendar.completeDays(bondId, emptyList()).total
         var evaluated = 0
         for (day in streaks.unevaluatedDays(bondId)) {
             if (!day.isClosed || !follows(day.date, previous, joiningDate)) break
@@ -125,6 +135,11 @@ internal class EvaluateStreaks(
             val step = StreakRules.step(state, day.date, outcome, strict)
             streaks.recordDay(day.id, outcome, strict, step.freezeApplied, now)
             record(bondId, day.date, state, step.state, announce = outcome == DayOutcome.COMPLETE, step, now)
+            // The day is recorded with this outcome: a COMPLETE one is the
+            // timeline's next complete day.
+            val completeAfter = if (outcome == DayOutcome.COMPLETE) complete + 1 else complete
+            announceMilestones(bondId, day.id, complete, completeAfter, now)
+            complete = completeAfter
             state = step.state
             // Never backwards. Days are read in date order, so this is a
             // guard and not a path: nothing reaches here out of order today.
@@ -208,6 +223,44 @@ internal class EvaluateStreaks(
         when {
             step.change == StreakChange.BROKEN -> publish("StreakBroken", bondId, now)
             step.change == StreakChange.EXTENDED && announce -> publish("StreakExtended", bondId, now)
+        }
+    }
+
+    /**
+     * `MilestoneReached` for each threshold of complete days this day took the bond across
+     * (FR-075; ADR-0041 decision 8). Here, in the transaction that records the day: `recordDay`
+     * refuses a day already evaluated, so a day announces once or, when its bond fails and rolls
+     * back, not at all. One day adds at most one complete day, so it crosses at most one
+     * threshold; a backlog crosses several on several days, each its own event.
+     *
+     * **Counted in complete days, never the run** (the owner's Q-M1): a day a freeze covered or
+     * a zone change stepped over extends the run and is not a complete day, so it reaches
+     * nothing, and a break takes nothing back. **And counted on the timeline** ([before] and
+     * [after] are the bond's days evaluated `COMPLETE`, as `GET /milestones` counts them), never
+     * on the stored `totalCompleteDays`: a drifted total would announce a day the read does not
+     * date the milestone by, and once recalculated, announce it again. Written on an ended bond as on any other:
+     * a day both wrote on before the end is complete (ADR-0034 decision 7); whether anybody is
+     * told is Phase 4's to decide, and doc 02:144 says nobody is.
+     *
+     * **Ids only** (spec §8): the bond and the day. Which threshold is the consumer's to count
+     * from the timeline, as `GET /milestones` does; a number in the payload would break the rule
+     * that a payload is a map of names to ids (ADR-0035). It names no member, so a notification
+     * made of it can only reach both or neither (H-M5).
+     *
+     * Never from `RecalculateStreak` (ADR-0034 decision 10): a replay that announced would
+     * tell two people again.
+     */
+    private fun announceMilestones(
+        bondId: UUID,
+        dayId: UUID,
+        before: Int,
+        after: Int,
+        now: Instant,
+    ) {
+        Milestones.crossed(before, after).forEach { _ ->
+            events.publish(
+                OutboxEvent("BondDay", dayId, "MilestoneReached", mapOf("bondId" to bondId, "bondDayId" to dayId), now),
+            )
         }
     }
 

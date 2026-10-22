@@ -3350,6 +3350,131 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val last = membership.endedAt?.let(membership.anchorTimeline::dateAt)?.takeIf { it.isBefore(today) } ?: today"
   },
   {
+    "id": "bond-none-milestones",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "GET /api/v1/bonds/{bondId}/milestones",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "milestones: a stranger is told the bond's 404",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/BondGuard.kt#throw NotFoundException(\"That bond was not found.\")"
+  },
+  {
+    "id": "bond-pending-member-milestones",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "GET /api/v1/bonds/{bondId}/milestones",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "A bond of one has reached nothing, whatever its creator wrote: achieved is empty and 7 is next.",
+    "rule": "doc 04 §8.3a",
+    "evidence": "test",
+    "evidenceRef": "MilestonesEndpointTest#a bond still waiting for its second person has reached nothing, whatever its creator wrote",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val total = if (counted) evaluated.total + 1 else evaluated.total"
+  },
+  {
+    "id": "bond-active-milestones",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "GET /api/v1/bonds/{bondId}/milestones",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "Each of 7, 30, 100 and 365 complete days reached, with the date of the day that reached it, and the next threshold, with no count. Today counts once it has revealed and follows the last evaluated day, as the streak's numbers do.",
+    "rule": "FR-075, ADR-0041",
+    "evidence": "smoke",
+    "evidenceRef": "milestones: the seventh complete day is today, reached the moment both wrote",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val counted = streak.countsToday(membership, today, todayComplete)"
+  },
+  {
+    "id": "bond-pending-deletion-milestones",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "GET /api/v1/bonds/{bondId}/milestones",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 200,
+    "code": null,
+    "reason": "What was reached is kept and nothing is next: the bond takes no writes while it counts down. Calling the deletion off brings next back. The same bytes as an ended bond's.",
+    "rule": "ADR-0041 §7",
+    "evidence": "test",
+    "evidenceRef": "MilestonesEndpointTest#an ended bond keeps what it reached with nothing next, the same bytes left, blocked or counting down, for both members",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#next = if (now.takesWrites) Milestones.next(total) else null,"
+  },
+  {
+    "id": "bond-archived-milestones",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "GET /api/v1/bonds/{bondId}/milestones",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 200,
+    "code": null,
+    "reason": "An ended bond keeps what it reached, and nothing is next: the same bytes for both members, whether it was left or blocked.",
+    "rule": "ADR-0041 §7, states.md §9",
+    "evidence": "test",
+    "evidenceRef": "MilestonesEndpointTest#an ended bond keeps what it reached with nothing next, the same bytes left, blocked or counting down, for both members",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#next = if (now.takesWrites) Milestones.next(total) else null,"
+  },
+  {
     "id": "bond-pending-member-joined",
     "region": "bond",
     "from": "PENDING_MEMBER",
