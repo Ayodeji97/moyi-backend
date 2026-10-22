@@ -24,13 +24,20 @@
 --
 -- The backfill fills the projection of every live row before the column is added. That is
 -- two passes over entries, not one: the UPDATE writes a new version of every live row, then
--- ADD COLUMN ... STORED rewrites the whole table under ACCESS EXCLUSIVE, and the index is
--- built under the same lock. Measured on 190k live rows (Task 1 review, 2026-10-21): 2.7 s,
--- 5.5 s and 0.4 s; entries is unreadable for about 6 s per 200k rows, and grows 136 -> 362 MB.
+-- ADD COLUMN ... STORED rewrites the whole table, and the index is built. Measured on 190k
+-- live rows (Task 1 review, 2026-10-21): 2.7 s, 5.5 s and 0.4 s; the table grows 136 -> 362 MB.
+--
+-- The whole table is locked first, ACCESS EXCLUSIVE, before the backfill. Taken only at the
+-- ALTER, the lock deadlocked with any writer of an entry: the UPDATE holds row locks, a
+-- request updating one of those rows holds ROW EXCLUSIVE on entries and waits for this
+-- transaction, and the ALTER then waits for that request (reproduced, final review m1).
+-- Locked first, the request waits and then commits. The cost: entries is unreadable for the
+-- backfill as well, about 8 s per 200k rows rather than 6, and no row can be inserted between
+-- the backfill and the rewrite.
 -- An erased row keeps NULL: its words are gone (BR-10). Both marks of an erasure are asked,
 -- as Entry.isErased asks them.
 --
--- lock_timeout: the rewrite must not queue every request behind a long transaction (the
+-- lock_timeout: the lock must not queue every request behind a long transaction (the
 -- withdrawal consumer holds one for up to 60 s). If the lock is not granted in 5 s the
 -- migration fails, rolls back whole, and the deploy is retried; it never waits with the
 -- table's traffic queued behind it. SET LOCAL ends with Flyway's transaction.
@@ -45,6 +52,8 @@
 -- tree using the bond's. bond_id is a uuid, which plain GIN cannot index: btree_gin gives it
 -- the operator class.
 SET LOCAL lock_timeout = '5s';
+
+LOCK TABLE entries IN ACCESS EXCLUSIVE MODE;
 
 CREATE EXTENSION IF NOT EXISTS unaccent SCHEMA public;
 CREATE EXTENSION IF NOT EXISTS btree_gin SCHEMA public;
