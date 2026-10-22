@@ -15,6 +15,7 @@ import com.moyi.common.testing.IntegrationTest
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -39,6 +40,7 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
+import java.net.Socket
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -70,7 +72,8 @@ import javax.sql.DataSource
  * edited, and the partner's), a password, two access tokens and two refresh
  * tokens, across register, sign-in, pairing, submit, read, edit, the reveal,
  * the archive (the feed with and without `favourites`, one day, a bookmark
- * set and removed, a conditional read that answers `304`), a reaction set,
+ * set and removed, a conditional read that answers `304`), a search, by a
+ * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), on this day with a memory, a reaction set,
  * replaced, refused and taken back, delete, an ending
  * that withdraws, the withdrawal's erasure by the dispatcher, a failing
  * transactional consumer, and a refresh. An `ETag` is not scanned for: it is
@@ -107,7 +110,9 @@ import javax.sql.DataSource
  * Each of the original six pins was removed in turn and this test failed each time,
  * naming the logger that line holds. The transactional interceptor regression
  * was also seen failing before its pin was added, and so was the pin on
- * `StatementCreatorUtils`.
+ * `StatementCreatorUtils`. On 2026-10-21 all fourteen pins were removed in turn,
+ * the six search and error-resolver ones among them, and it failed for each; the
+ * fifteenth, `Http11Processor`, was seen failing before it was added.
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -222,6 +227,38 @@ class SecretsNeverLoggedTest(
         get("/bonds/$bond/days/$today", bea, ifNoneMatch = day.etag).body.contains(ADA_EDITED) shouldBe true
         get("/bonds/$bond/days?limit=zz", ada).status shouldBe 422
         get("/bonds/$bond/days/nonsense", ada).status shouldBe 404
+        // Search (slice C6b): what somebody looks for is their words, held to the entry's standard, the
+        // request line included (ADR-0039 decision 22). One word that matches nothing, and one that finds both entries.
+        scan.watch("search terms", SEARCH_TERMS, wholeWord = true)
+        get("/bonds/$bond/search?q=$SEARCH_TERMS", bea).body shouldBe """{"items":[],"nextCursor":null}"""
+        // `after`, not `wrote`: the parser reads `~wrote` as one `file` token, so `wrote` is no lexeme of these texts.
+        get("/bonds/$bond/search?q=after", bea).body.contains(BEA_TEXT) shouldBe true
+        val refused = get("/bonds/$bond/search?q=$SEARCH_TERMS&limit=0", bea)
+        refused.status shouldBe 422
+        // On this day (slice C6b), with a memory: the bond's days moved back four years, so today's revealed day is
+        // one, and the route's own response type carries both entries' words past every logger (task 3 review I1).
+        // Four, not one: on 29 February a year back is 28 February. The statements bind the bond id and nothing else.
+        get("/bonds/$bond/on-this-day", bea).body shouldBe """{"items":[]}"""
+        jdbc.update("UPDATE bond_days SET date = date - INTERVAL '4 years' WHERE bond_id = ?::uuid", bond) shouldBe 1
+        val memory = get("/bonds/$bond/on-this-day", bea)
+        memory.body.contains(ADA_EDITED) shouldBe true
+        memory.body.contains(BEA_TEXT) shouldBe true
+        jdbc.update("UPDATE bond_days SET date = date + INTERVAL '4 years' WHERE bond_id = ?::uuid", bond) shouldBe 1
+        // Bytes that are not UTF-8 (task 2 review I1): Tomcat's exception quotes what it could decode, the words
+        // included, so it is answered 400 and logged without it. Any route, any parameter, known or not. The answer
+        // is written by a filter of our own, so it is held to carry the headers Security gives any other refusal.
+        get("/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", bea).malformed(like = refused)
+        get("/bonds/$bond/days?cursor=%FF", ada).malformed(like = refused)
+        get("/bonds/$bond/days?unknown=$SEARCH_TERMS%20x%FF", ada).malformed(like = refused)
+        // Authentication first (re-review m1): the filter runs after Spring Security's chain, so a caller who is not
+        // signed in, or whose token is not one, is told 401 as for any other request, and nothing is parsed for them.
+        send("GET", "/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", null, null).status shouldBe 401
+        send("GET", "/bonds/$bond/search?q=$SEARCH_TERMS%20x%FF", Session("not.a.token", ""), null).status shouldBe 401
+        undecodableWithTheRequestLoggersSetByName(bea, bond)
+        // A character Tomcat refuses in the request target (re-review I1): refused by the connector before any
+        // filter, and Http11Processor logged the whole target, the words in it, at INFO. Sent over a plain socket,
+        // because java.net.http will not send it.
+        requestLine("/api/v1/bonds/$bond/search?q=$SEARCH_TERMS%20x|y") shouldStartWith "HTTP/1.1 400"
         send("DELETE", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         send("PUT", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         // A reaction each way; hers replaced, refused twice, taken back, and set again for the erasure to remove.
@@ -295,6 +332,31 @@ class SecretsNeverLoggedTest(
                 .filter { (_, watched) -> watched.exceptFrom.isEmpty() && watched.pattern.containsMatchIn(output.all) }
                 .map { it.first }
                 .shouldBeEmpty()
+        }
+    }
+
+    /**
+     * The dispatcher servlet at TRACE and Security's filter chain at DEBUG, **set by their exact names**, which
+     * outranks their pins. Below INFO the dispatcher servlet reads every parameter before any handler, so without
+     * `UndecodableParameterFilter` Tomcat's exception escapes Spring and Tomcat logs it at ERROR, the value quoted.
+     * The filter chain at DEBUG prints the request line, the query string in it: that is what its pin is for, and
+     * a level set by name gives it way, so it alone may print these words. Nothing else may.
+     */
+    private fun undecodableWithTheRequestLoggersSetByName(
+        session: Session,
+        bond: String,
+    ) {
+        scan.watch("undecodable search terms", UNDECODABLE_TERMS, wholeWord = true, exceptFrom = listOf(FILTER_CHAIN_PROXY))
+        try {
+            logging.setLogLevel(DISPATCHER_SERVLET, LogLevel.TRACE)
+            logging.setLogLevel(FILTER_CHAIN_PROXY, LogLevel.DEBUG)
+            val answer = get("/bonds/$bond/search?q=$UNDECODABLE_TERMS%20x%FF", session)
+            answer.status shouldBe 400
+            answer.json["code"]?.asString() shouldBe "MALFORMED_REQUEST"
+        } finally {
+            // Back to the pins in application.yml.
+            logging.setLogLevel(DISPATCHER_SERVLET, LogLevel.INFO)
+            logging.setLogLevel(FILTER_CHAIN_PROXY, LogLevel.INFO)
         }
     }
 
@@ -385,8 +447,26 @@ class SecretsNeverLoggedTest(
         val body: String,
         val etag: String?,
         mapper: JsonMapper,
+        /** By lower-case name. */
+        val headers: Map<String, List<String>> = emptyMap(),
     ) {
         val json: JsonNode by lazy { mapper.readTree(body) }
+    }
+
+    /** Sends [target] as it is, unchecked, on a socket of its own, and returns the whole answer. */
+    private fun requestLine(target: String): String =
+        Socket("localhost", port).use { socket ->
+            socket.soTimeout = SOCKET_TIMEOUT_MILLIS
+            socket.getOutputStream().write("GET $target HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n".toByteArray())
+            socket.getOutputStream().flush()
+            String(socket.getInputStream().readAllBytes())
+        }
+
+    private fun Answer.malformed(like: Answer) {
+        status shouldBe 400
+        // Null-safe: should the answer ever be Boot's error body, it has no `code`.
+        json["code"]?.asString() shouldBe "MALFORMED_REQUEST"
+        headers.comparable() shouldBe like.headers.comparable()
     }
 
     private fun get(
@@ -420,7 +500,13 @@ class SecretsNeverLoggedTest(
         if (forwardedFor != null) request.header("X-Forwarded-For", forwardedFor)
         if (ifNoneMatch != null) request.header("If-None-Match", ifNoneMatch)
         val response = http.send(request.build(), HttpResponse.BodyHandlers.ofString())
-        return Answer(response.statusCode(), response.body(), response.headers().firstValue("ETag").orElse(null), json)
+        return Answer(
+            response.statusCode(),
+            response.body(),
+            response.headers().firstValue("ETag").orElse(null),
+            json,
+            response.headers().map().mapKeys { it.key.lowercase() },
+        )
     }
 
     /**
@@ -501,9 +587,14 @@ class SecretsNeverLoggedTest(
         const val ADA_EDITED = "Ada~edited~it to this"
         const val BEA_TEXT = "Bea~wrote~hers after"
         const val PASSWORD = "seven~green~kettles~at~dawn"
+        const val SEARCH_TERMS = "zqkettlesearch"
+        const val UNDECODABLE_TERMS = "zqundecodablesearch"
+        const val DISPATCHER_SERVLET = "org.springframework.web.servlet.DispatcherServlet"
+        const val FILTER_CHAIN_PROXY = "org.springframework.security.web.FilterChainProxy"
         const val HANDLER_SECRET = "private~handler~exception"
         const val CONTROL = "control~marker~"
         const val RUN_ID_LENGTH = 8
+        const val SOCKET_TIMEOUT_MILLIS = 15_000
         const val DISPATCH_BUDGET = 10
 
         val ENTRY_MARKERS =
@@ -511,13 +602,17 @@ class SecretsNeverLoggedTest(
 
         /**
          * An invite code travels in the path (`/invites/{code}/accept`), so a
-         * logger that prints a request line prints the code: Spring Security's
-         * filter chain at DEBUG, the dispatcher servlet and the handler's
-         * arguments at TRACE, Tomcat's authenticator valve at DEBUG. Those are
-         * the lines an operator lowers the level to read, and they are not
-         * pinned. **So an invite code does reach the log at DEBUG**, by these
-         * loggers; what is held here is that it reaches it by no other, the
-         * ones that print stored and bound values in particular.
+         * logger that prints a request line prints the code. Spring Security's
+         * filter chain at DEBUG, its authorization manager, the dispatcher
+         * servlet and the handler's arguments at TRACE did, until slice C6b
+         * pinned them for a search's words (ADR-0039 decision 22). Seen on
+         * 2026-10-21 with those pins in: Tomcat's authenticator valve still
+         * prints the path at DEBUG, and Spring MVC's `HttpEntityMethodProcessor`
+         * prints the body it writes at TRACE, which for `POST /bonds` holds the
+         * code. Those are not pinned. **So an invite code does reach the log
+         * below INFO**, by these loggers; what is held here is that it reaches
+         * it by no other, the ones that print stored and bound values in
+         * particular.
          */
         val PRINTS_THE_REQUEST_PATH =
             listOf("org.springframework.security.web.", "org.springframework.web.", "org.apache.catalina.")
@@ -544,6 +639,14 @@ class SecretsNeverLoggedTest(
                 "sql",
                 "web",
             )
+
+        /**
+         * Headers that differ from one response to the next whatever wrote it; and the rate limiter's, an
+         * interceptor that a parameter which cannot be decoded never reaches (`UndecodableParameterFilter`).
+         */
+        val PER_RESPONSE_HEADERS = setOf("date", "content-length", "transfer-encoding", "connection", "keep-alive")
+
+        fun Map<String, List<String>>.comparable() = filterKeys { it !in PER_RESPONSE_HEADERS && !it.startsWith("x-ratelimit-") }
 
         /** Libraries that must be seen logging below INFO for the test to mean anything. */
         val RAISED_EXPECTED_FROM = listOf("org.hibernate.", "org.springframework.", "org.apache.")

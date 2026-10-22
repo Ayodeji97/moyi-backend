@@ -57,10 +57,27 @@
 # entry recorded with the prompt it answered and nobody sent that back, one
 # 422 for every id that names no prompt after the bond's 404, the prompt gone
 # from the row with the entry's words, and none on an ended bond.
-# Every day it reads is today: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-21, against a database of
-# its own (MOYI_DB, below), at 683af97 (its jar's code is 0f04535's): 852
-# passed, 0 failed, 0 skipped, 22 sections; the run before it, on the same
+# Since slice C6b it searches: case and accents folded, whole words, the page
+# a page of days and a cursor that no cache may keep; the partner's unrevealed
+# words finding nothing and one's own found; one 422 on q for blank, long and
+# NUL, carrying none of it, after the bond's 404, which is the same bytes
+# whatever q is, if Tomcat can decode it (a q that is not UTF-8 is everyone's
+# 400, member or stranger, after authentication); an erased entry's words gone
+# from the row and from search.
+# And it reads on-this-day: last year's day, put in by hand, for both members;
+# and after a leave, the same nothing for both, while search still reads.
+# Every day it reads is today, but for last year's, put in by hand: no day
+# ends during a run, so paging and past days are the tests' to show. Last run
+# on 2026-10-22, after the final reviews' fix round, against a database of its
+# own (MOYI_DB, below), from 569b420 (the jar built from it; the commit after
+# it changed only this header and ADR-0039), with --attach to a jar booted by
+# hand exactly as below but on Postgres's port 55432, because another
+# project's container held 5432: 902 passed, 0 failed, 0 skipped, 23 sections.
+# Before it, from e1ac2be (its jar's code 50c269a's, both named as they stand
+# after the rebase onto 25fa9c1), 902, 0 and 0 in 23; the final review's run at
+# c5b98b6 skipped one tag-across-the-erasure check, the poller having won the
+# race. On 2026-10-21, at 683af97 (its jar's code
+# is 0f04535's), 852, 0 and 0 in 22; the run before that, on the same
 # head, skipped the two tag-across-the-erasure checks because the poller won
 # the race, which is what they skip on. On 2026-10-20, from 0f04535, 850, 0
 # and 0 in 22; on 2026-10-15, from dfac89b, 814, 0 and 0 in 21 (the
@@ -1861,6 +1878,87 @@ expect "prompts: …nor for the one who left" 200 '"prompt":null' -- "$API/bonds
 # Taken out here, so the sections after this one see the seed alone; the EXIT trap
 # takes them out again (a no-op by then) and is what does it when a run dies first.
 sql "DELETE FROM prompt_texts WHERE text LIKE 'PT~ %'" >/dev/null
+
+echo; echo "search and on this day — the archive found by its words, and earlier years of today (FR-091, FR-092, ADR-0039)"
+flush_buckets
+# What this section is for: search and on-this-day as the jar serves them. Words fold case and
+# accents and are whole; the partner's unrevealed words find nothing; an erased entry's words are
+# gone from the row and from search; a q that cannot be searched is one 422 that does not carry
+# it, after the bond's 404; neither response may be stored. Last year's day is put in by hand
+# (no day ends during a run), and resurfaced for both members until the bond ends, when both are
+# answered the same nothing. On 29 February the on-this-day probes skip: a year ago is the 28th.
+verified_account "searcher" "203.0.113.120"; SE_A="$ACCOUNT_ACCESS"
+verified_account "searched" "203.0.113.121"; SE_B="$ACCOUNT_ACCESS"
+verified_account "outsider" "203.0.113.122"; SE_O="$ACCOUNT_ACCESS"
+revealed_bond "search" "$SE_A" "$SE_B" "Obrigada pelo Café e pela caminhada" "thank you for the long walk home"
+SE_BOND="$RB_BOND"; SE_A_ENTRY="$RB_A_ENTRY"
+# search <label> <status> <needle> <q> <token> — q is url-encoded by curl, as a client would send it.
+search() { expect "$1" "$2" "$3" -- -G "$API/bonds/$SE_BOND/search" --data-urlencode "q=$4" -H "Authorization: Bearer $5"; }
+
+search "search: cafe finds Café" 200 'Obrigada pelo Café' "cafe" "$SE_B"
+search "search: CAFÉ finds it too" 200 'Obrigada pelo Café' "CAFÉ" "$SE_A"
+is "search: a page is days and a cursor, and nothing else" "$(python3 -c 'import json,sys; print(sorted(json.loads(sys.argv[1])))' "$LAST_BODY")" "['items', 'nextCursor']"
+header_is "search: never stored" "Cache-Control" "no-cache, no-store, max-age=0, must-revalidate"
+search "search: words in either order" 200 'thank you for the long walk home' "walk long" "$SE_A"
+search "search: caf is not a word of it" 200 '"items":[]' "caf" "$SE_A"
+search "search: punctuation alone matches nothing, and is not refused" 200 '"items":[]' "!!!" "$SE_A"
+
+# The partner's unrevealed words find nothing; one's own are found.
+expect "search: a second bond" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $SE_A" -d "$(bond_body "Us again")"
+SE_BOND2="$(printf '%s' "$LAST_BODY" | jget id)"
+SE_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "search: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$SE_CODE/accept" -H "Authorization: Bearer $SE_B"
+expect "search: only she writes" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$SE_BOND2/entries" -H "Authorization: Bearer $SE_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"a secret zebra"}'
+expect "search: she finds her own" 200 'a secret zebra' -- -G "$API/bonds/$SE_BOND2/search" --data-urlencode "q=zebra" -H "Authorization: Bearer $SE_A"
+expect "search: he does not, before the reveal" 200 '' -- -G "$API/bonds/$SE_BOND2/search" --data-urlencode "q=zebra" -H "Authorization: Bearer $SE_B"
+is "search: …the page is empty and the end" "$LAST_BODY" '{"items":[],"nextCursor":null}'
+
+# What cannot be searched: one 422 on q, never carrying q, and the stranger's 404 first.
+# The two the state map cites are written out, not through search(): scripts/state-map-check
+# finds a probe's label on an `expect` line.
+expect "search: blank q is one 422 on q" 422 '"field":"q"' -- -G "$API/bonds/$SE_BOND/search" --data-urlencode "q=   " -H "Authorization: Bearer $SE_A"
+SE_LONG="$(python3 -c 'print("zq" * 51)')"
+search "search: 102 characters is one 422 on q" 422 '"field":"q"' "$SE_LONG" "$SE_A"
+if [[ "$LAST_BODY" == *zqzqzq* ]]; then fail "search: the refusal carries q" "${LAST_BODY:0:200}"; else pass "search: the refusal does not carry q"; fi
+expect "search: NUL in q is one 422, not a 500" 422 '"field":"q"' -- "$API/bonds/$SE_BOND/search?q=zq%00zq" -H "Authorization: Bearer $SE_A"
+SE_STRANGER="$(curl -s "$API/bonds/$SE_BOND/search" -H "Authorization: Bearer $SE_O" | sed 's/"instance":"[^"]*"//')"
+expect "search: a stranger is told the bond's 404, whatever q is" 404 '"code":"NOT_FOUND"' -- -G "$API/bonds/$SE_BOND/search" --data-urlencode "q=   " -H "Authorization: Bearer $SE_O"
+is "search: …the same bytes as with no q at all" "$(no_instance | sed 's/"instance":"-"//')" "$SE_STRANGER"
+
+# Last year's today, put in by hand for both members, revealed.
+SE_TODAY="$(sql "SELECT (now() AT TIME ZONE 'Africa/Lagos')::date")"
+SE_LAST="$(sql "SELECT ((now() AT TIME ZONE 'Africa/Lagos')::date - interval '1 year')::date")"
+expect "on this day: today, for the two member ids" 200 '"myEntry"' -- "$API/bonds/$SE_BOND/today" -H "Authorization: Bearer $SE_A"
+SE_A_MEMBER="$(raw myEntry.authorMemberId)"; SE_B_MEMBER="$(raw partnerEntry.authorMemberId)"
+case "$SE_LAST" in
+  psql-unavailable|psql-error*) SE_LAST_MADE=0 ;;
+  *) if [ "${SE_LAST:5}" = "${SE_TODAY:5}" ]; then
+       SE_LAST_MADE="$(sql "WITH d AS (INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, entry_count, created_at, closed_at, version) VALUES (gen_random_uuid(), '$SE_BOND', '$SE_LAST', 'REVEALED', 'Africa/Lagos', '$SE_LAST'::date::timestamptz, ('$SE_LAST'::date + 1)::timestamptz, 2, now(), ('$SE_LAST'::date + 1)::timestamptz, 0) RETURNING id), e AS (INSERT INTO entries (id, bond_day_id, bond_id, author_member_id, text, text_search, status, created_at, intended_at, updated_at, revealed_at) SELECT gen_random_uuid(), d.id, '$SE_BOND', m, 'a year ago we walked', 'a year ago we walked', 'REVEALED', now(), now(), now(), now() FROM d, unnest(ARRAY['$SE_A_MEMBER', '$SE_B_MEMBER']::uuid[]) m RETURNING 1) SELECT count(*) FROM e")"
+     else SE_LAST_MADE=0; fi ;;
+esac
+if [ "$SE_LAST_MADE" = 2 ]; then
+  expect "on this day: last year's day, for her" 200 "\"date\":\"$SE_LAST\"" -- "$API/bonds/$SE_BOND/on-this-day" -H "Authorization: Bearer $SE_A"
+  header_is "on this day: never stored" "Cache-Control" "no-cache, no-store, max-age=0, must-revalidate"
+  expect "on this day: …and for him" 200 "\"date\":\"$SE_LAST\"" -- "$API/bonds/$SE_BOND/on-this-day" -H "Authorization: Bearer $SE_B"
+  search "search: last year's words are found too" 200 "\"date\":\"$SE_LAST\"" "walked" "$SE_A"
+else
+  skip "on this day: last year's day (it could not be put in, or today is 29 February)"
+fi
+expect "on this day: a stranger is told the bond's 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$SE_BOND/on-this-day" -H "Authorization: Bearer $SE_O"
+
+# An erased entry's words leave the row and the search.
+db_is "search: the row holds her words for search" "$(sql "SELECT text_search IS NOT NULL FROM entries WHERE id='$SE_A_ENTRY'")" "t"
+expect "search: she deletes her entry" 204 "" -- -X DELETE "$API/entries/$SE_A_ENTRY" -H "Authorization: Bearer $SE_A"
+db_is "search: …and the row holds none" "$(sql "SELECT coalesce(text_search, 'none') FROM entries WHERE id='$SE_A_ENTRY'")" "none"
+search "search: …and cafe finds nothing" 200 '"items":[]' "cafe" "$SE_B"
+
+# Ended: on-this-day is nothing, the same bytes for both; search still reads.
+expect "on this day: he leaves" 204 "" -- -X POST "$API/bonds/$SE_BOND/leave" -H "Authorization: Bearer $SE_B"
+expect "on this day: nothing for the one who stayed" 200 "" -- "$API/bonds/$SE_BOND/on-this-day" -H "Authorization: Bearer $SE_A"
+is "on this day: …exactly nothing" "$LAST_BODY" '{"items":[]}'
+expect "on this day: nothing for the one who left" 200 "" -- "$API/bonds/$SE_BOND/on-this-day" -H "Authorization: Bearer $SE_B"
+is "on this day: …the same bytes" "$LAST_BODY" '{"items":[]}'
+search "search: the ended bond is still searched, by the one who left" 200 'thank you for the long walk home' "walk" "$SE_B"
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

@@ -38,9 +38,23 @@ internal class ArchiveRig(
         bond: String,
         parameters: Map<String, String> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
+    ): MockHttpServletResponse = read(user, "/api/v1/bonds/$bond/days", parameters, headers)
+
+    /** `GET /bonds/{bond}/search`, whatever it answers. `q` is a parameter like any other here, NUL and all. */
+    fun search(
+        user: UUID,
+        bond: String,
+        parameters: Map<String, String> = emptyMap(),
+    ): MockHttpServletResponse = read(user, "/api/v1/bonds/$bond/search", parameters, emptyMap())
+
+    private fun read(
+        user: UUID,
+        path: String,
+        parameters: Map<String, String>,
+        headers: Map<String, String>,
     ): MockHttpServletResponse =
         mockMvc
-            .get("/api/v1/bonds/$bond/days") {
+            .get(path) {
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}")
                 parameters.forEach { (name, value) -> param(name, value) }
                 headers.forEach { (name, value) -> header(name, value) }
@@ -65,12 +79,21 @@ internal class ArchiveRig(
             }.andReturn()
             .response
 
-    /** One page, which must be a `200`. */
+    /** One page of [route] (`days` or `search`), which must be a `200`. */
     fun page(
         user: UUID,
         bond: String,
         parameters: Map<String, String> = emptyMap(),
-    ): JsonNode = json.readTree(days(user, bond, parameters).also { it.status shouldBe 200 }.getContentAsString(Charsets.UTF_8))
+        route: String = "days",
+    ): JsonNode =
+        json.readTree(
+            read(
+                user,
+                "/api/v1/bonds/$bond/$route",
+                parameters,
+                emptyMap(),
+            ).also { it.status shouldBe 200 }.getContentAsString(Charsets.UTF_8),
+        )
 
     /**
      * Every page from the first to the one whose `nextCursor` is null, in the
@@ -81,11 +104,12 @@ internal class ArchiveRig(
         user: UUID,
         bond: String,
         parameters: Map<String, String> = emptyMap(),
+        route: String = "days",
     ): List<JsonNode> {
         val pages = mutableListOf<JsonNode>()
         var cursor: String? = null
         do {
-            val body = page(user, bond, parameters + listOfNotNull(cursor?.let { "cursor" to it }))
+            val body = page(user, bond, parameters + listOfNotNull(cursor?.let { "cursor" to it }), route)
             pages.add(body)
             cursor = body["nextCursor"].takeUnless { it.isNull }?.asString()
             check(pages.size < MAX_PAGES) { "the walk did not end: a cursor that does not advance" }
@@ -98,7 +122,8 @@ internal class ArchiveRig(
         user: UUID,
         bond: String,
         parameters: Map<String, String> = emptyMap(),
-    ): List<JsonNode> = pages(user, bond, parameters).flatMap { it["items"].toList() }
+        route: String = "days",
+    ): List<JsonNode> = pages(user, bond, parameters, route).flatMap { it["items"].toList() }
 
     fun datesOf(days: List<JsonNode>): List<String> = days.map { it["date"].asString() }
 
@@ -189,15 +214,16 @@ internal class ArchiveRig(
         val later = Timestamp.from(at.plusSeconds(60))
         jdbc.update(
             """
-            INSERT INTO entries (id, bond_day_id, bond_id, author_member_id, text, status, created_at, intended_at, updated_at,
-                                 revealed_at, deleted_at)
-            VALUES (?, ?, ?::uuid, ?, ?, ?, ?, ?, ?, CASE WHEN ? THEN ?::timestamptz ELSE NULL END,
+            INSERT INTO entries (id, bond_day_id, bond_id, author_member_id, text, text_search, status, created_at, intended_at,
+                                 updated_at, revealed_at, deleted_at)
+            VALUES (?, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? THEN ?::timestamptz ELSE NULL END,
                     CASE WHEN ? THEN ?::timestamptz ELSE NULL END)
             """.trimIndent(),
             id,
             day,
             bond,
             author,
+            words.takeUnless { state.erased },
             words.takeUnless { state.erased },
             when {
                 state.erased -> "DELETED"

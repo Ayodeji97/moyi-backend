@@ -116,6 +116,7 @@ internal fun Entry.toEntity(): EntryEntity =
         bondId = bondId,
         authorMemberId = authorMemberId,
         text = text?.value,
+        textSearch = searchProjectionOf(text),
         imageMediaId = imageMediaId,
         voiceMediaId = voiceMediaId,
         voiceDurationMs = voiceDurationMs,

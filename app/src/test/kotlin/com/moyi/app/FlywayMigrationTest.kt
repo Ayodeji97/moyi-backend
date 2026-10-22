@@ -51,8 +51,9 @@ class FlywayMigrationTest(
         // V1 lives in `app` (database-wide extensions); V2 to V8 live in
         // `modules/identity`, V9, V10, V13, V18, V19 and V21 in `modules/bond` (its own
         // tables, its proposals, and the effective-anchor timeline), V11 in
-        // `common:web` (idempotency_keys, doc 06 §1), V12, V15, V17, V22, V23 and V24 in
-        // `modules/gratitude` (its tables, the close job's index, the streak, favourites, reactions, the prompt library), V14
+        // `common:web` (idempotency_keys, doc 06 §1), V12, V15, V17, V22, V23, V24 and V25 in
+        // `modules/gratitude` (its tables, the close job's index, the streak, favourites, reactions, the prompt library,
+        // search), V14
         // and V20 in `common:events` (the outbox, spec §8, and its consumers) and
         // V16 in `modules/scheduling` (ShedLock's table). Versions are one global sequence across
         // modules. Flyway merges every `classpath:db/migration` it finds, which
@@ -75,18 +76,18 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll((1..24).toList()),
-            "Expected every module's migrations through V24, found: $versions",
+            versions.containsAll((1..25).toList()),
+            "Expected every module's migrations through V25, found: $versions",
         )
 
         val extensions =
             jdbcTemplate.queryForList(
-                "SELECT extname FROM pg_extension WHERE extname IN ('citext', 'pgcrypto')",
+                "SELECT extname FROM pg_extension WHERE extname IN ('citext', 'pgcrypto', 'unaccent', 'btree_gin')",
                 String::class.java,
             )
         assertTrue(
-            extensions.containsAll(listOf("citext", "pgcrypto")),
-            "Expected citext and pgcrypto extensions, found: $extensions",
+            extensions.containsAll(listOf("citext", "pgcrypto", "unaccent", "btree_gin")),
+            "Expected citext, pgcrypto, unaccent and btree_gin (V25, search) extensions, found: $extensions",
         )
 
         val identityTables =

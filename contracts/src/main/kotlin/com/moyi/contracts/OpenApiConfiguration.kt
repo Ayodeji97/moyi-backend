@@ -183,6 +183,8 @@ class OpenApiConfiguration {
             documentFavourites(api)
             documentReactions(api)
             documentPrompts(api)
+            documentSearch(api)
+            documentOnThisDay(api)
         }
 
     /**
@@ -252,6 +254,9 @@ class OpenApiConfiguration {
     ): List<HttpStatus> =
         buildList {
             if (operation.requestBody != null) addAll(listOf(HttpStatus.BAD_REQUEST, HttpStatus.UNPROCESSABLE_ENTITY))
+            // A query parameter Tomcat cannot decode is `UndecodableParameterFilter`'s 400, on every route. Documented on
+            // search, the route most likely to be sent such bytes; the API-wide 400 is owed (ADR-0039, final review m1).
+            if (operation.operationId == SEARCH_OPERATION) add(HttpStatus.BAD_REQUEST)
             if (!public) addAll(listOf(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN))
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
             if (operation.operationId in CONFLICTING_OPERATIONS) add(HttpStatus.CONFLICT)
@@ -904,10 +909,10 @@ private const val DAYS_DESCRIPTION =
         "**A day's `status` does not say whether there is anything to draw.** A day whose author deleted their only " +
         "entry is still listed, for that author alone, with their tombstone as `myEntry`; once that day has closed " +
         "it carries `status: EMPTY`. Draw a day from its entries, not from its status."
-private const val DAYS_MIN_LIMIT = 1
-private const val DAYS_MAX_LIMIT = 50
-private const val DAYS_DEFAULT_LIMIT = 20
-private const val DAYS_MAX_CURSOR_LENGTH = 32
+internal const val DAYS_MIN_LIMIT = 1
+internal const val DAYS_MAX_LIMIT = 50
+internal const val DAYS_DEFAULT_LIMIT = 20
+internal const val DAYS_MAX_CURSOR_LENGTH = 32
 
 /**
  * States what a **conditional read** is on the operations that are one

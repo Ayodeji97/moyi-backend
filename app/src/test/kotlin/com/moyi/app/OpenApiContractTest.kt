@@ -117,9 +117,10 @@ class OpenApiContractTest(
         // socket; documented as query parameters they would generate a client
         // that sends them. Path parameters (`/sessions/{id}`) are real.
         // Cookie parameters: none, ever. Query parameters: the archive feed's
-        // four and no others (slice C5b). A resolver type documented as one
-        // would generate a client that sends it, so the list is exhaustive: a
-        // new query parameter has to be added here by somebody who meant it.
+        // four (slice C5b), search's three (slice C6b) and no others. A resolver
+        // type documented as one would generate a client that sends it, so the
+        // list is exhaustive: a new query parameter has to be added here by
+        // somebody who meant it.
         operations()
             .flatMap { (route, op) ->
                 op.parameters
@@ -127,7 +128,8 @@ class OpenApiContractTest(
                     .filter { it.`in` != "path" && it.`in` != "header" }
                     .map { "$route ${it.`in`} ${it.name}" }
             }.toSet() shouldBe
-            listOf("limit", "cursor", "until", "favourites").map { "GET /api/v1/bonds/{bondId}/days query $it" }.toSet()
+            listOf("limit", "cursor", "until", "favourites").map { "GET /api/v1/bonds/{bondId}/days query $it" }.toSet() +
+            listOf("q", "limit", "cursor").map { "GET /api/v1/bonds/{bondId}/search query $it" }
         // Headers are not all accidental — `If-Match` is required by doc 06 §1
         // and has to appear, or a generated client cannot send it. The list is
         // exhaustive on purpose: a *new* header parameter should have to be
@@ -521,6 +523,64 @@ class OpenApiContractTest(
         val page = api.components.schemas["DaysResponse"]!!
         page.properties.keys shouldBe setOf("items", "nextCursor")
         page.properties["items"]!!.items.`$ref` shouldBe "#/components/schemas/DayResponse"
+    }
+
+    @Test
+    fun `on-this-day takes nothing but its path and returns days and no cursor`() {
+        val onThisDay = api.paths["/api/v1/bonds/{bondId}/on-this-day"]!!.get
+        onThisDay.operationId shouldBe "onThisDay"
+        onThisDay.parameters.filter { it.`in` == "query" } shouldBe emptyList()
+        onThisDay.responses.keys shouldContainAll listOf("200", "401", "404", "429")
+        onThisDay.responses.keys shouldNotContain "422"
+        onThisDay.responses["200"]!!
+            .content["application/json"]!!
+            .schema.`$ref` shouldBe "#/components/schemas/OnThisDayResponse"
+        val page = api.components.schemas["OnThisDayResponse"]!!
+        page.properties.keys shouldBe setOf("items")
+        page.properties["items"]!!.items.`$ref` shouldBe "#/components/schemas/DayResponse"
+        val told = onThisDay.description.shouldNotBeNull()
+        told shouldContain "earlier year"
+        told shouldContain "29 February"
+        told shouldContain "takes no writes"
+    }
+
+    @Test
+    fun `search documents q as required and bounded, the feed's limit and cursor, its 400, 422 and 404, and the feed's page`() {
+        val search = api.paths["/api/v1/bonds/{bondId}/search"]!!.get
+        search.operationId shouldBe "search"
+        search.responses.keys shouldContainAll listOf("200", "400", "401", "404", "422", "429")
+        // An undecodable q is UndecodableParameterFilter's 400 MALFORMED_REQUEST, a problem like every refusal.
+        search.responses["400"]!!
+            .content[MediaType.APPLICATION_PROBLEM_JSON_VALUE]!!
+            .schema.`$ref` shouldBe "#/components/schemas/ProblemDetail"
+        search.parameters.single { it.name == "q" }.description shouldContain "400 MALFORMED_REQUEST"
+        search.responses.keys shouldNotContain "406"
+        search.responses.keys shouldNotContain "409"
+        search.requestBody.shouldBeNull()
+
+        val query = search.parameters.filter { it.`in` == "query" }.associateBy { it.name }
+        query.keys shouldBe setOf("q", "limit", "cursor")
+        query.getValue("q").required shouldBe true
+        query.getValue("q").schema.minLength shouldBe 1
+        query.getValue("q").schema.maxLength shouldBe 1024
+        query
+            .getValue("limit")
+            .schema.maximum
+            .toInt() shouldBe 50
+        query
+            .getValue("limit")
+            .schema.default
+            .toString() shouldBe "20"
+        query.getValue("cursor").schema.maxLength shouldBe 32
+        search.responses["200"]!!
+            .content["application/json"]!!
+            .schema.`$ref` shouldBe "#/components/schemas/DaysResponse"
+
+        val told = search.description.shouldNotBeNull()
+        told shouldContain "Only a null `nextCursor` means the end"
+        told shouldContain "Whole words"
+        told shouldContain "never echoed"
+        told shouldContain "no count"
     }
 
     @Test

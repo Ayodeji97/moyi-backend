@@ -55,6 +55,8 @@ stateDiagram-v2
 | remove an entry bookmark<br>`DELETE /entries/{entryId}/favourite` | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays |
 | react to your partner's entry<br>`PUT /entries/{entryId}/reaction` | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays |
 | take your reaction back<br>`DELETE /entries/{entryId}/reaction` | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays |
+| search the archive by words<br>`GET /bonds/{bondId}/search` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays |
+| this date in earlier years<br>`GET /bonds/{bondId}/on-this-day` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays |
 
 ### You can
 
@@ -179,6 +181,24 @@ stateDiagram-v2
 | `FROZEN` | take your reaction back |  | stays | Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown. | never-run |
 | `SUSPENDED` | list the archive |  | stays | List the archive is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
 | `SUSPENDED` | read one archived day |  | stays | Read one archived day is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
+| `NOT_OPENED` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `OPEN` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `PARTIAL` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `PENDING_REVEAL` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `REVEALED` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `SOLO` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `EMPTY` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `FROZEN` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `SUSPENDED` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `NOT_OPENED` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `OPEN` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `PARTIAL` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `PENDING_REVEAL` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `REVEALED` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `SOLO` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `EMPTY` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `FROZEN` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `SUSPENDED` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
 | `SUSPENDED` | bookmark an entry |  | stays | Bookmark an entry is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
 | `SUSPENDED` | remove an entry bookmark |  | stays | Remove an entry bookmark is independent of today's day status; the requested archive entry is addressed directly. The request still requires an authenticated member of the bond. | never-run |
 | `SUSPENDED` | react to your partner's entry |  | stays | Reacting to an entry is independent of today's day status; the entry is addressed directly, and it must be your partner's, revealed and shown to you in full. Your one reaction on it is set, or replaced. Both of you see it on the entry. | never-run |

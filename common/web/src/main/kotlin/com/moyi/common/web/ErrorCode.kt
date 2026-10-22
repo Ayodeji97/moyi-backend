@@ -27,7 +27,8 @@ enum class ErrorCode {
 
     /**
      * The body could not be taken in at all — not JSON, not the right shape,
-     * or (`413`) longer than an `@Idempotent` route will buffer.
+     * or (`413`) longer than an `@Idempotent` route will buffer — or a query
+     * parameter is not UTF-8.
      */
     MALFORMED_REQUEST,
 

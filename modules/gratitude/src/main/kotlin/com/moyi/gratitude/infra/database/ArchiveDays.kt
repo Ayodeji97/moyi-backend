@@ -2,6 +2,8 @@ package com.moyi.gratitude.infra.database
 
 import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.BondDayStatus
+import com.moyi.gratitude.domain.EntryId
+import com.moyi.gratitude.domain.SearchTerms
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementSetter
 import org.springframework.jdbc.core.RowMapper
@@ -14,6 +16,8 @@ internal data class ArchiveDay(
     val id: BondDayId,
     val date: LocalDate,
     val status: BondDayStatus,
+    /** For a search ([ArchiveDays.matching]), which of this day's entries matched it. Empty for every other listing. */
+    val matched: Set<EntryId> = emptySet(),
 )
 
 /**
@@ -135,6 +139,91 @@ internal class ArchiveDays(
                 ROW,
             ).firstOrNull()
 
+    /**
+     * At most [limit] days of [bondId], newest first and strictly before [before] where given,
+     * on which **one entry** matches [terms] and that same entry is one [memberId] may read in
+     * full as far as rows can say: they wrote it or it was revealed ([SEEN_ROW]), it is not
+     * erased ([LIVE_ROW]), and its author is not in [withdrawnMemberIds]. Each day carries the
+     * ids of its entries that matched (ADR-0039 decisions 2 and 3).
+     *
+     * **The match and the visibility are asked of one row.** Asked of the day, "a day with an
+     * entry the caller can see, and an entry that matches", the partner's unrevealed words
+     * would list a day the caller wrote on, and say what the partner wrote before the reveal
+     * (c6-corpus H-S2).
+     *
+     * **An erased entry never matches, whatever its projection still holds** ([LIVE_ROW]).
+     * This build empties the projection with every erasure (`searchProjectionOf`, V25), but a
+     * build from before V25 does not map the column, so an entry it erases keeps its words
+     * there, during a blue/green overlap or after a rollback across V25 (final review I1;
+     * ADR-0039's deploy prerequisites reconcile the rows). The search does not rely on a
+     * column write it does not own; the gate behind it would drop the day too.
+     *
+     * **The known withdrawn are excluded before `LIMIT`**, as the favourites feed does
+     * (ADR-0036 decision 7): a history of words taken back but not yet erased cannot fill a
+     * page with candidates the gate will drop. It is still a filter. The caller loads the
+     * entries, asks who has withdrawn again, and shows a day only if a matched entry was read
+     * in full.
+     *
+     * **`q` is a parameter**, folded by the function V25's generated column folds with, and
+     * parsed by `plainto_tsquery` (T-11): every word, as a whole word, in one entry.
+     *
+     * Driven from `entries`, so the planner may start from `entries_search_idx`; the measured
+     * cost is in ADR-0039.
+     *
+     * **The join names the bond on both sides** (`d.bond_id = e.bond_id`). Without it nothing
+     * bounds `bond_days` to the bond, and for a word the bond uses often the planner was free to
+     * hash-join a sequential scan of every bond's days: 49,980 rows at 100k entries
+     * (`SearchPlanMeasurement`, task 2 review I2). With it Postgres derives `d.bond_id = ?` and
+     * reads the bond's days alone. It also holds, in the query, that an entry and its day belong
+     * to one bond, which no foreign key does.
+     */
+    @Suppress("LongParameterList") // The search's own bounds, each a separate fact of the request.
+    fun matching(
+        bondId: UUID,
+        memberId: UUID,
+        terms: SearchTerms,
+        before: LocalDate?,
+        limit: Int,
+        withdrawnMemberIds: Set<UUID>,
+    ): List<ArchiveDay> {
+        val (sql, arguments) = matchingQuery(bondId, memberId, terms, before, limit, withdrawnMemberIds)
+        return jdbc.query(
+            sql,
+            PreparedStatementSetter { statement -> arguments.forEachIndexed { index, value -> statement.setObject(index + 1, value) } },
+            MATCHED,
+        )
+    }
+
+    /**
+     * The days of [bondId] dated [today]'s month and day in an earlier year, newest first, at
+     * most [ON_THIS_DAY_YEARS], that hold an entry [memberId] may read in full as far as rows
+     * can say: they wrote it or it was revealed ([SEEN_ROW]), it is not erased ([LIVE_ROW]),
+     * and its author is not in [withdrawnMemberIds] (ADR-0039 decision 15).
+     *
+     * **A day of tombstones is not a memory** (the controller's default 5, c6-corpus H-O5),
+     * so it is left out here, before the limit, and not by the reader afterwards. The archive
+     * still lists it ([SEEN] counts an erased row).
+     *
+     * **Month and day, compared as numbers**, so 29 February is found on 29 February only and
+     * 28 February never stands in for it (decision 16). [today] itself is not an earlier year.
+     *
+     * Walks the bond's own days by `bond_days_feed_idx`, about 365 a year of the bond, and
+     * never another bond's (NFR-033 by the bond, as the archive's sparse walk is).
+     */
+    fun onThisDay(
+        bondId: UUID,
+        memberId: UUID,
+        today: LocalDate,
+        withdrawnMemberIds: Set<UUID>,
+    ): List<ArchiveDay> {
+        val (sql, arguments) = onThisDayQuery(bondId, memberId, today, withdrawnMemberIds)
+        return jdbc.query(
+            sql,
+            PreparedStatementSetter { statement -> arguments.forEachIndexed { index, value -> statement.setObject(index + 1, value) } },
+            ROW,
+        )
+    }
+
     internal companion object {
         private const val SELECT = "SELECT d.id, d.date, d.status FROM bond_days d"
 
@@ -147,13 +236,22 @@ internal class ArchiveDays(
                 )
             }
 
-        private const val SEEN =
-            "AND EXISTS (SELECT 1 FROM entries e WHERE e.bond_day_id = d.id AND (e.author_member_id = ? OR e.revealed_at IS NOT NULL))"
+        /**
+         * BR-1's "ever readable" asked of one entry row `e`: the caller wrote it, or it has been
+         * revealed. Its one argument is the caller's member id. The archive lists a day by it
+         * ([SEEN]); a search asks it of the very row that matched ([matching]), never of the day.
+         */
+        private const val SEEN_ROW = "(e.author_member_id = ? OR e.revealed_at IS NOT NULL)"
+
+        private const val SEEN = "AND EXISTS (SELECT 1 FROM entries e WHERE e.bond_day_id = d.id AND $SEEN_ROW)"
+
+        /** Neither mark of an erasure, as `Entry.isErased` asks both. No argument. */
+        private const val LIVE_ROW = "e.deleted_at IS NULL AND e.status <> 'DELETED'"
 
         private const val MARKED =
             "AND EXISTS (SELECT 1 FROM entries e JOIN entry_favourites f ON f.entry_id = e.id " +
                 "WHERE e.bond_day_id = d.id AND f.member_id = ? " +
-                "AND e.revealed_at IS NOT NULL AND e.deleted_at IS NULL AND e.status <> 'DELETED'"
+                "AND e.revealed_at IS NOT NULL AND $LIVE_ROW"
 
         /**
          * The statement and its arguments, in order. Apart from [candidates]
@@ -189,5 +287,75 @@ internal class ArchiveDays(
             val arguments = listOfNotNull(bondId, before, until, memberId, memberId.takeIf { favouritesOnly }) + excluded + limit
             return sql to arguments
         }
+
+        /** [matching]'s statement and its arguments, in order: apart so that a measurement can ask Postgres how it runs. */
+        @Suppress("LongParameterList")
+        fun matchingQuery(
+            bondId: UUID,
+            memberId: UUID,
+            terms: SearchTerms,
+            before: LocalDate?,
+            limit: Int,
+            withdrawnMemberIds: Set<UUID>,
+        ): Pair<String, List<Any>> {
+            val sql =
+                listOfNotNull(
+                    "SELECT d.id, d.date, d.status, array_agg(e.id) AS matched",
+                    "FROM entries e JOIN bond_days d ON d.id = e.bond_day_id AND d.bond_id = e.bond_id",
+                    "WHERE e.bond_id = ?",
+                    before?.let { "AND d.date < ?" },
+                    "AND e.search_vector @@ plainto_tsquery('simple', public.immutable_unaccent(?))",
+                    "AND $SEEN_ROW",
+                    "AND $LIVE_ROW",
+                    withdrawnMemberIds
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { ids -> "AND e.author_member_id NOT IN (${ids.joinToString { "?" }})" },
+                    "GROUP BY d.id, d.date, d.status",
+                    "ORDER BY d.date DESC",
+                    "LIMIT ?",
+                ).joinToString("\n")
+            val arguments = listOfNotNull<Any>(bondId, before, terms.value, memberId) + withdrawnMemberIds + limit
+            return sql to arguments
+        }
+
+        /** The most earlier years [onThisDay] reads: more than any bond can have, and a bound all the same. */
+        const val ON_THIS_DAY_YEARS = 100
+
+        /** [onThisDay]'s statement and its arguments, in order. */
+        fun onThisDayQuery(
+            bondId: UUID,
+            memberId: UUID,
+            today: LocalDate,
+            withdrawnMemberIds: Set<UUID>,
+        ): Pair<String, List<Any>> {
+            val excluding =
+                withdrawnMemberIds
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { ids -> " AND e.author_member_id NOT IN (${ids.joinToString { "?" }})" }
+                    .orEmpty()
+            val sql =
+                listOf(
+                    SELECT,
+                    "WHERE d.bond_id = ?",
+                    "AND d.date < ?",
+                    "AND EXTRACT(MONTH FROM d.date) = ? AND EXTRACT(DAY FROM d.date) = ?",
+                    "AND EXISTS (SELECT 1 FROM entries e WHERE e.bond_day_id = d.id AND $SEEN_ROW AND $LIVE_ROW$excluding)",
+                    "ORDER BY d.date DESC",
+                    "LIMIT ?",
+                ).joinToString("\n")
+            val arguments =
+                listOf<Any>(bondId, today, today.monthValue, today.dayOfMonth, memberId) + withdrawnMemberIds + ON_THIS_DAY_YEARS
+            return sql to arguments
+        }
+
+        private val MATCHED =
+            RowMapper { row, _ ->
+                ArchiveDay(
+                    BondDayId(row.getObject("id", UUID::class.java)),
+                    row.getObject("date", LocalDate::class.java),
+                    BondDayStatus.valueOf(row.getString("status")),
+                    (row.getArray("matched").array as Array<*>).map { EntryId(it as UUID) }.toSet(),
+                )
+            }
     }
 }

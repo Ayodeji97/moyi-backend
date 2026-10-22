@@ -10,7 +10,7 @@ Any of these can follow any endpoint below. They are not repeated under each one
 
 | Status | Code | Why |
 |---|---|---|
-| 400 | `MALFORMED_REQUEST` | The body could not be read as what the endpoint expects. |
+| 400 | `MALFORMED_REQUEST` | The body could not be read as what the endpoint expects, or a query parameter is not UTF-8. A parameter that cannot be decoded is answered after authentication, so a caller without a valid token is told 401 first. |
 | 401 | `UNAUTHENTICATED` | No access token, or one that is expired or not valid. Everything under /api/v1 except the eight public auth POSTs needs one, and that is decided before the path is looked up: a path that does not exist, or a GET on a public auth route, is 401 without a token, not 404 or 405. A public route needs no token, but a token that is sent to one is still checked, and an expired or unaccepted one is 401 there too: send no Authorization header to a public route. In the account machine's own regions this answer is a row, because there the missing or expired token is the state. |
 | 403 | `FORBIDDEN` | A valid token that lacks the authority this action needs. |
 | 405 | `METHOD_NOT_ALLOWED` | The path exists; this verb does not. |
@@ -1534,6 +1534,71 @@ curl "$API/bonds/$BOND/days/$DATE" -H "Authorization: Bearer $TOKEN"
 |---|---|---|---|
 | 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer. | never-run |
 | 404 | `DAY_NOT_FOUND` | The value is not a calendar date, or that day is not in your archive. No more specific reason is returned. | never-run |
+
+### GET /bonds/{bondId}/search
+
+search the archive by words
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl -G "$API/bonds/$BOND/search" --data-urlencode "q=the long walk" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day` | `NOT_OPENED` |  | 200 stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-091 | never-run |
+| `day` | `OPEN` |  | 200 stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-091 | never-run |
+| `day` | `PARTIAL` |  | 200 stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-091 | never-run |
+| `day` | `PENDING_REVEAL` |  | 200 stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-091 | never-run |
+| `day` | `REVEALED` |  | 200 stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-091 | never-run |
+| `day` | `SOLO` |  | 200 stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-091 | never-run |
+| `day` | `EMPTY` |  | 200 stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-091 | never-run |
+| `day` | `FROZEN` |  | 200 stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-091 | never-run |
+| `day` | `SUSPENDED` |  | 200 stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-091 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so the same bytes whatever q is, as long as it can be decoded: a q whose bytes are not UTF-8 is everyone's 400 MALFORMED_REQUEST, member or stranger, after authentication. | smoke |
+| 422 | `VALIDATION_FAILED` | q is missing, blank, longer than 100 characters or 1,024 bytes, or holds NUL; or limit or cursor cannot be read. Each parameter is named, never its value: what was searched for is not sent back. | smoke |
+
+### GET /bonds/{bondId}/on-this-day
+
+this date in earlier years
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl "$API/bonds/$BOND/on-this-day" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day` | `NOT_OPENED` |  | 200 stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-092 | never-run |
+| `day` | `OPEN` |  | 200 stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-092 | never-run |
+| `day` | `PARTIAL` |  | 200 stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-092 | never-run |
+| `day` | `PENDING_REVEAL` |  | 200 stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-092 | never-run |
+| `day` | `REVEALED` |  | 200 stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-092 | never-run |
+| `day` | `SOLO` |  | 200 stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-092 | never-run |
+| `day` | `EMPTY` |  | 200 stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-092 | never-run |
+| `day` | `FROZEN` |  | 200 stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-092 | never-run |
+| `day` | `SUSPENDED` |  | 200 stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | FR-092 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer. | smoke |
 
 ### PUT /entries/{entryId}/favourite
 

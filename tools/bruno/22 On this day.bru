@@ -1,0 +1,19 @@
+meta {
+  name: On this day
+  type: http
+  seq: 22
+}
+
+get {
+  url: {{api}}/bonds/{{bondId}}/on-this-day
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  This date in earlier years, newest first, each day as the archive shows it. Today is the bond's date; 29 February only on 29 February. A day of tombstones is left out. Nothing at all once the bond has ended, whether it was left or blocked.
+}

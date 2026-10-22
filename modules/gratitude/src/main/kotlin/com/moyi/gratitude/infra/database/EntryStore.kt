@@ -49,6 +49,8 @@ internal class EntryStore(
     fun update(entry: Entry) {
         val entity = checkNotNull(entries.findById(entry.id.value)) { "cannot update a missing entry" }
         entity.text = entry.text?.value
+        // The projection follows the words, so an erasure empties it in the same statement (ADR-0039).
+        entity.textSearch = searchProjectionOf(entry.text)
         entity.status = entry.status
         entity.updatedAt = entry.updatedAt
         entity.revealedAt = entity.revealedAt ?: entry.revealedAt

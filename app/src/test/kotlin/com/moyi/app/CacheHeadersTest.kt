@@ -37,7 +37,8 @@ import javax.sql.DataSource
  * `SecurityConfiguration` was tried by a reviewer and every test stayed
  * green.
  *
- * The archive's two reads are the exception, and the reason the default now
+ * The archive's two reads are the exception (search and on-this-day, slice
+ * C6b, are not: they keep the default), and the reason the default now
  * needs holding: they send `Cache-Control: private, no-cache` beside an
  * `ETag`, which works *because* the writer leaves alone a response that has
  * a `Cache-Control` already. So both halves are asked here: the exception is
@@ -108,6 +109,12 @@ class CacheHeadersTest(
         neverStored("GET /today", today, 200)
         val date = today.body()["bondDay"]["date"].asString()
         neverStored("GET /streak", get("/bonds/$bond/streak", ada), 200)
+        // Search (slice C6b): what was found is never stored, by any cache (ADR-0039 decision 17).
+        neverStored("GET /search", get("/bonds/$bond/search?q=anything", ada), 200)
+        neverStored("GET /search, a q that cannot be searched", get("/bonds/$bond/search?q=", ada), 422)
+        neverStored("GET /search, a stranger", get("/bonds/$bond/search?q=anything", eve), 404)
+        neverStored("GET /on-this-day", get("/bonds/$bond/on-this-day", ada), 200)
+        neverStored("GET /on-this-day, a stranger", get("/bonds/$bond/on-this-day", eve), 404)
 
         // The archive: the two responses a client may keep, and must ask about before it uses them again.
         val days = "/bonds/$bond/days"
