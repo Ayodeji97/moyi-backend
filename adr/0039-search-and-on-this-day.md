@@ -548,11 +548,14 @@ record's author's.
     amendments in the tree (documentation only): green, **1,503 tests, 0 failures, 0 errors, 2
     skipped** (the two measurements, gated by `MOYI_MEASURE`), counted from the result files.
     `app` and `gratitude` ran; the other modules were up to date and their results reused.
-  - **CLAUDE.md and AGENTS.md** (decision 23): not amended in Task 4. PR #67, merged into
-    `main` as `25fa9c1` on 2026-10-22, rewrote the same rule (an invite code may reach a log
-    below the default level, ADR-0035 question 10), and the plan's replacement text was written
-    against the sentence before it. The amendment is owed on `main`'s wording, after this branch
-    is rebased, and the pull request must not go to review before it lands.
+  - **CLAUDE.md and AGENTS.md** (decision 23): PR #67, merged into `main` as `25fa9c1` on
+    2026-10-22, rewrote the same rule (an invite code may reach a log below the default level,
+    ADR-0035 question 10), and the plan's replacement text was written against the sentence
+    before it. The branch was rebased onto `25fa9c1` and the amendment applied to `main`'s
+    wording, keeping #67's invite-code clause: "Entry text, search terms, passwords and tokens
+    never reach a log, an exception message, or a second column (one exception:
+    `entries.text_search`, … ADR-0039); nor does an invite code, except …". AGENTS.md's rule 3
+    carries the same words.
 - **Argued, not run:** that `q` sent twice is joined by a comma (decision 11); that no
   Security filter reads a request parameter (the re-review ran every level at TRACE and saw
   nothing, which is evidence for today's filters only); that the backfill's cost grows linearly
