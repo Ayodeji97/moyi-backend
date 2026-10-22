@@ -10,6 +10,7 @@ import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.gratitude.service.GetDays
 import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.withClue
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
@@ -181,12 +182,18 @@ internal class OnThisDayTest(
 
         val answers =
             listOf(left to ada, left to bea, blocked to cy, blocked to dee, withdrawn to fay, withdrawn to gus)
-                .map { (bond, user) -> raw(user, bond).also { it.status shouldBe 200 }.contentAsString }
-        answers.toSet() shouldBe setOf(EMPTY)
+                .map { (bond, user) -> raw(user, bond).also { it.status shouldBe 200 } }
+        answers.map { it.contentAsString }.toSet() shouldBe setOf(EMPTY)
+        // The headers too, but for those that differ by the moment (task 3 review m1): not one says which ending it was.
+        val headers = answers.map(::headersOf).toSet()
+        withClue("$headers") { headers.size shouldBe 1 }
+        headers.single().keys shouldContain HttpHeaders.CACHE_CONTROL
         // And after the withdrawal's erasure, the same.
         dispatcher.dispatchDue(clock.instant(), DISPATCH_BUDGET).failed shouldBe 0
-        raw(fay, withdrawn).contentAsString shouldBe EMPTY
-        raw(gus, withdrawn).contentAsString shouldBe EMPTY
+        listOf(raw(fay, withdrawn), raw(gus, withdrawn)).forEach { erased ->
+            erased.contentAsString shouldBe EMPTY
+            headersOf(erased) shouldBe headers.single()
+        }
     }
 
     @Test
@@ -311,6 +318,13 @@ internal class OnThisDayTest(
             .andReturn()
             .response
 
+    /** Every header of [response] by name, but those that change from one moment to the next. */
+    private fun headersOf(response: MockHttpServletResponse): Map<String, List<String>> =
+        response.headerNames
+            .filterNot { name -> VOLATILE_HEADERS.any { it.equals(name, ignoreCase = true) } }
+            .sorted()
+            .associateWith { response.getHeaders(it) }
+
     private fun onThisDay(
         user: UUID,
         bond: String,
@@ -337,5 +351,6 @@ internal class OnThisDayTest(
         const val EMPTY = """{"items":[]}"""
         const val DISPATCH_BUDGET = 10
         const val TIMEOUT_SECONDS = 10L
+        val VOLATILE_HEADERS = listOf(HttpHeaders.DATE, HttpHeaders.LAST_MODIFIED)
     }
 }
