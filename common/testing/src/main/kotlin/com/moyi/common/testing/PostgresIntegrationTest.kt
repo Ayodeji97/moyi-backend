@@ -20,8 +20,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer
  * check waited thirty seconds on a container that no longer existed. The
  * singleton pattern is Testcontainers' own answer to this.
  *
- * **`max_connections=300`, not Postgres's 100.** Spring caches every distinct
- * test context for the run (up to 32) and evicts none, and each cached
+ * **`max_connections=300`, not Postgres's 100.** Spring caches up to 32
+ * distinct test contexts for the run, and evicts (and closes) the least
+ * recently used one only past that; each cached
  * context's Hikari pool keeps its connections open (`minimumIdle` defaults to
  * the pool size, 4 in the modules' test `application.yml`). The gratitude
  * suite reached about 25 contexts, 100 connections, in slice C6c: one more
