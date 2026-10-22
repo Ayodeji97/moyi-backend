@@ -5,10 +5,12 @@ import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.gratitude.api.DayCloser
+import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.shouldBe
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -22,9 +24,14 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
+import java.sql.Connection
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
@@ -43,11 +50,13 @@ import javax.sql.DataSource
 @Suppress("LongParameterList") // A test's collaborators, each named; nothing to bundle them into.
 internal class MilestoneReachedTest(
     @Autowired private val closer: DayCloser,
+    @Autowired private val streaks: EvaluateStreaks,
+    @Autowired private val closeDay: CloseDay,
     @Autowired private val recalculate: RecalculateStreak,
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired directory: UserDirectory,
-    @Autowired dataSource: DataSource,
+    @Autowired private val dataSource: DataSource,
     @Autowired private val clock: MutableClock,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
@@ -231,7 +240,69 @@ internal class MilestoneReachedTest(
         jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'MilestoneReached'", Int::class.java) shouldBe 1
     }
 
+    /**
+     * ADR-0041 decision 8: the count a milestone is crossed from is read under the bond's lock.
+     * ShedLock is a courtesy, not the guarantee (`SchedulingConfiguration`), so two runs can
+     * overlap; one that read the count before the lock, and then waited on it while another run
+     * committed days, would count on from a number already stale, and miss a threshold or
+     * announce one twice. Here a connection holds the bond's lock while the run waits on it, and
+     * commits days 1 to 6 evaluated `COMPLETE`, as an overlapping run would. Released, the run
+     * finds day 7 alone and announces 7 on it. Read before the lock, the count is 0 and day 7 is
+     * the first complete day: nothing is announced.
+     */
+    @Test
+    fun `a run that waited on the bond's lock counts from the days committed while it waited`() {
+        (1..7).forEach { bothWriteOn(it) }
+        (1..7).forEach { closeDay.settle(BondDayId(dayId(it)), Instant.parse("${day(7)}T23:01:00Z")) shouldBe CloseDay.Outcome.CLOSED }
+
+        val evaluated =
+            Executors.newSingleThreadExecutor().use { pool ->
+                dataSource.connection.use { holder ->
+                    holder.autoCommit = false
+                    holder.createStatement().use { it.execute("SELECT 1 FROM bonds WHERE id = '$bond' FOR UPDATE") }
+                    val run = pool.submit(Callable { streaks.evaluate() })
+                    try {
+                        await().atMost(Duration.ofSeconds(10)).until {
+                            jdbc.queryForObject(
+                                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'",
+                                Int::class.java,
+                            )!! >= 1
+                        }
+                        // The other run's work, committed while this one waits.
+                        evaluateAsComplete(holder, 1..6) shouldBe 6
+                        holder.commit()
+                    } finally {
+                        holder.rollback()
+                    }
+                    run.get(15, TimeUnit.SECONDS)
+                }
+            }
+
+        (evaluated.days to evaluated.failed) shouldBe (1 to 0)
+        milestones().map { it.dayId } shouldBe listOf(dayId(7))
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'MilestoneReached'", Int::class.java) shouldBe 1
+    }
+
     // ---- helpers ----------------------------------------------------------
+
+    /** Days [days] evaluated `COMPLETE` on [connection], as `StreakStore.recordDay` writes a day. */
+    private fun evaluateAsComplete(
+        connection: Connection,
+        days: IntRange,
+    ): Int =
+        connection
+            .prepareStatement(
+                """
+                UPDATE bond_days SET evaluated_at = now(), evaluated_as = 'COMPLETE', evaluated_strict = false,
+                    freeze_applied = false, version = version + 1
+                WHERE bond_id = ?::uuid AND date BETWEEN ? AND ? AND evaluated_at IS NULL
+                """.trimIndent(),
+            ).use {
+                it.setString(1, bond)
+                it.setObject(2, day(days.first))
+                it.setObject(3, day(days.last))
+                it.executeUpdate()
+            }
 
     private data class Announced(
         val dayId: UUID,
