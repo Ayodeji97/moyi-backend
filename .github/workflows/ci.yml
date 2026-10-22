@@ -80,7 +80,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-
   # Builds the deployable image (Spring Boot's own Cloud Native Buildpacks
   # support — no hand-maintained Dockerfile) once per CPU architecture, and
   # on a real merge to main publishes it to GHCR. No deploy stage: nothing
@@ -117,6 +116,11 @@ jobs:
   # push-to-main, so they are proven by the first run after merge and by
   # nothing before it.
   image:
+    # A short, stable check name per architecture, "image (amd64)" and
+    # "image (arm64)": these are what branch protection should require, so
+    # that a PR breaking one architecture cannot merge and then leave
+    # `latest` silently stuck when main's arm64 leg fails.
+    name: image (${{ matrix.arch }})
     needs: [quality, gitleaks]
     strategy:
       # One architecture failing should not cancel the other: on a PR the
@@ -130,14 +134,19 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     # Job-level permissions replace the workflow's, so contents: read is
-    # restated. packages: write is held on PRs too, where nothing is
-    # pushed — permissions cannot depend on the event — and a PR from a
-    # fork gets a read-only token whatever this says.
+    # restated. The `permissions` key cannot vary with the event, so
+    # packages: write is granted on PRs too, where nothing is pushed; a PR
+    # from a fork gets a read-only token whatever this says.
     permissions:
       contents: read
       packages: write
     steps:
+      # persist-credentials: false, because this job then runs the PR's own
+      # Gradle code (bootBuildImage), and a token left in .git/config would
+      # be readable by it, with packages: write on a same-repo PR.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # 21 as well as 25, even though this job never runs detekt: the
       # daemon JVM is now declared repo-wide in
@@ -218,13 +227,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - env:
+      # `latest` moves only if this commit is still main's head. Re-running
+      # an old run would otherwise move `latest` backwards, and `latest` is
+      # the tag a deploy pulls. The `<sha>` tag is always written.
+      - id: create
+        env:
           NAME: ${{ steps.image.outputs.name }}
           SHA: ${{ github.sha }}
         run: |
-          docker buildx imagetools create \
-            --tag "$NAME:$SHA" \
-            --tag "$NAME:latest" \
+          tags=(--tag "$NAME:$SHA")
+          head=$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}" refs/heads/main | cut -f1)
+          if [ "$head" = "$SHA" ]; then
+            tags+=(--tag "$NAME:latest")
+            echo "latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::main is now at $head, past $SHA: latest is left where it is"
+            echo "latest=false" >> "$GITHUB_OUTPUT"
+          fi
+          docker buildx imagetools create "${tags[@]}" \
             "$NAME:$SHA-amd64" \
             "$NAME:$SHA-arm64"
 
@@ -236,9 +256,12 @@ jobs:
       - env:
           NAME: ${{ steps.image.outputs.name }}
           SHA: ${{ github.sha }}
+          LATEST: ${{ steps.create.outputs.latest }}
         run: |
           expected=$'linux/amd64\nlinux/arm64'
-          for tag in "$SHA" latest; do
+          tags=("$SHA")
+          if [ "$LATEST" = true ]; then tags+=(latest); fi
+          for tag in "${tags[@]}"; do
             platforms=$(docker buildx imagetools inspect --raw "$NAME:$tag" \
               | jq -r '.manifests[].platform
                        | select(.os != "unknown")
@@ -247,5 +270,11 @@ jobs:
             echo "$NAME:$tag -> ${platforms//$'\n'/ }"
             test "$platforms" = "$expected"
           done
-          test "$(docker buildx imagetools inspect --raw "$NAME:$SHA" | sha256sum)" \
-            = "$(docker buildx imagetools inspect --raw "$NAME:latest" | sha256sum)"
+          if [ "$LATEST" = true ]; then
+            # Assigned first, so a failed inspect stops the step (errexit) rather
+            # than hashing two empty strings that compare equal.
+            by_sha=$(docker buildx imagetools inspect --raw "$NAME:$SHA")
+            by_latest=$(docker buildx imagetools inspect --raw "$NAME:latest")
+            test -n "$by_sha"
+            test "$by_sha" = "$by_latest"
+          fi
