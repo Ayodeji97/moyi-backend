@@ -578,5 +578,24 @@ class ArchitectureTest {
             "GetMilestones is handed the bond's access port, the calendar, the streak's rule for today and the clock, " +
                 "and nothing else. Found: $handed",
         )
+
+        // Nor its route (review m1): a store handed to the controller could be written after the
+        // read, as surely as one handed to the service. The reconcile writes bond-level joining
+        // state only, and is the route's as it is every bond read's.
+        val route =
+            project.files
+                .single { it.name == "MilestonesController" && it.normalisedProjectPath.contains("/modules/gratitude/src/main/") }
+                .classes()
+                .single { it.name == "MilestonesController" }
+        val routeHanded =
+            route.primaryConstructor
+                ?.parameters
+                .orEmpty()
+                .map { it.type.name }
+        assertTrue(
+            routeHanded.sorted() == listOf("BondAccess", "GetMilestones", "ReconcileJoiningDay") && route.secondaryConstructors.isEmpty(),
+            "MilestonesController is handed the guard's port, the read and the joining-day reconcile, and nothing else. " +
+                "Found: $routeHanded",
+        )
     }
 }
