@@ -115,6 +115,8 @@ internal class GratitudeCrossTenantTest(
             "GET /api/v1/bonds/{bondId}/search" to Fixture(query = "q=cross-tenant"),
             // No parameters: a stranger gets the bond's 404, never an empty list of memories.
             "GET /api/v1/bonds/{bondId}/on-this-day" to Fixture(),
+            // Slice C6c. No parameters: a stranger gets the bond's 404, never a list of what it reached.
+            "GET /api/v1/bonds/{bondId}/milestones" to Fixture(),
         )
 
     private data class Fixture(

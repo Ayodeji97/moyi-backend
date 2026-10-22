@@ -92,7 +92,7 @@ internal class GetStreak(
         // every number moves together: on a fourteenth day the freeze shows
         // as earned beside the fourteen, not at midnight.
         val state =
-            if (todayComplete && todayFollows(membership, today)) {
+            if (countsToday(membership, today, todayComplete)) {
                 StreakRules.step(stored, today, DayOutcome.COMPLETE, membership.strictMode).state
             } else {
                 stored
@@ -107,6 +107,20 @@ internal class GetStreak(
             lastCompleteDate = state.lastCompleteDate,
         )
     }
+
+    /**
+     * Whether a complete [today] is added to what is stored: the one rule for it, which [view]
+     * applies to the numbers and `GetMilestones` to the milestones (ADR-0041 decision 4), so that
+     * the two screens never disagree about today. [todayComplete]: today's square is `COMPLETE`,
+     * which is to say the day has **revealed** — a day both have written that waits for its
+     * reveal time is not complete yet. And today must directly follow the last evaluated day:
+     * see the class KDoc.
+     */
+    fun countsToday(
+        membership: BondMembership,
+        today: LocalDate,
+        todayComplete: Boolean,
+    ): Boolean = todayComplete && todayFollows(membership, today)
 
     /** Whether a complete today extends the stored run: see the class KDoc. An evaluated today is already in it. */
     private fun todayFollows(
