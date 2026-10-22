@@ -242,6 +242,12 @@ changes serialize with close. The one-minute margin absorbs ordinary clock skew.
    source. The ruling covers the lone-entry reveal rule and nothing else. Reads gated on the
    bond taking no writes are unchanged by it: `prompt` stays `null` on `GET /today` while a
    deletion counts down (ADR-0038 ruling 6).
+   *(Built 2026-10-22, ADR-0040. The closer's view gained `separatedAt`: the earliest of the
+   bond's `archivedAt` and any member's `leftAt`. It is not `archivedAt` alone, as the brief
+   said: a leave or block during a countdown stamps only `leftAt`, and a cancel later
+   archives at the cancel time, so `archivedAt` alone would reveal the lone entry of a
+   couple one of whom had already gone. `endedAt` is unchanged and still includes a
+   countdown.)*
 2. **A deletion that is called off leaves no record that it was ever counting down** (and
    one called off after a member has left archives the bond at the cancel, with the same
    effect).

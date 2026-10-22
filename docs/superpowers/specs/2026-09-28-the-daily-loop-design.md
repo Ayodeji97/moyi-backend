@@ -710,7 +710,7 @@ Under the Bond-day's row lock, in the same transaction that persists the entry:
 | `OPEN` | 1 | — | `PARTIAL` |
 | `PARTIAL` | 2 | absent, or already passed | `REVEALED`, both entries `REVEALED`, `revealedAt` set |
 | `PARTIAL` | 2 | in the future | `PENDING_REVEAL` |
-| `PENDING_REVEAL` | 2 | passed (the job's second sweep) | `REVEALED` |
+| `PENDING_REVEAL` | 2 | passed (the job's second sweep) | `REVEALED`, unless the bond separated first: then it stays `PENDING_REVEAL` and is closed so (ADR-0040) |
 
 - **`PENDING_REVEAL` is a distinct status and not a `PARTIAL` that waits.** FR-062 says why:
   doc 04 §6.1 defines `PARTIAL` as "the partner has written and you have not", so leaving both-
@@ -780,7 +780,12 @@ unsettled days**, regardless of the bond's current status or current requested z
    Current `ARCHIVED` or `PENDING_DELETION` status cannot strand an earlier partial or
    pending-reveal day. *(Amended 2026-10-06, the owner's ruling, ADR-0033 decision 9: a
    partial day is still settled `SOLO`, but its lone entry is not revealed when the bond
-   stopped taking writes before the day ended. Its author alone reads it.)* The timed-reveal sweep also scans existing rows in their snapshot
+   stopped taking writes before the day ended. Its author alone reads it.)*
+   *(Amended 2026-10-22, ADR-0040: "stopped taking writes" is narrowed to "separated" — the
+   bond archived, or a member left; a deletion countdown alone does not withhold the lone
+   entry, because it can be called off. And `PENDING_REVEAL → REVEALED` is not unconditional:
+   when the bond separated before the reveal fell due, a day both wrote on closes
+   `PENDING_REVEAL` with `closedAt`, nothing revealed, and still counts `COMPLETE`.)* The timed-reveal sweep also scans existing rows in their snapshot
    zone independently of the current bond status.
 3. **Evaluate the streak** for changed bonds (§6.5), from C4 onward.
 

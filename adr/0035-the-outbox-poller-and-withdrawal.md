@@ -699,6 +699,13 @@ Each is built one way and cheap to turn.
 
    *Ruled by the owner on 2026-10-21, to be built: withheld. An ended bond reveals nothing
    new, which agrees with ADR-0033 decision 9 and doc 09 T-20.*
+
+   *(Built 2026-10-22, ADR-0040. "No test pins it either way", above, was false when it was
+   written: `CloseElapsedDaysTest` pinned the reveal, and was inverted. "Ended" here is
+   "separated", as in ADR-0033 question 1: the bond archived or a member left, never a
+   countdown alone. The day is judged by when its reveal fell due, not by when the job ran.
+   A withheld day closes `PENDING_REVEAL`, reveals nothing, and counts `COMPLETE`, the owner's
+   ruling of 2026-10-22.)*
 10. **An invite code reaches the log at DEBUG, and CLAUDE.md says it never does.** The
     code is part of the path (`GET /invites/{code}`, `POST /invites/{code}/accept`), so
     every logger that prints a request line prints it: Spring Security's `FilterChainProxy`

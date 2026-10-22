@@ -71,7 +71,12 @@
 # same for both; and after a leave, what was reached kept and nothing next, for both alike.
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-22, for slice C6c, by its
+# days are the tests' to show. Last run on 2026-10-22, for the two rulings of
+# ADR-0040 (what an ended bond reveals), from 6445d92's jar (its code is
+# 7c8d408's), against a database of its own and --attach, Postgres on port
+# 55432 because another project's container held 5432: 930 passed, 0 failed,
+# 0 skipped, 24 sections; no probe changed, the rulings being the tests'
+# to show. Before it, for slice C6c, by its
 # final review, from 95ba089's jar: 930 passed, 0 failed, 0 skipped, 24
 # sections. Before it, against a database of its own (MOYI_DB, below), from
 # 1e1fc07 (named as it stands after the rebase onto dcb3b36; the jar was built
