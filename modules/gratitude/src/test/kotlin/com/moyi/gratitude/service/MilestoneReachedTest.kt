@@ -143,6 +143,27 @@ internal class MilestoneReachedTest(
     }
 
     /**
+     * ADR-0041 decision 9: a day both wrote on before the bond ended is a complete day (ADR-0034
+     * decision 7), and its milestone is history, written as on any other bond. Whether anybody is
+     * told is the consumer's to ask (doc 02:144), not the producer's to decide. Bea leaves an hour
+     * after both wrote the seventh day; the job evaluates it, and the days after, once it has ended.
+     */
+    @Test
+    fun `a day both wrote on before the bond ended still writes its MilestoneReached`() {
+        (1..7).forEach { bothWriteOn(it) }
+        clock.set(at(7).plusSeconds(3_600))
+        mockMvc
+            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, bearer(bea)) }
+            .andReturn()
+            .response.status shouldBe 204
+
+        closeThrough(9)
+
+        jdbc.queryForObject("SELECT evaluated_as FROM bond_days WHERE id = ?", String::class.java, dayId(7)) shouldBe "COMPLETE"
+        milestones().map { it.dayId } shouldBe listOf(dayId(7))
+    }
+
+    /**
      * Counted on the timeline, the days evaluated `COMPLETE`, which is what `GET /milestones`
      * dates by, and never on the stored `total_complete_days`. Drifted three too high, the stored
      * total would announce 7 on the fourth complete day, and again on the seventh once a
