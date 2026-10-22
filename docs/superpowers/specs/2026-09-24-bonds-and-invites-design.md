@@ -132,8 +132,10 @@ one-in-a-billion collision the insert is retried once with a fresh code.
 **One live invite per Bond.** Creating a new one revokes the outstanding one
 in the same transaction (doc 06 §3.3, `states.md` §2 "Replaced").
 
-The link is `<moyi.bond.invite.link-base-url>/<code>`, defaulting to
-`https://moyi.com/i`, configured like the verification link. The page it
+The link is `<moyi.bond.invite.link-base-url>/<code>`, configured like the
+verification link. *(Amended 2026-10-22, ADR-0018's amendment: there is no default;
+`MOYI_BOND_INVITE_LINK_BASE_URL` must be set, `local` uses `http://localhost:3000/i`, and
+a missing value fails the boot. `moyi.com` was never this product's domain.)* The page it
 lands on performs no lookup (`states.md` §2).
 
 ---
@@ -193,7 +195,7 @@ RFC 3339 UTC. Times of day `HH:mm`. Errors RFC 9457 with `code`.
     { "id": "019…", "displayName": "Amara", "role": "OWNER", "joinedAt": "…", "leftAt": null }
   ],
   "me": { "memberId": "019…", "role": "OWNER" },
-  "invite": { "id": "019…", "code": "7KQ4MZ", "link": "https://moyi.com/i/7KQ4MZ", "expiresAt": "…" } | null,
+  "invite": { "id": "019…", "code": "7KQ4MZ", "link": "https://example.com/i/7KQ4MZ", "expiresAt": "…" } | null,
   "pendingTimezoneChange": { "proposedTimezone": "Europe/London", "proposedByMemberId": "…", "proposedAt": "…", "expiresAt": "…" } | null,
   "pendingDeletionRequest": { "requestedByMemberId": "…", "requestedAt": "…", "expiresAt": "…" } | null
 }

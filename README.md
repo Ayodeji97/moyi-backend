@@ -67,7 +67,8 @@ link bases a verification, reset or invite link is built on:
 `MOYI_IDENTITY_VERIFICATION_RESET_LINK_BASE_URL` and
 `MOYI_BOND_INVITE_LINK_BASE_URL`, pages on the marketing site; `local`
 points them at `localhost:3000`, and nothing else has a default, because a
-token travels in the link (ADR-0018's amendment). Everything under
+token travels in the link (ADR-0018's amendment). Set all three together: a boot
+reports only the first one missing. Everything under
 `/api/v1` except the auth endpoints needs `Authorization: Bearer <token>`;
 `GET /api/v1/me` is the endpoint to try it on.
 

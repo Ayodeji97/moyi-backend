@@ -2571,7 +2571,8 @@ Reality: deleting the lines was the easy half. The first test that booted a cont
          defect lived. `LinkBaseUrlsHaveNoDefaultTest` loads the real files per profile.
          Mutations: the `moyi.com` lines put back in `application.yml`, and a default put
          back in either class, each turned its test red. The smoke's invite-link probe
-         hard-coded `https://moyi.com/i/`; it now reads the `local` value.
+         hard-coded `https://moyi.com/i/`; it now expects the `local` profile's
+         `http://localhost:3000/i/`, also written into the script.
 Wrong about: "required, with no default" being a property of a class. It is a property of
          what the deployment resolves, and a file every profile inherits can answer it
          before the class is asked. Also that `@NotNull` on a non-null Kotlin type means
