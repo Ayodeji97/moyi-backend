@@ -236,6 +236,24 @@ internal class OnThisDayTest(
     }
 
     @Test
+    fun `the memories stop at the first that does not fit, and a smaller one after it is not taken`() {
+        val bond = pair(Instant.parse("2022-09-01T10:00:00Z"))
+        bothWrite(bond, "2023-09-15")
+        clock.set(Instant.parse("2024-09-15T10:00:00Z"))
+        rig.bonds.submit(ada, bond, "a".repeat(LARGE_ENTRY))
+        rig.bonds.submit(bea, bond, "b".repeat(LARGE_ENTRY))
+        bothWrite(bond, "2025-09-15")
+        clock.set(NOW)
+        val membership = access.membershipOf(ada, UUID.fromString(bond))
+        // Not vacuous: the bound holds the newest and the oldest together, and not the newest with the middle one.
+        rig.datesOf(onThisDay(ada, bond)["items"].toList()) shouldBe listOf("2025-09-15", "2024-09-15", "2023-09-15")
+
+        // Oldest first out (decision 13): the page ends where the first day does not fit, as the archive's does, so
+        // what is left out is always the oldest run, never a year from the middle (task 3 review m3).
+        getDays.onThisDay(membership, textOctets = SMALL_DAYS_ONLY).map { it.date.toString() } shouldBe listOf("2025-09-15")
+    }
+
+    @Test
     fun `a withdrawal committed after the candidates were read is caught by the gate`() {
         val bond = pair(Instant.parse("2024-09-01T10:00:00Z"))
         handDay(bond, "2025-09-15", "SOLO", rig.bonds.memberId(bond, ada) to "her lone entry, revealed at the close", revealed = true)
@@ -351,6 +369,10 @@ internal class OnThisDayTest(
         const val EMPTY = """{"items":[]}"""
         const val DISPATCH_BUDGET = 10
         const val TIMEOUT_SECONDS = 10L
+        const val LARGE_ENTRY = 400
+
+        /** Two small days ("ada on …" and "bea on …", 34 octets each) fit; a small day and the large one do not. */
+        const val SMALL_DAYS_ONLY = 100
         val VOLATILE_HEADERS = listOf(HttpHeaders.DATE, HttpHeaders.LAST_MODIFIED)
     }
 }
