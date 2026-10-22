@@ -189,9 +189,9 @@ internal class MilestonesEndpointTest(
     }
 
     /**
-     * H-M4 and the controller's default 1: `takesWrites` (ADR-0041 decision 7). Three bonds with
-     * the same history on the same dates, ended three ways: a leave, a block with withdrawal, a
-     * deletion countdown. Every member of every one reads the same body and the same headers,
+     * H-M4 and the controller's default 1: `takesWrites` (ADR-0041 decision 7). Four bonds with
+     * the same history on the same dates, ended four ways: a leave, a block with withdrawal, a
+     * block without it (review m2), a deletion countdown. Every member of every one reads the same body and the same headers,
      * before the job and the erasure run and after. A countdown called off gives `next` back.
      */
     @Test
@@ -200,10 +200,19 @@ internal class MilestonesEndpointTest(
         val dee = users.verified("Dee")
         val fay = users.verified("Fay")
         val gus = users.verified("Gus")
+        val hal = users.verified("Hal")
+        val ivy = users.verified("Ivy")
         val left = bond
         val blocked = rig.pair(cy, dee)
         val counting = rig.pair(fay, gus)
-        val bonds = listOf(left to listOf(ada, bea), blocked to listOf(cy, dee), counting to listOf(fay, gus))
+        val plainlyBlocked = rig.pair(hal, ivy)
+        val bonds =
+            listOf(
+                left to listOf(ada, bea),
+                blocked to listOf(cy, dee),
+                counting to listOf(fay, gus),
+                plainlyBlocked to listOf(hal, ivy),
+            )
         bonds.forEach { (b, _) -> daysByHand(b, through = 6) }
         clock.set(at(7))
         bonds.forEach { (b, members) -> members.forEach { rig.submit(it, b, "thank you") } }
@@ -213,6 +222,7 @@ internal class MilestonesEndpointTest(
         clock.set(at(7).plusSeconds(3_600))
         rig.leave(bea, left)
         rig.block(dee, blocked, true)
+        rig.block(ivy, plainlyBlocked, false)
         deletionRequest(fay, counting, "POST")
         deletionRequest(gus, counting, "POST")
         // To be confirmed by running, as in OnThisDayTest: two requests put the bond in PENDING_DELETION.
@@ -224,7 +234,7 @@ internal class MilestonesEndpointTest(
         val headers = answers.map(::headersOf).toSet()
         withClue("$headers") { headers.size shouldBe 1 }
 
-        // The withdrawal's erasure runs, and the job evaluates day 7 on all three: the record is the same.
+        // The withdrawal's erasure runs, and the job evaluates day 7 on all four: the record is the same.
         dispatcher.dispatchDue(clock.instant(), DISPATCH_BUDGET).failed shouldBe 0
         jdbc.queryForObject(
             "SELECT count(*) FROM entries WHERE bond_id = ?::uuid AND author_member_id = ? AND text IS NOT NULL",
@@ -236,7 +246,7 @@ internal class MilestonesEndpointTest(
         clock.set(at(9))
         bonds.flatMap { (b, members) -> members.map { raw(it, b) } }.map { it.contentAsString }.toSet() shouldBe setOf(ended)
         // Decision 9: a day both wrote on before the end is announced, ended or not.
-        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'MilestoneReached'", Int::class.java) shouldBe 3
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'MilestoneReached'", Int::class.java) shouldBe 4
 
         deletionRequest(fay, counting, "DELETE")
         body(gus, counting) shouldBe reachedSeven(day(7))
