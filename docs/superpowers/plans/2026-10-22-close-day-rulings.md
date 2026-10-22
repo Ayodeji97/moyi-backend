@@ -40,7 +40,7 @@
 - Test: the bond module's closing-view test, if one exists (`grep -rln "closingViewOf\|lockClosingViewOf" modules/bond/src/test`); add the field assertion there.
 
 **Interfaces:**
-- Produces: `BondClosingView.archivedAt: Instant?` — when the bond was archived (left or blocked), `null` while it is live or only counting down to deletion. Task 2 uses it.
+- Produces: `BondClosingView.separatedAt: Instant?` — when the bond was archived (left or blocked), `null` while it is live or only counting down to deletion. Task 2 uses it.
 
 - [ ] **Step 1: Write the failing tests** in `CloseDayTest`, beside `a lone entry on a bond that ended before the day did is never revealed...` (keep that test; it is the archived case). How a test requests deletion: find the route in `modules/bond` (`grep -rn "deletion" modules/bond/src/main/kotlin/com/moyi/bond/web`), and use it as the leave test uses `/leave`.
 
@@ -84,7 +84,7 @@ Expected: the countdown test FAILS with `0 shouldBe 1`.
 
 In `BondAccessAdapter.closingView`: `archivedAt = bond.archivedAt,`. Check that a leave or block during `PENDING_DELETION` sets `archivedAt` (`Bond.kt` ~line 278); if it does not, stop and report.
 
-In `CloseDay`: pass `view.archivedAt` to `close`, rename its parameter `bondArchivedAt`, and the local `bondArchivedFirst = bondArchivedAt != null && bondArchivedAt.isBefore(closed.endsAt)`. Rewrite the comment above it: archived only; a countdown is not an ending, because it can be called off and would leave the entry its author's alone with nothing to release it (ADR-0033 q1, ruled 2026-10-21). Update the class KDoc's step 6 to say "archived" where it says "stopped taking writes".
+In `CloseDay`: pass `view.separatedAt` to `close`, rename its parameter `bondSeparatedAt`, and the local `bondArchivedFirst = bondSeparatedAt != null && bondSeparatedAt.isBefore(closed.endsAt)`. Rewrite the comment above it: archived only; a countdown is not an ending, because it can be called off and would leave the entry its author's alone with nothing to release it (ADR-0033 q1, ruled 2026-10-21). Update the class KDoc's step 6 to say "archived" where it says "stopped taking writes".
 
 - [ ] **Step 4: Run** `./gradlew :modules:gratitude:test --tests '*CloseDayTest*' :modules:bond:test` — PASS.
 - [ ] **Step 5: Mutate.** Put `view.endedAt` back in the call; the countdown test must fail. Restore.
@@ -103,7 +103,7 @@ In `CloseDay`: pass `view.archivedAt` to `close`, rename its parameter `bondArch
 - Test: `CloseDayTest.kt`; `StreakEvaluationTest.kt`; one archive read test (find the day-view test: `grep -rln "/days/" modules/gratitude/src/test`)
 
 **Interfaces:**
-- Consumes: `BondClosingView.archivedAt` (Task 1).
+- Consumes: `BondClosingView.separatedAt` (Task 1).
 - Produces, on `BondDay`:
   - `fun revealFallsDueAt(revealTime: LocalTime?): Instant` — the reveal time on this day's calendar, capped at `endsAt`; `endsAt` when `revealTime` is null.
   - `fun withholdReveal(): BondDay` — a two-entry unrevealed `PARTIAL`/`PENDING_REVEAL` day becomes `PENDING_REVEAL`; anything else is returned as is.
@@ -212,6 +212,8 @@ fun `a day both wrote on whose reveal comes during a deletion countdown is revea
 
 In `StreakEvaluationTest` (its own helpers): a withheld day evaluates `COMPLETE` and extends the run; the evaluation does not throw on it.
 
+In `MilestoneReachedTest` (its own helpers; gratitude-3f's request, owner's ruling covers milestones): six complete days, then a seventh both write on with a reveal time set, Bea leaves before it → the job closes it withheld; `evaluated_as` is `COMPLETE`, one `MilestoneReached` names that day, and `GET /milestones` dates the 7 milestone on it.
+
 In the archive/day-view test: after a withheld close, `GET` the day as Ada → her own entry readable, Bea's not (in whatever shape a locked partner entry has today — read `EntryReadabilityTest` and the day view first); the day's status is `PENDING_REVEAL`. Search as Ada for a word only in Bea's entry → nothing.
 
 - [ ] **Step 6: Run; they fail.**
@@ -226,7 +228,7 @@ In the archive/day-view test: after a withheld close, `GET` the day as Ada → h
         val withheld =
             prepared.entryCount == BondDay.MAX_ENTRIES &&
                 prepared.revealedAt == null &&
-                view.archivedAt?.isBefore(prepared.revealFallsDueAt(view.revealTimeLocal)) == true
+                view.separatedAt?.isBefore(prepared.revealFallsDueAt(view.revealTimeLocal)) == true
 ```
 
 (If `MAX_ENTRIES` is not reachable from `service`, use the accessor the code already uses, or make the predicate a `BondDay` function `isWithheldBy(archivedAt: Instant?, revealTime: LocalTime?): Boolean` and test it in the domain — preferred, as the rule then lives in one place.) Then:
@@ -235,7 +237,7 @@ In the archive/day-view test: after a withheld close, `GET` the day as Ada → h
         val current = if (withheld) prepared.withholdReveal().also(days::update) else reveal.apply(prepared, view.revealTimeLocal, at)
 ```
 
-and `close(current, at, view.archivedAt, withheld)`, where `close` skips the end-of-day `reveal.apply` when `withheld` and calls `day.close(now, withheld)`. Update the class KDoc steps 4 and 6. `REVEALED` outcome logic is unchanged (a withheld day never gains `revealedAt`).
+and `close(current, at, view.separatedAt, withheld)`, where `close` skips the end-of-day `reveal.apply` when `withheld` and calls `day.close(now, withheld)`. Update the class KDoc steps 4 and 6. `REVEALED` outcome logic is unchanged (a withheld day never gains `revealedAt`).
 
 - [ ] **Step 8: Run** `./gradlew :modules:gratitude:test` — PASS, including `MilestoneReachedTest` unchanged (its bond has no reveal time; the day reveals at the second entry).
 - [ ] **Step 9: Mutate, one at a time, each must fail a test:** (a) `withheld = false`; (b) compare against `at` instead of the due instant; (c) `view.endedAt` instead of `archivedAt`; (d) `DayOutcome.of(PENDING_REVEAL) -> null`; (e) drop the cap at `endsAt`. Restore.
@@ -252,6 +254,6 @@ and `close(current, at, view.archivedAt, withheld)`, where `close` skips the end
 - Modify: `.claude/HANDOVER.md` (new top entry)
 
 - [ ] **Step 1:** `grep -rn "PENDING_REVEAL" docs adr | grep -i "close\|REVEALED"` and amend every sentence that says a pending day always closes revealed.
-- [ ] **Step 2:** Write ADR-0040, including Questions for the owner: (1) a cleared reveal time is taken as due at the end; (2) the leaver's archive — does the leaver see the withheld day as `PENDING_REVEAL` (same as Ada); (3) `GET /today` of an archived bond is unaffected.
+- [ ] **Step 2:** Write ADR-0040. Its Consequences state: a withheld day counts toward milestones too — it can be a milestone's `achievedOn` and write `MilestoneReached` (ids only), so the couple can see "7 reached on <date>" for a day whose words were never revealed to each other (owner's 2026-10-22 ruling named milestones). Include Questions for the owner: (1) a cleared reveal time is taken as due at the end; (2) the leaver's archive — does the leaver see the withheld day as `PENDING_REVEAL` (same as Ada); (3) `GET /today` of an archived bond is unaffected.
 - [ ] **Step 3:** `scripts/state-map-check --strict` → 0 wrong; `./gradlew build` green; `scripts/smoke.sh` (see memory `moyi-stack-gotchas` for `MOYI_DB` and the port) → 0 failed. Record the numbers in ADR-0040 "How this was checked".
 - [ ] **Step 4: Commit** `docs: ADR-0040, what an ended bond reveals, and the rulings marked built`.
