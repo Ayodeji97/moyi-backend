@@ -66,6 +66,12 @@ internal class ReconcileJoiningDay(
         // both entries still counted, resuming it would reveal them.
         val locked = withdrawals.on(days.lockAndFind(initial.id), membership.withdrawnMemberIds, now)
         val resumed = locked.extendedTo(joining).resumeJoiningDay(membership.activeSince)
-        if (resumed != locked) reveal.apply(resumed, membership.revealTimeLocal, now)
+        // ADR-0035 question 9, as CloseDay asks it: an ended bond reveals
+        // nothing new, and a read must not be the way round that.
+        when {
+            resumed == locked -> Unit
+            resumed.isWithheldBy(membership.separatedAt, membership.revealTimeLocal) -> days.update(resumed.withholdReveal())
+            else -> reveal.apply(resumed, membership.revealTimeLocal, now)
+        }
     }
 }

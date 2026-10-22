@@ -124,6 +124,14 @@ internal data class BondDay(
         require(!startsAt.isAfter(endsAt)) { "a bond-day's span may be empty but never inverted" }
     }
 
+    /**
+     * Both have written and the two have not yet been read together: what
+     * [revealWhenDue] reveals, [isWithheldBy] may hold back, and
+     * [withholdReveal] leaves pending. One guard for the three of them.
+     */
+    private val awaitsReadingTogether: Boolean
+        get() = entryCount == MAX_ENTRIES && revealedAt == null && status in REVEALABLE
+
     /** [BondDayStatus.isClosed], on the aggregate for a caller who has already loaded the whole thing. */
     val isClosed: Boolean get() = status.isClosed
 
@@ -178,7 +186,7 @@ internal data class BondDay(
         revealTime: LocalTime?,
         now: Instant,
     ): BondDay {
-        if (entryCount != MAX_ENTRIES || status !in REVEALABLE) return this
+        if (!awaitsReadingTogether) return this
         val due = revealTime?.let(::onThisDaysCalendar)
         return if (due != null && now.isBefore(due)) {
             copy(status = BondDayStatus.PENDING_REVEAL)
@@ -210,11 +218,7 @@ internal data class BondDay(
     fun isWithheldBy(
         separatedAt: Instant?,
         revealTime: LocalTime?,
-    ): Boolean =
-        entryCount == MAX_ENTRIES &&
-            revealedAt == null &&
-            status in REVEALABLE &&
-            separatedAt?.isBefore(revealFallsDueAt(revealTime)) == true
+    ): Boolean = awaitsReadingTogether && separatedAt?.isBefore(revealFallsDueAt(revealTime)) == true
 
     /**
      * The day [isWithheldBy] says is withheld, as it waits: `PENDING_REVEAL`,
@@ -223,7 +227,7 @@ internal data class BondDay(
      * like any other. Anything else is returned as it is.
      */
     fun withholdReveal(): BondDay =
-        if (entryCount == MAX_ENTRIES && revealedAt == null && status in REVEALABLE) {
+        if (awaitsReadingTogether) {
             copy(status = BondDayStatus.PENDING_REVEAL)
         } else {
             this

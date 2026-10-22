@@ -210,6 +210,12 @@ internal class BondAccessTest(
             it.separatedAt shouldBe duringCountdown.separatedAt
             it.endedAt.shouldNotBeNull() shouldBeGreaterThan duringCountdown.separatedAt!!
         }
+
+        // A member is told the same instant, by both reads, whichever of the two is asking.
+        for (bond in listOf(together, counting, archived, calledOff)) {
+            val closer = access.closingViewOf(bond)!!.separatedAt
+            everyReadOf(bond, ada, bea).forEach { it.separatedAt shouldBe closer }
+        }
     }
 
     private fun bothClosingViewsOf(bondId: UUID): List<BondClosingView> =

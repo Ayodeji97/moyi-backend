@@ -174,6 +174,15 @@ class BondMembership internal constructor(
     /** When the bond ended (`bonds.archived_at`), or null while it is live. */
     val endedAt: Instant?,
     /**
+     * When the bond stopped being two people's: the same fact, from the same
+     * code, as [BondClosingView.separatedAt] — the earlier of its archive and
+     * any member's leaving; `null` while both are members and it is not
+     * archived; never a deletion countdown alone. For `gratitude`'s read-time
+     * reconcile of a joining day, which must withhold a reveal exactly as the
+     * closer does (ADR-0035 question 9).
+     */
+    val separatedAt: Instant?,
+    /**
      * The zone that **decides dates** over time, which is not
      * [anchorTimezone] — that is the zone the bond currently *requests*. They
      * differ for up to one logical day after a change is confirmed (BR-6).
