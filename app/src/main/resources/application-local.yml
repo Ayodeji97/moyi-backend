@@ -16,6 +16,18 @@ spring:
     locations: classpath:db/migration
 
 moyi:
+  identity:
+    verification:
+      # Required, with no value in application.yml (ADR-0018 amendment of
+      # 2026-10-22). Nothing listens on this port: the link is read from the
+      # log, and scripts/smoke.sh reads `token=` and `reset-password?token=`
+      # out of these two.
+      link-base-url: http://localhost:3000/verify
+      reset-link-base-url: http://localhost:3000/reset-password
+  bond:
+    invite:
+      # scripts/smoke.sh checks a new bond's invite link against this value.
+      link-base-url: http://localhost:3000/i
   notification:
     email:
       # Local development has no mailbox: the message is written to the log and

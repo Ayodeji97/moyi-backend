@@ -61,7 +61,13 @@ The same posture applies to the access-token signing key: `local` generates
 an ephemeral RSA pair at startup (tokens die with the process, and the log
 says so at WARN); every other profile needs
 `MOYI_SECURITY_JWT_PRIVATE_KEY_PEM` and `MOYI_SECURITY_JWT_PUBLIC_KEY_PEM`,
-generated with the two `openssl` lines in ADR-0019. Everything under
+generated with the two `openssl` lines in ADR-0019. Likewise the three
+link bases a verification, reset or invite link is built on:
+`MOYI_IDENTITY_VERIFICATION_LINK_BASE_URL`,
+`MOYI_IDENTITY_VERIFICATION_RESET_LINK_BASE_URL` and
+`MOYI_BOND_INVITE_LINK_BASE_URL`, pages on the marketing site; `local`
+points them at `localhost:3000`, and nothing else has a default, because a
+token travels in the link (ADR-0018's amendment). Everything under
 `/api/v1` except the auth endpoints needs `Authorization: Bearer <token>`;
 `GET /api/v1/me` is the endpoint to try it on.
 

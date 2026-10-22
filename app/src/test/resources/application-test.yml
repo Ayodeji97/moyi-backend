@@ -28,6 +28,16 @@ spring:
       ddl-auto: validate
 
 moyi:
+  identity:
+    verification:
+      # Required, with no value in application.yml (ADR-0018 amendment of
+      # 2026-10-22). `.test` is reserved (RFC 2606) and resolves nowhere, and
+      # it is the host the modules' own test contexts use.
+      link-base-url: https://moyi.test/verify
+      reset-link-base-url: https://moyi.test/reset-password
+  bond:
+    invite:
+      link-base-url: https://moyi.test/i
   scheduling:
     # No job fires on its own in a test; the jobs' own tests call them.
     enabled: false
