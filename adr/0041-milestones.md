@@ -158,7 +158,11 @@ reason; each mutation was restored and the restore checked.
    `evaluated_at` and `evaluated_as` in one commit. A stale last evaluated date withholds
    today, so the answer is at most a day behind; a fresh one implies a timeline that holds
    that day. Today is never evaluated while it is today (ADR-0034, Consequences), so nothing is
-   counted twice. **Argued, not run:** no existing hook can stop a request between two of its
+   counted twice. That depends on the settle margin, which the final concurrency review named
+   (m3): a day is settled only once it has been over for a minute (ADR-0033 decision 5), so a
+   request that computed `today` just before midnight cannot see that day evaluated by its
+   later statements. If the margin is ever removed, this order no longer suffices; one
+   `REPEATABLE_READ` snapshot for the four reads would. **Argued, not run:** no existing hook can stop a request between two of its
    statements without a new test context, and the ruling accepted the argument in place of a
    test.
 6. **The response is `{achieved: [{threshold, achievedOn}], next: {threshold} | null}` and
@@ -198,7 +202,8 @@ reason; each mutation was restored and the restore checked.
    run, after the bond lock and the streak row's `FOR UPDATE`, and adds one as each day
    evaluates `COMPLETE`, so **the event and the read count from one source**, and an event's
    `bondDayId` is always the day the read dates. *Run (Task 1 and its fix round):*
-   `MilestoneReachedTest`, 7 tests, the first four seen red before the call existed. Removing
+   `MilestoneReachedTest`, 7 tests, the first four seen red before the call existed (8 since
+   the final fix round, below). Removing
    the call (E1): all red. A threshold re-announced (E3, `it <= after`): red, the backlog test
    and "a day evaluated again…". A payload without `bondDayId` (E4): all red. The aggregate as
    the bond (E5): red, the first test. Publishing from `RecalculateStreak` (E6): red, "…a
@@ -214,7 +219,13 @@ reason; each mutation was restored and the restore checked.
    re-cross. The mechanism is held by the backlog test and "a day evaluated again…"; the review
    judged no extension owed. The review also probed a 40-day backlog closed in one run and the
    same history over five runs with the stored total bumped by five after each: the event days
-   equalled the read's `achievedOn` every time (run).
+   equalled the read's `achievedOn` every time (run). **The read's place under the lock was
+   held by nothing** until the final concurrency review (I1) moved it above the bond lock and
+   41 tests stayed green. The final fix round added "a run that waited on the bond's lock counts
+   from the days committed while it waited": a connection holds the bond row, the run waits on
+   it (seen in `pg_stat_activity`, not a sleep), the holder commits days 1 to 6 evaluated
+   `COMPLETE`, and the released run announces 7 on day 7. *Run:* the read moved above
+   `lockClosingViewOf`: red, that test only (no announcement); restored, green.
 9. **It is written on an ended bond too.** A day both wrote on before the bond ended is
    complete (ADR-0034 decision 7), and the event is history; doc 02:144's "no notifications"
    binds Phase 4's consumer (Owed). *Run (Task 1's fix round, m2):* "a day both wrote on
@@ -266,6 +277,14 @@ reason; each mutation was restored and the restore checked.
   claims only the types its consumers declare (read and run by the Task 1 review).
 - **The evaluation reads the timeline once per bond per run** (`completeDays`, one window query,
   O(complete days of the bond)), under the locks it already takes; nothing joins the lock graph.
+- **A close run by an older build announces nothing.** During a blue/green cutover, or after a
+  rollback to an image from before this slice, the old container's scheduler can take the
+  close job's lock and evaluate days without writing `MilestoneReached`. Those days are
+  evaluated once (`recordDay`'s `WHERE evaluated_at IS NULL`), so a threshold crossed in such a
+  run is never announced: the loss is permanent, and accepted. `GET /milestones` is unaffected
+  (it dates every threshold from the timeline), and nothing is announced twice. It matters
+  only once Phase 4's consumer is live, and that consumer starts from `NOW` (Owed). Read by the
+  final concurrency review (m1), not run.
 - **`GetStreak.countsToday` is now the one rule for today**, shared by two routes.
 - **The read is four reads of one bond's rows** (the membership resolved again, today's
   square, the last evaluated date, the timeline), with no lock, in the order decision 5 argues.
@@ -359,7 +378,17 @@ For the owner to carry into the corpus repository, which is not edited here.
 ## Revisit when
 
 - A bond's history passes a few thousand days: the read numbers every complete day of the bond
-  and keeps five rows, and the evaluation does the same once per bond per run.
+  and keeps five rows, and the evaluation does the same once per bond per run. *Measured by the
+  final concurrency review* (a throwaway `postgres:18`, `bond_days` with V12/V15/V17's indexes
+  and checks, 2,002,000 rows: 5,000 bonds of 400 days and one of 2,000, about 75% `COMPLETE`,
+  then `VACUUM ANALYZE`): on the 2,000-day bond the read took 1.10 ms and the evaluation's call
+  0.69 ms (0.77 ms as a generic plan), a bitmap scan of `bond_days_feed_idx`, no Seq Scan; with
+  the table rebuilt in date order, as production inserts it, 420 heap blocks and 3.4 ms cold;
+  the evaluation's call for all 5,001 bonds at one midnight, looped inside the database, 5.7 s,
+  about 1.1 ms a bond inside its lock. Acceptable now: it grows with a bond's history, not with
+  activity. When it is due, a partial index `bond_days (bond_id, date) WHERE evaluated_as =
+  'COMPLETE'` makes both calls index-only; the evaluation could also read the count only once
+  its first day evaluates.
 - A fifth threshold or a yearly one is wanted (Q-M2): one constant and the contract's sentence.
 - Phase 4 builds the card and the push.
 - A second consumer of `MilestoneReached` appears: it carries ids only, by design.

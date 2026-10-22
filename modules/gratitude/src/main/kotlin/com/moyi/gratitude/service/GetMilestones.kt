@@ -34,7 +34,10 @@ internal data class MilestonesView(
  * other way round, a timeline from before the commit and a last evaluated day from after it
  * would add today in yesterday's place: "7 reached today" for the day `MilestoneReached` dates
  * yesterday, an answer neither moment gives. Today itself is never evaluated while it is today
- * (ADR-0034, Consequences), so nothing is counted twice.
+ * (ADR-0034, Consequences), so nothing is counted twice. That rests on the settle margin: a day
+ * is settled only a minute after it ends (ADR-0033 decision 5), so a request that read `today`
+ * just before midnight cannot see that day evaluated by its later statements. Without the
+ * margin this read order would no longer be enough (ADR-0041 decision 5).
  *
  * **`next` is `null` when the membership takes no writes** (decision 7): ended, left, blocked
  * and the deletion countdown alike, so nothing says which. What was reached stays. Asked of the
