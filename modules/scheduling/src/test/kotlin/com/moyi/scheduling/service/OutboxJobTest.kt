@@ -46,8 +46,8 @@ import java.util.concurrent.AbstractExecutorService
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The poller, not the delivering: that a tick drains what is due, that its
@@ -473,14 +473,17 @@ internal class OutboxJobTest(
     fun `stopping interrupts the tick in flight, waits for it to end, and starts no other`() {
         val entered = CountDownLatch(1)
         val never = CountDownLatch(1)
-        val worker = AtomicReference<Thread>()
+        val ended = AtomicBoolean(false)
         val held =
             Scripted(dispatch = {
-                worker.set(Thread.currentThread())
                 entered.countDown()
-                // Interruptible, as a handler waiting on the database is; the dispatcher passes the interrupt on as a failure.
-                never.await(WAIT_SECONDS, TimeUnit.SECONDS)
-                DispatchResult(delivered = OutboxJob.BUDGET, failed = 0, more = true)
+                try {
+                    // Interruptible, as a handler waiting on the database is; the dispatcher passes the interrupt on as a failure.
+                    never.await(WAIT_SECONDS, TimeUnit.SECONDS)
+                    DispatchResult(delivered = OutboxJob.BUDGET, failed = 0, more = true)
+                } finally {
+                    ended.set(true)
+                }
             })
         val job = OutboxJob(held, clock, SimpleMeterRegistry())
         job.run()
@@ -489,7 +492,9 @@ internal class OutboxJobTest(
         job.destroy()
 
         // Over by the time `destroy` returns: the connection pool is closed next, and the tick must not still be using it.
-        worker.get().isAlive shouldBe false
+        // The tick's work, not its thread: `awaitTermination` returns once the pool has no task left, and the pool's
+        // thread can still be alive for a moment on its way out, so asking `isAlive` here failed once in CI (#70).
+        ended.get() shouldBe true
         held.dispatched shouldHaveSize 1
         appender.list.single().formattedMessage shouldContain "error=java.lang.InterruptedException"
 
