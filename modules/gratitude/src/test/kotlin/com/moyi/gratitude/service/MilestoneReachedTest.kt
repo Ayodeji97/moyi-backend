@@ -142,6 +142,45 @@ internal class MilestoneReachedTest(
         jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'MilestoneReached'", Int::class.java) shouldBe 1
     }
 
+    /**
+     * The same transaction as the day's record, held by failing it. A trigger makes the bond's
+     * last statement, the `streak_states` update after day 7 was recorded and announced, raise:
+     * the bond rolls back, and the announcement with it. Published in a transaction of its own,
+     * it would stay, and the retry would announce again. `TRUNCATE` drops no trigger, so the
+     * `finally` is what keeps it out of every other test.
+     */
+    @Test
+    fun `a bond whose evaluation fails announces nothing, and its retry announces once`() {
+        (1..7).forEach { bothWriteOn(it) }
+        jdbc.execute(
+            """
+            CREATE FUNCTION milestone_test_refuse() RETURNS trigger LANGUAGE plpgsql AS
+            ${'$'}${'$'} BEGIN RAISE EXCEPTION 'refused by MilestoneReachedTest'; END ${'$'}${'$'}
+            """.trimIndent(),
+        )
+        try {
+            jdbc.execute(
+                "CREATE TRIGGER milestone_test_refuse BEFORE UPDATE ON streak_states FOR EACH ROW EXECUTE FUNCTION milestone_test_refuse()",
+            )
+            closer.closeElapsedDays(Instant.parse("${day(7)}T23:01:00Z"), BUDGET).failed shouldBe 1
+
+            jdbc.queryForObject(
+                "SELECT count(*) FROM bond_days WHERE bond_id = ?::uuid AND evaluated_at IS NOT NULL",
+                Int::class.java,
+                bond,
+            ) shouldBe 0
+            jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'MilestoneReached'", Int::class.java) shouldBe 0
+        } finally {
+            jdbc.execute("DROP TRIGGER IF EXISTS milestone_test_refuse ON streak_states")
+            jdbc.execute("DROP FUNCTION IF EXISTS milestone_test_refuse()")
+        }
+
+        closeThrough(7)
+
+        milestones().map { it.dayId } shouldBe listOf(dayId(7))
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'MilestoneReached'", Int::class.java) shouldBe 1
+    }
+
     // ---- helpers ----------------------------------------------------------
 
     private data class Announced(
