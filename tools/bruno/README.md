@@ -1,9 +1,10 @@
 # The Moyi API in Bruno
 
 The daily loop as twelve requests, the four that read the archive and keep a bookmark, the
-two that leave a reaction and take it back, and the two that end a bond, for running it by
-hand: milestone M3 is two people using the HTTP
-API for a week, and there is no app yet. `scripts/moyi` is the same loop from a terminal.
+two that leave a reaction and take it back, the two that end a bond, and the two that
+search the archive and read this date in earlier years, for running it by hand:
+milestone M3 is two people using the HTTP API for a week, and there is no app yet.
+`scripts/moyi` is the same loop from a terminal.
 
 1. Open this folder in [Bruno](https://www.usebruno.com) as a collection and choose the
    `local` environment.
@@ -28,9 +29,12 @@ a response header in a script: Day's `If-None-Match` is where to look first of a
 two reaction requests (17 and 18, added 2026-10-13) have not been opened in Bruno either;
 `scripts/moyi react` and `unreact` send the same two requests and were run. The prompt
 (09's post-response script and 08's pre-request addition, 2026-10-20) has not been opened in
-Bruno either; `scripts/moyi write --prompt` sends the same two requests and was run.
+Bruno either; `scripts/moyi write --prompt` sends the same two requests and was run. Nor are
+21 Search and 22 On this day (slice C6b, 2026-10-21); `scripts/moyi search` and `moyi
+on-this-day` send the same requests and were run.
 
-**Leave bond and Block are last, and are not part of the loop.** Each ends the bond in
+**Leave bond and Block are not part of the loop.** (Search and On this day come after
+them only because they were added later; both only read.) Each ends the bond in
 use for both people. Their bodies are optional and their defaults are opposite: a leave
 keeps your entries unless it is asked to take them back, a block takes them back unless it
 is told to keep them, and taking them back erases them for good. Each request carries its

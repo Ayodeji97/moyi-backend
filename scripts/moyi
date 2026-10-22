@@ -36,6 +36,11 @@
 #                                            the days holding an entry you have marked; --cursor asks for
 #                                            the page after one whose nextCursor you were given
 #   moyi day <YYYY-MM-DD>                    one day of the archive
+#   moyi search "<words>" [--limit N] [--cursor <nextCursor>]
+#                                            or: moyi search - [--limit N] [--cursor …]   (the words from stdin).
+#                                            Days on which one entry you can read holds every word; case and accents
+#                                            do not matter, whole words only
+#   moyi on-this-day                         this date in earlier years, in the bond in use; nothing once it has ended
 #   moyi favourite <entryId>                 mark a revealed entry, yours or your partner's. The mark is
 #                                            yours alone: your partner is never shown it
 #   moyi unfavourite <entryId>
@@ -57,7 +62,7 @@
 # and through pipes. (What you type after `moyi write` is in your own shell's
 # argument list and history; `moyi write -` reads it from stdin instead. An
 # invite code and a verification token are typed as arguments, and a code is
-# part of the URL curl is given: both are single-use.)
+# part of the URL, which curl is given in a file: both are single-use.)
 #
 # It prints what the server sent. It decides nothing: every rule is the
 # server's, and this script is not a second copy of any of them.
@@ -178,7 +183,11 @@ call() {
   } > "$TMP/headers"
   local -a args=(--globoff -s -o "$TMP/out" -w '%{http_code}' -X "$method" -H "@$TMP/headers")
   if [ -n "$body" ]; then printf '%s' "$body" > "$TMP/body"; args+=(--data-binary "@$TMP/body"); fi
-  STATUS="$(curl "${args[@]}" "$API$path")" || die "could not reach $API"
+  # The URL in a file, not in argv: a search's words and an invite code are in it, and argv is
+  # readable by every process on the machine. Paths here are built from checked ids and from
+  # python's percent-encoding, so no quote or backslash reaches the file.
+  printf 'url = "%s"\n' "$API$path" > "$TMP/url"
+  STATUS="$(curl "${args[@]}" -K "$TMP/url")" || die "could not reach $API"
   BODY="$(cat "$TMP/out" 2>/dev/null || true)"
 }
 
@@ -348,6 +357,30 @@ case "$cmd" in
     [ $# -eq 1 ] || die "usage: moyi day <YYYY-MM-DD>"
     need_date "$1"
     signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/days/$1"; show 200
+    ;;
+  search)
+    usage='usage: moyi search "<words>" [--limit N] [--cursor <nextCursor>]   or: moyi search - [--limit N] [--cursor <nextCursor>]'
+    [ $# -ge 1 ] || die "$usage"
+    if [ "$1" = - ]; then words="$(cat)"; else words="$1"; fi
+    shift
+    query=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --limit)  [ $# -ge 2 ] && [[ "$2" =~ ^[0-9]{1,9}$ ]] || die "$usage"; query="$query&limit=$2"; shift 2 ;;
+        --cursor) [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || die "$usage"; query="$query&cursor=$2"; shift 2 ;;
+        *) die "$usage" ;;
+      esac
+    done
+    signed_in; BOND="$(bond)"
+    # Encoded by python from stdin, every character but the unreserved ones: what was searched for is never argv.
+    q="$(pairs "$words" | python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.buffer.read().decode().split("\0")[0], safe=""))')"
+    authed GET "/bonds/$BOND/search?q=$q$query"; show 200
+    next="$(printf '%s' "$BODY" | field nextCursor)"
+    [ -z "$next" ] || echo "There may be more. For the next page, the same command with: --cursor $next"
+    ;;
+  on-this-day)
+    [ $# -eq 0 ] || die "usage: moyi on-this-day"
+    signed_in; BOND="$(bond)"; authed GET "/bonds/$BOND/on-this-day"; show 200
     ;;
   favourite)
     [ $# -eq 1 ] || die "usage: moyi favourite <entryId>"

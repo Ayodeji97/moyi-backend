@@ -615,6 +615,50 @@
     "curl": "curl \"$API/bonds/$BOND/days/$DATE\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "GET /api/v1/bonds/{bondId}/search",
+    "summary": "search the archive by words",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so the same bytes whatever q is.",
+        "evidence": "smoke",
+        "evidenceRef": "search: a stranger is told the bond's 404, whatever q is",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/BondGuard.kt#throw NotFoundException(\"That bond was not found.\")"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "q is missing, blank, longer than 100 characters or 1,024 bytes, or holds NUL; or limit or cursor cannot be read. Each parameter is named, never its value: what was searched for is not sent back.",
+        "evidence": "smoke",
+        "evidenceRef": "search: blank q is one 422 on q",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchQuery.kt#if (paging == null || terms == null) throw DaysQueryNotValidException(violations)"
+      }
+    ],
+    "curl": "curl -G \"$API/bonds/$BOND/search\" --data-urlencode \"q=the long walk\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/on-this-day",
+    "summary": "this date in earlier years",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer.",
+        "evidence": "smoke",
+        "evidenceRef": "on this day: a stranger is told the bond's 404",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/BondGuard.kt#throw NotFoundException(\"That bond was not found.\")"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/on-this-day\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
     "id": "PUT /api/v1/entries/{entryId}/favourite",
     "summary": "bookmark an entry",
     "machine": "day",

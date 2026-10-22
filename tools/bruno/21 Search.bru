@@ -1,0 +1,31 @@
+meta {
+  name: Search
+  type: http
+  seq: 21
+}
+
+get {
+  url: {{api}}/bonds/{{bondId}}/search?q=walk
+  body: none
+  auth: bearer
+}
+
+params:query {
+  q: walk
+  ~limit: 20
+  ~cursor: {{nextCursor}}
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+script:post-response {
+  if (res.status === 200 && res.body.nextCursor) bru.setVar("nextCursor", res.body.nextCursor);
+}
+
+docs {
+  The archive, found by words: the days on which one entry you can read holds every word of q, newest first, each day whole. Case and accents do not matter (cafe finds Café); whole words only. Your own entry is found before it is revealed; your partner's only once it has been.
+
+  A blank q, or one longer than 100 characters, is 422 on q, which is never sent back. There is no count of matches; only a null nextCursor means the end.
+}
