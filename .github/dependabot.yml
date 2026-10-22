@@ -20,7 +20,7 @@ updates:
   # The larger supply-chain surface of the two, and the one nobody thinks
   # about. Every workflow here pins a floating major tag (`@v7`, `@v6`), so a
   # compromised release of any of them runs with this repository's
-  # `GITHUB_TOKEN` and, in the publish job, its GHCR write access. Pinning to
+  # `GITHUB_TOKEN` and, in the image jobs, its GHCR write access. Pinning to
   # commit SHAs would be stronger still; grouped weekly PRs are the version of
   # this that actually gets merged rather than ignored.
   - package-ecosystem: github-actions

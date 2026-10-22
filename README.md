@@ -404,6 +404,9 @@ has no mechanism to show it as a *requested reviewer*.
 Not yet. CI (`.github/workflows/ci.yml`) builds, tests, and — on every
 merge to `main` — publishes a container image to GHCR via Spring Boot's
 Cloud Native Buildpacks support (`./gradlew bootBuildImage`, no
-hand-maintained Dockerfile). There's no deploy stage after that: nothing
+hand-maintained Dockerfile). The image is multi-arch: one tag (`<sha>`
+and `latest`) serves both linux/arm64, for the planned Hetzner ARM (CAX)
+host, and linux/amd64, each built natively on its own runner. There's
+no deploy stage after that: nothing
 pulls the image anywhere yet. Deployment to Hetzner + Kamal + kamal-proxy
 is a follow-up plan, once that server infrastructure exists.
