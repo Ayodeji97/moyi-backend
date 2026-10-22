@@ -118,6 +118,22 @@ internal class StreakEndpointTest(
     }
 
     @Test
+    fun `a day both wrote on that is still waiting for its reveal time is not complete today`() {
+        (1..3).forEach { bothWriteOn(it) }
+        closeThrough(3)
+        // 23:00 in Lagos, where both write at 11:00: the day is PENDING_REVEAL for the rest of it, on a bond still taking writes.
+        jdbc.update("UPDATE bonds SET reveal_time_local = '23:00' WHERE id = ?::uuid", bond)
+
+        bothWriteOn(4)
+
+        for (member in listOf(ada, bea)) {
+            today(member)["bondDay"]["status"].asString() shouldBe "PENDING_REVEAL"
+            // A pending day counts once it is closed (`DayOutcome`), not while it waits: today is not yet the fourth.
+            today(member)["streak"]["current"].asInt() shouldBe 3
+        }
+    }
+
+    @Test
     fun `the first day a couple both write on is a streak of one, before any day has been evaluated`() {
         clock.set(at(0).plusSeconds(600))
         submit(ada)

@@ -180,7 +180,8 @@ internal class EvaluateStreaks(
         day: DayToEvaluate,
         view: BondClosingView,
     ): DayOutcome {
-        val byStatus = checkNotNull(DayOutcome.of(day.status)) { "a closed bond-day has a settled status: ${day.id}" }
+        val byStatus =
+            checkNotNull(DayOutcome.of(day.status, settled = day.isClosed)) { "a closed bond-day has a settled status: ${day.id}" }
         val ended = view.endedAt
         return when {
             byStatus != DayOutcome.MISSED -> byStatus

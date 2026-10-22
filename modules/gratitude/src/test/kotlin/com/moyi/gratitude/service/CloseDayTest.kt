@@ -368,6 +368,28 @@ internal class CloseDayTest(
         events("DayRevealed") shouldBe 1
     }
 
+    @Test
+    fun `a day both wrote on is withheld when a member left during a countdown before its reveal`() {
+        val bond = pairedBond()
+        jdbc.update("UPDATE bonds SET reveal_time_local = '20:00' WHERE id = ?::uuid", bond)
+        submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
+        submit(bea, bond, """{"text":"his"}""").status shouldBe 201
+        // The countdown alone is no separation; Bea's leave inside it is. The bond is never archived here.
+        clock.set(Instant.parse("2026-09-15T14:00:00Z"))
+        countDown(bond)
+        clock.set(Instant.parse("2026-09-15T15:00:00Z"))
+        leave(bea, bond)
+
+        closeDay.settle(dayOf(bond), Instant.parse("2026-09-15T19:01:00Z")) shouldBe Outcome.NOT_YET
+        status(bond) shouldBe "PENDING_REVEAL"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 0
+        closeDay.settle(dayOf(bond), END) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "PENDING_REVEAL"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL OR status = 'REVEALED'", Int::class.java) shouldBe 0
+        events("DayRevealed") shouldBe 0
+    }
+
     // --- a stale span: the day ends when the timeline says, not when the row said ---
 
     @Test

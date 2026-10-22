@@ -82,13 +82,19 @@ internal enum class DayOutcome {
 
     companion object {
         /**
-         * `null` for a status no settled day has. Only a settled day is asked,
-         * so `PENDING_REVEAL` here is a withheld day the close job stamped,
-         * never one still waiting for its time.
+         * `null` for a status no settled day has. [settled] is whether the day
+         * has been closed (`closedAt` is set), which a status alone does not
+         * say: `PENDING_REVEAL` is a day both wrote on that an ended bond
+         * withheld, and so [COMPLETE], only once it is closed; before that it
+         * is still waiting for its time, and has no outcome yet.
          */
-        fun of(status: BondDayStatus): DayOutcome? =
+        fun of(
+            status: BondDayStatus,
+            settled: Boolean,
+        ): DayOutcome? =
             when (status) {
-                BondDayStatus.REVEALED, BondDayStatus.PENDING_REVEAL -> COMPLETE
+                BondDayStatus.REVEALED -> COMPLETE
+                BondDayStatus.PENDING_REVEAL -> COMPLETE.takeIf { settled }
                 BondDayStatus.FROZEN -> FROZEN_BY_SKIP
                 BondDayStatus.SOLO, BondDayStatus.EMPTY -> MISSED
                 BondDayStatus.SUSPENDED -> SUSPENDED

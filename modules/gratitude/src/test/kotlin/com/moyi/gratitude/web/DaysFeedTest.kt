@@ -659,6 +659,23 @@ internal class DaysFeedTest(
         listOf(ada, bea).forEach { raw(it, bond) shouldBe before.getValue(it) }
     }
 
+    @Test
+    fun `a day withheld at the close is listed PENDING_REVEAL with no word of the partner's`() {
+        val bond = pair()
+        jdbc.update("UPDATE bonds SET reveal_time_local = '20:00' WHERE id = ?::uuid", bond)
+        bothWrite(bond, DAY_ONE)
+        // Bea leaves at 16:00 in Lagos; the reveal was to come at 20:00.
+        clock.set(Instant.parse("2026-09-15T15:00:00Z"))
+        rig.bonds.leave(bea, bond)
+        close(bond, DAY_ONE)
+
+        val day = rig.page(ada, bond)["items"].single()
+
+        day["status"].asString() shouldBe "PENDING_REVEAL"
+        day["myEntry"]["text"].asString() shouldBe words("ada", DAY_ONE)
+        raw(ada, bond) shouldNotContain words("bea", DAY_ONE)
+    }
+
     // ---- withdrawal ----
 
     @Test

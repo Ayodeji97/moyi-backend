@@ -125,7 +125,7 @@ branch only; and `BondDay.close` turned every `PENDING_REVEAL` day into `REVEALE
   separates. A countdown called off reopens the bond only when nobody left in it
   (`Bond.cancelDeletion` restores `ACTIVE`, or `PENDING_MEMBER`); when somebody has, it
   archives, and `separatedAt` already fixes the separation at the leave.
-- **`DayOutcome.of(PENDING_REVEAL)` is `COMPLETE`.** `OPEN` and `PARTIAL` are still null.
+- **`DayOutcome.of(PENDING_REVEAL, settled)` is `COMPLETE` once the day is closed, and null before.** `OPEN` and `PARTIAL` are still null.
 - **The lone-entry rule changes for a countdown.** A lone entry on a day that ends inside a
   deletion countdown is revealed (the couple may be together after the countdown is called
   off); one on a bond where a member left in it is withheld, and stays so after a cancel.
@@ -175,6 +175,15 @@ The three rulings are his. Then, one line each, with the alternative and what it
    2026-10-22 ruling; the line is here because the effect is visible: "7 reached on <date>"
    for a day whose words were never shared. Alternative: a withheld day counts toward the
    streak and not toward milestones. Costs a second meaning of `COMPLETE`.
+
+6. *A leave during a countdown, for q9.* Decision 1 carries "a countdown is not a separation"
+   (the owner's narrowing of 2026-10-21) over from q1 to q9. The owner ruled the narrowing for
+   q1 only; q9's ruling said "ended". For a day both wrote on whose reveal falls inside a
+   deletion countdown, no one having left, should it be revealed (as built) or withheld? What
+   each costs: if withheld, a countdown that is called off leaves that day locked for good,
+   for two people who stayed together; if revealed (as built), their words become readable
+   during a countdown that may still end in the bond's deletion. A leave inside the countdown
+   withholds either way (Question 4).
 
 ## What the corpus now says that is false
 
@@ -230,5 +239,13 @@ For the owner to carry into the corpus repository, which is not edited here.
   - **`scripts/state-map-check --strict`**: exit 0, "663 rows, 284 never run, 0 pending, 29 contract gaps. Nothing wrong." The checker's 154 tests pass. Before the data changed the check named 16 rows whose cited code had moved (`BondDay.close`'s `when`, `CloseDay`'s `bondEndedFirst` and its reveal line, `revealWhenDue`'s guard); each was read again, re-cited, and where the ruling changed what it says, rewritten.
   - **`./gradlew build --rerun-tasks`** at `6445d92`: `BUILD SUCCESSFUL in 4m 30s`, 217 tasks executed, **1,551 tests, 0 failures, 0 errors, 2 skipped** (the two search measurements, gated by `MOYI_MEASURE`), counted from all 179 result files, every one written by that run. `6445d92` is the code of `7c8d408`; the commits after it are documentation.
   - **The smoke**: the compose Postgres could not bind 5432, which another project's container held, so it was started on 55432 through a compose override, a database of its own (`moyi_smoke_c40`) created, and the jar, built from `6445d92`, booted by hand exactly as `scripts/smoke.sh` boots it (JDK 25.0.4, local profile, the close job every five seconds) on port 18095; the script ran with `--attach`: **930 passed, 0 failed, 0 skipped, 24 sections**. The application's log held no `ERROR` line. The database was dropped and seen gone, the jar stopped, and the Moyi Postgres left running. The smoke does not drive a separation before a reveal time (no day ends during a run), so the withheld day is the tests', not the smoke's.
+- **Follow-up to the review of #70** (2026-10-22). New tests: `StreakEndpointTest` (a day both
+  wrote on, pending its reveal time on a live bond, is not complete on `GET /today`); `CloseDayTest`
+  (both wrote, deletion requested 14:00Z, Bea left 15:00Z, reveal 19:00Z: `NOT_YET`, then `CLOSED`
+  pending, nothing revealed); `DaysFeedTest` (the withheld day listed `PENDING_REVEAL` with none
+  of the partner's words); `StreakRulesTest` (`DayOutcome.of` takes `settled`; an unsettled
+  `PENDING_REVEAL` is null). Mutations seen red: `GetToday` reading `DayOutcome.of(status) ==
+  COMPLETE` fails the `StreakEndpointTest` case (4, not 3); `separatedAtOf` returning
+  `bond.archivedAt` alone fails the new `CloseDayTest` case (`NOT_YET` expected, `REVEALED`).
 - **Argued, not run:** that a countdown called off after a leave leaves the leaver's entry
   unlocked under `archivedAt` alone (Question 4).
