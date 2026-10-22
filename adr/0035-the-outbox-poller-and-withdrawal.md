@@ -715,6 +715,7 @@ Each is built one way and cheap to turn.
     *Ruled by the owner on 2026-10-21: accepted.* CLAUDE.md's sentence, and the same rule
     in AGENTS.md, now say that an invite code never reaches a log at the default level.
     They were narrowed in the pull request that records this ruling.
+
 11. **Question 1 again, now that the contract says it.** The bare `POST /block` still
     erases. The contract states it and the CLI refuses to send it; a client that ignores
     the description still destroys by omission. Requiring the flag on that route would be

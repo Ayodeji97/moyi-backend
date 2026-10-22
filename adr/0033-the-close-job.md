@@ -235,11 +235,13 @@ changes serialize with close. The one-minute margin absorbs ordinary clock skew.
    it is. No test pins the countdown case either way.
 
    *Ruled by the owner on 2026-10-21, to be built: only an archived bond counts as ended
-   for the lone-entry rule; a deletion that is counting down does not.* The ruling names
-   V19's `bond_write_pauses` (ADR-0034 ruling 1) as what lets the closer tell the two apart.
-   It covers the lone-entry reveal rule and nothing else. Reads gated on the bond taking no
-   writes are unchanged by it: `prompt` stays `null` on `GET /today` while a deletion counts
-   down (ADR-0038 ruling 6), and on-this-day stays empty.
+   for the lone-entry rule; a deletion that is counting down does not.* The closer's view
+   must then say which of the two an ending is; today `endedAt` covers both. V19's
+   `bond_write_pauses` (ADR-0034 ruling 1) is written only when a countdown is cancelled, so
+   it cannot tell a running countdown from an archive by itself; the builder decides the
+   source. The ruling covers the lone-entry reveal rule and nothing else. Reads gated on the
+   bond taking no writes are unchanged by it: `prompt` stays `null` on `GET /today` while a
+   deletion counts down (ADR-0038 ruling 6).
 2. **A deletion that is called off leaves no record that it was ever counting down** (and
    one called off after a member has left archives the bond at the cancel, with the same
    effect).

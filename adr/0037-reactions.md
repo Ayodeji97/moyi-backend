@@ -519,6 +519,7 @@ is a review's finding of 2026-10-15, left as built.
     status codes a client sees.
 
     *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
+
 11. **After a block that keeps the entries, the blocked member can still take reactions off
     the blocker's entries.** Raised by the concurrency review of 2026-10-15 (its m1), by
     reading; not run as a block in its own right, though `ReactionsTest` ("no reaction can
