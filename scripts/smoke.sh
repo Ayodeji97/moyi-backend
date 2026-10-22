@@ -61,12 +61,15 @@
 # a page of days and a cursor that no cache may keep; the partner's unrevealed
 # words finding nothing and one's own found; one 422 on q for blank, long and
 # NUL, carrying none of it, after the bond's 404, which is the same bytes
-# whatever q is; an erased entry's words gone from the row and from search.
+# whatever q is, if Tomcat can decode it (a q that is not UTF-8 is everyone's
+# 400, member or stranger, after authentication); an erased entry's words gone
+# from the row and from search.
 # And it reads on-this-day: last year's day, put in by hand, for both members;
 # and after a leave, the same nothing for both, while search still reads.
 # Every day it reads is today, but for last year's, put in by hand: no day
 # ends during a run, so paging and past days are the tests' to show. Last run on 2026-10-22, against a database of
-# its own (MOYI_DB, below), from fb335e1 (its jar's code is 11d221a's), with
+# its own (MOYI_DB, below), from e1ac2be (its jar's code is 50c269a's; both
+# named as they stand after the rebase onto 25fa9c1, which changed only ADRs), with
 # --attach to a jar booted by hand exactly as below but on Postgres's port
 # 55432, because another project's container held 5432: 902 passed, 0
 # failed, 0 skipped, 23 sections. On 2026-10-21, at 683af97 (its jar's code

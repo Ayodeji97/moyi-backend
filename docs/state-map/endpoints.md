@@ -1565,7 +1565,7 @@ curl -G "$API/bonds/$BOND/search" --data-urlencode "q=the long walk" -H "Authori
 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
-| 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so the same bytes whatever q is. | smoke |
+| 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so the same bytes whatever q is, as long as it can be decoded: a q whose bytes are not UTF-8 is everyone's 400 MALFORMED_REQUEST, member or stranger, after authentication. | smoke |
 | 422 | `VALIDATION_FAILED` | q is missing, blank, longer than 100 characters or 1,024 bytes, or holds NUL; or limit or cursor cannot be read. Each parameter is named, never its value: what was searched for is not sent back. | smoke |
 
 ### GET /bonds/{bondId}/on-this-day

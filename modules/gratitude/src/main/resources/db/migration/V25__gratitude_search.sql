@@ -6,8 +6,10 @@
 -- (doc 09). Until then the projection is the text itself, written by the application
 -- (`searchProjectionOf`, in EntryStore) on submit and on an edit before the reveal, and
 -- emptied by every erasure, which goes through EntryStore.update with the words gone
--- (ADR-0039 decision 5). It is the one copy of an entry's words outside entries.text that
--- this codebase keeps (CLAUDE.md, amended with this slice).
+-- (ADR-0039 decision 5). With the vector Postgres generates from it, and that vector's index,
+-- it is the one copy of an entry's words outside entries.text that this codebase keeps
+-- (CLAUDE.md, amended with this slice). A build from before this migration does not map the
+-- column, so ADR-0039's deploy prerequisites reconcile it after the cutover.
 --
 -- search_vector is Postgres's, generated from the projection and never written by anybody.
 -- 'simple', not 'english': entries are multilingual, and 'simple' neither stems nor drops

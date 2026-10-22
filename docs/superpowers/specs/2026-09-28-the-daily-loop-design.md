@@ -323,6 +323,12 @@ on every update, so every erasure empties it), and `entries.search_vector` is ge
 Postgres from `text_search`. Neither is read into `Entry`, so no response can carry either
 (ADR-0039 decisions 5 and 6).
 
+*Amended 2026-10-22, ADR-0039 decision 10.* **`EntryText` is no longer the only place
+graphemes are counted.** The count itself moved to `domain/Graphemes.kt`, which `EntryText`
+and `SearchTerms` (a search's `q`) share; each decides what text it hands the count. The
+owner's ruling of 2026-10-21 (ADR-0031, ruling 1, to be built) changes what `EntryText` hands
+it: the text as typed, not its NFKC form. Whether `q` follows is ADR-0039's question 11.
+
 ### 3.3 `StreakState` and `StreakEvent`
 
 `StreakState` is a projection, one row per Bond, and `streak_events` is an append-only log of
@@ -524,7 +530,7 @@ archive lists (the owner's Q-S2), and what comes back is days.
 
 | Method | Path | As built |
 |---|---|---|
-| GET | `/bonds/{bondId}/search` | `q` required: 1 to 100 graphemes (NFKC, trimmed, as an entry is counted), at most 1,024 UTF-8 octets, no U+0000. `limit` and `cursor` as the feed's (`DaysQuery`: 1–50, default 20; the archive's date cursor). A page of days in the feed's shape, `DaysResponse` `{items, nextCursor}`, newest first, no count. Every `q` that cannot be searched is one `422 VALIDATION_FAILED` on `q` (codes `REQUIRED`, `VALID_SEARCH`), decided after the bond's `404` and never echoing it. A `q` with no lexeme is `200` and empty. The API's default `Cache-Control` (`no-cache, no-store, max-age=0, must-revalidate`); no `ETag`. Reads on an ended bond, for the member who left too (decisions 7–12, 17, 25) |
+| GET | `/bonds/{bondId}/search` | `q` required: 1 to 100 graphemes (NFKC, trimmed, as an entry is counted today; ADR-0031's ruling of 2026-10-21, to be built, counts an entry as typed, and whether `q` follows is ADR-0039's question 11), at most 1,024 UTF-8 octets, no U+0000. `limit` and `cursor` as the feed's (`DaysQuery`: 1–50, default 20; the archive's date cursor). A page of days in the feed's shape, `DaysResponse` `{items, nextCursor}`, newest first, no count. Every `q` that cannot be searched is one `422 VALIDATION_FAILED` on `q` (codes `REQUIRED`, `VALID_SEARCH`), decided after the bond's `404` and never echoing it. A `q` whose bytes are not UTF-8 is `400 MALFORMED_REQUEST` for a member and a stranger alike, after authentication and before the bond's `404` (`UndecodableParameterFilter`, every route; declared in the contract on this one). A `q` with no lexeme is `200` and empty. The API's default `Cache-Control` (`no-cache, no-store, max-age=0, must-revalidate`); no `ETag`. Reads on an ended bond, for the member who left too (decisions 7–12, 17, 25) |
 | GET | `/bonds/{bondId}/on-this-day` | `{items}` (`OnThisDayResponse`): the days on the bond's today's month and day in earlier years, newest first, each as the archive gives it, bounded by the archive's 192 KiB of text, with no cursor. Empty (`{"items":[]}`, the same bytes for every cause) when the bond takes no writes from the caller: ended, left, blocked, or counting down to deletion. The default `Cache-Control`; no `ETag` (decisions 13–17) |
 
 ### 5.3 New `ErrorCode` values (`common:web`)

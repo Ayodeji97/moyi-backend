@@ -57,21 +57,25 @@ Which test answers each hazard, as built (the plan's table, corrected by the rev
 | H-S1 | `SearchWithdrawalTest`, all three tests (the exclusion before `LIMIT`: "…over a history longer than one request reads"; the gate after the entries: the race test) |
 | H-S2 | `SearchTest`: "the caller's own unrevealed entry is found…", "a word only in the partner's unrevealed entry of a past day…", "…over a history longer than one request reads" (only the last sees the row predicate moved to the day: decision 2) |
 | H-S3 | `SearchTest`: "a page is days and a cursor and nothing else, and is bounded by count and by bytes" |
-| H-S4 | **`SearchProjectionTest`** (the delete, withdrawal and close-job tests) and `V25BackfillTest`. Not `SearchTest`, as the plan said: with the projection kept after an erasure, every search test stays green, because the gate drops the tombstoned day (Task 2 review m1) |
+| H-S4 | **`SearchProjectionTest`** (the delete, withdrawal and close-job tests) and `V25BackfillTest`; **`SearchCandidatesTest`** for an erased row whose projection an older build left in place (`LIVE_ROW`, final review I1). Not `SearchTest`, as the plan said: with the projection kept after an erasure, every search test stays green, because the gate drops the tombstoned day (Task 2 review m1) |
 | H-S5 | `SearchTermsTest`, `SearchTest`'s 422 test, `SecretsNeverLoggedTest` (q watched, every request line, an undecodable q, a refused request target) |
 | H-S6 | `CacheHeadersTest`, the search and on-this-day lines |
-| H-S7 | `GratitudeCrossTenantTest` fixtures for both routes; the stranger's one 404 for every q |
+| H-S7 | `GratitudeCrossTenantTest` fixtures for both routes; the stranger's one 404 for every q that Tomcat can decode (an undecodable one is everyone's 400, member or stranger, after authentication: decision 22) |
 | H-S8 | `SearchTest`: "a found day carries no snippet, highlight or rank"; `OpenApiContractTest` |
 | H-O1 | `OnThisDayCandidatesTest`: "the partner's unrevealed entry is no candidate…"; `OnThisDayTest`: "a past day is resurfaced by the archive's rule…" |
 | H-O2 | `OnThisDayCandidatesTest`: "a day whose only live entry is a known withdrawn author's…"; `OnThisDayTest`'s race test |
-| H-O3 | `OnThisDayTest`: "an ended bond resurfaces nothing, the same bytes left or blocked, for both members" (bodies and headers), "a deletion countdown resurfaces nothing…" |
+| H-O3 | `OnThisDayTest`: "an ended bond resurfaces nothing, the same bytes left or blocked, for both members" (bodies and headers), "a deletion countdown resurfaces nothing…", "an ending committed after the guard resolved the membership still resurfaces nothing" (final review m2) |
 | H-O4 | `OnThisDayTest`: "the answer does not move with anything the partner does but react" (no setting exists to read; the partner's bookmark is the nearest leak, and the review saw it red) |
 | H-O5 | `OnThisDayCandidatesTest`: "a day of tombstones is no candidate…"; `OnThisDayTest`: "a day of tombstones is not resurfaced…" |
 | H-O6 | `OnThisDayTest`: "today is the bond's date, not UTC's", "29 February only on 29 February"; `OnThisDayCandidatesTest`'s 29 February test. DST, a day an anchor change skipped and a bond younger than a year are held **by construction, not by route tests**: the date is `todayOf` (decision 16), which is `DayAssignment.dateFor`, shared with `GET /today`; a skipped day has no row, so no memory; a bond's first year has no earlier row on any date |
 
 The slice was built in four tasks (`docs/superpowers/plans/2026-10-21-search-c6b.md`), each
-with an independent review, on 2026-10-21 and 2026-10-22, on a branch cut from C6a's and
-rebased onto `main` at `4207f85` once #66 merged.
+with an independent review, on 2026-10-21 and 2026-10-22, then two whole-branch reviews and
+one fix round. The branch was cut from C6a's and rebased onto `main` twice: at `4207f85`
+once #66 merged (after Task 2), and at `25fa9c1` once #67 merged (after Task 4). Commits are
+named here as they stand on the branch after the second rebase; each run was made on the
+same change before it, and the local tags `pre-rebase-c6b-t2` and `pre-rebase-c6b-t4` hold
+those commits. #67 changed ADRs only, so no code differs.
 
 ## Decision
 
@@ -157,7 +161,12 @@ what was run to decide it or to hold it.
    submit and close-job tests red (the edit test stayed green, against the prediction: the edit
    goes through `update`), and the review confirmed the submit test reads the projection before
    any reveal. *Read (Task 1 review):* every write of `entries` in `src/main` goes through
-   `EntryStore.insert` or `update`; there is no trigger and no other writer.
+   `EntryStore.insert` or `update`; there is no trigger and no other writer. **The search does
+   not rely on that write to hide an erased entry**: `matchingQuery` asks `LIVE_ROW` of the row
+   that matched, as on-this-day does, because a build from before V25 erases without emptying
+   the projection (final review I1; the deploy step in Consequences empties the row). *Run (fix
+   round):* without `LIVE_ROW`, `SearchCandidatesTest` went red, 2 of 2, and every HTTP search
+   test stayed green, since the gate drops the day either way.
 6. **`search_vector` is generated from `text_search` through an `IMMUTABLE` wrapper**,
    `public.immutable_unaccent(text)`, a SQL-standard body naming the dictionary and the schema.
    *Run (2026-10-21, plan):* `unaccent` is `STABLE` in both forms (`provolatile = 's'`), and the
@@ -224,20 +233,35 @@ what was run to decide it or to hold it.
    "nextCursor":null}`, not `422`. *Run (2026-10-21):* Postgres's notice ("text-search query
    contains only stop words or doesn't contain lexemes, ignored") carries no part of `q`. *Run:*
    `SearchTest`'s "words with no letters or digits in them…"; the smoke's `!!!` probe.
-9. **`q` is required, 1 to 100 graphemes (NFKC, trimmed), at most 1,024 UTF-8 octets, with no
-   U+0000.** One `422 VALIDATION_FAILED` per problem on field `q` (`REQUIRED`, `VALID_SEARCH`),
-   never the value, read after the guard. *Run (Task 2):* dropping `.trim()`, counting `length`
-   instead of graphemes, dropping the octet check and dropping the NUL check each turned
-   `SearchTermsTest` red. `isBlank()` → `isEmpty()` survived: it is equivalent, because Kotlin's
-   `trim()` already removes every character `isBlank` would see, after NFKC maps U+00A0 to a
-   space. The check is redundant, not wrong, and has the same shape as `EntryText`'s.
+9. **`q` is required, 1 to 100 graphemes (counted on the NFKC form, trimmed, as an entry is
+   counted today), at most 1,024 UTF-8 octets, with no U+0000.** One `422 VALIDATION_FAILED` per
+   problem on field `q` (`REQUIRED`, `VALID_SEARCH`), never the value, read after the guard.
+   *Run (Task 2):* dropping `.trim()`, counting `length` instead of graphemes, dropping the
+   octet check and dropping the NUL check each turned `SearchTermsTest` red. `isBlank()` →
+   `isEmpty()` survived: it is equivalent, because Kotlin's `trim()` already removes every
+   character `isBlank` would see, after NFKC maps U+00A0 to a space. The check is redundant, not
+   wrong, and has the same shape as `EntryText`'s. **The owner has since ruled how an entry is
+   counted, to be built later** (ADR-0031, "Rulings — the owner, 2026-10-21", merged in #67):
+   ruling 1, the 500 are counted as typed, as grapheme clusters of the text as sent, not on the
+   NFKC form; ruling 2, an entry made only of zero-width characters is refused. Until those are
+   built, `q` and an entry are counted the same way, on the NFKC form. Whether `q` follows the
+   entry when they are is the owner's (question 11 below); today a `q` of zero-width characters
+   only is accepted and finds nothing.
 10. **The grapheme count lives in `domain/Graphemes.kt`**, shared by `EntryText` and
-    `SearchTerms`. *Run:* `EntryTextTest` 12 of 12 unchanged.
+    `SearchTerms`. It counts whatever text it is given; what each caller hands it (the NFKC
+    form today) is the caller's, and ADR-0031's ruling 1 changes what `EntryText` hands it.
+    *Run:* `EntryTextTest` 12 of 12 unchanged.
 11. **`q` sent twice is read as Spring binds it**, the two values joined by a comma. *Not run:*
     no test sends `q` twice; this is read from Spring's binding.
 12. **The search page is `DaysResponse`**, the feed's `{items, nextCursor}`; limit 1–50, default
-    20, and the cursor, are parsed by `DaysQuery`. *Run:* `OpenApiContractTest`; the contract
-    diff was 118 additions and 0 removals, one new path, no schema changed.
+    20, and the cursor, are parsed by `DaysQuery`. Search also declares `400 MALFORMED_REQUEST`
+    for an undecodable `q` (decision 22; final review m1), and its two limits are named mirrors of
+    `SearchTerms`'s, which `SearchTermsTest` holds the committed contract to (final review m9).
+    *Run:* `OpenApiContractTest`. The contract diff against `main` (`25fa9c1`) at the end of the
+    fix round: 216 additions and 0 removals; two new paths and one new schema,
+    `OnThisDayResponse`. oasdiff v1.11.7, run locally: `breaking --fail-on ERR` exit 0;
+    `changelog` two infos, both `endpoint-added`. The fix round's own change, against the
+    branch before it: one info, `response-non-success-status-added` (the 400 on search).
 13. **On-this-day is `{items: [day…]}`** (`OnThisDayResponse`): days on the bond-local today's
     month and day in earlier years, newest first, at most `ON_THIS_DAY_YEARS = 100` candidates,
     filled by the archive's `Filling` under the same 192 KiB text bound, the first day always
@@ -245,17 +269,25 @@ what was run to decide it or to hold it.
     a three-day test with the large day in the middle shows `Filling` stops at the first day that
     does not fit and does not take a smaller one after it; a "skip and keep filling" `Filling`
     turned it red, and `DaysFeedTest`'s largest-page test with it.
-14. **On-this-day is empty whenever the bond takes no writes from the caller**
-    (`!membership.takesWrites`: ended, left, blocked, and the deletion countdown), decided
-    before anything is read, so every cause gives the same bytes; a cancelled countdown brings
-    the memories back. *Run (Task 3):* the check dropped turned the ended-bond and countdown
+14. **On-this-day is empty whenever the bond takes no writes from the caller** (`!takesWrites`:
+    ended, left, blocked, and the deletion countdown), decided before anything is read, so every
+    cause gives the same bytes; a cancelled countdown brings the memories back. **It is asked of
+    the membership resolved again** (`membershipNow`), after the joining-day reconcile and
+    before any entry is read, not of the guard's: an ending that commits while the reconcile
+    waits on the bond's lock left the guard's membership taking writes, and a block then got
+    last year's memories (final review m2, reproduced). The same resolution gives the withdrawn
+    the candidates exclude, so a request still resolves the membership three times. An ending
+    that commits after that resolution is an answer from before it (ADR-0035 decision 12). *Run
+    (fix round):* `OnThisDayTest`'s "an ending committed after the guard resolved the membership
+    still resurfaces nothing" red before the change; with the guard's membership put back, only
+    that test went red. *Run (Task 3):* the check dropped turned the ended-bond and countdown
     tests red; `hasLeft` in its place, and `!takesWrites && withdrawnMemberIds.isEmpty()`, each
     turned the ended-bond test red; the reviewer's `!isOpen && !hasLeft` (the leaver given
     memories) did too; a controller that added a header by cause turned the header comparison
     red. **`takesWrites` → `isOpen` survives**: no request leaves a bond open while it takes no
-    writes. The empty body is decided after the guard and `ReconcileJoiningDay.beforeRead` (which
-    reads the joining day's row, never entries) and before any read of entries (Task 3 review,
-    read and run).
+    writes. The empty body is decided after the guard and `ReconcileJoiningDay.beforeRead`
+    (which reads the joining day's row, never entries) and before any read of entries (Task 3
+    review, read and run).
 15. **On-this-day lists a day only if it holds an entry SQL believes the caller may read in
     full** (`SEEN_ROW`, `LIVE_ROW`, not withdrawn, `d.bond_id = ?`), and after the gate only if
     one was read in full. *Run (Task 3):* `LIVE_ROW` dropped → the candidates test red; the
@@ -281,8 +313,10 @@ what was run to decide it or to hold it.
     red; the smoke reads the header off both routes from the jar.
 18. **No `ETag`, no conditional read** on either route. *Read.*
 19. **No rate bucket of their own**; the global 120 a minute per user. *Run:* every measured
-    statement took at most 5.6 ms (decision 7); one request is in practice one statement (a
-    second window needs a race). The Task 2 review judged 120 a minute at most about a second of
+    statement took at most 4.4 ms in the runs printed under decision 7, and under 1 ms in every
+    run after the join (decision 7's third run, and the final reviews' and fix round's runs in
+    How this was checked); one request is in practice one statement (a second window needs a
+    race). The Task 2 review judged 120 a minute at most about a second of
     database time a minute (read).
 20. **Both routes run the joining-day reconcile** after the guard, as the archive does (spec
     §12.4). *Run:* dropping it from search left `SearchTest` green; `JoiningDayTest` owns the
@@ -309,8 +343,10 @@ what was run to decide it or to hold it.
     and **multipart parsing** wrote an upload to disk before authentication on the public
     POSTs (now `spring.servlet.multipart.enabled: false`; `MultipartRefusedTest`).
 23. **CLAUDE.md's "never … a second column" gains its one exception**: `entries.text_search`,
-    the search projection, which every erasure empties; "search terms" join the list of what
-    never reaches a log. *Reason:* default 8 creates exactly the copy the rule forbids, and
+    the search projection, and the `search_vector` Postgres generates from it (with its index),
+    all emptied by every erasure; "search terms" join the list of what never reaches a log. The
+    vector and its index were named after the final review (m3): they hold the same words, as
+    lexemes. *Reason:* default 8 creates exactly the copy the rule forbids, and
     CLAUDE.md says the document wins and the file is the bug. The controller accepted it on
     2026-10-21 as a binding-rule change the owner may turn before merge. (How this was checked
     says where the text of the amendment stands.)
@@ -333,13 +369,17 @@ what was run to decide it or to hold it.
   `public.immutable_unaccent`, the backfill of `text_search` for live rows, the generated
   `search_vector` and `entries_search_idx` (GIN on `(bond_id, search_vector)`). Every write to
   `entries` now maintains the stored vector and the index.
-- **V25 rewrites `entries` once, under `ACCESS EXCLUSIVE`.** Measured by the Task 1 review on
-  190,127 live rows (`postgres:18` 18.6): the backfill UPDATE 2.65 s (row locks: writers of
-  those rows wait), `ADD COLUMN … STORED` 5.53 s and the index 0.38 s under `ACCESS EXCLUSIVE`
-  (every read and write waits); about 6 s of `entries` unreadable per 200k rows; the table grew
-  from 136 to 362 MB. V25 begins with `SET LOCAL lock_timeout = '5s'`: run, the `ALTER` is
-  cancelled after 5 s when another transaction holds the table, and the migration rolls back
-  whole.
+- **V25 locks `entries` first, `ACCESS EXCLUSIVE`, then backfills and rewrites it.** Measured
+  by the Task 1 review on 190,127 live rows (`postgres:18` 18.6): the backfill UPDATE 2.65 s,
+  `ADD COLUMN … STORED` 5.53 s and the index 0.38 s; the table grew from 136 to 362 MB. With
+  the lock taken before the backfill (final review m1), `entries` is unreadable for all three,
+  **about 8 s per 200k rows** rather than the 6 s of the rewrite alone (the reviewer's figure,
+  not re-measured). Taken only at the `ALTER`, the lock deadlocked with any writer of a row the
+  backfill had locked: run by the reviewer and again in the fix round (`deadlock detected`, the
+  migration the victim); taken first, the same writer waited and committed after it. V25
+  begins with `SET LOCAL lock_timeout = '5s'`, which now bounds that first lock: run in the fix
+  round, with another session holding the table, `canceling statement due to lock timeout`
+  after 5.06 s, and the migration rolled back whole.
 - **Deploy prerequisites.** Production's Postgres must ship `unaccent` **and** `btree_gin`
   (both are `trusted` in `postgres:18`, run). The migrating role must own the database or hold
   `CREATE` on schema `public`: a non-owner with only database `CREATE` gets the trusted
@@ -347,6 +387,24 @@ what was run to decide it or to hold it.
   review). If `unaccent` already lives in another schema, as some managed providers put it,
   `IF NOT EXISTS` skips it and the function fails to resolve `public.unaccent`: loud at migrate
   time.
+- **Deploy prerequisite: reconcile the projection after the cutover, and after any rollback
+  across V25.** A build from before V25 does not map `text_search`, so while it serves next to
+  the new one (Kamal's blue/green, ADR-0007 and ADR-0011) or after a rollback (V25 stays
+  applied), an entry it submits has no projection and an entry it erases **keeps its words in
+  `text_search` and `search_vector`** (final review I1, run on a scratch database; the fix
+  round's lock probe left exactly that row). Once only the new build serves, run
+  `UPDATE entries SET text_search = text WHERE text_search IS DISTINCT FROM text`. It is
+  idempotent, empties the stale projections of erased rows and fills the rows the old build
+  wrote; it holds only while the projection is the text (until Phase 5). No production
+  exists yet (README), so this is a documented step, not a V26. The search no longer depends
+  on it to hide an erased entry: `matchingQuery` asks `LIVE_ROW` (decision 5), and the gate
+  drops such a day as well; the step is what empties the words from the row.
+- **Deploy prerequisite: the boot-time budget.** V25 runs as the new container boots, under
+  Kamal's health-checked cutover: about 8 s per 200k rows plus up to 5 s of `lock_timeout`.
+  That must fit Kamal's deploy and readiness timeouts, and the migrating role must have no
+  `statement_timeout`, or one longer than the migration; otherwise the container is killed or
+  the statement cancelled, the transaction rolls back (safe), and every retry fails the same
+  way. Nothing comes near it at today's size.
 - **The logger pins and what they give up.** Fifteen pins in `application.yml`; the five search
   pins, `ExceptionHandlerExceptionResolver` and `Http11Processor` are this slice's. They cost
   the request-line debugging of every route: Spring Security's "Securing …" lines and filter
@@ -385,6 +443,10 @@ what was run to decide it or to hold it.
   found.
 - **The corpus**: doc 06, doc 07 and the spec amendments carried into it, and ADR-0035 to
   ADR-0039 copied into `Gratitude/documents/adr/` (c6-corpus X3).
+- **The `400 MALFORMED_REQUEST` for an undecodable query parameter is declared on search
+  only.** Every route answers it; the contract says so where a client is most likely to send
+  such bytes (final review m1). The API-wide declaration is owed with the `required` question
+  below.
 - **Response schemas declare no `required` fields**, contract-wide, so the generated client
   treats every response field as optional. One owner question for all responses, not a patch
   to these two (Task 3 review).
@@ -421,6 +483,15 @@ alternative, and what turning it would cost.
     no-store, max-age=0, must-revalidate`), which also forbids storing (decision 17); turning it
     to the letter costs one header per route and a case in `CacheHeadersTest`.
 
+One question the owner's own ruling of 2026-10-21 opens:
+
+11. **Does `q` follow the entry when ADR-0031's rulings are built?** Ruling 1 counts an entry's
+    500 as typed (grapheme clusters of the text as sent, no NFKC); ruling 2 refuses an entry
+    of zero-width characters only. `q` is counted on the NFKC form today, as an entry is
+    (decision 9). The likely answer is yes, in the same pull request, so that a client counts
+    both one way: `SearchTerms` would count the raw text and refuse a zero-width-only `q` as
+    blank (`422`). Leaving it costs a client two counting rules for the same app.
+
 Then the plan's decisions most worth his eye, one line each:
 
 - **Decision 2, two guards.** Each hides the other's removal except over a long history; both
@@ -436,6 +507,8 @@ Then the plan's decisions most worth his eye, one line each:
 - **Decision 19, no bucket.** A search-as-you-type client would want one.
 - **Decision 22, the pins.** Request-line debugging given up on every route.
 - **Decision 23, CLAUDE.md amended.** A binding rule gains a named exception.
+- **The deploy prerequisites** (Consequences): two extensions and `CREATE` on `public`, the
+  reconciliation after cutover and after a rollback, and the boot-time budget.
 
 ## What the corpus now says that is false
 
@@ -481,7 +554,7 @@ record's author's.
   match and `caf` does not; an emoji is no lexeme; the no-lexeme notice carries no part of `q`;
   a 500,000-row probe in which GIN alone read the mid-frequency word's postings across all bonds
   (62,500) and the `btree_gin` composite 63.
-- **Task 1** (2026-10-21, its implementer; `6661ee9`, then the controller's `7aa66af`).
+- **Task 1** (2026-10-21, its implementer; `a6aaea2`, then the controller's `998dc4c`).
   `FlywayMigrationTest`, `SearchProjectionTest` and `V25BackfillTest` seen red, then green.
   Mutations, each restored: the backfill's erasure clause dropped → `V25BackfillTest`; the
   generated column without the wrapper → `V25BackfillTest`; decision 5's three (above);
@@ -491,7 +564,7 @@ record's author's.
   insert path without the projection: red; the vector from `text`: only `V25BackfillTest` red).
   Critical 0, Important 0, Minor 4. The controller added `lock_timeout` and saw the `ALTER`
   cancelled after 5 s with the table held.
-- **Task 2** (2026-10-21, its implementer, then a fix session; `3a1cb2e` to `1087b42`).
+- **Task 2** (2026-10-21, its implementer, then a fix session; `630c783` to `7266ba5`).
   `SearchTermsTest`, `SearchTest` (red with 404 before the route existed), `SearchWithdrawalTest`,
   `GratitudeCrossTenantTest`, `OpenApiContractTest`, `CacheHeadersTest` and
   `SecretsNeverLoggedTest` each seen red for the stated reason first. Mutations in decisions 2, 3,
@@ -509,7 +582,7 @@ record's author's.
   without it), the state map's `MALFORMED_REQUEST` reason. Each pin removed in turn → red,
   naming it. `./gradlew build` green, 1,483 tests, 1 skipped (the measurement, gated by
   `MOYI_MEASURE`).
-- **Task 3** (2026-10-22, its implementer; `a949966` to `11d221a`). `OnThisDayCandidatesTest`
+- **Task 3** (2026-10-22, its implementer; `bf2443a` to `50c269a`). `OnThisDayCandidatesTest`
   and `OnThisDayTest` seen to fail to compile, then pass; `GratitudeCrossTenantTest` red without
   the fixture. Mutations in decisions 13, 14, 15 and 16. Its review (Critical 0, Important 1,
   Minor 4) mutated four more (the partner's bookmark read without `member_id`, the leaver given
@@ -522,11 +595,11 @@ record's author's.
   text`). Also fixed: the headers compared across every ending; `todayOf` in one place; the
   three-day byte-bound test. `./gradlew build` green, 1,502 tests, 2 skipped (the measurements).
 - **Task 4** (2026-10-22, this record's author).
-  - **The streak at the bond's midnight** (`fb335e1`): `StreakEndpointTest` 19 of 19; `todayOf`
+  - **The streak at the bond's midnight** (`e1ac2be`): `StreakEndpointTest` 19 of 19; `todayOf`
     → UTC turned only the new test red (decision 16).
   - **The smoke run.** The compose Postgres could not bind 5432, which another project's
     container held, so it was started on 55432 through a compose override, and the jar (built
-    from `11d221a`'s main code; `fb335e1` changed only a test) was booted by hand exactly as
+    from `50c269a`'s main code; `e1ac2be` changed only a test) was booted by hand exactly as
     `scripts/smoke.sh` boots it, on its own database `moyi_c6b_smoke`, and the script run with
     `--attach`. **902 passed, 0 failed, 0 skipped, 23 sections.** The new section's 49 probes
     all passed. Two predictions confirmed: `q=zq%00zq` reached the application and was its
@@ -544,7 +617,7 @@ record's author's.
     them. **Bruno**: two requests written, not opened.
   - **The state map**: `scripts/state-map-check --strict` exit 0, "652 rows, 286 never run, 0
     pending, 29 contract gaps. Nothing wrong."; the checker's 154 tests pass.
-  - **`./gradlew build`** at `3597e3f` with this record and the spec, README and log
+  - **`./gradlew build`** at `eec45bb` with this record and the spec, README and log
     amendments in the tree (documentation only): green, **1,503 tests, 0 failures, 0 errors, 2
     skipped** (the two measurements, gated by `MOYI_MEASURE`), counted from the result files.
     `app` and `gratitude` ran; the other modules were up to date and their results reused.
@@ -561,4 +634,5 @@ record's author's.
   nothing, which is evidence for today's filters only); that the backfill's cost grows linearly
   with the table.
 - **Not run by anyone:** V25 against a shared or production database; NFR-004's p95 under
-  concurrent load; the Bruno collection; CI's contract action.
+  concurrent load; the Bruno collection; CI's contract action (a local oasdiff v1.11.7 run by
+  the conformance review and by the fix round agrees: decision 12).

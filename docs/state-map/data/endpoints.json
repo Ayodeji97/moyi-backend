@@ -624,7 +624,7 @@
       {
         "status": 404,
         "code": "NOT_FOUND",
-        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so the same bytes whatever q is.",
+        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so the same bytes whatever q is, as long as it can be decoded: a q whose bytes are not UTF-8 is everyone's 400 MALFORMED_REQUEST, member or stranger, after authentication.",
         "evidence": "smoke",
         "evidenceRef": "search: a stranger is told the bond's 404, whatever q is",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/BondGuard.kt#throw NotFoundException(\"That bond was not found.\")"

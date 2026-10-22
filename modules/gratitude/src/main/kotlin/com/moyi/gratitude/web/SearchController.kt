@@ -17,8 +17,11 @@ import org.springframework.web.bind.annotation.RestController
  *
  * **The guard first, then the parameters, then the joining-day reconcile, then the read**:
  * `DaysController`'s order, for its reasons. `q` arrives as text and is read only after the
- * membership is resolved, so a stranger gets the bond's `404` whatever `q` is, and a member
- * whose `q` cannot be searched gets one `422` on `q` that does not carry it back.
+ * membership is resolved, so a stranger gets the bond's `404` whatever `q` is, as long as Tomcat
+ * can decode it, and a member whose `q` cannot be searched gets one `422` on `q` that does not
+ * carry it back. A `q` whose bytes are not UTF-8 never reaches this controller: it is
+ * `UndecodableParameterFilter`'s `400`, the same for a member and a stranger, after
+ * authentication (ADR-0039 decision 22).
  *
  * **Not a conditional read, and kept by nobody.** No `ETag`; the response carries the API's
  * default `Cache-Control` (`no-cache, no-store, max-age=0, must-revalidate`), so no cache, the
