@@ -456,6 +456,27 @@ author's.
     only): BUILD SUCCESSFUL in 3 m 58 s, 217 tasks executed, **1,531 tests, 0 failures, 0
     errors, 2 skipped** (the two search measurements, gated by `MOYI_MEASURE`), counted from
     all 179 result files. `scripts/state-map-check --strict` after it: exit 0.
+- **The whole-branch reviews** (2026-10-22, at `95ba089`, two agents, read-only on the branch).
+  *Conformance and privacy* (Critical 0, Important 2, Minor 5; docs only): ran oasdiff
+  (`breaking` exit 0, one `endpoint-added`, so no `breaking-api-change` label), the commit-message
+  hook on all 14 commits, an ancestry check of every SHA cited (the pre-rebase names, I1) and a
+  `grep -F` of every new state-map quote; found by reading that `/streak`'s calendar also gives
+  the count (I2, decision 6's owner question). *Concurrency, data integrity and performance*
+  (Critical 0, Important 1, Minor 4; a test gap): `./gradlew build --rerun-tasks` 1,531 tests, 0
+  failures, 2 skipped; the smoke at `95ba089`'s jar, 930 passed, 0 failed, 0 skipped, 24
+  sections; the count read moved above the bond lock, 41 tests green (I1, decision 8); the
+  measurements under Revisit when; the older-build close run (m1) and the settle margin (m3),
+  by reading.
+- **The final fix round** (2026-10-22, its implementer). The lock test of decision 8, seen
+  green, then red with the read moved above `lockClosingViewOf` (that test only), then green
+  restored; the pre-rebase names replaced (every rebased commit's tree equal to its original's,
+  run); the owner question reworded; the test-infra comments; the state-map row's evidence;
+  this record's additions. `scripts/state-map-check --strict` exit 0. `./gradlew build
+  --rerun-tasks` at the round's last change to code or comments (only this record changed
+  after it): BUILD SUCCESSFUL in 4 m 3 s, 217 tasks executed, **1,532 tests, 0 failures, 0
+  errors, 2 skipped** (the search measurements), counted from all 179 result files, every one
+  written by that run. The smoke was not run again: `scripts/smoke.sh` changed only in its
+  header comment.
 - **Argued, not run:** decision 2's invariant (the count of `COMPLETE` days equals
   `total_complete_days` while the projection is true); that today is never evaluated while it
   is today; decision 5's read order; that an account deletion leaves a day's status as it was,
