@@ -4,8 +4,11 @@ import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondAnchorTimeline
 import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.BondCalendar
+import com.moyi.gratitude.domain.DayAssignment
 import com.moyi.gratitude.domain.DayWindow
 import com.moyi.gratitude.domain.Reader
+import java.time.Clock
+import java.time.LocalDate
 
 /**
  * The bond's anchor timeline, as the [BondCalendar] `gratitude.domain` asks
@@ -24,6 +27,21 @@ internal fun BondAnchorTimeline.asCalendar(): BondCalendar =
     BondCalendar { at ->
         if (at.isBefore(beginsAt)) null else dayBoundsAt(at).let { DayWindow(it.date, it.startsAt, it.endsAt) }
     }
+
+/**
+ * **The bond's today**, for a read (BR-3): the date a write made now would be filed against
+ * ([DayAssignment.dateFor], the same function `SubmitEntry` uses), with no intended time and no
+ * grace, on the bond's effective zone over time ([asCalendar]), never the zone it now requests.
+ *
+ * One expression for every read that names today (`GET /today`, `GET /streak`,
+ * `GET /on-this-day`), so that no two can be given different dates at the bond's midnight
+ * (task 3 review m2: it had been written out three times). A write asks [DayAssignment] itself,
+ * with its own `intendedAt` and grace.
+ */
+internal fun todayOf(
+    membership: BondMembership,
+    clock: Clock,
+): LocalDate = DayAssignment.dateFor(clock.instant(), null, membership.anchorTimeline.asCalendar()) { false }
 
 /**
  * The caller, as BR-1's gate wants them: their member id together with the

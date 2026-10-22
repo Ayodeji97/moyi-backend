@@ -3,7 +3,6 @@ package com.moyi.gratitude.service
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.BondDayStatus
-import com.moyi.gratitude.domain.DayAssignment
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
@@ -246,7 +245,7 @@ internal class GetDays(
      * ended, left, blocked or counting down to deletion (the owner's Q-O3, decision 14). One
      * answer for every cause, so a block is not told from a leave.
      *
-     * **Today is the bond's** (BR-3): [GetToday]'s own call, so both members are given the
+     * **Today is the bond's** (BR-3): [todayOf], as `GET /today` asks it, so both members are given the
      * same date and a memory changes at the bond's midnight.
      *
      * The candidates exclude days of tombstones and the known withdrawn ([ArchiveDays.onThisDay]);
@@ -266,7 +265,7 @@ internal class GetDays(
         textOctets: Int = PAGE_TEXT_OCTETS,
     ): List<DayView> {
         if (!membership.takesWrites) return emptyList()
-        val today = DayAssignment.dateFor(clock.instant(), null, membership.anchorTimeline.asCalendar()) { false }
+        val today = todayOf(membership, clock)
         val candidates =
             archive.onThisDay(membership.bondId, membership.memberId, today, access.readerNow(membership).withdrawnAuthors)
         val read = read(membership, candidates).filter { it.readInFull.isNotEmpty() }

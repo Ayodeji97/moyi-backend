@@ -69,7 +69,7 @@ internal data class TodayView(
  * later if the calendar now says so, and puts it through the reveal rule. In
  * every other case `GET /today` writes nothing and takes no lock.
  *
- * [DayAssignment.dateFor] resolves which date "today" is, the same function [SubmitEntry] uses — `null` for `intendedAt`
+ * [todayOf] resolves which date "today" is, by [DayAssignment.dateFor], the same function [SubmitEntry] uses — `null` for `intendedAt`
  * (nobody backdates a read) and `{ false }` for `isSettled` (the lambda only
  * matters for an offline draft's claimed date, and a read makes no claim),
  * against the same effective-zone calendar ([asCalendar]) [SubmitEntry]
@@ -158,7 +158,7 @@ internal class GetToday(
         // `anchorTimezone` here would, for the rest of the day a confirmed
         // change is deferred, report a date the caller's own write would not
         // land on.
-        val date = DayAssignment.dateFor(clock.instant(), null, membership.anchorTimeline.asCalendar()) { false }
+        val date = todayOf(membership, clock)
         // From the bond, the date and the library alone (ADR-0038), and before the day is
         // read: nothing read below is in reach of it.
         val prompt = prompts.on(membership, date)

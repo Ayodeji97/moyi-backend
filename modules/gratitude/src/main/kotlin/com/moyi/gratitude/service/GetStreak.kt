@@ -1,7 +1,6 @@
 package com.moyi.gratitude.service
 
 import com.moyi.bond.api.BondMembership
-import com.moyi.gratitude.domain.DayAssignment
 import com.moyi.gratitude.domain.DayOutcome
 import com.moyi.gratitude.domain.StreakCell
 import com.moyi.gratitude.domain.StreakDay
@@ -119,8 +118,7 @@ internal class GetStreak(
             else -> last == today.minusDays(1) || (last.isBefore(today) && joiningDate(membership) == today)
         }
 
-    private fun today(membership: BondMembership): LocalDate =
-        DayAssignment.dateFor(clock.instant(), null, membership.anchorTimeline.asCalendar()) { false }
+    private fun today(membership: BondMembership): LocalDate = todayOf(membership, clock)
 
     private fun joiningDate(membership: BondMembership): LocalDate? = membership.activeSince?.let(membership.anchorTimeline::dateAt)
 
