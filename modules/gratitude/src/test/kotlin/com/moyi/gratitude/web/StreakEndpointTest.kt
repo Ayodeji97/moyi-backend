@@ -139,6 +139,26 @@ internal class StreakEndpointTest(
     }
 
     /**
+     * The bond's today, not UTC's (BR-3, `todayOf`): at 23:30 UTC it is already the next day in
+     * Lagos. Both write then, on the bond's new day, and are shown it complete and counted while
+     * UTC's date is still the day before. No streak test had run at such a moment (task 3 review).
+     */
+    @Test
+    fun `just after the bond's midnight and before UTC's, the streak counts the bond's today`() {
+        bothWriteOn(1)
+        closeThrough(1)
+        clock.set(Instant.parse("${day(1)}T23:30:00Z"))
+        submit(ada)
+        submit(bea)
+
+        for (member in listOf(ada, bea)) {
+            streak(member)["current"].asInt() shouldBe 2
+            calendar(member).takeLast(2) shouldBe listOf("${day(1)} COMPLETE", "${day(2)} COMPLETE")
+            today(member)["streak"]["current"].asInt() shouldBe 2
+        }
+    }
+
+    /**
      * The job is a run behind: yesterday is over and not evaluated. Today is
      * not added to a run that yesterday may have ended; the stored run stands
      * until the job has caught up, and then says what happened.
