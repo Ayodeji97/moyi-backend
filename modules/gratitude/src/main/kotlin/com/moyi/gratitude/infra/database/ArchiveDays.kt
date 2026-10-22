@@ -190,6 +190,36 @@ internal class ArchiveDays(
         )
     }
 
+    /**
+     * The days of [bondId] dated [today]'s month and day in an earlier year, newest first, at
+     * most [ON_THIS_DAY_YEARS], that hold an entry [memberId] may read in full as far as rows
+     * can say: they wrote it or it was revealed ([SEEN_ROW]), it is not erased ([LIVE_ROW]),
+     * and its author is not in [withdrawnMemberIds] (ADR-0039 decision 15).
+     *
+     * **A day of tombstones is not a memory** (the controller's default 5, c6-corpus H-O5),
+     * so it is left out here, before the limit, and not by the reader afterwards. The archive
+     * still lists it ([SEEN] counts an erased row).
+     *
+     * **Month and day, compared as numbers**, so 29 February is found on 29 February only and
+     * 28 February never stands in for it (decision 16). [today] itself is not an earlier year.
+     *
+     * Walks the bond's own days by `bond_days_feed_idx`, about 365 a year of the bond, and
+     * never another bond's (NFR-033 by the bond, as the archive's sparse walk is).
+     */
+    fun onThisDay(
+        bondId: UUID,
+        memberId: UUID,
+        today: LocalDate,
+        withdrawnMemberIds: Set<UUID>,
+    ): List<ArchiveDay> {
+        val (sql, arguments) = onThisDayQuery(bondId, memberId, today, withdrawnMemberIds)
+        return jdbc.query(
+            sql,
+            PreparedStatementSetter { statement -> arguments.forEachIndexed { index, value -> statement.setObject(index + 1, value) } },
+            ROW,
+        )
+    }
+
     internal companion object {
         private const val SELECT = "SELECT d.id, d.date, d.status FROM bond_days d"
 
@@ -280,6 +310,36 @@ internal class ArchiveDays(
                     "LIMIT ?",
                 ).joinToString("\n")
             val arguments = listOfNotNull<Any>(bondId, before, terms.value, memberId) + withdrawnMemberIds + limit
+            return sql to arguments
+        }
+
+        /** The most earlier years [onThisDay] reads: more than any bond can have, and a bound all the same. */
+        const val ON_THIS_DAY_YEARS = 100
+
+        /** [onThisDay]'s statement and its arguments, in order. */
+        fun onThisDayQuery(
+            bondId: UUID,
+            memberId: UUID,
+            today: LocalDate,
+            withdrawnMemberIds: Set<UUID>,
+        ): Pair<String, List<Any>> {
+            val excluding =
+                withdrawnMemberIds
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { ids -> " AND e.author_member_id NOT IN (${ids.joinToString { "?" }})" }
+                    .orEmpty()
+            val sql =
+                listOf(
+                    SELECT,
+                    "WHERE d.bond_id = ?",
+                    "AND d.date < ?",
+                    "AND EXTRACT(MONTH FROM d.date) = ? AND EXTRACT(DAY FROM d.date) = ?",
+                    "AND EXISTS (SELECT 1 FROM entries e WHERE e.bond_day_id = d.id AND $SEEN_ROW AND $LIVE_ROW$excluding)",
+                    "ORDER BY d.date DESC",
+                    "LIMIT ?",
+                ).joinToString("\n")
+            val arguments =
+                listOf<Any>(bondId, today, today.monthValue, today.dayOfMonth, memberId) + withdrawnMemberIds + ON_THIS_DAY_YEARS
             return sql to arguments
         }
 
