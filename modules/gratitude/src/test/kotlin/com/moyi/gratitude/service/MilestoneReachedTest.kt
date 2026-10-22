@@ -23,6 +23,7 @@ import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import java.sql.Connection
 import java.time.Duration
@@ -170,6 +171,36 @@ internal class MilestoneReachedTest(
 
         jdbc.queryForObject("SELECT evaluated_as FROM bond_days WHERE id = ?", String::class.java, dayId(7)) shouldBe "COMPLETE"
         milestones().map { it.dayId } shouldBe listOf(dayId(7))
+    }
+
+    /**
+     * ADR-0035 question 9: Bea leaves before the seventh day's reveal time, so the job closes it
+     * withheld, `PENDING_REVEAL`. The owner ruled on 2026-10-22 that it counts for milestones too.
+     */
+    @Test
+    fun `a day both wrote on that an ended bond withheld still reaches its milestone`() {
+        (1..6).forEach { bothWriteOn(it) }
+        closeThrough(6)
+        jdbc.update("UPDATE bonds SET reveal_time_local = '20:00:00'::time WHERE id = ?::uuid", bond) shouldBe 1
+        bothWriteOn(7)
+        clock.set(at(7).plusSeconds(3_600))
+        mockMvc
+            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, bearer(bea)) }
+            .andReturn()
+            .response.status shouldBe 204
+
+        closeThrough(7)
+
+        jdbc.queryForObject("SELECT status FROM bond_days WHERE id = ?", String::class.java, dayId(7)) shouldBe "PENDING_REVEAL"
+        jdbc.queryForObject("SELECT evaluated_as FROM bond_days WHERE id = ?", String::class.java, dayId(7)) shouldBe "COMPLETE"
+        milestones().map { it.dayId } shouldBe listOf(dayId(7))
+        mockMvc
+            .get("/api/v1/bonds/$bond/milestones") { header(HttpHeaders.AUTHORIZATION, bearer(ada)) }
+            .andReturn()
+            .response
+            .also { it.status shouldBe 200 }
+            // Dated on the withheld day. Nothing is next for a bond that has ended.
+            .contentAsString shouldBe """{"achieved":[{"threshold":7,"achievedOn":"${day(7)}"}],"next":null}"""
     }
 
     /**

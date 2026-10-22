@@ -84,6 +84,11 @@ ended). Such a day will then not be `REVEALED`, so not complete: no milestone co
 `MilestoneReached` names it. Nothing here needs to change for that; no test here pins the
 reveal of an ended bond's waiting day.
 
+*(Amended 2026-10-22, ADR-0040, which built that ruling. The paragraph above was wrong about
+its effect: the owner ruled on 2026-10-22 that a withheld day closes `PENDING_REVEAL` and
+**counts `COMPLETE`**. So milestones do count it, it can be a milestone's `achievedOn`, and
+`MilestoneReached` can name it.)*
+
 ### The controller's defaults
 
 Set by the controller of the C6 session on 2026-10-22, each the owner's to turn:
@@ -392,7 +397,8 @@ For the owner to carry into the corpus repository, which is not edited here.
 - A fifth threshold or a yearly one is wanted (Q-M2): one constant and the contract's sentence.
 - Phase 4 builds the card and the push.
 - A second consumer of `MilestoneReached` appears: it carries ids only, by design.
-- The peer's `PENDING_REVEAL` ruling lands (the note under the rulings).
+- ~~The peer's `PENDING_REVEAL` ruling lands~~ It landed in ADR-0040 and changes what is
+  counted (the amendment under the rulings).
 
 ## How this was checked
 
@@ -482,4 +488,6 @@ author's.
   is today; decision 5's read order; that an account deletion leaves a day's status as it was,
   which no test here drives, being `identity`'s route (the withdrawal's erasure is the test).
 - **Not run by anyone:** the Bruno request; CI's contract action; the peer's `PENDING_REVEAL`
-  ruling against these tests (it is not yet built).
+  ruling against these tests (it is not yet built). *(Amended 2026-10-22, ADR-0040: it is built,
+  and `MilestoneReachedTest` covers it: a withheld day 7 is evaluated `COMPLETE`, writes one
+  `MilestoneReached`, and dates the 7 milestone.)*

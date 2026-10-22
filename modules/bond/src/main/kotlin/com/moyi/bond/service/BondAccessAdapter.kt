@@ -107,6 +107,9 @@ internal class BondAccessAdapter(
                 // Archived, or counting down to deletion: either way it takes no
                 // more writes from here, which is what the closer means by ended.
                 endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
+                // Read from the same bond row and member rows as the rest, so
+                // after the lock when `lockClosingViewOf` is the caller.
+                separatedAt = separatedAtOf(bond),
                 revealTimeLocal = bond.revealTimeLocal,
                 past = pasts.of(bond),
                 anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),
@@ -140,6 +143,8 @@ internal class BondAccessAdapter(
             awaitingSecondMember = bond.status == BondStatus.PENDING_MEMBER,
             activeSince = activeSinceOf(bond),
             endedAt = bond.archivedAt,
+            // As the closer's view has it, and after the lock under `lockMembershipOf`.
+            separatedAt = separatedAtOf(bond),
             anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(membership.bondId)),
             // Of the bond, not of the caller: the member reading is as often the
             // one whose partner withdrew as the one who did, and each must be told
@@ -194,6 +199,16 @@ internal class BondAccessAdapter(
             isDegenerate = isDegenerate,
         )
 }
+
+/**
+ * When the bond stopped being two people's ([BondClosingView.separatedAt],
+ * [BondMembership.separatedAt]): the earliest of its archive and any member's
+ * leave. Left members keep their row, so every leave is here. One function
+ * for both views, so the closer and a read cannot disagree. Top-level for the
+ * reason [toApi] is. Every archive path today stamps a leftAt at or before archivedAt, so the
+ * archivedAt term guards a future path that stamps none.
+ */
+private fun separatedAtOf(bond: Bond): Instant? = (listOfNotNull(bond.archivedAt) + bond.members.mapNotNull { it.leftAt }).minOrNull()
 
 /**
  * One to one, and exhaustive: a fifth domain type is a compile error here, not a silent default.

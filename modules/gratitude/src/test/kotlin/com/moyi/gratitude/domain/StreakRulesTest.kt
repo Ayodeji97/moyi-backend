@@ -229,16 +229,23 @@ internal class StreakRulesTest {
 
     @Test
     fun `each settled status is one outcome, and an unsettled one is none`() {
-        BondDayStatus.entries.associateWith(DayOutcome::of) shouldBe
+        BondDayStatus.entries.associateWith { DayOutcome.of(it, settled = true) } shouldBe
             mapOf(
                 BondDayStatus.OPEN to null,
                 BondDayStatus.PARTIAL to null,
-                BondDayStatus.PENDING_REVEAL to null,
+                // Only a closed one: a day both wrote on that an ended bond withheld (owner, 2026-10-22).
+                BondDayStatus.PENDING_REVEAL to DayOutcome.COMPLETE,
                 BondDayStatus.REVEALED to DayOutcome.COMPLETE,
                 BondDayStatus.SOLO to DayOutcome.MISSED,
                 BondDayStatus.EMPTY to DayOutcome.MISSED,
                 BondDayStatus.SUSPENDED to DayOutcome.SUSPENDED,
                 BondDayStatus.FROZEN to DayOutcome.FROZEN_BY_SKIP,
             )
+    }
+
+    @Test
+    fun `a pending-reveal day that is not settled has no outcome yet`() {
+        DayOutcome.of(BondDayStatus.PENDING_REVEAL, settled = false) shouldBe null
+        DayOutcome.of(BondDayStatus.REVEALED, settled = false) shouldBe DayOutcome.COMPLETE
     }
 }

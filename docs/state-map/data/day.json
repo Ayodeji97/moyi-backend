@@ -1039,7 +1039,7 @@
     "rule": "ADR-0032 §7",
     "evidence": "test",
     "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (entryCount != MAX_ENTRIES || status !in setOf(BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL)) return this"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (!awaitsReadingTogether) return this"
   },
   {
     "id": "partner-locked-write-again",
@@ -2837,7 +2837,7 @@
     "rule": "FR-063, ADR-0033 §3",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day nobody ended up writing on closes EMPTY",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#BondDayStatus.OPEN -> copy(status = BondDayStatus.EMPTY, closedAt = at)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.OPEN -> {"
   },
   {
     "id": "day-partial-ends",
@@ -2855,7 +2855,7 @@
     "rule": "FR-063",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day one member wrote on closes SOLO and their entry is revealed",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#BondDayStatus.PARTIAL -> copy(status = BondDayStatus.SOLO, closedAt = at)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.PARTIAL -> {"
   },
   {
     "id": "day-pending-reveal-time",
@@ -2863,17 +2863,35 @@
     "from": "PENDING_REVEAL",
     "action": "event:reveal-time-arrives",
     "actor": "system",
-    "when": "",
+    "when": "the bond had not separated before the reveal fell due",
     "guards": [],
     "outcome": "ok",
     "to": "REVEALED",
     "status": null,
     "code": null,
     "reason": "Nothing watches the clock for one day. The close job looks at every day waiting on a reveal time on each run and reveals those whose time has come, so the reveal lands up to a quarter of an hour after the time set. No request does this, not even GET /today.",
-    "rule": "FR-062, ADR-0033 §3",
+    "rule": "FR-062, ADR-0033 §3, ADR-0035 question 9",
     "evidence": "test",
     "evidenceRef": "CloseElapsedDaysTest#a day waiting on its reveal time is found before its end, and revealed when the time comes",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val current = reveal.apply(locked.extendedTo(window).resumeJoiningDay(view.activeSince), view.revealTimeLocal, at)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#reveal.apply(prepared, view.revealTimeLocal, at)"
+  },
+  {
+    "id": "day-pending-reveal-time-withheld",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "event:reveal-time-arrives",
+    "actor": "system",
+    "when": "the bond separated (archived, or a member left) before the reveal fell due",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PENDING_REVEAL",
+    "status": null,
+    "code": null,
+    "reason": "An ended bond reveals nothing new. The close job asks, of the instant the reveal fell due and not of when it runs, whether the bond had separated; if so the day stays PENDING_REVEAL, nothing is stamped as read, no DayRevealed is written, and the day closes as it is when it ends. It counts as a complete day for the streak and the milestones (owner, 2026-10-22).",
+    "rule": "FR-062, ADR-0035 question 9, ADR-0040",
+    "evidence": "test",
+    "evidenceRef": "CloseElapsedDaysTest#an ended bond's day that was waiting on its reveal time is withheld when the time comes",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#prepared.withholdReveal().also(days::update)"
   },
   {
     "id": "day-pending-reveal-ends",
@@ -2881,17 +2899,35 @@
     "from": "PENDING_REVEAL",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "",
+    "when": "the bond had not separated before the reveal fell due",
     "guards": [],
     "outcome": "ok",
     "to": "REVEALED",
     "status": null,
     "code": null,
     "reason": "A reveal time later than the day's own end cannot hold the entries back past it: the day is revealed and closed in one step.",
-    "rule": "ADR-0033 §3",
+    "rule": "ADR-0033 §3, ADR-0035 question 9",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day still pending at its end is revealed once and closed, in one run",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#BondDayStatus.PENDING_REVEAL -> copy(status = BondDayStatus.REVEALED, revealedAt = revealedAt ?: at, closedAt = at)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.PENDING_REVEAL && !withheld -> {"
+  },
+  {
+    "id": "day-pending-reveal-ends-withheld",
+    "region": "day",
+    "from": "PENDING_REVEAL",
+    "action": "event:day-ends",
+    "actor": "system",
+    "when": "the bond separated (archived, or a member left) before the reveal fell due",
+    "guards": [],
+    "outcome": "ok",
+    "to": "PENDING_REVEAL",
+    "status": null,
+    "code": null,
+    "reason": "The day ends and closes still PENDING_REVEAL: it gains closedAt and nothing else. Neither entry is revealed, one DayClosed is written and no DayRevealed. It counts as COMPLETE, so the streak and the milestones count it (owner, 2026-10-22), and it is the third status that is settled without being isClosed.",
+    "rule": "ADR-0035 question 9, ADR-0040",
+    "evidence": "test",
+    "evidenceRef": "CloseDayTest#a day both wrote on is withheld when the bond was archived before its reveal - nothing revealed, closed pending",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#// Withheld, revealed while open, or suspended: closed, and nothing else."
   },
   {
     "id": "day-revealed-ends",
@@ -2909,7 +2945,7 @@
     "rule": "ADR-0033 §3",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day both wrote on, revealed while it was open, gains closedAt and one DayClosed",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> copy(closedAt = at)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#// Withheld, revealed while open, or suspended: closed, and nothing else."
   },
   {
     "id": "day-suspended-ends",
@@ -2927,7 +2963,7 @@
     "rule": "doc 04 §8.3a, ADR-0033 §3",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day from before the pairing is closed as it stands - still suspended, nothing revealed, no event",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> copy(closedAt = at)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#// Withheld, revealed while open, or suspended: closed, and nothing else."
   },
   {
     "id": "day-not-opened-joined",
@@ -3305,7 +3341,7 @@
     "rule": "ADR-0032 §7",
     "evidence": "test",
     "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (entryCount != MAX_ENTRIES || status !in setOf(BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL)) return this"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#if (!awaitsReadingTogether) return this"
   },
   {
     "id": "entry-submitted-reveal-time",
@@ -3313,17 +3349,35 @@
     "from": "SUBMITTED",
     "action": "event:reveal-time-arrives",
     "actor": "system",
-    "when": "",
+    "when": "the bond had not separated before the reveal fell due",
     "guards": [],
     "outcome": "ok",
     "to": "REVEALED",
     "status": null,
     "code": null,
     "reason": "Both entries of a day that was waiting are stamped revealed together, by the close job's first run after the time.",
-    "rule": "FR-062",
+    "rule": "FR-062, ADR-0035 question 9",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a PENDING_REVEAL day is left until its time, revealed at it, and closed at its end",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/RevealDay.kt#val revealed = entry.reveal(next.revealedAt)"
+  },
+  {
+    "id": "entry-submitted-reveal-time-withheld",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "event:reveal-time-arrives",
+    "actor": "system",
+    "when": "the bond separated (archived, or a member left) before the reveal fell due",
+    "guards": [],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": null,
+    "code": null,
+    "reason": "Your entry stays yours alone to read: the bond separated before the reveal fell due, so the close job never reveals the pair (ADR-0035 question 9).",
+    "rule": "ADR-0035 question 9, ADR-0040",
+    "evidence": "test",
+    "evidenceRef": "CloseElapsedDaysTest#an ended bond's day that was waiting on its reveal time is withheld when the time comes",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#prepared.withholdReveal().also(days::update)"
   },
   {
     "id": "entry-submitted-ends-solo",
@@ -3331,7 +3385,7 @@
     "from": "SUBMITTED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "you were the only one to write, and the bond had not ended before the day did",
+    "when": "you were the only one to write, and the bond had not separated (been archived, or had a member leave) before the day did",
     "guards": [],
     "outcome": "ok",
     "to": "REVEALED",
@@ -3341,7 +3395,7 @@
     "rule": "FR-063",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day one member wrote on closes SOLO and their entry is revealed",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#if (closed.status == BondDayStatus.SOLO && !bondEndedFirst) {"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#if (closed.status == BondDayStatus.SOLO && !bondSeparatedFirst) {"
   },
   {
     "id": "entry-submitted-ends-bond-ended",
@@ -3349,17 +3403,17 @@
     "from": "SUBMITTED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "you were the only one to write, and the bond ended, or began counting down to deletion, before the day did",
+    "when": "you were the only one to write, and the bond was archived, or a member left, before the day ended (a deletion countdown alone does not count)",
     "guards": [],
     "outcome": "ok",
     "to": "SUBMITTED",
     "status": null,
     "code": null,
-    "reason": "The day still closes SOLO, but the entry is not revealed: it was written for a bond that was still yours, and only you ever read it.",
+    "reason": "The day still closes SOLO, but the entry is not revealed: it was written for a bond that was still yours, and only you ever read it. A deletion that is only counting down does not do this, because it can be called off; a member who left during the countdown does (ADR-0033 question 1, ruled 2026-10-21).",
     "rule": "ADR-0033 §9",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a lone entry on a bond that ended before the day did is never revealed, and the day still closes SOLO",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val bondEndedFirst = bondEndedAt != null && bondEndedAt.isBefore(closed.endsAt)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val bondSeparatedFirst = bondSeparatedAt != null && bondSeparatedAt.isBefore(closed.endsAt)"
   },
   {
     "id": "entry-submitted-ends-pending",
@@ -3367,17 +3421,35 @@
     "from": "SUBMITTED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "both of you wrote, and the reveal time had not come when the day ended",
+    "when": "both of you wrote, and the reveal time had not come when the day ended, and the bond had not separated before the reveal fell due",
     "guards": [],
     "outcome": "ok",
     "to": "REVEALED",
     "status": null,
     "code": null,
     "reason": "The day's own end outranks a reveal time later than it, so both entries are revealed as the day closes.",
-    "rule": "ADR-0033 §3",
+    "rule": "ADR-0033 §3, ADR-0035 question 9",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day still pending at its end is revealed once and closed, in one run",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val day = if (ended.status == BondDayStatus.PENDING_REVEAL) reveal.apply(ended, null, now) else ended"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val day = if (ended.status == BondDayStatus.PENDING_REVEAL && !withheld) reveal.apply(ended, null, now) else ended"
+  },
+  {
+    "id": "entry-submitted-ends-withheld",
+    "region": "day.entry",
+    "from": "SUBMITTED",
+    "action": "event:day-ends",
+    "actor": "system",
+    "when": "both of you wrote, and the bond separated (archived, or a member left) before the reveal fell due",
+    "guards": [],
+    "outcome": "ok",
+    "to": "SUBMITTED",
+    "status": null,
+    "code": null,
+    "reason": "The day closes PENDING_REVEAL and neither entry is revealed: an ended bond reveals nothing new. The day still counts as complete.",
+    "rule": "ADR-0035 question 9, ADR-0040",
+    "evidence": "test",
+    "evidenceRef": "CloseDayTest#a day still pending at its end is withheld when the bond was archived before the end",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val withheld = prepared.isWithheldBy(view.separatedAt, view.revealTimeLocal)"
   },
   {
     "id": "entry-submitted-ends-suspended",
@@ -3395,7 +3467,7 @@
     "rule": "doc 04 §8.3a",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day on a bond still waiting for its partner is closed suspended, its entry still its author's alone",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> copy(closedAt = at)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#// Withheld, revealed while open, or suspended: closed, and nothing else."
   },
   {
     "id": "partner-none-partner-writes",
@@ -3529,17 +3601,35 @@
     "from": "LOCKED",
     "action": "event:reveal-time-arrives",
     "actor": "system",
-    "when": "",
+    "when": "the bond had not separated before the reveal fell due",
     "guards": [],
     "outcome": "ok",
     "to": "VISIBLE",
     "status": null,
     "code": null,
     "reason": "Both of you had written and were waiting. The close job's first run after the reveal time unlocks both entries.",
-    "rule": "FR-062",
+    "rule": "FR-062, ADR-0035 question 9",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a PENDING_REVEAL day is left until its time, revealed at it, and closed at its end",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/RevealDay.kt#val revealed = entry.reveal(next.revealedAt)"
+  },
+  {
+    "id": "partner-locked-reveal-time-withheld",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "event:reveal-time-arrives",
+    "actor": "system",
+    "when": "the bond separated (archived, or a member left) before the reveal fell due",
+    "guards": [],
+    "outcome": "ok",
+    "to": "LOCKED",
+    "status": null,
+    "code": null,
+    "reason": "Your partner's entry stays locked to you: the bond separated before the reveal fell due (ADR-0035 question 9).",
+    "rule": "ADR-0035 question 9, ADR-0040",
+    "evidence": "test",
+    "evidenceRef": "DayViewTest#a day withheld because the bond ended before its reveal shows her own entry and only a lock of his",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#prepared.withholdReveal().also(days::update)"
   },
   {
     "id": "partner-locked-ends-solo",
@@ -3547,7 +3637,7 @@
     "from": "LOCKED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "your partner alone wrote, the day is not suspended, and the bond had not ended before the day did",
+    "when": "your partner alone wrote, the day is not suspended, and the bond had not separated (been archived, or had a member leave) before the day did",
     "guards": [],
     "outcome": "ok",
     "to": "VISIBLE",
@@ -3557,7 +3647,7 @@
     "rule": "FR-063",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day one member wrote on closes SOLO and their entry is revealed",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#if (closed.status == BondDayStatus.SOLO && !bondEndedFirst) {"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#if (closed.status == BondDayStatus.SOLO && !bondSeparatedFirst) {"
   },
   {
     "id": "partner-locked-ends-pending",
@@ -3565,17 +3655,35 @@
     "from": "LOCKED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "both of you wrote, the day is not suspended, and the reveal time had not come when the day ended",
+    "when": "both of you wrote, the day is not suspended, and the reveal time had not come when the day ended, and the bond had not separated before the reveal fell due",
     "guards": [],
     "outcome": "ok",
     "to": "VISIBLE",
     "status": null,
     "code": null,
     "reason": "The day's own end outranks a reveal time later than it, so both entries are revealed as the day closes.",
-    "rule": "ADR-0033 §3",
+    "rule": "ADR-0033 §3, ADR-0035 question 9",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day still pending at its end is revealed once and closed, in one run",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val day = if (ended.status == BondDayStatus.PENDING_REVEAL) reveal.apply(ended, null, now) else ended"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val day = if (ended.status == BondDayStatus.PENDING_REVEAL && !withheld) reveal.apply(ended, null, now) else ended"
+  },
+  {
+    "id": "partner-locked-ends-withheld",
+    "region": "day.partnerEntry",
+    "from": "LOCKED",
+    "action": "event:day-ends",
+    "actor": "system",
+    "when": "both of you wrote, the day is not suspended, and the bond separated (archived, or a member left) before the reveal fell due",
+    "guards": [],
+    "outcome": "ok",
+    "to": "LOCKED",
+    "status": null,
+    "code": null,
+    "reason": "The day closes PENDING_REVEAL and your partner's entry stays locked to you for good: an ended bond reveals nothing new. The day view shows it as an author and a status, nothing more.",
+    "rule": "ADR-0035 question 9, ADR-0040",
+    "evidence": "test",
+    "evidenceRef": "DayViewTest#a day withheld because the bond ended before its reveal shows her own entry and only a lock of his",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val withheld = prepared.isWithheldBy(view.separatedAt, view.revealTimeLocal)"
   },
   {
     "id": "partner-locked-ends-bond-ended",
@@ -3583,17 +3691,17 @@
     "from": "LOCKED",
     "action": "event:day-ends",
     "actor": "system",
-    "when": "your partner alone wrote, the day is not suspended, and the bond ended, or began counting down to deletion, before the day did",
+    "when": "your partner alone wrote, the day is not suspended, and the bond was archived, or a member left, before the day ended (a deletion countdown alone does not count)",
     "guards": [],
     "outcome": "ok",
     "to": "LOCKED",
     "status": null,
     "code": null,
-    "reason": "The day closes SOLO, but the lone entry is not unlocked: it was written for a bond that was still its author's, and stays theirs alone.",
+    "reason": "The day closes SOLO, but the lone entry is not unlocked: it was written for a bond that was still its author's, and stays theirs alone. A deletion that is only counting down does not do this; a member who left during it does, and a countdown called off afterwards does not undo that (ADR-0033 question 1, ruled 2026-10-21).",
     "rule": "ADR-0033 §9",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a lone entry on a bond that ended before the day did is never revealed, and the day still closes SOLO",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val bondEndedFirst = bondEndedAt != null && bondEndedAt.isBefore(closed.endsAt)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#val bondSeparatedFirst = bondSeparatedAt != null && bondSeparatedAt.isBefore(closed.endsAt)"
   },
   {
     "id": "partner-locked-ends-suspended",
@@ -3611,7 +3719,7 @@
     "rule": "doc 04 §8.3a",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day on a bond still waiting for its partner is closed suspended, its entry still its author's alone",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#if (closed.status == BondDayStatus.SOLO && !bondEndedFirst) {"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseDay.kt#if (closed.status == BondDayStatus.SOLO && !bondSeparatedFirst) {"
   },
   {
     "id": "partner-locked-partner-withdraws",
@@ -3742,7 +3850,7 @@
     "to": "SUBMITTED",
     "status": 204,
     "code": null,
-    "reason": "Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is still revealed at that time or at the day's end, ended bond or not (ADR-0035, owner question 9; no test pins it). You may still delete it yourself.",
+    "reason": "Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is not revealed once the bond has separated before the reveal falls due: the day closes PENDING_REVEAL with neither entry shown (ADR-0035 question 9, ruled 2026-10-21). You may still delete it yourself.",
     "rule": "FR-029a, ADR-0035 §11, ADR-0033 §9",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -3968,7 +4076,7 @@
     "to": "PARTIAL",
     "status": 204,
     "code": null,
-    "reason": "Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond stopped taking writes first.",
+    "reason": "Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond had separated first (archived, or a member left).",
     "rule": "FR-029a, ADR-0033 §9",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -4032,10 +4140,10 @@
     "to": "PENDING_REVEAL",
     "status": 204,
     "code": null,
-    "reason": "Both entries stay, and the day goes on waiting. Ending the bond does not stop the reveal: at the reveal time, or at the day's end, the close job reveals both entries all the same. ADR-0035 records this as an open question for the owner, and no test pins it.",
+    "reason": "Both entries stay, and the day goes on waiting, but it is no longer going to be revealed: an ended bond reveals nothing new. If the bond separated (archived, or a member left) before the reveal falls due, the close job leaves the day PENDING_REVEAL, stamps it closed at its end and reveals neither entry; it still counts as a complete day (ADR-0035 question 9, ruled 2026-10-21 and 2026-10-22). A deletion countdown alone is not a separation, and a reveal that fell due before the bond separated is made.",
     "rule": "FR-029a, ADR-0035 owner question 9",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "CloseElapsedDaysTest#an ended bond's day that was waiting on its reveal time is withheld when the time comes",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
   },
   {
@@ -4295,7 +4403,7 @@
     "to": "SUBMITTED",
     "status": 204,
     "code": null,
-    "reason": "Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is still revealed at that time or at the day's end, ended bond or not (ADR-0035, owner question 9; no test pins it). You may still delete it yourself.",
+    "reason": "Your entry is left as it is. If you alone wrote on its day, it stays yours alone: the day closes SOLO and a lone entry is not unlocked once the bond has ended. If both of you wrote and the day is waiting for its reveal time, it is not revealed once the bond has separated before the reveal falls due: the day closes PENDING_REVEAL with neither entry shown (ADR-0035 question 9, ruled 2026-10-21). You may still delete it yourself.",
     "rule": "FR-029a, ADR-0035 §11, ADR-0033 §9",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -4528,7 +4636,7 @@
     "to": "PARTIAL",
     "status": 204,
     "code": null,
-    "reason": "Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond stopped taking writes first.",
+    "reason": "Nothing of yours is erased on this day, so it is counted as before. It closes SOLO when it ends, and the lone entry is not unlocked, because the bond had separated first (archived, or a member left).",
     "rule": "FR-029a, ADR-0033 §9",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -4594,10 +4702,10 @@
     "to": "PENDING_REVEAL",
     "status": 204,
     "code": null,
-    "reason": "Both entries stay, and the day goes on waiting. Ending the bond does not stop the reveal: at the reveal time, or at the day's end, the close job reveals both entries all the same. ADR-0035 records this as an open question for the owner, and no test pins it.",
+    "reason": "Both entries stay, and the day goes on waiting, but it is no longer going to be revealed: an ended bond reveals nothing new. If the bond separated (archived, or a member left) before the reveal falls due, the close job leaves the day PENDING_REVEAL, stamps it closed at its end and reveals neither entry; it still counts as a complete day (ADR-0035 question 9, ruled 2026-10-21 and 2026-10-22). A deletion countdown alone is not a separation, and a reveal that fell due before the bond separated is made.",
     "rule": "FR-029a, ADR-0035 owner question 9",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "CloseElapsedDaysTest#an ended bond's day that was waiting on its reveal time is withheld when the time comes",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EndBond.kt#if (withdrawEntries) withdraw(membership, now)"
   },
   {

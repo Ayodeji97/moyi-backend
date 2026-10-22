@@ -218,6 +218,41 @@ internal class DayViewTest(
         whole(his) shouldBe whole(rig.day(bea, bond, "2026-09-14"))
     }
 
+    /**
+     * ADR-0035 question 9: both wrote, Bea left before the reveal time, and the close job
+     * withheld the day. In Ada's archive it is the day both wrote on that it was, waiting
+     * for good: her own words, and of Bea's only the author and a status, as on any day
+     * still waiting for its hour. Search finds nothing of Bea's on it.
+     */
+    @Test
+    fun `a day withheld because the bond ended before its reveal shows her own entry and only a lock of his`() {
+        val bond = pair()
+        jdbc.update("UPDATE bonds SET reveal_time_local = '20:00:00' WHERE id = ?::uuid", bond) shouldBe 1
+        clock.set(at(DAY_ONE))
+        val adas = rig.bonds.submit(ada, bond, "zq-ada heron")
+        val beas = rig.bonds.submit(bea, bond, "zq-bea pelican")
+        clock.set(at(DAY_ONE).plusSeconds(7_200))
+        rig.bonds.leave(bea, bond)
+        close(bond, DAY_ONE)
+        rig.dayStatus(bond, "2026-09-15") shouldBe "PENDING_REVEAL"
+
+        val raw = rawDay(ada, bond, "2026-09-15")
+        val hers = json.readTree(raw)
+        hers["status"].asString() shouldBe "PENDING_REVEAL"
+        hers["myEntry"]["id"].asString() shouldBe adas
+        hers["myEntry"]["text"].asString() shouldBe "zq-ada heron"
+        hers["partnerEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+        hers["partnerEntry"]["status"].asString() shouldBe "LOCKED"
+        raw shouldNotContain "pelican"
+        raw shouldNotContain beas
+
+        rig.search(ada, bond, mapOf("q" to "pelican")).contentAsString shouldBe """{"items":[],"nextCursor":null}"""
+        // The day is searchable at all: her own word finds it, and his is still not in it.
+        val found = rig.search(ada, bond, mapOf("q" to "heron")).also { it.status shouldBe 200 }.contentAsString
+        rig.datesOf(json.readTree(found)["items"].toList()) shouldBe listOf("2026-09-15")
+        found shouldNotContain "pelican"
+    }
+
     // ---- one 404 ----
 
     @Test

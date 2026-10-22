@@ -2522,3 +2522,34 @@ Wrong about: "while the projection is true". A clause like that is a preconditio
          statement is its own moment, and the order of them is a decision, not a detail.
          Which test sees a transaction boundary. None of the tests that wrote an event failed
          after writing it, so none could tell inside the transaction from outside it.
+
+## 2026-10-22 · Phase 3 · What an ended bond reveals — a ruling's word that the code did not have, and a third writer
+
+Expected: two small changes to one method. ADR-0033 q1 narrowed "ended" to "archived" for
+         the lone entry; ADR-0035 q9 said a day both wrote on is not revealed once the bond
+         has ended. The plan put both in `CloseDay` and gave the closer's view an `archivedAt`.
+Reality: the ruling's word had no column. A leave or block during a deletion countdown
+         stamps only the member's `leftAt`, and a later cancel archives the bond at the cancel
+         time, so "archived" would have revealed a lone entry to a partner who had already
+         left. The first implementer stopped there, as the brief told it to; the field became
+         `separatedAt` (the earliest of the archive and any leave).
+         The plan named one writer and there were three. `CloseDay` reveals in two places, and
+         the read-path reconcile of a legacy joining day reveals too, before every archive
+         read. The implementer flagged it as a concern, the task review confirmed it, and the
+         predicate moved into `BondDay` so the three sites ask one rule. It is the C5a lesson
+         again ("list every writer that stamps the same fact"), and the plan still missed it.
+         A test pinned the old answer. ADR-0035 said "no test pins it either way";
+         `CloseElapsedDaysTest` did, and was inverted, with the ruling cited.
+         One mutation survived: removing `withholdReveal` from `CloseDay` broke nothing, until
+         a resumed joining day both wrote on was tested. And one test first failed to
+         discriminate: a cancel before the day's end archives before it, so it passed under
+         the wrong rule; moved after the end, it fails as it should.
+         The status of a withheld day was the owner's to choose, and was asked before building:
+         `PENDING_REVEAL` with `closedAt`, counted `COMPLETE`. `EvaluateStreaks` would have
+         thrown on a closed `PENDING_REVEAL` had the mapping not moved with it.
+         Build 1,551 tests, 0 failed; smoke 930, 0 failed, 24 sections; nothing in the smoke
+         drives a separation before a reveal time.
+Wrong about: what a ruling's word costs. "Archived" read as a column; it was a fact about
+         people that two columns record, and only the code's history said which.
+         Where a rule is asked. A plan that names the method to change names one writer; the
+         question to ask of a reveal rule is who else reveals.

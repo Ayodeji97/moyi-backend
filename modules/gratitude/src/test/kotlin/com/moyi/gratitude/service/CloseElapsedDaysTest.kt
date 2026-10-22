@@ -182,8 +182,12 @@ internal class CloseElapsedDaysTest(
         statuses()[bond] shouldBe "SOLO"
     }
 
+    /**
+     * ADR-0035 question 9, ruled 2026-10-21: an ended bond reveals nothing new. This test said
+     * the opposite until the ruling, which reversed what was built: Ada left before 20:00.
+     */
     @Test
-    fun `an ended bond's day that was waiting on its reveal time is still revealed when the time comes`() {
+    fun `an ended bond's day that was waiting on its reveal time is withheld when the time comes`() {
         val (bond, ada, bea) = pairedBond("Africa/Lagos")
         jdbc.update("UPDATE bonds SET reveal_time_local = '20:00' WHERE id = ?::uuid", bond)
         submit(ada, bond, "hers").status shouldBe 201
@@ -194,10 +198,12 @@ internal class CloseElapsedDaysTest(
             .response.status shouldBe 204
 
         closer.closeElapsedDays(Instant.parse("2026-09-15T18:59:00Z"), BUDGET).revealed shouldBe 0
-        closer.closeElapsedDays(Instant.parse("2026-09-15T19:00:00Z"), BUDGET).revealed shouldBe 1
+        closer.closeElapsedDays(Instant.parse("2026-09-15T19:00:00Z"), BUDGET).revealed shouldBe 0
+        statuses()[bond] shouldBe "PENDING_REVEAL"
 
-        statuses()[bond] shouldBe "REVEALED"
-        events("DayRevealed") shouldBe 1
+        closer.closeElapsedDays(LAGOS_END, BUDGET).closed shouldBe 1
+        statuses()[bond] shouldBe "PENDING_REVEAL"
+        events("DayRevealed") shouldBe 0
     }
 
     @Test

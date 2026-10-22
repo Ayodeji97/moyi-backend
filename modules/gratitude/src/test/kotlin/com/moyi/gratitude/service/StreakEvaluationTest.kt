@@ -407,6 +407,30 @@ internal class StreakEvaluationTest(
         decisions().last() shouldBe Decision(day(4), "REVEALED", "COMPLETE", freeze = false)
     }
 
+    /**
+     * ADR-0035 question 9: both wrote, and Bea left before the reveal time, so
+     * the close job withheld the day and closed it `PENDING_REVEAL`. It is
+     * still a day both wrote on, and counts so (the owner, 2026-10-22).
+     */
+    @Test
+    fun `a day both wrote on that an ended bond withheld is counted complete`() {
+        (1..3).forEach { bothWriteOn(it) }
+        jdbc.update("UPDATE bonds SET reveal_time_local = '20:00' WHERE id = ?::uuid", bond) shouldBe 1
+        bothWriteOn(4)
+        clock.set(at(4).plusSeconds(3_600))
+        mockMvc
+            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, bearer(bea)) }
+            .andReturn()
+            .response.status shouldBe 204
+
+        closeThrough(6)
+
+        streak() shouldBe Streak(current = 4, longest = 4, lastComplete = day(4), freezes = 0, progress = 4, consumed = 0, total = 4)
+        decisions().last() shouldBe Decision(day(4), "PENDING_REVEAL", "COMPLETE", freeze = false)
+        outbox("StreakExtended") shouldBe 4
+        outbox("DayRevealed") shouldBe 3
+    }
+
     // --- what is written down ---
 
     /** Spec §8: events carry ids only. FR-076: nothing in one says who wrote, or that anybody did not. */

@@ -119,4 +119,83 @@ internal class CloseTransitionTest {
         revealed.revealedAt shouldBe longAfter
         revealed.closedAt shouldBe null
     }
+
+    // --- ADR-0035 question 9: an ended bond reveals nothing new (ruled 2026-10-21, 2026-10-22) ---
+
+    @Test
+    fun `a pending day closed withheld keeps its status, gains closedAt, and records no reveal`() {
+        val pending = day.withEntry().withEntry().revealWhenDue(LocalTime.of(20, 0), opened)
+
+        val closed = pending.close(end, withheld = true)
+
+        closed.status shouldBe BondDayStatus.PENDING_REVEAL
+        closed.closedAt shouldBe end
+        closed.revealedAt shouldBe null
+        closed.isSettled shouldBe true
+        closed shouldBe pending.copy(closedAt = end)
+    }
+
+    @Test
+    fun `withholding a resumed joining day both wrote on makes it pending, so it can close`() {
+        val resumed =
+            day
+                .copy(status = BondDayStatus.SUSPENDED)
+                .withEntry()
+                .withEntry()
+                .resumeJoiningDay(opened)
+        resumed.status shouldBe BondDayStatus.PARTIAL
+
+        val withheld = resumed.withholdReveal()
+
+        withheld shouldBe resumed.copy(status = BondDayStatus.PENDING_REVEAL)
+        withheld.close(end, withheld = true).status shouldBe BondDayStatus.PENDING_REVEAL
+    }
+
+    @Test
+    fun `withholding leaves a revealed day, a SOLO day and an open one as they are`() {
+        val revealed = day.withEntry().withEntry().revealWhenDue(null, opened)
+        val solo = day.withEntry().close(end)
+        val lone = day.withEntry()
+
+        revealed.withholdReveal() shouldBe revealed
+        solo.withholdReveal() shouldBe solo
+        lone.withholdReveal() shouldBe lone
+    }
+
+    @Test
+    fun `the reveal falls due at the reveal time on the day's calendar, capped at its end, and at its end with no reveal time`() {
+        day.revealFallsDueAt(LocalTime.of(20, 0)) shouldBe Instant.parse("2026-09-15T19:00:00Z")
+        day.revealFallsDueAt(LocalTime.of(23, 59)) shouldBe Instant.parse("2026-09-15T22:59:00Z")
+        day.revealFallsDueAt(null) shouldBe end
+        // A day an eastward zone change cut short ends at 21:00Z; a reveal time of 23:00 there would be 22:00Z.
+        val cut = day.copy(endsAt = Instant.parse("2026-09-15T21:00:00Z"))
+        cut.revealFallsDueAt(LocalTime.of(23, 0)) shouldBe cut.endsAt
+    }
+
+    @Test
+    fun `a day both wrote on is withheld only by a separation before its reveal fell due`() {
+        val pending = day.withEntry().withEntry().revealWhenDue(LocalTime.of(20, 0), opened)
+        val due = Instant.parse("2026-09-15T19:00:00Z")
+
+        pending.isWithheldBy(due.minusSeconds(1), LocalTime.of(20, 0)) shouldBe true
+        pending.isWithheldBy(due, LocalTime.of(20, 0)) shouldBe false
+        pending.isWithheldBy(null, LocalTime.of(20, 0)) shouldBe false
+        // No reveal time left: it falls due at the day's end.
+        pending.isWithheldBy(end.minusSeconds(1), null) shouldBe true
+        pending.isWithheldBy(end, null) shouldBe false
+        // Read together already, or only one wrote: nothing to withhold. (A lone entry is CloseDay's own rule.)
+        day
+            .withEntry()
+            .withEntry()
+            .revealWhenDue(null, opened)
+            .isWithheldBy(opened, LocalTime.of(20, 0)) shouldBe false
+        day.withEntry().isWithheldBy(opened, LocalTime.of(20, 0)) shouldBe false
+        // A resumed joining day both wrote on, not yet asked the reveal rule.
+        day
+            .copy(status = BondDayStatus.SUSPENDED)
+            .withEntry()
+            .withEntry()
+            .resumeJoiningDay(opened)
+            .isWithheldBy(opened, LocalTime.of(20, 0)) shouldBe true
+    }
 }

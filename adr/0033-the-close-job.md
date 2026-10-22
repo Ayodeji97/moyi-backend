@@ -137,6 +137,9 @@ entry keeps no `revealedAt`, and only its author reads it. A day that ended befo
 did reveals as before. This supersedes spec §6.4 step 2's "`ARCHIVED` or `PENDING_DELETION`
 … cannot strand an earlier partial … day" for the unlock, and only for the unlock: the day
 is still settled.
+*(Amended 2026-10-22, ADR-0040: "stopped taking writes" and `endedAt` are narrowed to
+`BondClosingView.separatedAt`, the archive or a member's leaving; a countdown alone does not
+withhold the entry.)*
 
 **10. One day failing does not stop the rest, and neither does one bond.** A day that
 throws is counted, logged by id and exception class — never the message — and left for the
@@ -233,6 +236,11 @@ changes serialize with close. The one-minute margin absorbs ordinary clock skew.
    readable by its author alone, with nothing that releases it. Private is the safe side;
    narrowing the check to an archived bond needs the closer's view to say which of the two
    it is. No test pins the countdown case either way.
+   *(Amended 2026-10-22, ADR-0040: it is pinned now. `CloseDayTest`: "a lone entry on a day that
+   ended while a deletion counted down is revealed - a countdown is not a separation", "a lone
+   entry on a bond separated after the day ended is revealed", "a lone entry is withheld when a
+   member left during a countdown before the day ended" and "a lone entry stays withheld when
+   the deletion is called off after a member left in it".)*
 
    *Ruled by the owner on 2026-10-21, to be built: only an archived bond counts as ended
    for the lone-entry rule; a deletion that is counting down does not.* The closer's view
@@ -242,6 +250,12 @@ changes serialize with close. The one-minute margin absorbs ordinary clock skew.
    source. The ruling covers the lone-entry reveal rule and nothing else. Reads gated on the
    bond taking no writes are unchanged by it: `prompt` stays `null` on `GET /today` while a
    deletion counts down (ADR-0038 ruling 6).
+   *(Built 2026-10-22, ADR-0040. The closer's view gained `separatedAt`: the earliest of the
+   bond's `archivedAt` and any member's `leftAt`. It is not `archivedAt` alone, as the brief
+   said: a leave or block during a countdown stamps only `leftAt`, and a cancel later
+   archives at the cancel time, so `archivedAt` alone would reveal the lone entry of a
+   couple one of whom had already gone. `endedAt` is unchanged and still includes a
+   countdown.)*
 2. **A deletion that is called off leaves no record that it was ever counting down** (and
    one called off after a member has left archives the bond at the cancel, with the same
    effect).

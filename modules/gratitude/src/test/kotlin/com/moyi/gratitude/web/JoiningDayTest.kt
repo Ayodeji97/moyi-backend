@@ -175,6 +175,36 @@ internal class JoiningDayTest(
 
     // --- a native joining day: no row is touched by hand ---
 
+    /**
+     * ADR-0035 question 9: an ended bond reveals nothing new, and a read is no way round it. Eve
+     * leaves before the legacy day's reveal fell due (its end: the bond has no reveal time); Cara's
+     * first read resumes the day, and it waits `PENDING_REVEAL` with both entries still unread.
+     */
+    @Test
+    fun `a legacy joining day on a bond that separated before its reveal is resumed withheld by a read`() {
+        val legacy = legacyJoiningDay()
+        clock.set(NOW.plusSeconds(3_600))
+        mockMvc
+            .post("/api/v1/bonds/${legacy.bondId}/leave") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(eve).token}") }
+            .andReturn()
+            .response.status shouldBe 204
+
+        val bearer = "Bearer ${tokens.issue(cara).token}"
+        val read =
+            mockMvc
+                .get("/api/v1/bonds/${legacy.bondId}/days/2026-09-15") { header(HttpHeaders.AUTHORIZATION, bearer) }
+                .andReturn()
+                .response
+        read.status shouldBe 200
+        read.contentAsString shouldContain "\"partnerEntry\":{\"authorMemberId\""
+        read.contentAsString shouldContain "\"status\":\"LOCKED\""
+        read.contentAsString shouldNotContain "partner joining words"
+
+        statusOf(legacy.bondId, "2026-09-15") shouldBe "PENDING_REVEAL"
+        revealedEntries(legacy.bondId) shouldBe 0
+        dayRevealedEvents() shouldBe 0
+    }
+
     @Test
     fun `the second member's first entry on the joining day resumes it and reveals`() {
         val created = createBond(cara)

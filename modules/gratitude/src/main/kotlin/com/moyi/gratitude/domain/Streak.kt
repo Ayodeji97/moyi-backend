@@ -43,7 +43,13 @@ internal data class StreakState(
  * asks a narrower question than the status answers.
  */
 internal enum class DayOutcome {
-    /** Both wrote (`REVEALED`): extends the run, and is a *complete* day (FR-070) toward the next freeze. */
+    /**
+     * Both wrote (`REVEALED`): extends the run, and is a *complete* day
+     * (FR-070) toward the next freeze. So is a closed `PENDING_REVEAL` day,
+     * which both wrote on and an ended bond withheld from them (ADR-0035
+     * question 9): the owner ruled on 2026-10-22 that it counts for the streak
+     * and for milestones like any day both wrote.
+     */
     COMPLETE,
 
     /**
@@ -75,14 +81,24 @@ internal enum class DayOutcome {
     ;
 
     companion object {
-        /** `null` for a status no settled day has. */
-        fun of(status: BondDayStatus): DayOutcome? =
+        /**
+         * `null` for a status no settled day has. [settled] is whether the day
+         * has been closed (`closedAt` is set), which a status alone does not
+         * say: `PENDING_REVEAL` is a day both wrote on that an ended bond
+         * withheld, and so [COMPLETE], only once it is closed; before that it
+         * is still waiting for its time, and has no outcome yet.
+         */
+        fun of(
+            status: BondDayStatus,
+            settled: Boolean,
+        ): DayOutcome? =
             when (status) {
                 BondDayStatus.REVEALED -> COMPLETE
+                BondDayStatus.PENDING_REVEAL -> COMPLETE.takeIf { settled }
                 BondDayStatus.FROZEN -> FROZEN_BY_SKIP
                 BondDayStatus.SOLO, BondDayStatus.EMPTY -> MISSED
                 BondDayStatus.SUSPENDED -> SUSPENDED
-                BondDayStatus.OPEN, BondDayStatus.PARTIAL, BondDayStatus.PENDING_REVEAL -> null
+                BondDayStatus.OPEN, BondDayStatus.PARTIAL -> null
             }
     }
 }

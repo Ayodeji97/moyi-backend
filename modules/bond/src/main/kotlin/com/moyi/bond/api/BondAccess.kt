@@ -174,6 +174,15 @@ class BondMembership internal constructor(
     /** When the bond ended (`bonds.archived_at`), or null while it is live. */
     val endedAt: Instant?,
     /**
+     * When the bond stopped being two people's: the same fact, from the same
+     * code, as [BondClosingView.separatedAt] — the earlier of its archive and
+     * any member's leaving; `null` while both are members and it is not
+     * archived; never a deletion countdown alone. For `gratitude`'s read-time
+     * reconcile of a joining day, which must withhold a reveal exactly as the
+     * closer does (ADR-0035 question 9).
+     */
+    val separatedAt: Instant?,
+    /**
      * The zone that **decides dates** over time, which is not
      * [anchorTimezone] — that is the zone the bond currently *requests*. They
      * differ for up to one logical day after a change is confirmed (BR-6).
@@ -215,12 +224,13 @@ class BondMembership internal constructor(
 /**
  * What the close job may know of a bond ([BondAccess.closingViewOf]): when it
  * became two people, when it ended, when its days reveal, the timeline its
- * days are cut from, and whose entries have been withdrawn. No membership,
+ * days are cut from, whether and when it separated, and whose entries have
+ * been withdrawn. No membership,
  * no user, no name — the closer acts for
  * nobody, and a type that cannot carry a member cannot be mistaken for
  * permission to act as one.
  */
-@Suppress("LongParameterList") // Seven facts, each named at the one place that builds this (`BondAccessAdapter`), as with [BondMembership].
+@Suppress("LongParameterList") // Eight facts, each named at the one place that builds this (`BondAccessAdapter`), as with [BondMembership].
 class BondClosingView internal constructor(
     val bondId: UUID,
     /** As [BondMembership.activeSince]: the second member's join, `null` while the bond waits for one. */
@@ -236,6 +246,18 @@ class BondClosingView internal constructor(
      * days are suspended, not missed.
      */
     val endedAt: Instant?,
+    /**
+     * When the bond stopped being two people's: the earlier of its archive and
+     * any member's leaving, so a leave or block during a deletion countdown
+     * counts from the leave, not from the later archive a cancel brings. `null`
+     * while both are members and the bond is not archived. Narrower than
+     * [endedAt], on purpose: a countdown alone is not a separation, because it
+     * can be called off with the couple still together. What the closer asks
+     * before revealing a lone entry, and before revealing a day both wrote on,
+     * once the bond has separated (ADR-0033 question 1, ADR-0035 question 9,
+     * ruled 2026-10-21).
+     */
+    val separatedAt: Instant?,
     /** The bond's **current** reveal time (FR-062) — what a `PENDING_REVEAL` day is waiting for. */
     val revealTimeLocal: LocalTime?,
     private val past: BondPast,

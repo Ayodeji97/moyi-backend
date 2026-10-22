@@ -11,13 +11,16 @@ import com.moyi.bond.service.AcceptInvite
 import com.moyi.bond.service.BondAccessGuard
 import com.moyi.bond.service.CreateBond
 import com.moyi.bond.service.EndBond
+import com.moyi.bond.service.RequestDeletion
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.NotFoundException
 import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.comparables.shouldBeGreaterThan
 import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -45,6 +48,7 @@ internal class BondAccessTest(
     @Autowired private val acceptInvite: AcceptInvite,
     @Autowired private val guard: BondAccessGuard,
     @Autowired private val endBond: EndBond,
+    @Autowired private val requestDeletion: RequestDeletion,
     @Autowired private val transactions: TransactionTemplate,
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
@@ -169,6 +173,49 @@ internal class BondAccessTest(
         bothClosingViewsOf(bondId).forEach { it.withdrawnMemberIds shouldBe access.membershipOf(bea, bondId).withdrawnMemberIds }
 
         bothClosingViewsOf(other).forEach { it.withdrawnMemberIds.shouldBeEmpty() }
+    }
+
+    @Test
+    fun `the closer's view dates a separation by the archive or the earliest leave, never by a countdown alone`() {
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+
+        val together = bondForTwo(ada, bea)
+        bothClosingViewsOf(together).forEach { it.separatedAt.shouldBeNull() }
+
+        // A countdown alone: the stretch is ended for writes, but the couple are still together.
+        val counting = bondForTwo(ada, bea)
+        requestDeletion.request(guard.membershipOf(UserId(ada), BondId(counting)))
+        requestDeletion.request(guard.membershipOf(UserId(bea), BondId(counting)))
+        bothClosingViewsOf(counting).forEach {
+            it.endedAt.shouldNotBeNull()
+            it.separatedAt.shouldBeNull()
+        }
+
+        // Archived by a leave: the archive and the leave are one instant.
+        val archived = bondForTwo(ada, bea)
+        endBond.leave(guard.membershipOf(UserId(bea), BondId(archived)), withdrawEntries = false)
+        bothClosingViewsOf(archived).forEach { it.separatedAt.shouldNotBeNull() shouldBe it.endedAt }
+
+        // A leave during a countdown, then the deletion called off: the cancel archives the bond
+        // later than the leave, and it is the leave that counts.
+        val calledOff = bondForTwo(ada, bea)
+        requestDeletion.request(guard.membershipOf(UserId(ada), BondId(calledOff)))
+        requestDeletion.request(guard.membershipOf(UserId(bea), BondId(calledOff)))
+        endBond.leave(guard.membershipOf(UserId(bea), BondId(calledOff)), withdrawEntries = false)
+        val duringCountdown = access.closingViewOf(calledOff)!!
+        duringCountdown.separatedAt.shouldNotBeNull()
+        requestDeletion.cancel(guard.membershipOf(UserId(ada), BondId(calledOff)))
+        bothClosingViewsOf(calledOff).forEach {
+            it.separatedAt shouldBe duringCountdown.separatedAt
+            it.endedAt.shouldNotBeNull() shouldBeGreaterThan duringCountdown.separatedAt!!
+        }
+
+        // A member is told the same instant, by both reads, whichever of the two is asking.
+        for (bond in listOf(together, counting, archived, calledOff)) {
+            val closer = access.closingViewOf(bond)!!.separatedAt
+            everyReadOf(bond, ada, bea).forEach { it.separatedAt shouldBe closer }
+        }
     }
 
     private fun bothClosingViewsOf(bondId: UUID): List<BondClosingView> =
