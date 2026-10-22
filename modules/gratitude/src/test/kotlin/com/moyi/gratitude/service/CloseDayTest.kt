@@ -141,6 +141,66 @@ internal class CloseDayTest(
     }
 
     @Test
+    fun `a lone entry on a day that ended while a deletion counted down is revealed - a countdown is not a separation`() {
+        val bond = pairedBond()
+        submit(ada, bond, """{"text":"written before the countdown"}""").status shouldBe 201
+        clock.set(NOW.plusSeconds(7_200))
+        countDown(bond)
+
+        closeDay.settle(dayOf(bond), END) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "SOLO"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 1
+    }
+
+    @Test
+    fun `a lone entry on a bond separated after the day ended is revealed`() {
+        val bond = pairedBond()
+        submit(ada, bond, """{"text":"written while it was still two of them"}""").status shouldBe 201
+        clock.set(END.plusSeconds(60))
+        leave(bea, bond)
+
+        closeDay.settle(dayOf(bond), END.plusSeconds(120)) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "SOLO"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 1
+    }
+
+    @Test
+    fun `a lone entry is withheld when a member left during a countdown before the day ended`() {
+        val bond = pairedBond()
+        submit(ada, bond, """{"text":"written for a bond that was still hers"}""").status shouldBe 201
+        clock.set(NOW.plusSeconds(7_200))
+        countDown(bond)
+        leave(bea, bond)
+
+        closeDay.settle(dayOf(bond), END) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "SOLO"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `a lone entry stays withheld when the deletion is called off after a member left in it`() {
+        val bond = pairedBond()
+        submit(ada, bond, """{"text":"written for a bond that was still hers"}""").status shouldBe 201
+        clock.set(NOW.plusSeconds(7_200))
+        countDown(bond)
+        leave(bea, bond)
+        // The cancel archives the bond, but after the day ended and later than the leave: the leave is what counts.
+        clock.set(END.plusSeconds(60))
+        mockMvc
+            .delete("/api/v1/bonds/$bond/deletion-request") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(ada).token}") }
+            .andReturn()
+            .response.status shouldBe 204
+
+        closeDay.settle(dayOf(bond), END.plusSeconds(120)) shouldBe Outcome.CLOSED
+
+        status(bond) shouldBe "SOLO"
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 0
+    }
+
+    @Test
     fun `a day both wrote on, revealed while it was open, gains closedAt and one DayClosed`() {
         val bond = pairedBond()
         submit(ada, bond, """{"text":"hers"}""").status shouldBe 201
@@ -479,6 +539,26 @@ internal class CloseDayTest(
             .delete("/api/v1/entries/$id") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}") }
             .andReturn()
             .response
+
+    /** Both members ask for deletion, so the bond is counting down (`PENDING_DELETION`). */
+    private fun countDown(bond: String) {
+        listOf(ada, bea).forEach { user ->
+            mockMvc
+                .post("/api/v1/bonds/$bond/deletion-request") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}") }
+                .andReturn()
+                .response.status shouldBe 202
+        }
+    }
+
+    private fun leave(
+        user: UUID,
+        bond: String,
+    ) {
+        mockMvc
+            .post("/api/v1/bonds/$bond/leave") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}") }
+            .andReturn()
+            .response.status shouldBe 204
+    }
 
     private fun createBond(userId: UUID): MockHttpServletResponse =
         mockMvc

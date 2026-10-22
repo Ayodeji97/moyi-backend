@@ -58,7 +58,7 @@ import java.time.temporal.ChronoUnit
  * 6. Close it ([BondDay.close]). A day both wrote on that was still waiting
  *    for its time is revealed first, as a reveal; on a `SOLO` day the lone
  *    entry is revealed (FR-063), read fresh under the lock — unless the bond
- *    stopped taking writes before the day ended (ADR-0033 decision 9).
+ *    separated before the day ended (ADR-0033 decision 9).
  */
 @Service
 // Eight collaborators: what settling one day touches — the bond's view, the day, its
@@ -146,19 +146,19 @@ internal class CloseDay(
         return if (endedAsOf.isBefore(current.endsAt)) {
             if (locked.revealedAt == null && current.revealedAt != null) Outcome.REVEALED else Outcome.NOT_YET
         } else {
-            close(current, at, view.endedAt)
+            close(current, at, view.separatedAt)
             Outcome.CLOSED
         }
     }
 
     /**
-     * @param bondEndedAt when the bond stopped taking writes, or `null` while it is live
-     * (`BondClosingView.endedAt`: archived, or counting down to deletion).
+     * @param bondSeparatedAt when the bond stopped being two people's, or `null` while it is
+     * (`BondClosingView.separatedAt`: archived, or a member left; a deletion countdown alone is not).
      */
     private fun close(
         ended: BondDay,
         now: Instant,
-        bondEndedAt: Instant?,
+        bondSeparatedAt: Instant?,
     ) {
         // The day's own end outranks a reveal time later than it. Done as a
         // reveal, so both entries are stamped and DayRevealed is written.
@@ -166,13 +166,15 @@ internal class CloseDay(
         val closed = day.close(now)
         val closedAt = checkNotNull(closed.closedAt)
         // A lone entry is unlocked to a partner who did not write (FR-063), but
-        // not when the bond had ended before the day did: the partner left, was
-        // blocked, or is deleting it, and the author wrote for a bond that was
-        // still theirs. The day still closes SOLO, so it counts as written; the
-        // entry stays unrevealed, and only its author reads it. (ADR-0033,
-        // owner question 1, ruled 2026-10-06.)
-        val bondEndedFirst = bondEndedAt != null && bondEndedAt.isBefore(closed.endsAt)
-        if (closed.status == BondDayStatus.SOLO && !bondEndedFirst) {
+        // not when the bond had separated before the day ended: the partner left,
+        // was blocked, or the bond was archived, and the author wrote for a bond
+        // that was still theirs. The day still closes SOLO, so it counts as
+        // written; the entry stays unrevealed, and only its author reads it. A
+        // deletion countdown alone is not a separation: it can be called off, and
+        // the entry would then be its author's alone with nothing to release it
+        // (ADR-0033 question 1, ruled 2026-10-06 and 2026-10-21).
+        val bondSeparatedFirst = bondSeparatedAt != null && bondSeparatedAt.isBefore(closed.endsAt)
+        if (closed.status == BondDayStatus.SOLO && !bondSeparatedFirst) {
             entries.findForDayFresh(closed.id).forEach { entry ->
                 val revealed = entry.reveal(closedAt)
                 if (revealed != entry) entries.update(revealed)

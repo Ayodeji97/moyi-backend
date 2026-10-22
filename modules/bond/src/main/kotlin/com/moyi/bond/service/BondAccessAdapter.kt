@@ -107,6 +107,10 @@ internal class BondAccessAdapter(
                 // Archived, or counting down to deletion: either way it takes no
                 // more writes from here, which is what the closer means by ended.
                 endedAt = bond.archivedAt ?: bond.deletionRequestedAt,
+                // The earliest of the archive and any leave: read from the same bond
+                // row and member rows as the rest, so after the lock when
+                // `lockClosingViewOf` is the caller.
+                separatedAt = (listOfNotNull(bond.archivedAt) + bond.members.mapNotNull { it.leftAt }).minOrNull(),
                 revealTimeLocal = bond.revealTimeLocal,
                 past = pasts.of(bond),
                 anchorTimeline = apiTimelineOf(anchorIntervals.timelineOf(id)),

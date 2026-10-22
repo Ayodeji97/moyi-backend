@@ -220,7 +220,7 @@ class BondMembership internal constructor(
  * nobody, and a type that cannot carry a member cannot be mistaken for
  * permission to act as one.
  */
-@Suppress("LongParameterList") // Seven facts, each named at the one place that builds this (`BondAccessAdapter`), as with [BondMembership].
+@Suppress("LongParameterList") // Eight facts, each named at the one place that builds this (`BondAccessAdapter`), as with [BondMembership].
 class BondClosingView internal constructor(
     val bondId: UUID,
     /** As [BondMembership.activeSince]: the second member's join, `null` while the bond waits for one. */
@@ -236,6 +236,17 @@ class BondClosingView internal constructor(
      * days are suspended, not missed.
      */
     val endedAt: Instant?,
+    /**
+     * When the bond stopped being two people's: the earlier of its archive and
+     * any member's leaving, so a leave or block during a deletion countdown
+     * counts from the leave, not from the later archive a cancel brings. `null`
+     * while both are members and the bond is not archived. Narrower than
+     * [endedAt], on purpose: a countdown alone is not a separation, because it
+     * can be called off with the couple still together. What the closer asks
+     * before revealing a lone entry once the bond has ended (ADR-0033 question 1,
+     * ADR-0035 question 9, ruled 2026-10-21).
+     */
+    val separatedAt: Instant?,
     /** The bond's **current** reveal time (FR-062) — what a `PENDING_REVEAL` day is waiting for. */
     val revealTimeLocal: LocalTime?,
     private val past: BondPast,
