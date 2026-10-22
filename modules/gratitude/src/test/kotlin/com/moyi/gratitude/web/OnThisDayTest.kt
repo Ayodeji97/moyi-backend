@@ -270,6 +270,25 @@ internal class OnThisDayTest(
         interruptible.resolutions shouldBe 3
     }
 
+    @Test
+    fun `an ending committed after the guard resolved the membership still resurfaces nothing`() {
+        val bond = memories(ada, bea)
+        // Not vacuous: the bond is open, and the day is his memory.
+        rig.datesOf(onThisDay(bea, bond)["items"].toList()) shouldBe listOf("2025-09-15")
+        // The first resolution is the guard's. A block without withdrawal commits after it, as one can while the
+        // joining-day reconcile waits on the bond's lock (final review m2): the guard's membership still takes writes.
+        interruptible.afterResolution(1) {
+            pool.submit { rig.bonds.block(ada, bond, false) }.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        }
+
+        val raced = raw(bea, bond)
+
+        interruptible.fired shouldBe true
+        raced.status shouldBe 200
+        raced.contentAsString shouldBe EMPTY
+        raw(bea, bond).contentAsString shouldBe EMPTY
+    }
+
     // ---- helpers ----
 
     private data class Written(

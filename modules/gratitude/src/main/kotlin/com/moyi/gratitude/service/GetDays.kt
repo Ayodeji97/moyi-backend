@@ -243,7 +243,12 @@ internal class GetDays(
      *
      * **Nothing, before anything is read, when the bond takes no writes from the caller**:
      * ended, left, blocked or counting down to deletion (the owner's Q-O3, decision 14). One
-     * answer for every cause, so a block is not told from a leave.
+     * answer for every cause, so a block is not told from a leave. Asked of the membership
+     * **resolved again here** ([membershipNow]), after the joining-day reconcile and before any
+     * entry is read, not of the guard's: an ending can commit while the reconcile waits on the
+     * bond's lock, and the guard's membership would still take writes (final review m2). An
+     * ending that commits after this resolution is an answer from before the ending (ADR-0035
+     * decision 12). The same resolution gives the withdrawn the candidates exclude.
      *
      * **Today is the bond's** (BR-3): [todayOf], as `GET /today` asks it, so both members are given the
      * same date and a memory changes at the bond's midnight.
@@ -264,10 +269,10 @@ internal class GetDays(
         membership: BondMembership,
         textOctets: Int = PAGE_TEXT_OCTETS,
     ): List<DayView> {
-        if (!membership.takesWrites) return emptyList()
+        val now = access.membershipNow(membership)
+        if (!now.takesWrites) return emptyList()
         val today = todayOf(membership, clock)
-        val candidates =
-            archive.onThisDay(membership.bondId, membership.memberId, today, access.readerNow(membership).withdrawnAuthors)
+        val candidates = archive.onThisDay(membership.bondId, membership.memberId, today, now.asReader().withdrawnAuthors)
         val read = read(membership, candidates).filter { it.readInFull.isNotEmpty() }
         val marked = marksOf(membership, read)
         val reacted = reactionsOn(read)
