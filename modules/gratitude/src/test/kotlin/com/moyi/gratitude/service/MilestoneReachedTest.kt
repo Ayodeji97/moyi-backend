@@ -143,6 +143,35 @@ internal class MilestoneReachedTest(
     }
 
     /**
+     * Counted on the timeline, the days evaluated `COMPLETE`, which is what `GET /milestones`
+     * dates by, and never on the stored `total_complete_days`. Drifted three too high, the stored
+     * total would announce 7 on the fourth complete day, and again on the seventh once a
+     * recalculation had put it right: two announcements, the first naming a day the read never
+     * shows. The timeline announces once, on its seventh complete day.
+     */
+    @Test
+    fun `a drifted stored total neither moves nor repeats the announcement`() {
+        (1..3).forEach { bothWriteOn(it) }
+        closeThrough(3)
+        jdbc.update("UPDATE streak_states SET total_complete_days = 6 WHERE bond_id = ?::uuid", bond) shouldBe 1
+
+        bothWriteOn(4)
+        closeThrough(4)
+        recalculate.recalculate(UUID.fromString(bond)).after.totalCompleteDays shouldBe 4
+        (5..7).forEach { bothWriteOn(it) }
+        closeThrough(7)
+
+        milestones().map { it.dayId } shouldBe listOf(dayId(7))
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'MilestoneReached'", Int::class.java) shouldBe 1
+        // The day the read will date 7 by: the seventh evaluated COMPLETE.
+        jdbc.queryForObject(
+            "SELECT id FROM bond_days WHERE bond_id = ?::uuid AND evaluated_as = 'COMPLETE' ORDER BY date OFFSET 6 LIMIT 1",
+            UUID::class.java,
+            bond,
+        ) shouldBe dayId(7)
+    }
+
+    /**
      * The same transaction as the day's record, held by failing it. A trigger makes the bond's
      * last statement, the `streak_states` update after day 7 was recorded and announced, raise:
      * the bond rolls back, and the announcement with it. Published in a transaction of its own,
