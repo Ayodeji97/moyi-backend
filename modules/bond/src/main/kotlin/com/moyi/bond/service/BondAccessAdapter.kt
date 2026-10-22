@@ -205,7 +205,8 @@ internal class BondAccessAdapter(
  * [BondMembership.separatedAt]): the earliest of its archive and any member's
  * leave. Left members keep their row, so every leave is here. One function
  * for both views, so the closer and a read cannot disagree. Top-level for the
- * reason [toApi] is.
+ * reason [toApi] is. Every archive path today stamps a leftAt at or before archivedAt, so the
+ * archivedAt term guards a future path that stamps none.
  */
 private fun separatedAtOf(bond: Bond): Instant? = (listOfNotNull(bond.archivedAt) + bond.members.mapNotNull { it.leftAt }).minOrNull()
 

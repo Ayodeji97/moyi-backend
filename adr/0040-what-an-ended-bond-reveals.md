@@ -101,8 +101,11 @@ branch only; and `BondDay.close` turned every `PENDING_REVEAL` day into `REVEALE
   (amended there): that such a day "will then not be `REVEALED`, so not complete".
 - **`GET /today`'s `todayComplete` reads `status == REVEALED`** (`GetToday`), so a day
   withheld but not yet closed is not "complete today" on that route. The closed day is
-  `COMPLETE` in the walk. Moot on an ended bond, whose members see no today that takes
-  writes; recorded because the two readings of "complete" now differ for one status.
+  `COMPLETE` in the walk. `GET /today` on an archived bond still answers: on the afternoon
+  of a withheld day the stayer's streak and milestones show N, and after the midnight close
+  they show N+1, a preserved streak ticking up after the partner left. Harmless, and the
+  same as any pending day; recorded because the two readings of "complete" now differ for
+  one status.
 - **A closed `PENDING_REVEAL` is the third settled-but-not-`isClosed` status**, with an elapsed
   `SUSPENDED` day and a called-off deletion's `SUSPENDED` day (`BondDayStatus`'s KDoc). Nothing
   that asks `isClosed` may assume a closed day is not `PENDING_REVEAL`; the close job's
@@ -119,8 +122,9 @@ branch only; and `BondDay.close` turned every `PENDING_REVEAL` day into `REVEALE
   leave during a countdown leaves the status `PENDING_DELETION`; either way the time is
   frozen from then on. So the time read at the close is the one in force at the separation,
   which is what the rule needs. Read in the code, not run: no test moves the time and then
-  separates. A countdown called off reopens the bond and the time can move again, but a
-  member who left in it has `leftAt` set and `separatedAt` already fixes the separation.
+  separates. A countdown called off reopens the bond only when nobody left in it
+  (`Bond.cancelDeletion` restores `ACTIVE`, or `PENDING_MEMBER`); when somebody has, it
+  archives, and `separatedAt` already fixes the separation at the leave.
 - **`DayOutcome.of(PENDING_REVEAL)` is `COMPLETE`.** `OPEN` and `PARTIAL` are still null.
 - **The lone-entry rule changes for a countdown.** A lone entry on a day that ends inside a
   deletion countdown is revealed (the couple may be together after the countdown is called
@@ -137,6 +141,9 @@ branch only; and `BondDay.close` turned every `PENDING_REVEAL` day into `REVEALE
 - **Phase 4's `MilestoneReached` consumer** must not notify for a withheld day's milestone on a
   bond that takes no writes (already ADR-0041's Owed), and may celebrate a date for a day
   whose words were never shared; see Question 5.
+- **The KMP consumer.** The API has no field telling a day withheld for good from one pending
+  until its time. A client must read `PENDING_REVEAL` on a bond that is not open as
+  withheld, or it counts down to nothing, on `/today` and on past days.
 
 ## Questions that are the owner's
 
@@ -149,7 +156,10 @@ The three rulings are his. Then, one line each, with the alternative and what it
    that was moved is judged against the new time; one pending on a time that was cleared is
    withheld only if the bond separates before the day's end. Alternative: record each change
    and judge a day by the time in force when the second entry landed. Costs a stored history
-   the schema does not hold. See the consequence on this under Consequences.
+   the schema does not hold. See the consequence on this under Consequences. One edge: a
+   legacy C1 joining day with no reveal time is taken as due at its end, so a leave that
+   afternoon withholds a day that would have revealed at the second entry but for C1's
+   suspension. Pre-deploy rows only; conservative.
 2. *The leaver's archive.* After a leave the leaver's own archive shows the withheld day
    exactly as the stayer's does: `PENDING_REVEAL`, the caller's entry in full, the partner's
    as a lock. Alternative: show the leaver nothing of a day on the bond they left. Costs

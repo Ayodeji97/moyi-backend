@@ -224,7 +224,8 @@ class BondMembership internal constructor(
 /**
  * What the close job may know of a bond ([BondAccess.closingViewOf]): when it
  * became two people, when it ended, when its days reveal, the timeline its
- * days are cut from, and whose entries have been withdrawn. No membership,
+ * days are cut from, whether and when it separated, and whose entries have
+ * been withdrawn. No membership,
  * no user, no name — the closer acts for
  * nobody, and a type that cannot carry a member cannot be mistaken for
  * permission to act as one.
@@ -252,8 +253,9 @@ class BondClosingView internal constructor(
      * while both are members and the bond is not archived. Narrower than
      * [endedAt], on purpose: a countdown alone is not a separation, because it
      * can be called off with the couple still together. What the closer asks
-     * before revealing a lone entry once the bond has ended (ADR-0033 question 1,
-     * ADR-0035 question 9, ruled 2026-10-21).
+     * before revealing a lone entry, and before revealing a day both wrote on,
+     * once the bond has separated (ADR-0033 question 1, ADR-0035 question 9,
+     * ruled 2026-10-21).
      */
     val separatedAt: Instant?,
     /** The bond's **current** reveal time (FR-062) — what a `PENDING_REVEAL` day is waiting for. */
