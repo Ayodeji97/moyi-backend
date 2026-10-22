@@ -31,7 +31,10 @@ FR-074, FR-075, FR-076; doc 06:174; doc 04 BR-4, BR-10; doc 12:66.
 
 **Branch:** `feat/gratitude-milestones`, worktree `.worktrees/feat-gratitude-milestones`, cut
 from `feat/gratitude-search` @ `6116756` (C6b, PR #68, unmerged). When #68 merges:
-`git rebase --onto origin/main 6116756 feat/gratitude-milestones`. **No migration.**
+`git rebase --onto origin/main 6116756 feat/gratitude-milestones`. (Done after Task 3:
+`6116756` is C6b's branch tip and not on `main`; #68 squash-merged as `dcb3b36`, and the
+branch was rebased onto it. ADR-0041 names commits as they stand after the rebase.) **No
+migration.**
 **ADR-0041** (ADR-0040 and V26 are held by the peer session gratitude-0f, whose close-job
 pull request merges after this one; ping it when C6c merges).
 

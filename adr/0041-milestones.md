@@ -54,11 +54,14 @@ The cross-tenant fixture for the route is in `GratitudeCrossTenantTest` (red wit
 Step 8); the response is never stored (`CacheHeadersTest`, the member and the stranger).
 
 The slice was built in three tasks (`docs/superpowers/plans/2026-10-22-milestones-c6c.md`),
-each with an independent review and a fix round, all on 2026-10-22, on the branch
-`feat/gratitude-milestones` cut from C6b's at `6116756`. No rebase has been made at the time of
-writing: #68 (C6b) has since merged into `main` as `dcb3b36`, and the branch is to be rebased
-onto it (`git rebase --onto origin/main 6116756`) before its pull request. Commits are named
-here as they stand before that rebase.
+all on 2026-10-22. Tasks 1 and 2 each had an independent review and a fix round; Task 3 had no
+review of its own, and was reviewed by the two whole-branch reviews (conformance and privacy;
+concurrency, data integrity and performance), which were followed by one fix round. The branch
+`feat/gratitude-milestones` was cut from C6b's at `6116756`, C6b's branch tip, which is not on
+`main`: #68 (C6b) squash-merged as `dcb3b36`, with the same tree. After Task 3 the branch was
+rebased onto `dcb3b36` (`git rebase --onto origin/main 6116756`). Commits are named here as
+they stand after that rebase; each run before it was made on the same change (every rebased
+commit has its original's tree), and the local tag `pre-rebase-c6c-t3` holds those commits.
 
 ## Decision
 
@@ -126,11 +129,11 @@ reason; each mutation was restored and the restore checked.
    projection instead (M8): red, "the dates are the bond's days, not the stored streak…", on
    the drifted read (`achieved` empty). `evaluated_as` → `status = 'REVEALED'` (M7): red, "today
    is not counted…", and three more through the evaluation, which shares the statement since
-   `b16ec4f`.
+   `712a061`.
 3. **One statement gives the count and the dates**, `StreakCalendar.completeDays(bondId,
    ordinals)`: `row_number()` and `count(*)` over the bond's complete days, keeping the rows
    asked for and the last one; the ordinals travel as one bound `?::int[]`. *Built in Task 1's
-   fix round* (`b16ec4f`), not Task 2, because the event came to need it (decision 8). *Run:*
+   fix round* (`712a061`), not Task 2, because the event came to need it (decision 8). *Run:*
    Postgres casts the bound text `{7,30,100,365}` to `int[]` (the "all four" test reads all
    four dates) and `{}` too (Task 1). `ORDER BY date DESC` (M5): red, four tests, the event's
    date moving with the read's. Dropping `OR n = total` (M6): red, five tests, `achieved` empty.
@@ -146,7 +149,7 @@ reason; each mutation was restored and the restore checked.
    Whether extracting the function exposed an earlier disagreement between the two reads: it
    did not; `StreakEndpointTest` passed unchanged.
 5. **The read order** (*changed by the controller's ruling on the Task 2 review, I1;*
-   `96eb529`). The plan read the timeline first, then today's square, then the last evaluated
+   `ed3a848`). The plan read the timeline first, then today's square, then the last evaluated
    date. The review found, by reading, that an evaluation committing between the first and the
    last statement would give "7 reached today" for the day `MilestoneReached` dates yesterday,
    an answer neither moment gives. **As built, `GetMilestones.of` reads today's square, then
@@ -188,7 +191,7 @@ reason; each mutation was restored and the restore checked.
    `StreakStore.recordDay`, which updates only `WHERE evaluated_at IS NULL` and refuses anything
    but one row, so a day is announced once or not at all. Never from `RecalculateStreak`.
    **Counted on the timeline, not the stored total** (*changed by the controller's ruling on the
-   Task 1 review, m1;* `b16ec4f`). The plan crossed on the fold's `totalCompleteDays`. As built,
+   Task 1 review, m1;* `712a061`). The plan crossed on the fold's `totalCompleteDays`. As built,
    the evaluation reads `calendar.completeDays(bondId, emptyList()).total` once per bond per
    run, after the bond lock and the streak row's `FOR UPDATE`, and adds one as each day
    evaluates `COMPLETE`, so **the event and the read count from one source**, and an event's
@@ -231,7 +234,7 @@ reason; each mutation was restored and the restore checked.
     is handed `BondAccess`, `StreakCalendar`, `GetStreak` and `Clock`. `BondAccess` was added
     for ruling 1; it is the bond's access port, not a per-member store. *Run:* an unused
     `StreakStore` in the constructor (G4): red, naming the list. The controller's constructor
-    is pinned too (`6dd374c`): an unused `GetStreak` there: red on the new pin only.
+    is pinned too (`44b2673`): an unused `GetStreak` there: red on the new pin only.
 13. **Nothing is logged, and no `SecretsNeverLoggedTest` probe was to be added**: a probe that
     watches for words cannot fail on a route that returns thresholds and dates. **As built,
     Task 2 added one** (`GET /milestones` after `GET /streak`, the KDoc's list extended). It is
@@ -265,7 +268,7 @@ reason; each mutation was restored and the restore checked.
 - **The read is four reads of one bond's rows** (the membership resolved again, today's
   square, the last evaluated date, the timeline), with no lock, in the order decision 5 argues.
   The plan said three; ruling 1 added the first.
-- **The shared test Postgres starts with `max_connections=300`** (`8b07558`). The gratitude
+- **The shared test Postgres starts with `max_connections=300`** (`64a9cd1`). The gratitude
   test JVM had reached the default 100: about 25 cached Spring contexts, each holding Hikari's
   4 idle connections. Task 2's first `MilestonesEndpointTest` context, the 26th, made an
   unrelated class (`TimezoneMatrixTest`) fail to load with "too many clients". The limit was
@@ -362,7 +365,7 @@ For the owner to carry into the corpus repository, which is not edited here.
 below is the named agent's report of its own work, except Task 3's, which are this record's
 author's.
 
-- **Task 1** (2026-10-22, its implementer; `fc48442`, `4f66f91`). `MilestoneRulesTest` failed
+- **Task 1** (2026-10-22, its implementer; `5a96d99`, `a5f458e`). `MilestoneRulesTest` failed
   to compile, then passed; `MilestoneReachedTest` 4 of 4 red first (each on `milestones()`,
   `[]` where ids were expected; test 2's `FROZEN` line and test 3's `current_streak = 4` line
   passed before it, as predicted), then green. The mutations of decisions 1 and 8, above, with
@@ -371,10 +374,10 @@ author's.
   (red) and a freeze adding a complete day (red), found `REQUIRES_NEW` green and wrote the
   probe that became the fifth test; read once-per-threshold across a re-run, a backlog, a
   failed close and two concurrent closes (bond lock, then the streak row, then
-  `recordDay WHERE evaluated_at IS NULL`). **Its fix round** (`57d42e5`, `b16ec4f`, `b653163`):
+  `recordDay WHERE evaluated_at IS NULL`). **Its fix round** (`e4cf0cd`, `712a061`, `ec2eeaf`):
   the rollback test, the timeline crossing (the drift test seen red first), the ended-bond
   event; mutations as in decisions 8 and 9. Build green, 1,518 tests, 2 skipped.
-- **Task 2** (2026-10-22, its implementer; `2a51eec`, `1030684`). `MilestonesEndpointTest` 10
+- **Task 2** (2026-10-22, its implementer; `94b909d`, `41d9ebc`). `MilestonesEndpointTest` 10
   of 10 red first, each `expected:<200> but was:<404>`; `GratitudeCrossTenantTest` red without
   the fixture, naming the route; `OpenApiContractTest` red twice (stale; description null).
   Predictions marked "to be confirmed by running", each confirmed: the job reveals a day whose
@@ -387,14 +390,14 @@ author's.
   Minor 4): ran 65 gratitude and 57 app tests, a probe of the 40-day and five-run backlogs
   (event days equal to the read's dates), the live headers, and a plain block against a leave
   (identical); found the read order (I1, by reading) and the connection limit (I2). **Its fix
-  round** (`8b07558`, `96eb529`, `6dd374c`, `3a4c360`): `max_connections=300` with its test (red
+  round** (`64a9cd1`, `ed3a848`, `44b2673`, `1e1fc07`): `max_connections=300` with its test (red
   at 100) and the old import pair restored for one run (673 gratitude tests, 0 failed); the
   read order (decision 5; argued, not run); the controller's pin (red); the plain block.
   `./gradlew build --rerun-tasks`: 1,531 tests, 0 failures, 2 skipped.
-- **Task 3** (2026-10-22, this record's author; `3c04306` and the commit of this record).
+- **Task 3** (2026-10-22, this record's author; `b829743` and the commit of this record).
   - **The smoke.** The compose Postgres could not bind 5432, which another project's container
     held, so it was started on 55432 through a compose override, a database of its own
-    (`moyi_c6c_smoke`) created, and the jar, built from `3a4c360`, booted by hand exactly as
+    (`moyi_c6c_smoke`) created, and the jar, built from `1e1fc07`, booted by hand exactly as
     `scripts/smoke.sh` boots it (JDK 25.0.4, local profile, the close job every five seconds)
     on port 18094; the script ran with `--attach`. First run: **929 passed, 0 failed, 1
     skipped, 24 sections**; the skip was the withdrawal section's tag-across-the-erasure check,
@@ -413,7 +416,7 @@ author's.
     line checked against the tree with `grep -F`; `scripts/state-map-check --strict` exit 0,
     "657 rows, 286 never run, 0 pending, 29 contract gaps. Nothing wrong."; the checker's 154
     tests pass.
-  - **`./gradlew build --rerun-tasks`** at `3c04306` (the code of `3a4c360`; this record, the
+  - **`./gradlew build --rerun-tasks`** at `b829743` (the code of `1e1fc07`; this record, the
     spec, ADR-0034, the README and the log were being written in the tree, documentation
     only): BUILD SUCCESSFUL in 3 m 58 s, 217 tasks executed, **1,531 tests, 0 failures, 0
     errors, 2 skipped** (the two search measurements, gated by `MOYI_MEASURE`), counted from
