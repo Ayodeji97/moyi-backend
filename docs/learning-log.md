@@ -2408,3 +2408,69 @@ Wrong about: what a guard is guarding. Each of these passed, each was named besi
          Where the slice's work was. Half the commits were not code: smoke, CLI, state map,
          a record with eight rulings in it that nobody but an agent made. Those were the
          parts most likely to be wrong in a way no build would notice.
+
+## 2026-10-21 · Phase 3 · Search and on this day — two guards that hide each other, and the loggers nobody had read
+
+Expected: a search box over the archive, and a second, smaller read beside it. The plan had
+         done the expensive thinking: the match and the visibility asked of the same row, the
+         withdrawn excluded before the limit, the gate deciding after, the archive's own fill
+         shared so that a dropped day leaves no trace. A probe on 2026-10-21 had already shown
+         that GIN on the vector alone reads a common word across every bond, and that
+         `btree_gin` on `(bond_id, search_vector)` does not. I expected the index to be the
+         one open question, and the query string in the logs to be one pin, two at most.
+Reality: the design held, and almost every guard in it was seen by fewer tests than its
+         comment implied.
+         Two guards that hide each other. The row predicate and the filter after the gate
+         both keep the partner's unrevealed words and a withdrawn author's out of the page.
+         Move the predicate from the row to the day, and every short test stays green, because
+         the gate drops the day; only the test with a history longer than one request reads
+         goes red, with an empty first page and a cursor. Turn the filter into `true`, and all
+         of `SearchTest` stays green, and the twin test too, against the plan's prediction:
+         in the twin the block has committed before the search, so the SQL already excludes
+         her rows and nothing ever reaches the filter. Only the race test, a withdrawal
+         landing between the candidate query and the marker, sees it. Neither guard can go;
+         each is held by one test, and the record says which.
+         Two more that survived and stayed. `isBlank()` → `isEmpty()` on the search terms is
+         equivalent: Kotlin's `trim()` has already removed everything `isBlank` would see.
+         On-this-day's `takesWrites` → `isOpen` survives because no request leaves a bond open
+         while it takes no writes. A third, on-this-day's `WHERE d.bond_id = ?` neutralised,
+         survived both of its test classes, because the gate refuses another bond's entries
+         and the filter then drops the day; the implementer added the test that sees it, and
+         the measurement turned red on it too, with a Seq Scan of all of `bond_days`.
+         And the column. If an erasure kept the search projection, every search test would
+         still pass, because a tombstoned day is dropped by the gate. The plan credited
+         `SearchTest` with that hazard; `SearchProjectionTest`, at the column, is what holds it.
+         The measurement. GIN on the vector alone failed as the probe said it would: 62,509
+         rows of the word's postings read at 500k for a bond of 1,460 entries, against the
+         probe's 62,500. `btree_gin` passed at 175. What neither the probe nor the criterion
+         saw was the join: for a common word the planner scanned all of `bond_days`, because
+         nothing in the statement said the day belonged to the bond. One clause, `d.bond_id =
+         e.bond_id`, took that word from 913 buffers to 73. The criterion inspected index nodes
+         and was blind to a sequential scan; the implementer saw it only by printing every node
+         of the plan, flagged it, and the review reproduced it.
+         The logs. The plan predicted one logger printing `q` below INFO, Spring Security's,
+         and perhaps a second. `SecretsNeverLoggedTest` named five, among them Tomcat's
+         parameter parser and the `DispatcherServlet`'s request line, and two more followed
+         from the reviews. One of those was not a level at all: a query parameter that is not
+         UTF-8 was a `500` whose `ERROR` line quoted the readable part of the value, on every
+         route, since long before search. Search only made it somebody's words. And with the
+         `DispatcherServlet` set to DEBUG by name, it parses the parameters for its own log
+         line before any handler can catch the failure, so the fix had to be a filter, not a
+         handler. Then Tomcat itself, refusing a `|` in a request target, logged the whole
+         target at INFO. None of this was found by reading; each was a line in a test's
+         output naming a logger nobody had thought to look at.
+         `%00`. The plan marked "Tomcat hands NUL to the application" as a prediction. Run,
+         from the jar: the application answered, `422` on `q`, not a `400` from Tomcat.
+         The smoke ran 902 checks, none failed, none skipped, and had one thing to say: the
+         state map's checker reads a probe's label only from an `expect` line, so two probes
+         written through a helper were invisible to it until they were written out.
+Wrong about: how many tests a guard has. A design with two guards for one hazard is safer
+         and harder to test, because each hides the other's removal; the honest count is the
+         tests that go red when one of them alone is taken away, and for three of this slice's
+         mechanisms that count is one.
+         Where a query string goes. I thought of it as a parameter. It is also part of a
+         request line, an exception message, a parse failure and a URL handed to curl, and
+         each of those is a different log or a different process listing.
+         That a merged pull request leaves a sentence where the plan last saw it. The plan's
+         amendment to CLAUDE.md was written against a rule another session rewrote and merged
+         the morning this task ran; applied as written, it would have undone an owner's ruling.

@@ -48,6 +48,8 @@ docker compose up -d          # Postgres 18 + Redis (Valkey) for local dev
 ./gradlew bootRun             # starts the app on :8080, profile: default
 curl localhost:8080/actuator/health
 ```
+Search needs the `unaccent` extension, which the official image ships (V25 creates it,
+and `btree_gin`, which the image ships too: ADR-0039).
 For the app to actually reach the Postgres/Redis started above, run it
 with the `local` profile instead: `SPRING_PROFILES_ACTIVE=local ./gradlew bootRun`.
 The `local` profile also writes outgoing email to the log instead of
@@ -94,6 +96,8 @@ scripts/moyi bond new "Us" Africa/Lagos   # prints the code to send your partner
 scripts/moyi write "Thank you for the tea."
 scripts/moyi today
 scripts/moyi streak
+scripts/moyi search "the long walk"       # the days whose entries hold those words
+scripts/moyi on-this-day
 ```
 
 `scripts/moyi help` lists the rest. It talks to `MOYI_API` (this machine by default), and
