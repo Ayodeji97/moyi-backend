@@ -19,9 +19,10 @@ import java.util.concurrent.TimeUnit
  * into the output string, and delegates the KDF to BouncyCastle.
  *
  * **What is ours is the admission control**, and it is the part that would be
- * missing from a tutorial. See [Argon2Properties.maxConcurrentHashes] for why
- * a semaphore and not a thread pool: with virtual threads enabled, the server
- * imposes no natural limit, and each hash holds ~19 MiB off-heap. The permit
+ * missing from a tutorial. Each hash holds ~19 MiB off-heap, so something
+ * must bound how many run at once; why that is a semaphore, and what virtual
+ * threads do and do not change, is argued once, at
+ * [Argon2Properties.maxConcurrentHashes]. The permit
  * is released in a `finally`, because a leaked permit is a slow, permanent
  * outage that begins with one unlucky exception.
  */
