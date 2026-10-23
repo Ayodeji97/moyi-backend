@@ -96,7 +96,17 @@ internal class JoiningDayEveryReadTest(
             DynamicTest.dynamicTest("the discovery finds at least the $KNOWN_READS known reads") {
                 check(reads.size >= KNOWN_READS) { "Found ${reads.size} gratitude GET routes, expected at least $KNOWN_READS: $reads" }
             }
-        return listOf(count) + reads.map { route -> DynamicTest.dynamicTest("GET $route") { reconcilesThrough(route) } }
+        // One case per path holds only while each path has one handler. A second `GET` on the same path, told apart by
+        // `params`, `headers` or `produces`, would share the first one's case and never be called (Codex on #77).
+        val oneHandlerEach =
+            DynamicTest.dynamicTest("each gratitude read path is served by one handler") {
+                val shared = gratitudeHandlersByPath().filterValues { it.size > 1 }
+                check(shared.isEmpty()) {
+                    "These paths have more than one GET handler, and this test calls each path once: $shared. Give each " +
+                        "variant a fixture of its own that selects it."
+                }
+            }
+        return listOf(count, oneHandlerEach) + reads.map { route -> DynamicTest.dynamicTest("GET $route") { reconcilesThrough(route) } }
     }
 
     private fun reconcilesThrough(route: String) {
@@ -130,14 +140,19 @@ internal class JoiningDayEveryReadTest(
     }
 
     /** Every `GET` pattern this context serves from a handler in `com.moyi.gratitude`. */
-    private fun gratitudeReads(): List<String> =
+    private fun gratitudeReads(): List<String> = gratitudeHandlersByPath().keys.sorted()
+
+    /** Each gratitude `GET` pattern, with every handler method that serves it. */
+    private fun gratitudeHandlersByPath(): Map<String, List<String>> =
         routes.handlerMethods
             .filter { (info, handler) ->
                 handler.isGratitude() && RequestMethod.GET in info.methodsCondition.methods.ifEmpty { setOf(RequestMethod.GET) }
-            }.keys
-            .flatMap { it.pathPatternsCondition?.patternValues.orEmpty() }
-            .distinct()
-            .sorted()
+            }.flatMap { (info, handler) ->
+                info.pathPatternsCondition
+                    ?.patternValues
+                    .orEmpty()
+                    .map { it to handler.shortLogMessage }
+            }.groupBy({ it.first }, { it.second })
 
     private fun HandlerMethod.isGratitude(): Boolean = beanType.packageName.startsWith("com.moyi.gratitude")
 
