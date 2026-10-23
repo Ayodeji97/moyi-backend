@@ -482,6 +482,9 @@ internal class OutboxJobTest(
                     never.await(WAIT_SECONDS, TimeUnit.SECONDS)
                     DispatchResult(delivered = OutboxJob.BUDGET, failed = 0, more = true)
                 } finally {
+                    // Ends slowly, so that only a `destroy` that waits can find it ended: one that interrupted and
+                    // returned at once would assert before this pause is over (Codex on #71).
+                    Thread.sleep(SLOW_END_MILLIS)
                     ended.set(true)
                 }
             })
@@ -616,5 +619,8 @@ internal class OutboxJobTest(
     private companion object {
         const val ENTRY_LIKE = "Thank you for the tea this morning"
         const val WAIT_SECONDS = 10L
+
+        // Well inside OutboxJob.STOP_WAIT_SECONDS, far outside the time a `destroy` that does not wait takes to return.
+        const val SLOW_END_MILLIS = 1_000L
     }
 }
