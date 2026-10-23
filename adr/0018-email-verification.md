@@ -1,6 +1,6 @@
 # ADR-0018 — Email verification: hashed tokens, a landing page, and a listener that is not the outbox
 
-**Status:** Accepted · **Date:** 2026-09-23
+**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-10-22 (no link base URL in `application.yml`; decision 2 unchanged)
 
 ## Context
 
@@ -42,3 +42,15 @@ The `@Async` is also a security control, not only a latency one. The duplicate-r
 ## Revisit when
 
 The outbox lands (replace the listener with an event write). Rate limiting lands (add the per-email cooldown, and reconsider the duplicate-registration notice). FR-004 and FR-005 arrive (widen the `purpose` CHECK; the token mechanics are shared). Or a real user reports a link that "expired" on first click — that is the scanner problem appearing on the landing-page side, and would mean the page itself is fetching.
+
+## Amendment — 2026-10-22: "required, with no default" was true of the class and false of the deployment
+
+Decision 2 said the link base URL is required, with no default, and `VerificationProperties` (and, from slice B1, `InviteProperties`) had no default. `application.yml` did: `https://moyi.com/verify`, `https://moyi.com/reset-password` and `https://moyi.com/i`, inherited by every profile. `moyi.com` is not the project's domain (registered in 2004, by someone else). So the guard never fired, and a production deploy that forgot the variable would have booted cleanly and emailed live verification and reset tokens (`?token=`), and handed out invite codes, in links to a stranger's server. Found by a deploy review, not by a test: every test context set its own value, so nothing read what the shipped file resolved to.
+
+**1. No base URL in `application.yml`.** The three come from the environment, as `MOYI_IDENTITY_VERIFICATION_LINK_BASE_URL`, `MOYI_IDENTITY_VERIFICATION_RESET_LINK_BASE_URL` and `MOYI_BOND_INVITE_LINK_BASE_URL`, the same posture as the Resend key (doc 25 D7) and the signing key (ADR-0019): a missing value is a failed boot. Only the `local` profile (`http://localhost:3000/…`, read from the log by `scripts/smoke.sh`) and the test contexts (`https://moyi.test/…`, a reserved name) carry values.
+
+**2. A missing value fails with the property's name.** Both classes had a non-null `URI` with `@field:NotNull`; Kotlin's own null check threw first, "Parameter specified as non-null is null: …, parameter linkBaseUrl", and the `@NotNull` never ran. The constructor parameters are now nullable and checked in the class, so the failure reads "moyi.identity.verification.link-base-url is required (from the environment)". The message names the base URL only; a token never reaches it.
+
+**Tests.** `LinkBaseUrlsHaveNoDefaultTest` (`app`) reads the shipped files through Boot's config-data loading and asserts the default profile resolves none of the three, `local` and `test` resolve theirs, and the documented environment variables bind. `VerificationPropertiesTest` and `InvitePropertiesTest` assert a context without each value fails to start, naming it. Putting the `moyi.com` values back in `application.yml`, or a default back in either class, turns them red.
+
+**Considered and left alone: the JWT issuer.** `JwtProperties.DEFAULT_ISSUER` is `https://api.moyi.app`, also not a domain the project owns. It is a label: nothing fetches it, no token or code travels to it, and its only job is to differ between deployments that trust the same key (its KDoc). A wrong value there costs nothing to a third party, so it keeps its default.

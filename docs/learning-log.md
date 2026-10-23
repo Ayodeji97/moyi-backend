@@ -2553,3 +2553,28 @@ Wrong about: what a ruling's word costs. "Archived" read as a column; it was a f
          people that two columns record, and only the code's history said which.
          Where a rule is asked. A plan that names the method to change names one writer; the
          question to ask of a reveal rule is who else reveals.
+
+## 2026-10-22 · Fix · The link base URLs — a guard that a configuration file had already answered
+
+Expected: a one-file fix. A deploy review found that `application.yml` set the three link
+         bases (verify, reset, invite) to `https://moyi.com/…`, a domain registered in 2004 by
+         someone else, and the properties classes already said "required, with no default".
+         Delete three lines, give `local` and the test profile their own values, done.
+Reality: deleting the lines was the easy half. The first test that booted a context without
+         the value failed for the wrong reason: the message was Kotlin's "Parameter specified
+         as non-null is null: …, parameter linkBaseUrl", not the property's name. The
+         `@field:NotNull` beside it had never run and never could; a non-null constructor
+         parameter is checked before validation sees the object. The classes now take a
+         nullable value and name the property themselves. The second half was a test for the
+         file rather than the class: every test context had always set its own value, so no
+         test read what the shipped `application.yml` resolved to, and that is where the
+         defect lived. `LinkBaseUrlsHaveNoDefaultTest` loads the real files per profile.
+         Mutations: the `moyi.com` lines put back in `application.yml`, and a default put
+         back in either class, each turned its test red. The smoke's invite-link probe
+         hard-coded `https://moyi.com/i/`; it now expects the `local` profile's
+         `http://localhost:3000/i/`, also written into the script.
+Wrong about: "required, with no default" being a property of a class. It is a property of
+         what the deployment resolves, and a file every profile inherits can answer it
+         before the class is asked. Also that `@NotNull` on a non-null Kotlin type means
+         something: it is decoration, and the test that would have shown it had not been
+         written.

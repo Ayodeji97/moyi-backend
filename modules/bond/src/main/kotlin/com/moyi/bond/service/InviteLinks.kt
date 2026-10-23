@@ -6,7 +6,8 @@ import org.springframework.stereotype.Component
 import java.net.URI
 
 /**
- * The link half of FR-022 — `https://moyi.com/i/7KQ4MZ`.
+ * The link half of FR-022 — `<link-base-url>/7KQ4MZ`, the base being
+ * `moyi.bond.invite.link-base-url` (required; ADR-0018's amendment of 2026-10-22).
  *
  * One place that builds it, so the code and the link cannot disagree, and so
  * the base URL is read from configuration rather than assembled at each call

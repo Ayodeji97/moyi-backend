@@ -495,7 +495,8 @@ BOND_ETAG="$(etag_of)"
 # The alphabet is states.md §2's thirty symbols; 0/O, 1/I/L and U are absent
 # because a code is read aloud down a phone line (T-06, ADR-0026).
 if [[ "$CODE" =~ ^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{6}$ ]]; then pass "…code $CODE is six characters of the 30-symbol alphabet"; else fail "invite code" "got '$CODE'"; fi
-if [[ "$LAST_BODY" == *"\"link\":\"https://moyi.com/i/$CODE\""* ]]; then pass "…and the link carries it"; else fail "invite link" "${LAST_BODY:0:200}"; fi
+# The base is the `local` profile's moyi.bond.invite.link-base-url; application.yml has none.
+if [[ "$LAST_BODY" == *"\"link\":\"http://localhost:3000/i/$CODE\""* ]]; then pass "…and the link carries it"; else fail "invite link" "${LAST_BODY:0:200}"; fi
 # states.md §8: never the other member's settings. And a user id is identity's
 # to hand out, not this module's to echo.
 if [[ "$LAST_BODY" != *userId* && "$LAST_BODY" != *reminderTimezone* ]]; then pass "…and no userId or partner settings in the body"; else fail "response leakage" "${LAST_BODY:0:200}"; fi

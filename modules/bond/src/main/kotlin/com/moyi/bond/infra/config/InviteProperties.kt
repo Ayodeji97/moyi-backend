@@ -1,8 +1,6 @@
 package com.moyi.bond.infra.config
 
-import jakarta.validation.constraints.NotNull
 import org.springframework.boot.context.properties.ConfigurationProperties
-import org.springframework.validation.annotation.Validated
 import java.net.URI
 
 /**
@@ -18,25 +16,32 @@ import java.net.URI
  *
  * Required, with no default, for the reason that class gives: a default here
  * would be either a production URL committed to a repository or a `localhost`
- * that ships.
+ * that ships. `application.yml` carries none either (ADR-0018, amended
+ * 2026-10-22): it once said `https://moyi.com/i`, a domain the project does
+ * not own, and every profile inherited it.
  */
-@Validated
 @ConfigurationProperties(prefix = "moyi.bond.invite")
-internal data class InviteProperties(
-    /** Absolute, `http` or `https`; the code is appended as a path segment. */
-    @field:NotNull
-    val linkBaseUrl: URI,
+internal class InviteProperties(
+    linkBaseUrl: URI?,
 ) {
-    init {
-        // Checked at binding, so a relative path or a `mailto:` in a
-        // deployment's environment is a failed start rather than a link
-        // nobody can open.
-        require(linkBaseUrl.isAbsolute && linkBaseUrl.scheme in WEB_SCHEMES) {
-            "moyi.bond.invite.link-base-url must be an absolute http(s) URL, e.g. https://example.com/i"
+    /**
+     * Absolute, `http` or `https`; the code is appended as a path segment.
+     *
+     * Checked at binding, so a missing value, a relative path or a `mailto:`
+     * in a deployment's environment is a failed start rather than a link
+     * nobody can open. Nullable in the constructor so that a missing value
+     * reaches this message rather than Kotlin's "Parameter specified as
+     * non-null is null", which is what a non-null `URI` with `@field:NotNull`
+     * gave until 2026-10-22: the `@NotNull` never ran.
+     */
+    val linkBaseUrl: URI =
+        requireNotNull(linkBaseUrl) { "$PROPERTY is required (from the environment), e.g. $EXAMPLE" }.also {
+            require(it.isAbsolute && it.scheme in WEB_SCHEMES) { "$PROPERTY must be an absolute http(s) URL, e.g. $EXAMPLE" }
         }
-    }
 
     private companion object {
+        const val PROPERTY = "moyi.bond.invite.link-base-url"
+        const val EXAMPLE = "https://example.com/i"
         val WEB_SCHEMES = setOf("http", "https")
     }
 }
