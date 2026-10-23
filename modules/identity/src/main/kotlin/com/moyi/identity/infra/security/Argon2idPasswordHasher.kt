@@ -20,11 +20,9 @@ import java.util.concurrent.TimeUnit
  *
  * **What is ours is the admission control**, and it is the part that would be
  * missing from a tutorial. Each hash holds ~19 MiB off-heap, so something
- * must bound how many run at once. Virtual threads do not remove that bound
- * (Argon2id never blocks, so it never unmounts, and the carrier pool already
- * caps concurrent hashes at the processor count); the semaphore is the bound
- * that survives a larger instance or a raised scheduler parallelism. See
- * [Argon2Properties.maxConcurrentHashes] for the full argument. The permit
+ * must bound how many run at once; why that is a semaphore, and what virtual
+ * threads do and do not change, is argued once, at
+ * [Argon2Properties.maxConcurrentHashes]. The permit
  * is released in a `finally`, because a leaked permit is a slow, permanent
  * outage that begins with one unlucky exception.
  */
