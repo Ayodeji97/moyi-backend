@@ -26,7 +26,12 @@ jobs:
   # GitHub Actions job per sub-step (this project's few dozen files don't
   # justify the repeated per-job setup cost that split would add).
   quality:
-    runs-on: ubuntu-latest
+    # Pinned rather than ubuntu-latest: that label is moving to Ubuntu 26,
+    # and this job is the one that depends on the runner's image — the
+    # Docker engine Testcontainers talks to and the preinstalled JDKs. A
+    # runner upgrade should arrive as a reviewed one-line PR, not as a red
+    # main nobody changed.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
