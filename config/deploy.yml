@@ -120,6 +120,15 @@ env:
     # a single per-IP login bucket. The network keeps its range while it
     # exists; on a rebuilt server, read it again before the first deploy.
     MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES: 172.18.0.0/16
+    # Argon2id's iterations, tuned on this server to doc 09's ~150 ms per
+    # hash (Argon2Properties; NFR-046's t=2 stays the floor the tests hold).
+    # Measured 2026-10-24 on moyi-prod-1, in the production image, with
+    # scripts/argon2-bench: t=2 61 ms, t=4 106, t=5 120, t=6 147 and 155
+    # (two runs, p95 164 and 172), t=7 174, t=8 195 (medians of 15). Each
+    # concurrent hash still holds ~19 MiB off-heap; the iterations add time,
+    # not memory. A password hashed under an older t keeps verifying, because
+    # the hash records its own parameters.
+    MOYI_SECURITY_ARGON2_ITERATIONS: 6
   secret:
     - SPRING_DATASOURCE_PASSWORD:POSTGRES_PASSWORD
     - MOYI_SECURITY_JWT_PRIVATE_KEY_PEM
