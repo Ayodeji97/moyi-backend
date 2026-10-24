@@ -1,0 +1,4 @@
+# An invite link is /i/<code> (InviteLinks.kt). Every code is served the one
+# page, which reads the code from the address; 200 makes it a rewrite, so the
+# address bar keeps the code.
+/i/:code  /invite  200

@@ -12,7 +12,10 @@
 #   MOYI_INSECURE=1                          allow plain http to a host that is not this machine
 #
 #   moyi register <email> <display name> [locale]   the language you are shown prompts in, e.g. pt-PT (en if not given)
+#   moyi verify <token>                      the token in the confirmation email (getmoyi.app/verify shows it)
 #   moyi login <email>
+#   moyi forgot-password <email>             emails a reset link, if the address has an account
+#   moyi reset-password <token>              the token in that email; asks for the new password twice
 #   moyi bond new <name> <timezone>          prints the invite code to send your partner
 #   moyi bond join <code>
 #   moyi bond use <bondId>                   which bond the commands below mean
@@ -240,11 +243,22 @@ bond() {
 
 ask_password() { local p; IFS= read -r -s -p "password: " p; echo >&2; printf '%s' "$p"; }
 
+# A password being chosen is asked for twice: the prompt shows nothing, so a
+# slip would otherwise become a password nobody knows. Whether it is a good
+# password is the server's to say.
+ask_new_password() {
+  local p q
+  IFS= read -r -s -p "new password: " p; echo >&2
+  IFS= read -r -s -p "the same again: " q; echo >&2
+  [ "$p" = "$q" ] || die "the two passwords differ; nothing was sent"
+  printf '%s' "$p"
+}
+
 cmd="${1:-help}"; shift || true
 case "$cmd" in
   register)
     [ $# -eq 2 ] || [ $# -eq 3 ] || die "usage: moyi register <email> <display name> [locale]"
-    password="$(ask_password)"
+    password="$(ask_new_password)"
     ANONYMOUS=1 call POST /auth/register \
       "$(with_json '{"acceptedTermsVersion":"2026-09-01","over18":true}' email "$1" password "$password" displayName "$2" locale "${3:-en}")"
     [ "$STATUS" = 201 ] || show 201
@@ -264,6 +278,17 @@ case "$cmd" in
     [ "$STATUS" = 200 ] || show 200
     keep_tokens email "$1"
     echo "Signed in as $1 (profile $PROFILE)."
+    ;;
+  forgot-password)
+    [ $# -eq 1 ] || die "usage: moyi forgot-password <email>"
+    ANONYMOUS=1 call POST /auth/forgot-password "$(json_of email "$1")"; show 202
+    echo "If $1 has an account, a reset email is on its way. Then: moyi reset-password <the token in it>"
+    ;;
+  reset-password)
+    [ $# -eq 1 ] || die "usage: moyi reset-password <token>"
+    password="$(ask_new_password)"
+    ANONYMOUS=1 call POST /auth/reset-password "$(json_of token "$1" password "$password")"; show 200
+    echo "Password changed. Now: moyi login <email>"
     ;;
   whoami)
     authed GET /me; show 200
