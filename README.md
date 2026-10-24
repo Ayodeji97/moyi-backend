@@ -419,16 +419,20 @@ runner. A deploy never builds: it names a commit on `main` that CI has
 already published.
 
 ```
-kamal deploy --skip-push --version=$(git rev-parse origin/main)
+git fetch && kamal deploy --skip-push --version=$(git rev-parse origin/main)
 ```
 
 `--version` is not optional in practice: without it Kamal uses the local
 HEAD, plus an `_uncommitted_…` suffix if anything in the working tree has
-changed, and no such tag exists in GHCR. The first deploy is `kamal setup`
+changed, and no such tag exists in GHCR. The commit's CI run must have
+finished (the `manifest` job writes the tag), and images built before the
+`service` label was added to the build are refused by Kamal. The first deploy is `kamal setup`
 with the same two flags: it installs Docker on the server, starts Postgres
 and Valkey (the accessories, which publish no port), starts kamal-proxy,
 which takes a Let's Encrypt certificate for `api.getmoyi.app`, and then
-deploys. Every deploy after that starts the new container beside the old
+deploys. It does not wait for Postgres to finish initialising before the app
+first connects; if the very first boot loses that race, running the same
+command again is safe (accessories already running are skipped). Every deploy after that starts the new container beside the old
 one and switches traffic only once `/healthz` answers UP.
 
 What it needs on the Mac:

@@ -8,7 +8,11 @@
 # on every merge to main and publishes it to GHCR under the commit's SHA, so a
 # deploy names a commit that is already on main and has passed CI:
 #
-#   kamal deploy --skip-push --version=$(git rev-parse origin/main)
+#   git fetch && kamal deploy --skip-push --version=$(git rev-parse origin/main)
+#
+# That commit's CI run must have finished (its `manifest` job writes the tag),
+# and it must be a commit from after the `service` label was added to the
+# image build (app/build.gradle.kts): Kamal refuses an image without it.
 #
 # The explicit --version matters. Without it Kamal tags the deploy with the
 # local HEAD, and appends "_uncommitted_<random>" when the working tree has
@@ -51,8 +55,9 @@ registry:
   password:
     - KAMAL_REGISTRY_PASSWORD
 
-# Required by Kamal, and never used: every deploy is --skip-push. If it ever
-# were used, the server is Arm.
+# Never used: every deploy is --skip-push. Stated so that a deploy run
+# without that flag builds for the server's architecture only, not Kamal's
+# default of both.
 builder:
   arch: arm64
 
