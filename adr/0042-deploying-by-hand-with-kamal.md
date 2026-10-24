@@ -59,9 +59,10 @@ share one role. kamal-proxy keeps no log at all (decision 6), so a routing or
 certificate problem has to be diagnosed by switching it on deliberately.
 
 **Neutral:** the trusted-proxy range (`MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES`)
-is known only once Kamal has created its network on the server, so it is set by
-a change after the first deploy. Until then every client shares one rate-limit
-bucket: over-strict, never spoofable (ADR-0023).
+is known only once Kamal has created its network on the server, so it was set by
+a change after the first deploy: `172.18.0.0/16`. Until then every client shared
+one rate-limit bucket: over-strict, never spoofable (ADR-0023). A rebuilt server
+needs its range read again before its first deploy.
 
 ## Alternatives considered
 - **Kamal builds the image on each deploy** — rejected: production would run an
