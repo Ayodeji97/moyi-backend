@@ -87,10 +87,11 @@ jobs:
 
   # Builds the deployable image (Spring Boot's own Cloud Native Buildpacks
   # support — no hand-maintained Dockerfile) once per CPU architecture, and
-  # on a real merge to main publishes it to GHCR. No deploy stage: nothing
-  # pulls this image anywhere yet (CD is a follow-up plan, per doc 25 §7
-  # steps 10-12 being out of scope here) — this just makes the artifact a
-  # future deploy stage will need exist on every merge.
+  # on a real merge to main publishes it to GHCR. No deploy stage: deploys
+  # are run by hand with Kamal, which pulls this image by its commit SHA
+  # (`kamal deploy --skip-push`, config/deploy.yml; ADR-0042). So this job's
+  # output is what production runs, and Kamal refuses it without the
+  # `service` label app/build.gradle.kts adds.
   #
   # Two architectures because the planned host is a Hetzner CAX server,
   # which is ARM (linux/arm64); amd64 stays so the same tag still runs on

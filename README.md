@@ -409,12 +409,44 @@ has no mechanism to show it as a *requested reviewer*.
 
 ## How do I deploy it
 
-Not yet. CI (`.github/workflows/ci.yml`) builds, tests, and — on every
-merge to `main` — publishes a container image to GHCR via Spring Boot's
-Cloud Native Buildpacks support (`./gradlew bootBuildImage`, no
-hand-maintained Dockerfile). The image is multi-arch: one tag (`<sha>`
-and `latest`) serves both linux/arm64, for the planned Hetzner ARM (CAX)
-host, and linux/amd64, each built natively on its own runner. There's
-no deploy stage after that: nothing
-pulls the image anywhere yet. Deployment to Hetzner + Kamal + kamal-proxy
-is a follow-up plan, once that server infrastructure exists.
+With [Kamal 2](https://kamal-deploy.org), from a Mac, to one Hetzner server
+(`config/deploy.yml`). CI (`.github/workflows/ci.yml`) builds, tests and, on
+every merge to `main`, publishes the image to GHCR via Spring Boot's Cloud
+Native Buildpacks support (`./gradlew bootBuildImage`, no hand-maintained
+Dockerfile). One tag (the commit's SHA, and `latest`) serves linux/arm64,
+for the Hetzner CAX server, and linux/amd64, each built natively on its own
+runner. A deploy never builds: it names a commit on `main` that CI has
+already published.
+
+```
+git fetch && kamal deploy --skip-push --version=$(git rev-parse origin/main)
+```
+
+`--version` is not optional in practice: without it Kamal uses the local
+HEAD, plus an `_uncommitted_…` suffix if anything in the working tree has
+changed, and no such tag exists in GHCR. The commit's CI run must have
+finished (the `manifest` job writes the tag), and images built before the
+`service` label was added to the build are refused by Kamal. The first deploy is `kamal setup`
+with the same two flags: it installs Docker on the server, starts Postgres
+and Valkey (the accessories, which publish no port), starts kamal-proxy,
+which takes a Let's Encrypt certificate for `api.getmoyi.app`, and then
+deploys. It does not wait for Postgres to finish initialising before the app
+first connects; if the very first boot loses that race, running the same
+command again is safe (accessories already running are skipped). Every deploy after that starts the new container beside the old
+one and switches traffic only once `/healthz` answers UP.
+
+What it needs on the Mac:
+
+- Kamal 2.12 or later (`gem install kamal`, on a Ruby newer than macOS's).
+- The Bitwarden CLI, logged in to the EU server, and
+  `BITWARDEN_ACCOUNT` set to the vault's email address. `.kamal/secrets`
+  holds references only: each value is read from the secure note
+  `moyi-prod` at deploy time, and Kamal asks for the master password once
+  per command.
+- SSH access as root with `~/.ssh/moyi_hetzner`.
+
+Useful afterwards: `kamal app logs -f`, `kamal app details`,
+`kamal accessory logs postgres`, and `kamal rollback <version>`, which
+returns to a previous image in seconds. Migrations are not rolled back, so
+every migration stays backward-compatible with the release before it
+(doc 10 §4).
