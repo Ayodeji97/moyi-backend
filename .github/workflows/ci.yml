@@ -103,11 +103,17 @@ jobs:
   #
   # No imagePlatform is set in app/build.gradle.kts: Boot (4.1.1 here)
   # asks the daemon for its own platform and pulls the builder and run
-  # image for it. The default builder, paketobuildpacks/builder-noble-java-tiny,
-  # and its run image, ubuntu-noble-run-tiny, are both published for
-  # linux/amd64 and linux/arm64. Checked 2026-10-22 on an Apple Silicon
-  # Mac: Boot logged "Pulling run image ... for platform 'linux/arm64'",
-  # the image's Architecture was arm64, and it started on Java 25.
+  # image for it. The builder is pinned there by digest, to a multi-arch
+  # index of paketobuildpacks/builder-noble-java-tiny (linux/amd64 and
+  # linux/arm64): on 2026-10-24 Paketo republished `latest` as arm64 only,
+  # and this job's amd64 leg failed with "exec format error" (#80). The run
+  # image is not pinned here: the builder names it by a versioned tag
+  # (ubuntu-noble-run-tiny:0.0.149), itself an index of both platforms,
+  # checked 2026-10-24. A builder change is the moment to check both again,
+  # with `docker buildx imagetools inspect`. Checked 2026-10-22 on an Apple
+  # Silicon Mac: Boot logged "Pulling run image ... for platform
+  # 'linux/arm64'", the image's Architecture was arm64, and it started on
+  # Java 25.
   #
   # Runs on pull requests too, without pushing, so a PR proves both
   # architectures still build. It waits for quality and gitleaks, as the
