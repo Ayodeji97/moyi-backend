@@ -110,6 +110,16 @@ env:
     MOYI_BOND_INVITE_LINK_BASE_URL: https://getmoyi.app/i
     # getmoyi.app is verified in Resend (SPF, DKIM and DMARC pass).
     MOYI_NOTIFICATION_EMAIL_FROM: Moyi <hello@getmoyi.app>
+    # Kamal's Docker network on moyi-prod-1, where kamal-proxy has its address
+    # (`docker network inspect kamal`, read 2026-10-24). An X-Forwarded-For is
+    # believed only from here, so the rate limiter sees each client's own
+    # address, and a header a client forges is not believed, because the
+    # walk from the right stops at the first untrusted address (ADR-0023).
+    # Without it every request shares kamal-proxy's one bucket: seen,
+    # requests from two networks and one with a forged header all landed in
+    # a single per-IP login bucket. The network keeps its range while it
+    # exists; on a rebuilt server, read it again before the first deploy.
+    MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES: 172.18.0.0/16
   secret:
     - SPRING_DATASOURCE_PASSWORD:POSTGRES_PASSWORD
     - MOYI_SECURITY_JWT_PRIVATE_KEY_PEM
