@@ -99,6 +99,13 @@ tasks.named<org.springframework.boot.gradle.tasks.bundling.BootBuildImage>("boot
         "paketobuildpacks/builder-noble-java-tiny" +
             "@sha256:07b5e2d02f2e7dd26b6c7bf175c3381d496a4418e1bc8a8297e258e0c75ac696",
     )
+    // Kamal deploys an image CI already built (`kamal deploy --skip-push`),
+    // and before it starts one it checks the image's `service` label against
+    // `service:` in config/deploy.yml, refusing an image without it ("missing
+    // the 'service' label"). Kamal adds that label when it builds; this image
+    // is built by Paketo, whose image-labels buildpack applies the line below.
+    // Rename the service and this must change with it.
+    environment.put("BP_IMAGE_LABELS", "service=moyi")
 }
 
 // ArchitectureTest uses Konsist, which reads Kotlin source straight off
