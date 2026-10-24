@@ -124,7 +124,7 @@
 # Usage:
 #   scripts/smoke.sh              # builds the jar, boots it, probes, stops it
 #   scripts/smoke.sh --no-build   # reuse app/build/libs/*.jar
-#   PORT=18080 scripts/smoke.sh   # boot on another port
+#   PORT=18080 MGMT_PORT=18081 scripts/smoke.sh   # boot on other ports
 #   BASE=http://localhost:8080 scripts/smoke.sh --attach  # probe a server you started yourself;
 #                                                          # needs MOYI_LOG=<its log file> to read the emailed link
 #   MOYI_JAVA=/path/to/jdk-25/bin/java scripts/smoke.sh   # boot with that JDK instead of the one found
@@ -151,10 +151,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 PORT="${PORT:-8080}"
+# The actuator's own port (application.yml management.server.port).
+MGMT_PORT="${MGMT_PORT:-8081}"
 MOYI_DB="${MOYI_DB:-moyi}"
 [[ "$MOYI_DB" =~ ^[a-z_][a-z0-9_]*$ ]] || { echo "MOYI_DB must be a plain lower-case database name, got '$MOYI_DB'" >&2; exit 2; }
 BASE="${BASE:-http://localhost:$PORT}"
 API="$BASE/api/v1"
+MGMT_BASE="${MGMT_BASE:-http://localhost:$MGMT_PORT}"
 BUILD=1
 ATTACH=0
 for arg in "$@"; do
@@ -260,7 +263,7 @@ if [ "$ATTACH" = 0 ]; then
   JAVA="$(find_java)" || { echo "no JDK $MIN_JAVA or newer found: set MOYI_JAVA or JAVA_HOME, or install one (README: sdk install java 25.0.4-tem)"; exit 1; }
   MOYI_LOG="$(mktemp -t moyi-smoke.XXXXXX.log)"
   echo "booting $JAR (local profile) on $("$JAVA" -version 2>&1 | head -1), log: $MOYI_LOG"
-  "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" \
+  "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" --management.server.port="$MGMT_PORT" \
     --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" \
     --moyi.scheduling.close.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
@@ -285,7 +288,9 @@ register_body() { printf '{"email":"%s","password":"%s","displayName":"Smoke","l
 flush_buckets
 
 echo; echo "health"
-expect "GET /actuator/health is UP" 200 '"status":"UP"' -- "$BASE/actuator/health"
+expect "GET /healthz is UP" 200 '"status":"UP"' -- "$BASE/healthz"
+expect "the actuator is not on the application's port" 404 '"code":"NOT_FOUND"' -- "$BASE/actuator/prometheus"
+expect "the Prometheus scrape is on the management port" 200 'moyi_rate_limit_backend_unavailable_total' -- "$MGMT_BASE/actuator/prometheus"
 
 echo; echo "registration (FR-001, FR-011, ADR-0015)"
 # Each probe arrives from its own address. Registration is three an hour per

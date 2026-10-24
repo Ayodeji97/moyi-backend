@@ -46,7 +46,7 @@ import java.time.Duration
  * credentials, and there are none (doc 09 §5).
  *
  * **What is public is a list, not a pattern.** `POST` on the named auth
- * endpoints and `GET` on health; everything else needs a bearer token,
+ * endpoints, `GET` on health and on the Prometheus scrape; everything else needs a bearer token,
  * including any path that does not exist yet. A wildcard over everything
  * under `/auth/` would silently make `GET /auth/sessions` (FR-007) public the
  * day it is added.
@@ -73,6 +73,14 @@ class SecurityConfiguration {
                 PUBLIC_AUTH_ENDPOINTS.forEach { path -> authorize(HttpMethod.POST, path, permitAll) }
                 authorize(HttpMethod.GET, "/actuator/health", permitAll)
                 authorize(HttpMethod.GET, "/actuator/health/**", permitAll)
+                // The health verdict kamal-proxy routes on, on the application's
+                // own port: the actuator itself lives on the management port.
+                authorize(HttpMethod.GET, "/healthz", permitAll)
+                // Scraped by Prometheus, which holds no token. Public only
+                // because the actuator is not on the application's port in
+                // production (management.server.port); ManagementPortTest
+                // fails if it is ever served there.
+                authorize(HttpMethod.GET, "/actuator/prometheus", permitAll)
                 authorize(anyRequest, authenticated)
             }
             oauth2ResourceServer {

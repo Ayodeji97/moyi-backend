@@ -28,6 +28,6 @@ class HealthCheckTest(
 ) : IntegrationTest() {
     @Test
     fun `health endpoint returns 200`() {
-        mockMvc.get("/actuator/health").andExpect { status { isOk() } }
+        mockMvc.get("/healthz").andExpect { status { isOk() } }
     }
 }

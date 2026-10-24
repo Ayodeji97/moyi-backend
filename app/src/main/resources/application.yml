@@ -184,18 +184,31 @@ logging:
     org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO
 
 management:
+  server:
+    # The actuator on a port of its own, which kamal-proxy does not route: the
+    # Prometheus scrape below needs no token (Prometheus holds none), so it
+    # must not be reachable from the internet (ADR-0033, ADR-0035). The one
+    # health verdict the proxy needs stays on the application's port as
+    # /healthz (the `proxy` group). ManagementPortTest holds both.
+    port: 8081
   endpoints:
     web:
       exposure:
-        include: health
+        include: health, prometheus
   endpoint:
     health:
       show-details: never
+      group:
+        # The same verdict as /actuator/health (every indicator, Redis
+        # excluded below), served at /healthz on the application's port.
+        proxy:
+          include: "*"
+          additional-path: "server:/healthz"
   health:
     redis:
       # Deliberately NOT part of the health verdict. Doc 07 §5: "losing Redis
       # entirely degrades performance and nothing else" — the limiter fails
-      # open — and kamal-proxy routes on this endpoint, so a Redis outage
+      # open — and kamal-proxy routes on /healthz, so a Redis outage
       # reported as DOWN would take the whole application out of rotation to
       # protect a cache. Redis availability is visible instead through the
       # `moyi.rate_limit.backend_unavailable` counter (ADR-0023).
