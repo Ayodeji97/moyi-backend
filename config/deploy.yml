@@ -1,0 +1,141 @@
+# Kamal 2: how Moyi runs in production (M3 Deploy Plan; doc 10 §2, §4).
+#
+# One server runs everything: the app, Postgres, Valkey and kamal-proxy, each
+# in a container (ADR-0007). kamal-proxy owns TLS and the cutover between the
+# old and the new container (ADR-0011).
+#
+# The image is never built here. CI builds it for linux/arm64 and linux/amd64
+# on every merge to main and publishes it to GHCR under the commit's SHA, so a
+# deploy names a commit that is already on main and has passed CI:
+#
+#   kamal deploy --skip-push --version=$(git rev-parse origin/main)
+#
+# The explicit --version matters. Without it Kamal tags the deploy with the
+# local HEAD, and appends "_uncommitted_<random>" when the working tree has
+# any change, even an untracked file; no such tag exists in GHCR.
+#
+# Secrets are listed below by name only. Their values come from Bitwarden at
+# deploy time, through .kamal/secrets; none is ever written to this repository.
+
+service: moyi
+
+# The registry's server is prefixed, so this is
+# ghcr.io/ayodeji97/moyi-backend:<version>. GHCR names are lowercase; the
+# repository is Ayodeji97/moyi-backend.
+image: ayodeji97/moyi-backend
+
+minimum_version: 2.12.0
+
+servers:
+  web:
+    hosts:
+      - 91.98.71.136 # moyi-prod-1, Hetzner CAX21 (Arm64), Nuremberg
+    options:
+      # The app's share of the 8 GB box (doc 10 §2.1). The buildpack's memory
+      # calculator sizes the JVM to this limit. During a deploy a second
+      # container runs beside the first for up to drain_timeout, so twice this
+      # is briefly in use.
+      memory: 2g
+
+ssh:
+  user: root
+  # Only this key, never whatever else ssh-agent offers. The key has a
+  # passphrase; the macOS keychain unlocks it.
+  keys_only: true
+  keys:
+    - ~/.ssh/moyi_hetzner
+
+registry:
+  server: ghcr.io
+  username: ayodeji97
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+# Required by Kamal, and never used: every deploy is --skip-push. If it ever
+# were used, the server is Arm.
+builder:
+  arch: arm64
+
+proxy:
+  host: api.getmoyi.app
+  # Let's Encrypt, issued by kamal-proxy on the first deploy. Needs the DNS
+  # record to point straight at the server (Cloudflare "DNS only"; the plan's
+  # D8) and ports 80 and 443 open in the Hetzner firewall.
+  ssl: true
+  app_port: 8080
+  # With ssl: true kamal-proxy drops X-Forwarded-For unless told otherwise.
+  # Without it every request reaches the app from the proxy's address, and
+  # all clients share one rate-limit bucket (ADR-0023). The app believes the
+  # header only from MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES.
+  forward_headers: true
+  healthcheck:
+    # The `proxy` health group (application.yml), on the application's port:
+    # every indicator but Redis, and no details. /actuator/* lives on 8081,
+    # which nothing outside the container reaches.
+    path: /healthz
+    interval: 3
+    timeout: 3
+
+# The first boot runs every migration and loads the breach-corpus filter on
+# an Arm JVM, well past Kamal's 30-second default. Measure, then tighten.
+deploy_timeout: 120
+
+env:
+  clear:
+    # The accessories below, by container name on Kamal's Docker network.
+    SPRING_DATASOURCE_URL: jdbc:postgresql://moyi-postgres:5432/moyi
+    SPRING_DATASOURCE_USERNAME: moyi
+    SPRING_DATA_REDIS_HOST: moyi-valkey
+    SPRING_DATA_REDIS_PORT: 6379
+    # Pages on the website (deploy session 5), never this API: a link in an
+    # email is fetched by mail scanners (ADR-0018, ADR-0022).
+    MOYI_IDENTITY_VERIFICATION_LINK_BASE_URL: https://getmoyi.app/verify
+    MOYI_IDENTITY_VERIFICATION_RESET_LINK_BASE_URL: https://getmoyi.app/reset-password
+    MOYI_BOND_INVITE_LINK_BASE_URL: https://getmoyi.app/i
+    # getmoyi.app is verified in Resend (SPF, DKIM and DMARC pass).
+    MOYI_NOTIFICATION_EMAIL_FROM: Moyi <hello@getmoyi.app>
+  secret:
+    - SPRING_DATASOURCE_PASSWORD:POSTGRES_PASSWORD
+    - MOYI_SECURITY_JWT_PRIVATE_KEY_PEM
+    - MOYI_SECURITY_JWT_PUBLIC_KEY_PEM
+    - MOYI_SECURITY_HASHING_SECRET
+    - MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY
+
+accessories:
+  # Neither accessory publishes a port: they are reachable only on Kamal's
+  # Docker network, never on the server's address (doc 10 §8: "the single
+  # most common way a hobby project leaks its entire database").
+  postgres:
+    image: postgres:18
+    host: 91.98.71.136
+    # Tuned to Postgres's share of the box, not the whole of it (doc 10 §2.1).
+    cmd: postgres -c shared_buffers=512MB -c effective_cache_size=1536MB
+    env:
+      clear:
+        POSTGRES_USER: moyi
+        POSTGRES_DB: moyi
+      secret:
+        - POSTGRES_PASSWORD
+    directories:
+      # Postgres 18's image keeps its data under /var/lib/postgresql/18/...;
+      # mount the parent, as docker-compose.yml does. On the server this is
+      # /root/moyi-postgres/data.
+      - data:/var/lib/postgresql
+    options:
+      memory: 2g
+      # Docker's default /dev/shm is 64 MB, and Postgres uses it for parallel
+      # queries and sorts.
+      shm-size: 256m
+
+  valkey:
+    image: valkey/valkey:8
+    host: 91.98.71.136
+    # Rate-limit buckets only (ADR-0023), which fail open. appendonly keeps
+    # them across a restart (doc 10 §2). The buckets carry a TTL, so at the
+    # memory ceiling the oldest of them go first, below the container's limit
+    # so that Valkey evicts rather than being killed.
+    cmd: valkey-server --appendonly yes --maxmemory 256mb --maxmemory-policy volatile-lru
+    directories:
+      - data:/data
+    options:
+      memory: 384m
