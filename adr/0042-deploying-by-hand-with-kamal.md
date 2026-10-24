@@ -37,6 +37,13 @@ automatic security updates. `api.getmoyi.app` points straight at it.
 5. **The app's health check is `/healthz`** on the application's port, the
    actuator's `proxy` group. The actuator itself is on 8081, which kamal-proxy
    does not route and the firewall does not admit.
+6. **kamal-proxy runs with Docker's `none` log driver** (the owner's ruling on
+   the plan's D9, 2026-10-24). Its request log records each request's path and
+   query, which here means search words and invite codes, and those never reach
+   a log (ADR-0039; CLAUDE.md). Kamal cannot filter that log, only drop it.
+   Accepting the log for a short, capped retention was the alternative, rejected
+   because the rule has no retention exception. Moving the search words and
+   invite codes out of URLs is the change that would let the proxy log again.
 
 ## Consequences
 **Positive:** one command deploys, with zero downtime and `kamal rollback` back
@@ -48,9 +55,8 @@ repeatable.
 can deploy and nothing deploys on merge. The M0 definition ("deployed by CI",
 doc 25) is not yet met. There is no staging: a release meets production
 directly. The app connects as the database owner, so migrations and runtime
-share one role. The proxy's access log records request paths and queries,
-including search terms and invite codes (the plan's D9); it stays on the server,
-capped at 10 MB, and is never shipped elsewhere.
+share one role. kamal-proxy keeps no log at all (decision 6), so a routing or
+certificate problem has to be diagnosed by switching it on deliberately.
 
 **Neutral:** the trusted-proxy range (`MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES`)
 is known only once Kamal has created its network on the server, so it is set by

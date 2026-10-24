@@ -73,6 +73,17 @@ proxy:
   # all clients share one rate-limit bucket (ADR-0023). The app believes the
   # header only from MOYI_SECURITY_CLIENT_ADDRESS_TRUSTED_PROXIES.
   forward_headers: true
+  # No request log at all (owner's ruling D9, 2026-10-24). kamal-proxy logs
+  # every request's path and query, which here means search words (?q=) and
+  # invite codes, and nothing in this repository may log those (CLAUDE.md;
+  # ADR-0039). Kamal offers no filter, so the proxy container gets Docker's
+  # `none` log driver, and the 10 MB log option Kamal adds by default is
+  # dropped because that driver refuses options. The cost: no proxy log to
+  # debug with. To debug, switch it on deliberately, then off again.
+  run:
+    log_max_size: ""
+    options:
+      log-driver: none
   healthcheck:
     # The `proxy` health group (application.yml), on the application's port:
     # every indicator but Redis, and no details. /actuator/* lives on 8081,
