@@ -19,8 +19,14 @@
   var page = document.body.getAttribute("data-link");
   var value = "";
   if (page === "invite") {
-    var match = location.pathname.match(/^\/i\/([^/]+)\/?$/);
-    value = match ? decodeURIComponent(match[1]).trim().toUpperCase() : "";
+    // _redirects rewrites /i/<code> with no trailing slash, so neither does this.
+    var match = location.pathname.match(/^\/i\/([^/]+)$/);
+    try {
+      value = match ? decodeURIComponent(match[1]).trim().toUpperCase() : "";
+    } catch (malformed) {
+      // A mangled %-escape: say the link is incomplete rather than show nothing.
+      value = "";
+    }
   } else {
     value = (new URLSearchParams(location.search).get("token") || "").trim();
   }

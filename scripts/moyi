@@ -66,8 +66,9 @@
 # and what you write reach curl and python through files only you can read
 # and through pipes. (What you type after `moyi write` is in your own shell's
 # argument list and history; `moyi write -` reads it from stdin instead. An
-# invite code and a verification token are typed as arguments, and a code is
-# part of the URL, which curl is given in a file: both are single-use.)
+# invite code, a verification token and a reset token are typed as
+# arguments, and a code is part of the URL, which curl is given in a file:
+# all three are single-use.)
 #
 # It prints what the server sent. It decides nothing: every rule is the
 # server's, and this script is not a second copy of any of them.
