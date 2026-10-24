@@ -408,9 +408,9 @@ header_is "…and every authenticated request is counted against the per-user bu
 # prose title, and no implementation detail. Found by this smoke test on
 # 2026-09-24: a trailing slash was a 404 with `"type":null` and the detail
 # "No static resource api/v1/me." on an API that serves none.
-expect "a trailing slash is a 404 in the contract's shape" 404 '"type":"https://api.moyi.app/problems/not-found"' -- "$API/me/" -H "Authorization: Bearer $ACCESS"
+expect "a trailing slash is a 404 in the contract's shape" 404 '"type":"https://api.getmoyi.app/problems/not-found"' -- "$API/me/" -H "Authorization: Bearer $ACCESS"
 [[ "$LAST_BODY" == *'"detail":"No such resource."'* && "$LAST_BODY" != *"static resource"* ]] && pass "…that says only 'No such resource.'" || fail "404 detail" "${LAST_BODY:0:160}"
-expect "PUT /me is 405 METHOD_NOT_ALLOWED with a type" 405 '"type":"https://api.moyi.app/problems/method-not-allowed"' -- -X PUT "$API/me" -H "Authorization: Bearer $ACCESS"
+expect "PUT /me is 405 METHOD_NOT_ALLOWED with a type" 405 '"type":"https://api.getmoyi.app/problems/method-not-allowed"' -- -X PUT "$API/me" -H "Authorization: Bearer $ACCESS"
 expect "wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "not the password")"
 WRONG="$LAST_BODY"
 expect "unknown address is 401 too" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "nobody-$RANDOM@example.com" "not the password")"

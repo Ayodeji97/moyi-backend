@@ -50,7 +50,7 @@ internal class AccessTokenIssuerTest {
 
         jwt.claims.keys shouldContainExactlyInAnyOrder listOf("sub", "jti", "iat", "exp", "iss", "aud", "scope")
         jwt.subject shouldBe userId.toString()
-        jwt.issuer.toString() shouldBe "https://api.moyi.app"
+        jwt.issuer.toString() shouldBe "https://api.getmoyi.app"
         jwt.audience shouldBe listOf("moyi-app")
         jwt.issuedAt shouldBe now
         jwt.expiresAt shouldBe now.plus(Duration.ofMinutes(15))

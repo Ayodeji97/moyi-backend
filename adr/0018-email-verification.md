@@ -1,6 +1,6 @@
 # ADR-0018 — Email verification: hashed tokens, a landing page, and a listener that is not the outbox
 
-**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-10-22 (no link base URL in `application.yml`; decision 2 unchanged)
+**Status:** Accepted · **Date:** 2026-09-23 · **Amended:** 2026-10-22 (no link base URL in `application.yml`; decision 2 unchanged); 2026-10-24 (the JWT issuer and problem URIs name getmoyi.app)
 
 ## Context
 
@@ -54,3 +54,9 @@ Decision 2 said the link base URL is required, with no default, and `Verificatio
 **Tests.** `LinkBaseUrlsHaveNoDefaultTest` (`app`) reads the shipped files through Boot's config-data loading and asserts the default profile resolves none of the three, `local` and `test` resolve theirs, and the documented environment variables bind. `VerificationPropertiesTest` and `InvitePropertiesTest` assert a context without each value fails to start, naming it. Putting the `moyi.com` values back in `application.yml`, or a default back in either class, turns them red.
 
 **Considered and left alone: the JWT issuer.** `JwtProperties.DEFAULT_ISSUER` is `https://api.moyi.app`, also not a domain the project owns. It is a label: nothing fetches it, no token or code travels to it, and its only job is to differ between deployments that trust the same key (its KDoc). A wrong value there costs nothing to a third party, so it keeps its default.
+
+## Amendment — 2026-10-24: the issuer and the problem URIs name a domain the project owns
+
+The paragraph "Considered and left alone: the JWT issuer" kept `JwtProperties.DEFAULT_ISSUER` at `https://api.moyi.app` because a wrong label costs a third party nothing. That stays true. What changed is that the project now owns `getmoyi.app` (registered 2026-10-23), and both labels naming `moyi.app` are cheapest to change before the first deploy. After it, each is a breaking change: a new issuer rejects every access token issued under the old one, signing everyone out, and a client recognises an error by its `type`.
+
+So the issuer is `https://api.getmoyi.app` and `ProblemProperties.baseUri` is `https://api.getmoyi.app/problems`, the host the API will be served from. Nothing fetches either. `AccessTokenIssuerTest`, `GlobalExceptionHandlerTest` and `scripts/smoke.sh` hold the new values.
