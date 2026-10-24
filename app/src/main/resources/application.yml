@@ -19,8 +19,9 @@ spring:
       # park every request behind it and drain the connection pool (ADR-0031,
       # ADR-0033). A healthy wait lasts milliseconds; at 10 s something is
       # already broken, and the caller is better served by an error than by a
-      # longer wait. The tests say 15 s, for slow CI runners. LockTimeoutTest
-      # holds this line.
+      # longer wait. The modules' own test contexts say 15 s, for slow CI
+      # runners (common/web's test application.yml); the application's tests
+      # run under this line, and LockTimeoutTest holds it.
       connection-init-sql: SET lock_timeout = '10s'
   jpa:
     # Keep entities scoped to each service transaction. The bond access guard

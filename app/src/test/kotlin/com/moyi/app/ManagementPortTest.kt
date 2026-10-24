@@ -3,6 +3,7 @@ package com.moyi.app
 import com.moyi.common.testing.IntegrationTest
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
 import org.springframework.boot.env.YamlPropertySourceLoader
 import org.springframework.boot.test.context.SpringBootTest
@@ -66,6 +67,9 @@ class ManagementPortTest : IntegrationTest() {
 
         response.statusCode() shouldBe 200
         response.body() shouldContain "\"status\":\"UP\""
+        // The group inherits show-details: never. Its components would name
+        // the database and the disk to anyone on the internet.
+        response.body() shouldNotContain "components"
     }
 
     private fun get(
