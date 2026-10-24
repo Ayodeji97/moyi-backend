@@ -1,0 +1,19 @@
+# default-src 'none' is what makes these pages fetch nothing: no request to the
+# API, no font, no analytics. A token or code leaves the page only by being
+# copied (ADR-0018; link.js).
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+
+# The pages that carry a token or code are never cached, by the browser or by
+# Cloudflare.
+/verify
+  Cache-Control: no-store
+/reset-password
+  Cache-Control: no-store
+/i/*
+  Cache-Control: no-store
+/invite
+  Cache-Control: no-store
