@@ -205,7 +205,7 @@ class GlobalExceptionHandlerTest {
                 .response
 
         response.status shouldBe 405
-        response.contentAsString shouldContain "https://api.moyi.app/problems/method-not-allowed"
+        response.contentAsString shouldContain "https://api.getmoyi.app/problems/method-not-allowed"
         response.contentAsString shouldContain "\"title\":\"Method not allowed\""
         response.contentAsString shouldContain "\"instance\":\"/things\""
         // Spring's headers on its own errors survive the rebuild: `Allow` is
@@ -226,7 +226,7 @@ class GlobalExceptionHandlerTest {
 
         response.status shouldBe 404
         response.contentAsString shouldContain "\"code\":\"NOT_FOUND\""
-        response.contentAsString shouldContain "https://api.moyi.app/problems/not-found"
+        response.contentAsString shouldContain "https://api.getmoyi.app/problems/not-found"
         response.contentAsString shouldContain "\"detail\":\"No such resource.\""
         response.contentAsString shouldNotContain "static resource"
         response.contentAsString shouldNotContain "endpoint"
@@ -261,7 +261,7 @@ class GlobalExceptionHandlerTest {
                 }.andReturn()
                 .response
 
-        response.contentAsString shouldContain "https://api.moyi.app/problems/validation-failed"
+        response.contentAsString shouldContain "https://api.getmoyi.app/problems/validation-failed"
         response.contentAsString shouldContain "\"title\":\"Validation failed\""
         response.contentAsString shouldContain "\"instance\":\"/things\""
     }

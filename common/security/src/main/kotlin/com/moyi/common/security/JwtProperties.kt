@@ -52,7 +52,7 @@ data class JwtProperties(
     }
 
     private companion object {
-        const val DEFAULT_ISSUER = "https://api.moyi.app"
+        const val DEFAULT_ISSUER = "https://api.getmoyi.app"
         const val DEFAULT_AUDIENCE = "moyi-app"
         val DEFAULT_ACCESS_TOKEN_TTL: Duration = Duration.ofMinutes(15)
     }

@@ -13,6 +13,16 @@ springdoc:
   writer-with-default-pretty-printer: true
 
 spring:
+  datasource:
+    hikari:
+      # Postgres waits for a lock forever by default, so one stuck write would
+      # park every request behind it and drain the connection pool (ADR-0031,
+      # ADR-0033). A healthy wait lasts milliseconds; at 10 s something is
+      # already broken, and the caller is better served by an error than by a
+      # longer wait. The modules' own test contexts say 15 s, for slow CI
+      # runners (common/web's test application.yml); the application's tests
+      # run under this line, and LockTimeoutTest holds it.
+      connection-init-sql: SET lock_timeout = '10s'
   jpa:
     # Keep entities scoped to each service transaction. The bond access guard
     # reads before EndBond takes its row lock; sharing an EntityManager across
@@ -49,6 +59,15 @@ spring:
         enabled: false
 
 logging:
+  structured:
+    format:
+      # One JSON object per line, in the Elastic Common Schema: a log store can
+      # then filter by field (log.level, log.logger, process.thread.name)
+      # instead of matching text. The pins below decide WHICH lines are
+      # written; this decides only their shape. SecretsNeverLoggedTest and
+      # AddressNeverLoggedTest run under it, since the application's tests read
+      # this file. The `local` profile turns it off, for eyes.
+      console: ecs
   level:
     # Doc 18 §9: no personal data in a log. Postgres reports a unique
     # violation as "Key (email)=(ada@example.com) already exists", and
@@ -175,18 +194,31 @@ logging:
     org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO
 
 management:
+  server:
+    # The actuator on a port of its own, which kamal-proxy does not route: the
+    # Prometheus scrape below needs no token (Prometheus holds none), so it
+    # must not be reachable from the internet (ADR-0033, ADR-0035). The one
+    # health verdict the proxy needs stays on the application's port as
+    # /healthz (the `proxy` group). ManagementPortTest holds both.
+    port: 8081
   endpoints:
     web:
       exposure:
-        include: health
+        include: health, prometheus
   endpoint:
     health:
       show-details: never
+      group:
+        # The same verdict as /actuator/health (every indicator, Redis
+        # excluded below), served at /healthz on the application's port.
+        proxy:
+          include: "*"
+          additional-path: "server:/healthz"
   health:
     redis:
       # Deliberately NOT part of the health verdict. Doc 07 §5: "losing Redis
       # entirely degrades performance and nothing else" — the limiter fails
-      # open — and kamal-proxy routes on this endpoint, so a Redis outage
+      # open — and kamal-proxy routes on /healthz, so a Redis outage
       # reported as DOWN would take the whole application out of rotation to
       # protect a cache. Redis availability is visible instead through the
       # `moyi.rate_limit.backend_unavailable` counter (ADR-0023).

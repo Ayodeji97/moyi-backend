@@ -46,7 +46,8 @@ building it.
 ```
 docker compose up -d          # Postgres 18 + Redis (Valkey) for local dev
 ./gradlew bootRun             # starts the app on :8080, profile: default
-curl localhost:8080/actuator/health
+curl localhost:8080/healthz                 # the health the proxy routes on
+curl localhost:8081/actuator/prometheus     # metrics, on the management port
 ```
 Search needs the `unaccent` extension, which the official image ships (V25 creates it,
 and `btree_gin`, which the image ships too: ADR-0039).

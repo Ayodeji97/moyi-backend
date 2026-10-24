@@ -37,6 +37,9 @@ dependencies {
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    // Formats the meters the actuator already keeps the way Prometheus reads
+    // them, at /actuator/prometheus on the management port (application.yml).
+    runtimeOnly("io.micrometer:micrometer-registry-prometheus")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     // Jackson 3 (`tools.jackson`), which is what Spring Boot 4 wires into
     // its message converters — not Jackson 2's `com.fasterxml.jackson`

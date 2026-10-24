@@ -36,7 +36,7 @@ class RedisOutageTest(
 ) : PostgresIntegrationTest() {
     @Test
     fun `health is UP without Redis`() {
-        val response = mockMvc.get("/actuator/health").andReturn().response
+        val response = mockMvc.get("/healthz").andReturn().response
 
         response.status shouldBe 200
         response.contentAsString shouldContain "\"status\":\"UP\""

@@ -71,7 +71,11 @@
 # same for both; and after a leave, what was reached kept and nothing next, for both alike.
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-22, for the two rulings of
+# days are the tests' to show. Last run on 2026-10-24, for the production
+# configuration (health at /healthz, the scrape on MGMT_PORT, problem types on
+# api.getmoyi.app), from a jar of b4386b9's code, against a database of its own
+# and --attach, Postgres on 55432: 932 passed, 0 failed, 0 skipped, 24 sections.
+# Before it, on 2026-10-22, for the two rulings of
 # ADR-0040 (what an ended bond reveals), from 6445d92's jar (its code is
 # 7c8d408's), against a database of its own and --attach, Postgres on port
 # 55432 because another project's container held 5432: 930 passed, 0 failed,
@@ -124,7 +128,7 @@
 # Usage:
 #   scripts/smoke.sh              # builds the jar, boots it, probes, stops it
 #   scripts/smoke.sh --no-build   # reuse app/build/libs/*.jar
-#   PORT=18080 scripts/smoke.sh   # boot on another port
+#   PORT=18080 MGMT_PORT=18081 scripts/smoke.sh   # boot on other ports
 #   BASE=http://localhost:8080 scripts/smoke.sh --attach  # probe a server you started yourself;
 #                                                          # needs MOYI_LOG=<its log file> to read the emailed link
 #   MOYI_JAVA=/path/to/jdk-25/bin/java scripts/smoke.sh   # boot with that JDK instead of the one found
@@ -151,10 +155,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 PORT="${PORT:-8080}"
+# The actuator's own port (application.yml management.server.port).
+MGMT_PORT="${MGMT_PORT:-8081}"
 MOYI_DB="${MOYI_DB:-moyi}"
 [[ "$MOYI_DB" =~ ^[a-z_][a-z0-9_]*$ ]] || { echo "MOYI_DB must be a plain lower-case database name, got '$MOYI_DB'" >&2; exit 2; }
 BASE="${BASE:-http://localhost:$PORT}"
 API="$BASE/api/v1"
+MGMT_BASE="${MGMT_BASE:-http://localhost:$MGMT_PORT}"
 BUILD=1
 ATTACH=0
 for arg in "$@"; do
@@ -260,7 +267,7 @@ if [ "$ATTACH" = 0 ]; then
   JAVA="$(find_java)" || { echo "no JDK $MIN_JAVA or newer found: set MOYI_JAVA or JAVA_HOME, or install one (README: sdk install java 25.0.4-tem)"; exit 1; }
   MOYI_LOG="$(mktemp -t moyi-smoke.XXXXXX.log)"
   echo "booting $JAR (local profile) on $("$JAVA" -version 2>&1 | head -1), log: $MOYI_LOG"
-  "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" \
+  "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" --management.server.port="$MGMT_PORT" \
     --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" \
     --moyi.scheduling.close.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
@@ -285,7 +292,9 @@ register_body() { printf '{"email":"%s","password":"%s","displayName":"Smoke","l
 flush_buckets
 
 echo; echo "health"
-expect "GET /actuator/health is UP" 200 '"status":"UP"' -- "$BASE/actuator/health"
+expect "GET /healthz is UP" 200 '"status":"UP"' -- "$BASE/healthz"
+expect "the actuator is not on the application's port" 404 '"code":"NOT_FOUND"' -- "$BASE/actuator/prometheus"
+expect "the Prometheus scrape is on the management port" 200 'moyi_rate_limit_backend_unavailable_total' -- "$MGMT_BASE/actuator/prometheus"
 
 echo; echo "registration (FR-001, FR-011, ADR-0015)"
 # Each probe arrives from its own address. Registration is three an hour per
@@ -403,9 +412,9 @@ header_is "…and every authenticated request is counted against the per-user bu
 # prose title, and no implementation detail. Found by this smoke test on
 # 2026-09-24: a trailing slash was a 404 with `"type":null` and the detail
 # "No static resource api/v1/me." on an API that serves none.
-expect "a trailing slash is a 404 in the contract's shape" 404 '"type":"https://api.moyi.app/problems/not-found"' -- "$API/me/" -H "Authorization: Bearer $ACCESS"
+expect "a trailing slash is a 404 in the contract's shape" 404 '"type":"https://api.getmoyi.app/problems/not-found"' -- "$API/me/" -H "Authorization: Bearer $ACCESS"
 [[ "$LAST_BODY" == *'"detail":"No such resource."'* && "$LAST_BODY" != *"static resource"* ]] && pass "…that says only 'No such resource.'" || fail "404 detail" "${LAST_BODY:0:160}"
-expect "PUT /me is 405 METHOD_NOT_ALLOWED with a type" 405 '"type":"https://api.moyi.app/problems/method-not-allowed"' -- -X PUT "$API/me" -H "Authorization: Bearer $ACCESS"
+expect "PUT /me is 405 METHOD_NOT_ALLOWED with a type" 405 '"type":"https://api.getmoyi.app/problems/method-not-allowed"' -- -X PUT "$API/me" -H "Authorization: Bearer $ACCESS"
 expect "wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "not the password")"
 WRONG="$LAST_BODY"
 expect "unknown address is 401 too" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "nobody-$RANDOM@example.com" "not the password")"
