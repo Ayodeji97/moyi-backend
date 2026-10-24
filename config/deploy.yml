@@ -126,8 +126,18 @@ env:
     # scripts/argon2-bench: t=2 61 ms, t=4 106, t=5 120, t=6 147 and 155
     # (two runs, p95 164 and 172), t=7 174, t=8 195 (medians of 15). Each
     # concurrent hash still holds ~19 MiB off-heap; the iterations add time,
-    # not memory. A password hashed under an older t keeps verifying, because
-    # the hash records its own parameters.
+    # not memory.
+    #
+    # Changing it once accounts exist opens a timing oracle (ADR-0020). A
+    # stored hash is verified at the t it was made with, while an unknown
+    # email is checked against a dummy hash made at startup with the current
+    # t. Raise t over existing t=2 hashes and a wrong password for a real
+    # account answers faster than an unknown address, which tells an
+    # attacker the address is registered. Set to 6 while production had no
+    # accounts (0 rows in credentials, 2026-10-24), so every hash is made at
+    # t=6. Before changing it again, make failed verifications cost the same
+    # whatever t the stored hash carries; rehashing on login alone leaves
+    # accounts that never log in distinguishable (review of #83).
     MOYI_SECURITY_ARGON2_ITERATIONS: 6
   secret:
     - SPRING_DATASOURCE_PASSWORD:POSTGRES_PASSWORD
