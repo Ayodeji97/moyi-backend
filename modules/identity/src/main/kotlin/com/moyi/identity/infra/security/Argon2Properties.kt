@@ -22,9 +22,14 @@ import org.springframework.validation.annotation.Validated
  * The knob is [iterations]: cost scales close to linearly in `t`, so ~150 ms
  * is around `t=16` on this machine. It is deliberately **not** changed here,
  * because the number that matters is the one measured on the deployment
- * target (doc 15: "tuned and benchmarked on the ARM target"), that box does
- * not exist yet, and tuning against a developer laptop would bake in the
- * wrong answer while looking like diligence. This is owed before M1.
+ * target (doc 15: "tuned and benchmarked on the ARM target"), and tuning
+ * against a developer laptop would bake in the wrong answer while looking
+ * like diligence.
+ *
+ * **Tuned on the target since 2026-10-24.** On the production server (a
+ * Hetzner CAX21, Arm) these defaults hash in 61 ms, and `t=6` in ~150 ms,
+ * which production sets through `MOYI_SECURITY_ARGON2_ITERATIONS` in
+ * config/deploy.yml. scripts/argon2-bench measures it again.
  */
 @Validated
 @ConfigurationProperties(prefix = "moyi.security.argon2")
