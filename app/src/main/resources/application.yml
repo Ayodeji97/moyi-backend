@@ -58,6 +58,15 @@ spring:
         enabled: false
 
 logging:
+  structured:
+    format:
+      # One JSON object per line, in the Elastic Common Schema: a log store can
+      # then filter by field (log.level, log.logger, process.thread.name)
+      # instead of matching text. The pins below decide WHICH lines are
+      # written; this decides only their shape. SecretsNeverLoggedTest and
+      # AddressNeverLoggedTest run under it, since the application's tests read
+      # this file. The `local` profile turns it off, for eyes.
+      console: ecs
   level:
     # Doc 18 §9: no personal data in a log. Postgres reports a unique
     # violation as "Key (email)=(ada@example.com) already exists", and

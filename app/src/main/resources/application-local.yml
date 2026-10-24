@@ -52,3 +52,10 @@ moyi:
       trusted-proxies:
         - 127.0.0.0/8
         - ::1/128
+
+logging:
+  structured:
+    format:
+      # Plain text on a laptop: application.yml writes JSON for a log store, and
+      # an empty format is Spring Boot's own "not structured".
+      console: ""
