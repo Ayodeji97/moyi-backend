@@ -13,6 +13,7 @@
 #
 #   moyi register <email> <display name> [locale]   the language you are shown prompts in, e.g. pt-PT (en if not given)
 #   moyi verify <token>                      the token in the confirmation email (getmoyi.app/verify shows it)
+#   moyi resend-verification <email>         a new confirmation email, when the first has expired (they last 24 hours)
 #   moyi login <email>
 #   moyi forgot-password <email>             emails a reset link, if the address has an account
 #   moyi reset-password <token>              the token in that email; asks for the new password twice
@@ -269,6 +270,11 @@ case "$cmd" in
     [ $# -eq 1 ] || die "usage: moyi verify <token>"
     ANONYMOUS=1 call POST /auth/verify-email "$(json_of token "$1")"; show 200
     echo "Verified."
+    ;;
+  resend-verification)
+    [ $# -eq 1 ] || die "usage: moyi resend-verification <email>"
+    ANONYMOUS=1 call POST /auth/resend-verification "$(json_of email "$1")"; show 202
+    echo "If $1 has an account still to be confirmed, a new email is on its way. Then: moyi verify <the token in it>"
     ;;
   login)
     [ $# -eq 1 ] || die "usage: moyi login <email>"
