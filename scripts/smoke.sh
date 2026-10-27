@@ -71,7 +71,13 @@
 # same for both; and after a leave, what was reached kept and nothing next, for both alike.
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-24, for the production
+# days are the tests' to show. Since Phase 4 N1 it registers a push token for
+# the session's device, replaces and removes it, sees a logout forget it, a
+# deviceless or ended session answered 404, and the token in no log line; no
+# push is sent, since nothing requests one before N3. Last run on 2026-10-27,
+# from a jar of this change's code before its rebase onto 158bbfe, against a database of its own and --attach, Postgres on
+# 55432: 952 passed, 0 failed, 1 skipped (the tag across the erasure, the
+# poller having won the race), 25 sections. Before it, on 2026-10-24, for the production
 # configuration (health at /healthz, the scrape on MGMT_PORT, problem types on
 # api.getmoyi.app), from a jar of b4386b9's code, against a database of its own
 # and --attach, Postgres on 55432: 932 passed, 0 failed, 0 skipped, 24 sections.
