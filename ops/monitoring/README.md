@@ -26,13 +26,14 @@ ssh moyi 'chmod 700 /usr/local/sbin/moyi-close-check && install -d -m 700 /etc/m
 
 The ping URLs come from Healthchecks.io (one per check) and are kept in
 Bitwarden (`moyi-prod`: `HC_BACKUP_URL`, `HC_CLOSE_URL`). Whoever has one can
-report "all well", so they are root-only on the server:
+report "all well", so they are root-only on the server (`backup.env` is already
+600; the `sed` makes a re-run replace the line rather than add a second one):
 
 ```
 export BW_SESSION="$(bw unlock --raw)"
 f() { bw get item moyi-prod | python3 -c 'import json,sys; print(next(x["value"] for x in json.load(sys.stdin)["fields"] if x["name"]==sys.argv[1]))' "$1"; }
 printf 'CLOSE_PING_URL="%s"\n' "$(f HC_CLOSE_URL)" | ssh moyi 'install -m 600 /dev/stdin /etc/moyi-monitoring/heartbeats.env'
-printf 'PING_URL="%s"\n' "$(f HC_BACKUP_URL)" | ssh moyi 'cat >> /etc/moyi-backup/backup.env'
+printf 'PING_URL="%s"\n' "$(f HC_BACKUP_URL)" | ssh moyi 'sed -i "/^PING_URL=/d" /etc/moyi-backup/backup.env && cat >> /etc/moyi-backup/backup.env'
 bw lock; unset BW_SESSION
 ssh moyi 'systemctl start moyi-close-check; journalctl -u moyi-close-check -n 3 --no-pager'
 ssh moyi 'systemctl enable --now moyi-close-check.timer'

@@ -7,7 +7,11 @@
 # minutes. Two things say it is alive, both read from the database:
 #   - ShedLock's row for `close-days` was taken within the last 30 minutes
 #     (the job takes it on every run, on whichever instance runs it);
-#   - no day that ended more than 30 minutes ago is still unclosed.
+#   - no day that ended more than 30 minutes ago is still unclosed. A day
+#     whose bond row is gone is left out: the job leaves it unclosed on purpose
+#     and logs it at WARN on every run (ADR-0033), so it would alarm forever.
+# ShedLock's timestamps are zoneless UTC, hence `now() AT TIME ZONE 'UTC'`.
+# A PENDING_REVEAL day needs no exception: the job closes it at its end too.
 # Both true: it pings the heartbeat. Either false: it pings the heartbeat's
 # /fail URL with the reason, which alerts at once. If the box, Docker or
 # Postgres is down, no ping arrives at all and the heartbeat's grace period
@@ -27,8 +31,9 @@ die() { echo "moyi-close-check: $*" >&2; exit 1; }
 lock_age="" unclosed=""
 read -r lock_age unclosed < <(docker exec moyi-postgres psql -U moyi -d moyi -AtF ' ' -c "
   SELECT
-    coalesce((SELECT extract(epoch FROM now() - locked_at)::int FROM shedlock WHERE name = 'close-days'), 999999),
-    (SELECT count(*) FROM bond_days WHERE closed_at IS NULL AND ends_at < now() - interval '30 minutes')
+    coalesce((SELECT extract(epoch FROM (now() AT TIME ZONE 'UTC') - locked_at)::int FROM shedlock WHERE name = 'close-days'), 999999),
+    (SELECT count(*) FROM bond_days d WHERE d.closed_at IS NULL AND d.ends_at < now() - interval '30 minutes'
+       AND EXISTS (SELECT 1 FROM bonds b WHERE b.id = d.bond_id))
 ") || true
 [ -n "$unclosed" ] || die "could not read the database"
 
