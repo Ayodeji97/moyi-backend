@@ -184,7 +184,7 @@ internal class WithdrawalTwinArchiveTest(
             val at = Instant.parse("${date}T10:00:00Z")
             val adas = rig.insertEntry(day, bond, adasMember, EntryState.REVEALED, "zq-ada-$index", at)
             val beas = rig.insertEntry(day, bond, beasMember, EntryState.REVEALED, "zq-bea-$index", at)
-            mark(if (index == 0) beas!! else adas!!, beasMember, at)
+            mark(if (index == 0) beas!! else adas!!, beasMember)
         }
         clock.set(NOW)
         rig.bonds.block(ada, bond, true)
@@ -215,7 +215,7 @@ internal class WithdrawalTwinArchiveTest(
             val at = Instant.parse("${date}T10:00:00Z")
             val adas = rig.insertEntry(day, bond, adasMember, EntryState.REVEALED, "zq-ada-$index", at)
             rig.insertEntry(day, bond, beasMember, EntryState.REVEALED, "zq-bea-$index", at)
-            mark(adas!!, beasMember, at)
+            mark(adas!!, beasMember)
         }
         clock.set(NOW)
         rig.bonds.block(ada, bond, true)
@@ -241,7 +241,7 @@ internal class WithdrawalTwinArchiveTest(
             val at = Instant.parse("${date}T10:00:00Z")
             val adas = rig.insertEntry(day, bond, adasMember, EntryState.REVEALED, "review-probe", at)
             rig.insertEntry(day, bond, beasMember, EntryState.REVEALED, "review-probe", at)
-            mark(adas!!, beasMember, at)
+            mark(adas!!, beasMember)
             // And she left a reaction on each (slice C5c): hidden with the words, and gone with them.
             jdbc.update("INSERT INTO reactions (entry_id, member_id, type) VALUES (?, ?, 'HEART')", adas, beasMember) shouldBe 1
         }
@@ -354,13 +354,11 @@ internal class WithdrawalTwinArchiveTest(
     private fun mark(
         entry: UUID,
         member: UUID,
-        at: Instant,
     ) {
         jdbc.update(
-            "INSERT INTO entry_favourites (entry_id, member_id, created_at) VALUES (?, ?, ?)",
+            "INSERT INTO entry_favourites (entry_id, member_id) VALUES (?, ?)",
             entry,
             member,
-            java.sql.Timestamp.from(at),
         ) shouldBe 1
     }
 
