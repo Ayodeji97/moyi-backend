@@ -9,6 +9,7 @@ import com.lemonappdev.konsist.api.provider.modifier.KoVisibilityModifierProvide
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import java.io.File
 
 /**
  * Executable architecture rules — doc 16 §2.1: "Add Konsist enforcement,
@@ -393,6 +394,33 @@ class ArchitectureTest {
             "Only a module's api package is public; every other class, interface, object, " +
                 "type alias, top-level function and top-level property must be internal, " +
                 "so other modules physically cannot reach it. Found public: $violations",
+        )
+    }
+
+    @Test
+    fun `notification depends on no domain module, so that any module may tell it something`() {
+        // Spec §2.1, ADR-0044: identity already depends on notification (for
+        // EmailSender), and bond and gratitude on identity, so notification
+        // reading a device, a member or a bond would be a cycle. It stays a
+        // leaf: the modules that hold the facts resolve who is told what and
+        // hand it values. Gradle refuses a cycle with identity, bond or
+        // gratitude on its own; it would not refuse notification -> media,
+        // scheduling, admin or analytics, and it never sees an import. This does.
+        val others = MODULES - "notification"
+        val imports =
+            project.files
+                .filter { it.normalisedProjectPath.startsWith("/modules/notification/src/") }
+                .flatMap { file ->
+                    file.imports
+                        .filter { import -> others.any { import.name.startsWith("com.moyi.$it.") } }
+                        .map { "${file.name}: ${it.name}" }
+                }
+        val buildFile = File("../modules/notification/build.gradle.kts").readText()
+        val dependencies = others.filter { "projects.modules.$it" in buildFile }
+
+        assertTrue(
+            imports.isEmpty() && dependencies.isEmpty(),
+            "notification must depend on no domain module (spec §2.1, ADR-0044). Imports: $imports; build dependencies: $dependencies",
         )
     }
 

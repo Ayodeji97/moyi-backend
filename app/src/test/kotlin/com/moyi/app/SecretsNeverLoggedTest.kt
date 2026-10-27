@@ -12,6 +12,9 @@ import com.moyi.common.events.OutboxEvent
 import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.events.StartFrom
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.notification.api.Notifications
+import com.moyi.notification.api.PushCategory
+import com.moyi.notification.api.PushRequest
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
@@ -75,6 +78,7 @@ import javax.sql.DataSource
  * set and removed, a conditional read that answers `304`), a search, by a
  * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), on this day with a memory, the
  * milestones, a reaction set,
+ * a push token registered, sent to through the outbox and forgotten (ADR-0044),
  * replaced, refused and taken back, delete, an ending
  * that withdraws, the withdrawal's erasure by the dispatcher, a failing
  * transactional consumer, and a refresh. An `ETag` is not scanned for: it is
@@ -150,6 +154,7 @@ class SecretsNeverLoggedTest(
     @Autowired private val publisher: EventPublisher,
     @Autowired private val transactions: TransactionTemplate,
     @Autowired private val failingConsumer: FailingConsumer,
+    @Autowired private val notifications: Notifications,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
     private val http = HttpClient.newHttpClient()
@@ -293,6 +298,7 @@ class SecretsNeverLoggedTest(
         get("/bonds/$bond/today", bea).status shouldBe 200
 
         failingConsumerDoesNotLogItsException()
+        pushTokenIsNeverLogged(ada, bond)
 
         // A refresh sends the refresh token back; the pair it returns is watched too.
         val refreshed = send("POST", "/auth/refresh", null, """{"refreshToken":"${ada.refresh}"}""")
@@ -361,6 +367,36 @@ class SecretsNeverLoggedTest(
             logging.setLogLevel(DISPATCHER_SERVLET, LogLevel.INFO)
             logging.setLogLevel(FILTER_CHAIN_PROXY, LogLevel.INFO)
         }
+    }
+
+    /**
+     * ADR-0044: a push token is a secret. Registered through the route, sent to by the
+     * `notification.push` consumer through the outbox, and forgotten, with every level at TRACE.
+     * The provider here is the logging one; FCM's own adapter is held to the same in its module
+     * (`FcmPushSenderTest`), where its HTTP client is raised to TRACE.
+     */
+    private fun pushTokenIsNeverLogged(
+        session: Session,
+        bond: String,
+    ) {
+        scan.watch("push token", PUSH_TOKEN)
+        send("PUT", "/me/devices/current/push-token", session, """{"token":"$PUSH_TOKEN"}""").status shouldBe 204
+        val user = jdbc.queryForObject("SELECT user_id FROM push_tokens", UUID::class.java)!!
+        transactions.executeWithoutResult {
+            notifications.request(
+                PushRequest(
+                    user,
+                    UUID.fromString(bond),
+                    PushCategory.REVEAL,
+                    "secrets-probe:$user",
+                    Instant.now().plusSeconds(PUSH_STALE_SECONDS),
+                ),
+            ) shouldBe true
+        }
+        dispatcher.dispatchDue(Instant.now(), DISPATCH_BUDGET).delivered shouldBe 1
+        jdbc.queryForObject("SELECT status FROM notifications WHERE user_id = ?", String::class.java, user) shouldBe "SENT"
+        send("DELETE", "/me/devices/current/push-token", session, null).status shouldBe 204
+        jdbc.queryForObject("SELECT count(*) FROM push_tokens", Int::class.java) shouldBe 0
     }
 
     /** The catch in the dispatcher runs after this consumer's transactional interceptor. */
@@ -432,7 +468,14 @@ class SecretsNeverLoggedTest(
             )
         registered.status shouldBe 201
         jdbc.update("UPDATE users SET email_verified_at = now() WHERE email = ?::citext", email) shouldBe 1
-        val login = send("POST", "/auth/login", null, """{"email":"$email","password":"$PASSWORD"}""", forwardedFor = address)
+        val login =
+            send(
+                "POST",
+                "/auth/login",
+                null,
+                """{"email":"$email","password":"$PASSWORD","device":{"platform":"ANDROID","appVersion":"1.0","osVersion":"16"}}""",
+                forwardedFor = address,
+            )
         login.status shouldBe 200
         val session = Session(login.json["accessToken"].asString(), login.json["refreshToken"].asString())
         scan.watch("access token", session.access)
@@ -599,6 +642,8 @@ class SecretsNeverLoggedTest(
         const val RUN_ID_LENGTH = 8
         const val SOCKET_TIMEOUT_MILLIS = 15_000
         const val DISPATCH_BUDGET = 10
+        const val PUSH_TOKEN = "fcm~push~token~secret"
+        const val PUSH_STALE_SECONDS = 3_600L
 
         val ENTRY_MARKERS =
             listOf("entry text 0" to Watched(Regex("~wrote~")), "entry text 1" to Watched(Regex("~edited~")))

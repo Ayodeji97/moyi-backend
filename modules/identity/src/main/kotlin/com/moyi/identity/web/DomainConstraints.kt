@@ -3,6 +3,7 @@ package com.moyi.identity.web
 import com.moyi.identity.domain.BreachedPasswordCorpus
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
+import com.moyi.notification.api.PushToken
 import jakarta.validation.Constraint
 import jakarta.validation.ConstraintValidator
 import jakarta.validation.ConstraintValidatorContext
@@ -191,6 +192,26 @@ internal class NotBreachedValidator(
  * polite 422 about the user's input, which is exactly the kind of silence
  * this codebase keeps having to dig back out.
  */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [PushTokenConstraintValidator::class])
+internal annotation class ValidPushToken(
+    val message: String = "is not a valid push token",
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+/** Asks `notification.api.PushToken` whether the value is a token, and reports its answer (ADR-0044). */
+internal class PushTokenConstraintValidator : ConstraintValidator<ValidPushToken, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean {
+        if (value.isNullOrBlank()) return true
+        return validate(context) { PushToken(value) }
+    }
+}
+
 private inline fun validate(
     context: ConstraintValidatorContext,
     construct: () -> Unit,

@@ -16,7 +16,13 @@ import org.springframework.data.domain.Persistable
 import java.time.Instant
 import java.util.UUID
 
-/** The `devices` row (V8). Same [Persistable] arrangement as the others. */
+/**
+ * The `devices` row (V8). Same [Persistable] arrangement as the others.
+ *
+ * `devices.push_token` is not mapped: a device's push token is kept by
+ * `notification` (ADR-0044, spec D-1). The column was never written, and a
+ * later migration drops it once no running build maps it (expand/contract).
+ */
 @Entity
 @Table(name = "devices")
 internal class DeviceEntity(
@@ -28,8 +34,6 @@ internal class DeviceEntity(
     @Enumerated(EnumType.STRING)
     @Column(name = "platform", nullable = false, updatable = false)
     var platform: DevicePlatform,
-    @Column(name = "push_token", length = 512)
-    var pushToken: String?,
     @Column(name = "app_version", nullable = false, length = 40)
     var appVersion: String,
     @Column(name = "os_version", nullable = false, length = 40)
@@ -67,7 +71,6 @@ internal fun DeviceEntity.toDomain(): Device =
         appVersion = appVersion,
         osVersion = osVersion,
         lastSeenAt = lastSeenAt,
-        pushToken = pushToken,
         revokedAt = revokedAt,
     )
 
@@ -76,7 +79,6 @@ internal fun Device.toEntity(): DeviceEntity =
         id = id,
         userId = userId.value,
         platform = platform,
-        pushToken = pushToken,
         appVersion = appVersion,
         osVersion = osVersion,
         lastSeenAt = lastSeenAt,
