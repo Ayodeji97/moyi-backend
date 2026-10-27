@@ -1045,7 +1045,9 @@ Each is built one way and cheap to turn.
      one function (`displayNameOf`, beside `BondViews`) that both use.
    - **Read at request time**, from `identity.api.UserDirectory`, as `BondViews` reads it:
      a changed name changes everywhere at once. So a rename moves the archive's `ETag`,
-     which is right, since the tag is the body. It discloses nothing new: the caller's own
+     which is right, since the tag is the body. The test of that renames through the test's
+     own directory: it stands in for a `PATCH /me` that does not exist yet, and today a name
+     is fixed at registration. It discloses nothing new: the caller's own
      `GET /bonds/{bondId}` already names both members.
    - **`bond` owes it, through `BondAccess.partnerDisplayNameOf(membership)`.** It takes
      the unforgeable `BondMembership` (ADR-0026), so it cannot be asked about a bond the
@@ -1064,7 +1066,10 @@ Each is built one way and cheap to turn.
    **What it costs decision 6.** The name is on fifty days a page, and identity takes 80
    characters with no rule against controls, which JSON writes as six octets each: at its
    largest about 25 KB of the margin, which leaves about 4 KB. `DaysFeedTest` builds the
-   largest page with the longest name on every day and measures it. The next field on a day
+   largest page with the longest name on every day and measures it, and
+   `OpenApiContractTest` fails if identity's limit ever grows past the length it measured
+   with (`ArchivePageBudget`). On-this-day is not measured: it is capped at one day a year
+   for a hundred years, which no bond can yet fill. The next field on a day
    or an entry needs that bound looked at again (Revisit when).
 6. **A partner's entry that was written and erased before you saw it is a permanent
    `REMOVED` in the archive** (decision 1). BR-8 allows the shape, and `today` has shown it

@@ -292,7 +292,7 @@ fi
 
 EMAIL="smoke-$(date +%s)-$RANDOM@example.com"
 PASSWORD="correct horse battery"
-register_body() { printf '{"email":"%s","password":"%s","displayName":"Smoke","locale":"%s","acceptedTermsVersion":"2026-09-01","over18":true}' "$1" "$PASSWORD" "${2:-en}"; }
+register_body() { printf '{"email":"%s","password":"%s","displayName":"%s","locale":"%s","acceptedTermsVersion":"2026-09-01","over18":true}' "$1" "$PASSWORD" "${3:-Smoke}" "${2:-en}"; }
 
 # A previous run's buckets must not count against this one.
 flush_buckets
@@ -616,14 +616,14 @@ LOG_LINES_BEFORE_ENDING="$(wc -l < "$MOYI_LOG" | tr -d ' ')"
 # Registers, verifies and signs in one account, leaving its token in
 # ACCOUNT_ACCESS. Factored out because this section needs four accounts and the
 # sequence was already written twice inline above. Every account has the same
-# display name ("Smoke", from register_body), which is what lets two bonds be
-# compared byte for byte below. A different X-Forwarded-For each time, so the
-# per-IP registration bucket is not what this section ends up testing.
+# display name ("Smoke", from register_body) unless it is given one, which is what
+# lets two bonds be compared byte for byte below. A different X-Forwarded-For each
+# time, so the per-IP registration bucket is not what this section ends up testing.
 verified_account() {
-  local label="$1" ip="$2" locale="${3:-en}" email before token
+  local label="$1" ip="$2" locale="${3:-en}" name="${4:-Smoke}" email before token
   email="end-$label-$(date +%s)-$RANDOM@example.com"
   before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
-  expect "register $label" 201 "" -- -X POST "$API/auth/register" -H "X-Forwarded-For: $ip" -d "$(register_body "$email" "$locale")"
+  expect "register $label" 201 "" -- -X POST "$API/auth/register" -H "X-Forwarded-For: $ip" -d "$(register_body "$email" "$locale" "$name")"
   for _ in $(seq 1 40); do [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$before" ] && break; sleep 0.25; done
   token="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
   expect "verify $label" 200 "" -- -X POST "$API/auth/verify-email" -d "{\"token\":\"$token\"}"
@@ -1287,8 +1287,9 @@ no_instance() { printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":
 no_times() { if [[ "$LAST_BODY" == *'"deletedAt"'* || "$LAST_BODY" == *'"updatedAt"'* ]]; then fail "$1" "${LAST_BODY:0:300}"; else pass "$1"; fi; }
 tag() { etag_of || true; }
 
-verified_account "writer" "203.0.113.90";   ARC_W="$ACCOUNT_ACCESS"
-verified_account "marker" "203.0.113.91";   ARC_M="$ACCOUNT_ACCESS"
+# The two members go by different names, so a day that named the caller instead of the partner would fail.
+verified_account "writer" "203.0.113.90" en "Writer"; ARC_W="$ACCOUNT_ACCESS"
+verified_account "marker" "203.0.113.91" en "Marker"; ARC_M="$ACCOUNT_ACCESS"
 verified_account "outsider" "203.0.113.92"; ARC_O="$ACCOUNT_ACCESS"
 ARC_W_TEXT="thank you for the tea left by the door"
 ARC_M_TEXT="thank you for reading to me last night"
@@ -1308,14 +1309,13 @@ is "…the writer's own entry is myEntry, with its words" "$(raw items.0.myEntry
 is "…the partner's is partnerEntry, with its words" "$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)" "$ARC_M_ENTRY|$ARC_M_TEXT"
 is "…neither is marked, and there is no further page" "$(at items.0.myEntry.favourited)|$(at items.0.partnerEntry.favourited)|$(at nextCursor)" "false|false|null"
 no_times "…and no entry says when it was erased or last changed"
-# What the other member goes by, which GET /bonds/{bondId} already tells both;
-# every account here registers as "Smoke" (ADR-0036 question 5).
-is "…and the day names the partner" "$(raw items.0.partnerDisplayName)" "Smoke"
+# What the other member goes by, which GET /bonds/{bondId} already tells both (ADR-0036 question 5).
+is "…and the day names the partner, not the writer" "$(raw items.0.partnerDisplayName)" "Marker"
 ARC_W_ITEM="$(at items.0)"
 expect "the marker's GET /days is 200" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
 is "…the same day, REVEALED, and no other" "$(raw items.0.date)|$(raw items.0.status)|$(at items.1)|$(at nextCursor)" "$ARC_DATE|REVEALED|absent|null"
 is "…with the two entries the other way round" "$(raw items.0.myEntry.id)|$(raw items.0.myEntry.text)|$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)" "$ARC_M_ENTRY|$ARC_M_TEXT|$ARC_W_ENTRY|$ARC_W_TEXT"
-is "…and the partner named the same way" "$(raw items.0.partnerDisplayName)" "Smoke"
+is "…and names the writer, not the marker" "$(raw items.0.partnerDisplayName)" "Writer"
 ARC_M_ITEM="$(at items.0)"
 
 # One day is the feed's item, not a second rendering of it.
