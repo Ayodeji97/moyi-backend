@@ -22,19 +22,12 @@ collection variables, which every environment shares, so the second person's log
 replace the first's. The second person skips Create bond and runs Accept invite with the
 code the first was given (set it as the secret `inviteCode`).
 
-**Not yet opened in Bruno.** These files were written against Bruno's documented format
-and every request in them is one the smoke run sends with curl, but the collection itself
-has not been run. If a request fails to load, that is where to look first; `scripts/moyi`
-has been run end to end. That is as true of the four archive requests, which are the first
-here to switch a query parameter off (`~`), to send a header from a variable, and to read
-a response header in a script: Day's `If-None-Match` is where to look first of all. The
-two reaction requests (17 and 18, added 2026-10-13) have not been opened in Bruno either;
-`scripts/moyi react` and `unreact` send the same two requests and were run. The prompt
-(09's post-response script and 08's pre-request addition, 2026-10-20) has not been opened in
-Bruno either; `scripts/moyi write --prompt` sends the same two requests and was run. Nor are
-21 Search and 22 On this day (slice C6b, 2026-10-21); `scripts/moyi search` and `moyi
-on-this-day` send the same requests and were run. Nor is 23 Milestones (slice C6c,
-2026-10-22); `scripts/moyi milestones` sends the same request and was run.
+**First opened 2026-10-27**, in Bruno 4.3, against production as an existing account:
+Login, List bonds, Today, Streak, Days, Day (200, then 304 on the second send) and
+Milestones ran without an error. That run found that List bonds kept no `bondId`, so a
+session in an existing bond could reach none of the bond's routes (fixed in #93). The
+other requests are still unrun in Bruno; `scripts/moyi` sends the same requests and has
+been run end to end, so a failure there is most likely in the file, not the server.
 
 **Leave bond and Block are not part of the loop.** (Search, On this day and Milestones
 come after them only because they were added later; all three only read.) Each ends the bond in
