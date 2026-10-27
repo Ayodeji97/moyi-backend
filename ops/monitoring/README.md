@@ -31,6 +31,9 @@ report "all well", so they are root-only on the server (`backup.env` is already
 
 ```
 export BW_SESSION="$(bw unlock --raw)"
+# The CLI reads a local copy of the vault: a field added in the web vault since
+# the last sync is not there, and f() then writes an empty value.
+bw sync >/dev/null
 f() { bw get item moyi-prod | python3 -c 'import json,sys; print(next(x["value"] for x in json.load(sys.stdin)["fields"] if x["name"]==sys.argv[1]))' "$1"; }
 printf 'CLOSE_PING_URL="%s"\n' "$(f HC_CLOSE_URL)" | ssh moyi 'install -m 600 /dev/stdin /etc/moyi-monitoring/heartbeats.env'
 printf 'PING_URL="%s"\n' "$(f HC_BACKUP_URL)" | ssh moyi 'sed -i "/^PING_URL=/d" /etc/moyi-backup/backup.env && cat >> /etc/moyi-backup/backup.env'
