@@ -4,9 +4,17 @@
 Description=Moyi nightly backup: pg_dump, age, R2
 Wants=network-online.target docker.service
 After=network-online.target docker.service
+StartLimitIntervalSec=2h
+StartLimitBurst=3
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/moyi-backup
+# A dump of this size takes seconds; an hour means something is stuck.
+TimeoutStartSec=1h
+# A failed night is tried again: R2 or the network may be back, and at boot
+# the Postgres container may not have been up yet. Three tries, 15 min apart.
+Restart=on-failure
+RestartSec=15min
 Nice=10
 IOSchedulingClass=idle

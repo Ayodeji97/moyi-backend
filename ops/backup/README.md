@@ -19,8 +19,12 @@ All of them are in the Bitwarden secure note `moyi-prod`:
 | `R2_BACKUP_KEY_ID`, `R2_BACKUP_SECRET` | R2 token: Object Read & Write on `moyi-backups` only | yes, `/etc/moyi-backup/r2.curl` |
 | `R2_DRILL_KEY_ID`, `R2_DRILL_SECRET` | R2 token: Object Read only on `moyi-backups` | never |
 
-The server can write backups but cannot read them back in plaintext. The bucket
-lock keeps every object for 30 days, so it cannot delete them either.
+The server can write backups but never read one in plaintext. Its token CAN
+delete objects (R2 has no write-only scope): what stops a stolen server from
+emptying the bucket is the **bucket lock**, a 30-day retention rule set by hand
+in the Cloudflare dashboard, beside the **35-day lifecycle rule** that removes
+old backups. Neither is in this repository, so check both are there (R2 →
+`moyi-backups` → Settings) after any change to the bucket.
 
 ## Installing on a server (or a rebuilt one)
 
@@ -38,7 +42,7 @@ on the Mac or the shell history:
 ```
 export BW_SESSION="$(bw unlock --raw)"
 f() { bw get item moyi-prod | python3 -c 'import json,sys; print(next(x["value"] for x in json.load(sys.stdin)["fields"] if x["name"]==sys.argv[1]))' "$1"; }
-printf 'R2_ENDPOINT=%s\nR2_BUCKET=moyi-backups\nAGE_RECIPIENT=%s\n' "$(f R2_ENDPOINT)" "$(f AGE_PUBLIC_KEY)" \
+printf 'R2_ENDPOINT="%s"\nR2_BUCKET=moyi-backups\nAGE_RECIPIENT="%s"\n' "$(f R2_ENDPOINT)" "$(f AGE_PUBLIC_KEY)" \
   | ssh moyi 'install -m 600 /dev/stdin /etc/moyi-backup/backup.env'
 printf 'user = "%s:%s"\n' "$(f R2_BACKUP_KEY_ID)" "$(f R2_BACKUP_SECRET)" \
   | ssh moyi 'install -m 600 /dev/stdin /etc/moyi-backup/r2.curl'
@@ -51,17 +55,26 @@ ssh moyi 'systemctl daemon-reload && systemctl start moyi-backup && journalctl -
 ssh moyi 'systemctl enable --now moyi-backup.timer && systemctl list-timers moyi-backup.timer --no-pager'
 ```
 
-## Restoring
+## Restoring production
 
-The drill is also the restore procedure, minus the last step. To bring
-production back from a backup:
-
-1. Run `restore-drill.sh` until it passes. That proves the backup and gives you
-   the decrypted dump's path if you stop it before the cleanup.
-2. `kamal app stop`, then into the production Postgres:
-   `dropdb` / `createdb` and `pg_restore --exit-on-error` from the decrypted dump
-   (`docker exec -i moyi-postgres …`).
-3. `kamal app boot`. Flyway validates the restored schema at startup.
+1. Run `restore-drill.sh` against the backup you mean to restore
+   (`--object daily/<name>`), so you know it restores before you drop anything.
+2. Download and decrypt it on the Mac, straight into the server's Postgres; the
+   plaintext exists only in the pipe:
+   ```
+   kamal app stop
+   ssh moyi 'docker exec moyi-postgres dropdb -U moyi moyi && docker exec moyi-postgres createdb -U moyi moyi'
+   # r2 and the key as restore-drill.sh sets them up (R2_DRILL_* and AGE_PRIVATE_KEY from moyi-prod):
+   curl --fail --config r2.curl --aws-sigv4 "aws:amz:auto:s3" "$R2_ENDPOINT/moyi-backups/daily/<name>" \
+     | age --decrypt --identity age.key \
+     | ssh moyi 'docker exec -i moyi-postgres pg_restore -U moyi -d moyi --exit-on-error'
+   rm -f r2.curl age.key
+   kamal app boot
+   ```
+   Flyway validates the restored schema when the app starts.
+3. If the network is the problem rather than the server, the last three
+   backups are on the box too, in `/var/backups/moyi/`: copy one to the Mac and
+   decrypt it there, since the key never goes to the server.
 
 A restore loses whatever was written after the backup was taken: up to 24 hours
 (the RPO, ADR-0043).

@@ -8,8 +8,9 @@
 #   3. age-encrypt it to a PUBLIC key. The private key is in Bitwarden only,
 #      never on this machine, so whoever takes the server cannot read a backup;
 #   4. upload it to the R2 bucket (EU jurisdiction), under daily/;
-#   5. keep the last three encrypted copies on the box, for a restore that
-#      does not need the network to fetch one.
+#   5. keep the last three encrypted copies on the box, kept before the upload
+#      is tried: a night R2 cannot be reached still leaves a backup, on the box.
+#      systemd retries a failed run (moyi-backup.service).
 #
 # It prints one line on success and exits non-zero on any failure, so the
 # journal (journalctl -u moyi-backup) says which night and which step.
@@ -37,6 +38,9 @@ die() { echo "moyi-backup: $*" >&2; exit 1; }
 command -v age >/dev/null || die "age is not installed (apt install age)"
 
 mkdir -p "$KEEP_DIR"
+# A run killed outright (power, OOM) skips its trap and can leave a plaintext
+# dump in its work directory; no run is in progress now, so sweep them.
+rm -rf "$KEEP_DIR"/.work.*
 work="$(mktemp -d "$KEEP_DIR/.work.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 
@@ -51,16 +55,15 @@ tables="$(grep -c ' TABLE DATA ' "$work/toc" || true)"
 
 age --recipient "$AGE_RECIPIENT" --output "$work/$name" "$work/plain.dump" || die "age failed"
 rm -f "$work/plain.dump"
+mv "$work/$name" "$KEEP_DIR/"
+size="$(stat -c %s "$KEEP_DIR/$name")"
+# The newest $KEEP stay; the names sort by time.
+find "$KEEP_DIR" -maxdepth 1 -name 'moyi-*.dump.age' | sort -r | tail -n +"$((KEEP + 1))" | xargs -r rm -f
 
 curl --fail --silent --show-error --max-time 300 --retry 3 \
   --config "$AUTH_FILE" --aws-sigv4 "aws:amz:auto:s3" \
-  --upload-file "$work/$name" "$R2_ENDPOINT/$R2_BUCKET/daily/$name" >/dev/null \
-  || die "upload to R2 failed"
-
-size="$(stat -c %s "$work/$name")"
-mv "$work/$name" "$KEEP_DIR/"
-# The newest $KEEP stay; the names sort by time.
-find "$KEEP_DIR" -maxdepth 1 -name 'moyi-*.dump.age' | sort -r | tail -n +"$((KEEP + 1))" | xargs -r rm -f
+  --upload-file "$KEEP_DIR/$name" "$R2_ENDPOINT/$R2_BUCKET/daily/$name" >/dev/null \
+  || die "upload to R2 failed; $name is kept on the box"
 
 echo "moyi-backup: uploaded daily/$name ($size bytes, $tables tables)"
 

@@ -19,10 +19,13 @@ recovery with WAL archiving is Phase 5 (doc 15).
    Bitwarden. The server, and the bucket, hold only ciphertext, so taking either
    gives nobody the entries.
 3. **Stored in Cloudflare R2**, bucket `moyi-backups`, EU jurisdiction: off the
-   server and off Hetzner. The server's token can write to that bucket only. A
-   bucket lock keeps every object for 30 days, so that token cannot delete a
-   backup; a lifecycle rule removes them after 35. The last three also stay on
-   the server, encrypted.
+   server and off Hetzner. The server's token reaches that bucket only. R2 has
+   no write-only scope, so the token could delete; a bucket lock keeps every
+   object for 30 days so it cannot, and a lifecycle rule removes them after
+   35. Both are set by hand in Cloudflare, not in this repository; the runbook
+   says where to check them. The last three backups also stay on the server,
+   encrypted, kept before the upload is tried, and a failed night is retried
+   three times, fifteen minutes apart.
 4. **Uploads use curl's SigV4 signing**, so the server needs nothing beyond
    `age` from Ubuntu's archive. The token reaches curl from a root-only config
    file, never a command-line argument.
