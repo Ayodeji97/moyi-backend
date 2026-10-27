@@ -1,6 +1,6 @@
 # Phase 4 — media and notifications
 
-**Status:** draft, for the owner's review · **Date:** 2026-10-27 · **Author:** Claude, for Daniel
+**Status:** owner's rulings recorded 2026-10-27 (§5); for review · **Date:** 2026-10-27 · **Author:** Claude, for Daniel
 **Covers:** doc 15 §3 Phase 4 (`15-roadmap-and-milestones.md:100-111`) — direct-to-R2
 uploads, the image and voice pipelines, moderation and quarantine, the media lifecycle, FCM
 with preferences, quiet hours, dedupe and the push budget, all dispatched through the outbox.
@@ -169,7 +169,7 @@ Stated, not resolved. Each names what this spec assumes until the owner says oth
 | D-9 | **Erasure leaves the bytes.** BR-10/BR-10a (04:195-196) null "media references"; nothing deletes the object, so a withdrawn photo would stay in R2 | Every erasure path calls `media.api.release(ids)` in its transaction; a `media.purge` consumer deletes the objects |
 | D-10 | **`voiceDurationMs` twice.** 04:89 puts it on `Entry`, 07:155 too, and 07:238 puts `duration_ms` on `media_assets` | On the asset only; the entry response reads it from there (CLAUDE.md: a rule lives in one place) |
 | D-11 | **`presign:{mediaId}` in Redis** (07:325) vs the built posture: Valkey holds rate-limit buckets only (`config/deploy.yml`, ADR-0023) | Postgres only |
-| D-12 | **The SOLO unlock emits no `DayRevealed`.** `CloseDay` publishes `DayClosed` for it; `RevealDay` publishes `DayRevealed` only for a two-entry reveal | A SOLO-unlock push (if any, Q8) is driven by `DayClosed` and the day's status |
+| D-12 | **The SOLO unlock emits no `DayRevealed`.** `CloseDay` publishes `DayClosed` for it; `RevealDay` publishes `DayRevealed` only for a two-entry reveal | The SOLO-unlock push (ruled yes, Q8) is driven by `DayClosed` and the day's status |
 | D-13 | **No event for a partner joining.** FR-080 lists the push; `AcceptInvite` publishes nothing | N3 adds `MemberJoined {bondId}` from `bond` |
 | D-14 | **"Both or neither" vs per-member settings.** ADR-0041 H-M5 vs FR-081 (each member mutes categories) and FR-082 (per-member budget) | H-M5 governs the *decision*, made once at Bond level; a member's own mute, quiet hours or budget suppress only that member's copy, which tells neither anything about the other (Q9) |
 | D-15 | **Reveal vs quiet hours.** FR-061 wants the push within 60 s; FR-081 gives quiet hours | Hold until quiet hours end; NFR-006 is measured outside quiet hours (Q7) |
@@ -300,6 +300,13 @@ second time; a withdrawn entry's objects are gone from MinIO; an attached asset 
 **Smoke:** none (time-based); the state map records the jobs. The `media-pipeline-stuck.md`
 runbook and the P2 alert (11:97) land here.
 
+**The media mirror (Q15).** A nightly systemd timer beside `ops/backup` copies new `v/` objects
+from `moyi-media` to a second bucket with a bucket lock, using a read-only token on the source and
+a write-only-in-practice token on the target; a Healthchecks.io heartbeat as for the database
+backup; the restore drill gains one step that fetches a mirrored object. Object deletions
+(erasure, D-9) must reach the mirror too, or the mirror becomes a copy of erased content: the
+mirror's lifecycle expires a deleted key within the erasure window, and that is tested.
+
 ### N1 — push tokens, the notification ledger, FCM through the outbox
 
 **Endpoints:** `PUT /api/v1/me/devices/current/push-token {token}` (the device is the session's,
@@ -355,14 +362,23 @@ six; a member who wrote gets no reminder.
 `gratitude.notify` (`StartFrom.NOW`, ADR-0041:316-317) subscribes to `DayRevealed`,
 `DayClosed`, `MilestoneReached` — **never** `StreakBroken` (ADR-0034:240) or `StreakExtended`,
 and nothing for reactions (ADR-0037:281). `bond.notify` subscribes to a new `MemberJoined
-{bondId}` published by `AcceptInvite` (D-13). Each:
+{bondId}` published by `AcceptInvite` (D-13), and to a new `ProposalOpened {bondId, proposalId,
+proposerId}` published wherever a proposal row is created (`ChangeTimezone`, and the deletion
+request if it creates one **[inferred: check `EndBond`]**); it pushes to the *other* member only,
+once per proposal, never a reminder (Q13). Each:
 
 - asks the Bond whether it takes writes, and stops if not (ADR-0041:313-315, ADR-0040:141);
 - resolves **both** members and requests one push each (H-M5) — the decision is never made from
   one member's activity;
-- dedupe keys: `reveal:{bondDayId}:{userId}`, `solo:{bondDayId}:{userId}` (only if Q8 says yes),
-  `milestone:{bondDayId}:{userId}` (ADR-0041:316), `joined:{bondId}:{userId}`;
-- `stale_after`: reveal and solo end of the following Bond-day; milestone 24 h; joined 24 h.
+- dedupe keys: `reveal:{bondDayId}:{userId}`, `solo:{bondDayId}:{userId}` (Q8: yes),
+  `milestone:{bondDayId}:{userId}` (ADR-0041:316), `joined:{bondId}:{userId}`,
+  `proposal:{proposalId}:{userId}` (Q13: yes);
+- `stale_after`: reveal and solo end of the following Bond-day; milestone 24 h; joined 24 h;
+  proposal 24 h.
+
+The solo push (Q8) uses its own message key, worded as an opening and never as a miss: the
+same register as the reveal ("Today's words are open."), nothing that names who did not write.
+Its copy goes through the T-09/FR-076 check with the rest of `copy.md`.
 
 On this day: a weekly sweep in `scheduling` for members who opted in, at most one per week per
 member (FR-092), only where `GET /on-this-day` would answer non-empty.
@@ -375,7 +391,7 @@ ended Bond's `MilestoneReached` → nothing; `ArchitectureTest` pins that no con
 **M4 itself** is not a test: a real Android phone with a debug build receives exactly one push at
 reveal against production or a local FCM project. The client work that makes this possible
 (doc 15 Phase 8) does not exist yet; a throwaway Android harness that registers a token and
-shows a notification is the cheapest way **[inferred]**, and is Q12.
+shows a notification is the cheapest way **[inferred]**; ruled so (Q12).
 
 ### Order and why
 
@@ -386,64 +402,29 @@ before D5 so nothing is ever demoted that was never moderated.
 
 ---
 
-## 5. Owner questions
+## 5. Owner's rulings
 
-Each has a recommended answer; silence is not consent, but a one-word "yes" is enough.
+Answered 2026-10-27 through the Phase 4 Rulings form. Thirteen follow the recommendation; **two
+depart from it (Q8, Q13)** and one adds a question the draft left in the risks (Q15). The
+reasoning each recommendation carried is in this file's history (`git log -p`).
 
-1. **Moderation vendor and cost** (OQ-16, 21:26; 10:133 budgets ~€1/month). And first: **what is
-   moderated for?** Adult nudity between two consenting partners is plausible and legitimate
-   here; a nudity classifier would quarantine it. **Recommend:** the policy is *illegal content
-   only* (CSAM and extreme violence), not nudity; vendor **AWS Rekognition
-   `DetectModerationLabels` in eu-central-1**, ~$0.001/image (third-party figures, verify on
-   the AWS page: ~$2/month at 2k images), acting only on its CSAM-adjacent and violence labels.
-   Cloudflare Workers AI, the corpus's suggestion, has no moderation-grade image model that I
-   can confirm **[inferred]**. A self-hosted ONNX classifier is €0 and keeps images in the EU,
-   but cannot detect CSAM specifically. NFR-050 (08:74) forbids entry content in a non-EEA
-   transfer, so an EU region is a condition either way.
-2. **Image variants.** **Recommend:** two WebP variants — *full* at 2048 px long edge ≤350 KB,
-   *display* at 1280 px ≤150 KB; no server thumbnail (the client downsamples the display one,
-   13:119). Tier 2 keeps *display* only. Sums to the 500 KB cap (D-5).
-3. **Voice length cap.** FR-043 says 60 s. **Recommend:** keep 60 s; a longer cap breaks the
-   500 KB budget at any listenable bitrate.
-4. **Voice format.** **Recommend:** Opus, mono, 24 kbps (60 s ≈ 180 KB), one file for both
-   platforms — **after** a half-day device check that iOS plays the chosen container (iOS's
-   native Opus support is container-dependent **[inferred]**). If it does not, AAC-LC 48 kbps
-   for both (≈360 KB). Not both formats: that doubles storage.
-5. **Where transcoding runs.** The app image is Paketo's `builder-noble-java-tiny`
-   (`app/build.gradle.kts:97-101`): no shell, no package manager, so no ffmpeg or libvips can be
-   added to it. The container is capped at 2 GB and the buildpack sizes the heap to that cap, so
-   a native decoder in the same container is what the cgroup OOM-kills — the API with it.
-   **Recommend:** a **separate worker container** built from a small Dockerfile (JRE 25 +
-   ffmpeg + libvips) running the *same jar* under a `media-worker` profile that enables only the
-   `media.process` consumer; `--memory=768m --cpus=1.5`, deployed as a Kamal accessory. The outbox
-   already lets two processes share a queue (`SKIP LOCKED`, ADR-0035 decision 7). Alternative:
-   switch the app to a Dockerfile image and process in-process behind a semaphore of one with an
-   explicit `-Xmx`; fewer moving parts, but a decode bomb then takes the API down.
-6. **Push copy.** **Recommend:** the server sends localisation *keys* only; strings live in the
-   client's resources and the design system's `copy.md`; no partner name and no Bond name on a
-   lock screen (T-14, T-09). E.g. reveal → "Today's words are open." Owner writes the final copy.
-7. **Defaults: quiet hours and categories.** **Recommend:** quiet hours **off** by default (the
-   reminder time is the member's own choice already); reveal during quiet hours is **held to
-   their end**, not dropped (D-15); categories on by default except on-this-day (opt-in).
-8. **Does the solo unlock push?** At day close a lone entry unlocks to a partner who did not
-   write (FR-063). A push saying so lands on the person who missed the day. **Recommend: no
-   push** — it reads as the guilt FR-076 forbids; they find it on next open.
-9. **H-M5's reading** (D-14). **Recommend:** "both or neither" is about the decision; one
-   member's own mute, quiet hours or budget may suppress their own copy.
-10. **What the author sees when their photo is quarantined.** **Recommend:** the author still sees
-    their own photo, with a neutral "not shared" marker and no reason; the partner sees
-    "processing" indefinitely, never "removed" (nothing that implies an accusation reaches the
-    other person).
-11. **Has Apple Developer enrolment started?** 15:109 requires it to be complete before Phase 4;
-    10:143-148 and OQ-17 put it at $99/year and over the €25 ceiling. **Recommend:** enrol now as
-    an individual, accept the ≈€26 ceiling, and close OQ-17 (its quota half is moot, D-4). M4
-    proceeds on Android regardless.
-12. **The M4 device.** **Recommend:** a throwaway Android harness app (token registration + a
-    notification), kept out of the client repo, rather than waiting for Phase 8's real client.
-13. **Pending-proposal push** (ADR-0030:168). **Recommend:** no push in v1; it is a nudge from one
-    member to the other, which T-09 counsels against.
-14. **FCM transfer (OQ-05).** **Recommend:** accept with SCCs and a TIA, payloads carrying only
-    keys and opaque ids; nothing else is feasible for iOS (21:15).
+| # | Question | Ruling |
+|---|---|---|
+| 1 | Moderation | **Illegal content only** (CSAM-adjacent and extreme-violence labels, never nudity); **AWS Rekognition `DetectModerationLabels`, eu-central-1**, ~$2/month at 2k images. Verify the price on the AWS page at D4 |
+| 2 | Image variants | **Two WebP:** *full* 2048 px ≤350 KB, *display* 1280 px ≤150 KB; no server thumbnail; tier 2 keeps *display* only |
+| 3 | Voice length | **60 s** |
+| 4 | Voice format | **Opus, mono, 24 kbps**, after a half-day iPhone playback test; **AAC-LC 48 kbps** for both if it fails; never both |
+| 5 | Where processing runs | **A separate worker container** (JRE 25 + ffmpeg + libvips, same jar, `media-worker` profile), `--memory=768m --cpus=1.5`, a Kamal accessory |
+| 6 | Push copy | **Localisation keys only**; no partner or Bond name on a lock screen; owner writes the final words |
+| 7 | Defaults | Quiet hours **off**; a reveal inside them is **held to their end**; all categories on except on-this-day (opt-in) |
+| 8 | Solo-unlock push | **Push it** (departs from the recommendation). Constraint carried into N3: a neutral "opened" wording with its own key, nothing that says who did not write; FR-076's no-guilt rule still governs the copy |
+| 9 | H-M5's reading | **The decision is shared**; a member's own mute, quiet hours or budget may hold back only their copy |
+| 10 | Quarantined photo | The author sees it marked **"not shared"**, no reason; the partner sees **"processing"**, never "removed" |
+| 11 | Apple enrolment | **Enrol now as an individual**, accept ≈€26/month, close OQ-17. The owner already has a personal Apple developer account: it serves if it is a paid Apple Developer Program membership (a free Apple ID cannot send push); otherwise enrol that same account into the Program. M4 proceeds on Android regardless |
+| 12 | M4 device | **A throwaway Android harness**, outside the client repo |
+| 13 | Pending-proposal push | **Push it** (departs from the recommendation): one push to the other member per proposal, no reminders, no name; needs a new `ProposalOpened` event (N3) |
+| 14 | FCM transfer (OQ-05) | **Accept** with SCCs and a short TIA; payloads carry only keys and opaque ids |
+| 15 | Media backup (R-D) | **Mirror `moyi-media` nightly** to a second, locked bucket; built in D5 |
 
 ---
 
@@ -454,11 +435,11 @@ Each has a recommended answer; silence is not consent, but a one-word "yes" is e
 | R-A | **Memory.** 10:37-51 already sums to 8.0 GB (25:111). Live today: app 2 g (+2 g during a deploy), Postgres 2 g, Valkey 384 m, kamal-proxy and the backup timer. A worker at 768 m fits only because staging's 1.0 GB is not deployed **[inferred: no staging on moyi-prod-1]**; a full HEIC decode of a 48 MP photo can take several hundred MB of native memory **[inferred]** | Worker capped at 768 m with libvips' streaming access and a pixel ceiling; one job at a time; doc 10 §2.1 amended to carry the worker line and drop staging from the box |
 | R-B | **CPU.** Four Ampere vCPUs serve API, Postgres and processing. Per item: a 60 s voice note to Opus well under a second, an image resize/encode around a second **[inferred, measure on the box as Argon2 was]**. ≤2,000 entries/day (07:382) is nothing on average; evening peaks are bursts | `--cpus=1.5` on the worker so the reveal path keeps its cores; processing is async, so a queue is a delay, never an error; NFR-006 is measured on text |
 | R-C | **R2 cost.** Storage $0.015/GB-month, Class A $4.50/M, Class B $0.36/M, egress free, 10 GB and 1 M Class A free each month ([R2 pricing](https://developers.cloudflare.com/r2/pricing)). At 2,000 users the D-16 steady state of ~150 GB is ~$2.10/month, as 10:124 says; a worst-case abuser is bounded by 30 intents/hour × 10 MB, and the reaper removes what is never attached | Cost alert on the R2 dashboard; the intent limit; the bucket lifecycle backstop |
-| R-D | **No backup for media.** Backups are `pg_dump` only (`ops/backup`); R2 loss loses every photo and voice note (10:187 mirrors only Postgres) | Owner's call whether to mirror `moyi-media` to B2 (cost ~ storage); recorded, not solved here |
+| R-D | **No backup for media.** Backups are `pg_dump` only (`ops/backup`); R2 loss loses every photo and voice note (10:187 mirrors only Postgres) | Ruled (Q15): a nightly mirror of `moyi-media` to a second, bucket-locked R2 bucket in another jurisdiction or provider **[decide at D5: same-account R2 shares the account as a failure domain]**; a slice in D5 |
 | R-E | **Native code on untrusted input** (T-07). libvips and ffmpeg have a CVE history | The worker runs non-root, read-only root, no network but R2 and Postgres **[inferred feasible on a Kamal accessory]**, per-job timeout and `ulimit`; images rebuilt on a schedule |
 | R-F | **FCM's 60 s budget.** The outbox poller ticks every 2 s, then two hops (gratitude consumer → `PushRequested` → push consumer) | Two ticks ≈ 4 s; the reveal-latency histogram (11:44) proves it |
 | R-G | **Push is unreliable by nature** (17:30 R-14) | Already the rule: the client is correct with no push at all (25:69) |
-| R-H | **Apple's lead time** (15:109) | Q11, now |
+| R-H | **Apple's lead time** (15:109) | Q11: enrol now (owner's existing Apple account, if it is a paid Program membership) |
 
 ---
 
@@ -469,7 +450,7 @@ Each has a recommended answer; silence is not consent, but a one-word "yes" is e
 - **D2/D3:** where processing runs (Q5), the variant and codec targets (Q2, Q4), the FR-044a
   claim, the partner-visibility rule.
 - **D4:** the moderation policy and vendor (Q1), quarantine without an admin console.
-- **D5:** media erasure as object deletion (D-9).
+- **D5:** media erasure as object deletion (D-9), and its reach into the media mirror (Q15).
 - **N1:** the module split of §2.1, token ownership (D-1), the push consumer's deadline and
   at-least-once honesty (§2.2).
 - **N2/N3:** the budget's reservation and its day (D-16), quiet hours vs reveal (D-15),
