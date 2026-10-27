@@ -64,6 +64,11 @@ watches the `PUT` wait, then answer `404`).
   began is not ended (ADR-0025 decision 4: revocation is explicit). If the row is somebody
   else's, the phone changed hands without a sign-out, and the token just moves: the earlier
   owner's pushes must not reach the new owner's lock screen.
+- **Registrations of one token are serialised** by a transaction-scoped advisory lock on the
+  token's hash (namespace `2`; `1` is the sessions lock), taken before the take-and-give. Without
+  it, two registrations at once both found nobody holding the token and the second insert failed
+  on `unique (token)`: a 500 whose message, logged at ERROR, quoted the token (review of #96).
+  With it, the later registrant runs after the earlier commits and holds the token.
 
 **3. `devices.push_token` is dead, unmapped now, and dropped by a later forward migration.**
 `DeviceEntity` and `Device` stop mapping it in this change. The drop is not in V29 for two
@@ -128,10 +133,12 @@ delivery, records `current_setting('transaction_isolation')` (`read committed`),
 **8. FCM HTTP v1, the vendor in one `internal` class.** `FcmPushSender` signs a service-account
 assertion with Nimbus (RS256, already on the classpath through Spring Security's JOSE module; no
 hand-written crypto, doc 25 D5), trades it at Google's token endpoint for a bearer kept until
-five minutes before expiry, and sends through `RestClient`. Classification: `UNREGISTERED`, a
-404, `SENDER_ID_MISMATCH`, or a 400 that names the token → `TokenInvalid`; 429, 5xx, timeouts, a
-bearer FCM refuses (dropped and refetched) → `Unavailable`; any other refusal, and the token
-endpoint refusing the service account → `Rejected`. **[inferred]** FCM names a malformed token
+five minutes before expiry, and sends through `RestClient`. Classification: FCM's error code
+`UNREGISTERED` or `SENDER_ID_MISMATCH`, or a 400 that names the token → `TokenInvalid`. A bare 404
+without FCM's error code is `Rejected`: a wrong base URL or a proxy answers one for every token,
+and pruning on it would silence every phone (review of #96). 429, 5xx, timeouts, a bearer FCM
+refuses (dropped and refetched), and a 429 or 5xx from Google's token endpoint → `Unavailable`;
+any other refusal, and the token endpoint refusing the service account → `Rejected`. **[inferred]** FCM names a malformed token
 either with a `BadRequest` field violation on `message.token` or only in its prose ("registration
 token"); both are read, neither is logged. If FCM words it otherwise, the push is
 `FAILED_PERMANENT REJECTED` and the token stays: the safe direction, since no good token is

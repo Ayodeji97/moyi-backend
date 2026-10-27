@@ -4713,7 +4713,8 @@
         "properties" : {
           "token" : {
             "type" : "string",
-            "minLength" : 1
+            "maxLength" : 1024,
+            "minLength" : 0
           }
         },
         "required" : [ "token" ]

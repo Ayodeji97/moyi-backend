@@ -1,5 +1,6 @@
 package com.moyi.notification.infra.push
 
+import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.validation.annotation.Validated
@@ -19,6 +20,8 @@ import java.time.Duration
 @ConfigurationProperties(prefix = "moyi.notification.push")
 internal data class PushProperties(
     val provider: Provider = Provider.FCM,
+    /** `@Valid` so that [Fcm]'s own constraints run: without it a blank base URL bound silently (review of #96). */
+    @field:Valid
     val fcm: Fcm = Fcm(),
 ) {
     internal enum class Provider {

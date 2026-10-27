@@ -22,12 +22,14 @@ internal class PushTokenRegistry(
     private val clock: Clock,
 ) : PushTokens {
     /**
-     * Two statements in one transaction: the token is taken from whichever
-     * other device holds it, then given to this one. In that order, because
+     * Under a lock on the token, two statements: the token is taken from
+     * whichever other device holds it, then given to this one. In that order, because
      * `unique (token)` would refuse the second while the first still held it.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     override fun register(registration: PushTokenRegistration): PushTokenRegistered {
+        // First, so that the read-and-take below sees whatever an earlier registration of this token committed.
+        tokens.lockToken(registration.token)
         val folded = tokens.takeFromOthers(registration.token, registration.deviceId, registration.userId)
         tokens.put(registration.deviceId, registration.userId, registration.platform, registration.token, clock.instant())
         return PushTokenRegistered(folded)
