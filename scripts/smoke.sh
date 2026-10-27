@@ -73,7 +73,12 @@
 # partner and today does not, and a favourite's row holds no time (V26).
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-27, after the favourites
+# days are the tests' to show. Since Phase 4 N1 it registers a push token for
+# the session's device, replaces and removes it, sees a logout forget it, a
+# deviceless or ended session answered 404, and the token in no log line; no
+# push is sent, since nothing requests one before N3. Last run on 2026-10-28,
+# N1_RUN_RECORD
+# Before it, after the favourites
 # rulings' review fixes, from a jar of f737173's code, against a database of its
 # own and --attach, Postgres on 55432: 936 passed, 0 failed, 0 skipped, 24
 # sections. Before it, for the favourites rulings, from a jar of 86ae0c9's code, against a database of its own and
