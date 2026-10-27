@@ -41,6 +41,9 @@ on the Mac or the shell history:
 
 ```
 export BW_SESSION="$(bw unlock --raw)"
+# The CLI reads a local copy of the vault: a field added in the web vault since
+# the last sync is not there, and f() then writes an empty value.
+bw sync >/dev/null
 f() { bw get item moyi-prod | python3 -c 'import json,sys; print(next(x["value"] for x in json.load(sys.stdin)["fields"] if x["name"]==sys.argv[1]))' "$1"; }
 printf 'R2_ENDPOINT="%s"\nR2_BUCKET=moyi-backups\nAGE_RECIPIENT="%s"\n' "$(f R2_ENDPOINT)" "$(f AGE_PUBLIC_KEY)" \
   | ssh moyi 'install -m 600 /dev/stdin /etc/moyi-backup/backup.env'
