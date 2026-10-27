@@ -42,7 +42,7 @@ recovery with WAL archiving is Phase 5 (doc 15).
 ## Drill results
 | Date | Backup | Image | Time | Result |
 |---|---|---|---|---|
-| | | | | |
+| 2026-10-27 | `daily/moyi-2026-10-27T030304Z.dump.age` (74 KB, 30 tables; 3 users, 2 entries) | `4db6532` | 1 m 46 s, two typed passwords included | **Passed**: Flyway validated, signed in as a restored account, an entry's text read back through the API |
 
 ## Consequences
 **Positive:** a lost or compromised server costs at most a day, and its backups
