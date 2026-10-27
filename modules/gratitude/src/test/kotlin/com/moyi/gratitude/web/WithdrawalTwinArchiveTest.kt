@@ -89,8 +89,10 @@ internal class WithdrawalTwinArchiveTest(
         rig.bonds.clear()
         ada = users.verified("Ada")
         bea = users.verified("Bea")
-        cy = users.verified("Cy")
-        dee = users.verified("Dee")
+        // The twins go by the same names: each day carries the partner's name, and the two
+        // archives must differ by nothing but the mechanism.
+        cy = users.verified("Ada")
+        dee = users.verified("Bea")
         clock.set(NOW)
     }
 
