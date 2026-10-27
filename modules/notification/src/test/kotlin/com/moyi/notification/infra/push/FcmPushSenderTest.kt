@@ -132,6 +132,21 @@ internal class FcmPushSenderTest {
     }
 
     @Test
+    fun `a 404 that is not FCM's is a refusal, and no token is called invalid for it`() {
+        // A wrong base URL, or a proxy's page: every token would get this answer, and forgetting them all on it
+        // would silence every phone.
+        server.expect(requestTo(TOKEN_URI)).andRespond(withSuccess(BEARER_ANSWER, MediaType.APPLICATION_JSON))
+        server
+            .expect(requestTo(SEND_URI))
+            .andRespond(withStatus(HttpStatus.NOT_FOUND).contentType(MediaType.TEXT_HTML).body("<html><h1>404 Not Found</h1></html>"))
+        sender.send(message).shouldBeInstanceOf<PushDelivery.Rejected>()
+
+        server.reset()
+        answer(HttpStatus.NOT_FOUND, error(404, "NOT_FOUND", "Requested entity was not found."), fetchBearer = false)
+        sender.send(message).shouldBeInstanceOf<PushDelivery.Rejected>()
+    }
+
+    @Test
     fun `a token of another Firebase project is no good here either`() {
         answer(HttpStatus.FORBIDDEN, error(403, "PERMISSION_DENIED", "SenderId mismatch", fcmCode = "SENDER_ID_MISMATCH"))
         sender.send(message).shouldBeInstanceOf<PushDelivery.TokenInvalid>()
@@ -213,6 +228,11 @@ internal class FcmPushSenderTest {
 
         server.reset()
         server.expect(requestTo(TOKEN_URI)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE))
+        sender.send(message).shouldBeInstanceOf<PushDelivery.Unavailable>()
+
+        // Rate-limited: an outage by nature, retried with backoff, never FAILED_PERMANENT.
+        server.reset()
+        server.expect(requestTo(TOKEN_URI)).andRespond(withStatus(HttpStatus.TOO_MANY_REQUESTS))
         sender.send(message).shouldBeInstanceOf<PushDelivery.Unavailable>()
 
         server.reset()

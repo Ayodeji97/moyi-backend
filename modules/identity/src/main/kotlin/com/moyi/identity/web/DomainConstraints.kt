@@ -85,6 +85,28 @@ internal class PasswordConstraintValidator : ConstraintValidator<ValidPassword, 
     }
 }
 
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [PushTokenConstraintValidator::class])
+internal annotation class ValidPushToken(
+    val message: String = "is not a valid push token",
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+/** Asks `notification.api.PushToken` whether the value is a token, and reports its answer (ADR-0044). */
+internal class PushTokenConstraintValidator : ConstraintValidator<ValidPushToken, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean {
+        // Blank is `@NotBlank`'s, and too long is `@Size`'s, which states the limit in the contract: each
+        // reported once. The limit is `PushToken.MAX_LENGTH` in both places.
+        if (value.isNullOrBlank() || value.length > PushToken.MAX_LENGTH) return true
+        return validate(context) { PushToken(value) }
+    }
+}
+
 /**
  * ADR-0012's other half: the password is not in the breached-password corpus.
  *
@@ -192,26 +214,6 @@ internal class NotBreachedValidator(
  * polite 422 about the user's input, which is exactly the kind of silence
  * this codebase keeps having to dig back out.
  */
-@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
-@Retention(AnnotationRetention.RUNTIME)
-@Constraint(validatedBy = [PushTokenConstraintValidator::class])
-internal annotation class ValidPushToken(
-    val message: String = "is not a valid push token",
-    val groups: Array<KClass<*>> = [],
-    val payload: Array<KClass<out Payload>> = [],
-)
-
-/** Asks `notification.api.PushToken` whether the value is a token, and reports its answer (ADR-0044). */
-internal class PushTokenConstraintValidator : ConstraintValidator<ValidPushToken, String> {
-    override fun isValid(
-        value: String?,
-        context: ConstraintValidatorContext,
-    ): Boolean {
-        if (value.isNullOrBlank()) return true
-        return validate(context) { PushToken(value) }
-    }
-}
-
 private inline fun validate(
     context: ConstraintValidatorContext,
     construct: () -> Unit,

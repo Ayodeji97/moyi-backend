@@ -22,6 +22,22 @@ internal class PushTokenStore(
     private val jdbc: JdbcTemplate,
 ) {
     /**
+     * Serialises every registration of [token] for the rest of the current
+     * transaction: a transaction-scoped advisory lock keyed on the token's
+     * hash, in namespace `2` (`1` is identity's sessions lock). Two
+     * registrations of one token at once otherwise both find nobody holding
+     * it, and the second insert waits on the first's uncommitted row in the
+     * unique index and then fails with a duplicate key, whose message quotes
+     * the token (review of #96). Behind the lock the second one runs after the
+     * first has committed, finds the row, and takes it: the later registrant
+     * holds the token. A hash collision only makes two unrelated tokens wait
+     * for each other.
+     */
+    fun lockToken(token: PushToken) {
+        jdbc.queryForObject("SELECT 1 FROM (SELECT pg_advisory_xact_lock(2, hashtext(?))) AS held", Int::class.java, token.value)
+    }
+
+    /**
      * Takes [token] from every device but [deviceId] and answers which of
      * them were [userId]'s. One statement, so the rows it reports are exactly
      * the rows it removed.

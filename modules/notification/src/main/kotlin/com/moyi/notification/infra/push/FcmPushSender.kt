@@ -57,10 +57,13 @@ import java.util.Base64
  * rather than stacking (spec N1, Q6). No text authored here, no name.
  *
  * **Failures are classified, never thrown** ([PushDelivery]):
- * - the token is no good (`UNREGISTERED`, `SENDER_ID_MISMATCH`, or a `400` that
- *   names the token) → [PushDelivery.TokenInvalid];
- * - a `429`, a `5xx`, a timeout, or a bearer FCM no longer accepts →
- *   [PushDelivery.Unavailable];
+ * - the token is no good, **in FCM's own words**: the error code
+ *   `UNREGISTERED` or `SENDER_ID_MISMATCH`, or a `400` that names the token →
+ *   [PushDelivery.TokenInvalid]. A bare `404` is not enough: a wrong base URL
+ *   or a proxy answers one for every token, and forgetting every token on it
+ *   would silence every phone (review of #96);
+ * - a `429` or a `5xx`, from FCM or from Google's token endpoint, a timeout,
+ *   or a bearer FCM no longer accepts → [PushDelivery.Unavailable];
  * - any other refusal, by FCM or by the token endpoint →
  *   [PushDelivery.Rejected].
  *
@@ -115,7 +118,7 @@ internal class FcmPushSender(
                 unavailable("FCM rate-limited the request (HTTP 429, $code)")
             }
 
-            code == "UNREGISTERED" || status == HTTP_NOT_FOUND -> {
+            code == "UNREGISTERED" -> {
                 tokenInvalid("FCM: the token is no longer registered (HTTP $status, $code)")
             }
 
@@ -173,7 +176,10 @@ internal class FcmPushSender(
                 .retrieve()
                 .body(JsonNode::class.java)
         } catch (refused: HttpClientErrorException) {
-            throw TokenEndpointRefused(refused.statusCode.value(), refused)
+            // A 429 is a 4xx by number and an outage by nature, as for FCM itself: retried, not final.
+            val status = refused.statusCode.value()
+            val rateLimited = status == HTTP_TOO_MANY_REQUESTS
+            throw if (rateLimited) TokenEndpointUnavailable("HTTP 429", refused) else TokenEndpointRefused(status, refused)
         } catch (failed: RestClientException) {
             throw TokenEndpointUnavailable(failed.javaClass.simpleName, failed)
         }
@@ -291,7 +297,6 @@ internal class FcmPushSender(
         private const val DEFAULT_LIFETIME_SECONDS = 3600L
         private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_UNAUTHORIZED = 401
-        private const val HTTP_NOT_FOUND = 404
         private const val HTTP_TOO_MANY_REQUESTS = 429
 
         /**

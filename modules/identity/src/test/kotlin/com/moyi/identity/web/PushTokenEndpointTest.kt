@@ -1,9 +1,17 @@
 package com.moyi.identity.web
 
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.classic.spi.ThrowableProxyUtil
+import ch.qos.logback.core.read.ListAppender
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.TestBreachCorpus
+import com.moyi.notification.api.PushPlatform
+import com.moyi.notification.api.PushToken
+import com.moyi.notification.api.PushTokenRegistration
+import com.moyi.notification.api.PushTokens
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
@@ -13,6 +21,7 @@ import io.kotest.matchers.string.shouldContain
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
@@ -50,13 +59,15 @@ import javax.sql.DataSource
 @SpringBootTest(classes = [IdentityTestApplication::class])
 @AutoConfigureMockMvc
 @Import(LoginEndpointTest.RecordingConfiguration::class, SessionsEndpointTest.TimeConfiguration::class)
-@Suppress("LargeClass") // Every way a session ends, each with its own test.
+// LargeClass: every way a session ends, each with its own test. LongParameterList: what Spring hands the test.
+@Suppress("LargeClass", "LongParameterList")
 internal class PushTokenEndpointTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val clock: MutableClock,
     @Autowired private val json: JsonMapper,
     @Autowired private val emails: RecordingEmailSender,
     @Autowired private val transactions: TransactionTemplate,
+    @Autowired private val pushTokens: PushTokens,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
@@ -273,6 +284,49 @@ internal class PushTokenEndpointTest(
     }
 
     @Test
+    fun `two people registering one token at once end with the later one holding it, no 500 and the token in no log line`() {
+        // The review of #96: both registrations found nobody holding the token, so the second insert waited on
+        // the first's uncommitted row in the unique index and then failed, a 500 whose message quoted the token.
+        register(ADA)
+        register(GRACE)
+        val adas = login(ADA, device = PIXEL)
+        val graces = login(GRACE, device = PIXEL)
+        val adasDevice = deviceOf(adas)
+        val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
+        val captured = ListAppender<ILoggingEvent>().apply { start() }
+        root.addAppender(captured)
+        val release = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val holderPid = CompletableFuture<Int>()
+            val first =
+                pool.submit {
+                    transactions.execute {
+                        pushTokens.register(PushTokenRegistration(adasDevice, userId(ADA), PushPlatform.ANDROID, PushToken(RACED_TOKEN)))
+                        holderPid.complete(jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java))
+                        release.await(10, TimeUnit.SECONDS)
+                    }
+                }
+            val pid = holderPid.get(10, TimeUnit.SECONDS)
+            val second = pool.submit<MockHttpServletResponse> { put(graces, RACED_TOKEN) }
+
+            await().atMost(Duration.ofSeconds(10)).until { second.isDone || blockedBy(pid) }
+            second.isDone shouldBe false
+
+            release.countDown()
+            first.get(10, TimeUnit.SECONDS)
+            second.get(10, TimeUnit.SECONDS).status shouldBe 204
+        } finally {
+            pool.shutdownNow()
+            root.detachAppender(captured)
+        }
+        tokenHolders() shouldContainExactly listOf(deviceOf(graces))
+        val lines =
+            captured.list.map { event -> event.formattedMessage + (event.throwableProxy?.let(ThrowableProxyUtil::asString) ?: "") }
+        lines.filter { RACED_TOKEN in it }.shouldBeEmpty()
+    }
+
+    @Test
     fun `a token that is blank, has whitespace in it or is too long is refused, naming the field`() {
         register(ADA)
         val phone = login(ADA, device = PIXEL)
@@ -281,6 +335,8 @@ internal class PushTokenEndpointTest(
             val refused = put(phone, bad)
             refused.status shouldBe 422
             refused.contentAsString shouldContain "\"field\":\"token\""
+            // One mistake, one violation: blank is @NotBlank's, too long is @Size's, the rest PushToken's.
+            Regex("\"field\":\"token\"").findAll(refused.contentAsString).count() shouldBe 1
         }
         put(phone, "two words").contentAsString shouldContain "a push token has no whitespace in it"
         tokenHolders().shouldBeEmpty()
@@ -393,6 +449,7 @@ internal class PushTokenEndpointTest(
 
     private companion object {
         const val PASSWORD = "correct horse battery"
+        const val RACED_TOKEN = "raced~push~token~secret"
         const val ADA = "ada@example.com"
         const val GRACE = "grace@example.com"
         const val PIXEL = """{"platform":"ANDROID","appVersion":"1.0.3","osVersion":"16"}"""

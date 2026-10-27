@@ -6,6 +6,7 @@ import com.moyi.identity.service.DevicePushTokens
 import com.moyi.notification.api.PushToken
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Size
 import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PutMapping
@@ -54,6 +55,8 @@ internal class PushTokenController(
  */
 internal data class PushTokenRequest(
     @field:NotBlank
+    // States the limit in the contract (maxLength); ValidPushToken leaves an over-long value to it.
+    @field:Size(max = PushToken.MAX_LENGTH)
     @field:ValidPushToken
     val token: String,
 ) {

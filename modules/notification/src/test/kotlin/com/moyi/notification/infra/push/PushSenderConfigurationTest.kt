@@ -63,6 +63,22 @@ internal class PushSenderConfigurationTest {
     }
 
     @Test
+    fun `a blank base URL or token URI refuses startup, the nested settings being validated too`() {
+        for (blank in listOf("moyi.notification.push.fcm.base-url=", "moyi.notification.push.fcm.token-uri= ")) {
+            runner
+                .withPropertyValues(
+                    "moyi.notification.push.fcm.project-id=moyi-test",
+                    "moyi.notification.push.fcm.client-email=push@moyi-test.iam.gserviceaccount.com",
+                    "moyi.notification.push.fcm.private-key-pem=${FcmPushSenderTest.PRIVATE_KEY_PEM}",
+                    blank,
+                ).run { context ->
+                    context.startupFailure.shouldBeInstanceOf<Throwable>()
+                    generateSequence(context.startupFailure) { it.cause }.joinToString { it.message.orEmpty() } shouldContain "fcm."
+                }
+        }
+    }
+
+    @Test
     fun `the log provider has to be asked for by name, and sends nothing and prints no token`() {
         runner
             .withPropertyValues("moyi.notification.push.provider=log")
