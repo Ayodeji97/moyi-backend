@@ -1,0 +1,13 @@
+# 03:00 UTC: after the last Bond-day of the evening has closed in most zones,
+# and an hour before unattended-upgrades may reboot the box (04:00). Persistent
+# runs a night that was missed while the box was down as soon as it is up.
+[Unit]
+Description=Moyi nightly backup at 03:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target
