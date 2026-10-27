@@ -2,8 +2,8 @@
 
 The daily loop as twelve requests, the four that read the archive and keep a bookmark, the
 two that leave a reaction and take it back, the two that end a bond, the two that search
-the archive and read this date in earlier years, and the one that reads the milestones, for
-running it by hand:
+the archive and read this date in earlier years, the one that reads the milestones, and the
+two that give the device you signed in from a push token and take it away, for running it by hand:
 milestone M3 is two people using the HTTP API for a week, and there is no app yet.
 `scripts/moyi` is the same loop from a terminal.
 

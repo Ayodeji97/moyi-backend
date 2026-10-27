@@ -1,0 +1,27 @@
+meta {
+  name: Register push token
+  type: http
+  seq: 24
+}
+
+put {
+  url: {{api}}/me/devices/current/push-token
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "token": "{{pushToken}}"
+  }
+}
+
+docs {
+  Gives the device you signed in from a push token: 204, and 204 again for the same token. The device is the one your Login described, so there is no id in the path. A token is a secret (whoever holds it can make that phone show a notification): set it as the secret `pushToken`, never in a file.
+
+  A session whose sign-in described no device, or one that has ended, is 404. A token that is blank, has whitespace in it or is over 1024 characters is 422 on token. Logging out forgets it. Until slice N3 nothing sends a push, and production writes a push to its log rather than sending it (ADR-0044).
+}
