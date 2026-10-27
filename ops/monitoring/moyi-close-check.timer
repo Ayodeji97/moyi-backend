@@ -1,0 +1,10 @@
+# Hourly at seven past, away from the close job's quarter hours.
+[Unit]
+Description=Moyi close-job check, hourly
+
+[Timer]
+OnCalendar=*-*-* *:07:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target
