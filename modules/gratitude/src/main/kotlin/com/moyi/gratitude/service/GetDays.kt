@@ -521,7 +521,11 @@ internal class GetDays(
          * as 470 octets: at its largest it spends about 25 KB, and
          * `DaysFeedTest` measures the largest page with it. What is left is
          * about 4 KB, and a field on a day or an entry now needs this bound
-         * looked at again.
+         * looked at again. The name it measures with is
+         * `ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH`, and
+         * `OpenApiContractTest` ("the longest display name identity takes is
+         * no longer than the archive's largest page was measured with") fails
+         * if identity ever takes a longer one.
          */
         const val PAGE_TEXT_OCTETS = 192 * 1024
 

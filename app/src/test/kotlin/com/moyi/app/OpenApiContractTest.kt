@@ -2,6 +2,7 @@ package com.moyi.app
 
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.security.SecurityConfiguration
+import com.moyi.common.testing.ArchivePageBudget
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
@@ -15,6 +16,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import io.kotest.matchers.maps.shouldContainKey
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -527,6 +529,15 @@ class OpenApiContractTest(
         val page = api.components.schemas["DaysResponse"]!!
         page.properties.keys shouldBe setOf("items", "nextCursor")
         page.properties["items"]!!.items.`$ref` shouldBe "#/components/schemas/DayResponse"
+    }
+
+    @Test
+    fun `the longest display name identity takes is no longer than the archive's largest page was measured with`() {
+        // Every day of the archive carries the partner's name (ADR-0036 question 5), and
+        // DaysFeedTest measures the largest page with a name of this length. Identity's limit
+        // is internal to it; the contract states it, and a longer one is a page nobody measured.
+        val displayName = api.components.schemas["RegisterRequest"]!!.properties["displayName"]!!
+        displayName.maxLength.shouldNotBeNull() shouldBeLessThanOrEqual ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH
     }
 
     @Test

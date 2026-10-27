@@ -2,6 +2,7 @@ package com.moyi.gratitude.web
 
 import com.moyi.bond.api.BondAccess
 import com.moyi.common.security.AccessTokenIssuer
+import com.moyi.common.testing.ArchivePageBudget
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.gratitude.domain.BondDayId
@@ -482,9 +483,11 @@ internal class DaysFeedTest(
             Int::class.java,
             bond,
         ) shouldBe 4
-        // And both named as long as a name can be sent: 80 characters, the most identity takes, 78 of them controls between
-        // two letters so that registration's trim keeps them, which JSON writes as six octets each. 470 octets on every day.
-        val longestName = "a" + "\u001f".repeat(78) + "a"
+        // And both named as long as a name can be sent: 80 characters, the most identity takes (OpenApiContractTest holds
+        // identity to ArchivePageBudget), all but two of them controls between two letters so that registration's trim
+        // keeps them, which JSON writes as six octets each. 470 octets on every day.
+        val longestName = "a" + "\u001f".repeat(ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH - 2) + "a"
+        longestName.length shouldBe ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH
         users.rename(ada, longestName)
         users.rename(bea, longestName)
 
