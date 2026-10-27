@@ -13,3 +13,15 @@ get {
 auth:bearer {
   token: {{accessToken}}
 }
+
+script:post-response {
+  // With exactly one bond, it is the one the requests after this mean, as
+  // Create bond and Accept invite would have kept it. With more, pick one by
+  // setting bondId yourself: guessing would act on the wrong bond.
+  const bonds = (res.body && res.body.bonds) || [];
+  if (bonds.length === 1) bru.setVar("bondId", bonds[0].id);
+}
+
+docs {
+  Lists your bonds. When there is exactly one, keeps its id as bondId, so a session that signed in to an existing bond can go straight on to Today, Days and the rest without creating or joining one.
+}
