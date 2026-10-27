@@ -139,6 +139,8 @@ internal class BondAccessAdapter(
     @Transactional(readOnly = true)
     override fun partnerDisplayNameOf(membership: BondMembership): String? {
         val bond = bonds.findByMember(BondId(membership.bondId), UserId(membership.userId)) ?: throw BondNotFoundException()
+        // "The other row" is the partner only while a bond has two seats, as every v1 bond does; a third would make it a guess.
+        check(bond.members.size <= 2) { "a bond has more than two member rows; the partner is no longer one row" }
         val partner = bond.members.firstOrNull { it.id.value != membership.memberId } ?: return null
         return displayNameOf(users.find(partner.userId.value))
     }
