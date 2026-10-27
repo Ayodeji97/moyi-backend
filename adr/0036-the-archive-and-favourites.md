@@ -1,7 +1,7 @@
 # ADR-0036 — The archive and favourites
 
 **Status:** Accepted · **Date:** 2026-10-09 · **Deciders:** Daniel
-**Amended:** 2026-10-13 ("Owed, C5c" discharged or carried, item by item; decision 12's unmark narrowed on a tombstone by `01752a7`, which the owner accepted on 2026-10-21 — ADR-0037 question 8)
+**Amended:** 2026-10-13 ("Owed, C5c" discharged or carried, item by item; decision 12's unmark narrowed on a tombstone by `01752a7`, which the owner accepted on 2026-10-21 — ADR-0037 question 8); 2026-10-27 (questions 5 and 7 built as ruled: the partner's name on every day, and `entry_favourites.created_at` dropped by V26)
 
 ## Context
 
@@ -479,6 +479,9 @@ any column on it is readable by both people. Keyed this way there is no query th
   is kept because the corpus specifies it (doc 04:90, `memberId · entryId · createdAt`).
   V22 is unmerged and may still be edited. Noted by the whole-branch privacy review;
   question 7.
+- **Amended 2026-10-27: the column is gone** (V26, question 7's ruling). The row is
+  `(entry_id, member_id)`; `Favourites.mark` takes no time and `FavouriteEntry` no clock.
+  V22 is merged and stays as it was written.
 - The feed needed no index. `bond_days_feed_idx (bond_id, date DESC)` has existed since
   V12, and on a 2,000-day bond Postgres chose the unique `(bond_id, date)` backwards
   instead; either serves, with no sort. **A page costs about a page where the listed days
@@ -936,6 +939,7 @@ own bookmarks and nobody else's.
 **`bond`.** The partner's display name is still not obtainable in `gratitude`:
 `BondMembership` names nothing about the other member (ADR-0031, Consequences). The
 archive's author label needs it (question 5).
+*Discharged 2026-10-27: `BondAccess.partnerDisplayNameOf` (question 5's amendment).*
 
 **Its own pull request: the bond route's conditional `GET`.** Measured while building
 decision 9. `GET /bonds/{bondId}` sends its `ETag` beside Spring Security's `no-store` on
@@ -1025,6 +1029,43 @@ Each is built one way and cheap to turn.
    specifications precise enough to draw from when Figma is available again; the drawing is
    deferred. The partner's display name is added to the archive response, to be built;
    `bond` owes it.
+
+   *Built 2026-10-27, the name; the design gaps are the corpus's, in the Gratitude
+   repository, and not this one's.* Five decisions, the controller's:
+
+   - **On each day, as `partnerDisplayName: String?`, not on the page.** `GET /days/{date}`
+     is the feed's element byte for byte (decision 8); a field on the page would break that
+     and the day route would need its own. It is the same value on every day of a bond. The
+     day is also what search and on-this-day return (ADR-0039), so they carry it too: one
+     shape of a day, wherever a day is sent.
+   - **`null` only while the bond has never had a second member**, the creator's archive
+     before anyone joined. A partner who left or blocked keeps their member row and is still
+     named: the archive still shows what they wrote (ADR-0028). An account identity no
+     longer knows is `"Former member"`, the placeholder `GET /bonds/{bondId}` gives it, from
+     one function (`displayNameOf`, beside `BondViews`) that both use.
+   - **Read at request time**, from `identity.api.UserDirectory`, as `BondViews` reads it:
+     a changed name changes everywhere at once. So a rename moves the archive's `ETag`,
+     which is right, since the tag is the body. It discloses nothing new: the caller's own
+     `GET /bonds/{bondId}` already names both members.
+   - **`bond` owes it, through `BondAccess.partnerDisplayNameOf(membership)`.** It takes
+     the unforgeable `BondMembership` (ADR-0026), so it cannot be asked about a bond the
+     caller is not in, and runs no second guard. "Partner" is the bond's other member row,
+     whether or not they have left. `gratitude` imports nothing of `identity`.
+   - **One lookup a request, not one a day.** Each controller asks once, after the read,
+     and every day of the response carries the answer (`ArchivePartnerNameTest` counts the
+     calls through the test's `BondAccess`). After the read and outside its transaction, so
+     the lookup cannot put `bond`'s rows into the read's persistence context before the
+     marker is read (decision 15).
+
+   **`GET /today` does not carry it**, deliberately: the ruling names the archive, and
+   `TodayResponse` is unchanged. A client that wants the name on today has it from
+   `GET /bonds/{bondId}`.
+
+   **What it costs decision 6.** The name is on fifty days a page, and identity takes 80
+   characters with no rule against controls, which JSON writes as six octets each: at its
+   largest about 25 KB of the margin, which leaves about 4 KB. `DaysFeedTest` builds the
+   largest page with the longest name on every day and measures it. The next field on a day
+   or an entry needs that bound looked at again (Revisit when).
 6. **A partner's entry that was written and erased before you saw it is a permanent
    `REMOVED` in the archive** (decision 1). BR-8 allows the shape, and `today` has shown it
    for the day since C5a. Built: shown for good, on every walk. Hiding it once the day has
@@ -1040,6 +1081,18 @@ Each is built one way and cheap to turn.
 
    *Ruled by the owner on 2026-10-21, to be built: the column is dropped, by a new
    migration.*
+
+   *Built 2026-10-27:* `V26__gratitude_favourites_drop_created_at.sql`, one
+   `ALTER TABLE entry_favourites DROP COLUMN created_at`, outright and not in two steps.
+   `FlywayMigrationTest` asserts the table is two ids and nothing else, and the smoke run
+   reads its columns. **The rollout cost, accepted:** an image from before V26 still names
+   the column in its `INSERT`, so once V26 has run (a) a `PUT …/favourite` served by the old
+   container in the seconds of a Kamal deploy while the new one has migrated is a `500`, and
+   (b) after a rollback to a pre-V26 image every mark is a `500` until it is rolled forward.
+   Reads and unmarks are unaffected: nothing else names the column. Accepted for one couple
+   and a deliberate deploy; the alternative was a second migration later, in a sequence
+   Phase 4's work is now also taking numbers from, which is why V26 must reach `main`
+   before any of Phase 4's V27 onward is deployed.
 8. **What a client may cache** (decision 9). `private, no-cache` lets a client's HTTP cache
    keep entry text, where every other response is `no-store`. Withdrawn words then stay on
    the other member's device until that page is asked for again, and two accounts on one
@@ -1160,6 +1213,9 @@ Added after the conformance review, which found these missing from the list:
 - A field is added to `EntryResponse`: decision 6's margin is about 31 KB and a hundred
   entries a page spend it thirty octets at a time. `DaysFeedTest` measures the worst page
   and fails first.
+- A field is added to a day, or the display name's limit or its rules change: since
+  2026-10-27 the name spends most of that margin at its largest (question 5's amendment),
+  and about 4 KB is left.
 - The entry limit changes, or `EntryText` starts counting control characters: the worst
   case of decision 6 moves with it.
 - A second route by entry id arrives (reactions, C5c): decision 11, or its own reason.

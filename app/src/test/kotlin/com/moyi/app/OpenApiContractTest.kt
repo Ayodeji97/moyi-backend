@@ -510,10 +510,14 @@ class OpenApiContractTest(
     fun `a day of the archive carries the two entry fields exactly as today does, and a page is days and a cursor`() {
         // One reader for an entry, wherever it is met: the same branches, the
         // same discriminator, the same null. And no field about the other
-        // person: nothing but a date, the day's status and the two entries.
+        // person but one: a date, the day's status, the two entries, and the
+        // name the partner goes by, which their bond already tells the caller
+        // (ADR-0036 question 5), nullable for a bond nobody has joined yet.
         val today = api.components.schemas["TodayResponse"]!!.properties
         val day = api.components.schemas["DayResponse"]!!
-        day.properties.keys shouldBe setOf("date", "status", "myEntry", "partnerEntry")
+        day.properties.keys shouldBe setOf("date", "status", "myEntry", "partnerEntry", "partnerDisplayName")
+        day.properties["partnerDisplayName"]!!.types shouldBe setOf("string", "null")
+        today.keys shouldNotContain "partnerDisplayName"
         day.properties["partnerEntry"] shouldBe today["partnerEntry"]
         day.properties["myEntry"] shouldBe today["myEntry"]
         day.properties["partnerEntry"]!!.discriminator.shouldNotBeNull()

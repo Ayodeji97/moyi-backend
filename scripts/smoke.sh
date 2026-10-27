@@ -69,6 +69,8 @@
 # Since slice C6c it reads milestones: nothing reached and 7 next on a new bond; the seventh
 # complete day today, six earlier ones put in by hand, reached the moment both wrote and the
 # same for both; and after a leave, what was reached kept and nothing next, for both alike.
+# Since the favourites rulings (ADR-0036 questions 5 and 7) every day of the archive names the
+# partner and today does not, and a favourite's row holds no time (V26).
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
 # days are the tests' to show. Last run on 2026-10-24, for the production
@@ -1291,6 +1293,8 @@ revealed_bond "an archive of one day" "$ARC_W" "$ARC_M" "$ARC_W_TEXT" "$ARC_M_TE
 ARC_BOND="$RB_BOND"; ARC_W_ENTRY="$RB_A_ENTRY"; ARC_M_ENTRY="$RB_B_ENTRY"
 expect "today, for the date the archive should carry" 200 '"bondDay"' -- "$API/bonds/$ARC_BOND/today" -H "Authorization: Bearer $ARC_W"
 ARC_DATE="$(raw bondDay.date)"
+# The partner's name is the archive's (ADR-0036 question 5), not today's: the ruling names the archive.
+is "…today carries no partner's name" "$(at partnerDisplayName)" "absent"
 
 # The feed: one day, newest first, each member's own entry as myEntry.
 expect "the writer's GET /days is 200" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"
@@ -1300,10 +1304,14 @@ is "…the writer's own entry is myEntry, with its words" "$(raw items.0.myEntry
 is "…the partner's is partnerEntry, with its words" "$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)" "$ARC_M_ENTRY|$ARC_M_TEXT"
 is "…neither is marked, and there is no further page" "$(at items.0.myEntry.favourited)|$(at items.0.partnerEntry.favourited)|$(at nextCursor)" "false|false|null"
 no_times "…and no entry says when it was erased or last changed"
+# What the other member goes by, which GET /bonds/{bondId} already tells both;
+# every account here registers as "Smoke" (ADR-0036 question 5).
+is "…and the day names the partner" "$(raw items.0.partnerDisplayName)" "Smoke"
 ARC_W_ITEM="$(at items.0)"
 expect "the marker's GET /days is 200" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
 is "…the same day, REVEALED, and no other" "$(raw items.0.date)|$(raw items.0.status)|$(at items.1)|$(at nextCursor)" "$ARC_DATE|REVEALED|absent|null"
 is "…with the two entries the other way round" "$(raw items.0.myEntry.id)|$(raw items.0.myEntry.text)|$(raw items.0.partnerEntry.id)|$(raw items.0.partnerEntry.text)" "$ARC_M_ENTRY|$ARC_M_TEXT|$ARC_W_ENTRY|$ARC_W_TEXT"
+is "…and the partner named the same way" "$(raw items.0.partnerDisplayName)" "Smoke"
 ARC_M_ITEM="$(at items.0)"
 
 # One day is the feed's item, not a second rendering of it.
@@ -1397,6 +1405,9 @@ expect "PUT /entries/{id}/favourite on the partner's revealed entry is 204" 204 
 expect "…and 204 again" 204 "" -- -X PUT "$API/entries/$ARC_W_ENTRY/favourite" -H "Authorization: Bearer $ARC_M"
 ARC_MARKS="$(sql "SELECT count(*) FROM entry_favourites WHERE entry_id='$ARC_W_ENTRY'")"
 case "$ARC_MARKS" in psql-unavailable) skip "the favourite row count";; 1) pass "…leaving one row, not two";; *) fail "favourite rows" "expected 1, got '$ARC_MARKS'";; esac
+# The row is two ids and no time: when a person marked an entry is, to an operator, when they were reading it (V26).
+ARC_FAV_COLUMNS="$(sql "SELECT string_agg(column_name, ',' ORDER BY column_name) FROM information_schema.columns WHERE table_schema='public' AND table_name='entry_favourites'")"
+case "$ARC_FAV_COLUMNS" in psql-unavailable) skip "the favourite row's columns";; entry_id,member_id) pass "…and that row holds no time (V26)";; *) fail "favourite columns" "expected 'entry_id,member_id', got '$ARC_FAV_COLUMNS'";; esac
 expect "the marker's archive" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_M"
 is "…says favourited on that entry, and not on their own" "$(raw items.0.partnerEntry.id)|$(at items.0.partnerEntry.favourited)|$(at items.0.myEntry.favourited)" "$ARC_W_ENTRY|true|false"
 expect "the writer's archive" 200 '"items":[' -- "$API/bonds/$ARC_BOND/days" -H "Authorization: Bearer $ARC_W"

@@ -34,7 +34,7 @@ script:post-response {
 }
 
 docs {
-  The archive, newest day first: every day you have something to see on. A day is your entry, your partner's, and the day's status; each entry you can read says whether YOU have marked it (favourited).
+  The archive, newest day first: every day you have something to see on. A day is your entry, your partner's, the day's status, and the name your partner goes by (partnerDisplayName: null only before anyone has joined you); each entry you can read says whether YOU have marked it (favourited).
 
   Three parameters are switched off here; tick one to send it. until starts the page at that date or the nearest earlier one. favourites=true keeps to the days holding an entry you have marked. cursor is the nextCursor of the page before: it is kept when a response carries one, and null means there is no earlier page. A value the server cannot read is 422, naming the parameter.
 
