@@ -5,11 +5,13 @@ import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.events.OutboxEvent
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.PostgresIntegrationTest
+import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
 import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushDelivery
 import com.moyi.notification.api.PushMessage
 import com.moyi.notification.api.PushPlatform
+import com.moyi.notification.api.PushRecipient
 import com.moyi.notification.api.PushRequest
 import com.moyi.notification.api.PushToken
 import com.moyi.notification.api.PushTokenRegistration
@@ -32,6 +34,7 @@ import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Duration
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
@@ -313,7 +316,14 @@ internal class SendPushTest(
     private fun reveal(
         userId: UUID,
         staleAfter: Instant = start.plus(Duration.ofDays(1)),
-    ) = PushRequest(userId, bond, PushCategory.REVEAL, "reveal:day-1:$userId", staleAfter)
+    ) = PushRequest(
+        userId,
+        bond,
+        PushCategory.REVEAL,
+        "reveal:day-1:$userId",
+        staleAfter,
+        PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
+    )
 
     private fun register(
         userId: UUID,

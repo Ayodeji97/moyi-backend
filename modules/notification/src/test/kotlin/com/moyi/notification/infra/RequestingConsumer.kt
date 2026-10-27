@@ -3,14 +3,17 @@ package com.moyi.notification.infra
 import com.moyi.common.events.EventConsumer
 import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.events.StartFrom
+import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
 import com.moyi.notification.api.PushCategory
+import com.moyi.notification.api.PushRecipient
 import com.moyi.notification.api.PushRequest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Duration
+import java.time.ZoneId
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -44,6 +47,7 @@ internal class RequestingConsumer(
                 category = PushCategory.REVEAL,
                 dedupeKey = "reveal:${event.aggregateId}:$userId",
                 staleAfter = event.occurredAt.plus(Duration.ofDays(1)),
+                recipient = PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
             ),
         )
     }

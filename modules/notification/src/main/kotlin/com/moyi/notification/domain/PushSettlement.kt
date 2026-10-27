@@ -4,14 +4,21 @@ import java.time.Instant
 
 /** A row of the ledger's `status` column (V29). One CHECK, one enum. */
 internal enum class NotificationStatus {
-    /** Recorded, and owed to the `notification.push` consumer. The only status that is not final. */
+    /** Recorded, and owed to the `notification.push` consumer. Not final. */
     REQUESTED,
+
+    /**
+     * Arrived inside the member's quiet hours and waits for their end, at
+     * `not_before` (Q7, ADR-0045). Not final: released back to `REQUESTED`
+     * by [com.moyi.notification.api.HeldPushes].
+     */
+    HELD,
     SENT,
 
-    /** The member has the category turned off (N2). */
+    /** The member has the category turned off (FR-081). */
     SUPPRESSED,
 
-    /** Over FR-082's budget and not reveal-class: dropped, never queued (N2). */
+    /** Over FR-082's budget: dropped, never queued. */
     DROPPED_BUDGET,
 
     /** Still unsent at `stale_after`: never sent late. */
