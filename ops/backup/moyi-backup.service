@@ -1,0 +1,12 @@
+# The nightly backup (ADR-0043). Started by moyi-backup.timer; run it by hand
+# with `systemctl start moyi-backup` and read it with `journalctl -u moyi-backup`.
+[Unit]
+Description=Moyi nightly backup: pg_dump, age, R2
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/moyi-backup
+Nice=10
+IOSchedulingClass=idle
