@@ -1,0 +1,10 @@
+# The close job's dead-man switch (ops/monitoring/close-check.sh).
+[Unit]
+Description=Moyi close-job check: heartbeat when days are closing
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/moyi-close-check
+TimeoutStartSec=5min
