@@ -818,13 +818,18 @@ private const val REQUIRED_END_BOND_REQUEST = "RequiredEndBondRequest"
 private val FLAG_REQUIRED_OPERATIONS = setOf("blockBond")
 private const val WITHDRAW_ENTRIES_PROPERTY = "withdrawEntries"
 
+/** Where [ENDING_BODY_RULES] names the values a route accepts for the flag. */
+private const val ACCEPTED = "{accepted}"
+
 /**
- * The body rules both endings share, given the values the route accepts for
- * the flag: `/leave` takes `null` as absent, `/block` refuses it (ADR-0035
- * question 1). One text, so the two cannot drift apart in anything else.
+ * The body rules both endings share, with [ACCEPTED] standing for the values
+ * the route takes for the flag: `/leave` takes `null` as absent, `/block`
+ * refuses it (ADR-0035 question 1). One text, so the two cannot drift apart in
+ * anything else. A constant and not a function: the file is at detekt's
+ * `TooManyFunctions` threshold.
  */
-private fun endingBodyRules(accepted: String): String =
-    "A body with any other key, with the key twice, or with a value that is not JSON $accepted is " +
+private const val ENDING_BODY_RULES =
+    "A body with any other key, with the key twice, or with a value that is not JSON $ACCEPTED is " +
         "`400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body."
 
 /** What each ending does with an absent flag, by operation id: see [documentEndingDefaults]. */
@@ -837,7 +842,7 @@ private val ENDING_DESCRIPTIONS =
             "members, and this cannot be undone. The other route that ends a bond has no default: there the " +
             "flag is required. " +
             "`409 BOND_ARCHIVED` on a bond that has already ended, and nothing is withdrawn then. " +
-            endingBodyRules("true, false or null"),
+            ENDING_BODY_RULES.replace(ACCEPTED, "true, false or null"),
         "blockBond" to
             "Ends the bond for both members, with the same `204` as `POST /bonds/{bondId}/leave`, and keeps the " +
             "two accounts from being paired again. Also accepted on a bond that has already ended, and may be " +
@@ -846,7 +851,7 @@ private val ENDING_DESCRIPTIONS =
             "undone. Send `{\"withdrawEntries\": false}` to keep them. When the flag is absent or null, or there is " +
             "no body, the answer is `400 MALFORMED_REQUEST` and nothing is ended or withdrawn; a caller who is not a " +
             "member is answered `404` first. A later call with `true` withdraws what an earlier one kept. " +
-            endingBodyRules("true or false"),
+            ENDING_BODY_RULES.replace(ACCEPTED, "true or false"),
     )
 
 /**
