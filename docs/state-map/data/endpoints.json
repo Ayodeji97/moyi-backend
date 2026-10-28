@@ -314,7 +314,7 @@
     "machine": "bond",
     "auth": "bearer",
     "headers": [
-      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back. Any other Content-Type is refused with 415, even with no body)"
+      "Content-Type (application/json. The body is required and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block is refused with 400. Any other Content-Type is refused with 415, even with no body)"
     ],
     "requestErrors": [
       {
@@ -324,6 +324,14 @@
         "evidence": "smoke",
         "evidenceRef": "a misspelt flag to /block is 400 MALFORMED_REQUEST",
         "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/EndBondRequest.kt#context.reportInputMismatch<Nothing>(EndBondRequest::class.java, \"one key, once\")"
+      },
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The flag is missing: no body, {}, or {\"withdrawEntries\": null}. The same bytes as a body that cannot be read, and nothing is ended or withdrawn. Unlike that refusal it is answered after membership is looked at, so a stranger who sends no flag gets the 404 below (ADR-0035 question 1).",
+        "evidence": "smoke",
+        "evidenceRef": "a block with no body is 400 MALFORMED_REQUEST",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondsController.kt#?: throw HttpMessageNotReadableException(\"The flag is required on this route\", ServletServerHttpRequest(http))"
       },
       {
         "status": 404,
