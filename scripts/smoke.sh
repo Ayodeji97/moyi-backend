@@ -87,7 +87,10 @@
 # they are made to have passed, and taken by the logging provider. Since Phase 4
 # N3 a reveal on the wire sends one push to each member, logged twice by the logging
 # provider and SENT once each in the ledger, with neither the words nor the token in any
-# line, and the join asks one push of the member who was there. Last run on 2026-10-28,
+# line, and the join asks one push of the member who was there. Last run on 2026-10-28, for the entry-text rulings (ADR-0031 rulings 1 and 2), after main (b2da5a7, #100) was merged
+# in, from a jar of 2e0364b's code, on a fresh database that applied V1 to V27, V29, V30
+# and V31, against its own compose project (moyi-0f: Postgres 55443, Valkey 56390)
+# and --attach: 1017 passed, 0 failed, 0 skipped, 27 sections. Before it, on 2026-10-28,
 # after main (0a663d5, the squash of #99) was merged into N3, from a jar of that merge, on a
 # fresh database that applied V1 to V27, V29, V30 and V31, against its own compose project
 # (moyi-n3: Postgres 55438, Valkey 63798) and --attach: 1009 passed, 0 failed, 2 skipped
