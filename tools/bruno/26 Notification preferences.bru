@@ -1,0 +1,19 @@
+meta {
+  name: Notification preferences
+  type: http
+  seq: 26
+}
+
+get {
+  url: {{api}}/bonds/{{bondId}}/members/me/notifications
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Which kinds of push you want in this bond: reminder, partnerJoined, reveal, milestone, onThisDay and proposal. Yours alone; there is no way to ask for your partner's. If you never chose, everything is on except onThisDay, which is off until you turn it on. Readable after the bond has ended. A bond that is not yours is 404.
+}

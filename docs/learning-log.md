@@ -2600,3 +2600,27 @@ Reality: it was true, and was then run: a test consumer requests a push from ins
 Wrong about: where a secret leaks. Not in our `toString`, which was redacted, but in a
          library's debug line about the object we handed it. And about a mutation being
          the mutation intended: a replacement that matches twice breaks the first match.
+
+## 2026-10-28 · Feature · Push N2 — quiet hours held in the ledger, and the test that read its console twenty times
+
+Expected: quiet hours would be a typed "not yet" the push consumer throws and the outbox
+         backs off on, since the outbox already retries for ever. The budget lock would take
+         namespace 2, which ADR-0044 calls the next free one after identity's 1.
+Reality: the outbox counts every throw as a failure. A night's hold would have put the
+         consumer into the "failing" gauge after five retries, written a WARN every fifteen
+         minutes, kept the stuck-event age gauge climbing all night, and released a 07:00
+         reveal at any time up to 07:15. So a held push is acknowledged and kept `HELD` in
+         its own ledger, and a one-minute job hands it back. Namespace 2 was already bond's
+         (the bonds-of-a-user lock, FR-025) before N1 took it for tokens; N2 takes 4. And
+         `SecretsNeverLoggedTest` failed with "Java heap space" whenever the app suite ran
+         beside the module suites, and passed alone. It called `output.all` once per watched
+         secret, each call joining everything printed at TRACE (24 MB) into a new string.
+         Reading it once only moved the failure to the next test class, and N1's own head
+         failed the same way under the same full build: the app JVM's 512 MB default was the
+         limit, and now it has 1 GB. Mutations: twenty
+         five across notification, bond and gratitude, each turned its test red; one (an
+         absent toggle cleared) was first caught only by a neighbouring test, and the
+         endpoint test was tightened until it caught it itself.
+Wrong about: a retry being a cheap way to wait. To the outbox it is a failure, and its
+         gauges say so. And about a record of what is free: ADR-0044 said namespace 2 was
+         unused, and nobody had grepped.
