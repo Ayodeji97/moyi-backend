@@ -90,7 +90,9 @@
 # line. Last run on 2026-10-28, for D1 rebased onto main at 0a663d5 (#99, V30),
 # from a jar of that tree, on a fresh database that applied V1 to V27, V29, V30,
 # V32 and V33, against its own compose project (moyi-d1: Postgres 55440, Valkey
-# 63800, MinIO 59000) and --attach: 1034 passed, 0 failed, 0 skipped, 27 sections.
+# 63800, MinIO 59000) and --attach: 1034 passed, 0 failed, 0 skipped, 27 sections;
+# and the same again from a jar of 9718c61 (the review's fixes: storage calls
+# bounded and outside the transaction, MinIO pinned by digest), on a fresh database.
 # Before it, on
 # 2026-10-28, with main merged in (#96 as bd94436, #104's V27), from a jar of that
 # merge, on a fresh database that applied V1 to V27, V29 and V30, against its own
