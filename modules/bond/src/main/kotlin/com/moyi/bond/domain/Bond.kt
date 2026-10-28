@@ -33,7 +33,21 @@ internal enum class BondType(
  * `ACTIVE` with B2's accept, `ARCHIVED` with B3's leave and block,
  * `PENDING_DELETION` with B5, and `DELETED` with the Phase 5 job.
  */
-internal enum class BondStatus { PENDING_MEMBER, ACTIVE, ARCHIVED, PENDING_DELETION, DELETED }
+internal enum class BondStatus {
+    PENDING_MEMBER,
+    ACTIVE,
+    ARCHIVED,
+    PENDING_DELETION,
+    DELETED,
+    ;
+
+    /**
+     * [Bond.isOpen]'s rule, on the status, for a caller holding only a status
+     * read straight off a row (the push audience, ADR-0046): one rule, asked
+     * from two places.
+     */
+    val isOpen: Boolean get() = this == PENDING_MEMBER || this == ACTIVE
+}
 
 /**
  * What `POST /bonds` asks for (doc 06 §3.3), already validated at the edge —
@@ -173,7 +187,7 @@ internal data class Bond(
      * BR-9): a bond that has ended is a record, and the only things it still
      * accepts are reads, export and deletion.
      */
-    val isOpen: Boolean get() = status == BondStatus.PENDING_MEMBER || status == BondStatus.ACTIVE
+    val isOpen: Boolean get() = status.isOpen
 
     /**
      * Can still be left or blocked out of.
