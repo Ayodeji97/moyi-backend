@@ -10,8 +10,11 @@ import java.util.UUID
 /**
  * `POST /media/upload-intent`'s body (doc 06:181). Every field is nullable here
  * and checked by the domain's `UploadDeclaration`, the one place FR-042 and
- * FR-043 are written: a missing field and a wrong one are both `422` naming the
- * field, never `400`.
+ * FR-043 are written: a missing field, or a well-formed value that is not
+ * acceptable (an unknown kind, a size below 1, a checksum that is not a
+ * SHA-256), is `422` naming the field. A body that is not JSON, or a field of
+ * the wrong JSON type (a size that is not a number), cannot be read at all and
+ * is `400 MALFORMED_REQUEST`, as everywhere (review of #106).
  *
  * @property checksum the SHA-256 of the bytes about to be uploaded, in standard base64 (44 characters)
  * @property sizeBytes the exact length of the upload; the URL is signed for this length and no other

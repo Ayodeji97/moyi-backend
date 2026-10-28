@@ -64,11 +64,13 @@ URL was issued.
   declared type is a claim; D2 and D3 read the bytes (T-07). "MB" is a mebibyte, the larger
   reading.
 
-**2. Completion asks the storage, under the asset's row lock, inside the request's transaction.**
-`POST /media/{id}/complete` requires an `Idempotency-Key` (doc 06:16) and runs
-`IdempotentExecution.once` as `POST /entries` does: key lock, then the asset's `FOR UPDATE`, then
-a `HEAD`. A pending upload whose object has the declared length, and the declared digest when the
-storage reports one (MinIO does), becomes `UPLOADED` and publishes `MediaUploaded {mediaId}` on
+**2. Completion asks the storage before any transaction opens, then decides under the row lock.**
+`POST /media/{id}/complete` requires an `Idempotency-Key` (doc 06:16). It reads and authorises the
+asset with no transaction open, then (for a pending upload only) sends the `HEAD`, still with no
+transaction open, and only then runs `IdempotentExecution.once` as `POST /entries` does: key lock,
+then the asset's `FOR UPDATE`, then **the status read again under the lock**. A pending upload whose
+object has the declared length, and the declared digest when the storage reports one (MinIO does),
+becomes `UPLOADED` and publishes `MediaUploaded {mediaId}` on
 aggregate `Media` in the same transaction (ADR-0035). Nothing there, or something else there, is
 `409 MEDIA_NOT_UPLOADED` (a new code): nothing changes, and since a refusal is never recorded, the
 client may finish the PUT and complete again under the same key. An asset already past
@@ -76,10 +78,26 @@ client may finish the PUT and complete again under the same key. An asset alread
 is a read: an asset deleted since is the read's `404`. `idempotency_keys.result_kind` gains
 `MEDIA` (V33, `common:web`'s own migration, since the table is that module's).
 
-The `HEAD` holds a pooled connection and the row lock for one round trip, bounded by a 2 s connect
-and a 5 s read timeout on the storage client, as ADR-0044 decision 5 bounds FCM. Chosen over a
-`HEAD` before the transaction, which would need the owner check twice and could race a deletion.
-No consumer subscribes to `MediaUploaded` yet; D2's `media.process` will.
+**Every storage call is bounded, and none runs under a database lock** (review of #106). The
+first version sent the `HEAD` inside the transaction. With the SDK's defaults (three attempts with
+backoff, no call timeout) a storage that accepts and never answers held the call for about 20 s,
+and with it a pooled connection, the key's advisory lock and the row lock: ten such requests empty
+Hikari's pool, and a deletion waiting on the row met `lock_timeout` as an unmapped `500`. Now the
+storage client gives a whole call 3 s (`api-call-timeout`), one attempt 1.5 s
+(`api-call-attempt-timeout`), at most 2 attempts (`max-attempts`), all
+`moyi.media.storage.r2.*` properties; and the `HEAD` runs before the transaction. A storage that
+does not answer costs that request about 3 s and holds nothing in the database; the answer is
+`503 MEDIA_STORAGE_UNAVAILABLE` and nothing is recorded, the Idempotency-Key included
+(`MediaStorageHangsTest`, against a socket that accepts and never answers, also watches `pg_locks`
+for the whole call). Asking outside the lock is safe because the decision is taken under it, on
+the status as it is then: a completion that lost a race to another completion finds `UPLOADED` and
+answers `200` without a second event, one that lost to a deletion is the `404`
+(`MediaRaceTest`, both requests seen parked on the row in `pg_locks` before it is released).
+A row lock not had within `lock_timeout` (10 s in production) is **`409 MEDIA_BUSY`**, a new code,
+on both completion and deletion: not `503`, since the storage is not involved, and retryable as
+`FAVOURITE_BUSY` and `REACTION_BUSY` are; with no storage call under the lock it means the
+database is struggling, so it should be rare. No consumer subscribes to `MediaUploaded` yet; D2's
+`media.process` will.
 
 **3. Owner only, and one `404` for everyone else.** Every read is `WHERE id = ? AND owner_user_id =
 ?`, so another person's asset is not found rather than found and refused, and an id that is not a
@@ -90,7 +108,9 @@ see.
 
 `DELETE /media/{id}` marks the asset `DELETED` under its row lock, then, after the commit, deletes
 the object, on a best-effort basis: an upload is only ever under `in/` in this slice, and the
-bucket's lifecycle rule (decision 4) removes what a failed delete leaves within two days. D5's
+bucket's lifecycle rule (decision 4) removes what a failed delete leaves within two days. An upload
+URL also outlives a deletion: it stays valid until its 15 minutes are up, so a PUT after the delete
+leaves an orphan under `in/`, which the same 2-day rule removes. D5's
 `media.purge` is where an erasure that must never be given up on lives (spec D-9). "Only if
 unattached": nothing attaches before D2, so the attached case cannot arise; the delete's `UPDATE`
 carries `attached_entry_id IS NULL` anyway, and D2 adds its refusal with the claim that makes it
@@ -124,7 +144,8 @@ storage-shaped. `R2ObjectStore` is the only class that imports the AWS SDK v2
 clients are excluded) and path-style addressing. The tests and the `local` profile point the same
 class at MinIO, so what is tested is the code that runs in production, against the same SigV4.
 
-The image is `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, a community build of the MinIO server from
+The image is `pgsty/minio` release `RELEASE.2026-08-04T00-00-00Z`, pinned by its digest
+(`sha256:b6bfe723…e602372`, read from the tag with `docker image inspect`), a community build of the MinIO server from
 its source: `minio/minio` no longer resolves on Docker Hub and quay.io's copy needs a login (both
 tried, 2026-10-28). `docker-compose.yml` runs the same image, with a one-shot job that makes the
 local `moyi-media` bucket.
@@ -140,13 +161,13 @@ declared is refused by the storage itself, not by code of ours that could be byp
 production without media credentials starts, and says so in its log. Replacing R2 is one class.
 
 **Negative.** Whether R2 enforces the signed checksum is unproven until someone PUTs altered bytes
-at the real bucket. A completion holds a database connection for up to seven seconds when the
-storage is slow. A deleted upload's bytes may outlive the deletion by up to two days if the storage
+at the real bucket. A completion waits up to 3 s on a storage that does not answer (holding no
+database connection while it does). A deleted upload's bytes may outlive the deletion by up to two days if the storage
 cannot be reached at that moment. The test double is a community image whose maintainer is not
 MinIO.
 
-**Neutral.** Two new error codes beyond the spec's two (`MEDIA_NOT_UPLOADED`,
-`MEDIA_STORAGE_UNAVAILABLE`). `ResultKind` and V11's CHECK gain `MEDIA` together. The `media:intent`
+**Neutral.** Three new error codes beyond the spec's two (`MEDIA_NOT_UPLOADED`,
+`MEDIA_STORAGE_UNAVAILABLE`, `MEDIA_BUSY`). `ResultKind` and V11's CHECK gain `MEDIA` together. The `media:intent`
 bucket (30 an hour per user, doc 06 §4) joins `RateLimitBucket`.
 
 ## Alternatives considered
@@ -157,7 +178,8 @@ bucket (30 an hour per user, doc 06 §4) joins `RateLimitBucket`.
 - **Sign the length only.** Rejected: the digest costs the client one hash and lets MinIO, and R2 if
   it honours it, refuse altered bytes at the door.
 - **A logging stand-in, as email and push have.** Rejected in decision 5.
-- **HEAD before the transaction.** Rejected in decision 2.
+- **HEAD inside the transaction, under the row lock.** The first version; replaced in decision 2
+  after review, because a slow storage then held a pooled connection and two locks.
 - **Delete the object before the commit, or only through D5's `media.purge`.** Before the commit
   would lose the bytes of a deletion that rolled back; waiting for D5 would leave every deleted
   upload in the bucket until then.
@@ -174,8 +196,12 @@ bucket (30 an hour per user, doc 06 §4) joins `RateLimitBucket`.
   `MOYI_MEDIA_STORAGE_R2_BUCKET: moyi-media`, and list `MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID` and
   `MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY` as secrets; then PUT altered bytes to one intent's URL
   and see R2 refuse them (decision 1).
-- **D2:** `media.process`, the signed GET URLs on `GET /media/{id}`, the FR-044a claim and
+- **D2:** `media.process` must read the asset's status again and skip one that is `DELETED`: a
+  `MediaUploaded` can name an asset deleted after it was published. And
+  `media.process`, the signed GET URLs on `GET /media/{id}`, the FR-044a claim and
   `MEDIA_ATTACHED` for a delete of an attached asset.
+- **D3:** confirm the formats Android's recorder produces before trusting this slice's voice list;
+  `audio/aac` and `audio/3gpp` may need adding, with their magic bytes in D3's check.
 - **D5:** the reaper of `PENDING_UPLOAD` past its expiry, and `media.purge`.
 
 ## Revisit when

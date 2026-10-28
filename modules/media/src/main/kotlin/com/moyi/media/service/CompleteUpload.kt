@@ -7,6 +7,8 @@ import com.moyi.common.web.idempotency.IdempotentRequest
 import com.moyi.common.web.idempotency.IdempotentResult
 import com.moyi.common.web.idempotency.ResultKind
 import com.moyi.media.domain.MediaAsset
+import com.moyi.media.domain.MediaStatus
+import com.moyi.media.domain.StoredObject
 import com.moyi.media.infra.database.MediaAssetStore
 import com.moyi.media.infra.storage.ObjectStore
 import com.moyi.media.infra.storage.ObjectStoreUnavailableException
@@ -28,17 +30,26 @@ internal class Completion(
  * object is the one declared becomes `UPLOADED` and publishes `MediaUploaded
  * {mediaId}` in the same transaction (ADR-0035). D2's pipeline consumes it.
  *
- * **One transaction holds the key, the row and the event** (`SubmitEntry`'s
- * shape, spec §5.4 of the daily loop): [IdempotentExecution.once] tries the
- * key's advisory lock first, then the asset's row lock is taken, so a
- * completion and a deletion of one asset are serialised. A refusal is thrown
- * and rolls the key back with everything else, so a client that completes too
- * early may complete again under the same key once the PUT has finished.
+ * In order (ADR-0047 decision 2):
  *
- * **The HEAD runs inside that transaction**, holding a pooled connection and
- * the row lock for one round trip to the storage, bounded by a 2 s connect and
- * a 5 s read timeout (ADR-0047). Chosen over a HEAD before the transaction,
- * which would need the owner check twice and could race a deletion.
+ * 1. **The asset is read and authorised, with no transaction open.** Another
+ *    person's, a deleted one or none is the one `404`, before the storage is
+ *    asked anything.
+ * 2. **The storage is asked, with no transaction open**: a HEAD, and only for
+ *    a pending upload, bounded by the storage client's 3 s per call (at most
+ *    two attempts of 1.5 s). A storage that does not answer costs this
+ *    request those seconds and holds no pooled connection, no key and no row
+ *    lock while it does; the answer is `503`, and nothing was recorded.
+ * 3. **One transaction holds the key, the row and the event**
+ *    (`SubmitEntry`'s shape): [IdempotentExecution.once] tries the key's
+ *    advisory lock, then the asset's row is locked and **its status read
+ *    again**. Only an asset still pending moves, on what step 2 saw; one that
+ *    another completion moved meanwhile is already complete, and one deleted
+ *    meanwhile is the `404`. The re-check under the lock is what makes asking
+ *    the storage outside it safe. A refusal rolls the key back with
+ *    everything else, so a client that completes too early may complete
+ *    again under the same key once the PUT has finished. A row lock not had
+ *    within `lock_timeout` is `409 MEDIA_BUSY` ([busyIfLockRefused]).
  *
  * **A replay is a read**: the asset is read again by its owner, and an asset
  * deleted since is the same `404` as one that never existed. A second
@@ -59,22 +70,36 @@ internal class CompleteUpload(
         idempotency: IdempotentRequest,
     ): Completion {
         require(idempotency.userId == owner) { "the Idempotency-Key was prepared for a different caller than the one completing" }
+        val seen = readOwn(mediaId, owner)
+        val headed = if (seen.status == MediaStatus.PENDING_UPLOAD) Headed(headOf(seen)) else null
         val completion =
-            transactions.execute {
-                val outcome =
-                    execution.once(idempotency) {
-                        val asset = lockedOwn(mediaId, owner)
-                        when (asset.completion { headOf(asset) }) {
-                            MediaAsset.Completion.Uploaded -> uploaded(asset)
-                            MediaAsset.Completion.NotUploaded -> throw MediaNotUploadedException()
-                            MediaAsset.Completion.AlreadyComplete -> Unit
-                        }
-                        IdempotentResult(asset.id, asset.id, ResultKind.MEDIA, OK)
-                    }
-                Completion(readOwn(outcome.resultId, owner), outcome.wasReplayed)
+            busyIfLockRefused {
+                transactions.execute {
+                    val outcome = execution.once(idempotency) { decide(lockedOwn(mediaId, owner), headed) }
+                    Completion(readOwn(outcome.resultId, owner), outcome.wasReplayed)
+                }
             }
         return checkNotNull(completion) { "complete's transaction produces a Completion unless it threw" }
     }
+
+    /** Under the row lock: the status as it is now, judged on what the storage said before the lock. */
+    private fun decide(
+        asset: MediaAsset,
+        headed: Headed?,
+    ): IdempotentResult<UUID> {
+        val decided = asset.completion { checkNotNull(headed) { "an asset seen past PENDING_UPLOAD is pending again" }.stored }
+        when (decided) {
+            MediaAsset.Completion.Uploaded -> uploaded(asset)
+            MediaAsset.Completion.NotUploaded -> throw MediaNotUploadedException()
+            MediaAsset.Completion.AlreadyComplete -> Unit
+        }
+        return IdempotentResult(asset.id, asset.id, ResultKind.MEDIA, OK)
+    }
+
+    /** What the storage answered, asked once before the transaction; a null [stored] is "nothing there". */
+    private class Headed(
+        val stored: StoredObject?,
+    )
 
     /** The owner's live asset under its row lock; anybody else's, a deleted one or none is the one 404. */
     private fun lockedOwn(
@@ -82,7 +107,7 @@ internal class CompleteUpload(
         owner: UUID,
     ): MediaAsset = assets.lock(mediaId, owner)?.takeUnless { it.isGone } ?: throw MediaNotFoundException()
 
-    /** The asset as its owner may now read it: a replay is a read, and a deletion since is the read's 404. */
+    /** The owner's live asset as it stands: before the storage is asked, and again for the answer (a replay is a read). */
     private fun readOwn(
         mediaId: UUID,
         owner: UUID,

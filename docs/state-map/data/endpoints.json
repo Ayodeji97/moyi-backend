@@ -1169,6 +1169,14 @@
     "requestErrors": [
       {
         "status": 409,
+        "code": "MEDIA_BUSY",
+        "reason": "The asset's row was not to be had within lock_timeout (10 s) while another change to it ran. Nothing changed; send the same request again. No storage call is made under that lock, so this is rare.",
+        "evidence": "test",
+        "evidenceRef": "MediaBusyTest#a completion and a deletion that cannot have the row are 409 MEDIA_BUSY, and change nothing",
+        "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/MediaLocks.kt#if (failure.isLockRefusal()) throw MediaBusyException(failure) else throw failure"
+      },
+      {
+        "status": 409,
         "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
         "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued.",
         "evidence": "never-run",
@@ -1221,7 +1229,16 @@
     "headers": [
       "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
     ],
-    "requestErrors": [],
+    "requestErrors": [
+      {
+        "status": 409,
+        "code": "MEDIA_BUSY",
+        "reason": "The asset's row was not to be had within lock_timeout (10 s) while another change to it ran. Nothing changed; send the same request again. No storage call is made under that lock, so this is rare.",
+        "evidence": "test",
+        "evidenceRef": "MediaBusyTest#a completion and a deletion that cannot have the row are 409 MEDIA_BUSY, and change nothing",
+        "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/MediaLocks.kt#if (failure.isLockRefusal()) throw MediaBusyException(failure) else throw failure"
+      }
+    ],
     "curl": "curl -X DELETE \"$API/media/$MEDIA\" -H \"Authorization: Bearer $TOKEN\""
   }
 ]

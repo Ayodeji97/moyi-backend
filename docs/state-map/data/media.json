@@ -191,10 +191,10 @@
     "to": "PENDING_UPLOAD",
     "status": 503,
     "code": "MEDIA_STORAGE_UNAVAILABLE",
-    "reason": "The storage could not be asked what it holds. Nothing changes; complete again later.",
+    "reason": "The storage did not answer within 3 s (two attempts of 1.5 s). It is asked before any transaction opens, so nothing was locked or recorded meanwhile, the Idempotency-Key included; complete again later.",
     "rule": "ADR-0047 §2",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "MediaStorageHangsTest#a completion against a storage that never answers is 503 within four seconds and records nothing",
     "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/CompleteUpload.kt#throw MediaStorageUnavailableException(unavailable)"
   },
   {

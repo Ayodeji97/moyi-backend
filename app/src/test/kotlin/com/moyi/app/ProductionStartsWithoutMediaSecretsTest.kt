@@ -3,6 +3,7 @@ package com.moyi.app
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import org.yaml.snakeyaml.Yaml
 import java.io.File
 
 /**
@@ -18,29 +19,30 @@ import java.io.File
  * that environment and no media secrets when this landed (the pull request
  * that added it records the run).
  *
- * Read as text, not as YAML: the file is Kamal's, and the two lines that
- * matter are plain `NAME: value` under `env.clear` and `- NAME` under
- * `env.secret`.
+ * Parsed as YAML, and read only from the application's own `env` at the top
+ * of the file: the same line under an accessory's `env` (Postgres's, Valkey's)
+ * reaches a container that is not the application, and must not count
+ * (review of #106).
  */
 internal class ProductionStartsWithoutMediaSecretsTest {
-    private val deploy = File("../config/deploy.yml").readLines().map { it.trim() }.filterNot { it.startsWith("#") }
+    @Suppress("UNCHECKED_CAST")
+    private val env: Map<String, Any?> =
+        (Yaml().load<Map<String, Any?>>(File("../config/deploy.yml").readText())["env"] as? Map<String, Any?>).orEmpty()
+
+    @Suppress("UNCHECKED_CAST")
+    private val clear: Map<String, Any?> = (env["clear"] as? Map<String, Any?>).orEmpty()
+
+    /** Kamal's `env.secret` is a list of `NAME` or `NAME:SOURCE`; the application sees `NAME`. */
+    private val secret: Set<String> =
+        (env["secret"] as? List<*>).orEmpty().map { it.toString().substringBefore(':') }.toSet()
 
     @Test
     fun `deploy-yml selects the unavailable stand-in, or gives R2 its endpoint, its bucket and both halves of its token`() {
-        val provider =
-            deploy
-                .firstOrNull { it.startsWith("MOYI_MEDIA_STORAGE_PROVIDER:") }
-                ?.substringAfter(':')
-                ?.trim()
-                ?.lowercase()
+        val provider = clear["MOYI_MEDIA_STORAGE_PROVIDER"]?.toString()?.trim()?.lowercase()
         val standIn = provider == "unavailable"
         val r2Complete =
-            listOf("MOYI_MEDIA_STORAGE_R2_ENDPOINT", "MOYI_MEDIA_STORAGE_R2_BUCKET").all { name ->
-                deploy.any { it.startsWith("$name:") }
-            } &&
-                listOf("MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID", "MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY").all { name ->
-                    deploy.any { it == "- $name" || it.startsWith("- $name:") }
-                }
+            listOf("MOYI_MEDIA_STORAGE_R2_ENDPOINT", "MOYI_MEDIA_STORAGE_R2_BUCKET").all { it in clear } &&
+                listOf("MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID", "MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY").all { it in secret }
 
         withClue("config/deploy.yml would start a release whose media storage refuses to start (provider: ${provider ?: "<default R2>"})") {
             (standIn || ((provider == null || provider == "r2") && r2Complete)) shouldBe true

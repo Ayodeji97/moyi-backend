@@ -46,7 +46,8 @@ services:
   # MinIO server, because MinIO no longer publishes `minio/minio`; the tests run
   # the same image (MediaIntegrationTest). Dev-only credentials, as Postgres's.
   minio:
-    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    # RELEASE.2026-08-04T00-00-00Z, pinned by its digest (verified with docker image inspect).
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: moyi_dev_only
@@ -65,7 +66,8 @@ services:
   # Makes the `moyi-media` bucket once MinIO answers, then exits. Production's
   # bucket is made by hand in Cloudflare (ADR-0047, Owed).
   minio-bucket:
-    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    # RELEASE.2026-08-04T00-00-00Z, pinned by its digest (verified with docker image inspect).
+    image: pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     depends_on:
       minio:
         condition: service_healthy

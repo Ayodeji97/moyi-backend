@@ -53,13 +53,15 @@ internal class OwnMedia(
         mediaId: UUID,
     ) {
         val deleted =
-            transactions.execute {
-                val asset = assets.lock(mediaId, owner)?.takeUnless { it.isGone } ?: throw MediaNotFoundException()
-                check(asset.isDeletable) { "an attached asset is refused by D2's claim, which does not exist yet" }
-                check(assets.markDeleted(asset.id, clock.instant().truncatedTo(ChronoUnit.MICROS))) {
-                    "an unattached live asset under its row lock is deleted"
+            busyIfLockRefused {
+                transactions.execute {
+                    val asset = assets.lock(mediaId, owner)?.takeUnless { it.isGone } ?: throw MediaNotFoundException()
+                    check(asset.isDeletable) { "an attached asset is refused by D2's claim, which does not exist yet" }
+                    check(assets.markDeleted(asset.id, clock.instant().truncatedTo(ChronoUnit.MICROS))) {
+                        "an unattached live asset under its row lock is deleted"
+                    }
+                    asset
                 }
-                asset
             }
         val asset = checkNotNull(deleted) { "delete's transaction produces the asset unless it threw" }
         try {

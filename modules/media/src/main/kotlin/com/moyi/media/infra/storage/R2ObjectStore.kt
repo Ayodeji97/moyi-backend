@@ -228,7 +228,14 @@ internal class R2ObjectStore(
                     .serviceConfiguration(s3Configuration)
                     .requestChecksumCalculation(RequestChecksumCalculation.WHEN_REQUIRED)
                     .responseChecksumValidation(ResponseChecksumValidation.WHEN_REQUIRED)
-                    .httpClientBuilder(
+                    // Bounded: with the SDK's defaults a storage that accepts and never
+                    // answers held one call for about 20 s (ADR-0047 decision 2).
+                    .overrideConfiguration { override ->
+                        override
+                            .apiCallTimeout(r2.apiCallTimeout)
+                            .apiCallAttemptTimeout(r2.apiCallAttemptTimeout)
+                            .retryStrategy { retry -> retry.maxAttempts(r2.maxAttempts) }
+                    }.httpClientBuilder(
                         UrlConnectionHttpClient
                             .builder()
                             .connectionTimeout(r2.connectTimeout)

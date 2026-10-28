@@ -57,6 +57,15 @@ internal class MediaStorageUnavailableException(
         cause,
     )
 
+internal class MediaBusyException(
+    cause: Throwable,
+) : ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.MEDIA_BUSY,
+        "This photo or voice note is being changed. Please try again.",
+        cause,
+    )
+
 internal fun UploadDeclaration.Refusal.toException(): ApiException =
     when (this) {
         is UploadDeclaration.Refusal.Invalid -> MediaDeclarationInvalidException(violations)

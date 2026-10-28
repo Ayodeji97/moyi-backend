@@ -1930,7 +1930,7 @@ curl -X POST "$API/media/$MEDIA/complete" -H "Authorization: Bearer $TOKEN" -H "
 | `media` | `NONE` |  | 404 `NOT_FOUND` | Nothing of yours has this id: another person's photo, an id that names nothing and a value that is not an id all get this one answer, never 403, so that it does not confirm the asset exists. A partner reaches media only through an entry, never by its id. | doc 06:182-184, ADR-0047 §3 | test |
 | `media` | `PENDING_UPLOAD` | the storage holds the declared bytes under the asset's key | 200 → `UPLOADED` | The storage holds the declared length (and the declared SHA-256, where the storage reports one), so the asset is uploaded and MediaUploaded is recorded for the pipeline, in one transaction. | doc 05:164, ADR-0047 §2 | smoke |
 | `media` | `PENDING_UPLOAD` | the storage holds nothing under the asset's key, or not the declared length and digest | 409 `MEDIA_NOT_UPLOADED` | Nothing has been uploaded under the URL yet, or not the bytes declared. Nothing changes and the key is not recorded: finish the upload (the URL works until its expiresAt), then complete again. | ADR-0047 §2 | smoke |
-| `media` | `PENDING_UPLOAD` | the storage cannot be reached | 503 `MEDIA_STORAGE_UNAVAILABLE` | The storage could not be asked what it holds. Nothing changes; complete again later. | ADR-0047 §2 | never-run |
+| `media` | `PENDING_UPLOAD` | the storage cannot be reached | 503 `MEDIA_STORAGE_UNAVAILABLE` | The storage did not answer within 3 s (two attempts of 1.5 s). It is asked before any transaction opens, so nothing was locked or recorded meanwhile, the Idempotency-Key included; complete again later. | ADR-0047 §2 | test |
 | `media` | `UPLOADED` |  | 200 stays | It is already complete. Completing again, under the same key or a new one, changes nothing and records no second event; the same key is answered as a replay. | doc 06:182, ADR-0047 §2 | test |
 | `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184, ADR-0047 §3 | test |
 
@@ -1938,6 +1938,7 @@ curl -X POST "$API/media/$MEDIA/complete" -H "Authorization: Bearer $TOKEN" -H "
 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
+| 409 | `MEDIA_BUSY` | The asset's row was not to be had within lock_timeout (10 s) while another change to it ran. Nothing changed; send the same request again. No storage call is made under that lock, so this is rare. | test |
 | 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | never-run |
 | 413 | `MALFORMED_REQUEST` | A body larger than one mebibyte. The route reads none, but the Idempotency-Key's fingerprint reads what is sent. | never-run |
 | 422 | `VALIDATION_FAILED` | The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. | smoke |
@@ -1988,3 +1989,9 @@ curl -X DELETE "$API/media/$MEDIA" -H "Authorization: Bearer $TOKEN"
 | `media` | `PENDING_UPLOAD` |  | 204 → `DELETED` | The asset is deleted, and after the commit whatever was uploaded under its key is removed from the storage. Nothing can be attached to an entry yet (D2), so every asset of yours can be deleted. | doc 06:184, ADR-0047 §3 | test |
 | `media` | `UPLOADED` |  | 204 → `DELETED` | The asset is deleted, and after the commit its object is removed from the storage. If the storage cannot be reached then, the bucket's lifecycle rule removes the upload within two days. | doc 06:184, ADR-0047 §3 | smoke |
 | `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 409 | `MEDIA_BUSY` | The asset's row was not to be had within lock_timeout (10 s) while another change to it ran. Nothing changed; send the same request again. No storage call is made under that lock, so this is rare. | test |

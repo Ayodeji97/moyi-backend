@@ -2680,4 +2680,12 @@ Reality: `minio/minio` no longer resolves (MinIO stopped publishing it) and quay
          provider each turned a test red; removing the signed length turned only the
          signed-headers test red, because the signed digest still refused a longer body.
 Wrong about: a spec's named tool being available. The test double the whole slice rests
-         on had to be found again before the first test could run.
+         on had to be found again before the first test could run. And, found by review,
+         about what "a 5 s read timeout" bounds: the SDK retried three times with backoff,
+         so a storage that never answered held the HEAD, and the transaction around it,
+         for about 20 s. The call now has a 3 s ceiling and runs before the transaction;
+         the decision is re-taken under the row lock. Removing only the retry limit
+         stays green, since the 3 s ceiling still holds; removing the three settings
+         turns the hanging-storage test red at 27 s. And a test that read `deploy.yml`
+         stayed green with its line moved under Postgres's env: the app's test task did
+         not declare the file as an input, so Gradle reported it up to date.

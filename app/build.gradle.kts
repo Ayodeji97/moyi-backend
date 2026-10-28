@@ -138,4 +138,11 @@ tasks.named<Test>("test") {
             },
         ).withPropertyName("konsistScannedSources")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    // ProductionStartsWithoutMediaSecretsTest reads the deploy file (ADR-0047): a
+    // change to it alone must rerun the tests rather than reuse a result. Seen:
+    // the line moved under an accessory, and the suite reported up to date.
+    inputs
+        .file(rootProject.layout.projectDirectory.file("config/deploy.yml"))
+        .withPropertyName("deployConfiguration")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }

@@ -496,8 +496,10 @@ class OpenApiConfiguration {
                 // REACTION_BUSY conflict, as `unfavouriteEntry`'s is.
                 "reactToEntry",
                 "unreactToEntry",
-                // 409 MEDIA_NOT_UPLOADED: completed before the storage holds the declared bytes.
+                // 409 MEDIA_NOT_UPLOADED: completed before the storage holds the declared bytes;
+                // and for both, 409 MEDIA_BUSY: the asset's row lock not had within lock_timeout.
                 "completeMediaUpload",
+                "deleteMedia",
             )
 
         /**

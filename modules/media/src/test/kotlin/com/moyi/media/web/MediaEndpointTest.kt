@@ -264,6 +264,13 @@ internal class MediaEndpointTest(
     }
 
     @Test
+    fun `a field of the wrong JSON type cannot be read and is 400 MALFORMED_REQUEST, not 422`() {
+        val response = intentWith(ada, """{"kind":"IMAGE","contentType":"image/png","sizeBytes":"lots","checksum":"${sha256(photo)}"}""")
+        response.status shouldBe 400
+        response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+    }
+
+    @Test
     fun `an unauthenticated caller is 401 on every route`() {
         val id = UUID.randomUUID()
         mvc

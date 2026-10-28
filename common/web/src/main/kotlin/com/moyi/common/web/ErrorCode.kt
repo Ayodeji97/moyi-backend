@@ -326,6 +326,15 @@ enum class ErrorCode {
     MEDIA_STORAGE_UNAVAILABLE,
 
     /**
+     * A completion or a deletion of an asset waited for its row lock past
+     * `lock_timeout` while another change to the same asset ran. 409: nothing
+     * changed, and the same request may be sent again, as for
+     * [FAVOURITE_BUSY] and [REACTION_BUSY]. No storage call is made under the
+     * lock (ADR-0047), so this means the database is struggling, and is rare.
+     */
+    MEDIA_BUSY,
+
+    /**
      * `GET /bonds/{bondId}/days/{date}` for a date that is not in the
      * caller's archive. 404.
      *

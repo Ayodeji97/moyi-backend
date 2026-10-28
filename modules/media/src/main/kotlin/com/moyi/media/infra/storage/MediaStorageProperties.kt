@@ -2,6 +2,7 @@ package com.moyi.media.infra.storage
 
 import jakarta.validation.Valid
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Positive
 import org.springframework.boot.context.properties.ConfigurationProperties
 import org.springframework.validation.annotation.Validated
 import java.time.Duration
@@ -52,24 +53,36 @@ internal data class MediaStorageProperties(
         /** R2 accepts `auto`; the SDK insists on a region, and SigV4 signs it. MinIO accepts any. */
         @field:NotBlank
         val region: String = DEFAULT_REGION,
-        /**
-         * Short, because completion reads the object's length inside the
-         * request's transaction, holding a pooled connection and the asset's
-         * row lock while it waits (ADR-0047).
-         */
+        /** One attempt's TCP connect. Bounded again by [apiCallAttemptTimeout]. */
         val connectTimeout: Duration = DEFAULT_CONNECT_TIMEOUT,
+        /** One attempt's wait for a byte. Bounded again by [apiCallAttemptTimeout]. */
         val readTimeout: Duration = DEFAULT_READ_TIMEOUT,
+        /**
+         * The whole of one storage call, retries included. A request that
+         * calls the storage waits at most this long for it, and holds no
+         * database connection or lock while it does (ADR-0047 decision 2).
+         */
+        val apiCallTimeout: Duration = DEFAULT_API_CALL_TIMEOUT,
+        /** One attempt of a storage call. */
+        val apiCallAttemptTimeout: Duration = DEFAULT_API_CALL_ATTEMPT_TIMEOUT,
+        /** Attempts per storage call, the first included. The SDK's default is 3 with backoff; a request cannot wait for that. */
+        @field:Positive
+        val maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
     ) {
         /** The generated one would print the secret. */
         override fun toString(): String =
             "R2(endpoint=$endpoint, bucket=$bucket, accessKeyId=$accessKeyId, " +
                 "secretAccessKey=${if (secretAccessKey == null) null else "<redacted>"}, region=$region, " +
-                "connectTimeout=$connectTimeout, readTimeout=$readTimeout)"
+                "connectTimeout=$connectTimeout, readTimeout=$readTimeout, apiCallTimeout=$apiCallTimeout, " +
+                "apiCallAttemptTimeout=$apiCallAttemptTimeout, maxAttempts=$maxAttempts)"
 
         private companion object {
             const val DEFAULT_REGION = "auto"
             val DEFAULT_CONNECT_TIMEOUT: Duration = Duration.ofSeconds(2)
             val DEFAULT_READ_TIMEOUT: Duration = Duration.ofSeconds(5)
+            val DEFAULT_API_CALL_TIMEOUT: Duration = Duration.ofSeconds(3)
+            val DEFAULT_API_CALL_ATTEMPT_TIMEOUT: Duration = Duration.ofMillis(1500)
+            const val DEFAULT_MAX_ATTEMPTS = 2
         }
     }
 }

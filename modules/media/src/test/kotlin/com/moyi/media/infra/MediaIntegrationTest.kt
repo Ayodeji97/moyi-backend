@@ -26,7 +26,7 @@ import java.net.URI
  * **The image is `pgsty/minio`, not `minio/minio`.** MinIO stopped publishing
  * its community image (`minio/minio` no longer resolves on Docker Hub, and
  * quay.io's copy needs a login); `pgsty/minio` is a community build of the same
- * server from its source, pinned by its release tag (ADR-0047).
+ * server from its source, pinned by its digest (ADR-0047).
  *
  * [admin] is a client of the test's own, outside the code under test, for what
  * a test must arrange or inspect behind the application's back.
@@ -36,8 +36,12 @@ internal abstract class MediaIntegrationTest : IntegrationTest() {
     companion object {
         const val BUCKET = "moyi-media-test"
 
-        /** `docker-compose.yml`'s MinIO, so the smoke run and the tests run one server. */
-        const val MINIO_IMAGE = "pgsty/minio:RELEASE.2026-08-04T00-00-00Z"
+        /**
+         * `docker-compose.yml`'s MinIO, so the smoke run and the tests run one
+         * server: release RELEASE.2026-08-04T00-00-00Z, pinned by its digest so a
+         * re-pushed tag cannot change what runs.
+         */
+        const val MINIO_IMAGE = "pgsty/minio@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372"
 
         @JvmStatic
         val minio: MinIOContainer =
