@@ -8,7 +8,13 @@
 # on every merge to main and publishes it to GHCR under the commit's SHA, so a
 # deploy names a commit that is already on main and has passed CI:
 #
-#   git fetch && kamal deploy --skip-push --version=$(git rev-parse origin/main)
+#   git switch main && git pull --ff-only
+#   kamal deploy --skip-push --version=$(git rev-parse HEAD)
+#
+# Pull, not just fetch: Kamal pulls the image for --version but reads THIS
+# file from the working tree, so a stale checkout boots the new image with
+# old config. .kamal/hooks/pre-deploy refuses a deploy unless HEAD is the
+# version, no tracked file is modified, and HEAD is origin/main.
 #
 # That commit's CI run must have finished (its `manifest` job writes the tag),
 # and it must be a commit from after the `service` label was added to the

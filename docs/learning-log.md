@@ -2686,3 +2686,26 @@ Wrong about: what "add a consumer" costs a codebase whose tests count deliveries
          the other unfalsifiable through the real close, so each has a test that forges the
          other's half by SQL. And about a dedupe key as a rate limit: it limits requests, and
          what the member was owed was deliveries.
+
+## 2026-10-28 · Fix · The deploy of #96 — a new image, a stale config, and the command that taught it
+
+Expected: `git fetch && kamal deploy --skip-push --version=$(git rev-parse origin/main)`
+         deploys main. The image is built by CI and named by its SHA, so where the command
+         runs from should not matter; the fetch only makes `origin/main` current.
+Reality: the local `main` was 7 commits behind. Kamal pulled the new image, but it read
+         `config/deploy.yml` from the working tree, and the stale copy had no
+         `MOYI_NOTIFICATION_PUSH_PROVIDER: log`. The app defaulted to FCM, found no
+         credentials, and refused to start. Nothing went down: the new container never
+         passed `/healthz`, so Kamal kept the old one. The command came from the header
+         of `config/deploy.yml` and from the README, which both taught the fetch. They now
+         teach `git pull --ff-only` and `--version=$(git rev-parse HEAD)`, and a
+         `pre-deploy` hook refuses a deploy unless HEAD is the version, no tracked file is
+         modified, and HEAD is `origin/main` after a fetch. Kamal 2.12 runs that hook on
+         the Mac after the image is pulled and before anything boots, and also before a
+         rollback, where it skips the first check because a rollback names an older
+         commit. The hook was run by hand against a throwaway clone, sixteen cases; each of
+         its four guards, removed in turn, turned at least one case red.
+Wrong about: what a deploy is. It is two inputs, an image and a config, and only one of
+         them was pinned to a commit. `--version` named the image; the config was whatever
+         the checkout held. And about where a command's mistake lives: in the comment that
+         everyone copies, not in the hands of the one who ran it.
