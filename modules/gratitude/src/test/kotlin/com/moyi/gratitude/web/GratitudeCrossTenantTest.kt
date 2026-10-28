@@ -77,7 +77,7 @@ internal class GratitudeCrossTenantTest(
             "POST /api/v1/bonds/{bondId}/invites" to Fixture(),
             "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}" to Fixture(),
             "POST /api/v1/bonds/{bondId}/leave" to Fixture(),
-            "POST /api/v1/bonds/{bondId}/block" to Fixture(),
+            "POST /api/v1/bonds/{bondId}/block" to Fixture(body = """{"withdrawEntries":false}"""),
             "PATCH /api/v1/bonds/{bondId}" to
                 Fixture(
                     body = """{"name":"Mine"}""",

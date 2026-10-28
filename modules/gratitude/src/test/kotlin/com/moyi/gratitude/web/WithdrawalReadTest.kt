@@ -406,11 +406,14 @@ internal class WithdrawalReadTest(
             }.andReturn()
             .response
 
-    /** With no body: withdrawal is what a block does unless it is declined (FR-029a). */
+    /** A block that withdraws, which it must now say (ADR-0035 question 1). */
     private fun block(user: UUID): MockHttpServletResponse =
         mockMvc
-            .post("/api/v1/bonds/$bondId/block") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}") }
-            .andReturn()
+            .post("/api/v1/bonds/$bondId/block") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}")
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"withdrawEntries":true}"""
+            }.andReturn()
             .response
 
     private fun leave(

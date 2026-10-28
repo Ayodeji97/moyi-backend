@@ -153,7 +153,7 @@ internal class BondEndingEndpointTest(
         val bondId = bondIdOf(created)
         accept(bea, codeOf(created)).status shouldBe 200
 
-        block(ada, bondId).status shouldBe 204
+        block(ada, bondId, """{"withdrawEntries":true}""").status shouldBe 204
 
         jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
         jdbc.queryForObject("SELECT blocked_user_id FROM blocks", UUID::class.java) shouldBe bea
@@ -172,8 +172,8 @@ internal class BondEndingEndpointTest(
         accept(bea, codeOf(created)).status shouldBe 200
         leave(bea, bondId).status shouldBe 204
 
-        block(ada, bondId).status shouldBe 204
-        block(ada, bondId).status shouldBe 204
+        block(ada, bondId, """{"withdrawEntries":true}""").status shouldBe 204
+        block(ada, bondId, """{"withdrawEntries":true}""").status shouldBe 204
 
         jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 1
         // And the blocker's own membership is deliberately *not* stamped: the
@@ -189,7 +189,7 @@ internal class BondEndingEndpointTest(
         val ada = users.verified("Ada")
         val bondId = bondIdOf(createBond(ada))
 
-        block(ada, bondId).status shouldBe 204
+        block(ada, bondId, """{"withdrawEntries":true}""").status shouldBe 204
 
         jdbc.queryForObject("SELECT count(*) FROM blocks", Int::class.java) shouldBe 0
         getBond(ada, bondId).contentAsString shouldContain "\"status\":\"ARCHIVED\""
@@ -201,7 +201,7 @@ internal class BondEndingEndpointTest(
         val bea = users.verified("Bea")
         val created = createBond(ada)
         accept(bea, codeOf(created)).status shouldBe 200
-        block(ada, bondIdOf(created)).status shouldBe 204
+        block(ada, bondIdOf(created), """{"withdrawEntries":true}""").status shouldBe 204
 
         val response = accept(bea, codeOf(createBond(ada)))
 
@@ -218,7 +218,7 @@ internal class BondEndingEndpointTest(
         val bondId = bondIdOf(created)
         accept(bea, codeOf(created)).status shouldBe 200
 
-        val blocked = block(ada, bondId)
+        val blocked = block(ada, bondId, """{"withdrawEntries":true}""")
 
         blocked.contentAsString shouldBe ""
         val seen = getBond(bea, bondId).contentAsString + listBonds(bea).contentAsString
@@ -254,10 +254,10 @@ internal class BondEndingEndpointTest(
     // truncated.
 
     @Test
-    fun `blocking with no body withdraws - one marker for the caller, one event, both stamped alike`() {
+    fun `blocking with the flag on withdraws - one marker for the caller, one event, both stamped alike`() {
         val pair = pairedBond()
 
-        block(pair.ada, pair.id).status shouldBe 204
+        block(pair.ada, pair.id, """{"withdrawEntries":true}""").status shouldBe 204
 
         withdrawnMembers(pair.id) shouldBe listOf(memberIdOf(pair.id, pair.ada))
         val events = withdrawalEvents(pair.id)
@@ -279,26 +279,24 @@ internal class BondEndingEndpointTest(
     }
 
     @Test
-    fun `the absent flag means withdraw on a block and keep on a leave, however it is absent`() {
-        // No body and no Content-Type (scripts/moyi, the Bruno collection),
-        // a JSON Content-Type and no body (scripts/smoke.sh), `{}`, and an
+    fun `an absent flag is refused on a block and keeps on a leave, however it is absent`() {
+        // ADR-0035 questions 1 and 11, the owner's ruling of 2026-10-21: on a
+        // block the flag is required. It used to default to withdrawing, so
+        // the field a client left out was the one that erased. No body and
+        // no Content-Type, a JSON Content-Type and no body, `{}`, and an
         // explicit null. A property this API does not know is not an
-        // absence: see the refusal below.
-        val absences: List<Pair<String?, Boolean>> =
-            listOf(
-                null to false,
-                null to true,
-                "" to true,
-                "{}" to true,
-                """{"withdrawEntries":null}""" to true,
-            )
-
+        // absence: see the refusals below.
         absences.forEach { (body, json) ->
             withClue("body=$body json=$json") {
                 val blocked = pairedBond()
-                send(blocked.ada, blocked.id, "block", body, json).status shouldBe 204
-                withdrawnMembers(blocked.id) shouldHaveSize 1
-                withdrawalEvents(blocked.id) shouldHaveSize 1
+                val refused = send(blocked.ada, blocked.id, "block", body, json)
+                refused.status shouldBe 400
+                refused.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+                // Nothing was ended, nobody was blocked, nothing withdrawn.
+                getBond(blocked.ada, blocked.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+                blocksIn(blocked.id) shouldBe 0
+                withdrawnMembers(blocked.id).shouldBeEmpty()
+                withdrawalEvents(blocked.id).shouldBeEmpty()
 
                 val left = pairedBond()
                 send(left.ada, left.id, "leave", body, json).status shouldBe 204
@@ -307,6 +305,71 @@ internal class BondEndingEndpointTest(
             }
             clear()
         }
+    }
+
+    @Test
+    fun `an absent flag on a block is the same bytes as a body that cannot be read`() {
+        // The ruling's 400 is the standing one, not a second kind of
+        // refusal: same status, same code, same sentence, same headers, and
+        // nothing of what was sent quoted back.
+        val pair = pairedBond()
+        val unreadable = send(pair.ada, pair.id, "block", """{"withdrawEntries": """, json = true)
+        unreadable.status shouldBe 400
+
+        absences.forEach { (body, json) ->
+            withClue("body=$body json=$json") {
+                val refused = send(pair.ada, pair.id, "block", body, json)
+                refused.contentAsString shouldBe unreadable.contentAsString
+                headersOf(refused) shouldBe headersOf(unreadable)
+                refused.contentAsString shouldNotContain "ithdraw"
+            }
+        }
+        getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+    }
+
+    @Test
+    fun `an absent flag on a block that has already ended is refused, and withdraws nothing`() {
+        // The case the route exists for: the other member left first. A bare
+        // repeat used to withdraw what the first block had kept.
+        val pair = pairedBond()
+        leave(pair.bea, pair.id).status shouldBe 204
+        block(pair.ada, pair.id, """{"withdrawEntries":false}""").status shouldBe 204
+
+        absences.forEach { (body, json) ->
+            withClue("body=$body json=$json") {
+                send(pair.ada, pair.id, "block", body, json).status shouldBe 400
+            }
+        }
+
+        withdrawnMembers(pair.id).shouldBeEmpty()
+        withdrawalEvents(pair.id).shouldBeEmpty()
+    }
+
+    @Test
+    fun `a stranger who sends no flag gets the one 404, not the 400 a member would`() {
+        // The flag is asked for after the guard. A 400 here would tell a
+        // stranger that they had reached a bond's handler, and a 404 for a
+        // bond that does not exist beside it would say which ids are real.
+        val pair = pairedBond()
+        val eve = users.verified("Eve")
+        val ghost = UUID.randomUUID().toString()
+
+        absences.forEach { (body, json) ->
+            withClue("body=$body json=$json") {
+                val stranger = send(eve, pair.id, "block", body, json)
+                val unknown = send(pair.ada, ghost, "block", body, json)
+                val notAnId = send(pair.ada, "not-a-uuid", "block", body, json)
+
+                listOf(stranger, unknown, notAnId).forEach { response ->
+                    response.status shouldBe 404
+                    response.contentAsString shouldContain "\"code\":\"NOT_FOUND\""
+                }
+                unknown.contentAsString.replace(ghost, pair.id) shouldBe stranger.contentAsString
+                notAnId.contentAsString.replace("not-a-uuid", pair.id) shouldBe stranger.contentAsString
+            }
+        }
+        getBond(pair.ada, pair.id).contentAsString shouldContain "\"status\":\"ACTIVE\""
+        withdrawnMembers(pair.id).shouldBeEmpty()
     }
 
     @Test
@@ -340,7 +403,7 @@ internal class BondEndingEndpointTest(
         val first = jdbc.queryForMap("SELECT * FROM bond_entry_withdrawals WHERE bond_id = ?", UUID.fromString(pair.id))
 
         block(pair.ada, pair.id, """{"withdrawEntries":true}""").status shouldBe 204
-        block(pair.ada, pair.id).status shouldBe 204
+        block(pair.ada, pair.id, """{"withdrawEntries":false}""").status shouldBe 204
 
         jdbc.queryForMap("SELECT * FROM bond_entry_withdrawals WHERE bond_id = ?", UUID.fromString(pair.id)) shouldBe first
         withdrawalEvents(pair.id) shouldHaveSize 1
@@ -365,8 +428,8 @@ internal class BondEndingEndpointTest(
         withdrawnMembers(pair.id).shouldBeEmpty()
 
         // Ada left earlier and kept her words; Bea never left at all.
-        block(pair.ada, pair.id).status shouldBe 204
-        block(pair.bea, pair.id).status shouldBe 204
+        block(pair.ada, pair.id, """{"withdrawEntries":true}""").status shouldBe 204
+        block(pair.bea, pair.id, """{"withdrawEntries":true}""").status shouldBe 204
 
         withdrawnMembers(pair.id).toSet() shouldBe setOf(memberIdOf(pair.id, pair.ada), memberIdOf(pair.id, pair.bea))
         withdrawalEvents(pair.id).map { payloadOf(it)["memberId"] }.toSet() shouldBe
@@ -396,7 +459,7 @@ internal class BondEndingEndpointTest(
         val left = bondIdOf(createBond(ada))
         val kept = bondIdOf(createBond(ada))
 
-        block(ada, blocked).status shouldBe 204
+        block(ada, blocked, """{"withdrawEntries":true}""").status shouldBe 204
         leave(ada, left, """{"withdrawEntries":true}""").status shouldBe 204
         leave(ada, kept).status shouldBe 204
 
@@ -417,7 +480,7 @@ internal class BondEndingEndpointTest(
         val version = versionOf(pair.id)
         val before = listOf(pair.ada, pair.bea).map { getBond(it, pair.id) }
 
-        block(pair.ada, pair.id).status shouldBe 204
+        block(pair.ada, pair.id, """{"withdrawEntries":true}""").status shouldBe 204
 
         withdrawnMembers(pair.id) shouldHaveSize 1
         versionOf(pair.id) shouldBe version
@@ -582,7 +645,7 @@ internal class BondEndingEndpointTest(
         val (left, blocked) = pairedBond() to pairedBond()
         linesNaming(left.id) { leave(left.ada, left.id).status shouldBe 204 } shouldBe
             listOf("INFO ${EndBond::class.java.name}: A member ended bond BOND")
-        linesNaming(blocked.id) { block(blocked.ada, blocked.id).status shouldBe 204 } shouldBe
+        linesNaming(blocked.id) { block(blocked.ada, blocked.id, """{"withdrawEntries":true}""").status shouldBe 204 } shouldBe
             listOf("INFO ${EndBond::class.java.name}: A member ended bond BOND")
 
         // The case the route exists for: the other member left first.
@@ -595,8 +658,8 @@ internal class BondEndingEndpointTest(
         // A repeat.
         val repeated = pairedBond()
         linesNaming(repeated.id) {
-            block(repeated.ada, repeated.id).status shouldBe 204
-            block(repeated.ada, repeated.id).status shouldBe 204
+            block(repeated.ada, repeated.id, """{"withdrawEntries":true}""").status shouldBe 204
+            block(repeated.ada, repeated.id, """{"withdrawEntries":true}""").status shouldBe 204
         } shouldHaveSize 1
 
         // A withdrawal recorded on a bond that had already ended: the marker
@@ -605,7 +668,7 @@ internal class BondEndingEndpointTest(
         linesNaming(withdrawnLater.id) {
             leave(withdrawnLater.ada, withdrawnLater.id).status shouldBe 204
             block(withdrawnLater.bea, withdrawnLater.id, """{"withdrawEntries":true}""").status shouldBe 204
-            block(withdrawnLater.ada, withdrawnLater.id).status shouldBe 204
+            block(withdrawnLater.ada, withdrawnLater.id, """{"withdrawEntries":true}""").status shouldBe 204
         } shouldHaveSize 1
         withdrawnMembers(withdrawnLater.id) shouldHaveSize 2
         withdrawalEvents(withdrawnLater.id) shouldHaveSize 2
@@ -679,6 +742,21 @@ internal class BondEndingEndpointTest(
         withdrawnMembers(pair.id).shouldBeEmpty()
         withdrawalEvents(pair.id).shouldBeEmpty()
     }
+
+    /**
+     * Every way a flag can be absent, as a client would send it: no body and
+     * no Content-Type (scripts/moyi, the Bruno collection, before the
+     * ruling), a JSON Content-Type and no body (scripts/smoke.sh), `{}`, and
+     * an explicit null.
+     */
+    private val absences: List<Pair<String?, Boolean>> =
+        listOf(
+            null to false,
+            null to true,
+            "" to true,
+            "{}" to true,
+            """{"withdrawEntries":null}""" to true,
+        )
 
     private data class PairedBond(
         val id: String,
@@ -837,11 +915,15 @@ internal class BondEndingEndpointTest(
         body: String? = null,
     ): MockHttpServletResponse = send(userId, bondId, "leave", body, json = body != null)
 
+    /** A block always says what it does with the caller's entries: without the flag it is refused (ADR-0035 question 1). */
     private fun block(
         userId: UUID,
         bondId: String,
-        body: String? = null,
-    ): MockHttpServletResponse = send(userId, bondId, "block", body, json = body != null)
+        body: String,
+    ): MockHttpServletResponse = send(userId, bondId, "block", body, json = true)
+
+    private fun blocksIn(bondId: String): Int =
+        jdbc.queryForObject("SELECT count(*) FROM blocks WHERE bond_id = ?", Int::class.java, UUID.fromString(bondId))!!
 
     private fun createInvite(
         userId: UUID,
