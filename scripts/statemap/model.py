@@ -13,7 +13,7 @@ from pathlib import Path
 ACTORS = ("you", "partner", "system")
 OUTCOMES = ("ok", "refused", "unreachable")
 EVIDENCE = ("smoke", "test", "hand", "never-run")
-ROW_FILES = ("day.json", "bond.json", "account.json")
+ROW_FILES = ("day.json", "bond.json", "account.json", "media.json")
 ROW_KEYS = (
     "id", "region", "from", "action", "actor", "when", "guards", "outcome",
     "to", "status", "code", "reason", "rule", "evidence", "evidenceRef", "codeRef",

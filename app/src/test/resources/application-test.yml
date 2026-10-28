@@ -51,6 +51,12 @@ moyi:
       # Likewise: nothing here reaches FCM, which would refuse to start
       # without a service account (ADR-0044).
       provider: log
+  media:
+    storage:
+      # R2, the default, refuses to start without a bucket (ADR-0047). The media
+      # routes are tested in modules/media against MinIO; here only the
+      # composition has to start.
+      provider: unavailable
   security:
     jwt:
       key-source: ephemeral

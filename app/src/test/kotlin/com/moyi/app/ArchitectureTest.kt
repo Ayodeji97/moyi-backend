@@ -6,6 +6,7 @@ import com.lemonappdev.konsist.api.provider.KoNameProvider
 import com.lemonappdev.konsist.api.provider.KoPackageProvider
 import com.lemonappdev.konsist.api.provider.KoPathProvider
 import com.lemonappdev.konsist.api.provider.modifier.KoVisibilityModifierProvider
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
@@ -486,6 +487,44 @@ class ArchitectureTest {
             imports.isEmpty() && dependencies.isEmpty(),
             "notification must depend on no domain module (spec §2.1, ADR-0044). Imports: $imports; build dependencies: $dependencies",
         )
+    }
+
+    @Test
+    fun `media depends on no domain module, so that gratitude may depend on it`() {
+        // Spec §2.1, ADR-0047: `media` is a leaf. D2 makes gratitude depend on
+        // media.api for the FR-044a claim and for rendering, so media reading a
+        // bond or an entry would be a cycle; and media depending on any other
+        // domain module would make that edge drag it along. Gradle sees only a
+        // cycle; this sees an import or a build dependency.
+        val others = MODULES - "media"
+        val imports =
+            project.files
+                .filter { it.normalisedProjectPath.startsWith("/modules/media/src/") }
+                .flatMap { file ->
+                    file.imports
+                        .filter { import -> others.any { import.name.startsWith("com.moyi.$it.") } }
+                        .map { "${file.name}: ${it.name}" }
+                }
+        val buildFile = File("../modules/media/build.gradle.kts").readText()
+        val dependencies = others.filter { "projects.modules.$it" in buildFile }
+
+        assertTrue(
+            imports.isEmpty() && dependencies.isEmpty(),
+            "media must depend on no domain module (spec §2.1, ADR-0047). Imports: $imports; build dependencies: $dependencies",
+        )
+    }
+
+    @Test
+    fun `the AWS SDK is named in one class only`() {
+        // Doc 25:118, ADR-0047: the vendor appears in one internal class, so
+        // replacing R2 is one class. MediaIntegrationTest (test code) is the
+        // other user, for what a test arranges behind the application's back.
+        val users =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
+                .filter { file -> file.imports.any { it.name.startsWith("software.amazon.awssdk.") } }
+                .map { it.name }
+        assertEquals(listOf("R2ObjectStore"), users, "only R2ObjectStore may import the AWS SDK (doc 25:118)")
     }
 
     @Test

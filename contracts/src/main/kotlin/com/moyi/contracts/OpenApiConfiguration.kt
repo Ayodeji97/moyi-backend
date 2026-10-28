@@ -273,8 +273,11 @@ class OpenApiConfiguration {
             // bound (413 past it), and must be one a @RequestBody can read
             // (a multipart one is 415). Final whole-branch review, A5.
             if (operation.operationId in IDEMPOTENT_OPERATIONS) {
-                addAll(listOf(HttpStatus.CONTENT_TOO_LARGE, HttpStatus.UNSUPPORTED_MEDIA_TYPE))
+                // 422 for a missing or malformed Idempotency-Key, which a route
+                // with no body (completeMediaUpload) would otherwise not list.
+                addAll(listOf(HttpStatus.CONTENT_TOO_LARGE, HttpStatus.UNSUPPORTED_MEDIA_TYPE, HttpStatus.UNPROCESSABLE_ENTITY))
             }
+            addAll(MEDIA_STATUSES[operation.operationId].orEmpty())
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER && it.name == "code" }) {
                 add(HttpStatus.UNPROCESSABLE_ENTITY)
             }
@@ -497,6 +500,10 @@ class OpenApiConfiguration {
                 // REACTION_BUSY conflict, as `unfavouriteEntry`'s is.
                 "reactToEntry",
                 "unreactToEntry",
+                // 409 MEDIA_NOT_UPLOADED: completed before the storage holds the declared bytes;
+                // and for both, 409 MEDIA_BUSY: the asset's row lock not had within lock_timeout.
+                "completeMediaUpload",
+                "deleteMedia",
             )
 
         /**
@@ -515,7 +522,7 @@ class OpenApiConfiguration {
          * [requireIdempotencyKey] exists at all: springdoc cannot read this
          * off the controller the way it reads an actual `@RequestHeader`.
          */
-        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry", "patchEntry")
+        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry", "patchEntry", "completeMediaUpload")
 
         /**
          * The [IDEMPOTENT_OPERATIONS] declared `@Idempotent(required = false)`:
@@ -544,6 +551,20 @@ class OpenApiConfiguration {
         private val VERSIONED_RESOURCE_REFS = VERSIONED_RESOURCE_SCHEMAS.map { "#/components/schemas/$it" }.toSet()
     }
 }
+
+/**
+ * ADR-0047, by operation: an upload declared too large (413
+ * MEDIA_QUOTA_EXCEEDED) or of a type its kind does not take (415
+ * MEDIA_TYPE_UNSUPPORTED); and no storage configured, or none reachable (503
+ * MEDIA_STORAGE_UNAVAILABLE). A map rather than a branch per set, because
+ * [OpenApiConfiguration]'s status list is at detekt's complexity limit.
+ */
+private val MEDIA_STATUSES =
+    mapOf(
+        "createMediaUploadIntent" to
+            listOf(HttpStatus.CONTENT_TOO_LARGE, HttpStatus.UNSUPPORTED_MEDIA_TYPE, HttpStatus.SERVICE_UNAVAILABLE),
+        "completeMediaUpload" to listOf(HttpStatus.SERVICE_UNAVAILABLE),
+    )
 
 /**
  * The ECMA-262-compatible *documented* equivalent of `bond.web.NOT_ONLY_SPACE`'s

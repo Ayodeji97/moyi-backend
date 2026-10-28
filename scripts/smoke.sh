@@ -87,10 +87,23 @@
 # they are made to have passed, and taken by the logging provider. Since Phase 4
 # N3 a reveal on the wire sends one push to each member, logged twice by the logging
 # provider and SENT once each in the ledger, with neither the words nor the token in any
-# line, and the join asks one push of the member who was there. Last run on 2026-10-28, for the entry-text rulings (ADR-0031 rulings 1 and 2), after main (b2da5a7, #100) was merged
-# in, from a jar of 2e0364b's code, on a fresh database that applied V1 to V27, V29, V30
-# and V31, against its own compose project (moyi-0f: Postgres 55443, Valkey 56390)
-# and --attach: 1017 passed, 0 failed, 0 skipped, 27 sections. Before it, on 2026-10-28,
+# line, and the join asks one push of the member who was there. Since Phase 4
+# D1 it asks for an upload URL, sees the storage (the compose MinIO) refuse a body
+# other than the one declared and take the declared one, completes the upload
+# (409 before the PUT, a replay under the same key, 422 without one), reads it as
+# its owner and is told 404 as another user, refuses a GIF (415) and 11 MB (413),
+# deletes it and sees the object gone from MinIO, and finds the URL in no log
+# line. Last run on 2026-10-28, after main (b2da5a7, the squash of #100, V31) was merged
+# into D1, from a jar of that merge, on a fresh database that applied V1 to V27 and V29
+# to V33 in that order, against its own compose project (moyi-d1: Postgres 55440, Valkey
+# 63800, MinIO 59000) and --attach: 1045 passed, 0 failed, 0 skipped, 28 sections.
+# Before it, on 2026-10-28, for D1 rebased onto main at 0a663d5 (#99, V30),
+# from a jar of that tree, on a fresh database that applied V1 to V27, V29, V30,
+# V32 and V33, against its own compose project (moyi-d1: Postgres 55440, Valkey
+# 63800, MinIO 59000) and --attach: 1034 passed, 0 failed, 0 skipped, 27 sections;
+# and the same again from a jar of 9718c61 (the review's fixes: storage calls
+# bounded and outside the transaction, MinIO pinned by digest), on a fresh database.
+# Before them, N3's own runs: on 2026-10-28,
 # after main (0a663d5, the squash of #99) was merged into N3, from a jar of that merge, on a
 # fresh database that applied V1 to V27, V29, V30 and V31, against its own compose project
 # (moyi-n3: Postgres 55438, Valkey 63798) and --attach: 1009 passed, 0 failed, 2 skipped
@@ -322,7 +335,8 @@ trap on_exit EXIT
 
 if [ "$ATTACH" = 0 ]; then
   command -v docker >/dev/null || { echo "docker is required"; exit 1; }
-  docker compose up -d postgres >/dev/null
+  # MinIO and its one-shot bucket job too: the media section uploads to it (ADR-0047).
+  docker compose up -d postgres minio minio-bucket >/dev/null
   if [ "$MOYI_DB" != "moyi" ]; then
     for _ in $(seq 1 30); do docker compose exec -T postgres pg_isready -U moyi -d moyi >/dev/null 2>&1 && break; sleep 1; done
     docker compose exec -T postgres pg_isready -U moyi -d moyi >/dev/null 2>&1 || { echo "postgres did not become ready"; exit 1; }
@@ -2275,6 +2289,70 @@ if [ "$NR_LOGGED" = "2" ]; then pass "reveal push: two sends logged by the loggi
 db_is "reveal push: no solo, milestone or streak push came of it" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category NOT IN ('REMINDER', 'PARTNER_JOINED', 'REVEAL')")" "0"
 if grep -q "$NR_WORDS" "$MOYI_LOG"; then fail "reveal push: her words are in no log line" "found in $MOYI_LOG"; else pass "reveal push: her words are in no log line"; fi
 if grep -q "$NR_TOKEN" "$MOYI_LOG"; then fail "reveal push: his token is in no log line" "found in $MOYI_LOG"; else pass "reveal push: his token is in no log line"; fi
+flush_buckets
+
+echo; echo "media — an upload straight to the storage, and the four /media routes (Phase 4 D1, ADR-0047)"
+# The bytes go to MinIO (standing in for R2) on the URL the intent hands back,
+# never through this server (FR-044). The local profile points the app at
+# docker-compose.yml's MinIO and its moyi-media bucket; with --attach, start the
+# server against a MinIO that has that bucket. The file is a few bytes that
+# start like a JPEG: nothing reads them before D2's pipeline.
+verified_account "uploader" "203.0.113.120"; MEDIA_ACCESS="$ACCOUNT_ACCESS"
+verified_account "onlooker" "203.0.113.121"; ONLOOKER_ACCESS="$ACCOUNT_ACCESS"
+MEDIA_FILE="$(mktemp)"
+printf '\xff\xd8\xff\xe0 fake smoke photo %s' "$RANDOM" > "$MEDIA_FILE"
+MEDIA_SIZE="$(wc -c < "$MEDIA_FILE" | tr -d '[:space:]')"
+MEDIA_SUM="$(openssl dgst -sha256 -binary "$MEDIA_FILE" | base64)"
+media_intent() { printf '{"kind":"%s","contentType":"%s","sizeBytes":%s,"checksum":"%s"}' "$1" "$2" "$3" "$MEDIA_SUM"; }
+expect "media: an intent for a photo is 201 with an upload URL" 201 '"uploadUrl"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d "$(media_intent IMAGE image/jpeg "$MEDIA_SIZE")"
+MEDIA_ID="$(printf '%s' "$LAST_BODY" | jget mediaId)"
+MEDIA_URL="$(printf '%s' "$LAST_BODY" | jget uploadUrl)"
+MEDIA_CHECKSUM_HEADER="$(printf '%s' "$LAST_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin)['requiredHeaders']['x-amz-checksum-sha256'])")"
+db_is "media: …the asset waits for its upload" "$(sql "SELECT status FROM media_assets WHERE id='$MEDIA_ID'")" "PENDING_UPLOAD"
+db_is "media: …under a key that names nobody" "$(sql "SELECT (storage_key ~ '^in/[0-9a-f-]{36}$' AND storage_key NOT LIKE '%$MEDIA_ID%') FROM media_assets WHERE id='$MEDIA_ID'")" "t"
+expect "media: the owner reads it while it waits, PENDING_UPLOAD" 200 '"status":"PENDING_UPLOAD"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
+expect "media: completing before the PUT is 409 MEDIA_NOT_UPLOADED" 409 '"code":"MEDIA_NOT_UPLOADED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS" -H "Idempotency-Key: $(uuidgen)"
+# The upload, as a phone makes it: straight to the storage, with the signed headers.
+PUT_FORGED="$(mktemp)"; cp "$MEDIA_FILE" "$PUT_FORGED"; printf 'X' >> "$PUT_FORGED"
+PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Content-Type: image/jpeg' -H "x-amz-checksum-sha256: $MEDIA_CHECKSUM_HEADER" --data-binary "@$PUT_FORGED")"
+case "$PUT_STATUS" in 400|403) pass "media: the storage refuses a body other than the one declared ($PUT_STATUS)";; *) fail "media: forged body" "expected 400 or 403 from the storage, got $PUT_STATUS";; esac
+PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Content-Type: image/jpeg' -H "x-amz-checksum-sha256: $MEDIA_CHECKSUM_HEADER" --data-binary "@$MEDIA_FILE")"
+[ "$PUT_STATUS" = 200 ] && pass "media: the storage takes the declared bytes (200)" || fail "media: PUT" "expected 200 from the storage, got $PUT_STATUS"
+# No public bucket (NFR-047): while the object exists, its address without a
+# signature is refused. 403 only: a 200 is a public bucket, a 404 a wrong key.
+UNSIGNED_STATUS="$(curl -s -o /dev/null -w '%{http_code}' "${MEDIA_URL%%\?*}")"
+[ "$UNSIGNED_STATUS" = 403 ] && pass "media: an unsigned GET of the stored object is refused (403)" || fail "media: public bucket" "an unsigned GET of a stored object answered $UNSIGNED_STATUS"
+MEDIA_KEY="$(uuidgen)"
+expect "media: completing after the PUT is 200 UPLOADED" 200 '"status":"UPLOADED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS" -H "Idempotency-Key: $MEDIA_KEY"
+db_is "media: …and one MediaUploaded event was recorded" "$(sql "SELECT count(*) FROM outbox_events WHERE event_type='MediaUploaded' AND aggregate_id='$MEDIA_ID'")" "1"
+expect "media: the same key again is a replay" 200 '"status":"UPLOADED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS" -H "Idempotency-Key: $MEDIA_KEY"
+header_is "media: …marked as one" Idempotency-Replayed true
+expect "media: completion without an Idempotency-Key is 422" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS"
+expect "media: the owner reads it" 200 '"status":"UPLOADED"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
+expect "media: another user's GET is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $ONLOOKER_ACCESS"
+STRANGER_MEDIA="$LAST_BODY"
+expect "media: an id that names nothing is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- "$API/media/$(uuidgen | tr 'A-Z' 'a-z')" -H "Authorization: Bearer $MEDIA_ACCESS"
+[ "$(printf '%s' "$STRANGER_MEDIA" | sed 's/"instance":"[^"]*"//')" = "$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"//')" ] \
+  && pass "media: …the same answer as another user's id" || fail "media: one 404" "another user's id and an unknown id are answered differently"
+expect "media: another user's completion is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $ONLOOKER_ACCESS" -H "Idempotency-Key: $(uuidgen)"
+expect "media: another user's DELETE is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/media/$MEDIA_ID" -H "Authorization: Bearer $ONLOOKER_ACCESS"
+expect "media: a GIF is 415 MEDIA_TYPE_UNSUPPORTED" 415 '"code":"MEDIA_TYPE_UNSUPPORTED"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d "$(media_intent IMAGE image/gif 100)"
+expect "media: a photo over 10 MB is 413 MEDIA_QUOTA_EXCEEDED" 413 '"code":"MEDIA_QUOTA_EXCEEDED"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d "$(media_intent IMAGE image/png 10485761)"
+expect "media: an intent with no checksum is 422 on checksum" 422 '"field":"checksum"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d '{"kind":"VOICE","contentType":"audio/ogg","sizeBytes":100}'
+MEDIA_OBJECT="$(sql "SELECT storage_key FROM media_assets WHERE id='$MEDIA_ID'")"
+minio_has() { docker compose exec -T minio sh -c "mc alias set smoke http://localhost:9000 \"\$MINIO_ROOT_USER\" \"\$MINIO_ROOT_PASSWORD\" >/dev/null && mc stat smoke/moyi-media/$1" >/dev/null 2>&1; }
+if [ "$PSQL_OK" = 1 ] && docker compose exec -T minio true >/dev/null 2>&1; then MINIO_OK=1; else MINIO_OK=0; fi
+if [ "$MINIO_OK" = 0 ]; then skip "media: the object is in MinIO before the delete (MinIO or psql not reachable through docker compose)"
+elif minio_has "$MEDIA_OBJECT"; then pass "media: the object is in MinIO before the delete"; else fail "media: object before delete" "MinIO has nothing under the asset's key"; fi
+expect "media: the owner deletes it, 204" 204 "" -- -X DELETE "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
+if [ "$MINIO_OK" = 0 ]; then skip "media: …and the object is gone from MinIO"
+elif minio_has "$MEDIA_OBJECT"; then fail "media: object after delete" "MinIO still holds the deleted asset's object"; else pass "media: …and the object is gone from MinIO"; fi
+db_is "media: …the row says DELETED" "$(sql "SELECT status FROM media_assets WHERE id='$MEDIA_ID'")" "DELETED"
+expect "media: a deleted asset is 404 to its owner" 404 '"code":"NOT_FOUND"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
+if grep -q "X-Amz-Signature=$(printf '%s' "$MEDIA_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
+  fail "media: the upload URL is in no log line" "its signature is in $MOYI_LOG"
+else pass "media: the upload URL is in no log line"; fi
+rm -f "$MEDIA_FILE" "$PUT_FORGED"
 flush_buckets
 
 echo; echo "database state"
