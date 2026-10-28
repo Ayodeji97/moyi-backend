@@ -65,7 +65,10 @@ watches the `PUT` wait, then answer `404`).
   else's, the phone changed hands without a sign-out, and the token just moves: the earlier
   owner's pushes must not reach the new owner's lock screen.
 - **Registrations of one token are serialised** by a transaction-scoped advisory lock on the
-  token's hash (namespace `2`; `1` is the sessions lock), taken before the take-and-give. Without
+  token's hash (namespace `2`; `1` is the sessions lock), taken before the take-and-give.
+  *(Corrected 2026-10-28, ADR-0046: this said namespace `2` was free. Bond's "bonds of a user"
+  lock (FR-025) uses it too. Harmless, as ADR-0045 records: a hash collision would only make
+  two unrelated requests wait for each other.)* Without
   it, two registrations at once both found nobody holding the token and the second insert failed
   on `unique (token)`: a 500 whose message, logged at ERROR, quoted the token (review of #96).
   With it, the later registrant runs after the earlier commits and holds the token.

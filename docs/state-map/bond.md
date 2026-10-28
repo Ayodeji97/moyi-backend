@@ -224,7 +224,7 @@ stateDiagram-v2
 
 | In | What happens | Who | When | Leads to | Why | Evidence |
 |---|---|---|---|---|---|---|
-| `PENDING_MEMBER` | your partner accepts the invite | partner |  | `ACTIVE` | Somebody accepts your invite. The bond is two people and ACTIVE from that instant, and the code is spent. | smoke |
+| `PENDING_MEMBER` | your partner accepts the invite | partner |  | `ACTIVE` | Somebody accepts your invite. The bond is two people and ACTIVE from that instant, and the code is spent. You are sent one push saying so, with no name in it, unless you turned partner-joined pushes off (ADR-0046); the one who joined is sent none. | smoke |
 | `ACTIVE` | your partner leaves | partner |  | `ARCHIVED` | Your partner leaves, and the bond is ARCHIVED for both of you. You are not notified; you find out when you next read the bond, and what you read is the same bytes whether they left or blocked you. | smoke |
 | `PENDING_DELETION` | your partner leaves | partner |  | `PENDING_DELETION` | Your partner leaves during the countdown. Their membership ends and the bond goes on counting down. You can still call the deletion off, and then the bond becomes ARCHIVED, not ACTIVE. | smoke |
 | `ACTIVE` | your partner blocks you | partner |  | `ARCHIVED` | Your partner blocks you, and the bond is ARCHIVED for both of you. You are not notified; you find out when you next read the bond, and what you read is the same bytes whether they left or blocked you. | smoke |
@@ -429,7 +429,7 @@ stateDiagram-v2
 
 | In | What happens | Who | When | Leads to | Why | Evidence |
 |---|---|---|---|---|---|---|
-| `NONE` | your partner proposes a change | partner |  | `PROPOSED` | Your partner proposes a zone change or asks for the deletion. Your next read of the bond shows it waiting, with seven days to answer. You are not notified. | test |
+| `NONE` | your partner proposes a change | partner |  | `PROPOSED` | Your partner proposes a zone change or asks for the deletion. Your next read of the bond shows it waiting, with seven days to answer. You are sent one push for it, with no words of the server's and nothing about what is proposed, unless you turned proposal pushes off; never a second one, and none if it was answered or called off before it went (ADR-0046). | test |
 | `CONFIRMED` | your partner proposes a change | partner | the earlier one is done with: 30 days have passed since the zone moved, or the deletion it started was called off | `PROPOSED` | A new proposal of the same kind waits for you. The earlier agreement does not carry over to it. | never-run |
 | `CANCELLED` | your partner proposes a change | partner |  | `PROPOSED` | Your partner proposes again after the last one was called off. A new proposal has a new id, which is what you send to agree to a zone change. | test |
 | `LAPSED` | your partner proposes a change | partner |  | `PROPOSED` | Your partner proposes again after the last one lapsed. The lapsed one is stamped cancelled to free the slot, and the new one waits for you. | test |
