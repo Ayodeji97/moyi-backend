@@ -61,7 +61,7 @@ says which.
      NFKC form has *more* graphemes than the raw is decided on the raw.
    - Zero-width only is refused, one case per kind: U+200B, U+200C, U+200D, U+2060, U+FEFF,
      U+00AD, U+FE0F, U+034F, U+3164, U+E0041 (a tag, a surrogate pair), and mixtures with
-     whitespace. A zero-width character *with* a visible one (`a​`, a ZWJ emoji
+     whitespace. A zero-width character *with* a visible one (`a\u200b`, a ZWJ emoji
      sequence, a flag) is accepted and stored exactly.
    - Endpoint: `POST` and the edit route answer `422` for a zero-width-only text and `201`/
      `200` for the 499+`…` case; nothing is stored on a `422`.
