@@ -391,7 +391,7 @@ internal class RegistrationEndpointTest(
         response.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
         response.contentAsString shouldContain "\"field\":\"displayName\""
         response.contentAsString shouldContain "\"code\":\"VALID_DISPLAY_NAME\""
-        response.contentAsString shouldContain "display name must not contain control or formatting characters"
+        response.contentAsString shouldContain "display name must not contain control, formatting or unpaired surrogate characters"
         response.contentAsString shouldNotContain "\u202E"
         hasher.calls.get() shouldBe 0
         jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
@@ -410,6 +410,50 @@ internal class RegistrationEndpointTest(
 
         // The rule, never the name, reaches a log.
         output.all shouldNotContain refused
+    }
+
+    @Test
+    fun `a lone surrogate in a display name is 422, not a question mark in the row`() {
+        // Jackson decodes `\uD800` to a lone surrogate, and the row stored it
+        // as `?`: a 201 that kept something other than what was sent.
+        val response = register(displayName = "Ad\uD800a")
+
+        response.status shouldBe 422
+        response.contentAsString shouldContain "\"field\":\"displayName\""
+        response.contentAsString shouldContain "\"code\":\"VALID_DISPLAY_NAME\""
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `a name of only no-break spaces is 422 on displayName, not 500`() {
+        // `@NotBlank` judges with Java's whitespace, which leaves out U+00A0,
+        // U+2007 and U+202F; the trim then made the name empty and `User`
+        // threw. The domain's own blank check, asked by the edge, answers now.
+        listOf("\u00A0", "\u2007", "\u202F").forEachIndexed { index, name ->
+            val response = register(email = "space-$index@example.com", displayName = name)
+
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"displayName\""
+            response.contentAsString shouldContain "\"code\":\"VALID_DISPLAY_NAME\""
+            response.contentAsString shouldContain "display name must not be blank"
+        }
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM consent_records", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `an empty or all-space name is 422 on displayName, from both constraints`() {
+        // What changed with the domain's blank check: `@NotBlank` still speaks,
+        // and the domain now speaks too, so the field carries two codes.
+        listOf("", "   ").forEach { name ->
+            val response = register(displayName = name)
+
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"displayName\""
+            response.contentAsString shouldContain "\"code\":\"NOT_BLANK\""
+            response.contentAsString shouldContain "\"code\":\"VALID_DISPLAY_NAME\""
+        }
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
     }
 
     @Test
@@ -473,7 +517,7 @@ internal class RegistrationEndpointTest(
                     client = ClientContext(addressHash = "address-hash", userAgentHash = null),
                 ),
             )
-        }.message shouldBe "display name must not contain control or formatting characters"
+        }.message shouldBe "display name must not contain control, formatting or unpaired surrogate characters"
 
         hasher.calls.get() shouldBe 0
         jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0

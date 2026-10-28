@@ -22,6 +22,9 @@ internal class DisplayNamesTest {
             // left-to-right isolate, byte-order mark, soft hyphen, and a tag
             // character (outside the BMP: one code point, two UTF-16 units).
             "200B", "200E", "202E", "2066", "FEFF", "00AD", "E0041",
+            // Cs: a lone high and a lone low surrogate. Not a character at all,
+            // and stored as `?`, which is not what was sent.
+            "D800", "DC00",
         ],
     )
     fun `a control or format character is refused`(hex: String) {
@@ -29,9 +32,34 @@ internal class DisplayNamesTest {
 
         val refused = shouldThrow<IllegalArgumentException> { DisplayNames.check(name) }
 
-        refused.message shouldBe "display name must not contain control or formatting characters"
+        refused.message shouldBe "display name must not contain control, formatting or unpaired surrogate characters"
         // The rule, never the name: an exception message reaches logs.
         refused.message.orEmpty() shouldNotContain name
+    }
+
+    @Test
+    fun `a high surrogate at the end, or a pair the wrong way round, is refused`() {
+        listOf("Ada\uD800", "\uDC00\uD800").forEach { name ->
+            shouldThrow<IllegalArgumentException> { DisplayNames.check(name) }.message shouldBe
+                "display name must not contain control, formatting or unpaired surrogate characters"
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(
+        strings = [
+            "",
+            "   ",
+            // A no-break space, a figure space and a narrow no-break space: Zs,
+            // so blank to Kotlin, and not whitespace to Java (or to `@NotBlank`).
+            "\u00A0",
+            "\u2007",
+            "\u202F",
+        ],
+    )
+    fun `a name of nothing but spaces of any kind is blank`(name: String) {
+        shouldThrow<IllegalArgumentException> { DisplayNames.check(name) }.message shouldBe
+            "display name must not be blank"
     }
 
     @Test

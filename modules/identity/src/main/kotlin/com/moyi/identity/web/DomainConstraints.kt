@@ -104,9 +104,12 @@ internal class DisplayNameConstraintValidator : ConstraintValidator<ValidDisplay
         value: String?,
         context: ConstraintValidatorContext,
     ): Boolean {
-        // Blank is `@NotBlank`'s and too long is `@Size`'s, which publishes
-        // `maxLength`: each reported once.
-        if (value.isNullOrBlank()) return true
+        // Null is `@NotBlank`'s alone. Blank is not skipped: `@NotBlank` judges
+        // with Java's whitespace and misses U+00A0, U+2007 and U+202F, which
+        // then trimmed to "" and threw in `User` (a 500). So the domain's own
+        // blank check speaks too, and an all-space name carries both codes.
+        // Too long is `@Size`'s, which publishes `maxLength`.
+        if (value == null) return true
         // Trimmed, because the trimmed value is what `toCommand` stores. So a
         // trailing newline, which `trim()` removes as whitespace, is accepted,
         // and a newline inside the name is refused.
