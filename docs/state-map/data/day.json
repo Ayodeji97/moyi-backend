@@ -4759,7 +4759,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "read-one-archived-day-not_opened",
@@ -4777,7 +4777,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "bookmark-an-entry-not_opened",
@@ -4867,7 +4867,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "read-one-archived-day-open",
@@ -4885,7 +4885,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "bookmark-an-entry-open",
@@ -4975,7 +4975,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "read-one-archived-day-partial",
@@ -4993,7 +4993,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "bookmark-an-entry-partial",
@@ -5083,7 +5083,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "read-one-archived-day-pending_reveal",
@@ -5101,7 +5101,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "bookmark-an-entry-pending_reveal",
@@ -5191,7 +5191,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "read-one-archived-day-revealed",
@@ -5209,7 +5209,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "bookmark-an-entry-revealed",
@@ -5299,7 +5299,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "read-one-archived-day-solo",
@@ -5317,7 +5317,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "bookmark-an-entry-solo",
@@ -5407,7 +5407,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "read-one-archived-day-empty",
@@ -5425,7 +5425,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "bookmark-an-entry-empty",
@@ -5515,7 +5515,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "read-one-archived-day-frozen",
@@ -5533,7 +5533,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "bookmark-an-entry-frozen",
@@ -5623,7 +5623,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "read-one-archived-day-suspended",
@@ -5641,7 +5641,7 @@
     "rule": "FR-090",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/DaysController.kt#return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))"
   },
   {
     "id": "search-the-archive-not_opened",
@@ -5659,7 +5659,7 @@
     "rule": "FR-091",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(page, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "search-the-archive-open",
@@ -5677,7 +5677,7 @@
     "rule": "FR-091",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(page, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "search-the-archive-partial",
@@ -5695,7 +5695,7 @@
     "rule": "FR-091",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(page, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "search-the-archive-pending_reveal",
@@ -5713,7 +5713,7 @@
     "rule": "FR-091",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(page, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "search-the-archive-revealed",
@@ -5731,7 +5731,7 @@
     "rule": "FR-091",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(page, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "search-the-archive-solo",
@@ -5749,7 +5749,7 @@
     "rule": "FR-091",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(page, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "search-the-archive-empty",
@@ -5767,7 +5767,7 @@
     "rule": "FR-091",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(page, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "search-the-archive-frozen",
@@ -5785,7 +5785,7 @@
     "rule": "FR-091",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(page, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "search-the-archive-suspended",
@@ -5803,7 +5803,7 @@
     "rule": "FR-091",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/SearchController.kt#return DaysResponse.from(page, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "on-this-day-not_opened",
@@ -5821,7 +5821,7 @@
     "rule": "FR-092",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(getDays.onThisDay(membership))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "on-this-day-open",
@@ -5839,7 +5839,7 @@
     "rule": "FR-092",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(getDays.onThisDay(membership))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "on-this-day-partial",
@@ -5857,7 +5857,7 @@
     "rule": "FR-092",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(getDays.onThisDay(membership))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "on-this-day-pending_reveal",
@@ -5875,7 +5875,7 @@
     "rule": "FR-092",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(getDays.onThisDay(membership))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "on-this-day-revealed",
@@ -5893,7 +5893,7 @@
     "rule": "FR-092",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(getDays.onThisDay(membership))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "on-this-day-solo",
@@ -5911,7 +5911,7 @@
     "rule": "FR-092",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(getDays.onThisDay(membership))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "on-this-day-empty",
@@ -5929,7 +5929,7 @@
     "rule": "FR-092",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(getDays.onThisDay(membership))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "on-this-day-frozen",
@@ -5947,7 +5947,7 @@
     "rule": "FR-092",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(getDays.onThisDay(membership))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "on-this-day-suspended",
@@ -5965,7 +5965,7 @@
     "rule": "FR-092",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(getDays.onThisDay(membership))"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/OnThisDayController.kt#return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))"
   },
   {
     "id": "bookmark-an-entry-suspended",

@@ -7,7 +7,7 @@ import java.time.LocalDate
 
 /**
  * One day of the archive (FR-090): the day `GET /today` shows while it is
- * today, without the streak.
+ * today, without the streak, and with the partner's name.
  *
  * [status] is the day's, as its erasures will leave it, shared deliberately
  * as it is on `today` (`TodayResponse` has the reasoning). [myEntry] and
@@ -22,15 +22,33 @@ import java.time.LocalDate
  * `updatedAt` (when somebody erased or changed something is not the reader's
  * to know), and `favourited` is the caller's own mark: the partner's marks
  * are in no field, count or flag of any response (FR-093, FR-064).
+ *
+ * **One addition, [partnerDisplayName], and it discloses nothing new**: the
+ * name the other member goes by, which the caller's own `GET /bonds/{bondId}`
+ * already gives both members. The archive's author label needs it (ADR-0036
+ * question 5, ruled 2026-10-21), and `bond` owes it
+ * (`BondAccess.partnerDisplayNameOf`, which has its rules: `null` only before
+ * a second member ever joined, the name of one who left or blocked, and
+ * `"Former member"` for an account identity no longer knows). It is on each
+ * day and not on the page, so that `GET /days/{date}` stays the feed's
+ * element byte for byte; it is the same on every day of a bond, looked up once
+ * a request. Read as it is now, so a rename moves the archive's `ETag`, which
+ * is right: the tag is the body. `GET /today` does not carry it (the ruling
+ * names the archive).
  */
 internal data class DayResponse(
     val date: LocalDate,
     val status: BondDayStatus,
     val myEntry: EntryResponse?,
     val partnerEntry: PartnerEntryResponse?,
+    val partnerDisplayName: String?,
 ) {
     companion object {
-        fun from(view: DayView): DayResponse =
+        /** [partnerDisplayName] is the request's one answer from `BondAccess.partnerDisplayNameOf`, the same for every day of it. */
+        fun from(
+            view: DayView,
+            partnerDisplayName: String?,
+        ): DayResponse =
             DayResponse(
                 date = view.date,
                 status = view.status,
@@ -47,6 +65,7 @@ internal data class DayResponse(
                     view.partnerEntry?.let {
                         PartnerEntryResponse.of(it, view.date, it.disclosed?.id in view.marked, view.reactions[it.disclosed?.id])
                     },
+                partnerDisplayName = partnerDisplayName,
             )
     }
 }
@@ -65,7 +84,13 @@ internal data class DaysResponse(
     val nextCursor: String?,
 ) {
     companion object {
-        fun from(page: DaysPage): DaysResponse =
-            DaysResponse(items = page.days.map(DayResponse::from), nextCursor = page.next?.let { DayCursor(it).encode() })
+        fun from(
+            page: DaysPage,
+            partnerDisplayName: String?,
+        ): DaysResponse =
+            DaysResponse(
+                items = page.days.map { DayResponse.from(it, partnerDisplayName) },
+                nextCursor = page.next?.let { DayCursor(it).encode() },
+            )
     }
 }

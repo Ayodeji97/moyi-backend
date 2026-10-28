@@ -11,6 +11,9 @@ internal data class OnThisDayResponse(
     val items: List<DayResponse>,
 ) {
     companion object {
-        fun from(days: List<DayView>): OnThisDayResponse = OnThisDayResponse(days.map(DayResponse::from))
+        fun from(
+            days: List<DayView>,
+            partnerDisplayName: String?,
+        ): OnThisDayResponse = OnThisDayResponse(days.map { DayResponse.from(it, partnerDisplayName) })
     }
 }

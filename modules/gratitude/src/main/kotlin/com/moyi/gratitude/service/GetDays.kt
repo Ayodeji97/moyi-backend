@@ -521,6 +521,16 @@ internal class GetDays(
          * So the margin is about 29 KB, and it is what a new field on an
          * entry spends: a hundred entries a page, so every thirty octets
          * added to one are 3 KB off it. `reaction` (slice C5c) spent 2.3.
+         * `partnerDisplayName` (ADR-0036 question 5) is on the day, so fifty
+         * a page, not a hundred, but a name of 80 characters can be written
+         * as 470 octets: at its largest it spends about 25 KB, and
+         * `DaysFeedTest` measures the largest page with it. What is left is
+         * about 4 KB, and a field on a day or an entry now needs this bound
+         * looked at again. The name it measures with is
+         * `ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH`, and
+         * `OpenApiContractTest` ("the longest display name identity takes is
+         * no longer than the archive's largest page was measured with") fails
+         * if identity ever takes a longer one.
          */
         const val PAGE_TEXT_OCTETS = 192 * 1024
 

@@ -108,7 +108,7 @@ internal class FavouriteLockWaitTest(
     private val pool = Executors.newCachedThreadPool()
 
     /** The application's service for the two routes, over a store that waits [SHORT] for a lock. */
-    private val impatient = FavouriteEntry(access, entries, ImpatientFavourites(JdbcTemplate(dataSource), transactions), joining, clock)
+    private val impatient = FavouriteEntry(access, entries, ImpatientFavourites(JdbcTemplate(dataSource), transactions), joining)
 
     private lateinit var ada: UUID
     private lateinit var bea: UUID
@@ -427,9 +427,8 @@ internal class FavouriteLockWaitTest(
         override fun mark(
             entryId: EntryId,
             memberId: UUID,
-            now: Instant,
             lockTimeout: Duration,
-        ): Boolean = super.mark(entryId, memberId, now, SHORT)
+        ): Boolean = super.mark(entryId, memberId, SHORT)
     }
 
     private companion object {

@@ -4008,6 +4008,9 @@
               "type" : "null"
             } ]
           },
+          "partnerDisplayName" : {
+            "type" : [ "string", "null" ]
+          },
           "partnerEntry" : {
             "discriminator" : {
               "mapping" : {

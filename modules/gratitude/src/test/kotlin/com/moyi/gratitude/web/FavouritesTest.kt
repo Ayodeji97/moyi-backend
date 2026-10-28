@@ -45,7 +45,6 @@ import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import java.sql.Connection
-import java.sql.Timestamp
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
@@ -497,15 +496,14 @@ internal class FavouritesTest(
         val id = EntryId(UUID.fromString(adas))
 
         // Not revealed: nothing, even for its author, whom the service would have stopped first.
-        favourites.mark(id, adaMember, clock.instant()) shouldBe false
+        favourites.mark(id, adaMember) shouldBe false
         marks().shouldBeEmpty()
 
         rig.submit(bea, bond, BEAS_WORDS)
-        favourites.mark(id, adaMember, clock.instant()) shouldBe true
+        favourites.mark(id, adaMember) shouldBe true
         // A second time: the row is there, and that is what was asked.
-        favourites.mark(id, adaMember, clock.instant().plusSeconds(5)) shouldBe true
+        favourites.mark(id, adaMember) shouldBe true
         marks() shouldBe listOf(adas to adaMember)
-        jdbc.queryForObject("SELECT created_at FROM entry_favourites", Timestamp::class.java)!!.toInstant() shouldBe clock.instant()
         favourites.markedBy(adaMember, listOf(id, EntryId(UUID.randomUUID()))) shouldBe setOf(id)
         favourites.markedBy(rig.memberId(bond, bea), listOf(id)) shouldBe emptySet()
         favourites.markedBy(adaMember, emptyList()) shouldBe emptySet()
@@ -516,12 +514,12 @@ internal class FavouritesTest(
             withClue(erasure) {
                 jdbc.update("UPDATE entries SET deleted_at = NULL, status = 'REVEALED' WHERE id = ?::uuid", adas) shouldBe 1
                 jdbc.update("UPDATE entries SET $erasure WHERE id = ?::uuid", adas) shouldBe 1
-                favourites.mark(id, adaMember, clock.instant()) shouldBe false
+                favourites.mark(id, adaMember) shouldBe false
                 marks().shouldBeEmpty()
             }
         }
         // And an id nobody has.
-        favourites.mark(EntryId(UUID.randomUUID()), adaMember, clock.instant()) shouldBe false
+        favourites.mark(EntryId(UUID.randomUUID()), adaMember) shouldBe false
         marks().shouldBeEmpty()
     }
 
@@ -702,7 +700,7 @@ internal class FavouritesTest(
     fun `a repeat mark is a success whatever the member's own unmark does a moment later`() {
         val day = revealedDay()
         val entry = EntryId(UUID.fromString(day.adas))
-        favourites.mark(entry, day.beaMember, clock.instant()) shouldBe true
+        favourites.mark(entry, day.beaMember) shouldBe true
         var unmarked = false
         val racing =
             Favourites(
@@ -714,7 +712,7 @@ internal class FavouritesTest(
                 transactions,
             )
 
-        racing.mark(entry, day.beaMember, clock.instant()) shouldBe true
+        racing.mark(entry, day.beaMember) shouldBe true
 
         unmarked shouldBe true
         // The unmark came last, so it is what stands.
@@ -738,7 +736,7 @@ internal class FavouritesTest(
                 it.executeUpdate("DELETE FROM entry_favourites WHERE entry_id = '${day.adas}'")
             }
 
-            val marking = pool.submit(Callable { favourites.mark(EntryId(UUID.fromString(day.adas)), day.beaMember, clock.instant()) })
+            val marking = pool.submit(Callable { favourites.mark(EntryId(UUID.fromString(day.adas)), day.beaMember) })
             await().atMost(Duration.ofSeconds(10)).until { marking.isDone || waitingBehind(eraserPid).any { "entry_favourites" in it } }
             marking.isDone shouldBe false
 
@@ -821,7 +819,7 @@ internal class FavouritesTest(
         memberId: UUID,
     ) {
         jdbc.update(
-            "INSERT INTO entry_favourites (entry_id, member_id, created_at) VALUES (?::uuid, ?, now())",
+            "INSERT INTO entry_favourites (entry_id, member_id) VALUES (?::uuid, ?)",
             entryId,
             memberId,
         ) shouldBe 1

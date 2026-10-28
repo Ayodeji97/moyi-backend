@@ -449,7 +449,8 @@ internal class ArchiveGateTest(
                         }
                     (day != null) shouldBe readable
                     if (day != null) {
-                        day.propertyNames().toList() shouldContainExactlyInAnyOrder listOf("date", "status", "myEntry", "partnerEntry")
+                        day.propertyNames().toList() shouldContainExactlyInAnyOrder
+                            listOf("date", "status", "myEntry", "partnerEntry", "partnerDisplayName")
                         day["status"].asString() shouldBe shownStatus(cell, withdrawn)
                         day["myEntry"].shouldBe(own, mine, rig.bonds.memberId(bond, author), bond, cell.date)
                         day["partnerEntry"].shouldBe(theirs, partners, rig.bonds.memberId(bond, partner), bond, cell.date)
