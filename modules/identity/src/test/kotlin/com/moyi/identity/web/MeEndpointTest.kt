@@ -2,6 +2,7 @@ package com.moyi.identity.web
 
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.identity.api.UserDirectory
 import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.TestBreachCorpus
 import io.kotest.matchers.shouldBe
@@ -35,6 +36,7 @@ import javax.sql.DataSource
 internal class MeEndpointTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
+    @Autowired private val directory: UserDirectory,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
@@ -58,6 +60,24 @@ internal class MeEndpointTest(
         response.contentAsString shouldContain "\"status\":\"PENDING_VERIFICATION\""
         response.contentAsString shouldNotContain "tokensInvalidBefore"
         response.contentAsString shouldNotContain "createdAt"
+    }
+
+    @Test
+    fun `a stored name holding a right-to-left override still reads back, on me and through the directory`() {
+        // ADR-0015 as amended 2026-10-28: the character rule is the write
+        // path's, not the domain constructor's, which runs on every row read.
+        // A row written before the rule, or by hand, must stay readable: in
+        // `User.init` it would make every sign-in, `/me` and bond view of it a
+        // 500. Put there by SQL, because no route can write it any more.
+        val userId = registerAda()
+        jdbc.update("UPDATE users SET display_name = 'Ad' || chr(8238) || 'a' WHERE id = ?", userId)
+
+        val response = me(tokens.issue(userId).token)
+
+        response.status shouldBe 200
+        response.contentAsString shouldContain "\"displayName\":\"Ad\u202Ea\""
+        directory.find(userId)!!.displayName shouldBe "Ad\u202Ea"
+        directory.findAll(listOf(userId)).getValue(userId).displayName shouldBe "Ad\u202Ea"
     }
 
     @Test

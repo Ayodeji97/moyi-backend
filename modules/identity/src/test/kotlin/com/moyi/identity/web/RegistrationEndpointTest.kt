@@ -1,7 +1,9 @@
 package com.moyi.identity.web
 
+import com.moyi.common.security.ClientContext
 import com.moyi.common.security.PersonalDataHasher
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.PasswordHash
 import com.moyi.identity.domain.PasswordHashAlgorithm
@@ -10,9 +12,14 @@ import com.moyi.identity.infra.IdentityTestApplication
 import com.moyi.identity.infra.security.Argon2Properties
 import com.moyi.identity.infra.security.Argon2idPasswordHasher
 import com.moyi.identity.infra.security.TestBreachCorpus
+import com.moyi.identity.service.RegisterUser
+import com.moyi.identity.service.RegistrationCommand
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -33,6 +40,7 @@ import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicInteger
 import javax.sql.DataSource
 
@@ -55,14 +63,17 @@ internal class RegistrationEndpointTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val hasher: RecordingPasswordHasher,
     @Autowired private val personalData: PersonalDataHasher,
+    @Autowired private val emails: RecordingEmailSender,
+    @Autowired private val registerUser: RegisterUser,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
 
     @AfterEach
     fun clear() {
-        jdbc.execute("TRUNCATE TABLE consent_records, credentials, users CASCADE")
+        jdbc.execute("TRUNCATE TABLE verification_tokens, consent_records, credentials, users CASCADE")
         hasher.calls.set(0)
+        emails.sent.clear()
     }
 
     @Test
@@ -366,6 +377,108 @@ internal class RegistrationEndpointTest(
         jdbc.queryForObject("SELECT count(*) FROM consent_records WHERE ip_hash IS NULL", Int::class.java) shouldBe 0
     }
 
+    // ---- the display name (ADR-0015, amended 2026-10-28) -------------------
+
+    @Test
+    fun `a display name with a right-to-left override is 422 on displayName, and nothing is written or sent`(output: CapturedOutput) {
+        // U+202E reorders the text after it on the partner's screen and in an
+        // email: a spoofing tool, refused at the edge before any hash is paid.
+        val refused = "Ad\u202Ea"
+
+        val response = register(email = "refused@example.com", displayName = refused)
+
+        response.status shouldBe 422
+        response.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+        response.contentAsString shouldContain "\"field\":\"displayName\""
+        response.contentAsString shouldContain "\"code\":\"VALID_DISPLAY_NAME\""
+        response.contentAsString shouldContain "display name must not contain control or formatting characters"
+        response.contentAsString shouldNotContain "\u202E"
+        hasher.calls.get() shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM consent_records", Int::class.java) shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM verification_tokens", Int::class.java) shouldBe 0
+
+        // No email: synchronised on one that is sent, never on a sleep. The
+        // verification email is an AFTER_COMMIT consequence on another thread,
+        // so a valid registration after the refused one is what proves the
+        // sender was reachable, and none to the refused address once it has
+        // arrived is what proves the refused one asked for none. Filtered by
+        // address, because an earlier test's email may still be in flight.
+        register(email = "bob@example.com").status shouldBe 201
+        await().atMost(WAIT).untilAsserted { emails.sent.filter { it.to == "bob@example.com" } shouldHaveSize 1 }
+        emails.sent.filter { it.to == "refused@example.com" } shouldHaveSize 0
+
+        // The rule, never the name, reaches a log.
+        output.all shouldNotContain refused
+    }
+
+    @Test
+    fun `a newline inside a display name is refused`() {
+        val response = register(displayName = "Ad\na")
+
+        response.status shouldBe 422
+        response.contentAsString shouldContain "\"field\":\"displayName\""
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `a trailing newline is trimmed, as a surrounding space is, and the name accepted`() {
+        // Kotlin's trim() removes whitespace, and tab and newline are both
+        // whitespace and Cc. The check runs on the trimmed value, because that
+        // is what is stored: so a newline at the end is a typing accident.
+        register(displayName = "Ada\n").status shouldBe 201
+
+        jdbc.queryForObject("SELECT display_name FROM users", String::class.java) shouldBe "Ada"
+    }
+
+    @Test
+    fun `names in other scripts, emoji and accents are stored exactly as sent`() {
+        val names =
+            listOf(
+                // Persian, with the ZWNJ that spells it.
+                "\u0646\u06CC\u06A9\u200C\u0646\u0627\u0645",
+                // A family: three emoji joined by ZWJ.
+                "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67",
+                // A flag: two regional indicators.
+                "\uD83C\uDDF3\uD83C\uDDEC",
+                // Accented, precomposed and combining: two different strings, both kept.
+                "Zo\u00EB",
+                "Zoe\u0308",
+                // CJK.
+                "\u738B\u5C0F\u660E",
+            )
+
+        names.forEachIndexed { index, name ->
+            register(email = "name-$index@example.com", displayName = name).status shouldBe 201
+            jdbc.queryForObject(
+                "SELECT display_name FROM users WHERE email = ?",
+                String::class.java,
+                "name-$index@example.com",
+            ) shouldBe name
+        }
+    }
+
+    @Test
+    fun `the service refuses the name too, for a caller that does not come through the edge`() {
+        // The write path checks the name itself, before the hash: a command
+        // built by any future caller still cannot store a control character.
+        shouldThrow<IllegalArgumentException> {
+            registerUser.register(
+                RegistrationCommand(
+                    email = Email("ada@example.com"),
+                    password = Password.of(PASSWORD),
+                    displayName = "Ad\u202Ea",
+                    locale = "en",
+                    acceptedTermsVersion = "2026-09-01",
+                    client = ClientContext(addressHash = "address-hash", userAgentHash = null),
+                ),
+            )
+        }.message shouldBe "display name must not contain control or formatting characters"
+
+        hasher.calls.get() shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+    }
+
     private fun body(
         email: String,
         password: String,
@@ -386,6 +499,7 @@ internal class RegistrationEndpointTest(
         email: String = "ada@example.com",
         password: String = PASSWORD,
         over18: Boolean = true,
+        displayName: String = "Ada",
     ): MockHttpServletResponse =
         mockMvc
             .post(PATH) {
@@ -395,7 +509,7 @@ internal class RegistrationEndpointTest(
                     {
                       "email": "$email",
                       "password": "$password",
-                      "displayName": "Ada",
+                      "displayName": "${jsonEscaped(displayName)}",
                       "locale": "en",
                       "acceptedTermsVersion": "2026-09-01",
                       "over18": $over18
@@ -403,6 +517,17 @@ internal class RegistrationEndpointTest(
                     """.trimIndent()
             }.andReturn()
             .response
+
+    /**
+     * Every character outside printable ASCII, and the two JSON must escape,
+     * written as a JSON `\uXXXX` escape: so a test name can hold a newline or a
+     * surrogate pair and still be valid JSON, decoded by the server exactly.
+     */
+    private fun jsonEscaped(value: String): String =
+        value
+            .map { char ->
+                if (char in ' '..'~' && char != '"' && char != '\\') char.toString() else "\\u%04X".format(char.code)
+            }.joinToString("")
 
     /**
      * Wraps the real hasher rather than replacing it: the test needs to know
@@ -416,6 +541,10 @@ internal class RegistrationEndpointTest(
         @Primary
         fun recordingPasswordHasher(properties: Argon2Properties): RecordingPasswordHasher =
             RecordingPasswordHasher(Argon2idPasswordHasher(properties))
+
+        @Bean
+        @Primary
+        fun recordingEmailSender(): RecordingEmailSender = RecordingEmailSender()
     }
 
     private companion object {
@@ -438,6 +567,7 @@ internal class RegistrationEndpointTest(
 
         const val PATH = "/api/v1/auth/register"
         const val PASSWORD = "correct horse battery"
+        val WAIT: Duration = Duration.ofSeconds(5)
     }
 }
 
