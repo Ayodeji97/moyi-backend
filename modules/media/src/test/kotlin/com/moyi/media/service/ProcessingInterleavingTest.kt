@@ -3,6 +3,7 @@ package com.moyi.media.service
 import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.MutableClock
+import com.moyi.media.domain.ImageFormat
 import com.moyi.media.domain.StorageKey
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
@@ -167,11 +168,12 @@ internal class ProcessingInterleavingTest(
 
         override fun encode(
             source: Path,
+            format: ImageFormat,
             workDir: Path,
         ): Encoding {
             entered.countDown()
             check(release.await(30, TimeUnit.SECONDS)) { "the test never opened the gate" }
-            return real.encode(source, workDir)
+            return real.encode(source, format, workDir)
         }
     }
 

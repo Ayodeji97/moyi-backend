@@ -19,8 +19,28 @@ internal object Vipses {
             ?: error("libvips' command-line tools are not on PATH; install them (brew install vips, apt-get install libvips-tools)")
     }
 
-    /** The memory limit production uses, where this OS can enforce one; none on macOS. */
-    val sandbox: Sandbox get() = Sandbox(if (Sandbox.enforcesMemoryLimits) 1024L * 1024 * 1024 else null)
+    /** The memory limit production uses (640 MiB), where this OS can enforce one; none on macOS. */
+    val sandbox: Sandbox get() = Sandbox(if (Sandbox.enforcesMemoryLimits) 640L * 1024 * 1024 else null)
+
+    /**
+     * Runs `vips` (or `vipsheader`, with [program]) on files a test makes for
+     * itself, outside the code under test, and answers what it printed. Fails
+     * the test if the program does.
+     */
+    fun tool(
+        dir: Path,
+        vararg args: String,
+        program: String = "vips",
+    ): String {
+        val process =
+            ProcessBuilder(listOf(binDir.resolve(program).toString()) + args)
+                .directory(dir.toFile())
+                .redirectErrorStream(true)
+                .start()
+        val output = process.inputStream.readAllBytes().toString(Charsets.UTF_8)
+        check(process.waitFor() == 0) { "$program ${args.joinToString(" ")} failed: $output" }
+        return output
+    }
 
     fun onPath(timeout: Duration = Duration.ofSeconds(40)): VipsImageProcessor =
         VipsImageProcessor(binDir.resolve("vips"), binDir.resolve("vipsheader"), sandbox, timeout)

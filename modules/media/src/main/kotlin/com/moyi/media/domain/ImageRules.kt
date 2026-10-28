@@ -28,11 +28,25 @@ internal object ImageRules {
      * The most pixels a photo may have, read from its header **before it is
      * decoded** (spec §4 D2, T-07). 64 Mi pixels: a 48-megapixel phone photo
      * (8064 × 6048) fits, and so does a 16384 × 4096 panorama; a decompression
-     * bomb (30,000 × 30,000 in a few kilobytes) does not. Decoding is what
-     * costs memory, and the worker's 768 MB (Q5) holds one decode of this size
-     * with room to spare: about 200 MB of 8-bit RGB.
+     * bomb (30,000 × 30,000 in a few kilobytes) does not. **It does not bound
+     * memory on its own**: a pixel can be 1 byte or 8 (16-bit RGBA), and some
+     * formats are decoded whole. [MAX_DECODED_BYTES] is the memory bound.
      */
     const val MAX_PIXELS: Long = 64L * 1024 * 1024
+
+    /**
+     * The most bytes a photo may decode to, read from its header before it is
+     * decoded: width × height × bands × bytes per sample (review of #108).
+     * 100 MiB, chosen by measurement (ADR-0048 §3): just under it, on libvips
+     * 8.15.1 under the worker's 640 MiB address-space limit, the decode's peak
+     * resident memory was 283 MiB for a HEIC (the worst format: libheif keeps
+     * its own planes besides libvips' image), 151 MiB for an interlaced 16-bit
+     * RGBA PNG, 144 MiB for an interlaced 8-bit PNG, 127 MiB for a WebP and
+     * 71 MiB for a JPEG (shrunk as it is decoded). An 8-bit RGB photo up to
+     * about 35 megapixels fits (a 24-megapixel phone photo does; a 48-megapixel
+     * one, at 139 MiB, does not); 16-bit RGBA up to about 13.
+     */
+    const val MAX_DECODED_BYTES: Long = 100L * 1024 * 1024
 
     /**
      * WebP quality, tried highest first until a variant fits its byte cap
@@ -54,6 +68,38 @@ internal object ImageRules {
         width: Int,
         height: Int,
     ): Boolean = width > 0 && height > 0 && width.toLong() * height <= MAX_PIXELS
+
+    /**
+     * Why an image whose header says these things may not be decoded, or null
+     * when it may: the pixel ceiling, then the decoded-bytes ceiling. A header
+     * with no bands, or a sample format this rule does not know, is unreadable.
+     */
+    fun headerRefusal(
+        width: Int,
+        height: Int,
+        bands: Int,
+        format: String,
+    ): ImageRefusal? {
+        val sample = bytesPerSample(format)
+        return when {
+            !mayDecode(width, height) -> ImageRefusal.TOO_MANY_PIXELS
+            bands <= 0 || sample == null -> ImageRefusal.UNREADABLE
+            width.toLong() * height * bands * sample > MAX_DECODED_BYTES -> ImageRefusal.TOO_LARGE_DECODED
+            else -> null
+        }
+    }
+
+    /** Bytes per sample of libvips' band formats, by the name `vipsheader` prints. */
+    @Suppress("MagicNumber") // The widths of the formats are the table.
+    fun bytesPerSample(format: String): Int? =
+        when (format) {
+            "uchar", "char" -> 1
+            "ushort", "short" -> 2
+            "uint", "int", "float" -> 4
+            "double", "complex" -> 8
+            "dpcomplex" -> 16
+            else -> null
+        }
 
     /** [edge] scaled by [fraction], never below one pixel. */
     fun shrunk(
@@ -87,6 +133,19 @@ internal enum class ImageRefusal {
 
     /** The header says more than [ImageRules.MAX_PIXELS], or no size at all. */
     TOO_MANY_PIXELS,
+
+    /** The header says it decodes to more than [ImageRules.MAX_DECODED_BYTES]. */
+    TOO_LARGE_DECODED,
+
+    /** Declared and branded HEIC, but libvips reads another codec in it (an AVIF, say). */
+    NOT_HEVC,
+
+    /**
+     * [MediaAsset.MAX_ATTEMPTS] attempts began and none finished: a photo that
+     * keeps failing in a way that is thrown (a storage outage that outlasts
+     * them, a process killed mid-photo) is given up rather than retried for ever.
+     */
+    TOO_MANY_ATTEMPTS,
 
     /** The decoder could not read it, or stopped at a limit (memory, CPU time). */
     UNREADABLE,

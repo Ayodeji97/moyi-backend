@@ -90,8 +90,22 @@ internal class MediaAssetStore(
     fun startProcessing(id: UUID): Boolean =
         jdbc.update(
             "UPDATE media_assets SET status = 'PROCESSING', processing_attempts = processing_attempts + 1 " +
-                "WHERE id = ? AND kind = 'IMAGE' AND status IN ('UPLOADED', 'PROCESSING')",
+                "WHERE id = ? AND kind = 'IMAGE' AND status IN ('UPLOADED', 'PROCESSING') AND processing_attempts < ?",
             id,
+            MediaAsset.MAX_ATTEMPTS,
+        ) == 1
+
+    /**
+     * A photo whose attempts have all begun and none finished becomes FAILED:
+     * only one still waiting or left PROCESSING, and only once
+     * [MediaAsset.MAX_ATTEMPTS] have begun. Returns whether it moved.
+     */
+    fun giveUp(id: UUID): Boolean =
+        jdbc.update(
+            "UPDATE media_assets SET status = 'FAILED' " +
+                "WHERE id = ? AND kind = 'IMAGE' AND status IN ('UPLOADED', 'PROCESSING') AND processing_attempts >= ?",
+            id,
+            MediaAsset.MAX_ATTEMPTS,
         ) == 1
 
     /** PROCESSING to READY, with what is kept of the photo. Only from PROCESSING. */
@@ -170,7 +184,8 @@ internal class MediaAssetStore(
     private companion object {
         const val SELECT =
             "SELECT id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, " +
-                "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict FROM media_assets"
+                "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict, processing_attempts " +
+                "FROM media_assets"
 
         val JSON: JsonMapper = JsonMapper.builder().build()
 
@@ -190,6 +205,7 @@ internal class MediaAssetStore(
                     expiresAt = rs.getTimestamp("expires_at")?.toInstant(),
                     variants = variantsOf(rs.getString("variants")),
                     moderationVerdict = rs.getString("moderation_verdict"),
+                    processingAttempts = rs.getInt("processing_attempts"),
                 )
             }
 

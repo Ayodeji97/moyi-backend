@@ -17,8 +17,9 @@ import java.util.concurrent.TimeUnit
  *   under `ulimit -v` ([memoryLimitBytes] of address space) and `ulimit -t`
  *   (CPU seconds, a backstop to the deadline): an allocation past the limit
  *   fails inside the decoder, which exits with an error, and the JVM's own
- *   memory is never at stake. macOS does not enforce `ulimit -v`, so there
- *   [memoryLimitBytes] is `null` and nothing is limited
+ *   memory is never at stake. On macOS `/bin/sh` refuses `ulimit -v`
+ *   ("cannot modify limit: Invalid argument"), so a limited run never starts
+ *   there (exit 125); [memoryLimitBytes] is `null` on macOS and nothing is limited
  *   ([MediaProcessingProperties.Vips.allowUnlimitedMemory] says when that is
  *   allowed; production is Linux).
  * - **No inherited environment.** The program sees `PATH` and what the caller
@@ -116,7 +117,7 @@ internal class Sandbox(
     }
 
     companion object {
-        /** Whether this OS enforces `ulimit -v`. Linux does; macOS accepts the call and ignores it. */
+        /** Whether this OS enforces `ulimit -v`. Linux does; on macOS `/bin/sh` refuses the call ("cannot modify limit"). */
         val enforcesMemoryLimits: Boolean =
             System
                 .getProperty("os.name")

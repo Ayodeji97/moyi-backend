@@ -213,6 +213,50 @@ internal class ProcessUploadsTest(
         }
     }
 
+    /**
+     * Review of #108: an attempt that throws (an outage, a process killed
+     * mid-photo) leaves the photo PROCESSING and the delivery to be retried.
+     * After five began, the next delivery gives it up instead of starting a
+     * sixth, and succeeds, so the outbox stops.
+     */
+    @Test
+    fun `a photo on which five attempts began and none finished is failed by the next delivery, which succeeds`(output: CapturedOutput) {
+        val mediaId = client.upload(ada, TestImages.jpeg(64, 48))
+        val upload = storageKeyOf(mediaId)
+        jdbc.update("UPDATE media_assets SET status = 'PROCESSING', processing_attempts = 5 WHERE id = ?::uuid", mediaId)
+
+        val run = dispatcher.dispatchDue(clock.instant(), BUDGET)
+
+        run.failed shouldBe 0
+        jdbc.queryForMap("SELECT status, processing_attempts FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
+            mapOf("status" to "FAILED", "processing_attempts" to 5)
+        jdbc.queryForObject("SELECT count(*) FROM outbox_deliveries WHERE processed_at IS NULL", Int::class.java) shouldBe 0
+        output.out shouldContain "Media $mediaId failed: TOO_MANY_ATTEMPTS"
+        stored(upload) shouldBe false
+    }
+
+    @Test
+    fun `a photo on which four attempts began is tried a fifth time`() {
+        val mediaId = client.upload(ada, TestImages.jpeg(64, 48))
+        jdbc.update("UPDATE media_assets SET status = 'PROCESSING', processing_attempts = 4 WHERE id = ?::uuid", mediaId)
+
+        processAll()
+
+        jdbc.queryForMap("SELECT status, processing_attempts FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
+            mapOf("status" to "READY", "processing_attempts" to 5)
+    }
+
+    /** Review of #108: an AVIF whose brands were rewritten to HEIC's passes every brand check; its items say AV1. */
+    @Test
+    fun `an AV1 image under HEIC brands fails, before any decoder sees it`(output: CapturedOutput) {
+        val mediaId = client.upload(ada, TestImages.resource("av1-as-heic.heic"), declaredType = "image/heic")
+
+        processAll()
+
+        statusOf(mediaId) shouldBe "FAILED"
+        output.out shouldContain "Media $mediaId failed: NOT_HEVC"
+    }
+
     @Test
     fun `a voice note is left as it is, for D3`() {
         val voice = "RIFF....WAVEfmt fake voice bytes".toByteArray()

@@ -16,13 +16,18 @@ import java.time.Duration
  *
  * **In this order** (spec §4 D2):
  *
- * 1. **The header, and the pixel ceiling, before any decode.** `vipsheader`
- *    reads the dimensions libvips itself will decode (a HEIC grid's whole
- *    size, not a tile's), and an image over [ImageRules.MAX_PIXELS] is refused
- *    there: a decompression bomb is never decoded.
+ * 1. **The header, and the ceilings, before any decode.** `vipsheader`
+ *    reads the dimensions, bands and sample format libvips itself will decode
+ *    (a HEIC grid's whole size, not a tile's): an image over
+ *    [ImageRules.MAX_PIXELS] or [ImageRules.MAX_DECODED_BYTES] is refused
+ *    there, so a decompression bomb is never decoded and no decode can need
+ *    more memory than was measured. A HEIC must also hold HEVC
+ *    (`heif-compression`), not AV1 under a HEIC brand.
  * 2. **One decode of the upload**, `vips thumbnail`: shrunk to fit 2048 px as
  *    it is read (a JPEG is never decoded at full size), turned upright from
- *    its orientation tag, and written to a file of libvips' own format. Steps
+ *    its orientation tag, converted to sRGB from any profile it carries, and
+ *    written with no metadata (`[keep=none]`) to a file of libvips' own
+ *    format, so the later steps read nothing of the upload but pixels. Steps
  *    1 and 2 are the only ones that read bytes a user sent, and they run with
  *    `VIPS_BLOCK_UNTRUSTED`, so libvips refuses its loaders that are not
  *    meant for untrusted input (ImageMagick, Matlab and the like) whatever the
@@ -49,6 +54,7 @@ internal class VipsImageProcessor(
     @Suppress("ReturnCount")
     override fun encode(
         source: Path,
+        format: ImageFormat,
         workDir: Path,
     ): Encoding {
         val deadline = Sandbox.Deadline.after(timeout)
@@ -57,13 +63,15 @@ internal class VipsImageProcessor(
                 is Step.Done -> read.value
                 is Step.Failed -> return Encoding.Refused(read.reason)
             }
-        if (!ImageRules.mayDecode(header.width, header.height)) return Encoding.Refused(ImageRefusal.TOO_MANY_PIXELS)
+        ImageRules.headerRefusal(header.width, header.height, header.bands, header.format)?.let { return Encoding.Refused(it) }
+        // A HEIF container may hold AV1 (AVIF) or other codecs under a HEIC brand: the codec libvips reads decides.
+        if (format == ImageFormat.HEIC && header.heifCompression != HEVC) return Encoding.Refused(ImageRefusal.NOT_HEVC)
 
-        val decoded = workDir.resolve("decoded.v")
+        val decoded = workDir.resolve(DECODED)
         val decode =
             run(
-                listOf(vips.toString(), "thumbnail", source.toString(), decoded.toString()) +
-                    fitting(ImageVariant.FULL.maxEdge) + listOf("--fail-on", "error"),
+                listOf(vips.toString(), "thumbnail", source.toString(), noMetadata(decoded)) +
+                    fitting(ImageVariant.FULL.maxEdge) + listOf("--fail-on", "error") + TO_SRGB,
                 workDir,
                 deadline,
                 UNTRUSTED,
@@ -95,7 +103,7 @@ internal class VipsImageProcessor(
         for (fraction in ImageRules.SHRINK_STEPS) {
             val edge = ImageRules.shrunk(variant.maxEdge, fraction)
             val sized = workDir.resolve("${variant.label}-$edge.v")
-            val resizing = listOf(vips.toString(), "thumbnail", decoded.toString(), sized.toString()) + fitting(edge)
+            val resizing = listOf(vips.toString(), "thumbnail", decoded.toString(), noMetadata(sized)) + fitting(edge) + TO_SRGB
             val resize = run(resizing, workDir, deadline, TRUSTED)
             if (resize != null) return Step.Failed(resize)
             val size =
@@ -124,28 +132,34 @@ internal class VipsImageProcessor(
         return Step.Failed(ImageRefusal.CANNOT_FIT)
     }
 
-    /** `vipsheader -a`'s width and height; anything else it says is not read. */
+    /** `vipsheader -a`'s size, bands, sample format and (for a HEIF) codec; anything else it says is not read. */
     private fun header(
         file: Path,
         workDir: Path,
         deadline: Sandbox.Deadline,
         environment: Map<String, String>,
-    ): Step<Size> =
+    ): Step<Header> =
         when (val outcome = sandbox.run(listOf(vipsheader.toString(), "-a", file.toString()), environment, workDir, deadline)) {
             Sandbox.Outcome.TimedOut -> {
                 Step.Failed(ImageRefusal.TIMED_OUT)
             }
 
             is Sandbox.Outcome.Exited -> {
-                val width = outcome.field("width")
-                val height = outcome.field("height")
-                if (outcome.code != 0 || width == null || height == null) {
+                val width = outcome.field("width")?.toIntOrNull()
+                val height = outcome.field("height")?.toIntOrNull()
+                val bands = outcome.field("bands")?.toIntOrNull()
+                val format = outcome.field("format")
+                val read = listOf(width, height, bands, format).all { it != null }
+                if (outcome.code != 0 || !read) {
                     Step.Failed(ImageRefusal.UNREADABLE)
                 } else {
-                    Step.Done(Size(width, height))
+                    Step.Done(Header(width!!, height!!, bands!!, format!!, outcome.field("heif-compression")))
                 }
             }
         }
+
+    /** `path[keep=none]`: written with no metadata, so nothing of the upload's EXIF or XMP reaches a later step. */
+    private fun noMetadata(path: Path) = "$path[keep=none]"
 
     /** Runs one program; null when it exited 0, else why it is a refusal. */
     private fun run(
@@ -159,13 +173,12 @@ internal class VipsImageProcessor(
             is Sandbox.Outcome.Exited -> if (outcome.code == 0) null else ImageRefusal.UNREADABLE
         }
 
-    private fun Sandbox.Outcome.Exited.field(name: String): Int? =
+    private fun Sandbox.Outcome.Exited.field(name: String): String? =
         output
             .lineSequence()
             .firstOrNull { it.startsWith("$name: ") }
             ?.substringAfter(": ")
             ?.trim()
-            ?.toIntOrNull()
 
     private fun isWebp(file: Path): Boolean =
         Files.isRegularFile(file) &&
@@ -174,9 +187,12 @@ internal class VipsImageProcessor(
     /** Fit within an [edge]-pixel square, never enlarged. */
     private fun fitting(edge: Int) = listOf(edge.toString(), "--height", edge.toString(), "--size", "down")
 
-    private data class Size(
+    private data class Header(
         val width: Int,
         val height: Int,
+        val bands: Int,
+        val format: String,
+        val heifCompression: String?,
     )
 
     private sealed interface Step<out T> {
@@ -190,6 +206,19 @@ internal class VipsImageProcessor(
     }
 
     internal companion object {
+        /** The decoded upload, in libvips' own format, in the work directory. */
+        const val DECODED = "decoded.v"
+
+        private const val HEVC = "hevc"
+
+        /**
+         * Pixels converted to sRGB from whatever profile the photo carries (a
+         * phone's Display P3, say) **before** `keep=none` drops that profile:
+         * dropped unconverted, wide-gamut colour would be read as sRGB and come
+         * out shifted (review of #108). An image with no profile is left as it is.
+         */
+        private val TO_SRGB = listOf("--export-profile", "srgb")
+
         /**
          * For a program reading what a user sent. One thread, so memory and CPU
          * are one decode's; untrusted loaders refused.

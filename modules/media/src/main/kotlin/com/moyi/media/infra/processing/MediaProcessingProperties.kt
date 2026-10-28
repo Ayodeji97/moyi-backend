@@ -40,10 +40,14 @@ internal data class MediaProcessingProperties(
          */
         val timeout: Duration = DEFAULT_TIMEOUT,
         /**
-         * The address space each program may use (`ulimit -v`, Linux). Measured
-         * 2026-10-28 with libvips 8.15.1 on Ubuntu 24.04: a 48-megapixel HEIC
-         * peaks at 383 MB resident and needs about 500 MB of address space; a
-         * JPEG of the same size, 81 MB (it is shrunk while it is decoded).
+         * The address space each program may use (`ulimit -v`, Linux): a
+         * backstop, the second bound on memory after the decoded-bytes ceiling
+         * that is the first (`ImageRules.MAX_DECODED_BYTES`). Measured on
+         * libvips 8.15.1, Ubuntu 24.04 (ADR-0048 §3): 640 MiB is the least of
+         * those tried (512, 576, 640 MiB) under which every format, just under
+         * the ceiling, decoded whole; at 576 MiB a HEIC exited 0 with a
+         * truncated image and a WebP failed. Address space is not resident
+         * memory: the most resident memory measured under it was 283 MiB.
          */
         val memoryLimit: DataSize = DEFAULT_MEMORY_LIMIT,
         /**
@@ -56,6 +60,6 @@ internal data class MediaProcessingProperties(
 
     private companion object {
         val DEFAULT_TIMEOUT: Duration = Duration.ofSeconds(40)
-        val DEFAULT_MEMORY_LIMIT: DataSize = DataSize.ofGigabytes(1)
+        val DEFAULT_MEMORY_LIMIT: DataSize = DataSize.ofMegabytes(640)
     }
 }

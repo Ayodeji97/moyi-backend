@@ -1,5 +1,6 @@
 package com.moyi.media.infra.processing
 
+import com.moyi.media.domain.ImageFormat
 import com.moyi.media.domain.ImageRefusal
 import com.moyi.media.domain.ImageVariant
 import java.nio.file.Path
@@ -25,12 +26,13 @@ internal interface ImageProcessor {
     val processesHere: Boolean
 
     /**
-     * The variants of the photo at [source], written into [workDir], which the
-     * caller owns and deletes. A refusal is final: the same bytes would be
-     * refused again.
+     * The variants of the photo at [source], whose first bytes are [format],
+     * written into [workDir], which the caller owns and deletes. A refusal is
+     * final: the same bytes would be refused again.
      */
     fun encode(
         source: Path,
+        format: ImageFormat,
         workDir: Path,
     ): Encoding
 }
@@ -70,6 +72,7 @@ internal class ProcessingOff : ImageProcessor {
 
     override fun encode(
         source: Path,
+        format: ImageFormat,
         workDir: Path,
     ): Encoding = error("No image is processed in this process (moyi.media.processing.provider: off).")
 }

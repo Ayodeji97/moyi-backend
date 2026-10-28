@@ -92,6 +92,8 @@ internal class MediaAsset(
     val variants: List<StoredVariant> = emptyList(),
     /** D4's verdict on a photo, [PASSED] or `QUARANTINED`; none until D4 exists. */
     val moderationVerdict: String? = null,
+    /** How many attempts of `media.process` have begun on it, counted whatever became of them. */
+    val processingAttempts: Int = 0,
 ) {
     /** A deleted asset is gone to its owner too: every route answers it as one that never existed. */
     val isGone: Boolean get() = status == MediaStatus.DELETED
@@ -146,7 +148,12 @@ internal class MediaAsset(
      * an upload can be deleted after its event was published.
      *
      * - A photo that is [MediaStatus.UPLOADED], or [MediaStatus.PROCESSING]
-     *   after an attempt that did not finish, is processed.
+     *   after an attempt that did not finish, is processed, **unless
+     *   [MAX_ATTEMPTS] attempts have already begun on it**: then it is given
+     *   up ([Processing.GIVE_UP], `FAILED`), so that a photo whose every
+     *   attempt throws (an outage that outlasts them, a process killed
+     *   mid-photo, a bug) is not retried every fifteen minutes for ever
+     *   (review of #108).
      * - A voice note is left exactly as it is: transcoding is D3's.
      * - Anything else has nothing left to do: deleted, ready, failed, or never
      *   completed.
@@ -155,8 +162,9 @@ internal class MediaAsset(
         get() =
             when {
                 kind != MediaKind.IMAGE -> Processing.NOT_THIS_KIND
-                status == MediaStatus.UPLOADED || status == MediaStatus.PROCESSING -> Processing.PROCESS
-                else -> Processing.NOTHING_TO_DO
+                status != MediaStatus.UPLOADED && status != MediaStatus.PROCESSING -> Processing.NOTHING_TO_DO
+                processingAttempts >= MAX_ATTEMPTS -> Processing.GIVE_UP
+                else -> Processing.PROCESS
             }
 
     /**
@@ -182,7 +190,7 @@ internal class MediaAsset(
 
     override fun toString(): String = "MediaAsset(id=$id, kind=$kind, status=$status)"
 
-    enum class Processing { PROCESS, NOT_THIS_KIND, NOTHING_TO_DO }
+    enum class Processing { PROCESS, GIVE_UP, NOT_THIS_KIND, NOTHING_TO_DO }
 
     sealed interface Shown {
         data object Processing : Shown
@@ -203,5 +211,13 @@ internal class MediaAsset(
     internal companion object {
         /** D4's verdict that lets a photo reach someone other than its owner (FR-101). */
         const val PASSED = "PASSED"
+
+        /**
+         * Attempts of `media.process` that may begin on one photo. With the
+         * outbox's backoff (2 s doubling) five attempts span about half a
+         * minute of retries: enough for a blip, not for a photo that never
+         * finishes.
+         */
+        const val MAX_ATTEMPTS = 5
     }
 }

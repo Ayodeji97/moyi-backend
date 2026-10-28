@@ -71,6 +71,24 @@ internal class MediaAssetTest {
     }
 
     @Test
+    fun `a photo on which five attempts began and none finished is given up, and one with four is tried again`() {
+        pending(MediaStatus.PROCESSING, attempts = 4).processing shouldBe MediaAsset.Processing.PROCESS
+        pending(MediaStatus.PROCESSING, attempts = 5).processing shouldBe MediaAsset.Processing.GIVE_UP
+        pending(MediaStatus.UPLOADED, attempts = 5).processing shouldBe MediaAsset.Processing.GIVE_UP
+        // Given up only while there is something to give up.
+        pending(MediaStatus.READY, attempts = 5).processing shouldBe MediaAsset.Processing.NOTHING_TO_DO
+        pending(MediaStatus.DELETED, attempts = 9).processing shouldBe MediaAsset.Processing.NOTHING_TO_DO
+    }
+
+    @Test
+    fun `a photo's object keys are its upload and both variants', recorded or not, and a voice note's its upload`() {
+        val photo = pending(MediaStatus.PROCESSING)
+        photo.objectKeys shouldBe listOf(photo.storageKey) + ImageVariant.entries.map { StorageKey.forVariant(photo.storageKey, it) }
+        val voice = pending(MediaStatus.UPLOADED, kind = MediaKind.VOICE)
+        voice.objectKeys shouldBe listOf(voice.storageKey)
+    }
+
+    @Test
     fun `its owner sees a ready photo, the full image while there is one`() {
         val full = variant(ImageVariant.FULL)
         val display = variant(ImageVariant.DISPLAY)
@@ -99,13 +117,16 @@ internal class MediaAssetTest {
     private fun variant(which: ImageVariant) =
         StoredVariant(which, StorageKey.forVariant(StorageKey.forUpload(UUID.randomUUID()), which), 20, 10, 100)
 
+    @Suppress("LongParameterList") // A fixture: every parameter defaults, and each test names the one it varies.
     private fun pending(
         status: MediaStatus = MediaStatus.PENDING_UPLOAD,
         attached: UUID? = null,
         kind: MediaKind = MediaKind.IMAGE,
         variants: List<StoredVariant> = emptyList(),
         verdict: String? = null,
+        attempts: Int = 0,
     ) = MediaAsset(
+        processingAttempts = attempts,
         id = UUID.randomUUID(),
         ownerUserId = UUID.randomUUID(),
         kind = kind,

@@ -66,6 +66,25 @@ internal class SandboxTest {
         limited.shouldBeInstanceOf<Sandbox.Outcome.Exited>().code shouldBeGreaterThan 0
     }
 
+    /**
+     * Review of #108: the CPU-time limit, the deadline's backstop, is set too:
+     * the program sees its remaining seconds plus one, and the address-space
+     * limit, as its own limits.
+     */
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    fun `on Linux a program runs under the CPU-time limit and the address-space limit`() {
+        val limits = script("limits.sh", "echo \"cpu=\$(ulimit -t) as=\$(ulimit -v)\"")
+
+        val outcome =
+            Sandbox(
+                200L * 1024 * 1024,
+            ).run(listOf(limits.toString()), emptyMap(), dir, Sandbox.Deadline.after(Duration.ofSeconds(9)))
+
+        val output = outcome.shouldBeInstanceOf<Sandbox.Outcome.Exited>().output.trim()
+        output shouldBe "cpu=9 as=${200 * 1024}"
+    }
+
     /** Where the limit cannot be set (macOS refuses `ulimit -v`), the program does not run unlimited instead: it does not run. */
     @Test
     @EnabledOnOs(OS.MAC)

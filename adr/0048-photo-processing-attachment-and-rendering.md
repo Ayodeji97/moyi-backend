@@ -55,17 +55,34 @@ worker the owner ruled for, and why production's API never runs it.
    photo, or one left `PROCESSING` by an attempt that did not finish, is processed; a deleted
    upload, a ready or failed one, and anything not yet completed is left alone (ADR-0047's debt);
    a voice note is left `UPLOADED` for D3. The statement that starts an attempt repeats the
-   status condition as its backstop.
+   status condition as its backstop. **Five attempts at most** (`MediaAsset.MAX_ATTEMPTS`, review
+   of #108): once five have begun and none finished, the next delivery marks the photo `FAILED`
+   (`TOO_MANY_ATTEMPTS`) in its own transaction and succeeds, so the outbox stops; the upload
+   and any variant an attempt left are deleted after the commit. This covers every way an attempt
+   can end without deciding: an outage, a bug that throws, a JVM killed mid-photo. With the
+   outbox's backoff (2 s doubling) five attempts span about half a minute, so a storage outage
+   longer than that fails the photos uploaded during it; the owner sends them again. The rule
+   is the domain's, and `startProcessing` (`processing_attempts < 5`) and `giveUp`
+   (`processing_attempts >= 5`) repeat it as their backstops.
 2. **The attempt is recorded in a transaction of its own** (`PROCESSING`, `processing_attempts +
    1`, `REQUIRES_NEW`), committed whatever becomes of the delivery, so a photo being worked on is
-   seen to be (D5's alert on `PROCESSING` for 30 minutes reads it).
+   seen to be (D5's alert on `PROCESSING` for 30 minutes reads it) and the count survives a
+   rollback.
 3. **The work holds no lock on the asset.** The upload is read once, never past one byte more than
    its declared length (`LONGER_THAN_DECLARED`), and must have the declared SHA-256
    (`CHECKSUM_MISMATCH`). This settles, for the pipeline, the integrity question ADR-0047 left
    open about R2 and the signed checksum: whatever the storage accepted, nothing but the declared
-   bytes is processed. Its first twelve bytes must be one of the four allowed formats
-   (`ImageFormat`: JPEG `FFD8FF`, PNG, WebP `RIFF…WEBP`, HEIC `ftyp{heic,heix,mif1}`) and the one
-   declared; the declared type is a claim, the bytes decide (T-07).
+   bytes is processed. Its first bytes must be one of the four allowed formats (`ImageFormat`:
+   JPEG `FFD8FF`, PNG, WebP `RIFF…WEBP`, HEIC an `ftyp` box with a major brand of
+   `heic`/`heix`/`mif1` **and** a brand naming HEVC, `heic`/`heix`/`hevc`) and the one declared;
+   the declared type is a claim, the bytes decide (T-07). **A HEIC must also list HEVC images
+   and nothing in another codec in its `iinf` box** (`HeifItems`, `NOT_HEVC`): an AVIF is a HEIF
+   of AV1 images, and with its brands rewritten to HEIC's it passes every brand check, and
+   libvips 8.15 to 8.18, which derives `heif-compression` from the brands, reports `hevc` for it
+   and then decodes the AV1 (seen with a patched AVIF, review of #108). The processor also
+   refuses a HEIC whose `heif-compression` is not `hevc`, as the review asked; since libvips
+   reads that from the brands this check cannot be shown to stop anything the brand and item
+   checks let through, and no test can turn it red on its own.
 4. **The processor** (decision 3) makes the two variants, written under
    `v/{uuid}/{full,display}.webp` with the upload key's own random part (decision 4).
 5. **The decision is taken under the row lock**, on the status as it is then. Still
@@ -92,29 +109,81 @@ stays `PROCESSING` and is taken up again. `gratitude.media.processing.duration{k
   allocates without end does it there; the JVM reads an exit code. Bindings into the JVM (FFM
   over libvips) were rejected: a native call cannot be interrupted, and a fault in it is the
   JVM's.
-- **The pixel ceiling is read from the header before any decode**: `vipsheader` reports the size
-  libvips itself will decode (a HEIC grid's whole size, not a tile's), and more than 64 Mi pixels
-  (`ImageRules.MAX_PIXELS`: a 48-megapixel photo fits, and a 16384 × 4096 panorama) is
-  `TOO_MANY_PIXELS`. A 30,000 × 30,000 PNG of a few kilobytes is refused and never decoded; with
-  the check removed, libvips decodes it (seen).
+- **Two ceilings are read from the header before any decode.** `vipsheader` reports what libvips
+  itself will decode (a HEIC grid's whole size, not a tile's): its width, height, bands and sample
+  format.
+  - **Pixels**: more than 64 Mi (`ImageRules.MAX_PIXELS`) is `TOO_MANY_PIXELS`. A 30,000 × 30,000
+    PNG of a few kilobytes is refused and never decoded; with the check removed, libvips decodes it
+    (seen).
+  - **Decoded bytes**, the memory bound (review of #108): width × height × bands × bytes per
+    sample over 100 MiB (`ImageRules.MAX_DECODED_BYTES`) is `TOO_LARGE_DECODED`. The pixel
+    ceiling alone did not bound memory: the review measured a 511 KiB interlaced 16-bit RGBA PNG
+    of 8192 × 8192 (within 64 Mi pixels, 512 MiB decoded) at 600 MB resident, and an 8192 × 8192
+    HEIC at 461 MB.
+- **How 100 MiB was chosen** (measured 2026-10-29, libvips 8.15.1 on Ubuntu 24.04 in a container,
+  `/usr/bin/time` peak resident set of the decode `vips thumbnail … --fail-on error
+  --export-profile srgb`, `VIPS_CONCURRENCY=1`, `VIPS_BLOCK_UNTRUSTED=1`):
+
+  | Decoded size | interlaced 16-bit RGBA PNG | interlaced 8-bit RGB PNG | HEIC (8-bit) | lossless WebP |
+  |---|---|---|---|---|
+  | 64 MiB | 112 MiB | 106 MiB | 239 MiB | 72 MiB |
+  | 96 MiB | 148 MiB | 141 MiB | 277 MiB | 72 MiB |
+  | 128 MiB | 184 MiB | 176 MiB | 317 MiB | 72 MiB |
+  | 160 MiB | 220 MiB | 211 MiB | 362 MiB | 72 MiB |
+  | 192 MiB | 255 MiB | 252 MiB | 420 MiB | 73 MiB |
+
+  (peak resident set; flat images under a 1 GiB limit; the HEIC needs about 2.2 to 3.7 times its
+  decoded size, libheif holding its own planes besides libvips' image; an earlier run had a
+  48-megapixel HEIC at 374 MiB). Just under the ceiling, 99 MiB of noise, under the chosen 640 MiB
+  address-space limit: **HEIC 283 MiB**, 16-bit RGBA PNG 151 MiB, 8-bit PNG 144 MiB, lossy WebP 127
+  MiB, JPEG 71 MiB (a JPEG is shrunk as it decodes), every one decoded whole (`vips avg` read every
+  pixel). So the decode's resident memory stays at or below about 300 MB for anything the ceiling
+  admits. **What it refuses**: an 8-bit RGB photo over about 35 megapixels, so a 48-megapixel phone
+  photo (139 MiB decoded) is refused and a 24-megapixel one (70 MiB) is not; a 16-bit RGBA image
+  over about 13 megapixels. Phones shoot 12 to 24 megapixels by default; 48 is a mode one chooses.
+  That is a product cost the owner may want to weigh against the memory budget.
+- **The address-space limit, and the container's arithmetic.** `memoryLimit` (`ulimit -v`) is
+  640 MiB, the least of 512, 576 and 640 MiB under which every format just under the ceiling
+  decoded whole: at 576 MiB the HEIC exited 0 with a truncated image (`vips avg` could not read
+  it; the next step then fails it) and the WebP failed, at 512 MiB the same. It is the backstop
+  for a decoder that goes past the measurement; the ceiling is the bound. Q5's container is 768
+  MiB. The worker's JVM must be capped (owed: `-Xmx256m`, which with metaspace, code cache and
+  threads is about 400 MiB resident; to be measured on the worker) and processes one photo at a
+  time (the outbox poller is one thread); with the decode's measured 283 MiB at most, 400 + 283 =
+  683 MiB, inside 768. Address space is not resident memory, so the 640 MiB limit cannot itself be
+  made to fit beside the JVM (400 + 640 > 768): a decoder that reached it would be killed by the
+  container's cgroup rather
+  than fail its allocation. Decoding nothing over the measured ceiling is what keeps it from
+  getting there; a limit low enough to fit would refuse ordinary HEIC and WebP photos (measured
+  above).
 - **One decode of the upload**: `vips thumbnail` to 2048 px, shrunk as it loads, turned upright
-  from its orientation tag, `--fail-on error`. The two programs that read the user's bytes run
-  with `VIPS_BLOCK_UNTRUSTED`, so libvips refuses its loaders not meant for untrusted input
-  (ImageMagick, Matlab and the like) whatever the file claims; the caller has already allowed four
-  formats only.
-- **`keep=none` on every WebP save**, the one place metadata is removed: EXIF with its GPS
-  position, XMP, IPTC, the ICC profile. A test writes a GPS latitude into a JPEG's EXIF by hand
-  and reads the WebP's bytes: no EXIF chunk, no `Exif` header, not the latitude's bytes (and with
-  `keep=none` removed, the EXIF chunk is there: seen).
+  from its orientation tag, `--fail-on error` (a truncated JPEG is refused rather than decoded as
+  far as it goes; without the flag it was made READY: seen), and **`--export-profile srgb`**: the
+  pixels are converted from whatever profile the photo carries before the profile is dropped
+  (review of #108). Without it a Display P3 photo's numbers were kept and read as sRGB: a flat
+  sRGB (0, 163, 83) stored as P3 came out (71, 161, 91); with it, (0, 163, 83) (seen on 8.15 and
+  8.18). The decoded file is written with **`[keep=none]`**, as every intermediate is, so the later
+  steps, which run without `VIPS_BLOCK_UNTRUSTED` (libvips counts its own `.v` format among the
+  untrusted loaders), read nothing of the upload's EXIF or XMP, only pixels; a test reads the
+  intermediate's header (no `exif-data`, no `xmp-data`; with `[keep=none]` removed, there:
+  seen). The two programs that read the user's bytes run with `VIPS_BLOCK_UNTRUSTED`, so libvips
+  refuses its loaders not meant for untrusted input (ImageMagick, Matlab and the like); **no test
+  can show it**, because every file that reaches libvips has first passed the four-format
+  allow-list, and libvips' own loaders for those four (jpegload, pngload, webpload, heifload) are
+  trusted and claim them first. It stays as defence in depth.
+- **`keep=none` on every WebP save**, too: EXIF with its GPS position, XMP, IPTC, the ICC profile.
+  A test writes a GPS latitude into a JPEG's EXIF by hand and reads the WebP's bytes: no EXIF
+  chunk, no `Exif` header, not the latitude's bytes (and with `keep=none` removed, the EXIF chunk
+  is there: seen).
 - **A time limit, by killing**: one deadline for the photo's whole processing, 40 s by default,
   inside the delivery's minute (ADR-0035); a step past it is killed with anything it started.
-- **A memory limit, by the kernel**: on Linux each program runs under `ulimit -v` (1 GiB by
-  default) and `ulimit -t`. Measured 2026-10-28 with libvips 8.15.1 (Ubuntu 24.04, the CI runner's
-  and the worker's base): a 48-megapixel HEIC peaks at 383 MB resident and needs about 500 MB of
-  address space, in 1.7 s; a 48-megapixel JPEG, 81 MB in 0.2 s. A limit that cannot be set ends the
-  run before the program starts (exit 125): macOS refuses `ulimit -v`, so there the processor
-  starts only with `allow-unlimited-memory`, which the `local` profile and the tests set and
-  production never does.
+  `ulimit -t` (the remaining seconds plus one) is its backstop; a Linux test reads the limits the
+  program runs under, and goes red with `ulimit -t` removed (seen).
+- **A memory limit, by the kernel**: on Linux each program runs under `ulimit -v` (above). A limit
+  that cannot be set ends the run before the program starts (exit 125): on macOS `/bin/sh`
+  refuses `ulimit -v` ("cannot modify limit: Invalid argument"), so there the processor starts
+  only with `allow-unlimited-memory`, which the `local` profile and the tests set and production
+  never does.
 - **No inherited environment**: the program sees `PATH` and what it is given, nothing of this
   process's secrets. **Output to files**, read back to 64 KiB, so a program that writes without end
   cannot block on a pipe; nothing it prints is logged.
@@ -206,7 +275,9 @@ that process's other deliveries. `vipsheader` is native code reading untrusted b
 pixel ceiling is known, in the sandbox but before any limit of ours on size. Variants deleted on a
 best-effort basis can outlive their asset until D5. The pipeline's CLI options are those of libvips
 8.15 to 8.18 (checked on both); a libvips that renames them fails the start-up check or the photos,
-not silently.
+not silently. The decoded-bytes ceiling refuses a 48-megapixel photo. A storage outage longer than
+the five attempts' half-minute fails the photos uploaded during it. Until D5, a URL handed out
+before an erasure works for up to 25 hours after it (Owed).
 
 **Neutral.** One new error code (`MEDIA_ATTACHED`). The media state machine gains `PROCESSING`,
 `READY`, `READY_ATTACHED` and `FAILED`, and `VALIDATION_FAILED` becomes a row in its region, since
@@ -239,19 +310,34 @@ there the asset's state decides it. CI installs `libvips-tools` and `libheif-plu
   worker claims only its own deliveries. The ruling says "a Kamal accessory"; an accessory runs a
   fixed image and is not redeployed with the application, while a Kamal **role** runs the
   application's own image with its own command and options. Which of the two is the owner's to say
-  at the deploy (open question, below). Until then `config/deploy.yml` keeps `"off"`.
+  at the deploy (open question, below). Until then `config/deploy.yml` keeps `"off"`. The worker's
+  JVM is capped (`-Xmx256m`) and its resident memory measured, to confirm decision 3's 768 MiB
+  arithmetic.
 - **R2, not run:** one GET of a photo URL signed up to an hour earlier, against the real bucket,
   when uploads are switched on (MinIO serves it; R2's SigV4 is expected to, as S3's does).
 - **D3:** voice notes, still `UPLOADED` after `media.process` has passed them; D3 processes them,
   and claims `voiceMediaId` (`MEDIA_NOT_YET_SUPPORTED` until then). `AttachableKind` gains `VOICE`.
-- **D4:** the verdict that lets a partner see a photo; the author's "not shared" for a quarantined
-  one (Q10) is the `status` D4 adds to `ImageViewStatus`.
+- **D4:** the verdict that lets a partner see a photo. **The author's "not shared" for a
+  quarantined photo (Q10) is not named as a wire value anywhere** (the ruling gives the words the
+  author sees, not a status), so it is not added to `EntryImageResponse.status` here: D4 names it
+  and adds it, and that is one more value in an enum the contract already marks as changing
+  (review of #108, decided owed rather than guessed).
+- **D4 must not ship before D5's purge** (review of #108). A signed URL is a bearer credential for
+  up to 25 hours, and until D5 an erasure leaves the photo and its objects in place:
+  - after the author deletes an entry, or a withdrawal erases it, a URL already handed out keeps
+    working until it expires, up to 25 hours, and the objects stay until D5's purge;
+  - until D5, the owner's `GET /media/{id}` of a photo on an erased entry still answers with a URL
+    (the asset is still READY and attached to the erased entry).
+  Today only the owner is ever given a URL, so this exposes nothing to anyone else; once D4 gives
+  partners URLs, a partner could keep reaching a photo its author took back, until the URL
+  expires. **D5 owns the fix**: the purge on erasure, and the owner's view of a released photo.
 - **D5:** erasure releases and purges an erased entry's photo (D-9), the reaper deletes a photo
   unattached for 24 hours (a released one included) and variants a best-effort delete left behind.
 
 ## Revisit when
 
 The worker is deployed (decision 1's in-process mode then serves development and tests only).
-libvips changes a command-line option the pipeline uses. A photo is seen to need more than 64 Mi
-pixels, or the worker's memory to need more than 1 GiB of address space. Clients are seen to fetch
-the same photo again within the hour (the URL is meant to let them cache).
+libvips changes a command-line option the pipeline uses, or how it reports `heif-compression`.
+The 100 MiB decoded-bytes ceiling is seen to refuse photos people take (the 48-megapixel mode), or
+the worker's memory measured to have room for more. Clients are seen to fetch the same photo again
+within the hour (the URL is meant to let them cache).

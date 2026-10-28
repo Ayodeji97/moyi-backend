@@ -3,6 +3,7 @@ package com.moyi.media.service
 import com.moyi.common.events.EventConsumer
 import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.events.StartFrom
+import com.moyi.media.domain.HeifItems
 import com.moyi.media.domain.ImageFormat
 import com.moyi.media.domain.ImageRefusal
 import com.moyi.media.domain.MediaAsset
@@ -51,15 +52,18 @@ import java.util.Base64
  * 1. **The row, read again** ([MediaAsset.processing]). The event may be older
  *    than the asset: one deleted since is skipped (ADR-0047 owed this), and so
  *    is one already ready or failed (the same event twice) and a voice note
- *    (D3's).
+ *    (D3's). A photo on which [MediaAsset.MAX_ATTEMPTS] attempts began and
+ *    none finished is given up: `FAILED`, and the delivery succeeds.
  * 2. **The attempt is recorded in a transaction of its own**: `PROCESSING`, and
  *    one more `processing_attempts`, committed whatever becomes of this
  *    delivery, so a photo being worked on is seen to be (D5's alert on
- *    anything `PROCESSING` for 30 minutes reads it).
+ *    anything `PROCESSING` for 30 minutes reads it) and the count survives
+ *    the rollback of an attempt that throws.
  * 3. **The work, holding no lock on the asset.** The upload is read once,
  *    never past its declared length, and must have the declared SHA-256; its
  *    first bytes must be one of the four allowed formats and the one declared
- *    ([ImageFormat], T-07). Only then does the processor see it. Each variant
+ *    ([ImageFormat], T-07), and a HEIC must hold HEVC images only
+ *    ([HeifItems]). Only then does the processor see it. Each variant
  *    is written under `v/{uuid}/…` ([StorageKey.forVariant]).
  * 4. **The decision, under the row lock**, on the status as it is then. Still
  *    `PROCESSING`: `READY` with the variants, or `FAILED`. Anything else means
@@ -95,12 +99,37 @@ internal class ProcessUploads(
     override val startFrom: StartFrom = StartFrom.BEGINNING
 
     override fun handle(event: ReceivedEvent) {
-        val asset = event.references[CompleteUpload.MEDIA_ID]?.let(assets::findAny)
-        // Steps 1 and 2: nothing to do for this asset, or nothing left to do by the time the attempt would begin.
-        if (asset?.processing != MediaAsset.Processing.PROCESS || ownTransaction.execute { assets.startProcessing(asset.id) } != true) {
-            return
-        }
+        val asset = event.references[CompleteUpload.MEDIA_ID]?.let(assets::findAny) ?: return
+        when (asset.processing) {
+            MediaAsset.Processing.GIVE_UP -> {
+                giveUp(asset)
+            }
 
+            // Step 2: the attempt begins, unless it has nothing left to do by now.
+            MediaAsset.Processing.PROCESS -> {
+                if (ownTransaction.execute { assets.startProcessing(asset.id) } == true) attempt(asset)
+            }
+
+            MediaAsset.Processing.NOT_THIS_KIND, MediaAsset.Processing.NOTHING_TO_DO -> {
+                Unit
+            }
+        }
+    }
+
+    /**
+     * [MediaAsset.MAX_ATTEMPTS] attempts began and none finished: `FAILED`, in
+     * this delivery's transaction, and the delivery succeeds, so the outbox
+     * stops retrying. Whatever an attempt left in the storage goes after the
+     * commit, as a failed photo's does.
+     */
+    private fun giveUp(asset: MediaAsset) {
+        if (!assets.giveUp(asset.id)) return
+        log.warn("Media {} failed: {}", asset.id, ImageRefusal.TOO_MANY_ATTEMPTS)
+        afterCommit { asset.objectKeys.forEach { bestEffortDelete(it, asset) } }
+    }
+
+    /** Steps 3 to 5, timed. */
+    private fun attempt(asset: MediaAsset) {
         val started = System.nanoTime()
         var outcome = OUTCOME_ERROR
         try {
@@ -124,7 +153,9 @@ internal class ProcessUploads(
             val source = workDir.resolve("upload")
             val refusal = fetch(asset, source) ?: formatRefusal(asset, source)
             if (refusal != null) return Result.Refused(refusal)
-            return when (val encoding = processor.encode(source, workDir)) {
+            // The bytes are the declared format, so the declaration names it.
+            val format = ImageFormat.entries.single { it.agreesWith(asset.contentType) }
+            return when (val encoding = processor.encode(source, format, workDir)) {
                 is Encoding.Refused -> {
                     Result.Refused(encoding.reason)
                 }
@@ -152,7 +183,12 @@ internal class ProcessUploads(
         val format = Files.newInputStream(source).use { ImageFormat.of(it.readNBytes(ImageFormat.SNIFF_BYTES)) }
         return when {
             format == null -> ImageRefusal.NOT_AN_ALLOWED_FORMAT
+
             !format.agreesWith(asset.contentType) -> ImageRefusal.NOT_THE_DECLARED_FORMAT
+
+            // A HEIC's brands are a claim; its items are what is decoded (an AV1 under HEIC brands decodes as AV1).
+            format == ImageFormat.HEIC && !HeifItems.isHevcOnly(Files.readAllBytes(source)) -> ImageRefusal.NOT_HEVC
+
             else -> null
         }
     }
@@ -175,26 +211,6 @@ internal class ProcessUploads(
             checksum != asset.checksumSha256 -> ImageRefusal.CHECKSUM_MISMATCH
             else -> null
         }
-    }
-
-    /** Copies [input] to [output] through [digest]; false, and stops, as soon as more than [limit] bytes have been read. */
-    private fun copyAtMost(
-        input: InputStream,
-        output: OutputStream,
-        limit: Long,
-        digest: MessageDigest,
-    ): Boolean {
-        val buffer = ByteArray(BUFFER)
-        var length = 0L
-        var read = input.read(buffer)
-        while (read >= 0) {
-            length += read
-            if (length > limit) return false
-            digest.update(buffer, 0, read)
-            output.write(buffer, 0, read)
-            read = input.read(buffer)
-        }
-        return true
     }
 
     /** Step 4, in the delivery's transaction, and step 5 registered for after it. Returns the outcome's name for the timer. */
@@ -277,10 +293,31 @@ internal class ProcessUploads(
 
         private const val WORK_PREFIX = "moyi-media-"
         private const val WEBP = "image/webp"
-        private const val BUFFER = 64 * 1024
         private const val OUTCOME_READY = "ready"
         private const val OUTCOME_FAILED = "failed"
         private const val OUTCOME_GONE = "deleted"
         private const val OUTCOME_ERROR = "error"
     }
 }
+
+/** Copies [input] to [output] through [digest]; false, and stops, as soon as more than [limit] bytes have been read. */
+private fun copyAtMost(
+    input: InputStream,
+    output: OutputStream,
+    limit: Long,
+    digest: MessageDigest,
+): Boolean {
+    val buffer = ByteArray(COPY_BUFFER)
+    var length = 0L
+    var read = input.read(buffer)
+    while (read >= 0) {
+        length += read
+        if (length > limit) return false
+        digest.update(buffer, 0, read)
+        output.write(buffer, 0, read)
+        read = input.read(buffer)
+    }
+    return true
+}
+
+private const val COPY_BUFFER = 64 * 1024
