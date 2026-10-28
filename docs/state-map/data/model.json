@@ -305,13 +305,15 @@
             },
             {
               "id": "PROCESSING",
-              "label": "PROCESSING",
-              "built": false
+              "label": "PROCESSING, a photo being made into its variants"
             },
             {
               "id": "READY",
-              "label": "READY",
-              "built": false
+              "label": "READY, a photo with its variants, attached to no entry"
+            },
+            {
+              "id": "READY_ATTACHED",
+              "label": "READY, attached to an entry"
             },
             {
               "id": "QUARANTINED",
@@ -320,8 +322,7 @@
             },
             {
               "id": "FAILED",
-              "label": "FAILED",
-              "built": false
+              "label": "FAILED, a photo the pipeline refused"
             },
             {
               "id": "DELETED",
@@ -422,6 +423,21 @@
       "id": "event:reuse-detected",
       "label": "a refresh token already used is presented again",
       "actor": "system"
+    },
+    {
+      "id": "event:photo-taken-up",
+      "label": "media.process takes an uploaded photo up",
+      "actor": "system"
+    },
+    {
+      "id": "event:photo-made",
+      "label": "media.process makes the photo's two variants",
+      "actor": "system"
+    },
+    {
+      "id": "event:photo-refused",
+      "label": "media.process refuses the photo's bytes",
+      "actor": "system"
     }
   ],
   "everywhere": [
@@ -468,8 +484,11 @@
     {
       "status": 422,
       "code": "VALIDATION_FAILED",
-      "reason": "The request parsed but a field or a required header is missing or not valid.",
-      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.VALIDATION_FAILED"
+      "reason": "The request parsed but a field or a required header is missing or not valid. In the media machine this answer is a row: attaching a photo to an entry (imageMediaId) is refused or not by the state of the asset (FR-044a), so each state says what it answers.",
+      "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/GlobalExceptionHandler.kt#ErrorCode.VALIDATION_FAILED",
+      "rowsAllowedIn": [
+        "media"
+      ]
     },
     {
       "status": 429,

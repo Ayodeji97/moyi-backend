@@ -20,5 +20,5 @@ body:text {
 }
 
 docs {
-  The upload itself, to the storage and not to the API: the URL Media upload intent kept. No bearer token; the URL is signed. 200 from the storage. Any other body, length or type is refused by the storage (400 or 403).
+  The upload itself, to the storage and not to the API: the URL Media upload intent kept. No bearer token; the URL is signed. 200 from the storage. Any other body, length or type is refused by the storage (400 or 403). These twenty bytes are text, not a picture: once completed, the pipeline refuses them and Media reads FAILED (ADR-0048).
 }

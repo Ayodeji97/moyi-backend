@@ -15,30 +15,36 @@ stateDiagram-v2
     state "none (an id that names nothing of yours)" as media__NONE
     state "PENDING_UPLOAD, the upload URL issued" as media__PENDING_UPLOAD
     state "UPLOADED, the bytes in the storage" as media__UPLOADED
-    state "PROCESSING" as media__PROCESSING
-    state "READY" as media__READY
+    state "PROCESSING, a photo being made into its variants" as media__PROCESSING
+    state "READY, a photo with its variants, attached to no entry" as media__READY
+    state "READY, attached to an entry" as media__READY_ATTACHED
     state "QUARANTINED" as media__QUARANTINED
-    state "FAILED" as media__FAILED
+    state "FAILED, a photo the pipeline refused" as media__FAILED
     state "DELETED, by you" as media__DELETED
     media__NONE --> media__PENDING_UPLOAD: you - ask for a URL to upload a photo or a voice note to
     media__PENDING_UPLOAD --> media__UPLOADED: you - say the upload is done
     media__PENDING_UPLOAD --> media__DELETED: you - delete one of your own photos or voice notes
     media__UPLOADED --> media__DELETED: you - delete one of your own photos or voice notes
+    media__UPLOADED --> media__PROCESSING: system - media.process takes an uploaded photo up
+    media__PROCESSING --> media__READY: system - media.process makes the photo's two variants
+    media__PROCESSING --> media__FAILED: system - media.process refuses the photo's bytes
+    media__PROCESSING --> media__DELETED: you - delete one of your own photos or voice notes
+    media__READY --> media__DELETED: you - delete one of your own photos or voice notes
+    media__FAILED --> media__DELETED: you - delete one of your own photos or voice notes
+    media__READY --> media__READY_ATTACHED: you - write today's entry
     classDef unbuilt fill:#eeeeee,stroke:#aaaaaa,color:#888888
-    class media__PROCESSING unbuilt
-    class media__READY unbuilt
     class media__QUARANTINED unbuilt
-    class media__FAILED unbuilt
 ```
 
 ### Every action in every state
 
-| Action | `NONE` | `PENDING_UPLOAD` | `UPLOADED` | `DELETED` |
-|---|---|---|---|---|
-| ask for a URL to upload a photo or a voice note to<br>`POST /media/upload-intent` | 201 → `PENDING_UPLOAD` (the declaration is accepted and a storage is configured)<br>415 `MEDIA_TYPE_UNSUPPORTED` (the content type is not one its kind takes)<br>413 `MEDIA_QUOTA_EXCEEDED` (the declared size is over its kind's limit)<br>503 `MEDIA_STORAGE_UNAVAILABLE` (no storage is configured) | not reachable | not reachable | not reachable |
-| say the upload is done<br>`POST /media/{mediaId}/complete` | 404 `NOT_FOUND` | 200 → `UPLOADED` (the storage holds the declared bytes under the asset's key)<br>409 `MEDIA_NOT_UPLOADED` (the storage holds nothing under the asset's key, or not the declared length and digest)<br>503 `MEDIA_STORAGE_UNAVAILABLE` (the storage cannot be reached) | 200 stays | 404 `NOT_FOUND` |
-| read one of your own photos or voice notes<br>`GET /media/{mediaId}` | 404 `NOT_FOUND` | 200 stays | 200 stays | 404 `NOT_FOUND` |
-| delete one of your own photos or voice notes<br>`DELETE /media/{mediaId}` | 404 `NOT_FOUND` | 204 → `DELETED` | 204 → `DELETED` | 404 `NOT_FOUND` |
+| Action | `NONE` | `PENDING_UPLOAD` | `UPLOADED` | `PROCESSING` | `READY` | `READY_ATTACHED` | `FAILED` | `DELETED` |
+|---|---|---|---|---|---|---|---|---|
+| ask for a URL to upload a photo or a voice note to<br>`POST /media/upload-intent` | 201 → `PENDING_UPLOAD` (the declaration is accepted and a storage is configured)<br>415 `MEDIA_TYPE_UNSUPPORTED` (the content type is not one its kind takes)<br>413 `MEDIA_QUOTA_EXCEEDED` (the declared size is over its kind's limit)<br>503 `MEDIA_STORAGE_UNAVAILABLE` (no storage is configured) | not reachable | not reachable | not reachable | not reachable | not reachable | not reachable | not reachable |
+| say the upload is done<br>`POST /media/{mediaId}/complete` | 404 `NOT_FOUND` | 200 → `UPLOADED` (the storage holds the declared bytes under the asset's key)<br>409 `MEDIA_NOT_UPLOADED` (the storage holds nothing under the asset's key, or not the declared length and digest)<br>503 `MEDIA_STORAGE_UNAVAILABLE` (the storage cannot be reached) | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 404 `NOT_FOUND` |
+| read one of your own photos or voice notes<br>`GET /media/{mediaId}` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 404 `NOT_FOUND` |
+| delete one of your own photos or voice notes<br>`DELETE /media/{mediaId}` | 404 `NOT_FOUND` | 204 → `DELETED` | 204 → `DELETED` | 204 → `DELETED` | 204 → `DELETED` | 409 `MEDIA_ATTACHED` | 204 → `DELETED` | 404 `NOT_FOUND` |
+| write today's entry<br>`POST /bonds/{bondId}/entries` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 201 → `READY_ATTACHED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` |
 
 ### You can
 
@@ -48,9 +54,21 @@ stateDiagram-v2
 | `PENDING_UPLOAD` | say the upload is done | the storage holds the declared bytes under the asset's key | `UPLOADED` | The storage holds the declared length (and the declared SHA-256, where the storage reports one), so the asset is uploaded and MediaUploaded is recorded for the pipeline, in one transaction. | smoke |
 | `UPLOADED` | say the upload is done |  | stays | It is already complete. Completing again, under the same key or a new one, changes nothing and records no second event; the same key is answered as a replay. | test |
 | `PENDING_UPLOAD` | read one of your own photos or voice notes |  | stays | Its kind, status, type and size. No URL: nothing is ready to be shown until the pipeline (D2) makes it so. | smoke |
-| `UPLOADED` | read one of your own photos or voice notes |  | stays | Its kind, status, type and size. No URL until the pipeline (D2) has made its variants. | smoke |
+| `UPLOADED` | read one of your own photos or voice notes |  | stays | Its kind, status, type and size. url, width and height are null until the photo is READY. | smoke |
 | `PENDING_UPLOAD` | delete one of your own photos or voice notes |  | `DELETED` | The asset is deleted, and after the commit whatever was uploaded under its key is removed from the storage. Nothing can be attached to an entry yet (D2), so every asset of yours can be deleted. | test |
-| `UPLOADED` | delete one of your own photos or voice notes |  | `DELETED` | The asset is deleted, and after the commit its object is removed from the storage. If the storage cannot be reached then, the bucket's lifecycle rule removes the upload within two days. | smoke |
+| `UPLOADED` | delete one of your own photos or voice notes |  | `DELETED` | The asset is deleted, and after the commit its upload is removed from the storage. If the storage cannot be reached then, the bucket's lifecycle rule removes it within two days. A photo being processed meanwhile is media.process's to clean up. | smoke |
+| `PROCESSING` | say the upload is done |  | stays | It is already complete. Completing again changes nothing and records no second event. | test |
+| `READY` | say the upload is done |  | stays | It is already complete. Completing again changes nothing and records no second event. | test |
+| `READY_ATTACHED` | say the upload is done |  | stays | It is already complete. Completing again changes nothing and records no second event. | test |
+| `FAILED` | say the upload is done |  | stays | It is already complete. Completing again changes nothing and records no second event. | test |
+| `PROCESSING` | read one of your own photos or voice notes |  | stays | Its kind, status PROCESSING, type and size; no URL yet. | never-run |
+| `READY` | read one of your own photos or voice notes |  | stays | Its kind, status, type and size, and a signed GET of the largest image kept with that image's width and height. The URL is signed as of the start of the hour for 25 hours: at least 24 hours from now, ending on the hour, the same all hour. | smoke |
+| `READY_ATTACHED` | read one of your own photos or voice notes |  | stays | As when it was attached to nothing: its owner is given the URL and the size. | smoke |
+| `FAILED` | read one of your own photos or voice notes |  | stays | Its kind, status FAILED, type and size; no URL. Why it failed is not said (the log has it, by id and rule). | never-run |
+| `PROCESSING` | delete one of your own photos or voice notes |  | `DELETED` | Deleted at once: the pipeline holds no lock while it works. It finds the photo deleted under the row lock when it is done, and removes what it made. | test |
+| `READY` | delete one of your own photos or voice notes |  | `DELETED` | Deleted, and after the commit its variants and any upload left are removed from the storage, on a best-effort basis (D5's media.purge is where an erasure that must not be given up on lives). | never-run |
+| `FAILED` | delete one of your own photos or voice notes |  | `DELETED` | Deleted; there is nothing left in the storage to remove but an upload the pipeline could not delete. | never-run |
+| `READY` | write today's entry |  | `READY_ATTACHED` | The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4). | smoke |
 
 ### Refused here
 
@@ -67,3 +85,19 @@ stateDiagram-v2
 | `DELETED` | read one of your own photos or voice notes |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | smoke |
 | `NONE` | delete one of your own photos or voice notes |  | 404 `NOT_FOUND` | Nothing of yours has this id: another person's photo, an id that names nothing and a value that is not an id all get this one answer, never 403, so that it does not confirm the asset exists. A partner reaches media only through an entry, never by its id. | doc 06:184, ADR-0047 §3 | smoke |
 | `DELETED` | delete one of your own photos or voice notes |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | test |
+| `READY_ATTACHED` | delete one of your own photos or voice notes |  | 409 `MEDIA_ATTACHED` | It is part of an entry now and stays with it; nothing changes. It leaves with the entry (D5's erasure). | doc 06:184, ADR-0048 §4 | smoke |
+| `NONE` | write today's entry |  | 422 `VALIDATION_FAILED` | No photo of yours has this id: another user's, a v7 id, or nothing at all. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | smoke |
+| `PENDING_UPLOAD` | write today's entry |  | 422 `VALIDATION_FAILED` | Not READY. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | never-run |
+| `UPLOADED` | write today's entry |  | 422 `VALIDATION_FAILED` | Not READY: still to be processed. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | never-run |
+| `PROCESSING` | write today's entry |  | 422 `VALIDATION_FAILED` | Not READY yet. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | test |
+| `READY_ATTACHED` | write today's entry |  | 422 `VALIDATION_FAILED` | Already on another entry. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | test |
+| `FAILED` | write today's entry |  | 422 `VALIDATION_FAILED` | Not READY: the pipeline refused it. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | smoke |
+| `DELETED` | write today's entry |  | 422 `VALIDATION_FAILED` | Deleted. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | never-run |
+
+### Happens without you
+
+| In | What happens | Who | When | Leads to | Why | Evidence |
+|---|---|---|---|---|---|---|
+| `UPLOADED` | media.process takes an uploaded photo up | system |  | `PROCESSING` | media.process takes the photo up: PROCESSING, and one more processing_attempts, committed in a transaction of its own, so a photo being worked on is seen to be. A voice note is left UPLOADED, for D3; a deleted upload is skipped. | test |
+| `PROCESSING` | media.process makes the photo's two variants | system |  | `READY` | The bytes are the declared ones (length, SHA-256) and one of the four allowed formats, the one declared; the header is within the pixel ceiling; libvips, in a sandbox with a time and a memory limit, makes a full and a display WebP with no metadata, within 350 and 150 KiB. READY under the row lock; the upload itself is deleted after the commit. | smoke |
+| `PROCESSING` | media.process refuses the photo's bytes | system |  | `FAILED` | The bytes are not the declared ones, not an allowed format, not the declared format, over the pixel ceiling, unreadable, too slow or impossible to fit: FAILED, final, and the upload is deleted. A storage that cannot be reached is not a refusal: the outbox retries, and the photo stays PROCESSING. | smoke |

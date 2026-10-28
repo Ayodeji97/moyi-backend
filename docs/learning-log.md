@@ -2738,3 +2738,26 @@ Wrong about: what a deploy is. It is two inputs, an image and a config, and only
          them was pinned to a commit. `--version` named the image; the config was whatever
          the checkout held. And about where a command's mistake lives: in the comment that
          everyone copies, not in the hands of the one who ran it.
+
+## 2026-10-28 · Feature · Media D2 — a photo made safe in a process of its own, and the word that YAML read as false
+
+Expected: the guards on untrusted bytes (a pixel ceiling, metadata stripped, four formats,
+         a time limit, a memory limit) to be one test each, each red when its line goes; a
+         presigned GET "rounded to the hour" to be a matter of the expiry; and
+         `MOYI_MEDIA_PROCESSING_PROVIDER: off` to say off.
+Reality: libvips runs as a program in a sandbox, and each guard did turn its test red:
+         without the ceiling a 30,000 × 30,000 PNG of a few kilobytes decoded (libvips
+         streams PNG, so it was slow, not fatal); without `keep=none` the WebP carried
+         an EXIF chunk; without the kill the decoder outlived the test; without the env
+         clear the program printed this machine's tokens. The memory limit could only be
+         seen on Linux (macOS refuses `ulimit -v`), so its test ran in an Ubuntu container
+         from classes compiled on the Mac, and went red there with the limit removed. A
+         URL stable for the hour needs the signing instant fixed, not the expiry, and the
+         SDK's presigner has no way to say so; its SigV4 signer does. And YAML 1.1, which
+         Kamal reads, takes a bare `off` for `false`.
+Wrong about: what a guard on untrusted input is. Half of them were not lines of Kotlin but
+         a process boundary, and the test had to run where the boundary is enforced. And
+         about the YAML trap's cost: I wrote down that "false" would fail the start, then
+         booted the jar with it, and it started: Spring Boot binds "false" to OFF. The
+         quotes stay because the file should say what it means; the claim was corrected
+         before it shipped.

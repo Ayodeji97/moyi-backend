@@ -15,5 +15,5 @@ auth:bearer {
 }
 
 docs {
-  One of your own photos or voice notes: its kind, status, type and size. Only its owner can read it; anyone else gets 404, as for an id that names nothing. To delete it, send the same URL as DELETE (204, then 404): only while it is attached to no entry.
+  One of your own photos or voice notes: its kind, status, type and size. A photo is processed once it is complete (ADR-0048): PROCESSING, then READY or FAILED. Once READY, `url` is a signed GET of the larger WebP kept of it, valid for at least 24 hours and the same all hour, with its `width` and `height`; before, all three are null. Only its owner can read it; anyone else gets 404, as for an id that names nothing. Delete media deletes it, while it is on no entry.
 }
