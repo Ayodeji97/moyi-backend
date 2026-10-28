@@ -12,8 +12,10 @@ import com.moyi.common.events.OutboxEvent
 import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.events.StartFrom
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
 import com.moyi.notification.api.PushCategory
+import com.moyi.notification.api.PushRecipient
 import com.moyi.notification.api.PushRequest
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
@@ -49,6 +51,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Instant
+import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
@@ -335,10 +338,14 @@ class SecretsNeverLoggedTest(
         withClue("JdbcTemplate printed a bound value beside a bookmark's or a reaction's statement") {
             statements.count { marker in it || adaEntry in it || beaEntry in it } shouldBe 0
         }
+        // Read once. `output.all` joins everything the JVM has printed into a new string on every
+        // call, tens of megabytes at TRACE; asked once per watched secret, the copies ran the test
+        // JVM out of heap whenever the run was slow enough to print more (seen in Phase 4 N2).
+        val console = output.all
         withClue("a secret reached the console by a road that is not a logger") {
             scan
                 .watched()
-                .filter { (_, watched) -> watched.exceptFrom.isEmpty() && watched.pattern.containsMatchIn(output.all) }
+                .filter { (_, watched) -> watched.exceptFrom.isEmpty() && watched.pattern.containsMatchIn(console) }
                 .map { it.first }
                 .shouldBeEmpty()
         }
@@ -390,6 +397,7 @@ class SecretsNeverLoggedTest(
                     PushCategory.REVEAL,
                     "secrets-probe:$user",
                     Instant.now().plusSeconds(PUSH_STALE_SECONDS),
+                    PushRecipient(ZoneId.of("UTC"), null, NotificationPreferences.DEFAULTS),
                 ),
             ) shouldBe true
         }
