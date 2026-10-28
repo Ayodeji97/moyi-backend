@@ -462,4 +462,4 @@ database, then roll back:
 - `UPDATE reactions SET type = 'HEART' WHERE type = 'ME_TOO';` (or another
   of the four) — the reaction stays, but misstated.
 
-Which of the two is the owner's to rule (ADR-0037 question 12).
+Which of the two is the owner's to rule (ADR-0037 question 13).

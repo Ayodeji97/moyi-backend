@@ -17,7 +17,7 @@
 -- Once a ME_TOO row exists, an image older than this migration cannot read
 -- that bond's reactions: its enum has no ME_TOO. A rollback past here after
 -- anyone has reacted ME_TOO maps or removes those rows first (ADR-0037, its
--- amendment of 2026-10-28, and question 12).
+-- amendment of 2026-10-28, and question 13).
 ALTER TABLE reactions
     DROP CONSTRAINT reactions_type_check,
     ADD CONSTRAINT reactions_type_check CHECK (type IN ('HEART', 'THANK_YOU', 'SMILE', 'MOVED', 'ME_TOO'));

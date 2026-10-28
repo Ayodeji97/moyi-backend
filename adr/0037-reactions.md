@@ -420,7 +420,7 @@ carries the ones left on their entries is not decided anywhere.
   `WARN` line carrying the entry's id and the type only, so that a sixth value is an expand
   step that a rollback survives. It does not help a rollback past V27.
 - **The outer corpus's doc 06:156** still lists the placeholder four; it is to read five.
-- Question 12's ruling, and the README's runbook step to follow it.
+- Question 13's ruling, and the README's runbook step to follow it.
 
 **Not assigned.**
 
@@ -495,7 +495,7 @@ is a review's finding of 2026-10-15, left as built.
      section now carries the step to run before a rollback past V27: either
      `DELETE FROM reactions WHERE type = 'ME_TOO'` (the reaction is lost) or an `UPDATE`
      mapping it to one of the four (the reaction is misstated). Which of the two is
-     question 12; the README gives both and recommends the delete. No tolerance was built
+     question 13; the README gives both and recommends the delete. No tolerance was built
      in this pull request: it would help only an image that has it, and the image a
      rollback goes to does not. One is owed for the next value (Owed, below).
    - **The contract.** oasdiff (`tufin/oasdiff:v1.34.1`, the image `oasdiff-action`
@@ -613,7 +613,9 @@ is a review's finding of 2026-10-15, left as built.
     ended, by `react`'s `hasLeft || !isOpen` check. A reaction the blocked member can no
     longer remove stays shown to the blocker.*
 
-12. **A rollback past V27 after someone has reacted `ME_TOO`: delete or map?** Raised by
+12. *(Reserved: PR #103 adds question 12, the member who withdrew taking a reaction back. This
+    one is 13 so the two merge without renumbering.)*
+13. **A rollback past V27 after someone has reacted `ME_TOO`: delete or map?** Raised by
     the amendment of 2026-10-28 (question 1). An image older than V27 answers `500` on any
     read that carries a `ME_TOO` reaction, so before such a rollback the rows must go or
     change. Delete (`DELETE FROM reactions WHERE type = 'ME_TOO'`): the reaction is lost,
