@@ -71,6 +71,12 @@ import java.util.UUID
  * tombstone, which says `null`) and `EraseEntry` removes it. If it did not,
  * the author sees a reaction that was sent before the ending and landed
  * just after it (ADR-0037 decision 5 and question 4: the owner's to turn).
+ *
+ * [unreact] has the same window. An ending that commits after the
+ * membership is read lets the removal land, and the answer is `204`: a
+ * reaction taken back a moment after an ending that refuses the next one
+ * (ADR-0037 question 11). Closing it would take the bond's lock, for the
+ * reason above.
  */
 @Service
 internal class ReactToEntry(

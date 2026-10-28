@@ -854,7 +854,9 @@ internal class ReactionsTest(
      * stopped at its read of the entry, which is after it resolved the
      * caller's membership for the route. Decided from that first membership,
      * the reaction would be left on an entry both people are already shown
-     * as a tombstone, or on a bond that has ended.
+     * as a tombstone, or on a bond that has ended. A `DELETE` on a bond
+     * that has ended would remove the reaction where the second look refuses
+     * (ADR-0037 question 11).
      *
      * The request is stopped by a lock on the table, taken as its first
      * resolution returns, and the test waits until Postgres reports its read
@@ -863,10 +865,18 @@ internal class ReactionsTest(
      */
     @Test
     fun `who has withdrawn and whether the bond has ended are asked after the entry is read, so an ending during that read refuses`() {
-        for ((ending, code) in listOf("a block that withdraws" to "ENTRY_IMMUTABLE", "a leave that keeps the entries" to "BOND_ARCHIVED")) {
-            withClue(ending) {
+        val arms =
+            listOf(
+                Triple("a block that withdraws", "ENTRY_IMMUTABLE", "PUT"),
+                Triple("a leave that keeps the entries", "BOND_ARCHIVED", "PUT"),
+                // Taking one back is refused after an ending too (ADR-0037 question 11), and asked of the same second look.
+                Triple("a leave that keeps the entries", "BOND_ARCHIVED", "DELETE"),
+            )
+        for ((ending, code, verb) in arms) {
+            withClue("$verb, $ending") {
                 rig.clear()
                 val day = revealedDay()
+                if (verb == "DELETE") react(bea, day.adas, "SMILE").status shouldBe 204
                 withAnotherTransaction { holder ->
                     val holderPid = backendPidOf(holder)
                     interruptible.afterResolution(1) {
@@ -874,7 +884,7 @@ internal class ReactionsTest(
                         holder.createStatement().use { it.execute("LOCK TABLE entries IN ACCESS EXCLUSIVE MODE") }
                     }
 
-                    val reacting = pool.submit(Callable { react(bea, day.adas) })
+                    val reacting = pool.submit(Callable { if (verb == "PUT") react(bea, day.adas) else unreact(bea, day.adas) })
                     await().atMost(Duration.ofSeconds(10)).until { reacting.isDone || waitingBehind(holderPid).isNotEmpty() }
                     reacting.isDone shouldBe false
                     interruptible.fired shouldBe true
@@ -889,7 +899,7 @@ internal class ReactionsTest(
                     json.readTree(refused.contentAsString)["code"].asString() shouldBe code
                     // Nothing was erased: the row is whole, and it is the request's own second look that refused.
                     entry(day.adas)["text"] shouldBe ADAS_WORDS
-                    rows().shouldBeEmpty()
+                    rows() shouldBe if (verb == "PUT") emptyList() else listOf(Row(day.adas, day.beaMember, "SMILE"))
                 }
             }
         }
