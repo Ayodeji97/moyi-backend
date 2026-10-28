@@ -151,6 +151,19 @@ class IdempotencyKeyStoreTest(
     }
 
     @Test
+    fun `the table takes every ResultKind, MEDIA among them since V33, and nothing else`() {
+        // ResultKind and the result_kind CHECK are one list in two places; a
+        // kind the table refused would fail only on a real completion, as a 500.
+        val user = UUID.randomUUID()
+        val reserved = record(user, "kinds", Instant.now())
+        store.insert(reserved)
+        val named = "UPDATE idempotency_keys SET result_id = ?, result_kind = ? WHERE id = ?"
+
+        ResultKind.entries.forEach { kind -> jdbc.update(named, UUID.randomUUID(), kind.name, reserved.id) shouldBe 1 }
+        shouldThrow<DataIntegrityViolationException> { jdbc.update(named, UUID.randomUUID(), "PHOTO", reserved.id) }
+    }
+
+    @Test
     fun `the advisory lock is nonblocking, one holder at a time, and free after commit`() {
         val user = UUID.randomUUID()
         val tx = TransactionTemplate(transactionManager)

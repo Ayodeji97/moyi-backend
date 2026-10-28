@@ -40,6 +40,40 @@ services:
       timeout: 5s
       retries: 10
 
+  # MinIO, standing in for Cloudflare R2 (Phase 4 D1, ADR-0047): the same S3
+  # API, the same presigned PUT. The local profile points the app at it, and
+  # scripts/smoke.sh uploads to it. `pgsty/minio` is a community build of the
+  # MinIO server, because MinIO no longer publishes `minio/minio`; the tests run
+  # the same image (MediaIntegrationTest). Dev-only credentials, as Postgres's.
+  minio:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: moyi_dev_only
+      MINIO_ROOT_PASSWORD: moyi_dev_only_secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - moyi-minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Makes the `moyi-media` bucket once MinIO answers, then exits. Production's
+  # bucket is made by hand in Cloudflare (ADR-0047, Owed).
+  minio-bucket:
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - mc alias set local http://minio:9000 moyi_dev_only moyi_dev_only_secret && mc mb --ignore-existing local/moyi-media
+
 volumes:
   moyi-postgres-data:
   moyi-redis-data:
+  moyi-minio-data:
