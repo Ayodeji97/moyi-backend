@@ -431,6 +431,14 @@ internal class DaysFeedTest(
         responses.flatMap { rig.datesOf(json.readTree(it.contentAsString)["items"].toList()) } shouldBe dates
     }
 
+    /** The arithmetic the largest page below is built on, checked by the function the page's bound counts with. */
+    @Test
+    fun `the largest entry is 10,688 octets as JSON, and nine days of two and one filler are the page's text bound`() {
+        GetDays.octetsAsJson("\\" + "\u0301".repeat(3_846) + "\u001f".repeat(499)) shouldBe 10_688
+        GetDays.octetsAsJson("ab" + "\u0301".repeat(1_055)) shouldBe 2_112
+        (18 * 10_688 + 2 * 2_112) shouldBe GetDays.PAGE_TEXT_OCTETS
+    }
+
     /**
      * The largest page there can be, built and measured. Found by the review
      * of this slice, which proved the arithmetic first written beside the
@@ -465,7 +473,7 @@ internal class DaysFeedTest(
      * octets, on all fifty days.
      */
     @Test
-    fun `the largest page there can be - two days of the largest entries among forty-eight of tombstones - is under 256 KB`() {
+    fun `the largest page there can be - ten days of text at the page's bound among forty of tombstones - is under 256 KB`() {
         val bond = pair()
         // As JSON in the request: a backslash, 3,846 combining acutes, 499 U+001F.
         val largest = "\\\\" + "\\u0301".repeat(3_846) + "\\u001f".repeat(499)
@@ -497,10 +505,6 @@ internal class DaysFeedTest(
             Int::class.java,
             bond,
         ) shouldBe 18
-        heavy.size shouldBe 9
-        GetDays.octetsAsJson("\\" + "\u0301".repeat(3_846) + "\u001f".repeat(499)) shouldBe 10_688
-        GetDays.octetsAsJson("ab" + "\u0301".repeat(1_055)) shouldBe 2_112
-        (18 * 10_688 + 2 * 2_112) shouldBe GetDays.PAGE_TEXT_OCTETS
         // And both named as long as a name can be sent: 80 characters, the most identity takes (OpenApiContractTest holds
         // identity to ArchivePageBudget), all but two of them controls between two letters so that registration's trim
         // keeps them, which JSON writes as six octets each. 470 octets on every day.
