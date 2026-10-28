@@ -3222,7 +3222,7 @@
     "rule": "ADR-0028 §4",
     "evidence": "smoke",
     "evidenceRef": "the partner's very next read no longer carries the words",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = shown.status,"
   },
   {
     "id": "bond-none-streak",
