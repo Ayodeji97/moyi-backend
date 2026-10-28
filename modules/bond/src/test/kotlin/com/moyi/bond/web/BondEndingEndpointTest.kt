@@ -746,14 +746,15 @@ internal class BondEndingEndpointTest(
     /**
      * Every way a flag can be absent, as a client would send it: no body and
      * no Content-Type (scripts/moyi, the Bruno collection, before the
-     * ruling), a JSON Content-Type and no body (scripts/smoke.sh), `{}`, and
-     * an explicit null.
+     * ruling), a JSON Content-Type and no body (scripts/smoke.sh), a JSON
+     * `null` for the whole body, `{}`, and an explicit null.
      */
     private val absences: List<Pair<String?, Boolean>> =
         listOf(
             null to false,
             null to true,
             "" to true,
+            "null" to true,
             "{}" to true,
             """{"withdrawEntries":null}""" to true,
         )
