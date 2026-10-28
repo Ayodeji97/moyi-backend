@@ -85,6 +85,10 @@
 # N3 a reveal on the wire sends one push to each member, logged twice by the logging
 # provider and SENT once each in the ledger, with neither the words nor the token in any
 # line, and the join asks one push of the member who was there. Last run on 2026-10-28,
+# after N2 with main and #96 (eb999d2) was merged into N3, from a jar of that merge, on a
+# fresh database that applied V1 to V27, V29, V30 and V31, against its own compose project
+# (moyi-n3: Postgres 55438, Valkey 63798) and --attach: 1011 passed, 0 failed, 0 skipped,
+# 27 sections. Before it, on 2026-10-28,
 # after the rebased N1 and N2 (2062b68) were merged into N3, from a jar of that merge,
 # against its own compose project (moyi-n3: Postgres 55438, Valkey 63798) and --attach:
 # 1008 passed, 0 failed, 0 skipped, 27 sections. The first run on that fresh database
