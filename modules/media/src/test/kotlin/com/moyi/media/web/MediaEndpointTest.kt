@@ -295,10 +295,26 @@ internal class MediaEndpointTest(
     }
 
     @Test
-    fun `the asset carries the declared type and size and nothing about the storage`() {
+    fun `the asset carries the declared type and size and nothing about the storage, and no URL until it is ready`() {
         val mediaId = uploaded(ada)
         val response = json.readTree(get(ada, mediaId).contentAsString)
-        response.propertyNames().asSequence().toList() shouldContainExactly listOf("id", "kind", "status", "contentType", "sizeBytes")
+        response.propertyNames().asSequence().toList() shouldContainExactly
+            listOf("id", "kind", "status", "contentType", "sizeBytes", "url", "width", "height")
+        listOf("url", "width", "height").forEach { response[it].isNull shouldBe true }
+    }
+
+    @Test
+    fun `an asset attached to an entry cannot be deleted, and is left as it was`() {
+        val mediaId = uploaded(ada)
+        val entry = UUID.randomUUID()
+        jdbc.update("UPDATE media_assets SET status = 'READY', attached_entry_id = ? WHERE id = ?::uuid", entry, mediaId)
+
+        val refused = delete(ada, mediaId)
+
+        refused.status shouldBe 409
+        refused.contentAsString shouldContain "\"code\":\"MEDIA_ATTACHED\""
+        jdbc.queryForMap("SELECT status, attached_entry_id FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
+            mapOf("status" to "READY", "attached_entry_id" to entry)
     }
 
     private fun uploaded(owner: UUID): String {

@@ -67,7 +67,7 @@ internal class MediaController(
         val completion = completions.complete(caller.id, mediaIdOrNotFound(mediaId), IdempotencyInterceptor.requestOf(http))
         val response = ResponseEntity.ok()
         if (completion.replayed) response.header(IdempotencyInterceptor.REPLAYED_HEADER, "true")
-        return response.body(MediaResponse.from(completion.asset))
+        return response.body(MediaResponse.from(own.viewOf(completion.asset)))
     }
 
     @GetMapping("/{mediaId}")

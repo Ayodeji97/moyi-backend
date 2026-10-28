@@ -4,7 +4,9 @@ import com.moyi.media.domain.StorageKey
 import com.moyi.media.domain.StoredObject
 import java.io.InputStream
 import java.net.URI
+import java.nio.file.Path
 import java.time.Duration
+import java.time.Instant
 
 /**
  * No storage. Asked for by name only (`moyi.media.storage.provider: unavailable`),
@@ -27,12 +29,19 @@ internal class UnavailableObjectStore : ObjectStore {
 
     override fun presignDownload(
         key: StorageKey,
+        signedAt: Instant,
         expiresIn: Duration,
     ): URI = refuse()
 
     override fun head(key: StorageKey): StoredObject? = refuse()
 
     override fun open(key: StorageKey): InputStream? = refuse()
+
+    override fun put(
+        key: StorageKey,
+        file: Path,
+        contentType: String,
+    ): Unit = refuse()
 
     override fun delete(key: StorageKey): Unit = refuse()
 

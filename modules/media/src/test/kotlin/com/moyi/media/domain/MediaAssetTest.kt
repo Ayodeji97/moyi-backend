@@ -51,13 +51,66 @@ internal class MediaAssetTest {
         pending().toString() shouldNotContain "in/"
     }
 
+    @Test
+    fun `a variant is kept under v, with the upload key's random part and never the asset's id`() {
+        val random = UUID.randomUUID()
+        val upload = StorageKey.forUpload(random)
+        StorageKey.forVariant(upload, ImageVariant.FULL).value shouldBe "v/$random/full.webp"
+        StorageKey.forVariant(upload, ImageVariant.DISPLAY).value shouldBe "v/$random/display.webp"
+    }
+
+    @Test
+    fun `media-process works on an uploaded photo, or one whose last attempt did not finish, and on nothing else`() {
+        pending(MediaStatus.UPLOADED).processing shouldBe MediaAsset.Processing.PROCESS
+        pending(MediaStatus.PROCESSING).processing shouldBe MediaAsset.Processing.PROCESS
+        // ADR-0047's debt: an asset deleted after its MediaUploaded was published is skipped.
+        for (status in MediaStatus.entries - MediaStatus.UPLOADED - MediaStatus.PROCESSING) {
+            pending(status).processing shouldBe MediaAsset.Processing.NOTHING_TO_DO
+        }
+        pending(MediaStatus.UPLOADED, kind = MediaKind.VOICE).processing shouldBe MediaAsset.Processing.NOT_THIS_KIND
+    }
+
+    @Test
+    fun `its owner sees a ready photo, the full image while there is one`() {
+        val full = variant(ImageVariant.FULL)
+        val display = variant(ImageVariant.DISPLAY)
+        pending(MediaStatus.READY, variants = listOf(display, full)).shownTo(owner = true) shouldBe MediaAsset.Shown.Ready(full)
+        pending(MediaStatus.READY, variants = listOf(display)).shownTo(owner = true) shouldBe MediaAsset.Shown.Ready(display)
+    }
+
+    @Test
+    fun `anyone else sees processing until the photo is ready and has passed moderation (FR-101)`() {
+        val full = variant(ImageVariant.FULL)
+        pending(MediaStatus.READY, variants = listOf(full)).shownTo(owner = false) shouldBe MediaAsset.Shown.Processing
+        pending(MediaStatus.READY, variants = listOf(full), verdict = "QUARANTINED").shownTo(owner = false) shouldBe
+            MediaAsset.Shown.Processing
+        pending(MediaStatus.READY, variants = listOf(full), verdict = MediaAsset.PASSED).shownTo(owner = false) shouldBe
+            MediaAsset.Shown.Ready(full)
+    }
+
+    @Test
+    fun `a photo that is not ready is processing to everyone, its owner included`() {
+        for (status in MediaStatus.entries - MediaStatus.READY) {
+            pending(status, variants = listOf(variant(ImageVariant.FULL)), verdict = MediaAsset.PASSED).shownTo(owner = true) shouldBe
+                MediaAsset.Shown.Processing
+        }
+    }
+
+    private fun variant(which: ImageVariant) =
+        StoredVariant(which, StorageKey.forVariant(StorageKey.forUpload(UUID.randomUUID()), which), 20, 10, 100)
+
     private fun pending(
         status: MediaStatus = MediaStatus.PENDING_UPLOAD,
         attached: UUID? = null,
+        kind: MediaKind = MediaKind.IMAGE,
+        variants: List<StoredVariant> = emptyList(),
+        verdict: String? = null,
     ) = MediaAsset(
         id = UUID.randomUUID(),
         ownerUserId = UUID.randomUUID(),
-        kind = MediaKind.IMAGE,
+        kind = kind,
+        variants = variants,
+        moderationVerdict = verdict,
         storageKey = StorageKey.forUpload(UUID.randomUUID()),
         contentType = "image/png",
         sizeBytes = 1234,

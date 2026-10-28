@@ -8,6 +8,7 @@ import org.springframework.http.MediaType
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
@@ -32,13 +33,17 @@ internal class MediaClient(
     fun intent(
         owner: UUID,
         bytes: ByteArray,
+        declaredType: String = "image/jpeg",
+        kind: String = "IMAGE",
+        declaredChecksum: String = sha256(bytes),
     ): JsonNode {
         val response =
             mvc
                 .post("/api/v1/media/upload-intent") {
                     header(HttpHeaders.AUTHORIZATION, bearer(owner))
                     contentType = MediaType.APPLICATION_JSON
-                    content = """{"kind":"IMAGE","contentType":"image/jpeg","sizeBytes":${bytes.size},"checksum":"${sha256(bytes)}"}"""
+                    content =
+                        """{"kind":"$kind","contentType":"$declaredType","sizeBytes":${bytes.size},"checksum":"$declaredChecksum"}"""
                 }.andReturn()
                 .response
         response.status shouldBe 201
@@ -74,6 +79,26 @@ internal class MediaClient(
         mediaId: String,
     ): MockHttpServletResponse =
         mvc.delete("/api/v1/media/$mediaId") { header(HttpHeaders.AUTHORIZATION, bearer(caller)) }.andReturn().response
+
+    fun get(
+        caller: UUID,
+        mediaId: String,
+    ): MockHttpServletResponse =
+        mvc.get("/api/v1/media/$mediaId") { header(HttpHeaders.AUTHORIZATION, bearer(caller)) }.andReturn().response
+
+    /** Intent, PUT straight to the storage, completion: an `UPLOADED` asset and its `MediaUploaded`. Returns the media id. */
+    fun upload(
+        owner: UUID,
+        bytes: ByteArray,
+        declaredType: String = "image/jpeg",
+        kind: String = "IMAGE",
+    ): String {
+        val intent = intent(owner, bytes, declaredType, kind)
+        put(intent, bytes) shouldBe 200
+        val mediaId = intent["mediaId"].asString()
+        complete(owner, mediaId).status shouldBe 200
+        return mediaId
+    }
 
     private fun bearer(user: UUID) = "Bearer ${tokens.issue(user).token}"
 

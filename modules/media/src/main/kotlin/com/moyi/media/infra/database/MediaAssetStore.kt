@@ -1,25 +1,32 @@
 package com.moyi.media.infra.database
 
+import com.moyi.media.domain.ImageVariant
 import com.moyi.media.domain.MediaAsset
 import com.moyi.media.domain.MediaKind
 import com.moyi.media.domain.MediaStatus
 import com.moyi.media.domain.StorageKey
+import com.moyi.media.domain.StoredVariant
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Repository
+import tools.jackson.databind.json.JsonMapper
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
 
 /**
- * `media_assets` (V32), through plain JDBC. Every read is by id **and owner**:
- * an asset another person owns is not found, by construction, never found
- * and then refused (CLAUDE.md: authorisation before any read; doc 06:184).
+ * `media_assets` (V32), through plain JDBC. Every read a person's request makes
+ * is by id **and owner**: an asset another person owns is not found, by
+ * construction, never found and then refused (CLAUDE.md: authorisation before
+ * any read; doc 06:184). The reads by id alone ([findAny], [lockAny],
+ * [findAll]) are for the work no person asks for: the pipeline, and an entry's
+ * rendering, which `gratitude` has authorised before it asks (spec §4 D2).
  *
  * Instants arrive truncated to microseconds (the service's clock is), so what
  * is written is what comes back (CLAUDE.md).
  */
 @Repository
+@Suppress("TooManyFunctions") // One table, every statement on it; each is one rule's backstop.
 internal class MediaAssetStore(
     private val jdbc: JdbcTemplate,
 ) {
@@ -59,9 +66,90 @@ internal class MediaAssetStore(
         owner: UUID,
     ): MediaAsset? = jdbc.query("$SELECT WHERE id = ? AND owner_user_id = ? FOR UPDATE", ROW, id, owner).firstOrNull()
 
+    /** The asset, whoever owns it: for the pipeline, which acts for nobody. */
+    fun findAny(id: UUID): MediaAsset? = jdbc.query("$SELECT WHERE id = ?", ROW, id).firstOrNull()
+
+    /** [findAny] under the row lock: the pipeline's last word is said under it, after any deletion has committed. */
+    fun lockAny(id: UUID): MediaAsset? = jdbc.query("$SELECT WHERE id = ? FOR UPDATE", ROW, id).firstOrNull()
+
+    /** Each of [ids] that exists, whoever owns it: for rendering entries their reader may already read. */
+    fun findAll(ids: Collection<UUID>): List<MediaAsset> {
+        if (ids.isEmpty()) return emptyList()
+        return jdbc.query("$SELECT WHERE id = ANY (?::uuid[])", ROW, ids.map(UUID::toString).toTypedArray())
+    }
+
     /** PENDING_UPLOAD to UPLOADED, only from PENDING_UPLOAD. Returns whether it moved. */
     fun markUploaded(id: UUID): Boolean =
         jdbc.update("UPDATE media_assets SET status = 'UPLOADED' WHERE id = ? AND status = 'PENDING_UPLOAD'", id) == 1
+
+    /**
+     * An attempt begins: a photo UPLOADED, or PROCESSING after an attempt that
+     * did not finish, becomes PROCESSING and counts one more attempt. Returns
+     * whether it moved; a photo deleted or finished since is left alone.
+     */
+    fun startProcessing(id: UUID): Boolean =
+        jdbc.update(
+            "UPDATE media_assets SET status = 'PROCESSING', processing_attempts = processing_attempts + 1 " +
+                "WHERE id = ? AND kind = 'IMAGE' AND status IN ('UPLOADED', 'PROCESSING')",
+            id,
+        ) == 1
+
+    /** PROCESSING to READY, with what is kept of the photo. Only from PROCESSING. */
+    fun markReady(
+        id: UUID,
+        variants: List<StoredVariant>,
+        at: Instant,
+    ): Boolean {
+        val largest = variants.maxBy { it.width.toLong() * it.height }
+        return jdbc.update(
+            "UPDATE media_assets SET status = 'READY', width = ?, height = ?, variants = ?::jsonb, ready_at = ? " +
+                "WHERE id = ? AND status = 'PROCESSING'",
+            largest.width,
+            largest.height,
+            variantsJson(variants),
+            Timestamp.from(at),
+            id,
+        ) == 1
+    }
+
+    /** PROCESSING to FAILED. Only from PROCESSING. */
+    fun markFailed(id: UUID): Boolean =
+        jdbc.update("UPDATE media_assets SET status = 'FAILED' WHERE id = ? AND status = 'PROCESSING'", id) == 1
+
+    /**
+     * FR-044a, in one statement (spec §4 D2): the asset is attached to
+     * [entryId] only if it is [owner]'s, of [kind], `READY`, and attached to
+     * nothing. Two entries racing for one asset are serialised on its row, and
+     * the second finds `attached_entry_id` set and matches nothing: one winner.
+     * Returns whether this call attached it.
+     */
+    fun claim(
+        owner: UUID,
+        id: UUID,
+        kind: MediaKind,
+        entryId: UUID,
+    ): Boolean =
+        jdbc.update(
+            "UPDATE media_assets SET attached_entry_id = ? " +
+                "WHERE id = ? AND owner_user_id = ? AND kind = ? AND status = 'READY' AND attached_entry_id IS NULL",
+            entryId,
+            id,
+            owner,
+            kind.name,
+        ) == 1
+
+    /** Detaches [id] from [entryId], only if it is [owner]'s and attached there. */
+    fun release(
+        owner: UUID,
+        id: UUID,
+        entryId: UUID,
+    ): Boolean =
+        jdbc.update(
+            "UPDATE media_assets SET attached_entry_id = NULL WHERE id = ? AND owner_user_id = ? AND attached_entry_id = ?",
+            id,
+            owner,
+            entryId,
+        ) == 1
 
     /**
      * To DELETED, only when unattached and not already deleted (doc 06:184).
@@ -82,7 +170,9 @@ internal class MediaAssetStore(
     private companion object {
         const val SELECT =
             "SELECT id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, " +
-                "attached_entry_id, created_at, expires_at FROM media_assets"
+                "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict FROM media_assets"
+
+        val JSON: JsonMapper = JsonMapper.builder().build()
 
         val ROW =
             RowMapper { rs, _ ->
@@ -98,7 +188,37 @@ internal class MediaAssetStore(
                     attachedEntryId = rs.getObject("attached_entry_id", UUID::class.java),
                     createdAt = rs.getTimestamp("created_at").toInstant(),
                     expiresAt = rs.getTimestamp("expires_at")?.toInstant(),
+                    variants = variantsOf(rs.getString("variants")),
+                    moderationVerdict = rs.getString("moderation_verdict"),
                 )
             }
+
+        /** `[{"variant":"FULL","key":"v/…","width":2048,"height":1536,"bytes":180766}, …]`. */
+        fun variantsJson(variants: List<StoredVariant>): String =
+            JSON.writeValueAsString(
+                variants.map {
+                    mapOf(
+                        "variant" to it.variant.name,
+                        "key" to it.key.value,
+                        "width" to it.width,
+                        "height" to it.height,
+                        "bytes" to it.bytes,
+                    )
+                },
+            )
+
+        fun variantsOf(json: String): List<StoredVariant> {
+            val array = JSON.readTree(json)
+            return (0 until array.size()).map { index ->
+                val node = array[index]
+                StoredVariant(
+                    variant = ImageVariant.valueOf(node["variant"].asString()),
+                    key = StorageKey(node["key"].asString()),
+                    width = node["width"].asInt(),
+                    height = node["height"].asInt(),
+                    bytes = node["bytes"].asLong(),
+                )
+            }
+        }
     }
 }

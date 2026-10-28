@@ -1,8 +1,8 @@
 package com.moyi.media.web
 
-import com.moyi.media.domain.MediaAsset
 import com.moyi.media.domain.MediaKind
 import com.moyi.media.domain.MediaStatus
+import com.moyi.media.service.OwnAsset
 import com.moyi.media.service.UploadIntent
 import java.time.Instant
 import java.util.UUID
@@ -48,9 +48,14 @@ internal data class UploadIntentResponse(
 }
 
 /**
- * One of the caller's own photos or voice notes (doc 06:183). Until processing
- * exists (D2, D3) an asset is `PENDING_UPLOAD` or `UPLOADED`, and carries no
- * URL; D2 adds the signed URLs of its ready variants.
+ * One of the caller's own photos or voice notes (doc 06:183: "status + signed
+ * URLs for ready variants"). [status] is the asset's own lifecycle state. Once
+ * a photo is `READY`, [url] is a signed GET of the largest image kept of it,
+ * valid for at least 24 hours and the same all hour (ADR-0048), and [width]
+ * and [height] are that image's; before, all three are null. [contentType] and
+ * [sizeBytes] are what was declared for the upload, not what is kept.
+ *
+ * @property url a bearer credential for the image: keep it out of logs and analytics
  */
 internal data class MediaResponse(
     val id: UUID,
@@ -58,8 +63,24 @@ internal data class MediaResponse(
     val status: MediaStatus,
     val contentType: String,
     val sizeBytes: Long,
+    val url: String?,
+    val width: Int?,
+    val height: Int?,
 ) {
+    override fun toString(): String =
+        "MediaResponse(id=$id, kind=$kind, status=$status, url=${url?.let { "<redacted>" }}, width=$width, height=$height)"
+
     companion object {
-        fun from(asset: MediaAsset): MediaResponse = MediaResponse(asset.id, asset.kind, asset.status, asset.contentType, asset.sizeBytes)
+        fun from(own: OwnAsset): MediaResponse =
+            MediaResponse(
+                own.asset.id,
+                own.asset.kind,
+                own.asset.status,
+                own.asset.contentType,
+                own.asset.sizeBytes,
+                own.url?.toString(),
+                own.width,
+                own.height,
+            )
     }
 }

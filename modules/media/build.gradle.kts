@@ -19,6 +19,8 @@ dependencies {
     // conditional update under a row lock that JPA would only wrap.
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("tools.jackson.module:jackson-module-kotlin")
+    // `gratitude.media.processing.duration` (doc 11:49), as the scheduling jobs' meters are.
+    implementation("io.micrometer:micrometer-core")
 
     // The S3 API, for R2 (ADR-0047). The vendor appears in one internal class,
     // `R2ObjectStore` (doc 25:118). The JDK's URLConnection is the transport:

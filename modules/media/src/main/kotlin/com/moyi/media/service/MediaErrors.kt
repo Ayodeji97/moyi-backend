@@ -57,6 +57,14 @@ internal class MediaStorageUnavailableException(
         cause,
     )
 
+/** `DELETE /media/{id}` of an asset attached to an entry (doc 06:184: "only if unattached"). */
+internal class MediaAttachedException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.MEDIA_ATTACHED,
+        "This photo or voice note is part of an entry, and stays with it.",
+    )
+
 internal class MediaBusyException(
     cause: Throwable,
 ) : ApiException(

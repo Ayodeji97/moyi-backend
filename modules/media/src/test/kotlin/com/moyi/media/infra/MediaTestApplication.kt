@@ -4,6 +4,8 @@ import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyConfiguration
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.context.annotation.Bean
@@ -29,4 +31,8 @@ internal class MediaTestApplication {
     @Bean
     @Primary
     fun testClock(): MutableClock = MutableClock(Instant.parse("2026-10-28T09:00:00Z"))
+
+    /** `media.process` times every photo (doc 11:49); the application gets its registry from the actuator. */
+    @Bean
+    fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
 }

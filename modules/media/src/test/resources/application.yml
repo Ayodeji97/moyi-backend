@@ -20,3 +20,12 @@ moyi:
       enabled: false
   # The storage itself (provider R2, against MinIO) is set by MediaIntegrationTest,
   # which knows the container's address.
+  media:
+    processing:
+      # The real libvips, from PATH (CI installs it). Nothing is processed until a
+      # test runs the outbox's dispatcher; this context has no poller.
+      provider: vips
+      vips:
+        # macOS cannot enforce the memory limit; on Linux (CI) this changes nothing
+        # and the limit is applied (ADR-0048).
+        allow-unlimited-memory: true
