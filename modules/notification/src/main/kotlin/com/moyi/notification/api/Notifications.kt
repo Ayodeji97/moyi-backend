@@ -49,6 +49,24 @@ interface Notifications {
      * @return whether this call cancelled a push.
      */
     fun cancel(dedupeKey: String): Boolean
+
+    /**
+     * Whether [userId] has, in [bondId], a push of [category] asked for after
+     * [since] that was **sent or is still owed** (`SENT`, `REQUESTED`, or
+     * `HELD` by quiet hours). A push that went nowhere (expired, dropped by
+     * the budget, suppressed by a toggle, cancelled, failed) is not counted:
+     * it reached nobody, and must not stand in for one that would.
+     *
+     * For a caller that bounds a category over a span of its own: the
+     * on-this-day push, at most one in seven days (FR-092, ADR-0046). Ids and
+     * values in, a yes or no out; this module learns nothing of why.
+     */
+    fun hasLiveOrSent(
+        userId: UUID,
+        bondId: UUID,
+        category: PushCategory,
+        since: Instant,
+    ): Boolean
 }
 
 /**

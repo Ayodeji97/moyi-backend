@@ -253,6 +253,8 @@ here. The test also reads its capture once instead of once per watched secret.
   `HELD`, `SUPPRESSED` and `DROPPED_BUDGET` too.
 - **ADR-0044 decision 2 says namespace 2 was free**; it is shared with bond's lock. Harmless
   (a hash collision would only serialise two unrelated requests), but the record is wrong.
+  *(Discharged by ADR-0046: ADR-0044 is corrected in place. N3's recipients, likewise, are
+  resolved through `bond.api.PushAudiences`.)*
 
 ## Revisit when
 

@@ -1,5 +1,6 @@
 package com.moyi.bond.infra.database
 
+import com.moyi.bond.domain.BondStatus
 import com.moyi.notification.api.NotificationPreferences
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
@@ -75,6 +76,31 @@ internal class MemberNotifications(
             """.trimIndent(),
         ) { row, _ -> candidate(row) }
 
+    /**
+     * One bond's status and its members who have not left, each with what a
+     * push needs to know of them (ADR-0046); `null` if there is no such bond.
+     *
+     * Unguarded, for the push consumers: they answer an event `bond` or
+     * `gratitude` published about this bond, not a request.
+     */
+    fun audienceOf(bondId: UUID): BondAudienceRows? {
+        val rows =
+            jdbc.query(
+                """
+                SELECT b.status, m.id, m.bond_id, m.user_id, m.reminder_time_local, m.reminder_timezone,
+                       m.quiet_hours_start, m.quiet_hours_end, m.notification_prefs::text AS prefs
+                  FROM bonds b
+                  LEFT JOIN bond_members m ON m.bond_id = b.id AND m.left_at IS NULL
+                 WHERE b.id = ?
+                 ORDER BY m.id
+                """.trimIndent(),
+                { row, _ -> row.getString("status") to row.getObject("id", UUID::class.java)?.let { candidate(row) } },
+                bondId,
+            )
+        if (rows.isEmpty()) return null
+        return BondAudienceRows(status = BondStatus.valueOf(rows.first().first), members = rows.mapNotNull { it.second })
+    }
+
     private fun candidate(row: ResultSet) =
         ReminderCandidate(
             memberId = row.getObject("id", UUID::class.java),
@@ -138,3 +164,9 @@ internal data class ReminderCandidate(
     /** Ids only: when somebody sleeps is personal data (doc 18 §5). */
     override fun toString(): String = "ReminderCandidate(memberId=$memberId, bondId=$bondId)"
 }
+
+/** A bond's status and its members who have not left ([MemberNotifications.audienceOf]). */
+internal class BondAudienceRows(
+    val status: BondStatus,
+    val members: List<ReminderCandidate>,
+)

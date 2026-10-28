@@ -4,7 +4,9 @@ import com.moyi.common.core.IdGenerator
 import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
 import com.moyi.notification.api.Notifications
+import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushRequest
+import com.moyi.notification.domain.NotificationStatus
 import com.moyi.notification.infra.database.NewPush
 import com.moyi.notification.infra.database.NotificationStore
 import com.moyi.notification.infra.database.QuietWindow
@@ -12,6 +14,8 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import java.time.Clock
+import java.time.Instant
+import java.util.UUID
 
 /**
  * [Notifications] over the ledger and the outbox (spec §2.2, ADR-0044).
@@ -68,7 +72,18 @@ internal class PushRequests(
     @Transactional(propagation = Propagation.MANDATORY)
     override fun cancel(dedupeKey: String): Boolean = ledger.cancel(dedupeKey)
 
+    @Transactional(readOnly = true)
+    override fun hasLiveOrSent(
+        userId: UUID,
+        bondId: UUID,
+        category: PushCategory,
+        since: Instant,
+    ): Boolean = ledger.existsSince(userId, bondId, category, LIVE_OR_SENT, since)
+
     internal companion object {
+        /** What a push that reached, or may yet reach, its member is: sent, or still owed. */
+        val LIVE_OR_SENT = setOf(NotificationStatus.SENT, NotificationStatus.REQUESTED, NotificationStatus.HELD)
+
         const val AGGREGATE = "Notification"
         const val PUSH_REQUESTED = "PushRequested"
         const val NOTIFICATION_ID = "notificationId"

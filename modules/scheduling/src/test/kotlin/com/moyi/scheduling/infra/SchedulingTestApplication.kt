@@ -10,6 +10,8 @@ import com.moyi.common.web.idempotency.IdempotencyKeyStore
 import com.moyi.gratitude.api.CloseResult
 import com.moyi.gratitude.api.DailyReminders
 import com.moyi.gratitude.api.DayCloser
+import com.moyi.gratitude.api.OnThisDayPushes
+import com.moyi.gratitude.api.OnThisDayRun
 import com.moyi.gratitude.api.ReminderRun
 import com.moyi.notification.api.HeldPushes
 import io.micrometer.core.instrument.MeterRegistry
@@ -63,6 +65,21 @@ internal class SchedulingTestApplication {
 
     @Bean
     fun heldPushes(): RecordingHeldPushes = RecordingHeldPushes()
+
+    @Bean
+    fun onThisDay(): RecordingOnThisDay = RecordingOnThisDay()
+}
+
+internal class RecordingOnThisDay : OnThisDayPushes {
+    val windows = CopyOnWriteArrayList<Pair<Instant, Instant>>()
+
+    override fun pushDue(
+        after: Instant,
+        upTo: Instant,
+    ): OnThisDayRun {
+        windows += after to upTo
+        return OnThisDayRun(due = 0, requested = 0, nothingToRemember = 0, failed = 0)
+    }
 }
 
 /** A [DailyReminders] that records the windows it was asked about. */

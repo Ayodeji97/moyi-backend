@@ -4,11 +4,17 @@ import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.common.web.idempotency.IdempotencyConfiguration
 import com.moyi.identity.api.UserDirectory
-import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.SpringBootConfiguration
+import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration
+import org.springframework.boot.context.TypeExcludeFilter
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.boot.persistence.autoconfigure.EntityScan
 import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.ComponentScan
+import org.springframework.context.annotation.FilterType
 import org.springframework.context.annotation.Import
+import org.springframework.context.annotation.Primary
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories
 
 /**
@@ -77,7 +83,17 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
  * the fuller account, including why its interceptor orders itself after
  * `common:security`'s `RateLimitInterceptor` (fix round 1, I4).
  */
-@SpringBootApplication(scanBasePackages = ["com.moyi.common", "com.moyi.gratitude", "com.moyi.bond", "com.moyi.notification"])
+@SpringBootConfiguration
+@EnableAutoConfiguration
+@ComponentScan(
+    basePackages = ["com.moyi.common", "com.moyi.gratitude", "com.moyi.bond", "com.moyi.notification"],
+    excludeFilters = [
+        // @SpringBootApplication's own two.
+        ComponentScan.Filter(type = FilterType.CUSTOM, classes = [TypeExcludeFilter::class]),
+        ComponentScan.Filter(type = FilterType.CUSTOM, classes = [AutoConfigurationExcludeFilter::class]),
+        ComponentScan.Filter(type = FilterType.REGEX, pattern = [GratitudeTestApplication.PUSH_CONSUMERS]),
+    ],
+)
 @ConfigurationPropertiesScan("com.moyi.common", "com.moyi.gratitude", "com.moyi.bond", "com.moyi.notification")
 @EntityScan("com.moyi.gratitude", "com.moyi.bond")
 @EnableJpaRepositories("com.moyi.gratitude", "com.moyi.bond")
@@ -88,4 +104,22 @@ internal class GratitudeTestApplication {
 
     @Bean
     fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }
+
+    /** Phase 4 N3: the provider keeps what it was handed, so a test can read every payload a phone would get. */
+    @Bean
+    @Primary
+    fun capturingPushSender(): CapturingPushSender = CapturingPushSender()
+
+    companion object {
+        /**
+         * The two push consumers (Phase 4 N3, ADR-0046), `gratitude.notify` and `bond.notify`,
+         * left out of the shared context. A dozen tests here count the outbox's deliveries
+         * exactly (the withdrawal's one, a failing handler's none), and with these in the
+         * context every join, reveal and push would add to the count without being what those
+         * tests are about. The tests of the pushes import `NotifyDayMembers` themselves
+         * (`DayPushesTest`); `bond.notify`'s are `bond`'s (`BondPushesTest`), and the app's
+         * `SecretsNeverLoggedTest` runs with both.
+         */
+        const val PUSH_CONSUMERS = """com\.moyi\.(gratitude|bond)\.service\.Notify(Day|Bond)Members"""
+    }
 }

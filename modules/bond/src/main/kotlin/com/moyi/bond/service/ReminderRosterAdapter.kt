@@ -6,11 +6,13 @@ import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.ReminderTime
 import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.MemberNotifications
+import com.moyi.bond.infra.database.ReminderCandidate
 import com.moyi.notification.api.PushRecipient
 import com.moyi.notification.api.QuietHoursWindow
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.time.Instant
+import java.time.LocalTime
 import java.time.ZoneId
 
 /**
@@ -27,11 +29,24 @@ internal class ReminderRosterAdapter(
     override fun remindersDueBetween(
         after: Instant,
         upTo: Instant,
+    ): List<DueReminder> = dueBetween(members.reminderCandidates(), ReminderCandidate::reminderTimeLocal, after, upTo)
+
+    /**
+     * Each of [candidates] whose [timeOf], in their reminder zone, fell within
+     * `(after, upTo]`, with the bond-day it fell in and their settings: the
+     * daily reminder's rule, and the on-this-day push's (ADR-0046), which
+     * asks it with a fixed time of day instead of the member's own.
+     */
+    fun dueBetween(
+        candidates: List<ReminderCandidate>,
+        timeOf: (ReminderCandidate) -> LocalTime,
+        after: Instant,
+        upTo: Instant,
     ): List<DueReminder> {
         val due =
-            members.reminderCandidates().mapNotNull { candidate ->
+            candidates.mapNotNull { candidate ->
                 val zone = ZoneId.of(candidate.reminderTimezone)
-                ReminderTime.occurrenceIn(candidate.reminderTimeLocal, zone, after, upTo)?.let { at -> Triple(candidate, zone, at) }
+                ReminderTime.occurrenceIn(timeOf(candidate), zone, after, upTo)?.let { at -> Triple(candidate, zone, at) }
             }
         // One timeline per bond, read only for the bonds somebody is due in.
         val timelines = due.map { it.first.bondId }.distinct().associateWith { anchorIntervals.timelineOf(BondId(it)) }
@@ -47,7 +62,7 @@ internal class ReminderRosterAdapter(
                         .first()
                         .effectiveFrom,
                 )
-            }.map { (candidate, zone, at) ->
+            }.map { (candidate, _, at) ->
                 val day = timelines.getValue(candidate.bondId).dayBoundsAt(at)
                 DueReminder(
                     bondId = candidate.bondId,
@@ -56,18 +71,25 @@ internal class ReminderRosterAdapter(
                     remindAt = at,
                     bondDate = day.date,
                     bondDayEndsAt = day.endsAt,
-                    recipient =
-                        PushRecipient(
-                            zone = zone,
-                            quietHours =
-                                if (candidate.quietHoursStart != null && candidate.quietHoursEnd != null) {
-                                    QuietHoursWindow(candidate.quietHoursStart, candidate.quietHoursEnd)
-                                } else {
-                                    null
-                                },
-                            preferences = candidate.preferences,
-                        ),
+                    recipient = candidate.recipient(),
                 )
             }
     }
 }
+
+/**
+ * A member's settings in one bond as a push carries them (ADR-0045): their
+ * reminder zone, their quiet hours if they set both ends, their toggles. The
+ * one place a member row becomes a [PushRecipient].
+ */
+internal fun ReminderCandidate.recipient(): PushRecipient =
+    PushRecipient(
+        zone = ZoneId.of(reminderTimezone),
+        quietHours =
+            if (quietHoursStart != null && quietHoursEnd != null) {
+                QuietHoursWindow(quietHoursStart, quietHoursEnd)
+            } else {
+                null
+            },
+        preferences = preferences,
+    )
