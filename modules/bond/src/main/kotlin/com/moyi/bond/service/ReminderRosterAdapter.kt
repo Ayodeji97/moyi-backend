@@ -35,27 +35,39 @@ internal class ReminderRosterAdapter(
             }
         // One timeline per bond, read only for the bonds somebody is due in.
         val timelines = due.map { it.first.bondId }.distinct().associateWith { anchorIntervals.timelineOf(BondId(it)) }
-        return due.map { (candidate, zone, at) ->
-            val day = timelines.getValue(candidate.bondId).dayBoundsAt(at)
-            DueReminder(
-                bondId = candidate.bondId,
-                memberId = candidate.memberId,
-                userId = candidate.userId,
-                remindAt = at,
-                bondDate = day.date,
-                bondDayEndsAt = day.endsAt,
-                recipient =
-                    PushRecipient(
-                        zone = zone,
-                        quietHours =
-                            if (candidate.quietHoursStart != null && candidate.quietHoursEnd != null) {
-                                QuietHoursWindow(candidate.quietHoursStart, candidate.quietHoursEnd)
-                            } else {
-                                null
-                            },
-                        preferences = candidate.preferences,
-                    ),
-            )
-        }
+        // A reminder that fell before its bond began has no bond-day to be about: a bond made at
+        // 23:57 whose member's reminder is 23:55. Asked of the timeline, that instant throws, and
+        // took every other member's reminder down with it (found by the smoke run).
+        return due
+            .filter { (candidate, _, at) ->
+                !at.isBefore(
+                    timelines
+                        .getValue(candidate.bondId)
+                        .intervals
+                        .first()
+                        .effectiveFrom,
+                )
+            }.map { (candidate, zone, at) ->
+                val day = timelines.getValue(candidate.bondId).dayBoundsAt(at)
+                DueReminder(
+                    bondId = candidate.bondId,
+                    memberId = candidate.memberId,
+                    userId = candidate.userId,
+                    remindAt = at,
+                    bondDate = day.date,
+                    bondDayEndsAt = day.endsAt,
+                    recipient =
+                        PushRecipient(
+                            zone = zone,
+                            quietHours =
+                                if (candidate.quietHoursStart != null && candidate.quietHoursEnd != null) {
+                                    QuietHoursWindow(candidate.quietHoursStart, candidate.quietHoursEnd)
+                                } else {
+                                    null
+                                },
+                            preferences = candidate.preferences,
+                        ),
+                )
+            }
     }
 }

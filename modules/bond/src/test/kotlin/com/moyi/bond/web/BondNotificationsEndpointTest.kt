@@ -26,10 +26,12 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.put
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -163,6 +165,32 @@ internal class BondNotificationsEndpointTest(
         // Bea's 20:00 in Lagos is 19:00Z.
         roster.remindersDueBetween(Instant.parse("2026-10-28T18:55:00Z"), Instant.parse("2026-10-28T19:00:00Z")).map { it.userId } shouldBe
             listOf(bea)
+    }
+
+    @Test
+    fun `a reminder that fell before the bond began is not due, and does not stop the others`() {
+        // Found by the smoke run: a bond made at 23:57 with a reminder at 23:55 asked its timeline
+        // for a day before its first, which threw, and the whole sweep, everyone's reminders, failed.
+        val (_, ada, bea) = pairedBond()
+        val (late, _, _) = pairedBond("Cal" to "Dee")
+        // 20:00 in Lagos is 19:00Z, tomorrow's: inside the window for every member of both bonds.
+        val windowEnd =
+            Instant
+                .now()
+                .truncatedTo(ChronoUnit.DAYS)
+                .plus(Duration.ofDays(1))
+                .plus(Duration.ofHours(19))
+        // The second bond begins after it, as a bond made between a reminder and the sweep does.
+        jdbc.update(
+            "UPDATE bond_anchor_intervals SET effective_from = ?, first_label = ? WHERE bond_id = ?",
+            java.sql.Timestamp.from(windowEnd.plusSeconds(1)),
+            windowEnd.plusSeconds(1).atZone(ZoneId.of("Africa/Lagos")).toLocalDate(),
+            UUID.fromString(late),
+        )
+
+        val due = roster.remindersDueBetween(windowEnd.minusSeconds(300), windowEnd)
+
+        due.map { it.userId } shouldContainExactlyInAnyOrder listOf(ada, bea)
     }
 
     @Test
