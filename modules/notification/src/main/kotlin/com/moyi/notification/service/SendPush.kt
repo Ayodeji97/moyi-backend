@@ -81,27 +81,51 @@ internal class SendPush(
         val notificationId =
             checkNotNull(event.references[PushRequests.NOTIFICATION_ID]) { "A PushRequested event carries no notificationId." }
         val push = ledger.lock(notificationId)?.takeIf { it.status == NotificationStatus.REQUESTED } ?: return
-
         val now = clock.instant()
-        if (PushSettlement.isExpired(push.staleAfter, now)) {
-            ledger.settle(push.id, NotificationStatus.EXPIRED, now)
-            return
+        when (val decision = decide(push, now)) {
+            is Decision.Settle -> ledger.settle(push.id, decision.status, now)
+            is Decision.Hold -> ledger.hold(push.id, decision.until)
+            is Decision.Send -> send(push, decision.slot)
         }
-        if (!push.wanted) {
-            ledger.settle(push.id, NotificationStatus.SUPPRESSED, now)
-            return
-        }
-        val goesAt = notBefore(push, now)
-        if (goesAt.isAfter(now)) {
-            ledger.hold(push.id, goesAt)
-            return
-        }
-        val slot = budgetSlot(push, now)
-        if (slot == BudgetDecision.DROPPED) {
-            ledger.settle(push.id, NotificationStatus.DROPPED_BUDGET, now)
-            return
-        }
+    }
 
+    /**
+     * Steps 2 and 3 of the class's note, in that order: the deadline first, so
+     * that a push held past it is expired when it comes back, then the
+     * member's own settings. The budget last, because it is the one step that
+     * takes a lock and spends something.
+     */
+    private fun decide(
+        push: StoredPush,
+        now: Instant,
+    ): Decision {
+        val goesAt by lazy { notBefore(push, now) }
+        return when {
+            PushSettlement.isExpired(push.staleAfter, now) -> {
+                Decision.Settle(NotificationStatus.EXPIRED)
+            }
+
+            !push.wanted -> {
+                Decision.Settle(NotificationStatus.SUPPRESSED)
+            }
+
+            goesAt.isAfter(now) -> {
+                Decision.Hold(goesAt)
+            }
+
+            else -> {
+                when (val slot = budgetSlot(push, now)) {
+                    BudgetDecision.DROPPED -> Decision.Settle(NotificationStatus.DROPPED_BUDGET)
+                    else -> Decision.Send(slot)
+                }
+            }
+        }
+    }
+
+    private fun send(
+        push: StoredPush,
+        slot: BudgetDecision,
+    ) {
         val answers =
             tokens.heldBy(push.userId).map { held ->
                 val answer = sender.send(PushMessage(held.token, push.category, push.bondId))
@@ -162,6 +186,24 @@ internal class SendPush(
             sentAcrossBonds = ledger.sentSince(push.userId, now.minus(PushBudget.ACROSS_BONDS_WINDOW)),
             revealClass = push.category.isRevealClass,
         )
+    }
+
+    /** What the consumer does with a push before any phone is tried. */
+    private sealed interface Decision {
+        /** Into a final status, unsent: expired, suppressed or over budget. */
+        data class Settle(
+            val status: NotificationStatus,
+        ) : Decision
+
+        /** `HELD` until [until], when quiet hours end. */
+        data class Hold(
+            val until: Instant,
+        ) : Decision
+
+        /** To every phone, in the slot the budget gave it. */
+        data class Send(
+            val slot: BudgetDecision,
+        ) : Decision
     }
 
     private fun resultOf(answer: PushDelivery): SendResult =

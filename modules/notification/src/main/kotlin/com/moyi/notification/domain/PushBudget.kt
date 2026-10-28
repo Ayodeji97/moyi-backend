@@ -51,7 +51,8 @@ internal object PushBudget {
     const val PER_BOND_PER_DAY = 3
     const val RESERVED_PER_BOND_PER_DAY = 1
     const val ACROSS_BONDS = 6
-    val ACROSS_BONDS_WINDOW: Duration = Duration.ofHours(24)
+    private const val ACROSS_BONDS_WINDOW_HOURS = 24L
+    val ACROSS_BONDS_WINDOW: Duration = Duration.ofHours(ACROSS_BONDS_WINDOW_HOURS)
 
     /**
      * @param sentInBondToday pushes of this Bond sent to this member in their
@@ -66,10 +67,13 @@ internal object PushBudget {
         sentAcrossBonds: Int,
         revealClass: Boolean,
     ): BudgetDecision {
-        if (sentAcrossBonds >= ACROSS_BONDS) return BudgetDecision.DROPPED
-        if (revealClass && !reservedSpentToday) return BudgetDecision.RESERVED
         val remainderSpent = sentInBondToday - if (reservedSpentToday) RESERVED_PER_BOND_PER_DAY else 0
-        return if (remainderSpent < PER_BOND_PER_DAY - RESERVED_PER_BOND_PER_DAY) BudgetDecision.REMAINDER else BudgetDecision.DROPPED
+        return when {
+            sentAcrossBonds >= ACROSS_BONDS -> BudgetDecision.DROPPED
+            revealClass && !reservedSpentToday -> BudgetDecision.RESERVED
+            remainderSpent < PER_BOND_PER_DAY - RESERVED_PER_BOND_PER_DAY -> BudgetDecision.REMAINDER
+            else -> BudgetDecision.DROPPED
+        }
     }
 
     /** The day in [zone] that [instant] falls in. Midnight is asked of the zone, which moves it where a DST change skips it. */
