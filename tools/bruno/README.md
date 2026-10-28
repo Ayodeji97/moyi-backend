@@ -31,10 +31,10 @@ been run end to end, so a failure there is most likely in the file, not the serv
 
 **Leave bond and Block are not part of the loop.** (Search, On this day and Milestones
 come after them only because they were added later; all three only read.) Each ends the bond in
-use for both people. Their bodies are optional and their defaults are opposite: a leave
-keeps your entries unless it is asked to take them back, a block takes them back unless it
-is told to keep them, and taking them back erases them for good. Each request carries its
-own default as its example body, so sending it as it stands does what sending nothing
-would.
+use for both people. A leave's body is optional, and it keeps your entries unless it is asked
+to take them back. A block's body is required: it must say which, and without the flag it is
+`400` and ends nothing. Taking them back erases them for good. Leave bond's example body is
+its default, so sending it as it stands does what sending nothing would; Block's example
+takes the entries back.
 
 Every rule is the server's. These files send requests and decide nothing.
