@@ -236,16 +236,18 @@ class OpenApiConfiguration {
             text.maxLength = ENTRY_TEXT_MAX_OCTETS
             text.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
             text.description =
-                "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does " +
-                "not count either), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
+                "FR-041: at least one character that is neither whitespace (Unicode-aware, so a lone non-breaking " +
+                "space does not count either) nor invisible (Unicode's Default_Ignorable_Code_Point: a text of only " +
+                "zero-width spaces, joiners, variation selectors and the like is refused as empty), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
                 "$ENTRY_TEXT_MAX_GRAPHEMES user-perceived characters (graphemes, not UTF-16 code units — an " +
                 "emoji sequence can be one grapheme and several of those). `maxLength` here states the octet " +
                 "cap in UTF-16 characters, which is not the same unit as either real limit and both are wider " +
                 "than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a " +
                 "guarantee. The server enforces both limits exactly and is the only authority on whether a " +
                 "given body is accepted. The text is stored and returned exactly as sent — not normalised, " +
-                "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted on its NFKC-normalised, trimmed form " +
-                "(so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused."
+                "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted as typed, on the text as sent, " +
+                "untrimmed (so a typographic ellipsis counts as one, and a leading or trailing space counts too), " +
+                "and so are the octets. U+0000 is refused."
         }
     }
 
