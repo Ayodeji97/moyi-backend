@@ -1750,6 +1750,256 @@
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberSettingsService.kt#if (!bond.isOpen) throw BondArchivedException()"
   },
   {
+    "id": "bond-none-notifications-read",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "notifications: a stranger reading them is told the bond's 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-notifications-read",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "Which kinds of push you want in this bond: everything on but on-this-day until you choose. Only yours: the path has no way to name your partner's.",
+    "rule": "FR-081, Q7, ADR-0045 §1",
+    "evidence": "smoke",
+    "evidenceRef": "notifications: readable while the bond waits for its second member",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberNotificationsService.kt#fun of(membership: Membership): NotificationPreferences {"
+  },
+  {
+    "id": "bond-active-notifications-read",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "Yours, as on a bond of one. Your partner's are theirs and are never shown.",
+    "rule": "FR-081, ADR-0045 §1",
+    "evidence": "test",
+    "evidenceRef": "BondNotificationsEndpointTest#a member who never chose is shown every category on except on-this-day",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberNotificationsService.kt#fun of(membership: Membership): NotificationPreferences {"
+  },
+  {
+    "id": "bond-pending-deletion-notifications-read",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 200,
+    "code": null,
+    "reason": "Reading is not a write, so the countdown does not stop it.",
+    "rule": "",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberNotificationsService.kt#fun of(membership: Membership): NotificationPreferences {"
+  },
+  {
+    "id": "bond-archived-notifications-read",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "GET /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 200,
+    "code": null,
+    "reason": "An ended bond's record stays readable, your own choices with it.",
+    "rule": "ADR-0028 §4",
+    "evidence": "test",
+    "evidenceRef": "BondNotificationsEndpointTest#an ended bond's toggles can be read and not changed",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberNotificationsService.kt#fun of(membership: Membership): NotificationPreferences {"
+  },
+  {
+    "id": "bond-none-notifications-replace",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "test",
+    "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-notifications-replace",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 200,
+    "code": null,
+    "reason": "Sets the kinds it is sent and keeps the others: a toggle left out is not cleared. No If-Match, and the bond's ETag does not move.",
+    "rule": "ADR-0045 §1",
+    "evidence": "smoke",
+    "evidenceRef": "notifications: …and settable while it waits",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberNotificationsService.kt#notifications.replace(membership.memberId.value, updated)"
+  },
+  {
+    "id": "bond-active-notifications-replace",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 200,
+    "code": null,
+    "reason": "The same on a bond of two. Turning a kind off holds back your own copy only: your partner is still told, and is not told that you are not.",
+    "rule": "FR-081, Q9, ADR-0045 §1, §3",
+    "evidence": "test",
+    "evidenceRef": "BondNotificationsEndpointTest#a put sets what it is sent and keeps what it is not",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberNotificationsService.kt#notifications.replace(membership.memberId.value, updated)"
+  },
+  {
+    "id": "bond-pending-deletion-notifications-replace",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond counting down takes no writes, your own choices included.",
+    "rule": "BR-9, FR-028",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberNotificationsService.kt#if (!bondOf(membership).isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-notifications-replace",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "PUT /api/v1/bonds/{bondId}/members/me/notifications",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "Writes stop when the bond ends; reads do not.",
+    "rule": "BR-9, ADR-0028 §4",
+    "evidence": "test",
+    "evidenceRef": "BondNotificationsEndpointTest#an ended bond's toggles can be read and not changed",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/MemberNotificationsService.kt#if (!bondOf(membership).isOpen) throw BondArchivedException()"
+  },
+  {
     "id": "bond-none-timezone-propose",
     "region": "bond",
     "from": "NO_BOND",
@@ -1847,7 +2097,7 @@
     "rule": "FR-027, BR-6, ADR-0030 §4",
     "evidence": "smoke",
     "evidenceRef": "proposing a zone is 200 and moves nothing yet",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#val proposal = Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now)"
   },
   {
     "id": "bond-active-timezone-propose-pending",
@@ -3486,8 +3736,8 @@
     "to": "ACTIVE",
     "status": null,
     "code": null,
-    "reason": "Somebody accepts your invite. The bond is two people and ACTIVE from that instant, and the code is spent.",
-    "rule": "FR-022, M2",
+    "reason": "Somebody accepts your invite. The bond is two people and ACTIVE from that instant, and the code is spent. You are sent one push saying so, with no name in it, unless you turned partner-joined pushes off (ADR-0046); the one who joined is sent none.",
+    "rule": "FR-022, M2, FR-080",
     "evidence": "smoke",
     "evidenceRef": "the creator sees the same active bond",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#return copy(status = BondStatus.ACTIVE, members = members + member)"
@@ -5326,7 +5576,7 @@
     "rule": "FR-027, ADR-0030 §1",
     "evidence": "smoke",
     "evidenceRef": "proposing a zone is 200 and moves nothing yet",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#val proposal = Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now)"
   },
   {
     "id": "proposal-none-timezone-propose-alone",
@@ -5451,7 +5701,7 @@
     "rule": "FR-027",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#val proposal = Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now)"
   },
   {
     "id": "proposal-confirmed-timezone-propose-too-soon",
@@ -5513,7 +5763,7 @@
     "rule": "ADR-0030 §5",
     "evidence": "smoke",
     "evidenceRef": "…and a fresh proposal is allowed",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#val proposal = Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now)"
   },
   {
     "id": "proposal-lapsed-timezone-propose",
@@ -6824,11 +7074,11 @@
     "to": "PROPOSED",
     "status": null,
     "code": null,
-    "reason": "Your partner proposes a zone change or asks for the deletion. Your next read of the bond shows it waiting, with seven days to answer. You are not notified.",
-    "rule": "FR-027, FR-028",
+    "reason": "Your partner proposes a zone change or asks for the deletion. Your next read of the bond shows it waiting, with seven days to answer. You are sent one push for it, with no words of the server's and nothing about what is proposed, unless you turned proposal pushes off; never a second one, and none if it was answered or called off before it went (ADR-0046).",
+    "rule": "FR-027, FR-028, Q13",
     "evidence": "test",
-    "evidenceRef": "BondTimezoneEndpointTest#an active bond records a proposal, and the zone does not move yet",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "evidenceRef": "BondPushesTest#a zone change waiting on the other member is told to them only, once, and never again",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#support.events.publish(ProposalOpened.of(proposal))"
   },
   {
     "id": "proposal-confirmed-partner-proposes",

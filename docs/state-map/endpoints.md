@@ -395,6 +395,56 @@ curl -X DELETE "$API/auth/sessions/$SESSION" -H "Authorization: Bearer $TOKEN"
 |---|---|---|---|
 | 404 | `NOT_FOUND` | The id in the path is not a UUID. It is the same answer as a session that is not yours, and not a 400 about its shape. The rows say what the other ids get. | smoke |
 
+### PUT /me/devices/current/push-token
+
+give the current device a push token
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"token":"<FCM registration token>"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session, so there is no device to speak of. Sign in first. | ADR-0019 §5 | smoke |
+| `account.session` | `ACCESS_VALID` | the sign-in that started this session described its device | 204 stays | The token becomes the one this device holds, replacing any it held, and is kept by the notification module. If another device row held it, that row loses it: an earlier sign-in of yours from the same phone is folded into this one (its session goes on), and anybody else's device simply stops being sent pushes. Saying it again changes nothing. A token that is blank, has whitespace in it or is over 1024 characters is 422 on token. | FR-080, FR-083, ADR-0044 §2 | smoke |
+| `account.session` | `ACCESS_VALID` | the sign-in that started this session described no device | 404 `NOT_FOUND` | A device is made at sign-in from what the client says about itself, and this session said nothing, so there is no current device to hold a token. Sign in again with a device description. | ADR-0025 §3, ADR-0044 §2 | smoke |
+| `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes (the server allows 60 seconds for a wrong clock). Exchange the refresh token at POST /auth/refresh, then repeat the call. (a test asserts the 401 for an expired token on a test-only route, not the code) | ADR-0019 §5 | never-run |
+| `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired (15 minutes, and the 60 seconds more the server allows) | 404 `NOT_FOUND` | The token still works, but the session it names has ended, and its device's push token was forgotten when it did. An ended session has no current device, so nothing can be registered or removed for it. | ADR-0044 §2 | smoke |
+| `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | Nothing is left that the server accepts. Sign in again. | ADR-0019 §4 | never-run |
+
+### DELETE /me/devices/current/push-token
+
+remove the current device's push token
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session, so there is no device to speak of. Sign in first. | ADR-0019 §5 | smoke |
+| `account.session` | `ACCESS_VALID` | the sign-in that started this session described its device | 204 stays | The device forgets its push token, if it held one, and is sent no more pushes until a token is registered again. The answer is the same whether or not there was one. Every way a session ends does the same by itself. | FR-080, FR-083, ADR-0044 §2 | smoke |
+| `account.session` | `ACCESS_VALID` | the sign-in that started this session described no device | 404 `NOT_FOUND` | A device is made at sign-in from what the client says about itself, and this session said nothing, so there is no current device to hold a token. Sign in again with a device description. | ADR-0025 §3, ADR-0044 §2 | smoke |
+| `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes (the server allows 60 seconds for a wrong clock). Exchange the refresh token at POST /auth/refresh, then repeat the call. (a test asserts the 401 for an expired token on a test-only route, not the code) | ADR-0019 §5 | never-run |
+| `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired (15 minutes, and the 60 seconds more the server allows) | 404 `NOT_FOUND` | The token still works, but the session it names has ended, and its device's push token was forgotten when it did. An ended session has no current device, so nothing can be registered or removed for it. | ADR-0044 §2 | smoke |
+| `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | Nothing is left that the server accepts. Sign in again. | ADR-0019 §4 | never-run |
+
 ### GET /me
 
 read your profile
@@ -1001,6 +1051,63 @@ curl -X PUT "$API/bonds/$BOND/members/me/settings" -H "Authorization: Bearer $TO
 |---|---|
 | 415 | Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type. |
 
+### GET /bonds/{bondId}/members/me/notifications
+
+read which kinds of push you want in this bond
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl "$API/bonds/$BOND/members/me/notifications" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 200 stays | Which kinds of push you want in this bond: everything on but on-this-day until you choose. Only yours: the path has no way to name your partner's. | FR-081, Q7, ADR-0045 §1 | smoke |
+| `bond` | `ACTIVE` |  | 200 stays | Yours, as on a bond of one. Your partner's are theirs and are never shown. | FR-081, ADR-0045 §1 | test |
+| `bond` | `PENDING_DELETION` |  | 200 stays | Reading is not a write, so the countdown does not stop it. |  | never-run |
+| `bond` | `ARCHIVED` |  | 200 stays | An ended bond's record stays readable, your own choices with it. | ADR-0028 §4 | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
+
+### PUT /bonds/{bondId}/members/me/notifications
+
+turn kinds of push on or off in this bond, leaving the rest
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl -X PUT "$API/bonds/$BOND/members/me/notifications" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"categories": {"onThisDay": true}}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | test |
+| `bond` | `PENDING_MEMBER` |  | 200 stays | Sets the kinds it is sent and keeps the others: a toggle left out is not cleared. No If-Match, and the bond's ETag does not move. | ADR-0045 §1 | smoke |
+| `bond` | `ACTIVE` |  | 200 stays | The same on a bond of two. Turning a kind off holds back your own copy only: your partner is still told, and is not told that you are not. | FR-081, Q9, ADR-0045 §1, §3 | test |
+| `bond` | `PENDING_DELETION` |  | 409 `BOND_ARCHIVED` | A bond counting down takes no writes, your own choices included. | BR-9, FR-028 | never-run |
+| `bond` | `ARCHIVED` |  | 409 `BOND_ARCHIVED` | Writes stop when the bond ends; reads do not. | BR-9, ADR-0028 §4 | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
+| 422 | `VALIDATION_FAILED` | categories is missing or null. A toggle that is not true or false is 400 MALFORMED_REQUEST instead; a toggle left out is kept, not an error. | smoke |
+
 ### PATCH /bonds/{bondId}/timezone
 
 propose a new time zone
@@ -1271,7 +1378,7 @@ curl -X POST "$API/bonds/$BOND/entries" -H "Authorization: Bearer $TOKEN" -H "Id
 | `day` | `NOT_OPENED` | the bond takes entries, and an offline draft's intendedAt names a day that ended before the bond became two people | 201 → `SUSPENDED` | The draft is within the 36-hour offline window and the day has no row, so this write opens it, and opens it SUSPENDED. A day that ended before the bond became two people is suspended for good, so nothing on it is revealed, even with both entries in. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | ADR-0032 §7 | test |
 | `day` | `OPEN` | the bond takes entries | 201 → `PARTIAL` | The day has a row and no live entry: an entry was deleted from it, or the joining day resumed empty. Yours is counted as its first. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-1 | test |
 | `day` | `PARTIAL` | a new request, the bond takes entries, and you have already written today | 409 `ENTRY_ALREADY_EXISTS` | One entry per member per day. The database's unique index refuses the second; the first is untouched. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-2 | smoke |
-| `day` | `PARTIAL` | the bond takes entries, your partner has written, you have not, and the bond has no reveal time or it has passed | 201 → `REVEALED` | Yours is the second entry, so both are revealed in the same transaction and each of you can read the other. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-1, ADR-0032 §1 | smoke |
+| `day` | `PARTIAL` | the bond takes entries, your partner has written, you have not, and the bond has no reveal time or it has passed | 201 → `REVEALED` | Yours is the second entry, so both are revealed in the same transaction and each of you can read the other. Each of you is then sent one push that the day is open, with no words in it, unless you turned reveal pushes off (ADR-0046). On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-1, ADR-0032 §1 | smoke |
 | `day` | `PARTIAL` | the bond takes entries, your partner has written, you have not, and the bond's reveal time is still ahead | 201 → `PENDING_REVEAL` | Yours is the second entry, but the bond has a reveal time that has not come, so both entries stay locked until it does. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | FR-062 | smoke |
 | `day` | `PENDING_REVEAL` | a new request, and the bond takes entries | 409 `ENTRY_ALREADY_EXISTS` | Both of you have written and the day is only waiting for its time, so any write here is a second entry from its author. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-2 | never-run |
 | `day` | `REVEALED` | a new request, the bond takes entries, and the day is today | 409 `DAY_CLOSED` | A revealed day is settled: its words have been read. The day is checked before the entry is inserted, so this is the answer whether you still have an entry on it or deleted yours, which is what stops delete-then-rewrite replacing words already read. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-10, ADR-0032 §8 | test |
@@ -1701,7 +1808,7 @@ react to your partner's entry
 
 **Needs:** an access token.
 
-- Content-Type (application/json, with exactly one key, {"type": "HEART", "THANK_YOU", "SMILE" or "MOVED"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)
+- Content-Type (application/json, with exactly one key, {"type": "HEART", "THANK_YOU", "SMILE", "MOVED" or "ME_TOO"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)
 
 **Try it:**
 
@@ -1728,7 +1835,7 @@ curl -X PUT "$API/entries/$ENTRY/reaction" -H "Authorization: Bearer $TOKEN" -H 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 400 | `MALFORMED_REQUEST` | The body is not one JSON object with the one key: not an object, a key other than type, type twice, a value that is an object or an array, or content after the object. Nothing is set. | smoke |
-| 422 | `VALIDATION_FAILED` | type is missing, null, or not one of the four names exactly as written. Nothing is set. | smoke |
+| 422 | `VALIDATION_FAILED` | type is missing, null, or not one of the five names exactly as written. Nothing is set. | smoke |
 | 404 | `NOT_FOUND` | There is no such entry, the id is not an id, you are not a member of its bond, or it is your partner's entry and still locked: every entry you were never shown. No more specific reason is returned. | smoke |
 | 409 | `REACTION_ON_OWN_ENTRY` | You wrote the entry, revealed or not. A reaction is left on your partner's entry; your own takes none. | smoke |
 | 409 | `ENTRY_IMMUTABLE` | The entry is shown to you as erased (deleted by its author, or withdrawn at an ending, whether or not the erasure has run yet), or an erasure committed, or held the row past two seconds, while this request was deciding. Nothing is set. Told before an ending. | smoke |

@@ -2,6 +2,11 @@ package com.moyi.bond.infra.database
 
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.infra.BondTestApplication
+import com.moyi.bond.infra.FakeUserDirectory
+import com.moyi.common.events.EventConsumer
+import com.moyi.common.security.TokenRevocation
+import com.moyi.common.security.TokenRevocations
+import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -9,8 +14,18 @@ import org.flywaydb.core.Flyway
 import org.flywaydb.core.api.MigrationVersion
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.SpringBootConfiguration
+import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration
+import org.springframework.boot.context.TypeExcludeFilter
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan
+import org.springframework.boot.persistence.autoconfigure.EntityScan
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.ComponentScan
+import org.springframework.context.annotation.FilterType
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories
 import org.springframework.jdbc.core.JdbcTemplate
 import org.testcontainers.postgresql.PostgreSQLContainer
 import java.time.Instant
@@ -44,7 +59,7 @@ import javax.sql.DataSource
  * `AnchorIntervalEntity` maps does not exist when this context starts.
  */
 @SpringBootTest(
-    classes = [BondTestApplication::class],
+    classes = [AnchorIntervalBackfillTest.BeforeTheOutbox::class],
     properties = ["spring.flyway.target=11", "spring.jpa.hibernate.ddl-auto=none"],
 )
 internal class AnchorIntervalBackfillTest(
@@ -165,6 +180,36 @@ internal class AnchorIntervalBackfillTest(
             bond.status,
             bond.createdAt,
         )
+    }
+
+    /**
+     * [BondTestApplication]'s context without an event consumer. At V11 there is no outbox
+     * (V14), and a context with a consumer registers it at start-up, which locks
+     * `outbox_events` and fails; one with none touches nothing. Since Phase 4 N3 `bond` has a
+     * consumer of its own (`bond.notify`) and its test context scans `notification`, which has
+     * another, so this test, the one that stops before V14, leaves both out. Nested in the test
+     * class, so that no other context's scan picks it up.
+     */
+    @SpringBootConfiguration
+    @EnableAutoConfiguration
+    @ComponentScan(
+        basePackages = ["com.moyi.common", "com.moyi.bond"],
+        excludeFilters = [
+            // @SpringBootApplication's own two, so that test classes and their nested configurations stay out.
+            ComponentScan.Filter(type = FilterType.CUSTOM, classes = [TypeExcludeFilter::class]),
+            ComponentScan.Filter(type = FilterType.CUSTOM, classes = [AutoConfigurationExcludeFilter::class]),
+            ComponentScan.Filter(type = FilterType.ASSIGNABLE_TYPE, classes = [EventConsumer::class, BondTestApplication::class]),
+        ],
+    )
+    @ConfigurationPropertiesScan("com.moyi.common", "com.moyi.bond")
+    @EntityScan("com.moyi.bond")
+    @EnableJpaRepositories("com.moyi.bond")
+    internal class BeforeTheOutbox {
+        @Bean
+        fun userDirectory(): UserDirectory = FakeUserDirectory()
+
+        @Bean
+        fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }
     }
 
     companion object {

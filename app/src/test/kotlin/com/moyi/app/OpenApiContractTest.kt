@@ -719,7 +719,7 @@ class OpenApiContractTest(
     }
 
     @Test
-    fun `a reaction is put as one required type of the four and deleted with no body, and removing a locked one can conflict`() {
+    fun `a reaction is put as one required type of the five and deleted with no body, and removing a locked one can conflict`() {
         val reaction = api.paths["/api/v1/entries/{entryId}/reaction"]!!
         reaction.readOperationsMap().keys.map { it.name } shouldContainExactlyInAnyOrder listOf("PUT", "DELETE")
 
@@ -752,7 +752,7 @@ class OpenApiContractTest(
     }
 
     @Test
-    fun `an entry carries the reaction on it, one of the four or null and always sent, and nothing says when it was left`() {
+    fun `an entry carries the reaction on it, one of the five or null and always sent, and nothing says when it was left`() {
         val full =
             api.components.schemas["EntryResponse"]!!
                 .allOf
@@ -1033,7 +1033,7 @@ class OpenApiContractTest(
 
     private companion object {
         /** FR-048's set, written out: the contract's enum, so a change here is a breaking change to a generated client. */
-        val REACTION_TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED")
+        val REACTION_TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO")
         val GENERATED = File("build/openapi/openapi.json")
         val COMMITTED = File("../contracts/openapi.json")
     }

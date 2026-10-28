@@ -170,9 +170,9 @@ internal class ReactionsTest(
     }
 
     @Test
-    fun `each of the four types is taken, by its exact name`() {
+    fun `each of the five types is taken, by its exact name`() {
         val day = revealedDay()
-        // The wire names, written out: a rename in the enum is a breaking change and fails here.
+        // The wire names, written out, in their order: a rename in the enum is a breaking change and fails here.
         ReactionType.entries.map { it.name } shouldBe TYPES
 
         for (type in TYPES) {
@@ -180,6 +180,38 @@ internal class ReactionsTest(
             rows() shouldBe listOf(Row(day.adas, day.beaMember, type))
             reactionShown(ada, day.bond, day.adas) shouldBe listOf(type, type, type)
         }
+    }
+
+    @Test
+    fun `ME_TOO, the fifth, is set, shown to both like the others, and replaces and is replaced by each of the four`() {
+        val day = revealedDay()
+        val shownToBoth = { type: String? ->
+            reactionShown(ada, day.bond, day.adas) shouldBe listOf(type, type, type)
+            reactionShown(bea, day.bond, day.adas) shouldBe listOf(type, type, type)
+        }
+
+        react(bea, day.adas, ME_TOO).status shouldBe 204
+        rows() shouldBe listOf(Row(day.adas, day.beaMember, ME_TOO))
+        // The author is shown it on today, the feed and the day, as the member who left it is.
+        shownToBoth(ME_TOO)
+
+        // From every other value to ME_TOO and back: still one row, and always the last one set.
+        for (other in TYPES - ME_TOO) {
+            withClue("$other -> $ME_TOO -> $other") {
+                react(bea, day.adas, other).status shouldBe 204
+                rows() shouldBe listOf(Row(day.adas, day.beaMember, other))
+                react(bea, day.adas, ME_TOO).status shouldBe 204
+                rows() shouldBe listOf(Row(day.adas, day.beaMember, ME_TOO))
+                shownToBoth(ME_TOO)
+                react(bea, day.adas, other).status shouldBe 204
+                rows() shouldBe listOf(Row(day.adas, day.beaMember, other))
+                shownToBoth(other)
+            }
+        }
+
+        unreact(bea, day.adas).status shouldBe 204
+        rows().shouldBeEmpty()
+        shownToBoth(null)
     }
 
     @Test
@@ -459,7 +491,7 @@ internal class ReactionsTest(
         val long = "zq".repeat(MEGABYTE / 2)
         val bodies =
             listOf(
-                // A value that is not one of the four: unknown, the wrong case, padded, a number, a boolean, null, absent, 1 MB.
+                // A value that is not one of the five: unknown, the wrong case, padded, a number, a boolean, null, absent, 1 MB.
                 """{"type":"LOVE"}""" to 422,
                 """{"type":"heart"}""" to 422,
                 """{"type":" HEART"}""" to 422,
@@ -751,7 +783,7 @@ internal class ReactionsTest(
     }
 
     @Test
-    fun `the table holds one row for a member on an entry, and only one of the four types`() {
+    fun `the table holds one row for a member on an entry, and only one of the five types`() {
         val day = revealedDay()
         row(day.adas, day.beaMember, "HEART")
 
@@ -1220,7 +1252,8 @@ internal class ReactionsTest(
         /** The three ways a bond ends with both entries still read in full: [end] makes each. */
         val ENDINGS = listOf("leave", "block keeping entries", "deletion countdown")
 
-        val TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED")
+        val TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO")
+        const val ME_TOO = "ME_TOO"
         val FULL_KEYS =
             listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
 

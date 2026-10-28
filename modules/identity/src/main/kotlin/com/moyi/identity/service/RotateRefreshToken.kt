@@ -8,6 +8,7 @@ import com.moyi.identity.domain.User
 import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.infra.database.AccountStore
 import com.moyi.identity.infra.database.RefreshTokenStore
+import com.moyi.notification.api.PushTokens
 import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
@@ -57,6 +58,7 @@ internal data class RotatedTokens(
  * that rolled back would be a valid credential for nothing that happened.
  */
 @Service
+@Suppress("LongParameterList") // What a rotation touches, each named: the push tokens since ADR-0044.
 internal class RotateRefreshToken(
     private val tokens: RefreshTokenStore,
     private val accounts: AccountStore,
@@ -64,6 +66,7 @@ internal class RotateRefreshToken(
     private val clock: Clock,
     private val transactions: TransactionTemplate,
     private val events: ApplicationEventPublisher,
+    private val pushTokens: PushTokens,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -119,6 +122,7 @@ internal class RotateRefreshToken(
                 // The account can no longer sign in, so its sessions end here.
                 // Not a reuse — nobody did anything wrong with the token.
                 tokens.revokeFamily(previous.familyId, now)
+                previous.deviceId?.let(pushTokens::forget)
                 Outcome.Invalid
             }
 
@@ -143,6 +147,8 @@ internal class RotateRefreshToken(
         now: Instant,
     ): Outcome {
         val revoked = tokens.revokeFamily(previous.familyId, now)
+        // The phone may be the thief's: it is told nothing more (ADR-0044).
+        previous.deviceId?.let(pushTokens::forget)
         log.warn(
             "Refresh token REUSE detected for user {}: family {} revoked ({} token(s)). The account holder is being emailed.",
             previous.userId.value,
