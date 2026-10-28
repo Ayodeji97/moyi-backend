@@ -277,6 +277,55 @@
           ]
         }
       ]
+    },
+    {
+      "id": "media",
+      "label": "Media",
+      "regions": [
+        {
+          "id": "media",
+          "label": "The photo or voice note (one asset, named by its id; only the person who uploaded it can reach it by its id)",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none (an id that names nothing of yours)",
+              "initial": true
+            },
+            {
+              "id": "PENDING_UPLOAD",
+              "label": "PENDING_UPLOAD, the upload URL issued"
+            },
+            {
+              "id": "UPLOADED",
+              "label": "UPLOADED, the bytes in the storage"
+            },
+            {
+              "id": "PROCESSING",
+              "label": "PROCESSING",
+              "built": false
+            },
+            {
+              "id": "READY",
+              "label": "READY",
+              "built": false
+            },
+            {
+              "id": "QUARANTINED",
+              "label": "QUARANTINED",
+              "built": false
+            },
+            {
+              "id": "FAILED",
+              "label": "FAILED",
+              "built": false
+            },
+            {
+              "id": "DELETED",
+              "label": "DELETED, by you"
+            }
+          ]
+        }
+      ]
     }
   ],
   "events": [

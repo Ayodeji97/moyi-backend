@@ -10,9 +10,10 @@ import java.util.UUID
  * Which resource an `idempotency_keys.result_id` names — V11's
  * `result_kind` CHECK, as a type, so a kind the table would refuse cannot be
  * written in the first place and a replay always knows what to re-read.
- * A new idempotent resource adds a value here and to that CHECK together.
+ * A new idempotent resource adds a value here and to that CHECK together
+ * (MEDIA: V33, for `POST /media/{id}/complete`, ADR-0047).
  */
-enum class ResultKind { ENTRY, }
+enum class ResultKind { ENTRY, MEDIA, }
 
 /**
  * What [IdempotencyInterceptor] read off an `@Idempotent` request, handed to

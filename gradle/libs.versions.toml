@@ -27,6 +27,10 @@ swaggerParser = "2.1.48"
 # not Redis (spec §12.3: Redis fails open here, which is unsafe for a lock).
 # 7.x is the line built against Spring Framework 7. Not in the Spring Boot BOM.
 shedlock = "7.10.1"
+# The S3 client and presigner for Cloudflare R2 (Phase 4 D1, ADR-0047), confined
+# to one internal class in `modules/media` (doc 25:118). R2 speaks the S3 API, and
+# the same class reaches MinIO in tests and locally. Not in the Spring Boot BOM.
+awssdk = "2.55.16"
 
 [libraries]
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
@@ -39,6 +43,7 @@ shedlock-spring = { module = "net.javacrumbs.shedlock:shedlock-spring", version.
 shedlock-jdbc = { module = "net.javacrumbs.shedlock:shedlock-provider-jdbc-template", version.ref = "shedlock" }
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+awssdk-bom = { module = "software.amazon.awssdk:bom", version.ref = "awssdk" }
 # flyway-core / flyway-database-postgresql, the postgresql JDBC driver, and
 # Testcontainers are NOT pinned here — their versions come from the Spring
 # Boot BOM (spring-boot-dependencies) that every Spring-facing module
