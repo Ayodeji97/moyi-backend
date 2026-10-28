@@ -80,10 +80,12 @@
 # (and the release of held pushes) every five seconds: the member who wrote is
 # not reminded, the one who did not is, held by her quiet hours, released when
 # they are made to have passed, and taken by the logging provider. Last run on
-# 2026-10-28, from a jar of this change's code, against a database of its own and --attach,
-# its own compose project (Postgres on 55436, Valkey on 63796): 993 passed, 0 failed,
-# 0 skipped, 26 sections. The run before it found that a reminder falling before its bond
-# began failed the whole sweep (ADR-0045). Before it, on 2026-10-27,
+# 2026-10-28, after the review of #99 (a reminder called off by writing, a half-hour
+# lookback), from a jar of that code, against a fresh database and --attach, its own compose
+# project (Postgres on 55436, Valkey on 63796): 992 passed, 0 failed, 1 skipped (the tag
+# across the erasure, the poller having won the race), 26 sections. The run before, from the
+# change's first jar, 993, 0 and 0; the one before that found that a reminder falling before
+# its bond began failed the whole sweep (ADR-0045). Before them, on 2026-10-27,
 # from a jar of this change's code before its rebase onto 158bbfe, against a database of its own and --attach, Postgres on
 # 55432: 952 passed, 0 failed, 1 skipped (the tag across the erasure, the
 # poller having won the race), 25 sections. Before it, on 2026-10-24, for the production

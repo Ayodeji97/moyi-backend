@@ -125,6 +125,10 @@ night. NFR-006's 60 s is measured outside quiet hours (D-15).
   anything else shares the other two. So FR-082's own example holds: three pushes before
   22:00 send two and drop one, and the 22:00 reveal still goes, in the reserved slot.
   `notifications.reserved` marks the push that took it; V30's CHECK allows it only on `SENT`.
+  **The per-Bond total is checked before the reserved slot is given** (review of #99): three
+  sent with the reserved slot unspent is a count the rule never makes, but the ledger can hold
+  one, since the day is counted in the member's zone and a zone can change mid-day. Without the
+  check that count granted a fourth push.
 - **The per-Bond day is the member's day in that Bond's reminder zone** (D-16): 23 or 25 hours
   across a DST change, starting wherever that zone's midnight falls.
 - **The cross-Bond cap is six in a rolling 24 hours**, because no one zone's day is the
@@ -142,16 +146,22 @@ night. NFR-006's 60 s is measured outside quiet hours (D-15).
   (ADR-0044 decision 2, which calls it free). The concurrency test pauses the first send
   inside the provider with the lock held, and sees the second wait on that lock in
   `pg_locks` before it lets the first finish; with the lock removed the second sends too.
+  **The time the budget counts from is read after the lock is taken** (review of #99): the wait
+  can last a send, and a push that waited across the member's midnight counted against the day
+  that had ended. The test holds the lock over a London midnight.
 
 **6. The daily reminder: `scheduling` knows when, `bond` whose, `gratitude` who wrote.**
 
 - `ReminderJob` (`scheduling`), at thirty seconds past every fifth minute, ShedLock
   `daily-reminders`, asks `gratitude.api.DailyReminders.remindDue(after, upTo)` about **the
-  five minutes that ended on the last five-minute boundary**. Not "since the last run": a run
-  that starts late, or on another instance, asks about the same window, so consecutive runs
-  neither overlap nor leave a gap (`ReminderJobTest` walks a day of the cron's firings). A
-  window nobody ran in while the application was down is not made up: a reminder an hour late
-  is noise (doc 25:69).
+  half hour that ended on the last five-minute boundary**: each run looks back over six of
+  its windows (review of #99). A tick lost to a restart or a deploy is asked about by the next
+  one, and the dedupe key makes the overlap ask for nothing twice (`DailyRemindersTest`: a
+  missed tick, then two runs, one push each). Not "since the last run": a run that starts late,
+  or on another instance, asks about the same half hour. An outage longer than that still
+  loses reminders, bounded on purpose: a reminder more than half an hour after the time the
+  member chose is noise (doc 25:69), and its `stale_after` (the end of the bond-day) bounds it
+  in any case.
 - `bond.api.ReminderRoster.remindersDueBetween` reads every active member of a bond that takes
   entries (`PENDING_MEMBER` or `ACTIVE`, not left) and keeps those whose
   `reminder_time_local` in `reminder_timezone` fell in the window (`ReminderTime`, pure: a
@@ -173,6 +183,21 @@ night. NFR-006's 60 s is measured outside quiet hours (D-15).
   bond-day's row is made by the first entry or by the close job, and the day a member is
   reminded on usually has none yet. A bond's labels are unique to it
   (`bond_days_bond_date_key`) and a member id to one bond, so the key names the same day.
+  The rule lives in one place, `gratitude.domain.ReminderKey`, which both of its users ask.
+- **Writing calls off one's own reminder** (review of #99). A reminder asked for before the
+  member wrote can still be owed afterwards: a 06:30 reminder held by quiet hours to 07:00
+  reaches a member who wrote at 06:45. So `SubmitEntry`, in the entry's own transaction, calls
+  `Notifications.cancel` on that member's reminder key for the bond-day the entry landed on.
+  A push still `REQUESTED` or `HELD` becomes **`CANCELLED`**; one already settled is left
+  alone (V30's `sent_at` CHECK refuses a sent push being anything but `SENT`), and calling it
+  off twice is calling it off once. The key stays spent, so a later sweep asks for nothing. It
+  is the author's reminder only: the other member's is about their own writing (FR-076).
+  **A status of its own rather than `SUPPRESSED`**: that one says the member turned the
+  category off, and the ledger answers "why was this member not told" (ADR-0044). A reminder
+  whose reason went away is a different answer, and reading it as a mute would be wrong. The
+  cancel waits for a push the consumer has locked mid-send, then finds it settled or still
+  owed, never both; the entry write never takes a lock the consumer holds while waiting for
+  one of the write's, so there is no cycle.
 
 ## Consequences
 
@@ -184,7 +209,8 @@ pushes come in, and the lock makes it true under concurrency. The reminder needs
 **Negative.** A setting changed after a push was asked for does not reach it (decision 2).
 The cross-Bond cap can drop a reveal (decision 5). The roster reads every active member every
 five minutes, a few thousand rows at the planned scale. The release is one more job with a
-lock. A reminder window missed during downtime is lost.
+lock. A reminder whose tick fell in an outage longer than half an hour is lost. An entry write
+may wait on a push the consumer is sending, for up to one send.
 
 **Neutral.** `bond`, `gratitude` and `scheduling` now depend on `notification` (for `api`
 values and calls; it remains a leaf). Gratitude's test context scans `notification` so that a
