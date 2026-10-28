@@ -1010,6 +1010,13 @@ largest page were rebuilt for the new worst case (255,507 octets of 262,144 meas
 the longest reaction on every entry that can carry one; ADR-0036 decision 6 carries the
 note).
 
+**An open product question for the owner, found in review and not built:** an entry of
+only C0 control characters (U+0001, say) or only U+2800 (the braille blank, which renders
+as an empty cell) is still accepted. Neither is default-ignorable, so ruling 2 as built does
+not reach them, and neither is whitespace to Kotlin (U+001C–U+001F are, and are refused).
+Whether "says nothing" should take in either is the owner's to rule; `Invisible` is the one
+place a wider set would go.
+
 **Owed, not done here:** the corpus — spec §3.2 and doc 04 §7 say "NFKC-normalised before
 counting" — lives in another repository and still says so; and the KMP client's counter
 (`moyi-app`) should count grapheme clusters of the raw text, which is now what the server
