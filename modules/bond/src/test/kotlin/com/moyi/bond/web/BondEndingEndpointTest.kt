@@ -346,6 +346,43 @@ internal class BondEndingEndpointTest(
     }
 
     @Test
+    fun `an absent flag is refused in every state a block is accepted in, and writes nothing`() {
+        // The state map's block rows each say "without the flag the block is
+        // refused": here is each state but ACTIVE, which the tests above hold.
+        // A bond nobody joined; one counting down, with the caller still in it
+        // and after they have left it; and one the caller already left.
+        val solo = users.verified("Sol").let { ada -> ada to bondIdOf(createBond(ada)) }
+        val countingDown = pairedBond(names = "Cy" to "Di").also { coolOff(it) }
+        val leftCountingDown =
+            pairedBond(names = "Ed" to "Flo").also {
+                coolOff(it)
+                block(it.ada, it.id, """{"withdrawEntries":false}""").status shouldBe 204
+            }
+        val leftArchived =
+            pairedBond(names = "Gus" to "Hal").also { leave(it.ada, it.id).status shouldBe 204 }
+        val cases =
+            listOf(
+                "PENDING_MEMBER" to solo,
+                "PENDING_DELETION" to (countingDown.ada to countingDown.id),
+                "PENDING_DELETION, already left" to (leftCountingDown.ada to leftCountingDown.id),
+                "ARCHIVED, already left" to (leftArchived.ada to leftArchived.id),
+            )
+
+        cases.forEach { (state, caller) ->
+            val (user, bondId) = caller
+            val before = writesOf(bondId)
+            absences.forEach { (body, json) ->
+                withClue("$state body=$body json=$json") {
+                    val refused = send(user, bondId, "block", body, json)
+                    refused.status shouldBe 400
+                    refused.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+                    writesOf(bondId) shouldBe before
+                }
+            }
+        }
+    }
+
+    @Test
     fun `a stranger who sends no flag gets the one 404, not the 400 a member would`() {
         // The flag is asked for after the guard. A 400 here would tell a
         // stranger that they had reached a bond's handler, and a 404 for a
@@ -915,6 +952,30 @@ internal class BondEndingEndpointTest(
         bondId: String,
         body: String? = null,
     ): MockHttpServletResponse = send(userId, bondId, "leave", body, json = body != null)
+
+    /** Both members ask for the deletion, so the bond is counting down (ADR-0030). */
+    private fun coolOff(pair: PairedBond) {
+        listOf(pair.ada, pair.bea).forEach { user ->
+            mockMvc
+                .post("/api/v1/bonds/${pair.id}/deletion-request") { header(HttpHeaders.AUTHORIZATION, bearer(user)) }
+                .andReturn()
+                .response.status shouldBe 202
+        }
+        jdbc.queryForObject("SELECT status FROM bonds WHERE id = ?", String::class.java, UUID.fromString(pair.id)) shouldBe
+            "PENDING_DELETION"
+    }
+
+    /** Everything an ending can write about [bondId]: its row, its members, its blocks, its markers and its events. */
+    private fun writesOf(bondId: String): List<Any?> {
+        val id = UUID.fromString(bondId)
+        return listOf(
+            jdbc.queryForMap("SELECT status, version FROM bonds WHERE id = ?", id),
+            jdbc.queryForList("SELECT user_id, left_at FROM bond_members WHERE bond_id = ? ORDER BY user_id", id),
+            blocksIn(bondId),
+            withdrawnMembers(bondId),
+            withdrawalEvents(bondId).size,
+        )
+    }
 
     /** A block always says what it does with the caller's entries: without the flag it is refused (ADR-0035 question 1). */
     private fun block(
