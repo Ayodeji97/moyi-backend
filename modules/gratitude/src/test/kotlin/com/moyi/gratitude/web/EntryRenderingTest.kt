@@ -200,7 +200,9 @@ internal class EntryRenderingTest {
         shouldThrow<IllegalStateException> { PartnerEntryResponse.of(unseen, date, favourited = false, reaction = null) }
         EntryResponse.of(unseen, date, favourited = false, reaction = null).shouldBeNull()
         // And no partner shape is left that could carry it: the narrow one is BR-8's lock alone.
-        PartnerEntryResponse::class.java.permittedSubclasses.map { it.simpleName }.toSet() shouldBe
+        PartnerEntryResponse::class.java.permittedSubclasses
+            .map { it.simpleName }
+            .toSet() shouldBe
             setOf("EntryResponse", "LockedEntryResponse")
     }
 

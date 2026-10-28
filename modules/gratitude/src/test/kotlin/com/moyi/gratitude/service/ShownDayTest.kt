@@ -6,8 +6,8 @@ import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryStatus
 import com.moyi.gratitude.domain.EntryText
-import com.moyi.gratitude.domain.Reader
 import com.moyi.gratitude.domain.Readability
+import com.moyi.gratitude.domain.Reader
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
