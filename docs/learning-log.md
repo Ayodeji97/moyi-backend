@@ -2614,3 +2614,25 @@ Reality: `tufin/oasdiff:v1.34.1`, the image `oasdiff-action` v0.1.20 runs, repor
 Wrong about: the cause. Three versions agreeing ruled out the version, and I named it
          anyway. The tool's warning text said "compared the `allOf` branches one at a time…
          run with --flatten-allof"; reading the verdict's own words would have found it.
+
+## 2026-10-27 · Feature · Push N1 — a leaf that carries and records, and the logger that printed the body
+
+Expected: the push transport would copy the email port (ADR-0017): a port, an adapter, a
+         logger by name, and a consumer on the outbox that already retried for ever. The
+         spec's one [inferred] item, that a consumer may publish from inside a delivery, was
+         read from the dispatcher's code and looked true.
+Reality: it was true, and was then run: a test consumer requests a push from inside its own
+         delivery, records `current_setting('transaction_isolation')` (read committed), and
+         the push it asked for is sent on the next run. The surprise was elsewhere. Spring's
+         `DefaultRestClient` writes every object body it serialises into a DEBUG line,
+         "Writing [...]", and the FCM body holds the device token and the token request a
+         signed credential. The FCM sender now hands the client bytes, which no converter
+         sees; its test raises `org.springframework` to TRACE and goes red when the map is
+         passed instead. The same logger prints the Resend body (recipient and, for a
+         verification email, the link) at DEBUG, which this PR reports and does not change.
+         Mutations: nineteen in `notification`, ten in `identity` and two in `app`, each
+         turned its test red; the first try at "reuse forgets the token" stayed green
+         because the mutation removed the other branch's identical line.
+Wrong about: where a secret leaks. Not in our `toString`, which was redacted, but in a
+         library's debug line about the object we handed it. And about a mutation being
+         the mutation intended: a replacement that matches twice breaks the first match.

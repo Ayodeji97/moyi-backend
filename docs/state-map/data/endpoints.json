@@ -1010,6 +1010,28 @@
     "curl": "curl -X DELETE \"$API/auth/sessions/$SESSION\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "PUT /api/v1/me/devices/current/push-token",
+    "summary": "give the current device a push token",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X PUT \"$API/me/devices/current/push-token\" -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: application/json\" -d '{\"token\":\"<FCM registration token>\"}'"
+  },
+  {
+    "id": "DELETE /api/v1/me/devices/current/push-token",
+    "summary": "remove the current device's push token",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X DELETE \"$API/me/devices/current/push-token\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
     "id": "GET /api/v1/me",
     "summary": "read your profile",
     "machine": "account",

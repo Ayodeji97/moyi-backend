@@ -395,6 +395,56 @@ curl -X DELETE "$API/auth/sessions/$SESSION" -H "Authorization: Bearer $TOKEN"
 |---|---|---|---|
 | 404 | `NOT_FOUND` | The id in the path is not a UUID. It is the same answer as a session that is not yours, and not a 400 about its shape. The rows say what the other ids get. | smoke |
 
+### PUT /me/devices/current/push-token
+
+give the current device a push token
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"token":"<FCM registration token>"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session, so there is no device to speak of. Sign in first. | ADR-0019 §5 | smoke |
+| `account.session` | `ACCESS_VALID` | the sign-in that started this session described its device | 204 stays | The token becomes the one this device holds, replacing any it held, and is kept by the notification module. If another device row held it, that row loses it: an earlier sign-in of yours from the same phone is folded into this one (its session goes on), and anybody else's device simply stops being sent pushes. Saying it again changes nothing. A token that is blank, has whitespace in it or is over 1024 characters is 422 on token. | FR-080, FR-083, ADR-0044 §2 | smoke |
+| `account.session` | `ACCESS_VALID` | the sign-in that started this session described no device | 404 `NOT_FOUND` | A device is made at sign-in from what the client says about itself, and this session said nothing, so there is no current device to hold a token. Sign in again with a device description. | ADR-0025 §3, ADR-0044 §2 | smoke |
+| `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes (the server allows 60 seconds for a wrong clock). Exchange the refresh token at POST /auth/refresh, then repeat the call. (a test asserts the 401 for an expired token on a test-only route, not the code) | ADR-0019 §5 | never-run |
+| `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired (15 minutes, and the 60 seconds more the server allows) | 404 `NOT_FOUND` | The token still works, but the session it names has ended, and its device's push token was forgotten when it did. An ended session has no current device, so nothing can be registered or removed for it. | ADR-0044 §2 | smoke |
+| `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | Nothing is left that the server accepts. Sign in again. | ADR-0019 §4 | never-run |
+
+### DELETE /me/devices/current/push-token
+
+remove the current device's push token
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session, so there is no device to speak of. Sign in first. | ADR-0019 §5 | smoke |
+| `account.session` | `ACCESS_VALID` | the sign-in that started this session described its device | 204 stays | The device forgets its push token, if it held one, and is sent no more pushes until a token is registered again. The answer is the same whether or not there was one. Every way a session ends does the same by itself. | FR-080, FR-083, ADR-0044 §2 | smoke |
+| `account.session` | `ACCESS_VALID` | the sign-in that started this session described no device | 404 `NOT_FOUND` | A device is made at sign-in from what the client says about itself, and this session said nothing, so there is no current device to hold a token. Sign in again with a device description. | ADR-0025 §3, ADR-0044 §2 | smoke |
+| `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes (the server allows 60 seconds for a wrong clock). Exchange the refresh token at POST /auth/refresh, then repeat the call. (a test asserts the 401 for an expired token on a test-only route, not the code) | ADR-0019 §5 | never-run |
+| `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired (15 minutes, and the 60 seconds more the server allows) | 404 `NOT_FOUND` | The token still works, but the session it names has ended, and its device's push token was forgotten when it did. An ended session has no current device, so nothing can be registered or removed for it. | ADR-0044 §2 | smoke |
+| `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | Nothing is left that the server accepts. Sign in again. | ADR-0019 §4 | never-run |
+
 ### GET /me
 
 read your profile

@@ -73,7 +73,16 @@
 # partner and today does not, and a favourite's row holds no time (V26).
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-28, for ME_TOO after main
+# days are the tests' to show. Since Phase 4 N1 it registers a push token for
+# the session's device, replaces and removes it, sees a logout forget it, a
+# deviceless or ended session answered 404, and the token in no log line; no
+# push is sent, since nothing requests one before N3. Last run on 2026-10-28,
+# from a jar of 56a7941 (this change with main and #104, V27, merged in), against
+# a compose project of its own (moyi-n1, Postgres 55434, Valkey 63794) and
+# --attach: 959 passed, 0 failed, 1 skipped (the tag across the erasure, the
+# poller having won the race), 25 sections. Before it, on 6ecece5: 957 passed,
+# 0 failed, 0 skipped.
+# Before it, for ME_TOO after main
 # (#97, V26) was merged in, from a jar of a56ac42's code, against a database of
 # its own and --attach, under compose project moyi-0f with Postgres on 55443 and
 # Valkey on 56390: 939 passed, 0 failed, 0 skipped, 24 sections. Before it, for
@@ -484,6 +493,7 @@ expect "DELETE the current session is a logout: 204" 204 "" -- -X DELETE "$API/a
 expect "…and the watch now lists no sessions" 200 '"sessions":[]' -- "$API/auth/sessions" -H "Authorization: Bearer $WATCH_ACCESS"
 expect "an unknown platform is 422 on device.platform" 422 '"field":"device.platform"' -- -X POST "$API/auth/login" -d "$(printf '{"email":"%s","password":"%s","device":{"platform":"BLACKBERRY","appVersion":"1","osVersion":"7"}}' "$EMAIL" "$PASSWORD")"
 flush_buckets
+
 
 echo; echo "password reset (FR-004, T-17, ADR-0022)"
 EMAILS_BEFORE="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
@@ -2055,6 +2065,38 @@ if [ "$MI_MADE" = 6 ]; then
 else
   skip "milestones: the seventh day and the ending (the days could not be put in by hand)"
 fi
+
+echo; echo "push tokens (Phase 4 N1, ADR-0044)"
+# The token goes to the device of the caller's session and is kept by the
+# notification module. Nothing requests a push before slice N3, and no route
+# may trigger one, so this proves the route and the table, not a send.
+flush_buckets
+PUSH_TOKEN="smoke-push-token-$RANDOM$RANDOM"
+expect "push: sign in on a phone" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$NEW_PASSWORD")"
+PUSH_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"; PUSH_REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "push: PUT a token for the current device is 204" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+db_is "push: …and it is kept for that session's device, as ANDROID" "$(sql "SELECT p.platform FROM push_tokens p JOIN refresh_tokens t ON t.device_id = p.device_id JOIN users u ON u.id = t.user_id WHERE u.email='$EMAIL' AND p.token='$PUSH_TOKEN' AND t.revoked_at IS NULL AND t.rotated_at IS NULL")" "ANDROID"
+expect "push: PUT the same token again is 204, one row" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+db_is "push: …still one row" "$(sql "SELECT count(*) FROM push_tokens WHERE token='$PUSH_TOKEN'")" "1"
+expect "push: a token with a space in it is 422 on token" 422 '"field":"token"' -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d '{"token":"two words"}'
+expect "push: DELETE the token is 204" 204 "" -- -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS"
+db_is "push: …and it is gone" "$(sql "SELECT count(*) FROM push_tokens WHERE token='$PUSH_TOKEN'")" "0"
+expect "push: DELETE again is still 204" 204 "" -- -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS"
+expect "push: PUT it back" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+expect "push: logout is 204" 204 "" -- -X POST "$API/auth/logout" -d "{\"refreshToken\":\"$PUSH_REFRESH\"}"
+db_is "push: …and the logout forgot the device's token" "$(sql "SELECT count(*) FROM push_tokens WHERE token='$PUSH_TOKEN'")" "0"
+expect "push: PUT with the ended session's access token is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+expect "push: DELETE with it is 404 NOT_FOUND too" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS"
+expect "push: sign in without describing a device" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "{\"email\":\"$EMAIL\",\"password\":\"$NEW_PASSWORD\"}"
+BARE_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"; BARE_REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "push: a session with no device has nowhere to keep a token: 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $BARE_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+expect "push: …and DELETE from it is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $BARE_ACCESS"
+expect "push: logout of the bare session" 204 "" -- -X POST "$API/auth/logout" -d "{\"refreshToken\":\"$BARE_REFRESH\"}"
+expect "push: PUT without a bearer is 401" 401 '"code":"UNAUTHENTICATED"' -- -X PUT "$API/me/devices/current/push-token" -d "{\"token\":\"$PUSH_TOKEN\"}"
+expect "push: DELETE without a bearer is 401" 401 '"code":"UNAUTHENTICATED"' -- -X DELETE "$API/me/devices/current/push-token"
+# The local profile's push provider is the logging one; it and everything else must never print a token.
+if grep -q "$PUSH_TOKEN" "$MOYI_LOG"; then fail "push: the token is in no log line" "found in $MOYI_LOG"; else pass "push: the token is in no log line"; fi
+flush_buckets
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

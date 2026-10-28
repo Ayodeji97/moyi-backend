@@ -13,11 +13,12 @@ internal enum class DevicePlatform {
 /**
  * What a sign-in said about the client it came from (doc 07 §2, FR-007).
  *
- * Created at login, one row per sign-in for now: without a push token or an
- * installation id there is nothing to say two sign-ins from one phone are
- * one device, and inventing a fingerprint to guess would be worse than two
- * rows. `pushToken` and `revokedAt` are doc 07's columns for Phase 3; nothing
- * fills them yet (ADR-0025).
+ * Created at login, one row per sign-in: until a push token is registered
+ * there is nothing to say two sign-ins from one phone are one device, and
+ * inventing a fingerprint to guess would be worse than two rows. `revokedAt`
+ * marks a row folded into a later sign-in from the same phone, once that
+ * sign-in registered the phone's push token (ADR-0025, ADR-0044); the token
+ * itself is kept by `notification`.
  */
 internal data class Device(
     val id: UUID,
@@ -26,7 +27,6 @@ internal data class Device(
     val appVersion: String,
     val osVersion: String,
     val lastSeenAt: Instant,
-    val pushToken: String? = null,
     val revokedAt: Instant? = null,
 ) {
     init {
