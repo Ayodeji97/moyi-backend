@@ -34,6 +34,11 @@ internal class FakeUserDirectory : UserDirectory {
         users.computeIfPresent(id) { _, user -> user.copy(displayName = displayName) }
     }
 
+    /** An account identity no longer knows: erased, as Phase 5 will erase one, while its member rows stay. */
+    fun forget(id: UUID) {
+        users.remove(id)
+    }
+
     fun clear() = users.clear()
 
     override fun find(id: UUID): UserSummary? = users[id]
