@@ -202,7 +202,7 @@ internal class WithdrawalReadTest(
     }
 
     @Test
-    fun `an entry withdrawn before it was ever revealed is author and REMOVED to the partner, and nothing else`() {
+    fun `an entry withdrawn before it was ever revealed is nothing to the partner, and the day is as a delete leaves it`() {
         val adas = entryOf(submit(ada, ADAS_WORDS))
         val before = today(bea)
         before["partnerEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
@@ -211,17 +211,19 @@ internal class WithdrawalReadTest(
 
         block(ada).status shouldBe 204
 
-        // The partner was owed BR-8's two fields while it was live, and is owed no more now:
-        // no id, no timestamps, no date, nothing by which to tell when it was written.
+        // The partner was owed BR-8's two fields while it was live, and is owed nothing now, not even
+        // that it was written (the owner's ruling of 2026-10-21, ADR-0032 question 2): the `null` of a
+        // partner who never wrote. And the day is shown as the erasure will leave it, `OPEN`, as a
+        // delete by hand leaves it at once: the row still says `PARTIAL` until the consumer runs.
         val theirs = todayResponse(bea)
         theirs.contentAsString shouldNotContain ADAS_WORDS
         theirs.contentAsString shouldNotContain adas.id
+        theirs.contentAsString shouldNotContain adas.authorMemberId
         val partners = json.readTree(theirs.contentAsString)
-        partners["partnerEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-        partners["partnerEntry"]["authorMemberId"].asString() shouldBe adas.authorMemberId
-        partners["partnerEntry"]["status"].asString() shouldBe "REMOVED"
+        partners["partnerEntry"].isNull shouldBe true
         partners["myEntry"].isNull shouldBe true
-        partners["bondDay"]["status"].asString() shouldBe "PARTIAL"
+        partners["bondDay"]["status"].asString() shouldBe "OPEN"
+        jdbc.queryForObject("SELECT status FROM bond_days WHERE bond_id = ?::uuid", String::class.java, bondId) shouldBe "PARTIAL"
 
         // The author always knew when she wrote it: the wide tombstone, without the words.
         val hers = todayResponse(ada)
@@ -234,7 +236,7 @@ internal class WithdrawalReadTest(
         own["myEntry"]["text"].isNull shouldBe true
         own["myEntry"]["status"].asString() shouldBe "DELETED"
         own["partnerEntry"].isNull shouldBe true
-        own["bondDay"]["status"].asString() shouldBe "PARTIAL"
+        own["bondDay"]["status"].asString() shouldBe "OPEN"
         nothingWasErased(adas.id to ADAS_WORDS)
     }
 

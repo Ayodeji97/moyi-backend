@@ -52,7 +52,9 @@ import javax.sql.DataSource
  *
  * - whether the day is listed;
  * - the exact JSON of each entry: every key and value of the wide shape, and
- *   the whole text of the two narrow ones;
+ *   the whole text of the narrow one;
+ * - the day's status: the row's, or what the erasure of a withdrawal will
+ *   make it (`service.shownTo`);
  * - that no word of an entry the reader may not read in full is anywhere in
  *   what they were sent;
  * - and the cross-check: the day is listed **if and only if**
@@ -61,8 +63,9 @@ import javax.sql.DataSource
  *
  * What is expected ([Shape.of]) is written here from the product's rule and
  * not taken from the code under test: your own entry, or one that has been
- * revealed; a tombstone where it was erased; and for a partner's entry you
- * were never shown, an author and a status.
+ * revealed; a tombstone where it was erased; for a partner's entry you were
+ * never shown, an author and a status; and once that entry is erased,
+ * nothing (the owner's ruling of 2026-10-21, ADR-0036 question 6).
  *
  * **Two ways of making the states.** The first tests build each state the
  * way the application reaches it: requests, the clock, the close job's step
@@ -130,7 +133,7 @@ internal class ArchiveGateTest(
     }
 
     @Test
-    fun `PARTIAL after the partner wrote and deleted - each is listed their own, and the partner's is an author and a status`() {
+    fun `PARTIAL after the partner wrote and deleted - each is listed their own, and the partner's is not there`() {
         val bond = pair()
         rig.bonds.delete(bea, rig.bonds.submit(bea, bond, BEAS))
         rig.bonds.submit(ada, bond, ADAS)
@@ -265,7 +268,7 @@ internal class ArchiveGateTest(
     }
 
     @Test
-    fun `a withdrawal changes what every listed entry of its author shows and not one day of what is listed`() {
+    fun `a withdrawal changes what every listed entry of its author shows, and an unsettled day its erasure steps back, and no listing`() {
         val bond = pair()
         val cells = matrix(bond)
         val before = listOf(ada, bea).associateWith { rig.datesOf(rig.walk(it, bond, mapOf("limit" to "50"))) }
@@ -310,7 +313,6 @@ internal class ArchiveGateTest(
         FULL,
         TOMBSTONE,
         LOCKED,
-        REMOVED,
         ;
 
         companion object {
@@ -318,7 +320,8 @@ internal class ArchiveGateTest(
              * BR-1 and BR-8, from the product's side. [mine] is whether the
              * reader wrote it; [withdrawn] is whether its author has
              * withdrawn their entries, which is an erasure whatever the row
-             * still holds.
+             * still holds. A partner's entry erased before it was ever shown
+             * is not there (ADR-0036 question 6, as ruled).
              */
             fun of(
                 state: EntryState,
@@ -329,7 +332,7 @@ internal class ArchiveGateTest(
                 return when {
                     state == EntryState.NONE -> ABSENT
                     mine || state.revealed -> if (erased) TOMBSTONE else FULL
-                    else -> if (erased) REMOVED else LOCKED
+                    else -> if (erased) ABSENT else LOCKED
                 }
             }
         }
@@ -443,7 +446,7 @@ internal class ArchiveGateTest(
                     (day != null) shouldBe readable
                     if (day != null) {
                         day.propertyNames().toList() shouldContainExactlyInAnyOrder listOf("date", "status", "myEntry", "partnerEntry")
-                        day["status"].asString() shouldBe cell.status
+                        day["status"].asString() shouldBe shownStatus(cell, withdrawn)
                         day["myEntry"].shouldBe(own, mine, rig.bonds.memberId(bond, author), bond, cell.date)
                         day["partnerEntry"].shouldBe(theirs, partners, rig.bonds.memberId(bond, partner), bond, cell.date)
                     }
@@ -455,6 +458,29 @@ internal class ArchiveGateTest(
                 day != null
             }
         }
+
+    /**
+     * The status a reader is shown for [cell]: the row's, unless an author in [withdrawn] has a
+     * live entry on it that the erasure has not reached. Then it is what that erasure will leave,
+     * as a delete by hand leaves it at once: a settled day and a joining day as they are, any
+     * other `OPEN` with nothing live left and `PARTIAL` with one (`BondDay.withoutEntry`).
+     * Written here from that rule, not taken from the code under test.
+     */
+    private fun shownStatus(
+        cell: Cell,
+        withdrawn: Set<UUID>,
+    ): String {
+        val live = listOf(ada to cell.adas, bea to cell.beas).filter { (_, written) -> written.state.live }
+        val awaiting = live.count { (author, _) -> author in withdrawn }
+        val settled = BondDayStatus.valueOf(cell.status).isClosed
+        return when {
+            awaiting == 0 || settled || cell.status == "SUSPENDED" -> cell.status
+            live.size == awaiting -> "OPEN"
+            else -> "PARTIAL"
+        }
+    }
+
+    private val EntryState.live: Boolean get() = this != EntryState.NONE && !erased
 
     /** One entry as it was sent, against the shape it must have: every key, and every value. */
     private fun JsonNode.shouldBe(
@@ -471,10 +497,6 @@ internal class ArchiveGateTest(
 
             Shape.LOCKED -> {
                 toString() shouldBe """{"authorMemberId":"$author","status":"LOCKED"}"""
-            }
-
-            Shape.REMOVED -> {
-                toString() shouldBe """{"authorMemberId":"$author","status":"REMOVED"}"""
             }
 
             Shape.FULL, Shape.TOMBSTONE -> {

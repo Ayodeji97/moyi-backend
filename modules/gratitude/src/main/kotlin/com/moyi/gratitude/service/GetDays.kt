@@ -63,8 +63,17 @@ internal data class DaysPage(
  * else chooses a shape: not the day's status, not a column the query read. A
  * closed `SOLO` day whose entry was never revealed is its author's alone
  * (ADR-0033 decision 9), and it is the entry's `revealedAt`, asked by the
- * gate, that says so. Which row of a day is "mine" is [onEachSideOf]'s, the
- * rule `GET /today` uses.
+ * gate, that says so. How a picked day is shown is [shownTo]'s, the rule
+ * `GET /today` uses: which row is "mine", an entry erased before the caller
+ * was ever shown it left out, and the status as the day's erasures will
+ * leave it.
+ *
+ * **So the query must not list a day for that entry alone**, or the day would
+ * come back empty where a day the partner never wrote on is not listed at
+ * all. It does not: an entry erased before its reveal was never revealed, and
+ * [ArchiveDays]'s rule lists a day for its author or for a revealed row. Search
+ * and on this day ask for a live row besides. `UnseenErasureTwinTest` holds the
+ * five routes to the twin who never wrote.
  *
  * **Who has withdrawn is asked after the entries are loaded, not before**
  * ([readerNow], which has the reasoning). The [BondMembership] this is handed
@@ -395,10 +404,7 @@ internal class GetDays(
         val written = entries.findForDays(days.map { it.id })
         // After the entries, never before: the marker is read last.
         val reader = access.readerNow(membership)
-        return days.map { day ->
-            val sides = written[day.id].orEmpty().onEachSideOf(membership.memberId)
-            Read(day, sides.mine?.readBy(reader), sides.partners?.readBy(reader))
-        }
+        return days.map { day -> Read(day, written[day.id].orEmpty().shownTo(reader, day.status, day.closedAt)) }
     }
 
     /** The caller's own marks among [read]: asked after the gate, and only of what it answered in full. */
@@ -445,13 +451,12 @@ internal class GetDays(
         }
     }
 
-    /** A candidate day after the gate: what the caller may see of each side. */
+    /** A candidate day after the gate: what the caller may see of each side, and the status they are shown ([shownTo]). */
     private class Read(
         val day: ArchiveDay,
-        val mine: EntryReading?,
-        val partners: EntryReading?,
+        private val shown: ShownDay,
     ) {
-        private val readings = listOfNotNull(mine, partners)
+        private val readings = listOfNotNull(shown.mine, shown.partners)
 
         val readInFull: List<EntryId> = readings.filter { it.readability == Readability.FULL }.mapNotNull { it.disclosed?.id }
 
@@ -472,7 +477,7 @@ internal class GetDays(
         fun shown(
             kept: Set<EntryId>,
             reacted: Map<EntryId, ReactionType>,
-        ): DayView = DayView(day.date, day.status, mine, partners, kept, reacted.filterKeys { it in readInFull })
+        ): DayView = DayView(day.date, shown.status, shown.mine, shown.partners, kept, reacted.filterKeys { it in readInFull })
 
         /** The octets of text this day will send to this caller. A reading that discloses no text sends none. */
         val octets: Int =
