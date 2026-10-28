@@ -1051,6 +1051,63 @@ curl -X PUT "$API/bonds/$BOND/members/me/settings" -H "Authorization: Bearer $TO
 |---|---|
 | 415 | Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type. |
 
+### GET /bonds/{bondId}/members/me/notifications
+
+read which kinds of push you want in this bond
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl "$API/bonds/$BOND/members/me/notifications" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 200 stays | Which kinds of push you want in this bond: everything on but on-this-day until you choose. Only yours: the path has no way to name your partner's. | FR-081, Q7, ADR-0045 §1 | smoke |
+| `bond` | `ACTIVE` |  | 200 stays | Yours, as on a bond of one. Your partner's are theirs and are never shown. | FR-081, ADR-0045 §1 | test |
+| `bond` | `PENDING_DELETION` |  | 200 stays | Reading is not a write, so the countdown does not stop it. |  | never-run |
+| `bond` | `ARCHIVED` |  | 200 stays | An ended bond's record stays readable, your own choices with it. | ADR-0028 §4 | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
+
+### PUT /bonds/{bondId}/members/me/notifications
+
+turn kinds of push on or off in this bond, leaving the rest
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl -X PUT "$API/bonds/$BOND/members/me/notifications" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"categories": {"onThisDay": true}}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | test |
+| `bond` | `PENDING_MEMBER` |  | 200 stays | Sets the kinds it is sent and keeps the others: a toggle left out is not cleared. No If-Match, and the bond's ETag does not move. | ADR-0045 §1 | smoke |
+| `bond` | `ACTIVE` |  | 200 stays | The same on a bond of two. Turning a kind off holds back your own copy only: your partner is still told, and is not told that you are not. | FR-081, Q9, ADR-0045 §1, §3 | test |
+| `bond` | `PENDING_DELETION` |  | 409 `BOND_ARCHIVED` | A bond counting down takes no writes, your own choices included. | BR-9, FR-028 | never-run |
+| `bond` | `ARCHIVED` |  | 409 `BOND_ARCHIVED` | Writes stop when the bond ends; reads do not. | BR-9, ADR-0028 §4 | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
+| 422 | `VALIDATION_FAILED` | categories is missing or null. A toggle that is not true or false is 400 MALFORMED_REQUEST instead; a toggle left out is kept, not an error. | smoke |
+
 ### PATCH /bonds/{bondId}/timezone
 
 propose a new time zone

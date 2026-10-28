@@ -76,8 +76,27 @@
 # days are the tests' to show. Since Phase 4 N1 it registers a push token for
 # the session's device, replaces and removes it, sees a logout forget it, a
 # deviceless or ended session answered 404, and the token in no log line; no
-# push is sent, since nothing requests one before N3. Last run on 2026-10-28,
-# from a jar of 56a7941 (this change with main and #104, V27, merged in), against
+# push is sent by a route, since nothing requests one before N3. Since Phase 4
+# N2 it reads and sets a member's push toggles, sees the settings PUT leave
+# them alone and a stranger told the bond's 404, and runs the daily reminder
+# (and the release of held pushes) every five seconds: the member who wrote is
+# not reminded, the one who did not is, held by her quiet hours, released when
+# they are made to have passed, and taken by the logging provider. Last run on
+# 2026-10-28, with main merged in (#96 as bd94436, #104's V27), from a jar of that
+# merge, on a fresh database that applied V1 to V27, V29 and V30, against its own
+# compose project (Postgres 55436, Valkey 63796) and --attach: 1000 passed, 0 failed,
+# 0 skipped, 26 sections. Before it, on 2026-10-28, after N1 was rebased onto main
+# (9fc8444) and merged in, from a jar of that merge, against its own compose project
+# (Postgres 55436, Valkey 63796) and --attach: 997 passed, 0 failed, 0 skipped, 26
+# sections. Before it, after the review of #99 (a reminder called off by writing, a
+# half-hour lookback), from a jar of that code on the pre-rebase N1, against a fresh
+# database and --attach, its own compose project (Postgres on 55436, Valkey on 63796):
+# 992 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won
+# the race), 26 sections; the change's first jar, 993, 0 and 0; and the run before
+# that found that a reminder falling before its bond began failed the whole sweep
+# (ADR-0045).
+# For N1, on 2026-10-28,
+# from a jar of 56a7941 (that change with main and #104, V27, merged in), against
 # a compose project of its own (moyi-n1, Postgres 55434, Valkey 63794) and
 # --attach: 959 passed, 0 failed, 1 skipped (the tag across the erasure, the
 # poller having won the race), 25 sections. Before it, on 6ecece5: 957 passed,
@@ -292,7 +311,8 @@ if [ "$ATTACH" = 0 ]; then
   echo "booting $JAR (local profile) on $("$JAVA" -version 2>&1 | head -1), log: $MOYI_LOG"
   "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" --management.server.port="$MGMT_PORT" \
     --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" \
-    --moyi.scheduling.close.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
+    --moyi.scheduling.close.cron='*/5 * * * * *' \
+    --moyi.scheduling.reminders.cron='*/5 * * * * *' --moyi.scheduling.held-pushes.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
   for _ in $(seq 1 90); do
     grep -q "Started MoyiApplication" "$MOYI_LOG" && break
@@ -2096,6 +2116,84 @@ expect "push: PUT without a bearer is 401" 401 '"code":"UNAUTHENTICATED"' -- -X 
 expect "push: DELETE without a bearer is 401" 401 '"code":"UNAUTHENTICATED"' -- -X DELETE "$API/me/devices/current/push-token"
 # The local profile's push provider is the logging one; it and everything else must never print a token.
 if grep -q "$PUSH_TOKEN" "$MOYI_LOG"; then fail "push: the token is in no log line" "found in $MOYI_LOG"; else pass "push: the token is in no log line"; fi
+flush_buckets
+
+echo; echo "push preferences, quiet hours and the daily reminder (Phase 4 N2, ADR-0045)"
+# The toggles as a resource of their own, beside the settings it must survive;
+# then the daily reminder on the wire. The run starts the reminder job and the
+# release of held pushes every five seconds instead of every five minutes and
+# every minute. The reminder job asks about the five minutes that ended on the
+# last boundary, so both members' reminders are set to that boundary in a zone
+# at UTC with no DST (Africa/Abidjan): the one who wrote today is not reminded,
+# the one who did not is, and inside her quiet hours that push is held. Her
+# night is then made to have passed, by hand on the push's own row, and the
+# release hands it back and the logging provider takes it.
+flush_buckets
+verified_account "toggler" "203.0.113.140"; NB_A="$ACCOUNT_ACCESS"
+verified_account "toggled" "203.0.113.141"; NB_B="$ACCOUNT_ACCESS"
+verified_account "outsider-n" "203.0.113.142"; NB_O="$ACCOUNT_ACCESS"
+expect "notifications: a bond for two is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $NB_A" -d "$(bond_body "Us")"
+NB_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+NB_MADE="$(date -u +%s)"
+NB_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "notifications: readable while the bond waits for its second member" 200 '"reminder":true' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A"
+expect "notifications: …and settable while it waits" 200 '"proposal":true' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"proposal":true}}'
+expect "notifications: the other member joins it" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$NB_CODE/accept" -H "Authorization: Bearer $NB_B"
+NB_ALL_ON='{"categories":{"reminder":true,"partnerJoined":true,"reveal":true,"milestone":true,"onThisDay":false,"proposal":true}}'
+expect "notifications: a member who never chose has every category on but on-this-day" 200 '"onThisDay":false' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A"
+is "notifications: …exactly that" "$LAST_BODY" "$NB_ALL_ON"
+expect "notifications: a PUT sets what it is sent" 200 '"onThisDay":true' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"onThisDay":true,"milestone":false}}'
+expect "notifications: …and a later one keeps what it is not sent" 200 '"milestone":false' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"partnerJoined":false}}'
+is "notifications: …all three as set" "$LAST_BODY" '{"categories":{"reminder":true,"partnerJoined":false,"reveal":true,"milestone":false,"onThisDay":true,"proposal":true}}'
+expect "notifications: the settings PUT, which clears what it is not sent, is 200" 200 '"reminderTimeLocal":"21:00"' -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_A" -d '{"reminderTimeLocal":"21:00"}'
+expect "notifications: …and leaves the toggles alone" 200 '"onThisDay":true' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A"
+expect "notifications: the other member's are their own, still the defaults" 200 '"onThisDay":false' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_B"
+is "notifications: …exactly" "$LAST_BODY" "$NB_ALL_ON"
+expect "notifications: a PUT without categories is 422 on categories" 422 '"field":"categories"' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{}'
+expect "notifications: a toggle that is not a yes or no is 400" 400 '"code":"MALFORMED_REQUEST"' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"reveal":"sometimes"}}'
+expect "notifications: a stranger reading them is told the bond's 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_O"
+expect "notifications: …and writing them too" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_O" -d '{"categories":{"onThisDay":true}}'
+expect "notifications: without a bearer is 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/bonds/$NB_BOND/members/me/notifications"
+# Back to the defaults for the reminder below: only the reminder toggle matters to it.
+expect "notifications: reminders stay on" 200 '"reminder":true' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"reminder":true}}'
+
+# The daily reminder. Its boundary must come after the bond was made (a reminder that fell before
+# its bond began is no reminder: ADR-0045), and a window more than four minutes old would close
+# before the job ran again. Up to five minutes' wait, the one long pause of this script.
+while [ $(( $(date -u +%s) - $(date -u +%s) % 300 )) -le "$NB_MADE" ]; do sleep 5; done
+[ "$(( $(date -u +%s) % 300 ))" -lt 240 ] || sleep $(( 300 - $(date -u +%s) % 300 + 1 ))
+NB_AT="$(python3 -c 'import time; t=int(time.time()); t-=t%300; print(time.strftime("%H:%M", time.gmtime(t)))')"
+NB_QUIET_FROM="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()-3600)))')"
+NB_QUIET_TO="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()+3600)))')"
+NB_TOKEN="smoke-push-token-n2-$RANDOM$RANDOM"
+# He writes first: set before, his reminder could fall between the setting and the entry.
+expect "reminder: he writes today" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$NB_BOND/entries" -H "Authorization: Bearer $NB_B" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"thank you for the reminder I did not need"}'
+expect "reminder: she registers her phone" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $NB_A" -d "{\"token\":\"$NB_TOKEN\"}"
+expect "reminder: hers at the window's end, with quiet hours around now" 200 "\"quietHoursStart\":\"$NB_QUIET_FROM\"" -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_A" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\",\"quietHoursStart\":\"$NB_QUIET_FROM\",\"quietHoursEnd\":\"$NB_QUIET_TO\"}"
+expect "reminder: his at the same time, no quiet hours" 200 "\"reminderTimeLocal\":\"$NB_AT\"" -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_B" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\"}"
+NB_A_ROW=""
+for _ in $(seq 1 40); do
+  NB_A_ROW="$(sql "SELECT n.status FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REMINDER' AND m.role = 'OWNER'")"
+  [ "$NB_A_ROW" = "HELD" ] || [ "$NB_A_ROW" = "psql-unavailable" ] && break
+  sleep 0.5
+done
+db_is "reminder: she had not written, so hers was asked for, and her quiet hours hold it" "$NB_A_ROW" "HELD"
+db_is "reminder: …held until her quiet hours end" "$(sql "SELECT to_char(not_before AT TIME ZONE 'UTC', 'HH24:MI') FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REMINDER'")" "$NB_QUIET_TO"
+db_is "reminder: he wrote, so none was asked for him" "$(sql "SELECT count(*) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NB_BOND' AND m.role = 'MEMBER'")" "0"
+db_is "reminder: its key is the member and the bond-day" "$(sql "SELECT dedupe_key LIKE 'reminder:%:' || to_char(now() AT TIME ZONE 'Africa/Lagos', 'YYYY-MM-DD') FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REMINDER'")" "t"
+sleep 6
+db_is "reminder: the job ran again on the same window and asked for nothing twice" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND'")" "1"
+# Her night passes, by hand: the hold ends now, and the window it was read under is gone.
+sql "UPDATE notifications SET not_before = now() - interval '1 second', quiet_hours_start = NULL, quiet_hours_end = NULL WHERE bond_id = '$NB_BOND' AND status = 'HELD'" >/dev/null
+NB_SENT=""
+for _ in $(seq 1 40); do
+  NB_SENT="$(sql "SELECT status || '|' || coalesce(provider_message_id, '') || '|' || reserved FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REMINDER'")"
+  [[ "$NB_SENT" == SENT* ]] || [ "$NB_SENT" = "psql-unavailable" ] && break
+  sleep 0.5
+done
+db_is "reminder: released when her hours end, and taken by the logging provider, out of the remainder" "$NB_SENT" "SENT|not-sent:log|false"
+if grep -q "$NB_TOKEN" "$MOYI_LOG"; then fail "reminder: the token is in no log line" "found in $MOYI_LOG"; else pass "reminder: the token is in no log line"; fi
+if grep -qE '"quietHours|quiet_hours' "$MOYI_LOG"; then fail "reminder: her quiet hours are in no log line" "found in $MOYI_LOG"; else pass "reminder: her quiet hours are in no log line"; fi
 flush_buckets
 
 echo; echo "database state"

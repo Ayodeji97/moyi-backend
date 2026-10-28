@@ -12,6 +12,9 @@ dependencies {
     // everything in `gratitude` outside its `api` package is Kotlin
     // `internal`, and ArchitectureTest fails a declaration there that is not.
     implementation(projects.modules.gratitude)
+    // `notification.api.HeldPushes` and nothing else: the release of pushes
+    // held by quiet hours (ADR-0045). The same "when, never what".
+    implementation(projects.modules.notification)
     // OutboxDispatcher, for the poller: this module owns the trigger and the
     // meters, `common:events` the delivering (ADR-0035 decisions 7 and 8).
     implementation(projects.common.events)

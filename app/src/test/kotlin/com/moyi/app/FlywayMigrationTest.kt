@@ -113,7 +113,9 @@ class FlywayMigrationTest(
         // in `modules/gratitude` (its tables, the close job's index, the streak, favourites, reactions, the prompt
         // library, search, the favourite's dropped time, the fifth reaction), V14
         // and V20 in `common:events` (the outbox, spec §8, and its consumers) and
-        // V16 in `modules/scheduling` (ShedLock's table). Versions are one global sequence across
+        // V16 in `modules/scheduling` (ShedLock's table), and V29 and V30 in `modules/notification`
+        // (push tokens and the ledger, ADR-0044; the member's toggles, quiet hours and the budget,
+        // ADR-0045). V28 is not yet anybody's. Versions are one global sequence across
         // modules. Flyway merges every `classpath:db/migration` it finds, which
         // is what lets a module own its schema without `app` restating it — and
         // this assertion is what notices when a module's migrations are not on
@@ -134,8 +136,8 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll((1..27).toList()),
-            "Expected every module's migrations through V27, found: $versions",
+            versions.containsAll((1..27).toList() + listOf(29, 30)),
+            "Expected every module's migrations, V1 to V27, V29 and V30, found: $versions",
         )
 
         val extensions =

@@ -7,6 +7,7 @@ import com.moyi.notification.api.Notifications
 import com.moyi.notification.api.PushRequest
 import com.moyi.notification.infra.database.NewPush
 import com.moyi.notification.infra.database.NotificationStore
+import com.moyi.notification.infra.database.QuietWindow
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -47,10 +48,15 @@ internal class PushRequests(
                     bondId = request.bondId,
                     category = request.category,
                     dedupeKey = request.dedupeKey,
-                    // Quiet hours will move this (N2); until then a push may go at once.
+                    // May go at once; quiet hours are the consumer's to judge, when it comes to send.
                     notBefore = now,
                     staleAfter = request.staleAfter,
                     createdAt = now,
+                    zone = request.recipient.zone,
+                    quietHours = request.recipient.quietHours?.let { QuietWindow(it.start, it.end) },
+                    // Kept as the answer, not the toggles: the toggle that governs a category is
+                    // NotificationPreferences' rule, asked once, here.
+                    wanted = request.recipient.preferences.allows(request.category),
                 ),
             )
         if (recorded) {
@@ -58,6 +64,9 @@ internal class PushRequests(
         }
         return recorded
     }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun cancel(dedupeKey: String): Boolean = ledger.cancel(dedupeKey)
 
     internal companion object {
         const val AGGREGATE = "Notification"
