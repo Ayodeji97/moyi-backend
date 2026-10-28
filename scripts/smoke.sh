@@ -77,10 +77,14 @@
 # the session's device, replaces and removes it, sees a logout forget it, a
 # deviceless or ended session answered 404, and the token in no log line; no
 # push is sent, since nothing requests one before N3. Last run on 2026-10-28,
-# from a jar of this change on 6ecece5, against a compose project of its own
-# (Postgres 55434, Valkey 63794) and --attach: 957 passed, 0 failed, 0 skipped,
-# 25 sections.
-# Before it, after the favourites
+# N1_RUN_RECORD
+# Before it, for ME_TOO after main
+# (#97, V26) was merged in, from a jar of a56ac42's code, against a database of
+# its own and --attach, under compose project moyi-0f with Postgres on 55443 and
+# Valkey on 56390: 939 passed, 0 failed, 0 skipped, 24 sections. Before it, for
+# ME_TOO (ADR-0037 question 1, V27), from a jar of 91afa4d's code, against a database of its
+# own and --attach, under compose project moyi-0f with Postgres on 55453 and
+# Valkey on 56391: 935 passed, 0 failed, 0 skipped, 24 sections. Before it, on 2026-10-27, after the favourites
 # rulings' review fixes, from a jar of f737173's code, against a database of its
 # own and --attach, Postgres on 55432: 936 passed, 0 failed, 0 skipped, 24
 # sections. Before it, for the favourites rulings, from a jar of 86ae0c9's code, against a database of its own and
@@ -1678,6 +1682,12 @@ expect "…and one with a second key" 400 '"code":"MALFORMED_REQUEST"' -- -X PUT
 expect "the author's day is 304 on the tag from before all that" 304 "" -- "$API/bonds/$RX_BOND/days/$RX_DATE" -H "Authorization: Bearer $RX_A" -H "If-None-Match: $RX_A_DAY_TAG_HEART"
 rows_are "…and the reaction is still the one that was set" "$RX_A_ENTRY" "1|HEART"
 expect "the reactor takes the bookmark off" 204 "" -- -X DELETE "$API/entries/$RX_A_ENTRY/favourite" -H "Authorization: Bearer $RX_B"
+
+# The fifth type, ME_TOO (ADR-0037 question 1, V27): taken, and read back by both, like the others.
+flush_buckets
+expect "PUT {\"type\":\"ME_TOO\"} is 204" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"ME_TOO"}'
+rows_are "…one row, now ME_TOO" "$RX_A_ENTRY" "1|ME_TOO"
+is "…read back by the reactor and the author on today, the feed and the day" "$(rx_views "$RX_B" "$RX_BOND" partnerEntry)|$(rx_views "$RX_A" "$RX_BOND" myEntry)" '"ME_TOO" "ME_TOO" "ME_TOO"|"ME_TOO" "ME_TOO" "ME_TOO"'
 
 # Replace. One per member per entry: a second type is put in place of the first.
 for type in SMILE THANK_YOU MOVED; do

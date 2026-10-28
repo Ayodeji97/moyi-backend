@@ -1751,7 +1751,7 @@ react to your partner's entry
 
 **Needs:** an access token.
 
-- Content-Type (application/json, with exactly one key, {"type": "HEART", "THANK_YOU", "SMILE" or "MOVED"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)
+- Content-Type (application/json, with exactly one key, {"type": "HEART", "THANK_YOU", "SMILE", "MOVED" or "ME_TOO"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)
 
 **Try it:**
 
@@ -1778,7 +1778,7 @@ curl -X PUT "$API/entries/$ENTRY/reaction" -H "Authorization: Bearer $TOKEN" -H 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 400 | `MALFORMED_REQUEST` | The body is not one JSON object with the one key: not an object, a key other than type, type twice, a value that is an object or an array, or content after the object. Nothing is set. | smoke |
-| 422 | `VALIDATION_FAILED` | type is missing, null, or not one of the four names exactly as written. Nothing is set. | smoke |
+| 422 | `VALIDATION_FAILED` | type is missing, null, or not one of the five names exactly as written. Nothing is set. | smoke |
 | 404 | `NOT_FOUND` | There is no such entry, the id is not an id, you are not a member of its bond, or it is your partner's entry and still locked: every entry you were never shown. No more specific reason is returned. | smoke |
 | 409 | `REACTION_ON_OWN_ENTRY` | You wrote the entry, revealed or not. A reaction is left on your partner's entry; your own takes none. | smoke |
 | 409 | `ENTRY_IMMUTABLE` | The entry is shown to you as erased (deleted by its author, or withdrawn at an ending, whether or not the erasure has run yet), or an erasure committed, or held the row past two seconds, while this request was deciding. Nothing is set. Told before an ending. | smoke |
