@@ -419,8 +419,20 @@ runner. A deploy never builds: it names a commit on `main` that CI has
 already published.
 
 ```
-git fetch && kamal deploy --skip-push --version=$(git rev-parse origin/main)
+git switch main && git pull --ff-only
+kamal deploy --skip-push --version=$(git rev-parse HEAD)
 ```
+
+Pull, not just fetch. Kamal pulls the image for `--version`, but it reads
+`config/deploy.yml` from the working tree: deploying `origin/main` from a
+local `main` that is behind boots the new image with the old config (the
+incident of 2026-10-28, `docs/learning-log.md`). The `pre-deploy` hook
+(`.kamal/hooks/pre-deploy`) enforces this: it refuses the deploy unless
+`HEAD` is the version being deployed, no tracked file is modified, and
+`HEAD` is `origin/main` after a fresh fetch. Any git failure refuses too. It
+runs before `kamal setup`, `redeploy` and `rollback` as well; a rollback
+names an older commit by design, so for it only the first check is skipped.
+`--skip-hooks` bypasses it, for an emergency only.
 
 `--version` is not optional in practice: without it Kamal uses the local
 HEAD, plus an `_uncommitted_…` suffix if anything in the working tree has

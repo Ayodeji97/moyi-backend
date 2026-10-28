@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Kamal pre-deploy hook: refuse a deploy whose config/deploy.yml is not the
+# config of the commit being deployed.
+#
+# Kamal pulls the image for --version from GHCR, but it reads config/deploy.yml
+# (the env, the accessories, the proxy) from this working tree. If the two
+# differ, the new image boots with the old config. That is how the deploy of
+# #96 failed on 2026-10-28: main was 7 commits behind origin/main, the stale
+# deploy.yml lacked MOYI_NOTIFICATION_PUSH_PROVIDER, and the app refused to
+# start (docs/learning-log.md).
+#
+# So this hook allows a deploy only when:
+#   1. HEAD is the commit being deployed (KAMAL_VERSION, a full SHA, which is
+#      how CI tags the image);
+#   2. no tracked file differs from HEAD, staged or not;
+#   3. HEAD is origin/main after a fresh fetch.
+# Any git failure refuses the deploy too.
+#
+# Kamal 2.12 runs this on the Mac, in the directory `kamal` was run from,
+# after the image is pulled on the server and before anything boots
+# (lib/kamal/cli/main.rb). It runs before `kamal redeploy` and `kamal rollback`
+# as well. A rollback names an older commit on purpose, so check 1 is skipped
+# for it (KAMAL_COMMAND=rollback); checks 2 and 3 still apply.
+#
+# Escape hatch, for an emergency only: `--skip-hooks` skips every hook.
+
+set -u
+
+refuse() {
+  {
+    echo
+    echo "pre-deploy: REFUSED. $1"
+    shift
+    for line in "$@"; do echo "  $line"; done
+    echo
+    echo "  Deploy from an up-to-date, clean main:"
+    echo "    git switch main && git pull --ff-only"
+    echo "    kamal deploy --skip-push --version=\$(git rev-parse HEAD)"
+    echo
+  } >&2
+  exit 1
+}
+
+command -v git >/dev/null 2>&1 || refuse "git is not on PATH."
+
+# The checkout this hook lives in: the one whose config/deploy.yml Kamal read.
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)" || refuse "cannot resolve the hook's directory."
+ROOT="$(git -C "$HOOK_DIR" rev-parse --show-toplevel 2>/dev/null)" \
+  || refuse "$HOOK_DIR is not inside a git checkout."
+
+VERSION="${KAMAL_VERSION:-}"
+[ -n "$VERSION" ] || refuse "KAMAL_VERSION is empty; this hook is run by kamal, which sets it."
+COMMAND="${KAMAL_COMMAND:-deploy}"
+
+HEAD_SHA="$(git -C "$ROOT" rev-parse --verify HEAD 2>/dev/null)" \
+  || refuse "cannot read HEAD in $ROOT."
+
+# 1. HEAD is the version being deployed.
+if [ "$COMMAND" != "rollback" ] && [ "$VERSION" != "$HEAD_SHA" ]; then
+  refuse "the version being deployed is not this checkout's HEAD." \
+    "version: $VERSION" \
+    "HEAD:    $HEAD_SHA" \
+    "Kamal would boot that image with HEAD's config/deploy.yml."
+fi
+
+# 2. No tracked file differs from HEAD. Untracked files cannot change what
+# Kamal reads, so they are allowed.
+DIRTY="$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" \
+  || refuse "git status failed in $ROOT."
+if [ -n "$DIRTY" ]; then
+  refuse "tracked files differ from HEAD, so Kamal would read uncommitted config:" \
+    "$DIRTY"
+fi
+
+# 3. HEAD is origin/main, as of now.
+git -C "$ROOT" fetch --quiet origin main 2>/dev/null \
+  || refuse "git fetch origin main failed, so whether HEAD is current is unknown."
+MAIN_SHA="$(git -C "$ROOT" rev-parse --verify origin/main 2>/dev/null)" \
+  || refuse "cannot resolve origin/main in $ROOT."
+if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
+  refuse "HEAD is not origin/main." \
+    "HEAD:        $HEAD_SHA" \
+    "origin/main: $MAIN_SHA"
+fi
+
+echo "pre-deploy: OK. $COMMAND of $VERSION from a clean checkout of origin/main."
