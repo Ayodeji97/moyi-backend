@@ -461,6 +461,8 @@ class OpenApiConfiguration {
                 "revokeBondInvite",
                 "patchBond",
                 "replaceMemberSettings",
+                // Phase 4 N2: BOND_ARCHIVED, as the settings PUT (ADR-0045).
+                "replaceMemberNotifications",
                 // Slice B5. `cancelBondTimezoneChange` and `cancelBondDeletion`
                 // are deliberately absent: cancelling is never a conflict, it is
                 // either done or there was nothing there (a `404`).
