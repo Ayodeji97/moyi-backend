@@ -73,7 +73,11 @@
 # partner and today does not, and a favourite's row holds no time (V26).
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-28, for ADR-0037 question 11
+# days are the tests' to show. Last run on 2026-10-28, after main (#97, V26) was
+# merged in, from a jar of 65f7dc3's code, against a database of its own and
+# --attach, under compose project moyi-0f with Postgres on 55443 and Valkey on
+# 56390: 936 passed, 0 failed, 1 skipped (a tag-across-the-erasure check, the
+# poller having won the race), 24 sections. Before it, for ADR-0037 question 11
 # (no reaction taken back from the partner's entry after an ending), from a jar
 # of this branch's code, against a database of its own and --attach, Postgres
 # on 55443 and Valkey on 56390 in a compose project of its own: 933 passed, 0
