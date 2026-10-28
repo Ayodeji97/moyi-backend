@@ -2,6 +2,7 @@ package com.moyi.app
 
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.security.SecurityConfiguration
+import com.moyi.common.testing.ArchivePageBudget
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
@@ -15,6 +16,7 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotBeEmpty
 import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.ints.shouldBeLessThanOrEqual
 import io.kotest.matchers.maps.shouldContainKey
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -536,10 +538,14 @@ class OpenApiContractTest(
     fun `a day of the archive carries the two entry fields exactly as today does, and a page is days and a cursor`() {
         // One reader for an entry, wherever it is met: the same branches, the
         // same discriminator, the same null. And no field about the other
-        // person: nothing but a date, the day's status and the two entries.
+        // person but one: a date, the day's status, the two entries, and the
+        // name the partner goes by, which their bond already tells the caller
+        // (ADR-0036 question 5), nullable for a bond nobody has joined yet.
         val today = api.components.schemas["TodayResponse"]!!.properties
         val day = api.components.schemas["DayResponse"]!!
-        day.properties.keys shouldBe setOf("date", "status", "myEntry", "partnerEntry")
+        day.properties.keys shouldBe setOf("date", "status", "myEntry", "partnerEntry", "partnerDisplayName")
+        day.properties["partnerDisplayName"]!!.types shouldBe setOf("string", "null")
+        today.keys shouldNotContain "partnerDisplayName"
         day.properties["partnerEntry"] shouldBe today["partnerEntry"]
         day.properties["myEntry"] shouldBe today["myEntry"]
         day.properties["partnerEntry"]!!.discriminator.shouldNotBeNull()
@@ -549,6 +555,15 @@ class OpenApiContractTest(
         val page = api.components.schemas["DaysResponse"]!!
         page.properties.keys shouldBe setOf("items", "nextCursor")
         page.properties["items"]!!.items.`$ref` shouldBe "#/components/schemas/DayResponse"
+    }
+
+    @Test
+    fun `the longest display name identity takes is no longer than the archive's largest page was measured with`() {
+        // Every day of the archive carries the partner's name (ADR-0036 question 5), and
+        // DaysFeedTest measures the largest page with a name of this length. Identity's limit
+        // is internal to it; the contract states it, and a longer one is a page nobody measured.
+        val displayName = api.components.schemas["RegisterRequest"]!!.properties["displayName"]!!
+        displayName.maxLength.shouldNotBeNull() shouldBeLessThanOrEqual ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH
     }
 
     @Test

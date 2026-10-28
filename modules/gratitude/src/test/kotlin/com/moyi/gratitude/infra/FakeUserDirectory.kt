@@ -26,6 +26,14 @@ internal class FakeUserDirectory : UserDirectory {
     /** Registered, not yet verified: may sign in, may not create or join a bond. */
     fun unverified(displayName: String): UUID = add(displayName, verified = false, "en")
 
+    /** [id] goes by [displayName] from now on, as `PATCH /me` would leave it. */
+    fun rename(
+        id: UUID,
+        displayName: String,
+    ) {
+        users.computeIfPresent(id) { _, user -> user.copy(displayName = displayName) }
+    }
+
     /** The directory no longer knows [id]: an account deleted under a bond that still names it. */
     fun forget(id: UUID) {
         users.remove(id)

@@ -32,6 +32,8 @@ internal class OnThisDayController(
     ): OnThisDayResponse {
         val membership = access.guard(caller, bondId)
         joining.beforeRead(membership)
-        return OnThisDayResponse.from(getDays.onThisDay(membership))
+        val days = getDays.onThisDay(membership)
+        // Once for the request, after the read: every day carries the archive's one shape (DayResponse).
+        return OnThisDayResponse.from(days, access.partnerDisplayNameOf(membership))
     }
 }

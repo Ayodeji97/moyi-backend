@@ -96,7 +96,8 @@ internal class DaysController(
         val query = DaysQuery.parse(limit, cursor, until, favourites)
         joining.beforeRead(membership)
         val page = getDays.page(membership, query.before, query.until, query.limit, query.favouritesOnly)
-        return representations.revalidated(DaysResponse.from(page))
+        // Once for the page, not once a day (DayResponse has why each day carries it).
+        return representations.revalidated(DaysResponse.from(page, access.partnerDisplayNameOf(membership)))
     }
 
     /**
@@ -124,7 +125,7 @@ internal class DaysController(
         val on = strictIsoDate(date) ?: throw DayNotFoundException()
         joining.beforeRead(membership)
         val day = getDays.day(membership, on) ?: throw DayNotFoundException()
-        return representations.revalidated(DayResponse.from(day))
+        return representations.revalidated(DayResponse.from(day, access.partnerDisplayNameOf(membership)))
     }
 
     /** The guard: the caller's membership of the bond [bondId] names, or the one `404`. */

@@ -2,6 +2,7 @@ package com.moyi.gratitude.web
 
 import com.moyi.bond.api.BondAccess
 import com.moyi.common.security.AccessTokenIssuer
+import com.moyi.common.testing.ArchivePageBudget
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.gratitude.domain.BondDayId
@@ -121,7 +122,8 @@ internal class DaysFeedTest(
         body["nextCursor"].isNull shouldBe true
         rig.datesOf(body["items"].toList()) shouldBe listOf("2026-09-17", "2026-09-16", "2026-09-15")
         body["items"].forEach { day ->
-            day.propertyNames().toList() shouldContainExactlyInAnyOrder listOf("date", "status", "myEntry", "partnerEntry")
+            day.propertyNames().toList() shouldContainExactlyInAnyOrder
+                listOf("date", "status", "myEntry", "partnerEntry", "partnerDisplayName")
             day["status"].asString() shouldBe "REVEALED"
             day["myEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder FULL_KEYS
             day["partnerEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder FULL_KEYS
@@ -450,6 +452,10 @@ internal class DaysFeedTest(
      * each `createdAt` and `intendedAt` is twenty characters. An instant in
      * production carries microseconds and is twenty-seven: seven octets on
      * two fields of a hundred entries, about 1.4 KB more than is measured.
+     *
+     * Each day also carries the partner's name (ADR-0036 question 5), and it
+     * is measured at its largest: 80 characters that JSON writes as 470
+     * octets, on all fifty days.
      */
     @Test
     fun `the largest page there can be - two days of the largest entries among forty-eight of tombstones - is under 256 KB`() {
@@ -477,6 +483,13 @@ internal class DaysFeedTest(
             Int::class.java,
             bond,
         ) shouldBe 4
+        // And both named as long as a name can be sent: 80 characters, the most identity takes (OpenApiContractTest holds
+        // identity to ArchivePageBudget), all but two of them controls between two letters so that registration's trim
+        // keeps them, which JSON writes as six octets each. 470 octets on every day.
+        val longestName = "a" + "\u001f".repeat(ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH - 2) + "a"
+        longestName.length shouldBe ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH
+        users.rename(ada, longestName)
+        users.rename(bea, longestName)
 
         val sizes =
             listOf(ada, bea).map { reader ->
@@ -488,8 +501,8 @@ internal class DaysFeedTest(
                 rig.datesOf(page["items"].toList()) shouldBe dates
                 page["nextCursor"].isNull shouldBe true
                 val size = response.contentAsByteArray.size
-                // Four entries of 49,147 octets each on the wire, and forty-eight days of tombstones around them.
-                size shouldBeGreaterThan 4 * 49_147 + 48 * 400
+                // Four entries of 49,147 octets each on the wire, forty-eight days of tombstones around them, and fifty names.
+                size shouldBeGreaterThan 4 * 49_147 + 48 * 400 + 50 * 470
                 size shouldBeLessThan MAX_RESPONSE
                 size
             }
@@ -735,7 +748,10 @@ internal class DaysFeedTest(
                 .shouldNotBeNull()
                 .text
                 .shouldBeNull()
-            val rendered = json.writeValueAsString(DaysResponse.from(getDays.page(membership, null, null, 20, false)))
+            val rendered =
+                json.writeValueAsString(
+                    DaysResponse.from(getDays.page(membership, null, null, 20, false), access.partnerDisplayNameOf(membership)),
+                )
             rendered shouldNotContain "zq-ada"
             rendered shouldContain "zq-bea"
         }

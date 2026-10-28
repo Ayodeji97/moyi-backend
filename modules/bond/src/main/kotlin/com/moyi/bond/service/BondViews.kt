@@ -9,6 +9,7 @@ import com.moyi.bond.domain.UserId
 import com.moyi.bond.infra.database.InviteStore
 import com.moyi.bond.infra.database.ProposalStore
 import com.moyi.identity.api.UserDirectory
+import com.moyi.identity.api.UserSummary
 import org.springframework.stereotype.Component
 import java.net.URI
 import java.time.Clock
@@ -57,7 +58,7 @@ internal class BondViews(
         return bonds.map { bond ->
             BondView(
                 bond = bond,
-                members = bond.members.map { MemberView(it, names[it.userId.value]?.displayName ?: FORMER_MEMBER) },
+                members = bond.members.map { MemberView(it, displayNameOf(names[it.userId.value])) },
                 // The guard is what decides whether the caller is a member, and
                 // it runs before any of this. Reaching here without a membership
                 // is a wiring mistake, and it should say so rather than produce
@@ -68,17 +69,24 @@ internal class BondViews(
             )
         }
     }
-
-    private companion object {
-        /**
-         * Someone identity no longer knows: an account erased in Phase 5,
-         * whose entries survive as tombstones (BR-10). A placeholder rather
-         * than a blank, because the archive still shows what they wrote and a
-         * nameless author reads as a bug.
-         */
-        const val FORMER_MEMBER = "Former member"
-    }
 }
+
+/**
+ * The name a member goes by, wherever this module prints one: [BondViews] for
+ * the bond routes, and `BondAccessAdapter.partnerDisplayNameOf` for the
+ * archive's author label. One rule, so the two cannot name one person twice.
+ * [user] is identity's answer for the member's user, `null` when it knows
+ * nobody by that id.
+ */
+internal fun displayNameOf(user: UserSummary?): String = user?.displayName ?: FORMER_MEMBER
+
+/**
+ * Someone identity no longer knows: an account erased in Phase 5,
+ * whose entries survive as tombstones (BR-10). A placeholder rather
+ * than a blank, because the archive still shows what they wrote and a
+ * nameless author reads as a bug.
+ */
+private const val FORMER_MEMBER = "Former member"
 
 /** A bond as one member sees it, with everything the HTTP layer needs and nothing it has to look up. */
 internal data class BondView(

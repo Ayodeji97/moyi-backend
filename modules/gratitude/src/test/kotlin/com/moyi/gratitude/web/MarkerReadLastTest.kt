@@ -444,12 +444,17 @@ internal class MarkerReadLastTest(
     /**
      * `bond`'s own [BondAccess], with one thing added: something can be made
      * to happen as the Nth `membershipOf` since [afterResolution] returns.
-     * What it returns is the real answer, untouched.
+     * What it returns is the real answer, untouched. It also counts the
+     * partner's name being asked for ([nameLookups]), so a test can see a
+     * request ask once and not once a day.
      */
     internal class InterruptibleBondAccess(
         private val real: BondAccess,
     ) : BondAccess by real {
         private val count = AtomicInteger()
+
+        /** How many times [partnerDisplayNameOf] has been asked; a test sets it to zero before the request it counts. */
+        val nameLookups = AtomicInteger()
 
         @Volatile private var nth: Int = 0
 
@@ -486,6 +491,11 @@ internal class MarkerReadLastTest(
                 fired = true
             }
             return membership
+        }
+
+        override fun partnerDisplayNameOf(membership: BondMembership): String? {
+            nameLookups.incrementAndGet()
+            return real.partnerDisplayNameOf(membership)
         }
     }
 

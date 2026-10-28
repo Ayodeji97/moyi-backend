@@ -2579,6 +2579,23 @@ Wrong about: "required, with no default" being a property of a class. It is a pr
          something: it is decoration, and the test that would have shown it had not been
          written.
 
+## 2026-10-27 · Feature · The partner's name in the archive — a field that spent the margin
+
+Expected: one nullable string per archive day, read once per request from `bond`, and a
+         column dropped by V26. Small, and nothing near a limit.
+Reality: the name is the first per-day value that the page budget (`PAGE_TEXT_OCTETS`, ADR-0036
+         decision 6) does not count. Identity takes 80 characters and does not refuse control
+         characters, which JSON writes as six octets each, so the largest page went from a
+         comfortable margin to 255,363 of 262,144 octets. Nothing failed: the largest-page test
+         measured it because it was made to use the worst name there is. A contract test now
+         holds identity's limit to the length that test measured, and refusing control and
+         format characters in a display name is owed to identity. The review also found the
+         smoke run could not tell the partner's name from the caller's: every smoke account
+         was "Smoke". The state map's evidence lines for four routes went stale in the same
+         change and only `state-map-check --strict` said so.
+Wrong about: a field being small because the values in it usually are. A bound is set by the
+         worst value the system accepts, and here another module decides what that is.
+
 ## 2026-10-28 · Feature · withdrawEntries required on POST /block — where "required" is checked decides who learns what
 
 Expected: `@RequestBody(required = true)` and a non-null field, and a bare block is a `400`.
