@@ -54,7 +54,7 @@ curl -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{\"ema
 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
-| 422 | `VALIDATION_FAILED` | A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank or over 80 characters; locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created. | smoke |
+| 422 | `VALIDATION_FAILED` | A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank or over 80 characters, or, once trimmed, holds a control character or a format character other than ZWNJ and ZWJ (errors code VALID_DISPLAY_NAME; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created. | smoke |
 | 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. | test |
 
 #### The contract is silent on

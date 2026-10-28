@@ -392,6 +392,11 @@ expect "same address again (different case) is still 201" 201 "" -- -X POST "$AP
 expect "7-character password is 422 VALID_PASSWORD" 422 '"code":"VALID_PASSWORD"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.3' -d '{"email":"x@example.com","password":"short12","displayName":"S","acceptedTermsVersion":"1","over18":true}'
 expect "breached password is 422 NOT_BREACHED" 422 '"code":"NOT_BREACHED"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.4' -d '{"email":"x@example.com","password":"password","displayName":"S","acceptedTermsVersion":"1","over18":true}'
 expect "over18=false is 422 on field over18" 422 '"field":"over18"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.5' -d '{"email":"x@example.com","password":"correct horse battery","displayName":"S","acceptedTermsVersion":"1","over18":false}'
+# A display name holds no control or format character but ZWNJ and ZWJ (ADR-0015,
+# amended 2026-10-28). U+202E travels as the JSON escape, so this file holds no
+# literal of it, and the answer names the rule, never the name.
+expect "a display name with U+202E is 422 VALID_DISPLAY_NAME" 422 '"code":"VALID_DISPLAY_NAME"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.8' -d "$(register_body "x@example.com" en 'Ad\u202Ea')"
+[[ "$LAST_BODY" == *'"field":"displayName"'* ]] && pass "…on the field displayName" || fail "display name field" "got: ${LAST_BODY:0:200}"
 expect "malformed JSON is 400 MALFORMED_REQUEST" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.6' -d '{"email": '
 expect "wrong content type is 415" 415 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.7' -H 'Content-Type: text/plain' -d 'x'
 # Since E1 (ADR-0019) the resource server answers before routing does: anything
