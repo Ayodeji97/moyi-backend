@@ -2585,9 +2585,15 @@ Expected: CI's oasdiff gate to fail without `breaking-api-change`. ADR-0024's am
          records `response-property-enum-value-added` as an error (76 of them for two new
          error codes), and a new value in `EntryResponse.reaction` is that check.
 Reality: `tufin/oasdiff:v1.34.1`, the image `oasdiff-action` v0.1.20 runs, reported it as
-         seven warnings and no error, so `--fail-on ERR` passed (v1.32.1 and v1.33.0 said
-         the same). The label is still applied, by ADR-0024's reasoning, but nothing makes
-         it so: a pull request that adds a value to a response enum can now reach `main`
-         unlabelled. Whether an error-code addition is still an error was not checked.
-Wrong about: the gate being the policy. ADR-0024 decided what a breaking change is; the
-         tool's severities are its own and can move under a version bump.
+         seven warnings and no error, so `--fail-on ERR` passed. I first blamed the tool's
+         version (v1.32.1 and v1.33.0 said the same). The review found the cause: `allOf`.
+         `reaction` sits in `EntryResponse`'s second `allOf` branch, and oasdiff lowers the
+         severity when it compares `allOf` branches one at a time. With `--flatten-allof`
+         the same v1.34.1 reports the seven as errors, and it still reports an error-code
+         addition as an error (440 on C5c's diff). So under today's CI any new value of a
+         response enum inside an `allOf` schema reaches `main` unlabelled. The label is
+         applied here by ADR-0024's reasoning; running `breaking` with `--flatten-allof` is
+         a CI pull request of its own (ADR-0037, Owed), since its error counts differ.
+Wrong about: the cause. Three versions agreeing ruled out the version, and I named it
+         anyway. The tool's warning text said "compared the `allOf` branches one at a time…
+         run with --flatten-allof"; reading the verdict's own words would have found it.

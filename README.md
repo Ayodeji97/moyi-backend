@@ -450,3 +450,16 @@ Useful afterwards: `kamal app logs -f`, `kamal app details`,
 returns to a previous image in seconds. Migrations are not rolled back, so
 every migration stays backward-compatible with the release before it
 (doc 10 §4).
+
+One accepted exception (ADR-0037, its amendment of 2026-10-28): once anyone
+has reacted `ME_TOO`, an image older than V27 answers `500` on every read
+that carries that reaction, so `kamal rollback` alone does not recover.
+Before rolling back past V27, run one of these against the production
+database, then roll back:
+
+- `DELETE FROM reactions WHERE type = 'ME_TOO';` — the reaction is lost.
+  **Recommended.**
+- `UPDATE reactions SET type = 'HEART' WHERE type = 'ME_TOO';` (or another
+  of the four) — the reaction stays, but misstated.
+
+Which of the two is the owner's to rule (ADR-0037 question 12).
