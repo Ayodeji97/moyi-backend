@@ -12,6 +12,7 @@ import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.infra.database.AccountStore
 import com.moyi.identity.infra.database.RefreshTokenStore
 import com.moyi.identity.infra.database.VerificationTokenStore
+import com.moyi.notification.api.PushTokens
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Component
 import org.springframework.stereotype.Service
@@ -63,6 +64,7 @@ internal class ApplyPasswordReset(
     private val accounts: AccountStore,
     private val refreshTokens: RefreshTokenStore,
     private val events: ApplicationEventPublisher,
+    private val pushTokens: PushTokens,
 ) {
     @Transactional
     @Suppress("ThrowsCount")
@@ -88,6 +90,8 @@ internal class ApplyPasswordReset(
         refreshTokens.lockSessionsOf(user.id)
         refreshTokens.revokeAllForUser(user.id, now)
         accounts.revokeAllSessions(user.id, now)
+        // Every device was signed out, so none is told anything more (ADR-0044).
+        pushTokens.forgetAllOf(user.id.value)
         // T-17: the old address is told, after the commit, that the password
         // changed and every device was signed out.
         events.publishEvent(SecurityNotice.PasswordChanged(user.id, user.email, user.displayName, changedAt = now))

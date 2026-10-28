@@ -21,6 +21,7 @@ import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.domain.PromptId
 import com.moyi.gratitude.domain.ReactionType
+import com.moyi.gratitude.domain.ReminderKey
 import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.Favourites
@@ -29,6 +30,7 @@ import com.moyi.gratitude.infra.database.PromptLibrary
 import com.moyi.gratitude.infra.database.Reactions
 import com.moyi.gratitude.infra.database.redacted
 import com.moyi.gratitude.infra.database.violates
+import com.moyi.notification.api.Notifications
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -269,6 +271,7 @@ internal class SubmitEntry(
     private val favourites: Favourites,
     private val reactions: Reactions,
     private val prompts: PromptLibrary,
+    private val notifications: Notifications,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -482,6 +485,11 @@ internal class SubmitEntry(
         // than deferred to a commit this catch could no longer be on the
         // stack for.
         entries.insert(entry)
+        // The member has written this day, so a reminder to write it that has not gone yet is
+        // pointless: a 06:30 reminder held by quiet hours to 07:00 would otherwise reach someone
+        // who wrote at 06:45 (ADR-0045). In this transaction, so it is called off exactly when
+        // the entry commits. Their own reminder only: the other member's is about their writing.
+        notifications.cancel(ReminderKey.of(membership.memberId, day.date))
         events.publish(OutboxEvent("Entry", entry.id.value, "EntrySubmitted", mapOf("bondId" to bondId, "bondDayId" to day.id.value), now))
         val updated = reveal.apply(day.withEntry(), membership.revealTimeLocal, now)
         if (joiningDate != null && joiningDate.isAfter(claimed.date)) joining.underBondLock(membership, now)

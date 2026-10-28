@@ -2596,6 +2596,97 @@ Reality: the name is the first per-day value that the page budget (`PAGE_TEXT_OC
 Wrong about: a field being small because the values in it usually are. A bound is set by the
          worst value the system accepts, and here another module decides what that is.
 
+## 2026-10-28 · Feature · ME_TOO, the fifth reaction — the contract check that did not fire
+
+Expected: CI's oasdiff gate to fail without `breaking-api-change`. ADR-0024's amendment
+         records `response-property-enum-value-added` as an error (76 of them for two new
+         error codes), and a new value in `EntryResponse.reaction` is that check.
+Reality: `tufin/oasdiff:v1.34.1`, the image `oasdiff-action` v0.1.20 runs, reported it as
+         seven warnings and no error, so `--fail-on ERR` passed. I first blamed the tool's
+         version (v1.32.1 and v1.33.0 said the same). The review found the cause: `allOf`.
+         `reaction` sits in `EntryResponse`'s second `allOf` branch, and oasdiff lowers the
+         severity when it compares `allOf` branches one at a time. With `--flatten-allof`
+         the same v1.34.1 reports the seven as errors, and it still reports an error-code
+         addition as an error (440 on C5c's diff). So under today's CI any new value of a
+         response enum inside an `allOf` schema reaches `main` unlabelled. The label is
+         applied here by ADR-0024's reasoning; running `breaking` with `--flatten-allof` is
+         a CI pull request of its own (ADR-0037, Owed), since its error counts differ.
+Wrong about: the cause. Three versions agreeing ruled out the version, and I named it
+         anyway. The tool's warning text said "compared the `allOf` branches one at a time…
+         run with --flatten-allof"; reading the verdict's own words would have found it.
+
+## 2026-10-27 · Feature · Push N1 — a leaf that carries and records, and the logger that printed the body
+
+Expected: the push transport would copy the email port (ADR-0017): a port, an adapter, a
+         logger by name, and a consumer on the outbox that already retried for ever. The
+         spec's one [inferred] item, that a consumer may publish from inside a delivery, was
+         read from the dispatcher's code and looked true.
+Reality: it was true, and was then run: a test consumer requests a push from inside its own
+         delivery, records `current_setting('transaction_isolation')` (read committed), and
+         the push it asked for is sent on the next run. The surprise was elsewhere. Spring's
+         `DefaultRestClient` writes every object body it serialises into a DEBUG line,
+         "Writing [...]", and the FCM body holds the device token and the token request a
+         signed credential. The FCM sender now hands the client bytes, which no converter
+         sees; its test raises `org.springframework` to TRACE and goes red when the map is
+         passed instead. The same logger prints the Resend body (recipient and, for a
+         verification email, the link) at DEBUG, which this PR reports and does not change.
+         Mutations: nineteen in `notification`, ten in `identity` and two in `app`, each
+         turned its test red; the first try at "reuse forgets the token" stayed green
+         because the mutation removed the other branch's identical line.
+Wrong about: where a secret leaks. Not in our `toString`, which was redacted, but in a
+         library's debug line about the object we handed it. And about a mutation being
+         the mutation intended: a replacement that matches twice breaks the first match.
+
+## 2026-10-28 · Feature · Push N2 — quiet hours held in the ledger, and the test that read its console twenty times
+
+Expected: quiet hours would be a typed "not yet" the push consumer throws and the outbox
+         backs off on, since the outbox already retries for ever. The budget lock would take
+         namespace 2, which ADR-0044 calls the next free one after identity's 1.
+Reality: the outbox counts every throw as a failure. A night's hold would have put the
+         consumer into the "failing" gauge after five retries, written a WARN every fifteen
+         minutes, kept the stuck-event age gauge climbing all night, and released a 07:00
+         reveal at any time up to 07:15. So a held push is acknowledged and kept `HELD` in
+         its own ledger, and a one-minute job hands it back. Namespace 2 was already bond's
+         (the bonds-of-a-user lock, FR-025) before N1 took it for tokens; N2 takes 4. And
+         `SecretsNeverLoggedTest` failed with "Java heap space" whenever the app suite ran
+         beside the module suites, and passed alone. It called `output.all` once per watched
+         secret, each call joining everything printed at TRACE (24 MB) into a new string.
+         Reading it once only moved the failure to the next test class, and N1's own head
+         failed the same way under the same full build: the app JVM's 512 MB default was the
+         limit, and now it has 1 GB. Mutations: twenty
+         five across notification, bond and gratitude, each turned its test red; one (an
+         absent toggle cleared) was first caught only by a neighbouring test, and the
+         endpoint test was tightened until it caught it itself.
+Wrong about: a retry being a cheap way to wait. To the outbox it is a failure, and its
+         gauges say so. And about a record of what is free: ADR-0044 said namespace 2 was
+         unused, and nobody had grepped.
+
+## 2026-10-28 · Feature · Push N3 — who is told what, and the tests that counted the outbox
+
+Expected: the consumers would be the small part of N3: read the event, find the two
+         members, ask for two pushes. The SOLO unlock would need its own event, and the
+         existing suites would not notice two more consumers.
+Reality: the consumers were small. What they touched was not. A dozen `gratitude` tests
+         assert the outbox's exact delivery count (one for a withdrawal, none for a failing
+         handler), and every join and reveal now adds deliveries; the shared test context
+         leaves the push consumers out and their own tests import them. `bond`'s V13 backfill
+         test runs at Flyway target 11, before the outbox exists, and a context with any
+         consumer locks `outbox_events` at start-up, so that one test gets a context with
+         none. The SOLO unlock needed no event: `DayClosed`, the day's status and the stamp
+         the close already writes when a lone entry opens say it, and the stamp also says
+         when it did not (the bond had separated). On-this-day is "weekly" in the spec, but a
+         sweep run once a week looks at one date in seven; it runs daily. Its first weekly
+         bound was a dedupe key per ISO week, and the independent review broke it: a key is
+         spent by the request, so a push held by quiet hours and then expired took the
+         member's week with it. The bound is now seven days counted from the ledger, where
+         only a push sent or still owed counts. And the streak pin read files: a constant
+         from another file slipped past it, so a test now asks every consumer bean.
+Wrong about: what "add a consumer" costs a codebase whose tests count deliveries. And about
+         redundant guards: the status check and the stamp check on the solo push each made
+         the other unfalsifiable through the real close, so each has a test that forges the
+         other's half by SQL. And about a dedupe key as a rate limit: it limits requests, and
+         what the member was owed was deliveries.
+
 ## 2026-10-27 · Fix · The email body — a log line no test could see
 
 Expected: a finding to confirm or dismiss. A review reported that the Resend sender on
