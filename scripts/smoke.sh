@@ -77,7 +77,11 @@
 # the session's device, replaces and removes it, sees a logout forget it, a
 # deviceless or ended session answered 404, and the token in no log line; no
 # push is sent, since nothing requests one before N3. Last run on 2026-10-28,
-# N1_RUN_RECORD
+# from a jar of 56a7941 (this change with main and #104, V27, merged in), against
+# a compose project of its own (moyi-n1, Postgres 55434, Valkey 63794) and
+# --attach: 959 passed, 0 failed, 1 skipped (the tag across the erasure, the
+# poller having won the race), 25 sections. Before it, on 6ecece5: 957 passed,
+# 0 failed, 0 skipped.
 # Before it, for ME_TOO after main
 # (#97, V26) was merged in, from a jar of a56ac42's code, against a database of
 # its own and --attach, under compose project moyi-0f with Postgres on 55443 and
