@@ -59,6 +59,13 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
  * other modules' dependencies, and Flyway merges every module's — which
  * costs a few tables nothing here touches.
  *
+ * **`com.moyi.notification` is scanned too, as of Phase 4 N2**, for the
+ * real `Notifications` behind the daily reminder: its ledger, its outbox
+ * event and its consumer, so that a reminder test reads the row the push
+ * consumer will read. `notification` is a leaf that knows nothing of this
+ * module, and its two providers are the logging ones (this module's test
+ * `application.yml`).
+ *
  * **`@Import(IdempotencyConfiguration::class)` wires `@Idempotent`'s beans**
  * (fix round 1, I7) — one import rather than the four hand-copied `@Bean`
  * methods this file used to carry (the same four `IdempotencyTestApplication`
@@ -70,8 +77,8 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
  * the fuller account, including why its interceptor orders itself after
  * `common:security`'s `RateLimitInterceptor` (fix round 1, I4).
  */
-@SpringBootApplication(scanBasePackages = ["com.moyi.common", "com.moyi.gratitude", "com.moyi.bond"])
-@ConfigurationPropertiesScan("com.moyi.common", "com.moyi.gratitude", "com.moyi.bond")
+@SpringBootApplication(scanBasePackages = ["com.moyi.common", "com.moyi.gratitude", "com.moyi.bond", "com.moyi.notification"])
+@ConfigurationPropertiesScan("com.moyi.common", "com.moyi.gratitude", "com.moyi.bond", "com.moyi.notification")
 @EntityScan("com.moyi.gratitude", "com.moyi.bond")
 @EnableJpaRepositories("com.moyi.gratitude", "com.moyi.bond")
 @Import(IdempotencyConfiguration::class)

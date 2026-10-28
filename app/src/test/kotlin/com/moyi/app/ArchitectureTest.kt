@@ -124,14 +124,20 @@ class ArchitectureTest {
          */
         private val TRANSACTION_APIS = listOf("org.springframework.transaction.", "jakarta.transaction.")
 
-        /** The methods of `bond.api.BondAccess` that run no membership guard: written for the close job, and used by work like it. */
-        private val UNGUARDED_BOND_READS = listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep")
+        /**
+         * The methods of `bond.api` that run no membership guard: `BondAccess`'s, written for the
+         * close job and used by work like it, and `ReminderRoster`'s, which names members of every
+         * bond for the daily reminder (ADR-0045).
+         */
+        private val UNGUARDED_BOND_READS = listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep", "remindersDueBetween")
 
         /**
-         * The work nobody asked for (`gratitude.service`): the close job's three steps and the
-         * withdrawal's consumer. Each reads a bond with no caller whose membership could be checked.
+         * The work nobody asked for (`gratitude.service`): the close job's three steps, the
+         * withdrawal's consumer and the daily reminder's sweep. Each reads a bond with no caller
+         * whose membership could be checked.
          */
-        private val WORK_WITH_NO_CALLER = setOf("CloseDay.kt", "CreateMissingDays.kt", "EvaluateStreaks.kt", "WithdrawEntries.kt")
+        private val WORK_WITH_NO_CALLER =
+            setOf("CloseDay.kt", "CreateMissingDays.kt", "EvaluateStreaks.kt", "WithdrawEntries.kt", "SendDailyReminders.kt")
 
         private data class Location(
             val module: String,
@@ -363,7 +369,7 @@ class ArchitectureTest {
 
         assertTrue(
             violations.isEmpty(),
-            "Only the close job and the withdrawal's consumer may call BondAccess's unguarded reads. Found in: $violations",
+            "Only the close job, the withdrawal's consumer and the reminder sweep may call bond's unguarded reads. Found in: $violations",
         )
     }
 

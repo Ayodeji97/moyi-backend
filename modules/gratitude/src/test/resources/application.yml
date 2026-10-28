@@ -31,6 +31,14 @@ spring:
     open-in-view: false
 
 moyi:
+  notification:
+    # The daily reminder's real ledger is in this context (Phase 4 N2). Nothing
+    # here sends: both providers log, and FCM and Resend would refuse to start
+    # without their secrets.
+    email:
+      provider: log
+    push:
+      provider: log
   bond:
     invite:
       # Task 7: this context now scans `com.moyi.bond` too (real `bond`
