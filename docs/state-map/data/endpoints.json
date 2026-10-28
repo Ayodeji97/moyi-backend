@@ -329,8 +329,8 @@
         "status": 400,
         "code": "MALFORMED_REQUEST",
         "reason": "The flag is missing: no body, {}, or {\"withdrawEntries\": null}. The same bytes as a body that cannot be read, and nothing is ended or withdrawn. Unlike that refusal it is answered after membership is looked at, so a stranger who sends no flag gets the 404 below (ADR-0035 question 1).",
-        "evidence": "smoke",
-        "evidenceRef": "a block with no body is 400 MALFORMED_REQUEST",
+        "evidence": "test",
+        "evidenceRef": "BondEndingEndpointTest#an absent flag is refused in every state a block is accepted in, and writes nothing",
         "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondsController.kt#?: throw HttpMessageNotReadableException(\"The flag is required on this route\", ServletServerHttpRequest(http))"
       },
       {
