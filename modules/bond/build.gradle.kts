@@ -26,6 +26,14 @@ dependencies {
     // learns about identity by doing so.
     implementation(projects.modules.identity)
 
+    // `com.moyi.notification.api` only, for its values: a member's category
+    // toggles are `NotificationPreferences`, whose rule (which toggle governs
+    // which push, and the defaults) is notification's, and the reminder roster
+    // hands `gratitude` a resolved `PushRecipient` (spec §2.1, ADR-0045).
+    // `notification` is a leaf, so this makes no cycle; `ArchitectureTest`
+    // holds the leaf.
+    implementation(projects.modules.notification)
+
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
 
     // This module owns its own HTTP edge — controllers and DTOs live in

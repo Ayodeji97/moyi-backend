@@ -1,0 +1,17 @@
+spring:
+  datasource:
+    hikari:
+      # A test context needs two or three connections, not the default ten:
+      # every cached context holds its pool for the whole run (the note in
+      # modules/gratitude's test application.yml).
+      maximum-pool-size: 4
+
+moyi:
+  notification:
+    email:
+      # Nothing here sends email, and Resend would refuse to start without a key.
+      provider: log
+    push:
+      # Replaced by a scripted sender in NotificationTestApplication; FCM, the
+      # default, would refuse to start without a service account.
+      provider: log

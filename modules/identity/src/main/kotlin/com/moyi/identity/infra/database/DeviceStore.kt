@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component
 import java.time.Instant
 import java.util.UUID
 
-/** The `devices` table in domain terms. Three things, because that is what FR-007 does with it. */
+/** The `devices` table in domain terms: what FR-007 does with it, and the fold push tokens make (ADR-0025). */
 @Component
 internal class DeviceStore(
     private val devices: DeviceRepository,
@@ -23,5 +23,16 @@ internal class DeviceStore(
         now: Instant,
     ) {
         devices.touch(id, now)
+    }
+
+    fun find(id: UUID): Device? = devices.findById(id)?.toDomain()
+
+    /** Marks [ids], earlier sign-ins of [userId] from the phone that now holds their push token, as folded. */
+    fun fold(
+        ids: Set<UUID>,
+        userId: UserId,
+        now: Instant,
+    ) {
+        if (ids.isNotEmpty()) devices.fold(ids, userId.value, now)
     }
 }

@@ -9,6 +9,7 @@ import com.moyi.bond.infra.database.BlockStore
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.InviteStore
 import com.moyi.common.core.IdGenerator
+import com.moyi.common.events.EventPublisher
 import com.moyi.identity.api.UserDirectory
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -99,6 +100,7 @@ internal class AcceptInvite(
 
         val member = Member.member(MemberId(support.ids.timeOrdered()), bond.id, caller, bond.anchorTimezone, joinedAt)
         bonds.addMember(bond.accept(member), member)
+        support.events.publish(MemberJoined.of(member, joinedAt))
         log.info("User {} joined bond {}", caller.value, bond.id.value)
         // Re-read rather thanreturning the in-memory aggregate: `accept` leaves the
         // version it was loaded with, while Hibernate's @Version has since
@@ -116,10 +118,13 @@ internal class AcceptInvite(
  * generator are the least interesting six-and-seventh arguments imaginable.
  *
  * Shared by `AcceptInvite`, `ChangeTimezone` and `RequestDeletion` since slice
- * B5 (it was `AcceptSupport` when only one service needed it).
+ * B5 (it was `AcceptSupport` when only one service needed it). The outbox
+ * joined them in Phase 4 N3, for the same three: each publishes the event a
+ * push is made of (`MemberJoined`, `ProposalOpened`, ADR-0046).
  */
 @Service
 internal class BondSupport(
     val clock: Clock,
     val ids: IdGenerator,
+    val events: EventPublisher,
 )

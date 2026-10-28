@@ -267,6 +267,22 @@ internal interface DeviceRepository : Repository<DeviceEntity, UUID> {
         id: UUID,
         now: Instant,
     ): Int
+
+    fun findById(id: UUID): DeviceEntity?
+
+    /**
+     * ADR-0025's fold: a device row whose push token a later sign-in of the
+     * same person registered was that phone all along, and is marked so. The
+     * session it began is not ended by this: revocation is explicit (ADR-0025
+     * decision 4), and the phone may still hold its refresh token.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE DeviceEntity d SET d.revokedAt = :now WHERE d.id IN :ids AND d.userId = :userId AND d.revokedAt IS NULL")
+    fun fold(
+        ids: Collection<UUID>,
+        userId: UUID,
+        now: Instant,
+    ): Int
 }
 
 /**

@@ -31,6 +31,14 @@ spring:
         generate_statistics: true
 
 moyi:
+  notification:
+    # The ledger behind bond.notify is in this context (Phase 4 N3). Nothing
+    # here sends: both providers log, and FCM and Resend would refuse to start
+    # without their secrets.
+    email:
+      provider: log
+    push:
+      provider: log
   bond:
     invite:
       link-base-url: https://moyi.test/i

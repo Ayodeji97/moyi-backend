@@ -1,0 +1,29 @@
+meta {
+  name: Set notification preferences
+  type: http
+  seq: 27
+}
+
+put {
+  url: {{api}}/bonds/{{bondId}}/members/me/notifications
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "categories": {
+      "onThisDay": true
+    }
+  }
+}
+
+docs {
+  Turns the kinds of push you send on or off, and leaves the ones you do not send as they are: this body turns on-this-day on and changes nothing else. `categories` is required (422 without it); a value that is not true or false is 400. Quiet hours and the reminder time are on the member settings, not here, and that PUT does not touch these.
+
+  After the bond has ended it is 409 BOND_ARCHIVED. Turning a kind off holds back your own copy only: your partner is still told, and is not told that you are not (ADR-0045).
+}

@@ -95,7 +95,9 @@ internal class ChangeTimezone(
         if (proposals.findLive(membership.bondId, ProposalKind.TIMEZONE_CHANGE, now) != null) {
             throw ProposalPendingException()
         }
-        proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))
+        val proposal = Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now)
+        proposals.insert(proposal)
+        support.events.publish(ProposalOpened.of(proposal))
         log.info("A zone change was proposed on bond {}", membership.bondId.value)
         return view(membership)
     }

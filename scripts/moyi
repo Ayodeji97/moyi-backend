@@ -51,10 +51,14 @@
 #                                            yours alone: your partner is never shown it
 #   moyi unfavourite <entryId>
 #   moyi react <entryId> <type>              leave a reaction on your partner's revealed entry, in place
-#                                            of any you had left: HEART, THANK_YOU, SMILE or MOVED. Your
-#                                            partner IS shown it, on that entry. Not on your own entry,
-#                                            and not once the bond has ended
+#                                            of any you had left: HEART, THANK_YOU, SMILE, MOVED or ME_TOO.
+#                                            Your partner IS shown it, on that entry. Not on your own
+#                                            entry, and not once the bond has ended
 #   moyi unreact <entryId>                   take it back; also after the bond has ended
+#   moyi notifications [<kind>=on|off …]     which kinds of push you want in the bond in use: with nothing,
+#                                            shows them; with e.g. onThisDay=on reminder=off, sets those
+#                                            and leaves the rest. The kinds are the server's: reminder,
+#                                            partnerJoined, reveal, milestone, onThisDay, proposal
 #   moyi whoami
 #
 # The session (two tokens and the bond in use) is kept in
@@ -433,7 +437,7 @@ case "$cmd" in
     echo "Unmarked."
     ;;
   react)
-    [ $# -eq 2 ] || die "usage: moyi react <entryId> <type>   (HEART, THANK_YOU, SMILE or MOVED)"
+    [ $# -eq 2 ] || die "usage: moyi react <entryId> <type>   (HEART, THANK_YOU, SMILE, MOVED or ME_TOO)"
     need_uuid "$1" "$1"
     # The type is sent as it was typed. Which names are reactions is the server's to say, and it says 422.
     authed PUT "/entries/$1/reaction" "$(json_of type "$2")"; show 204
@@ -444,6 +448,20 @@ case "$cmd" in
     need_uuid "$1" "$1"
     authed DELETE "/entries/$1/reaction"; show 204
     echo "Taken back."
+    ;;
+  notifications)
+    signed_in; BOND="$(bond)"
+    if [ $# -eq 0 ]; then
+      authed GET "/bonds/$BOND/members/me/notifications"; show 200
+    else
+      # The shape only, so the body is well formed: which kinds exist is the server's to say.
+      for arg in "$@"; do [[ "$arg" =~ ^[A-Za-z]+=(on|off)$ ]] || die "usage: moyi notifications [<kind>=on|off …], e.g. onThisDay=on"; done
+      body="$(pairs "$@" | python3 -c '
+import json, sys
+a = sys.stdin.buffer.read().decode().split("\0")[:-1]
+print(json.dumps({"categories": {k: v == "on" for k, v in (x.split("=") for x in a)}}))')"
+      authed PUT "/bonds/$BOND/members/me/notifications" "$body"; show 200
+    fi
     ;;
   edit)
     [ $# -eq 2 ] || die 'usage: moyi edit <entryId> "<text>"'
