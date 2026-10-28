@@ -19,6 +19,7 @@ import io.kotest.matchers.maps.shouldContainKey
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldNotContainIgnoringCase
@@ -254,6 +255,31 @@ class OpenApiContractTest(
         // is the route's own name; its prose, and the other route's, do not
         // repeat it.
         listOf(leave, other, flag).forEach { it shouldNotContainIgnoringCase "block" }
+    }
+
+    @Test
+    fun `one ending requires its body and its flag, never null, and the other takes both as optional`() {
+        // ADR-0035 questions 1 and 11, the owner's ruling of 2026-10-21. The
+        // handler takes the shared optional type, so that the guard runs
+        // before the flag is asked for; springdoc can see only that, and
+        // without the customiser the document would say the body may be left
+        // out of a route that refuses it.
+        val leave = api.paths["/api/v1/bonds/{bondId}/leave"]!!.post.requestBody
+        val other = api.paths["/api/v1/bonds/{bondId}/block"]!!.post.requestBody
+
+        leave.required shouldNotBe true
+        leave.content["application/json"]!!.schema.`$ref` shouldBe "#/components/schemas/EndBondRequest"
+
+        other.required shouldBe true
+        other.content.keys shouldBe setOf("application/json")
+        other.content["application/json"]!!.schema.`$ref` shouldBe "#/components/schemas/RequiredEndBondRequest"
+        val required = api.components.schemas["RequiredEndBondRequest"]!!
+        required.required shouldBe listOf("withdrawEntries")
+        required.properties.keys shouldBe setOf("withdrawEntries")
+        val flag = required.properties["withdrawEntries"]!!
+        // A boolean and nothing else: `null` is not one of its types.
+        (flag.types ?: setOf(flag.type)) shouldBe setOf("boolean")
+        flag.description.shouldNotBeNull() shouldNotContainIgnoringCase "block"
     }
 
     @Test
