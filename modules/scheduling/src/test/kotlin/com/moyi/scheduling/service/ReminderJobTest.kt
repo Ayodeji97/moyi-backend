@@ -40,7 +40,7 @@ internal class ReminderJobTest(
     }
 
     @Test
-    fun `a run asks about the five minutes that ended on the last boundary, however late it starts`() {
+    fun `a run asks about the half hour that ended on the last boundary, however late it starts`() {
         clock.set(Instant.parse("2026-10-28T20:00:30Z"))
         job.remindOnce()
         clock.set(Instant.parse("2026-10-28T20:04:59Z"))
@@ -50,14 +50,26 @@ internal class ReminderJobTest(
 
         reminders.windows shouldBe
             listOf(
-                window("19:55", "20:00"),
-                window("19:55", "20:00"),
-                window("20:00", "20:05"),
+                window("19:30", "20:00"),
+                window("19:30", "20:00"),
+                window("19:35", "20:05"),
             )
     }
 
     @Test
-    fun `consecutive runs on the timer cover every minute of the day once, with no gap and no overlap`() {
+    fun `a reminder whose tick was missed, in a restart or a deploy, is asked about by the next one`() {
+        // A 20:00 reminder: the 20:00 tick never ran. The 20:05 one still covers it, and the
+        // dedupe key makes the windows' overlap ask for nothing twice (DailyRemindersTest).
+        clock.set(Instant.parse("2026-10-28T20:05:30Z"))
+        job.remindOnce()
+
+        val (after, upTo) = reminders.windows.single()
+        val missed = Instant.parse("2026-10-28T20:00:00Z")
+        (missed.isAfter(after) && !missed.isAfter(upTo)) shouldBe true
+    }
+
+    @Test
+    fun `consecutive runs on the timer cover every minute of the day, each looking back a bounded half hour`() {
         val cron = CronExpression.parse(ReminderJob.EVERY_FIVE_MINUTES)
         val start = Instant.parse("2026-10-28T00:00:00Z").atZone(ZoneOffset.UTC)
         val windows =
@@ -65,11 +77,12 @@ internal class ReminderJobTest(
                 .take(288)
                 .map { fired ->
                     val upTo = ReminderJob.windowEndingBefore(fired.toInstant())
-                    upTo.minus(ReminderJob.WINDOW) to upTo
+                    upTo.minus(ReminderJob.LOOKBACK) to upTo
                 }.toList()
 
-        windows.zipWithNext().forEach { (a, b) -> b.first shouldBe a.second }
-        windows.first().first shouldBe Instant.parse("2026-10-27T23:55:00Z")
+        windows.forEach { (after, upTo) -> java.time.Duration.between(after, upTo) shouldBe java.time.Duration.ofMinutes(30) }
+        // No gap: each window begins at or before the end of the one before it.
+        windows.zipWithNext().forEach { (a, b) -> b.first.isAfter(a.second) shouldBe false }
         windows.last().second shouldBe Instant.parse("2026-10-28T23:55:00Z")
     }
 

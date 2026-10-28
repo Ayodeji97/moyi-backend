@@ -19,15 +19,15 @@ import java.util.concurrent.atomic.AtomicLong
  * time and a lock, and asks `gratitude` to do the rest: whose reminder fell,
  * and who has written, are not written here.
  *
- * **The window is the five minutes that ended on the last boundary**,
- * `(boundary - 5 min, boundary]`, with the boundary the run's time rounded
- * down to a multiple of five minutes. Not "since the last run": a run that
- * starts a few seconds late, or on another instance, asks about the same
- * window as one that started on time, so consecutive runs neither overlap
- * nor leave a gap, and a window asked about twice asks for nothing twice
- * (the dedupe key). A window nobody ran in, while the application was down,
- * is not made up: a reminder is a hint (doc 25:69), and one sent an hour
- * late is noise.
+ * **The window is the half hour that ended on the last boundary**,
+ * `(boundary - 30 min, boundary]`, with the boundary the run's time rounded
+ * down to a multiple of five minutes. Every run asks about the last six
+ * windows, not only its own: a run that never happened, in a restart or a
+ * deploy, is made up by the next, and the dedupe key makes the overlap ask
+ * for nothing twice. A run that starts late, or on another instance, asks
+ * about the same half hour as one that started on time. An outage longer
+ * than half an hour still loses reminders: one sent later than that is no
+ * longer the time the member chose, and is noise (doc 25:69).
  *
  * **At thirty seconds past each fifth minute.** Reminder times are whole
  * minutes, and the window ends on the minute; firing a little after it keeps
@@ -67,7 +67,7 @@ internal class ReminderJob(
     fun remindOnce(): ReminderRun {
         val now = clock.instant()
         val upTo = windowEndingBefore(now)
-        val run = reminders.remindDue(upTo.minus(WINDOW), upTo)
+        val run = reminders.remindDue(upTo.minus(LOOKBACK), upTo)
         requested.increment(run.requested.toDouble())
         lastSuccess.set(now.epochSecond)
         if (run.failed > 0) {
@@ -84,6 +84,16 @@ internal class ReminderJob(
         const val EVERY_FIVE_MINUTES = "30 */5 * * * *"
         const val LOCK = "daily-reminders"
         val WINDOW: Duration = Duration.ofMinutes(5)
+        private const val LOOKBACK_MINUTES = 30L
+
+        /**
+         * How far back each run asks: six of its windows. A tick lost to a restart or a
+         * deploy is asked about by the next one; the dedupe key makes the overlap ask for
+         * nothing twice, and a reminder's own deadline (the end of its bond-day) bounds
+         * how late one can be sent. Half an hour, because a reminder later than that is
+         * no longer the time the member chose (ADR-0045).
+         */
+        val LOOKBACK: Duration = Duration.ofMinutes(LOOKBACK_MINUTES)
 
         /** `gratitude_reminder_job_last_success_timestamp` once exported (doc 11). */
         const val LAST_SUCCESS = "gratitude.reminder.job.last.success.timestamp"
