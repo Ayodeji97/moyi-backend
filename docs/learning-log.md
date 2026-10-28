@@ -2578,3 +2578,17 @@ Wrong about: "required, with no default" being a property of a class. It is a pr
          before the class is asked. Also that `@NotNull` on a non-null Kotlin type means
          something: it is decoration, and the test that would have shown it had not been
          written.
+
+## 2026-10-28 · Feature · withdrawEntries required on POST /block — where "required" is checked decides who learns what
+
+Expected: `@RequestBody(required = true)` and a non-null field, and a bare block is a `400`.
+Reality: Spring resolves a required body before the handler runs, so the `400` would have come
+         before the membership guard, and a stranger could tell a bond's route from a dead one
+         by whether a bare block was `400` or `404`. The body stays optional to Spring; the
+         handler refuses an absent flag after the guard, by throwing the same exception an
+         unreadable body raises, so the status, code and sentence stay in the one handler that
+         already answered it. A test compares the bytes and headers of the two refusals. The
+         contract still says the body and the flag are required, by a customiser, so a
+         generated client is told the truth.
+Wrong about: a framework's "required" being free. It is a check, and it runs where the
+         framework runs it, which here was before authorisation.
