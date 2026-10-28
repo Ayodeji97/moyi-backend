@@ -291,6 +291,10 @@ class SecretsNeverLoggedTest(
         // Delete, then an ending that withdraws, then the erasure itself.
         send("DELETE", "/entries/$adaEntry", ada, null).status shouldBe 204
         get("/bonds/$bond/today", bea).status shouldBe 200
+        // Since Phase 4 N3 the join and the reveal are told (ADR-0046), and those pushes go
+        // through the logging provider at TRACE too. Delivered here, so that the one delivery
+        // counted below is the withdrawal's.
+        repeat(DRAIN_ROUNDS) { dispatcher.dispatchDue(Instant.now(), DISPATCH_BUDGET) }
         post("/bonds/$bond/block", bea, """{"withdrawEntries": true}""").status shouldBe 204
         get("/bonds/$bond/today", ada).body.contains(BEA_TEXT) shouldBe false
         get("/bonds/$bond/days", ada).body.contains(BEA_TEXT) shouldBe false
@@ -402,7 +406,9 @@ class SecretsNeverLoggedTest(
             ) shouldBe true
         }
         dispatcher.dispatchDue(Instant.now(), DISPATCH_BUDGET).delivered shouldBe 1
-        jdbc.queryForObject("SELECT status FROM notifications WHERE user_id = ?", String::class.java, user) shouldBe "SENT"
+        // The probe's own row: since N3 the join and the reveal above asked for pushes too.
+        jdbc.queryForObject("SELECT status FROM notifications WHERE dedupe_key = ?", String::class.java, "secrets-probe:$user") shouldBe
+            "SENT"
         send("DELETE", "/me/devices/current/push-token", session, null).status shouldBe 204
         jdbc.queryForObject("SELECT count(*) FROM push_tokens", Int::class.java) shouldBe 0
     }
@@ -650,6 +656,9 @@ class SecretsNeverLoggedTest(
         const val RUN_ID_LENGTH = 8
         const val SOCKET_TIMEOUT_MILLIS = 15_000
         const val DISPATCH_BUDGET = 10
+
+        /** Three runs: an event, the pushes it asked for, and one to spare. */
+        const val DRAIN_ROUNDS = 3
         const val PUSH_TOKEN = "fcm~push~token~secret"
         const val PUSH_STALE_SECONDS = 3_600L
 
