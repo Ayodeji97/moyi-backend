@@ -77,16 +77,17 @@ internal data class DaysPage(
  *
  * **A page has two bounds.** The count the caller asked for, and
  * [PAGE_TEXT_OCTETS] of entry text **as it will be sent**. An entry is at
- * most 8,192 octets as it arrives and can be six times that as JSON: the
- * largest there can be is 49,147 octets on the wire ([octetsAsJson] has
- * how). So one day can be 98 KB, and the largest page by count would be
- * nearly nineteen times the 256 KB a response may be (NFR-008). Days are
+ * most 8,192 octets as it arrives and more than that as JSON: the largest
+ * there can be is 10,688 octets on the wire ([octetsAsJson] has how), so one
+ * day can be 21 KB, and the largest page by count would be over four times
+ * the 256 KB a response may be (NFR-008). (Until ADR-0031's ruling 1 was
+ * built, 2026-10-28, an entry could be 49,147 octets out and a day 98 KB.) Days are
  * taken in order while the text **this caller will be sent** stays within
  * the bound; a tombstone and a locked entry send none. The first day is
  * always taken, so a page is never empty for its size. Text is measured as
  * JSON will carry it, because that is what the limit is on: measured as it
- * arrived, two of the largest days would count as 32 KB and be sent as
- * 197 KB.
+ * arrived, nine of the largest days would count as 147 KB and be sent as
+ * 192 KB.
  *
  * **`favouritesOnly`** asks the query for days holding an entry the caller
  * has marked, excluding known withdrawn authors before the limit, and then
@@ -138,7 +139,7 @@ internal class GetDays(
      * [textOctets] is the page's bound on text and is [PAGE_TEXT_OCTETS] for
      * every caller there is. It is a parameter only so that a test can make
      * it smaller than one day: no day can be large enough to reach the
-     * real one alone (the largest is 98,294 octets of text, half of it), and
+     * real one alone (the largest is 21,376 octets of text, a ninth of it), and
      * the rule that the first day is always taken would otherwise be a line
      * nothing could show to be needed.
      *
@@ -543,11 +544,14 @@ internal class GetDays(
          * It matters because an entry is bounded by octets as sent to us
          * (8,192), not by octets as we send it, and its limit of 500
          * characters does not make up the difference. That limit is counted
-         * on the text trimmed, and U+001C to U+001F are trimmed as space
-         * and escaped as controls. So `a` followed by 8,191 of them is
-         * accepted as one character, is 8,192 octets in and 49,147 out, and
-         * a page of such entries counted raw would be past the limit while
-         * looking a sixth of the way to it.
+         * on the text as sent (ADR-0031, ruling 1), and a control is a
+         * character of its own, so at most 499 can be controls; but one more
+         * character can be a backslash carrying 3,846 combining marks. That
+         * entry is 8,192 octets in and 10,688 out, and a page of such entries
+         * counted raw would be past the limit while looking three-quarters
+         * of the way to it. Until the ruling was built the limit was counted
+         * on the text trimmed, U+001C to U+001F trim as space, and `a`
+         * followed by 8,191 of them was one character and 49,147 octets out.
          */
         fun octetsAsJson(text: String): Int =
             text.toByteArray(Charsets.UTF_8).size +

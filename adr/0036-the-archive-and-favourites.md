@@ -227,6 +227,15 @@ earlier than `limit` would have put it.
   hundred entries: about 1.4 KB more than was measured (the conformance review's
   arithmetic; not built). The margin is about 31 KB, and a new field on an entry spends it
   at a hundred entries a page.
+  *(2026-10-28, ADR-0031's ruling 1 built: the 500 are counted on the text as sent, so `a`
+  and 8,191 U+001F are a `422` and the largest entry is now 10,688 octets out — a
+  backslash with 3,846 combining acutes, and 499 U+001F. The bound and `octetsAsJson` are
+  unchanged. `DaysFeedTest` now fills the page with nine days of two such entries and one
+  that brings the text to 196,608 exactly, among forty days of tombstones, and measures
+  255,367 octets of 262,144, with the partner's name at its longest on every day (added
+  2026-10-27, about 23.5 KB of it). Every day costs about 1,174 octets beside its text, so
+  a page at the text bound is that size whichever entries carry the text: the margin is
+  about 6.8 KB, less the 1.4 KB of production timestamps.)*
 - The count is an upper bound on what the serializer writes, never under: the reviewer
   compared it with the application's mapper over every scalar of the Basic Multilingual
   Plane.

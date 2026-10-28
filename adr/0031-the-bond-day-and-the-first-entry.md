@@ -1001,6 +1001,14 @@ decisions the rulings did not make themselves:
    invisible characters, and one whose raw text is over 500 graphemes though its trimmed
    NFKC form was not.
 
+**A consequence found by the build, not by the plan:** the archive's worst-case entry
+(ADR-0036 decision 6) was `a` and 8,191 U+001F, one character under the trimmed count and
+49,147 octets as JSON. Counted as sent it is 8,192 characters and a `422`. The largest entry
+is now a backslash with 3,846 combining acutes and 499 U+001F, 10,688 octets out.
+`GetDays`' bound is measured per text and did not change; its KDoc and `DaysFeedTest`'s
+largest page were rebuilt for the new worst case (255,367 octets of 262,144 measured;
+ADR-0036 decision 6 carries the note).
+
 **Owed, not done here:** the corpus — spec §3.2 and doc 04 §7 say "NFKC-normalised before
 counting" — lives in another repository and still says so; and the KMP client's counter
 (`moyi-app`) should count grapheme clusters of the raw text, which is now what the server

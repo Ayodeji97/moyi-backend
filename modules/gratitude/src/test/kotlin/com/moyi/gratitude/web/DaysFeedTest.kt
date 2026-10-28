@@ -436,15 +436,22 @@ internal class DaysFeedTest(
      * of this slice, which proved the arithmetic first written beside the
      * bound wrong by five times.
      *
-     * An entry is bounded at 8,192 octets as it arrives. `a` followed by
-     * 8,191 U+001F is that; it is one character to the limit of 500, which
-     * is counted on the text trimmed, and a trailing U+001F is trimmed; and
-     * it is 49,147 octets as JSON, where each control is six. Two such days
-     * are 196,588 octets of text, twenty short of the page's bound, so both
-     * fit in one page and no third can. What can still join them is a day
-     * that sends no text at all: forty-eight days on which both wrote and
-     * both erased, two wide tombstones each. Fifty days, the most a page may
-     * be asked for, carrying all the text a page may carry.
+     * An entry is bounded at 8,192 octets as it arrives and 500 characters
+     * counted on the text as sent (ADR-0031, the owner's ruling 1). JSON
+     * writes a control as six octets and a backslash or a quote as two, and
+     * a control is a character of its own, so the most an entry can become
+     * is a backslash carrying 3,846 combining acutes (one character, 7,693
+     * octets) and 499 U+001F: 8,192 octets in, 10,688 as JSON. Until the
+     * ruling was built the 500 were counted on the text trimmed, U+001F
+     * trims as space, and `a` and 8,191 of them were one character and
+     * 49,147 octets out; that entry is a `422` now.
+     *
+     * Nine days of two such entries are 192,384 octets of text; one day of
+     * two entries of 2,112 octets as JSON brings the page to its bound,
+     * 196,608, exactly, so all ten fit and no other text can join them. What
+     * still can is a day that sends no text at all: forty days on which both
+     * wrote and both erased, two wide tombstones each. Fifty days, the most
+     * a page may be asked for, carrying all the text a page may carry.
      *
      * The size is written to `build/archive-largest-page.txt` for a person.
      *
@@ -460,8 +467,12 @@ internal class DaysFeedTest(
     @Test
     fun `the largest page there can be - two days of the largest entries among forty-eight of tombstones - is under 256 KB`() {
         val bond = pair()
-        val largest = "a" + "\\u001f".repeat(8_191)
-        val heavy = setOf(DAY_ONE.plusDays(20), DAY_ONE.plusDays(40))
+        // As JSON in the request: a backslash, 3,846 combining acutes, 499 U+001F.
+        val largest = "\\\\" + "\\u0301".repeat(3_846) + "\\u001f".repeat(499)
+        // Two letters and 1,055 combining acutes: 2,112 octets, as sent and as JSON.
+        val filler = "ab" + "\\u0301".repeat(1_055)
+        val heavy = (5L..45L step 5).map { DAY_ONE.plusDays(it) }.toSet()
+        val filled = DAY_ONE.plusDays(27)
         val dates =
             (0L until 50)
                 .map { DAY_ONE.plusDays(it) }
@@ -470,6 +481,9 @@ internal class DaysFeedTest(
                     if (date in heavy) {
                         rig.bonds.submit(ada, bond, largest)
                         rig.bonds.submit(bea, bond, largest)
+                    } else if (date == filled) {
+                        rig.bonds.submit(ada, bond, filler)
+                        rig.bonds.submit(bea, bond, filler)
                     } else {
                         val written = bothWrite(bond, date)
                         rig.bonds.delete(ada, written.adas)
@@ -477,12 +491,16 @@ internal class DaysFeedTest(
                     }
                 }.map { it.toString() }
                 .reversed()
-        // What was accepted and stored is what was meant: four entries of 8,192 octets ending in the control.
+        // What was accepted and stored is what was meant: eighteen entries of 8,192 octets ending in the control.
         jdbc.queryForObject(
             "SELECT count(*) FROM entries WHERE bond_id = ?::uuid AND octet_length(text) = 8192 AND right(text, 1) = chr(31)",
             Int::class.java,
             bond,
-        ) shouldBe 4
+        ) shouldBe 18
+        heavy.size shouldBe 9
+        GetDays.octetsAsJson("\\" + "\u0301".repeat(3_846) + "\u001f".repeat(499)) shouldBe 10_688
+        GetDays.octetsAsJson("ab" + "\u0301".repeat(1_055)) shouldBe 2_112
+        (18 * 10_688 + 2 * 2_112) shouldBe GetDays.PAGE_TEXT_OCTETS
         // And both named as long as a name can be sent: 80 characters, the most identity takes (OpenApiContractTest holds
         // identity to ArchivePageBudget), all but two of them controls between two letters so that registration's trim
         // keeps them, which JSON writes as six octets each. 470 octets on every day.
@@ -501,8 +519,8 @@ internal class DaysFeedTest(
                 rig.datesOf(page["items"].toList()) shouldBe dates
                 page["nextCursor"].isNull shouldBe true
                 val size = response.contentAsByteArray.size
-                // Four entries of 49,147 octets each on the wire, forty-eight days of tombstones around them, and fifty names.
-                size shouldBeGreaterThan 4 * 49_147 + 48 * 400 + 50 * 470
+                // The page's whole bound of text on the wire, forty days of tombstones around it, and fifty names.
+                size shouldBeGreaterThan GetDays.PAGE_TEXT_OCTETS + 40 * 400 + 50 * 470
                 size shouldBeLessThan MAX_RESPONSE
                 size
             }
@@ -516,8 +534,8 @@ internal class DaysFeedTest(
             responses.forEach { it.contentAsByteArray.size shouldBeLessThan MAX_RESPONSE }
             val pages = responses.map { rig.datesOf(json.readTree(it.getContentAsString(Charsets.UTF_8))["items"].toList()) }
             pages.flatten() shouldBe listOf("2026-11-04") + dates
-            // The 4th of November back to the 6th of October, then the 5th (the older heavy day) and the rest.
-            pages.map { it.size } shouldBe listOf(30, 21)
+            // The 4th of November back to the 21st of September, then the 20th (the oldest heavy day) and the rest.
+            pages.map { it.size } shouldBe listOf(45, 6)
         }
     }
 
