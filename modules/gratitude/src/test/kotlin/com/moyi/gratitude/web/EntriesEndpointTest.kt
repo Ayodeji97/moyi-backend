@@ -335,6 +335,69 @@ internal class EntriesEndpointTest(
     }
 
     /**
+     * The owner's ruling of 2026-10-21 (ADR-0031, ruling 2): an entry of only
+     * zero-width characters is refused as empty. The JSON spells each as its
+     * escape, which is how a client that escapes non-ASCII sends it; the last
+     * is a tag character, a surrogate pair.
+     */
+    @Test
+    fun `an entry of only zero-width characters is 422 naming the field, and nothing is stored`() {
+        for (invisible in listOf("\\u200b", "\\u200d\\ufeff", " \\u2060 ", "\\u00ad", "\\ufe0f", "\\udb40\\udc41")) {
+            val response = submit(ada, bondId, """{"text":"$invisible"}""")
+
+            response.status shouldBe 422
+            response.contentAsString shouldContain "\"field\":\"text\""
+            response.contentAsString shouldContain "an entry must say something"
+            jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 0
+        }
+    }
+
+    /**
+     * The owner's ruling of 2026-10-21 (ADR-0031, ruling 1): the 500 are
+     * counted as typed. 499 letters and a typographic ellipsis are 500 as
+     * typed and 502 under NFKC; they used to be a `422`.
+     */
+    @Test
+    fun `499 letters and an ellipsis are 500 as typed, and are accepted and stored as sent`() {
+        val written = "a".repeat(499) + "\u2026"
+
+        val created = submit(ada, bondId, """{"text":"$written"}""")
+
+        created.status shouldBe 201
+        jdbc.queryForObject("SELECT text FROM entries", String::class.java) shouldBe written
+        submit(bea, bondId, """{"text":"${"b".repeat(500)} "}""").status shouldBe 422
+    }
+
+    /**
+     * ADR-0031's amendment, decision 3: a row written under the old rule,
+     * which the new one refuses, is still read back. Both rulings tighten
+     * what `EntryText.of` accepts, and every read maps the row's text; were
+     * the read path to run the write path's check, every read of such a day
+     * would be a `500`.
+     */
+    @Test
+    fun `a row the new rule refuses but the old one accepted is read back unchanged`() {
+        val zeroWidth = "\u200b"
+        val trailingSpace = "a".repeat(500) + " "
+        val ours = bondIdOf(submit(ada, bondId, """{"text":"placeholder"}"""))
+        val theirs = bondIdOf(submit(bea, bondId, """{"text":"placeholder"}"""))
+        for ((id, old) in listOf(ours to zeroWidth, theirs to trailingSpace)) {
+            jdbc.update("UPDATE entries SET text = ?, text_search = ? WHERE id = ?::uuid", old, old, id) shouldBe 1
+        }
+
+        val today =
+            mockMvc
+                .get("/api/v1/bonds/$bondId/today") { header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(ada).token}") }
+                .andReturn()
+                .response
+
+        today.status shouldBe 200
+        today.getContentAsString(Charsets.UTF_8) shouldContain "\"text\":\"$zeroWidth\""
+        today.getContentAsString(Charsets.UTF_8) shouldContain "\"text\":\"$trailingSpace\""
+        jdbc.queryForList("SELECT text FROM entries ORDER BY text", String::class.java).toSet() shouldBe setOf(zeroWidth, trailingSpace)
+    }
+
+    /**
      * Fix round 1, C1: the edge's first draft restated FR-041's octet limit
      * with `@Size(max = 8192)`, which counts UTF-16 characters, not UTF-8
      * octets — so a body that is under the character count but over the real

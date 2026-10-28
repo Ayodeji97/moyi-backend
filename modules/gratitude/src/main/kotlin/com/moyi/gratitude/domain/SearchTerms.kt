@@ -14,9 +14,10 @@ import java.text.Normalizer
  * - **At most [MAX_OCTETS] UTF-8 octets**, on the raw text: a character has no upper bound on
  *   its length, and `q` travels in a URL.
  * - **Not blank** and **at most [MAX_GRAPHEMES] characters**, on the NFKC form trimmed, by
- *   [Graphemes.count]: as an entry is counted today (FR-041's convention), so a client counts
- *   both one way. The owner's ruling of 2026-10-21 (ADR-0031, ruling 1, to be built) counts an
- *   entry as typed, with no NFKC; whether `q` follows is ADR-0039's question 11.
+ *   [Graphemes.count]: as an entry was counted until the owner's ruling of 2026-10-21
+ *   (ADR-0031, ruling 1), which counts an entry as typed, with no NFKC, and refuses one of
+ *   only invisible characters (ruling 2). Neither applies here yet: whether `q` follows is
+ *   ADR-0039's question 11, open, so the two are counted differently for now.
  *
  * **Redacted.** What somebody looks for in what two people wrote is their words (T-19); it
  * reaches no log, no exception message and no `toString`.

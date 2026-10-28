@@ -389,6 +389,28 @@ internal class EntryChangesTest(
         patchEntry(ada, id, "{}").status shouldBe 422
     }
 
+    /**
+     * The owner's rulings of 2026-10-21 (ADR-0031) reach an edit as they reach
+     * a submission, through the same `EntryText.of`: only zero-width
+     * characters is a `422` and leaves the entry as it was; 499 letters and an
+     * ellipsis are 500 as typed and are a `200`, stored as sent.
+     */
+    @Test
+    fun `an edit to only zero-width characters is refused, and 499 letters and an ellipsis fit`() {
+        val id = entryId(submit(ada, bondId, """{"text":"before"}"""))
+
+        for (invisible in listOf("\\u200b", "\\ufeff\\u200d", " \\u2060\\n")) {
+            val refused = patchEntry(ada, id, """{"text":"$invisible"}""")
+            refused.status shouldBe 422
+            refused.contentAsString shouldContain "\"field\":\"text\""
+            jdbc.queryForObject("SELECT text FROM entries", String::class.java) shouldBe "before"
+        }
+
+        val typed = "a".repeat(499) + "\u2026"
+        patchEntry(ada, id, """{"text":"$typed"}""").status shouldBe 200
+        jdbc.queryForObject("SELECT text FROM entries", String::class.java) shouldBe typed
+    }
+
     @Test
     fun `a real update constraint failure never exposes entry text`(output: org.springframework.boot.test.system.CapturedOutput) {
         val id = entryId(submit(ada, bondId, """{"text":"privacy-canary-before"}"""))
