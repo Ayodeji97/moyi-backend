@@ -85,6 +85,11 @@
 # N3 a reveal on the wire sends one push to each member, logged twice by the logging
 # provider and SENT once each in the ledger, with neither the words nor the token in any
 # line, and the join asks one push of the member who was there. Last run on 2026-10-28,
+# after the rebased N1 and N2 (2062b68) were merged into N3, from a jar of that merge,
+# against its own compose project (moyi-n3: Postgres 55438, Valkey 63798) and --attach:
+# 1008 passed, 0 failed, 0 skipped, 27 sections. The first run on that fresh database
+# failed three reminder probes: the job's ShedLock holds at least thirty seconds and the
+# probe waited twenty, so it now waits forty. Before it, on 2026-10-28,
 # for N3 after the rulings on its independent review (the on-this-day week counted from
 # the ledger, V31), from a jar of that code, against a fresh database of its own compose
 # project (moyi-n3: Postgres on 55438, Valkey on 63798) and --attach: 1004 passed,
@@ -2164,7 +2169,10 @@ expect "reminder: she registers her phone" 204 "" -- -X PUT "$API/me/devices/cur
 expect "reminder: hers at the window's end, with quiet hours around now" 200 "\"quietHoursStart\":\"$NB_QUIET_FROM\"" -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_A" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\",\"quietHoursStart\":\"$NB_QUIET_FROM\",\"quietHoursEnd\":\"$NB_QUIET_TO\"}"
 expect "reminder: his at the same time, no quiet hours" 200 "\"reminderTimeLocal\":\"$NB_AT\"" -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_B" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\"}"
 NB_A_ROW=""
-for _ in $(seq 1 40); do
+# Up to forty seconds: the reminder job is timed every five here, but its ShedLock holds for
+# at least thirty (lockAtLeastFor), so a setting saved just after a run waits for the next
+# one up to thirty seconds later. Twenty was too short once (the N3 merge's first run).
+for _ in $(seq 1 80); do
   NB_A_ROW="$(sql "SELECT n.status FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REMINDER' AND m.role = 'OWNER'")"
   [ "$NB_A_ROW" = "HELD" ] || [ "$NB_A_ROW" = "psql-unavailable" ] && break
   sleep 0.5
