@@ -19,9 +19,11 @@ interface OnThisDayPushes {
      * holds only what they can already read; the other member's opt-in,
      * settings and pushes are never consulted, and the push names nothing.
      *
-     * At most one a week per member, however many memories the week holds or
-     * how often a window is asked about: the dedupe key is the member and the
-     * ISO week of their Bond-day.
+     * At most one in any seven days per member, however many memories they
+     * hold: a push of this kind sent, or still owed, in the last seven days
+     * stops another; one that reached nobody (expired, dropped by the budget,
+     * muted) does not. However often a window is asked about, the dedupe key
+     * (the member and their Bond-day) asks for nothing twice.
      */
     fun pushDue(
         after: Instant,

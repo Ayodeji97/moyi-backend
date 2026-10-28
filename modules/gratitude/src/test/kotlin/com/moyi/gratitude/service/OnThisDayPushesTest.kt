@@ -1,5 +1,6 @@
 package com.moyi.gratitude.service
 
+import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
@@ -9,6 +10,11 @@ import com.moyi.gratitude.api.OnThisDayRun
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
+import com.moyi.notification.api.HeldPushes
+import com.moyi.notification.api.PushPlatform
+import com.moyi.notification.api.PushToken
+import com.moyi.notification.api.PushTokenRegistration
+import com.moyi.notification.api.PushTokens
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
@@ -26,24 +32,30 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.put
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.support.TransactionTemplate
 import java.sql.Timestamp
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
 
 /**
- * The on-this-day push (FR-092, ADR-0046): opt-in, private, at most one a
- * week, and only when `GET /on-this-day` would answer the member with a day.
+ * The on-this-day push (FR-092, ADR-0046): opt-in, private, at most one in
+ * seven days, and only when `GET /on-this-day` would answer the member with a day.
  *
  * `Africa/Lagos`, UTC+1: the bond is made on 2025-09-01 and the memories are
- * written then; the push time is midday there, 11:00Z, so the sweep asked
- * about `(10:00Z, 11:00Z]` a year later finds it. Tuesday 2026-09-01 and
- * Wednesday 2026-09-02 are in ISO week 36; Tuesday 2026-09-08 is in week 37.
+ * written on 1, 2, 7 and 8 September 2025; the push time is midday there,
+ * 11:00Z, so the sweep asked about `(10:00Z, 11:00Z]` a year later finds it.
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
 @Import(StreakEvaluationTest.TimeConfiguration::class)
+@Suppress("LongParameterList") // A test's collaborators, each named.
 internal class OnThisDayPushesTest(
+    @Autowired private val dispatcher: OutboxDispatcher,
+    @Autowired private val held: HeldPushes,
+    @Autowired private val pushTokens: PushTokens,
+    @Autowired private val transactionManager: PlatformTransactionManager,
     @Autowired private val pushes: OnThisDayPushes,
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
@@ -69,13 +81,18 @@ internal class OnThisDayPushesTest(
         val created = createBond(ada)
         bond = idOf(created)
         accept(bea, codeOf(created))
-        // Ada writes on three days a year back; Bea writes nothing, and no day is ever closed, so
+        // Ada writes on four days a year back; Bea writes nothing, and no day is ever closed, so
         // none of Ada's words is ever opened to her.
-        listOf("2025-09-01", "2025-09-02", "2025-09-08").forEach { date ->
+        listOf("2025-09-01", "2025-09-02", "2025-09-07", "2025-09-08").forEach { date ->
             clock.set(Instant.parse("${date}T12:00:00Z"))
             write(ada)
         }
         notifications(ada, """{"categories":{"onThisDay":true}}""")
+        // Her phone, so that a push the consumer sends is SENT and not "no device".
+        jdbc.execute("TRUNCATE TABLE push_tokens")
+        TransactionTemplate(transactionManager).executeWithoutResult {
+            pushTokens.register(PushTokenRegistration(UUID.randomUUID(), ada, PushPlatform.ANDROID, PushToken("fake-push-token-otd-0001")))
+        }
     }
 
     @Test
@@ -88,18 +105,57 @@ internal class OnThisDayPushesTest(
         val row = jdbc.queryForMap("SELECT * FROM notifications")
         row["user_id"] shouldBe ada
         row["category"] shouldBe "ON_THIS_DAY"
-        row["dedupe_key"] shouldBe "on-this-day:${memberIdOf(ada)}:2026-W36"
+        row["dedupe_key"] shouldBe "on-this-day:${memberIdOf(ada)}:2026-09-01"
         row["stale_after"] shouldBe Timestamp.from(Instant.parse("2026-09-01T23:00:00Z"))
     }
 
     @Test
-    fun `at most one a week, however many memories the week holds, and again the next week`() {
+    fun `a push sent on day one spends the next six days, and the eighth day is told again`() {
         sweep("2026-09-01").requested shouldBe 1
+        dispatchAll()
+        statusOn("2026-09-01") shouldBe "SENT"
         sweep("2026-09-01").requested shouldBe 0
+
+        // Memories on the 2nd and the 7th: both inside the seven days, so both ask nothing.
         sweep("2026-09-02") shouldBe OnThisDayRun(due = 1, requested = 0, nothingToRemember = 0, failed = 0)
+        sweep("2026-09-07") shouldBe OnThisDayRun(due = 1, requested = 0, nothingToRemember = 0, failed = 0)
         sweep("2026-09-08").requested shouldBe 1
 
         jdbc.queryForObject("SELECT count(*) FROM notifications WHERE user_id = ?", Int::class.java, ada) shouldBe 2
+    }
+
+    @Test
+    fun `a push that expired in quiet hours spends nothing, and the next day's memory is told`() {
+        // The review of #100: quiet hours from 11:30 to 00:30 cover her midday and run past the
+        // bond's midnight. The first day's push is held, then expires at the day's end. Under a
+        // key per week it would have taken her week with it, and she would never be told.
+        settings(
+            ada,
+            """{"reminderTimeLocal":"21:00","reminderTimezone":"Africa/Lagos","quietHoursStart":"11:30","quietHoursEnd":"00:30"}""",
+        )
+        clock.set(Instant.parse("2026-09-01T10:45:00Z")) // 11:45 in Lagos, inside her hours
+        pushes.pushDue(Instant.parse("2026-09-01T10:00:00Z"), Instant.parse("2026-09-01T11:00:00Z")).requested shouldBe 1
+        dispatchAll()
+        statusOn("2026-09-01") shouldBe "HELD"
+        val released = Instant.parse("2026-09-01T23:31:00Z") // 00:31 in Lagos: her hours are over, and so is the day
+        clock.set(released)
+        held.releaseDue(released, DISPATCH) shouldBe 1
+        dispatchAll()
+        statusOn("2026-09-01") shouldBe "EXPIRED"
+
+        settings(ada, """{"reminderTimeLocal":"21:00","reminderTimezone":"Africa/Lagos"}""")
+        sweep("2026-09-02").requested shouldBe 1
+        dispatchAll()
+        statusOn("2026-09-02") shouldBe "SENT"
+    }
+
+    @Test
+    fun `a push the budget dropped spends nothing`() {
+        sweep("2026-09-01").requested shouldBe 1
+        // As the consumer leaves it when FR-082's budget is spent: dropped, never sent.
+        jdbc.update("UPDATE notifications SET status = 'DROPPED_BUDGET'") shouldBe 1
+
+        sweep("2026-09-02").requested shouldBe 1
     }
 
     @Test
@@ -167,6 +223,28 @@ internal class OnThisDayPushesTest(
     private fun sweep(date: String): OnThisDayRun {
         clock.set(Instant.parse("${date}T11:00:00Z"))
         return pushes.pushDue(Instant.parse("${date}T10:00:00Z"), Instant.parse("${date}T11:00:00Z"))
+    }
+
+    /** Runs the outbox until it has nothing due: the push request, then its send. */
+    private fun dispatchAll() {
+        repeat(DISPATCH_ROUNDS) { dispatcher.dispatchDue(clock.instant().plusSeconds(1), DISPATCH) }
+    }
+
+    /** The status of Ada's on-this-day push asked on the bond-day [date]. */
+    private fun statusOn(date: String): String =
+        jdbc.queryForObject("SELECT status FROM notifications WHERE dedupe_key LIKE ?", String::class.java, "on-this-day:%:$date")!!
+
+    private fun settings(
+        userId: UUID,
+        body: String,
+    ) {
+        mockMvc
+            .put("/api/v1/bonds/$bond/members/me/settings") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = MediaType.APPLICATION_JSON
+                content = body
+            }.andReturn()
+            .response.status shouldBe 200
     }
 
     private fun notified(): List<UUID> = jdbc.queryForList("SELECT user_id FROM notifications", UUID::class.java).filterNotNull()
@@ -238,4 +316,9 @@ internal class OnThisDayPushesTest(
 
     private fun idOf(response: MockHttpServletResponse): String =
         Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
+
+    private companion object {
+        const val DISPATCH = 100
+        const val DISPATCH_ROUNDS = 3
+    }
 }

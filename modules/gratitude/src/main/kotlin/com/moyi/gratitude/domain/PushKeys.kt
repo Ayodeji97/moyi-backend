@@ -1,7 +1,6 @@
 package com.moyi.gratitude.domain
 
 import java.time.LocalDate
-import java.time.temporal.IsoFields
 import java.util.UUID
 
 /**
@@ -32,15 +31,14 @@ internal object PushKeys {
     ): String = "milestone:$bondDayId:$userId"
 
     /**
-     * At most one a week per member (FR-092): the ISO week of the Bond-day it
-     * was asked on, so a second memory in the same week asks for nothing.
+     * One per member per Bond-day: the sweep's overlapping windows ask for
+     * nothing twice. FR-092's "at most one a week" is not this key's: it is a
+     * rolling seven days counted from the ledger, where a push that reached
+     * nobody does not spend it (ADR-0046 decision 8). A week's key spent by a
+     * push that then expired in quiet hours took the member's week with it.
      */
     fun onThisDay(
         memberId: UUID,
         bondDate: LocalDate,
-    ): String {
-        val year = bondDate.get(IsoFields.WEEK_BASED_YEAR)
-        val week = bondDate.get(IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-        return "on-this-day:$memberId:$year-W${week.toString().padStart(2, '0')}"
-    }
+    ): String = "on-this-day:$memberId:$bondDate"
 }

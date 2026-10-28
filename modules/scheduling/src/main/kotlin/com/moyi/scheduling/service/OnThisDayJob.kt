@@ -23,9 +23,9 @@ import java.util.concurrent.atomic.AtomicLong
  * "weekly sweep" is the push's cadence, not the job's: a memory is a date in
  * an earlier year, and a sweep that ran one day a week would look at one date
  * in seven and miss the rest. So the job asks every day, at each member's own
- * midday ([OnThisDayPushes.PUSH_AT] in their reminder zone), and the dedupe key
- * (the member and the ISO week) makes the first memory of a week the only push
- * of it.
+ * midday ([OnThisDayPushes.PUSH_AT] in their reminder zone), and `gratitude`
+ * counts seven days back from the ledger: one sent, or still owed, in that
+ * span is the week's push (ADR-0046 decision 8).
  *
  * **The window is the hour that ended on the last quarter-hour boundary**,
  * the reminder job's design at a slower pace: a tick lost to a restart or a

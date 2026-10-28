@@ -110,6 +110,34 @@ internal class NotificationStore(
         ) == 1
 
     /**
+     * Whether a push of [category] to [userId] in [bondId], asked for after
+     * [since], has one of [statuses]. Read by `notifications_recipient_idx`
+     * (V31).
+     */
+    fun existsSince(
+        userId: UUID,
+        bondId: UUID,
+        category: PushCategory,
+        statuses: Set<NotificationStatus>,
+        since: Instant,
+    ): Boolean =
+        jdbc.queryForObject(
+            """
+            SELECT EXISTS (
+              SELECT 1 FROM notifications
+               WHERE user_id = ? AND category = ? AND created_at > ? AND bond_id = ?
+                 AND status = ANY (?)
+            )
+            """.trimIndent(),
+            Boolean::class.java,
+            userId,
+            category.name,
+            timestamp(since),
+            bondId,
+            statuses.map { it.name }.toTypedArray(),
+        ) == true
+
+    /**
      * Holds a `REQUESTED` push back until [until]: quiet hours (ADR-0045).
      * The push stays owed, and [releaseDue] hands it back when the time comes.
      */
