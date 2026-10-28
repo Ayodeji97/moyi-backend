@@ -82,18 +82,45 @@
 # (and the release of held pushes) every five seconds: the member who wrote is
 # not reminded, the one who did not is, held by her quiet hours, released when
 # they are made to have passed, and taken by the logging provider. Since Phase 4
+# N3 a reveal on the wire sends one push to each member, logged twice by the logging
+# provider and SENT once each in the ledger, with neither the words nor the token in any
+# line, and the join asks one push of the member who was there. Since Phase 4
 # D1 it asks for an upload URL, sees the storage (the compose MinIO) refuse a body
 # other than the one declared and take the declared one, completes the upload
 # (409 before the PUT, a replay under the same key, 422 without one), reads it as
 # its owner and is told 404 as another user, refuses a GIF (415) and 11 MB (413),
 # deletes it and sees the object gone from MinIO, and finds the URL in no log
-# line. Last run on 2026-10-28, for D1 rebased onto main at 0a663d5 (#99, V30),
+# line. Last run on 2026-10-28, after main (b2da5a7, the squash of #100, V31) was merged
+# into D1, from a jar of that merge, on a fresh database that applied V1 to V27 and V29
+# to V33 in that order, against its own compose project (moyi-d1: Postgres 55440, Valkey
+# 63800, MinIO 59000) and --attach: 1045 passed, 0 failed, 0 skipped, 28 sections.
+# Before it, on 2026-10-28, for D1 rebased onto main at 0a663d5 (#99, V30),
 # from a jar of that tree, on a fresh database that applied V1 to V27, V29, V30,
 # V32 and V33, against its own compose project (moyi-d1: Postgres 55440, Valkey
 # 63800, MinIO 59000) and --attach: 1034 passed, 0 failed, 0 skipped, 27 sections;
 # and the same again from a jar of 9718c61 (the review's fixes: storage calls
 # bounded and outside the transaction, MinIO pinned by digest), on a fresh database.
-# Before it, on
+# Before them, N3's own runs: on 2026-10-28,
+# after main (0a663d5, the squash of #99) was merged into N3, from a jar of that merge, on a
+# fresh database that applied V1 to V27, V29, V30 and V31, against its own compose project
+# (moyi-n3: Postgres 55438, Valkey 63798) and --attach: 1009 passed, 0 failed, 2 skipped
+# (both the tag across the erasure, the poller having won the race), 27 sections. Before
+# it, on 2026-10-28, after N2 with main and #96 (eb999d2) was merged into N3, from a jar of that merge, on a
+# fresh database that applied V1 to V27, V29, V30 and V31, against its own compose project
+# (moyi-n3: Postgres 55438, Valkey 63798) and --attach: 1011 passed, 0 failed, 0 skipped,
+# 27 sections. Before it, on 2026-10-28,
+# after the rebased N1 and N2 (2062b68) were merged into N3, from a jar of that merge,
+# against its own compose project (moyi-n3: Postgres 55438, Valkey 63798) and --attach:
+# 1008 passed, 0 failed, 0 skipped, 27 sections. The first run on that fresh database
+# failed three reminder probes: the job's ShedLock holds at least thirty seconds and the
+# probe waited twenty, so it now waits forty. Before it, on 2026-10-28,
+# for N3 after the rulings on its independent review (the on-this-day week counted from
+# the ledger, V31), from a jar of that code, against a fresh database of its own compose
+# project (moyi-n3: Postgres on 55438, Valkey on 63798) and --attach: 1004 passed,
+# 0 failed, 0 skipped, 27 sections. Before it, N3's first code, 1004, 0 and 0 on that
+# project's database after a first run, which had failed one probe of its own, which had
+# assumed the join's push was settled before a toggle PUT a second later (it is read when
+# the consumer runs), and now allows either. Before them, on
 # 2026-10-28, with main merged in (#96 as bd94436, #104's V27), from a jar of that
 # merge, on a fresh database that applied V1 to V27, V29 and V30, against its own
 # compose project (Postgres 55436, Valkey 63796) and --attach: 1000 passed, 0 failed,
@@ -2185,7 +2212,10 @@ expect "reminder: she registers her phone" 204 "" -- -X PUT "$API/me/devices/cur
 expect "reminder: hers at the window's end, with quiet hours around now" 200 "\"quietHoursStart\":\"$NB_QUIET_FROM\"" -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_A" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\",\"quietHoursStart\":\"$NB_QUIET_FROM\",\"quietHoursEnd\":\"$NB_QUIET_TO\"}"
 expect "reminder: his at the same time, no quiet hours" 200 "\"reminderTimeLocal\":\"$NB_AT\"" -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_B" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\"}"
 NB_A_ROW=""
-for _ in $(seq 1 40); do
+# Up to forty seconds: the reminder job is timed every five here, but its ShedLock holds for
+# at least thirty (lockAtLeastFor), so a setting saved just after a run waits for the next
+# one up to thirty seconds later. Twenty was too short once (the N3 merge's first run).
+for _ in $(seq 1 80); do
   NB_A_ROW="$(sql "SELECT n.status FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REMINDER' AND m.role = 'OWNER'")"
   [ "$NB_A_ROW" = "HELD" ] || [ "$NB_A_ROW" = "psql-unavailable" ] && break
   sleep 0.5
@@ -2195,7 +2225,7 @@ db_is "reminder: …held until her quiet hours end" "$(sql "SELECT to_char(not_b
 db_is "reminder: he wrote, so none was asked for him" "$(sql "SELECT count(*) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NB_BOND' AND m.role = 'MEMBER'")" "0"
 db_is "reminder: its key is the member and the bond-day" "$(sql "SELECT dedupe_key LIKE 'reminder:%:' || to_char(now() AT TIME ZONE 'Africa/Lagos', 'YYYY-MM-DD') FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REMINDER'")" "t"
 sleep 6
-db_is "reminder: the job ran again on the same window and asked for nothing twice" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND'")" "1"
+db_is "reminder: the job ran again on the same window and asked for nothing twice" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REMINDER'")" "1"
 # Her night passes, by hand: the hold ends now, and the window it was read under is gone.
 sql "UPDATE notifications SET not_before = now() - interval '1 second', quiet_hours_start = NULL, quiet_hours_end = NULL WHERE bond_id = '$NB_BOND' AND status = 'HELD'" >/dev/null
 NB_SENT=""
@@ -2207,6 +2237,37 @@ done
 db_is "reminder: released when her hours end, and taken by the logging provider, out of the remainder" "$NB_SENT" "SENT|not-sent:log|false"
 if grep -q "$NB_TOKEN" "$MOYI_LOG"; then fail "reminder: the token is in no log line" "found in $MOYI_LOG"; else pass "reminder: the token is in no log line"; fi
 if grep -qE '"quietHours|quiet_hours' "$MOYI_LOG"; then fail "reminder: her quiet hours are in no log line" "found in $MOYI_LOG"; else pass "reminder: her quiet hours are in no log line"; fi
+flush_buckets
+
+echo; echo "the pushes a reveal and a join make (Phase 4 N3, ADR-0046)"
+# The same two members. He wrote today above and she has not; both phones are registered, and
+# her quiet hours are cleared, so her entry, the second, reveals the day and the outbox tells
+# each of them once, through the logging provider. When he joined the bond she was asked one
+# push, under the join's key, and him none. How hers settled depends on a race this script runs
+# on purpose: she turned partner-joined pushes off within a second or two of his joining, and the
+# consumer reads her settings when it runs (ADR-0045 decision 2), so it is SUPPRESSED if her
+# PUT came first and FAILED_PERMANENT (no phone yet) if it did not. Never SENT.
+NJ_ROW="$(sql "SELECT (n.status IN ('SUPPRESSED', 'FAILED_PERMANENT')) || '|' || (n.dedupe_key = 'joined:' || n.bond_id || ':' || n.user_id) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'PARTNER_JOINED' AND m.role = 'OWNER'")"
+db_is "joined: the member who was there was asked one push, under the join's key, and it was not sent" "$NJ_ROW" "true|true"
+db_is "joined: …and the one who joined was asked none" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'PARTNER_JOINED'")" "1"
+NR_TOKEN="smoke-push-token-n3-$RANDOM$RANDOM"
+expect "reveal push: he registers his phone" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $NB_B" -d "{\"token\":\"$NR_TOKEN\"}"
+expect "reveal push: her quiet hours are cleared" 200 '"quietHoursStart":null' -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_A" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\"}"
+NR_WORDS="the second entry of the reveal push $RANDOM"
+expect "reveal push: she writes the second entry, and the day is open" 201 "" -- -X POST "$API/bonds/$NB_BOND/entries" -H "Authorization: Bearer $NB_A" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"$NR_WORDS\"}"
+NR_SENT=""
+for _ in $(seq 1 40); do
+  NR_SENT="$(sql "SELECT count(DISTINCT user_id) || '|' || count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REVEAL' AND status = 'SENT'")"
+  [ "$NR_SENT" = "2|2" ] || [ "$NR_SENT" = "psql-unavailable" ] && break
+  sleep 0.5
+done
+db_is "reveal push: one push SENT to each member, and no more" "$NR_SENT" "2|2"
+db_is "reveal push: …each under its reveal key" "$(sql "SELECT count(*) FROM notifications n JOIN bond_days d ON n.dedupe_key = 'reveal:' || d.id || ':' || n.user_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REVEAL'")" "2"
+NR_LOGGED="$(grep -c "Push NOT sent (provider=log): category=REVEAL bond=$NB_BOND" "$MOYI_LOG" || true)"
+if [ "$NR_LOGGED" = "2" ]; then pass "reveal push: two sends logged by the logging provider"; else fail "reveal push: two sends logged by the logging provider" "found $NR_LOGGED"; fi
+db_is "reveal push: no solo, milestone or streak push came of it" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category NOT IN ('REMINDER', 'PARTNER_JOINED', 'REVEAL')")" "0"
+if grep -q "$NR_WORDS" "$MOYI_LOG"; then fail "reveal push: her words are in no log line" "found in $MOYI_LOG"; else pass "reveal push: her words are in no log line"; fi
+if grep -q "$NR_TOKEN" "$MOYI_LOG"; then fail "reveal push: his token is in no log line" "found in $MOYI_LOG"; else pass "reveal push: his token is in no log line"; fi
 flush_buckets
 
 echo; echo "media — an upload straight to the storage, and the four /media routes (Phase 4 D1, ADR-0047)"

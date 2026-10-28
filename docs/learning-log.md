@@ -2661,6 +2661,32 @@ Wrong about: a retry being a cheap way to wait. To the outbox it is a failure, a
          gauges say so. And about a record of what is free: ADR-0044 said namespace 2 was
          unused, and nobody had grepped.
 
+## 2026-10-28 · Feature · Push N3 — who is told what, and the tests that counted the outbox
+
+Expected: the consumers would be the small part of N3: read the event, find the two
+         members, ask for two pushes. The SOLO unlock would need its own event, and the
+         existing suites would not notice two more consumers.
+Reality: the consumers were small. What they touched was not. A dozen `gratitude` tests
+         assert the outbox's exact delivery count (one for a withdrawal, none for a failing
+         handler), and every join and reveal now adds deliveries; the shared test context
+         leaves the push consumers out and their own tests import them. `bond`'s V13 backfill
+         test runs at Flyway target 11, before the outbox exists, and a context with any
+         consumer locks `outbox_events` at start-up, so that one test gets a context with
+         none. The SOLO unlock needed no event: `DayClosed`, the day's status and the stamp
+         the close already writes when a lone entry opens say it, and the stamp also says
+         when it did not (the bond had separated). On-this-day is "weekly" in the spec, but a
+         sweep run once a week looks at one date in seven; it runs daily. Its first weekly
+         bound was a dedupe key per ISO week, and the independent review broke it: a key is
+         spent by the request, so a push held by quiet hours and then expired took the
+         member's week with it. The bound is now seven days counted from the ledger, where
+         only a push sent or still owed counts. And the streak pin read files: a constant
+         from another file slipped past it, so a test now asks every consumer bean.
+Wrong about: what "add a consumer" costs a codebase whose tests count deliveries. And about
+         redundant guards: the status check and the stamp check on the solo push each made
+         the other unfalsifiable through the real close, so each has a test that forges the
+         other's half by SQL. And about a dedupe key as a rate limit: it limits requests, and
+         what the member was owed was deliveries.
+
 ## 2026-10-28 · Feature · Media D1 — an upload that never touches the API, and a test image that no longer exists
 
 Expected: MinIO, as the spec names it, from `minio/minio` on Docker Hub; the AWS SDK's

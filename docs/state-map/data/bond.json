@@ -2097,7 +2097,7 @@
     "rule": "FR-027, BR-6, ADR-0030 §4",
     "evidence": "smoke",
     "evidenceRef": "proposing a zone is 200 and moves nothing yet",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#val proposal = Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now)"
   },
   {
     "id": "bond-active-timezone-propose-pending",
@@ -3736,8 +3736,8 @@
     "to": "ACTIVE",
     "status": null,
     "code": null,
-    "reason": "Somebody accepts your invite. The bond is two people and ACTIVE from that instant, and the code is spent.",
-    "rule": "FR-022, M2",
+    "reason": "Somebody accepts your invite. The bond is two people and ACTIVE from that instant, and the code is spent. You are sent one push saying so, with no name in it, unless you turned partner-joined pushes off (ADR-0046); the one who joined is sent none.",
+    "rule": "FR-022, M2, FR-080",
     "evidence": "smoke",
     "evidenceRef": "the creator sees the same active bond",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/domain/Bond.kt#return copy(status = BondStatus.ACTIVE, members = members + member)"
@@ -5576,7 +5576,7 @@
     "rule": "FR-027, ADR-0030 §1",
     "evidence": "smoke",
     "evidenceRef": "proposing a zone is 200 and moves nothing yet",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#val proposal = Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now)"
   },
   {
     "id": "proposal-none-timezone-propose-alone",
@@ -5701,7 +5701,7 @@
     "rule": "FR-027",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#val proposal = Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now)"
   },
   {
     "id": "proposal-confirmed-timezone-propose-too-soon",
@@ -5763,7 +5763,7 @@
     "rule": "ADR-0030 §5",
     "evidence": "smoke",
     "evidenceRef": "…and a fresh proposal is allowed",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#val proposal = Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now)"
   },
   {
     "id": "proposal-lapsed-timezone-propose",
@@ -7074,11 +7074,11 @@
     "to": "PROPOSED",
     "status": null,
     "code": null,
-    "reason": "Your partner proposes a zone change or asks for the deletion. Your next read of the bond shows it waiting, with seven days to answer. You are not notified.",
-    "rule": "FR-027, FR-028",
+    "reason": "Your partner proposes a zone change or asks for the deletion. Your next read of the bond shows it waiting, with seven days to answer. You are sent one push for it, with no words of the server's and nothing about what is proposed, unless you turned proposal pushes off; never a second one, and none if it was answered or called off before it went (ADR-0046).",
+    "rule": "FR-027, FR-028, Q13",
     "evidence": "test",
-    "evidenceRef": "BondTimezoneEndpointTest#an active bond records a proposal, and the zone does not move yet",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#proposals.insert(Proposal.timezoneChange(ProposalId(support.ids.timeOrdered()), bond.id, zone, membership.memberId, now))"
+    "evidenceRef": "BondPushesTest#a zone change waiting on the other member is told to them only, once, and never again",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#support.events.publish(ProposalOpened.of(proposal))"
   },
   {
     "id": "proposal-confirmed-partner-proposes",

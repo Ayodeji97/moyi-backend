@@ -127,18 +127,36 @@ class ArchitectureTest {
 
         /**
          * The methods of `bond.api` that run no membership guard: `BondAccess`'s, written for the
-         * close job and used by work like it, and `ReminderRoster`'s, which names members of every
-         * bond for the daily reminder (ADR-0045).
+         * close job and used by work like it, `ReminderRoster`'s, which names members of every
+         * bond for the daily reminder (ADR-0045), and `PushAudiences`', which names them for the
+         * pushes an event or the on-this-day sweep makes (ADR-0046).
          */
-        private val UNGUARDED_BOND_READS = listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep", "remindersDueBetween")
+        private val UNGUARDED_BOND_READS =
+            listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep", "remindersDueBetween", "audienceOf", "onThisDayDueBetween")
 
         /**
          * The work nobody asked for (`gratitude.service`): the close job's three steps, the
-         * withdrawal's consumer and the daily reminder's sweep. Each reads a bond with no caller
-         * whose membership could be checked.
+         * withdrawal's consumer, the daily reminder's sweep, the day's push consumer and the
+         * on-this-day sweep. Each reads a bond with no caller whose membership could be checked.
          */
         private val WORK_WITH_NO_CALLER =
-            setOf("CloseDay.kt", "CreateMissingDays.kt", "EvaluateStreaks.kt", "WithdrawEntries.kt", "SendDailyReminders.kt")
+            setOf(
+                "CloseDay.kt",
+                "CreateMissingDays.kt",
+                "EvaluateStreaks.kt",
+                "WithdrawEntries.kt",
+                "SendDailyReminders.kt",
+                "NotifyDayMembers.kt",
+                "SendOnThisDayPushes.kt",
+            )
+
+        /**
+         * The events no push is ever made of (ADR-0034 decision 11, ADR-0046): a streak that
+         * ended is the guilt FR-076 forbids, and one that went on is countdown pressure. Written
+         * here as the literals a consumer would have to spell to subscribe; a reaction publishes
+         * no event at all (ADR-0037 decision 10), so there is none to list for it.
+         */
+        private val NEVER_PUSHED = listOf("\"StreakBroken\"", "\"StreakExtended\"")
 
         private data class Location(
             val module: String,
@@ -370,7 +388,34 @@ class ArchitectureTest {
 
         assertTrue(
             violations.isEmpty(),
-            "Only the close job, the withdrawal's consumer and the reminder sweep may call bond's unguarded reads. Found in: $violations",
+            "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer and the on-this-day " +
+                "sweep may call bond's unguarded reads. Found in: $violations",
+        )
+    }
+
+    @Test
+    fun `no event consumer subscribes to a streak breaking or going on`() {
+        // ADR-0034 decision 11 (the ruling at :240), ADR-0046: nothing is ever pushed, or done,
+        // because a streak ended or went on. A consumer subscribes by naming the event type in
+        // its `eventTypes`, so a consumer's file that spells either literal is the violation,
+        // wherever in the file it is: a constant two lines above `eventTypes` is how it would be
+        // written. Comments and KDoc may name them (they do, to say why not): they are written
+        // in backticks, never as string literals. `DayPushesTest` pins `gratitude.notify`'s set
+        // to the three it is, at run time, as the second half of this.
+        val consumers =
+            project
+                .classes()
+                .filter { it.resideInPath("..src/main..") }
+                .filter { declaration -> declaration.parents().any { it.name == "EventConsumer" } }
+        val violations =
+            consumers
+                .filter { declaration -> NEVER_PUSHED.any { it in declaration.containingFile.text } }
+                .map { it.name }
+
+        assertTrue(consumers.isNotEmpty(), "No EventConsumer was found: this rule would hold vacuously.")
+        assertTrue(
+            violations.isEmpty(),
+            "No event consumer may subscribe to StreakBroken or StreakExtended (ADR-0034 decision 11, ADR-0046). Found in: $violations",
         )
     }
 
