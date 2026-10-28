@@ -1136,5 +1136,92 @@
       }
     ],
     "curl": "curl -X POST \"$API/auth/reset-password\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$RESET_TOKEN\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\""
+  },
+  {
+    "id": "POST /api/v1/media/upload-intent",
+    "summary": "ask for a URL to upload a photo or a voice note to",
+    "machine": "media",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers: 30 intents an hour per user, a refused one included, below the 120 a minute every call counts against; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "A field is missing or malformed: kind is not IMAGE or VOICE, contentType is blank, sizeBytes is missing or below 1, or checksum is not a SHA-256 in base64. Every such field is named at once.",
+        "evidence": "smoke",
+        "evidenceRef": "media: an intent with no checksum is 422 on checksum",
+        "codeRef": "modules/media/src/main/kotlin/com/moyi/media/domain/UploadDeclaration.kt#if (violations.isNotEmpty()) return Outcome.Refused(Refusal.Invalid(violations))"
+      }
+    ],
+    "curl": "curl -X POST \"$API/media/upload-intent\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"kind\":\"IMAGE\",\"contentType\":\"image/jpeg\",\"sizeBytes\":20,\"checksum\":\"<SHA-256 of the bytes, base64>\"}'"
+  },
+  {
+    "id": "POST /api/v1/media/{mediaId}/complete",
+    "summary": "say the upload is done",
+    "machine": "media",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key (required. Repeating a key is a replay: 200 again with Idempotency-Replayed: true and the asset as it stands now; a refusal is never recorded, so the same key may complete once the bytes are there)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "A body larger than one mebibyte. The route reads none, but the Idempotency-Key's fingerprint reads what is sent.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII.",
+        "evidence": "smoke",
+        "evidenceRef": "media: completion without an Idempotency-Key is 422",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#violationOf(key)?.let { throw IdempotencyKeyNotValidException(it) }"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another asset's completion, or another route.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/media/$MEDIA/complete\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\""
+  },
+  {
+    "id": "GET /api/v1/media/{mediaId}",
+    "summary": "read one of your own photos or voice notes",
+    "machine": "media",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/media/$MEDIA\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/media/{mediaId}",
+    "summary": "delete one of your own photos or voice notes",
+    "machine": "media",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X DELETE \"$API/media/$MEDIA\" -H \"Authorization: Bearer $TOKEN\""
   }
 ]
