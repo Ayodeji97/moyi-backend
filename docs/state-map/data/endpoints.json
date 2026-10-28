@@ -742,7 +742,7 @@
     "machine": "day",
     "auth": "bearer",
     "headers": [
-      "Content-Type (application/json, with exactly one key, {\"type\": \"HEART\", \"THANK_YOU\", \"SMILE\" or \"MOVED\"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)"
+      "Content-Type (application/json, with exactly one key, {\"type\": \"HEART\", \"THANK_YOU\", \"SMILE\", \"MOVED\" or \"ME_TOO\"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)"
     ],
     "requestErrors": [
       {
@@ -756,7 +756,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "type is missing, null, or not one of the four names exactly as written. Nothing is set.",
+        "reason": "type is missing, null, or not one of the five names exactly as written. Nothing is set.",
         "evidence": "smoke",
         "evidenceRef": "an unknown type once more, for its body",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/ReactionRequest.kt#internal class ReactionTypeConstraintValidator"
