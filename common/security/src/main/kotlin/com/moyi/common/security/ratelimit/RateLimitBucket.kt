@@ -72,6 +72,13 @@ enum class RateLimitBucket(
     /** Spec §5.5, corpus doc 06 §4: 20 entry submission attempts per day per user. */
     ENTRIES_CREATE_USER("entries:create:user", Subject.USER, 20, Duration.ofDays(1)),
 
+    /**
+     * Doc 06 §4: "`media:intent` (per user) 30 / hour". Each intent is an upload
+     * URL for up to 10 MB, so this is what bounds the bytes one account can
+     * make the storage take (T-16, spec §6 R-C).
+     */
+    MEDIA_INTENT_USER("media:intent:user", Subject.USER, 30, Duration.ofHours(1)),
+
     /** Doc 06 §4: "global authenticated 120 / min", per user, on every request that carries a valid token. */
     AUTHENTICATED("authenticated:user", Subject.USER, 120, Duration.ofMinutes(1)),
     ;

@@ -1,0 +1,24 @@
+meta {
+  name: Media upload
+  type: http
+  seq: 29
+}
+
+put {
+  url: {{uploadUrl}}
+  body: text
+  auth: none
+}
+
+headers {
+  Content-Type: image/jpeg
+  x-amz-checksum-sha256: {{uploadChecksum}}
+}
+
+body:text {
+  fake photo for bruno
+}
+
+docs {
+  The upload itself, to the storage and not to the API: the URL Media upload intent kept. No bearer token; the URL is signed. 200 from the storage. Any other body, length or type is refused by the storage (400 or 403).
+}

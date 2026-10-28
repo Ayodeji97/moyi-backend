@@ -1874,3 +1874,125 @@ curl -X DELETE "$API/entries/$ENTRY/reaction" -H "Authorization: Bearer $TOKEN"
 |---|---|---|---|
 | 404 | `NOT_FOUND` | There is no such entry, the id is not an id, you are not a member of its bond, or it is your partner's entry and still locked: every entry you were never shown. No more specific reason is returned. | smoke |
 | 409 | `REACTION_BUSY` | Another operation holds your reaction on a partner's entry you read in full: an erasure, which may roll back, or your own request still running (two DELETEs that overlap, or a DELETE over your own PUT). Nothing is removed; retry. Never given on an entry shown to you as erased, nor on your own entry: there it is 204. | test |
+
+## Media
+
+### POST /media/upload-intent
+
+ask for a URL to upload a photo or a voice note to
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers: 30 intents an hour per user, a refused one included, below the 120 a minute every call counts against; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/media/upload-intent" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"kind":"IMAGE","contentType":"image/jpeg","sizeBytes":20,"checksum":"<SHA-256 of the bytes, base64>"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `media` | `NONE` | the declaration is accepted and a storage is configured | 201 → `PENDING_UPLOAD` | A new asset waits for its upload, and you get a URL that takes exactly the declared bytes straight to the storage, never through the API, for 15 minutes, with the headers the upload must carry. The URL is signed for the content type, the length and the SHA-256, so the storage refuses any other body. | FR-042, FR-043, FR-044, ADR-0047 §1 | smoke |
+| `media` | `NONE` | the content type is not one its kind takes | 415 `MEDIA_TYPE_UNSUPPORTED` | An image is JPEG, PNG, HEIC or WebP; a voice note is MPEG-4 audio, Ogg, AMR, WebM or WAV. A type with parameters is refused too, because the value is signed and must be sent back exactly. Nothing is recorded. | FR-042, ADR-0047 §1 | smoke |
+| `media` | `NONE` | the declared size is over its kind's limit | 413 `MEDIA_QUOTA_EXCEEDED` | More bytes than the kind allows: 10 MB for an image, 5 MB for a voice note. It refuses the upload, never an entry. Nothing is recorded. | FR-042, FR-043, doc 06:186 | smoke |
+| `media` | `NONE` | no storage is configured | 503 `MEDIA_STORAGE_UNAVAILABLE` | No storage is configured: production, until the owner makes the bucket. Signing an upload URL needs no network, so a configured storage that is down does not refuse an intent; the completion does. Nothing is recorded; keep the entry's words and offer the photo again later. | ADR-0047 §5 | test |
+| `media` | `PENDING_UPLOAD` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
+| `media` | `UPLOADED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
+| `media` | `DELETED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 422 | `VALIDATION_FAILED` | A field is missing or malformed: kind is not IMAGE or VOICE, contentType is blank, sizeBytes is missing or below 1, or checksum is not a SHA-256 in base64. Every such field is named at once. | smoke |
+
+### POST /media/{mediaId}/complete
+
+say the upload is done
+
+**Needs:** an access token.
+
+- Idempotency-Key (required. Repeating a key is a replay: 200 again with Idempotency-Replayed: true and the asset as it stands now; a refusal is never recorded, so the same key may complete once the bytes are there)
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/media/$MEDIA/complete" -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $(uuidgen)"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `media` | `NONE` |  | 404 `NOT_FOUND` | Nothing of yours has this id: another person's photo, an id that names nothing and a value that is not an id all get this one answer, never 403, so that it does not confirm the asset exists. A partner reaches media only through an entry, never by its id. | doc 06:182-184, ADR-0047 §3 | test |
+| `media` | `PENDING_UPLOAD` | the storage holds the declared bytes under the asset's key | 200 → `UPLOADED` | The storage holds the declared length (and the declared SHA-256, where the storage reports one), so the asset is uploaded and MediaUploaded is recorded for the pipeline, in one transaction. | doc 05:164, ADR-0047 §2 | smoke |
+| `media` | `PENDING_UPLOAD` | the storage holds nothing under the asset's key, or not the declared length and digest | 409 `MEDIA_NOT_UPLOADED` | Nothing has been uploaded under the URL yet, or not the bytes declared. Nothing changes and the key is not recorded: finish the upload (the URL works until its expiresAt), then complete again. | ADR-0047 §2 | smoke |
+| `media` | `PENDING_UPLOAD` | the storage cannot be reached | 503 `MEDIA_STORAGE_UNAVAILABLE` | The storage did not answer within 3 s (two attempts of 1.5 s). It is asked before any transaction opens, so nothing was locked or recorded meanwhile, the Idempotency-Key included; complete again later. | ADR-0047 §2 | test |
+| `media` | `UPLOADED` |  | 200 stays | It is already complete. Completing again, under the same key or a new one, changes nothing and records no second event; the same key is answered as a replay. | doc 06:182, ADR-0047 §2 | test |
+| `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184, ADR-0047 §3 | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 409 | `MEDIA_BUSY` | The asset's row was not to be had within lock_timeout (10 s) while another change to it ran. Nothing changed; send the same request again. No storage call is made under that lock, so this is rare. | test |
+| 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | never-run |
+| 413 | `MALFORMED_REQUEST` | A body larger than one mebibyte. The route reads none, but the Idempotency-Key's fingerprint reads what is sent. | never-run |
+| 422 | `VALIDATION_FAILED` | The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. | smoke |
+| 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another asset's completion, or another route. | never-run |
+
+### GET /media/{mediaId}
+
+read one of your own photos or voice notes
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl "$API/media/$MEDIA" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `media` | `NONE` |  | 404 `NOT_FOUND` | Nothing of yours has this id: another person's photo, an id that names nothing and a value that is not an id all get this one answer, never 403, so that it does not confirm the asset exists. A partner reaches media only through an entry, never by its id. | doc 06:183, BR-1, ADR-0047 §3 | smoke |
+| `media` | `PENDING_UPLOAD` |  | 200 stays | Its kind, status, type and size. No URL: nothing is ready to be shown until the pipeline (D2) makes it so. | doc 06:183 | smoke |
+| `media` | `UPLOADED` |  | 200 stays | Its kind, status, type and size. No URL until the pipeline (D2) has made its variants. | doc 06:183 | smoke |
+| `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | smoke |
+
+### DELETE /media/{mediaId}
+
+delete one of your own photos or voice notes
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X DELETE "$API/media/$MEDIA" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `media` | `NONE` |  | 404 `NOT_FOUND` | Nothing of yours has this id: another person's photo, an id that names nothing and a value that is not an id all get this one answer, never 403, so that it does not confirm the asset exists. A partner reaches media only through an entry, never by its id. | doc 06:184, ADR-0047 §3 | smoke |
+| `media` | `PENDING_UPLOAD` |  | 204 → `DELETED` | The asset is deleted, and after the commit whatever was uploaded under its key is removed from the storage. Nothing can be attached to an entry yet (D2), so every asset of yours can be deleted. | doc 06:184, ADR-0047 §3 | test |
+| `media` | `UPLOADED` |  | 204 → `DELETED` | The asset is deleted, and after the commit its object is removed from the storage. If the storage cannot be reached then, the bucket's lifecycle rule removes the upload within two days. | doc 06:184, ADR-0047 §3 | smoke |
+| `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 409 | `MEDIA_BUSY` | The asset's row was not to be had within lock_timeout (10 s) while another change to it ran. Nothing changed; send the same request again. No storage call is made under that lock, so this is rare. | test |

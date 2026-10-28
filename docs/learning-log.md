@@ -2687,6 +2687,35 @@ Wrong about: what "add a consumer" costs a codebase whose tests count deliveries
          other's half by SQL. And about a dedupe key as a rate limit: it limits requests, and
          what the member was owed was deliveries.
 
+## 2026-10-28 · Feature · Media D1 — an upload that never touches the API, and a test image that no longer exists
+
+Expected: MinIO, as the spec names it, from `minio/minio` on Docker Hub; the AWS SDK's
+         presigner signing whatever `PutObjectRequest` carries; and R2's documents saying
+         whether a signed `x-amz-checksum-sha256` is enforced, so the spec's [inferred] item
+         could be closed by reading.
+Reality: `minio/minio` no longer resolves (MinIO stopped publishing it) and quay.io's copy
+         needs a login; `pgsty/minio`, a community build of the same server, pinned by its
+         release tag, is what the tests and the compose file run. The presigner signs
+         exactly `content-length;content-type;host;x-amz-checksum-sha256` once the SDK's
+         own checksums are set to `WHEN_REQUIRED`: seen in the URL, and MinIO refused a
+         longer body, a same-length body with one byte changed, and another content type.
+         Cloudflare's pages say nothing either way about the checksum header on PutObject,
+         so the item stays open and is owed as one manual PUT against the real bucket.
+         Mutations: the owner filter, the rate limit, the length and digest checks at
+         completion, the object delete, the event, the Idempotency-Key and the default
+         provider each turned a test red; removing the signed length turned only the
+         signed-headers test red, because the signed digest still refused a longer body.
+Wrong about: a spec's named tool being available. The test double the whole slice rests
+         on had to be found again before the first test could run. And, found by review,
+         about what "a 5 s read timeout" bounds: the SDK retried three times with backoff,
+         so a storage that never answered held the HEAD, and the transaction around it,
+         for about 20 s. The call now has a 3 s ceiling and runs before the transaction;
+         the decision is re-taken under the row lock. Removing only the retry limit
+         stays green, since the 3 s ceiling still holds; removing the three settings
+         turns the hanging-storage test red at 27 s. And a test that read `deploy.yml`
+         stayed green with its line moved under Postgres's env: the app's test task did
+         not declare the file as an input, so Gradle reported it up to date.
+
 ## 2026-10-28 · Feature · withdrawEntries required on POST /block — where "required" is checked decides who learns what
 
 Expected: `@RequestBody(required = true)` and a non-null field, and a bare block is a `400`.

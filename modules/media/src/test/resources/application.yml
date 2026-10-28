@@ -1,0 +1,22 @@
+spring:
+  datasource:
+    hikari:
+      # A test context needs two or three connections, not the default ten:
+      # every cached context holds its pool for the whole run.
+      maximum-pool-size: 4
+  data:
+    redis:
+      repositories:
+        enabled: false
+
+moyi:
+  security:
+    jwt:
+      key-source: ephemeral
+    hashing:
+      secret-source: ephemeral
+    rate-limit:
+      # MediaRateLimitTest switches it on; nothing else here is about it.
+      enabled: false
+  # The storage itself (provider R2, against MinIO) is set by MediaIntegrationTest,
+  # which knows the container's address.
