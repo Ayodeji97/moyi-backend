@@ -119,10 +119,19 @@ env:
     # Since slice N3 (#100) production requests pushes, and each one is written
     # to the log, not sent, until there is a Firebase project (ADR-0044). The
     # log line names the category and the bond, never the token, and the
-    # ledger settles it as "not-sent:log", never as a delivery. To send: remove this line and add MOYI_NOTIFICATION_PUSH_FCM_PROJECT_ID
+    # ledger settles it as "not-sent:log", never as a delivery. To send:
+    # remove this line and add MOYI_NOTIFICATION_PUSH_FCM_PROJECT_ID
     # here and _CLIENT_EMAIL and _PRIVATE_KEY_PEM as secrets; without them the
     # default provider, FCM, refuses to start.
     MOYI_NOTIFICATION_PUSH_PROVIDER: log
+    # No media storage until the owner has made the `moyi-media` R2 bucket and
+    # its token (ADR-0047): every upload is refused with 503
+    # MEDIA_STORAGE_UNAVAILABLE and the rest of the API is untouched. To store:
+    # remove this line, add MOYI_MEDIA_STORAGE_R2_ENDPOINT and
+    # MOYI_MEDIA_STORAGE_R2_BUCKET here and _ACCESS_KEY_ID and
+    # _SECRET_ACCESS_KEY as secrets; without them the default provider, R2,
+    # refuses to start.
+    MOYI_MEDIA_STORAGE_PROVIDER: unavailable
     # Kamal's Docker network on moyi-prod-1, where kamal-proxy has its address
     # (`docker network inspect kamal`, read 2026-10-24). An X-Forwarded-For is
     # believed only from here, so the rate limiter sees each client's own

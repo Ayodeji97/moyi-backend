@@ -1,0 +1,24 @@
+meta {
+  name: Media complete
+  type: http
+  seq: 30
+}
+
+post {
+  url: {{api}}/media/{{mediaId}}/complete
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+script:pre-request {
+  // A new key on every send: a retry of one send is then the same completion (doc 06 section 1).
+  req.setHeader("Idempotency-Key", require("uuid").v4());
+}
+
+docs {
+  Says the upload is done. 200 with the asset, now UPLOADED. Before the upload has arrived it is 409 MEDIA_NOT_UPLOADED and nothing changes; send Upload, then this again. Another person's asset, a deleted one or an id that names nothing is 404.
+}
