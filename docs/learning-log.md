@@ -2596,6 +2596,25 @@ Reality: the name is the first per-day value that the page budget (`PAGE_TEXT_OC
 Wrong about: a field being small because the values in it usually are. A bound is set by the
          worst value the system accepts, and here another module decides what that is.
 
+## 2026-10-28 · Feature · ME_TOO, the fifth reaction — the contract check that did not fire
+
+Expected: CI's oasdiff gate to fail without `breaking-api-change`. ADR-0024's amendment
+         records `response-property-enum-value-added` as an error (76 of them for two new
+         error codes), and a new value in `EntryResponse.reaction` is that check.
+Reality: `tufin/oasdiff:v1.34.1`, the image `oasdiff-action` v0.1.20 runs, reported it as
+         seven warnings and no error, so `--fail-on ERR` passed. I first blamed the tool's
+         version (v1.32.1 and v1.33.0 said the same). The review found the cause: `allOf`.
+         `reaction` sits in `EntryResponse`'s second `allOf` branch, and oasdiff lowers the
+         severity when it compares `allOf` branches one at a time. With `--flatten-allof`
+         the same v1.34.1 reports the seven as errors, and it still reports an error-code
+         addition as an error (440 on C5c's diff). So under today's CI any new value of a
+         response enum inside an `allOf` schema reaches `main` unlabelled. The label is
+         applied here by ADR-0024's reasoning; running `breaking` with `--flatten-allof` is
+         a CI pull request of its own (ADR-0037, Owed), since its error counts differ.
+Wrong about: the cause. Three versions agreeing ruled out the version, and I named it
+         anyway. The tool's warning text said "compared the `allOf` branches one at a time…
+         run with --flatten-allof"; reading the verdict's own words would have found it.
+
 ## 2026-10-27 · Feature · Push N1 — a leaf that carries and records, and the logger that printed the body
 
 Expected: the push transport would copy the email port (ADR-0017): a port, an adapter, a
