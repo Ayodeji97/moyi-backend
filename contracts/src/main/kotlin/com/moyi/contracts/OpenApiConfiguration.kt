@@ -479,7 +479,8 @@ class OpenApiConfiguration {
                 "favouriteEntry",
                 // Slice C5c. REACTION_ON_OWN_ENTRY, ENTRY_IMMUTABLE (a tombstone)
                 // and BOND_ARCHIVED. Taking back a locked reaction is a retryable
-                // REACTION_BUSY conflict, as `unfavouriteEntry`'s is.
+                // REACTION_BUSY conflict, as `unfavouriteEntry`'s is, and taking
+                // one back on an ended bond is BOND_ARCHIVED (ADR-0037 question 11).
                 "reactToEntry",
                 "unreactToEntry",
             )
@@ -1074,11 +1075,12 @@ private val REACTION_DESCRIPTIONS =
         "unreactToEntry" to
             "Takes the caller's reaction back. Repeatable: no reaction is success, and so is an entry that has since " +
             "been erased, or one the caller wrote. `404` is every entry the caller was never shown, the same as for an " +
-            "id that does not exist. `409 REACTION_BUSY` means another operation holds the reaction, which can be the " +
-            "caller's own request still running (two removals at once, or one over the caller's own `PUT`); retry the " +
-            "removal. " +
-            "It is never given for an entry the caller is shown as erased, or for one the caller wrote: there the " +
-            "answer is `204`. Allowed on a bond that has ended.",
+            "id that does not exist. `409 BOND_ARCHIVED` is the partner's entry on a bond that has ended, or that the " +
+            "caller has left: the reaction stays, and is still shown. `409 REACTION_BUSY` means another operation " +
+            "holds the reaction, which can be the caller's own request still running (two removals at once, or one " +
+            "over the caller's own `PUT`); retry the removal. " +
+            "Neither is given for an entry the caller is shown as erased, or for one the caller wrote: there the " +
+            "answer is `204`, on a bond that has ended too.",
     )
 
 /**

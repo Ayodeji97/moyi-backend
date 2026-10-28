@@ -788,10 +788,10 @@
       {
         "status": 409,
         "code": "BOND_ARCHIVED",
-        "reason": "The bond has ended, or you have left it: after an ending a reaction would be contact. Told last, only to a caller who could otherwise have reacted. Taking one back is still allowed.",
+        "reason": "The bond has ended, or you have left it: after an ending a reaction would be contact. Told last, only to a caller who could otherwise have reacted. Taking one back from the partner's entry is refused the same way.",
         "evidence": "smoke",
         "evidenceRef": "PUT …/reaction by the one who stayed is 409 BOND_ARCHIVED",
-        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#membership.hasLeft || !membership.isOpen -> BondArchivedException()"
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#!membership.takesWrites -> BondArchivedException()"
       }
     ],
     "curl": "curl -X PUT \"$API/entries/$ENTRY/reaction\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"type\": \"HEART\"}'"
@@ -810,6 +810,14 @@
         "evidence": "smoke",
         "evidenceRef": "DELETE /entries/<an id nobody was issued>/reaction is 404",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryNotFoundException : NotFoundException(\"That entry was not found.\")"
+      },
+      {
+        "status": 409,
+        "code": "BOND_ARCHIVED",
+        "reason": "The bond has ended, or you have left it, and the entry is your partner's, read in full: a removal the other person sees is contact too (ADR-0037 question 11). Nothing is removed, and the reaction is still shown to both. Told before REACTION_BUSY, whoever holds the row. On your own entry, and on one shown to you as erased, it is 204.",
+        "evidence": "smoke",
+        "evidenceRef": "DELETE …/reaction on the ended bond is 409 BOND_ARCHIVED",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#answer == Reacting.ALLOWED && !membership.takesWrites -> BondArchivedException()"
       },
       {
         "status": 409,
