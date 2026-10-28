@@ -65,6 +65,7 @@ internal class ProcessingInterleavingTest(
     fun clear() {
         gate.reset()
         storage.puts = true
+        storage.putsLeft = Int.MAX_VALUE
         jdbc.execute("TRUNCATE TABLE media_assets, idempotency_keys, outbox_deliveries, outbox_events")
     }
 
@@ -104,6 +105,28 @@ internal class ProcessingInterleavingTest(
 
         jdbc.queryForMap("SELECT status, processing_attempts FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
             mapOf("status" to "READY", "processing_attempts" to 2)
+    }
+
+    /**
+     * Review of #108: an attempt that stored the full variant and failed on the
+     * display one records nothing; a deletion before the retry must still find
+     * the full one, since nothing will retry a deleted photo.
+     */
+    @Test
+    fun `a photo deleted after an attempt left one variant behind takes that variant with it`() {
+        val mediaId = client.upload(ada, TestImages.jpeg(64, 48))
+        val upload = storageKeyOf(mediaId)
+        storage.putsLeft = 1
+
+        dispatcher.dispatchDue(clock.instant(), BUDGET).failed shouldBe 1
+        stored(variantOf(upload, "full")) shouldBe true
+        jdbc.queryForObject("SELECT variants::text FROM media_assets WHERE id = ?::uuid", String::class.java, mediaId) shouldBe "[]"
+
+        storage.putsLeft = Int.MAX_VALUE
+        client.delete(ada, mediaId).status shouldBe 204
+
+        stored(variantOf(upload, "full")) shouldBe false
+        stored(upload) shouldBe false
     }
 
     private fun statusOf(mediaId: String): String =
@@ -158,12 +181,17 @@ internal class ProcessingInterleavingTest(
     ) : ObjectStore by real {
         @Volatile var puts = true
 
+        /** How many more PUTs succeed before the storage is "unreachable"; unlimited unless a test sets it. */
+        @Volatile var putsLeft = Int.MAX_VALUE
+
         override fun put(
             key: StorageKey,
             file: Path,
             contentType: String,
         ) {
-            if (!puts) throw ObjectStoreUnavailableException("The media storage could not store an object (switched off by the test).")
+            if (!puts || putsLeft-- <= 0) {
+                throw ObjectStoreUnavailableException("The media storage could not store an object (switched off by the test).")
+            }
             real.put(key, file, contentType)
         }
     }

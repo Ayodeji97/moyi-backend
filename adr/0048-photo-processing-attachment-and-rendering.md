@@ -154,9 +154,13 @@ sent again.
   attached is, for D5's reaper. The same photo again changes nothing. An absent `imageMediaId`
   leaves the photo as it is; `PATCH` cannot remove one (open question, below).
 - **`DELETE /media/{id}`** of an attached photo is `409 MEDIA_ATTACHED` (new code): it is the entry's
-  now, and leaves with the entry. Deleting an unattached ready photo removes its variants too, after
-  the commit, on a best-effort basis; there is no lifecycle rule on `v/`, so a variant the storage
-  could not delete then is D5's `media.purge`'s to find.
+  now, and leaves with the entry. Deleting an unattached photo removes, after the commit and on a
+  best-effort basis, every key it may have: its upload and both variant keys, **derived from the
+  upload's, whether or not the row records them** (`MediaAsset.objectKeys`). An attempt that stored
+  one variant and then failed records nothing, and a photo deleted before the retry is never
+  retried, so a list read from the row would leave that variant behind (found in review of #108;
+  `ProcessingInterleavingTest` red with the recorded list, green with the derived one). There is no
+  lifecycle rule on `v/`, so a variant the storage could not delete then is D5's `media.purge`'s.
 - **An erasure** (the author's delete, a withdrawal) nulls the entry's `image_media_id` with the
   words (BR-10, as before), and leaves the asset attached to the erased entry. Deleting its objects
   is D5's (spec D-9), not this slice's.

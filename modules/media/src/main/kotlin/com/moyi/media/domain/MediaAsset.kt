@@ -128,6 +128,18 @@ internal class MediaAsset(
     val isDeletable: Boolean get() = attachedEntryId == null
 
     /**
+     * Every key the storage may hold for this asset: its upload and, for a
+     * photo, each variant's key, **whether or not the row records it**. The
+     * keys are derived from the upload's ([StorageKey.forVariant]), so an
+     * attempt that wrote one variant and then failed, before anything was
+     * recorded, leaves nothing a deletion cannot find (review of #108).
+     */
+    val objectKeys: List<StorageKey>
+        get() =
+            listOf(storageKey) +
+                if (kind == MediaKind.IMAGE) ImageVariant.entries.map { StorageKey.forVariant(storageKey, it) } else emptyList()
+
+    /**
      * What `media.process` does with this asset when a `MediaUploaded` names it
      * (spec §4 D2). Asked of the row as it is now, never of the event, which
      * may be older: ADR-0047 owed it that **a deleted asset is skipped**, since

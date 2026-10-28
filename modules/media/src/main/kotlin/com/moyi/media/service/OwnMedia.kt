@@ -88,7 +88,7 @@ internal class OwnMedia(
                 }
             }
         val asset = checkNotNull(deleted) { "delete's transaction produces the asset unless it threw" }
-        for (key in listOf(asset.storageKey) + asset.variants.map { it.key }) {
+        for (key in asset.objectKeys) {
             try {
                 storage.delete(key)
             } catch (unavailable: ObjectStoreUnavailableException) {
