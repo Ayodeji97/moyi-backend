@@ -125,6 +125,21 @@ internal class OnThisDayPushesTest(
     }
 
     @Test
+    fun `a midday whose bond-day has ended by the sweep spends nothing, and the next day's memory is still told`() {
+        // The review of #100: the sweep looks back an hour, so a midday can be swept after its
+        // bond-day ended. Here 1 September's window is swept after the bond's midnight (23:00Z in
+        // Lagos), when `GET /on-this-day` answers for 2 September instead. Asked under 1
+        // September's key and deadline, that push would be expired at once and spend the week's
+        // key, and 2 September's memory would never be told.
+        clock.set(Instant.parse("2026-09-01T23:00:01Z"))
+        pushes.pushDue(Instant.parse("2026-09-01T10:00:00Z"), Instant.parse("2026-09-01T11:00:00Z")) shouldBe
+            OnThisDayRun(due = 1, requested = 0, nothingToRemember = 0, failed = 0)
+        notified().shouldBeEmpty()
+
+        sweep("2026-09-02").requested shouldBe 1
+    }
+
+    @Test
     fun `a member who did not opt in is never asked about`() {
         notifications(ada, """{"categories":{"onThisDay":false}}""")
 

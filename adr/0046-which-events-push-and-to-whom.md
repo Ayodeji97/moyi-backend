@@ -139,6 +139,12 @@ answer.**
   member's opt-in is never read, and the push carries a key and the Bond's id.
 - **At most one a week**: the key is the member and the ISO week of their bond-day, so the
   first memory of a week is its only push.
+- **A midday swept after its bond-day ended asks for nothing** (review of #100). The window
+  looks back an hour, and in a member zone far from the bond's anchor, midday can fall in the
+  last hour of a bond-day: swept after its midnight, `GetDays.onThisDay` answers for the next
+  day, and a push asked under the ended day's key and deadline would expire at once and spend
+  the week's key. The clock is read after the answer, so a day not over then was not over when
+  the answer was read.
 
 **The spec says "a weekly sweep"; this sweeps daily.** A memory is a date in an earlier year:
 a sweep run on one day a week would look at one date in seven and could never tell a member

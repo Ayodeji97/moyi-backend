@@ -13,6 +13,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.PlatformTransactionManager
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Clock
 import java.time.Instant
 
 /**
@@ -47,6 +48,7 @@ internal class SendOnThisDayPushes(
     private val access: BondAccess,
     private val getDays: GetDays,
     private val notifications: Notifications,
+    private val clock: Clock,
     transactionManager: PlatformTransactionManager,
 ) : OnThisDayPushes {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -66,7 +68,7 @@ internal class SendOnThisDayPushes(
                 when (transactions.execute { push(member) }) {
                     Outcome.REQUESTED -> requested++
                     Outcome.NOTHING_TO_REMEMBER -> nothing++
-                    else -> Unit // asked already this week
+                    else -> Unit // asked already this week, or its day is over
                 }
             } catch (thrown: Exception) {
                 failed++
@@ -76,9 +78,16 @@ internal class SendOnThisDayPushes(
         return OnThisDayRun(due = due.size, requested = requested, nothingToRemember = nothing, failed = failed)
     }
 
+    @Suppress("ReturnCount") // One return per reason nothing is asked, in the order they are asked.
     private fun push(member: DueReminder): Outcome {
         val membership = access.membershipOf(member.userId, member.bondId)
-        if (getDays.onThisDay(membership).isEmpty()) return Outcome.NOTHING_TO_REMEMBER
+        val memories = getDays.onThisDay(membership)
+        // The sweep looks back an hour, so the member's midday can belong to a bond-day that has
+        // since ended (review of #100). The answer above is then the next day's, and a push asked
+        // for under this day's key and deadline would be expired at once and spend the week's key.
+        // Read after the answer: if the day has not ended now, it had not when the answer was read.
+        if (!clock.instant().isBefore(member.bondDayEndsAt)) return Outcome.DAY_OVER
+        if (memories.isEmpty()) return Outcome.NOTHING_TO_REMEMBER
         val asked =
             notifications.request(
                 PushRequest(
@@ -93,5 +102,5 @@ internal class SendOnThisDayPushes(
         return if (asked) Outcome.REQUESTED else Outcome.ALREADY_ASKED
     }
 
-    private enum class Outcome { REQUESTED, NOTHING_TO_REMEMBER, ALREADY_ASKED }
+    private enum class Outcome { REQUESTED, NOTHING_TO_REMEMBER, ALREADY_ASKED, DAY_OVER }
 }
