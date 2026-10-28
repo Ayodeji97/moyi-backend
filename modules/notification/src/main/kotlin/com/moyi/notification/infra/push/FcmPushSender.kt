@@ -89,7 +89,7 @@ internal class FcmPushSender(
                     .uri("${account.fcmBaseUrl}/v1/projects/{project}/messages:send", account.projectId)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer ${bearerToken()}")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .body(bytes(MAPPER.writeValueAsBytes(payloadOf(message))))
+                    .body(bytes(MAPPER.writeValueAsBytes(payloadOf(message, clock.instant()))))
                     .retrieve()
                     .body(JsonNode::class.java)
             log.debug("FCM accepted a push, category {}", message.category)
@@ -312,10 +312,21 @@ internal class FcmPushSender(
         /** The same for every phone of a category and Bond, so a later push replaces an earlier one. */
         fun collapseKey(message: PushMessage): String = "${message.category.name}:${message.bondId}"
 
-        /** FCM v1's `messages:send` body. Maps, because the wire names mix snake case and hyphens. */
-        fun payloadOf(message: PushMessage): Map<String, Any> {
+        /**
+         * FCM v1's `messages:send` body. Maps, because the wire names mix snake case and hyphens.
+         *
+         * **The deadline travels with it.** Android's `ttl` is the push's remaining lifetime at
+         * [now], in whole seconds and never negative (FCM's default is four weeks); APNs'
+         * `apns-expiration` is the deadline itself, in epoch seconds. A phone that is offline
+         * when the push is accepted is then not shown it after [PushMessage.staleAfter].
+         */
+        fun payloadOf(
+            message: PushMessage,
+            now: Instant,
+        ): Map<String, Any> {
             val (title, body) = locKeys(message.category)
             val collapse = collapseKey(message)
+            val remaining = Duration.between(now, message.staleAfter).seconds.coerceAtLeast(0)
             return mapOf(
                 "message" to
                     mapOf(
@@ -324,11 +335,16 @@ internal class FcmPushSender(
                         "android" to
                             mapOf(
                                 "collapse_key" to collapse,
+                                "ttl" to "${remaining}s",
                                 "notification" to mapOf("title_loc_key" to title, "body_loc_key" to body),
                             ),
                         "apns" to
                             mapOf(
-                                "headers" to mapOf("apns-collapse-id" to collapse),
+                                "headers" to
+                                    mapOf(
+                                        "apns-collapse-id" to collapse,
+                                        "apns-expiration" to message.staleAfter.epochSecond.toString(),
+                                    ),
                                 "payload" to mapOf("aps" to mapOf("alert" to mapOf("title-loc-key" to title, "loc-key" to body))),
                             ),
                     ),

@@ -131,10 +131,9 @@ internal class ArchiveReadOrderTest(
             val adas = rig.insertEntry(day, bond, adasMember, EntryState.REVEALED, "zq-race-ada", at)
             val beas = rig.insertEntry(day, bond, beasMember, EntryState.REVEALED, "zq-race-bea", at)
             jdbc.update(
-                "INSERT INTO entry_favourites (entry_id, member_id, created_at) VALUES (?, ?, ?)",
+                "INSERT INTO entry_favourites (entry_id, member_id) VALUES (?, ?)",
                 if (index == 0) beas else adas,
                 beasMember,
-                java.sql.Timestamp.from(at),
             )
         }
         clock.set(NOW)

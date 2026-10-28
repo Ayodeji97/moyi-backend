@@ -156,7 +156,10 @@ the bearer or the assertion appears in any line; handing the client the map inst
 **9. Payload: keys and opaque ids only** (spec §5 Q6, FR-084, T-14). `title_loc_key`/
 `body_loc_key` (Android) and `title-loc-key`/`loc-key` (iOS) set to `push_<category>_title` and
 `push_<category>_body`; `data: {bondId, kind}`; collapse key `<CATEGORY>:<bondId>` on both
-platforms, so a held push replaces its predecessor. The owner writes the words in the apps'
+platforms, so a held push replaces its predecessor. The deadline travels too: Android `ttl` is
+the remaining lifetime at send time (never negative; FCM's default is four weeks) and APNs
+`apns-expiration` the deadline itself, so a phone offline when FCM accepted the push is not shown
+it after `stale_after` (review of #96). The owner writes the words in the apps'
 string tables.
 
 **10. The provider posture is ADR-0017's.** `moyi.notification.push.provider` defaults to `FCM`,

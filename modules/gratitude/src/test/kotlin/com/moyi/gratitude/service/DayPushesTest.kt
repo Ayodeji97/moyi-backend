@@ -131,8 +131,10 @@ internal class DayPushesTest(
         reveals.map { it.token.value }.toSet() shouldBe setOf(ADA_TOKEN, BEA_TOKEN)
         reveals.size shouldBe 2
         reveals.forEach { it.bondId shouldBe UUID.fromString(bond) }
-        // No content: the message is the token, the category and the bond, and nothing else can carry words.
-        PushMessage::class.memberProperties.map { it.name }.toSet() shouldBe setOf("token", "category", "bondId")
+        // No content: the message is the token, the category, the bond and its deadline (#96), and
+        // nothing else can carry words.
+        PushMessage::class.memberProperties.map { it.name }.toSet() shouldBe setOf("token", "category", "bondId", "staleAfter")
+        reveals.forEach { it.staleAfter shouldBe Instant.parse("2026-09-02T23:00:00Z") }
         val everythingSent = sender.sent.joinToString { "${it.category}|${it.bondId}" }
         val ledger = jdbc.queryForList("SELECT n::text FROM notifications n", String::class.java).joinToString()
         val events = jdbc.queryForList("SELECT payload::text FROM outbox_events", String::class.java).joinToString()

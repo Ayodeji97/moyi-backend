@@ -129,7 +129,9 @@ internal class DayViewTest(
             feed shouldBe """{"items":[${days.joinToString(",")}],"nextCursor":null}"""
         }
         val one = json.readTree(rawDay(ada, bond, "2026-09-17"))
-        one.propertyNames().toList() shouldContainExactlyInAnyOrder listOf("date", "status", "myEntry", "partnerEntry")
+        one.propertyNames().toList() shouldContainExactlyInAnyOrder
+            listOf("date", "status", "myEntry", "partnerEntry", "partnerDisplayName")
+        one["partnerDisplayName"].asString() shouldBe "Bea"
         one["date"].asString() shouldBe "2026-09-17"
         one["status"].asString() shouldBe "REVEALED"
         one["myEntry"]["text"].asString() shouldBe words("ada", DAY_ONE.plusDays(2))
@@ -561,7 +563,7 @@ internal class DayViewTest(
                 .shouldNotBeNull()
                 .text
                 .shouldBeNull()
-            val rendered = json.writeValueAsString(DayResponse.from(day))
+            val rendered = json.writeValueAsString(DayResponse.from(day, access.partnerDisplayNameOf(membership)))
             rendered shouldNotContain "zq-ada"
             rendered shouldContain "zq-bea"
         }
