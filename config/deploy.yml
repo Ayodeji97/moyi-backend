@@ -116,9 +116,10 @@ env:
     MOYI_BOND_INVITE_LINK_BASE_URL: https://getmoyi.app/i
     # getmoyi.app is verified in Resend (SPF, DKIM and DMARC pass).
     MOYI_NOTIFICATION_EMAIL_FROM: Moyi <hello@getmoyi.app>
-    # Push is written to the log, not sent, until there is a Firebase project
-    # (ADR-0044). Nothing requests a push before slice N3, so nothing is lost.
-    # To send: remove this line and add MOYI_NOTIFICATION_PUSH_FCM_PROJECT_ID
+    # Since slice N3 (#100) production requests pushes, and each one is written
+    # to the log, not sent, until there is a Firebase project (ADR-0044). The
+    # log line names the category and the bond, never the token, and the
+    # ledger settles it as "not-sent:log", never as a delivery. To send: remove this line and add MOYI_NOTIFICATION_PUSH_FCM_PROJECT_ID
     # here and _CLIENT_EMAIL and _PRIVATE_KEY_PEM as secrets; without them the
     # default provider, FCM, refuses to start.
     MOYI_NOTIFICATION_PUSH_PROVIDER: log
