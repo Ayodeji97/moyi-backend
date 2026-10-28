@@ -104,7 +104,8 @@ corpus gives. Case by case:
   now reads the shape from the jar. Question 6.
   *(Amended 2026-10-28: question 6 was ruled the other way and is built. The day is listed
   as before, through the caller's own entry, and the partner's entry erased before any
-  reveal is not in it: `partnerEntry: null`, the day a partner who never wrote gives. The
+  reveal is not in it: `partnerEntry: null`, the day a partner who never wrote gives (for
+  a day not yet settled when the entry was erased; ADR-0032 question 4 has the rest). The
   rule is one function that every day renderer reads through (`service.shownTo`), not a
   rule of the archive's, and it holds on today as well; the gate's answer is unchanged.
   `ArchiveGateTest`'s matrix now expects absence in those cells. ADR-0032 question 2 has the
@@ -1044,8 +1045,11 @@ Each is built one way and cheap to turn.
 
    *Built 2026-10-28.* Hidden on every walk and on today, from the erasure (or the
    withdrawal's commit) and not only once the day has closed: the partner's entry is
-   `null`, and the day is byte for byte the day of a partner who never wrote, on the feed,
-   one day, search and on this day (`UnseenErasureTwinTest`). Decision 1's rule lists no
+   `null`, and a day that had not settled when the entry was erased is byte for byte the
+   day of a partner who never wrote, on the feed, one day, search and on this day
+   (`UnseenErasureTwinTest`). A day that settled first keeps the status and streak square
+   it settled with (BR-10), so for it alone the status still says an entry was there:
+   ADR-0032 question 2 has the scenario, and its question 4 is the owner's. Decision 1's rule lists no
    day for such an entry alone, so the listing needed no change. Built not as an archive
    rule rendering an entry from its day's state, the objection above, but as one rule of how
    any day is shown (`service.shownTo`). ADR-0032 question 2 records the decisions,
