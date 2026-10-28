@@ -1074,7 +1074,8 @@ withdrawal means. Six things in it were built differently, or were not said.
   section covered only block. One mechanism serves both, and it is the destructive one.
 - **The request.** `POST /bonds/{bondId}/leave` and `POST /bonds/{bondId}/block` take an
   optional body `{"withdrawEntries": boolean}`. Absent, it is `true` on block and `false`
-  on leave (FR-029a: "given by default", "offered"). Only JSON `true`, `false` or `null` is
+  on leave (FR-029a: "given by default", "offered"). *(2026-10-28: superseded, ADR-0035 q1:
+  on block the flag is required, and an absent one is `400`.)* Only JSON `true`, `false` or `null` is
   accepted for the value; an unknown key or the key sent twice is `400 MALFORMED_REQUEST`,
   because a misspelt key on `/block` would otherwise be an absent flag and withdraw. A
   repeat block may withdraw what the first declined.

@@ -749,14 +749,15 @@ private fun requireDiscriminatorProperty(api: OpenAPI) {
  * Says, on each of the two routes that end a bond, what an absent
  * `withdrawEntries` does there (ADR-0035 decision 11).
  *
- * One request type serves both and the flag's default is opposite on the
- * two: absent, the caller's entries are erased on one and kept on the
- * other, and an erasure cannot be undone. Generated, the type is an
+ * One request type serves both and an absent flag means something
+ * different on each: on `/leave` the caller's entries are kept, and on
+ * `/block` the request is refused with `400` (ADR-0035 questions 1 and 11),
+ * where until 2026-10-28 it erased them. Generated, the shared type is an
  * optional nullable boolean with nothing beside it, so a person writing a
- * client from this document could not learn that leaving the field out
- * destroys something. The default is stated on each operation, because a
- * `default` on the shared schema would be right for one route and wrong
- * for the other; the schema's own description says only that it depends.
+ * client from this document could not learn either from it. What absence
+ * means is stated on each operation, because a `default` on the shared
+ * schema would be right for one route and wrong for the other; the
+ * schema's own description says only that it depends.
  *
  * **Neither description names the ending** (ADR-0028 decision 8). Each
  * route's path already is its name; the prose calls the other one "the

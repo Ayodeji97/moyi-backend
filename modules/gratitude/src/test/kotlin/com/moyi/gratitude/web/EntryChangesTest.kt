@@ -469,7 +469,7 @@ internal class EntryChangesTest(
                 block(bea, """{"withdrawEntries":false}""").status shouldBe 204
             }
 
-            // The default: Bea's entries are withdrawn and, with no poller
+            // Withdrawing: Bea's entries are withdrawn and, with no poller
             // in this context, not yet erased. Her own delete erases them now.
             Ending.BLOCK_WITHDRAWING -> {
                 block(bea, """{"withdrawEntries":true}""").status shouldBe 204

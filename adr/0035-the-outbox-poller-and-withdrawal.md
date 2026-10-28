@@ -847,7 +847,10 @@ are the corpus's at `docs/phase-3-daily-loop`, `9be5149`.
    `{"withdrawEntries": boolean}`, the opposite defaults, `400` for an unknown or repeated
    key, and `415`. *(2026-10-28: not "the opposite defaults" any more. Doc 06 now owes an
    optional body on `/leave` whose absent flag keeps, and a required body and flag on
-   `/block`, whose absence is `400` after the membership check. Owed; not edited here.)* **Doc 06:155, `DELETE /entries/{id}`** owes "`204` for its author on an
+   `/block`, whose absence is `400` after the membership check. Owed; not edited here. In
+   this repository, the daily-loop design (`docs/superpowers/specs/2026-09-28-the-daily-loop-design.md`,
+   "The request") said the same and carries a dated note that it is superseded; it is
+   not rewritten.)* **Doc 06:155, `DELETE /entries/{id}`** owes "`204` for its author on an
    ended bond". Doc 06:106's "byte-identical … same `ETag`" stays true.
 8. **Doc 04, BR-9**, "all write operations … return `409`, except export and deletion": an
    author's entry `DELETE` is now excepted too. **BR-10a** says "the blocker's"; it is

@@ -94,12 +94,14 @@ import java.util.concurrent.atomic.AtomicLong
  * **A tick that delivered says so at DEBUG, and nothing at INFO.** The only
  * event there is to deliver is a withdrawal's. A line at INFO two seconds
  * after "A member ended bond …" would tell a reader of the log that this
- * ending took its entries back, and the two endings have opposite defaults,
- * so that it was probably a block (ADR-0028 decision 8). The close job
- * declines to report its own erasures for the same reason (ADR-0035 decision
- * 14). What an operator needs is still there: the counters and the gauges,
- * which name no bond, and every failure, which the dispatcher logs at WARN by
- * class name and this job logs at WARN when a tick ends with more waiting.
+ * ending took its entries back, and a withdrawal recorded on a bond that had
+ * already ended can only have come from a block, the one write an ended bond
+ * accepts: the log would then say which ending it was (ADR-0028 decision
+ * 8). The close job declines to report its own erasures for the same reason
+ * (ADR-0035 decision 14). What an operator needs is still there: the
+ * counters and the gauges, which name no bond, and every failure, which the
+ * dispatcher logs at WARN by class name and this job logs at WARN when a
+ * tick ends with more waiting.
  */
 @Component
 internal class OutboxJob(
