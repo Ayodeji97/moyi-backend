@@ -38,30 +38,30 @@ internal class DisplayNamesTest {
     fun `a Persian name written with a zero-width non-joiner is accepted`() {
         // ZWNJ is how Persian, Urdu and several Indic scripts are spelt
         // correctly. Refusing it would refuse real names.
-        accepted("نیک‌نام")
+        accepted("\u0646\u06CC\u06A9\u200C\u0646\u0627\u0645")
     }
 
     @Test
     fun `an emoji family joined by zero-width joiners is accepted`() {
-        accepted("👨‍👩‍👧")
+        accepted("\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67")
     }
 
     @Test
     fun `a flag is accepted`() {
         // Two regional indicators, So rather than Cf.
-        accepted("🇳🇬")
+        accepted("\uD83C\uDDF3\uD83C\uDDEC")
     }
 
     @Test
     fun `accented letters are accepted, precomposed and combining`() {
-        accepted("Zoë")
+        accepted("Zo\u00EB")
         // A combining diaeresis is Mn, not Cf.
-        accepted("Zoë")
+        accepted("Zoe\u0308")
     }
 
     @Test
     fun `a CJK name is accepted`() {
-        accepted("王小明")
+        accepted("\u738B\u5C0F\u660E")
     }
 
     @Test
