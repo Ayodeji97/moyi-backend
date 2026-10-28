@@ -59,7 +59,10 @@ internal class FcmPushSenderTest {
     private val clock = MutableClock(Instant.parse("2026-10-27T18:00:00Z"))
     private val sender = FcmPushSender.create(fcm(), builder, clock)
     private val bond = UUID.fromString("0b0e0d00-0000-4000-8000-000000000001")
-    private val message = PushMessage(PushToken(DEVICE_TOKEN), PushCategory.REVEAL, bond)
+
+    // Ninety minutes left at the clock's start: what the payload's TTL and expiry are read against.
+    private val staleAfter = Instant.parse("2026-10-27T19:30:00Z")
+    private val message = PushMessage(PushToken(DEVICE_TOKEN), PushCategory.REVEAL, bond, staleAfter)
 
     private val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
     private val spring = LoggerFactory.getLogger("org.springframework") as Logger
@@ -88,6 +91,9 @@ internal class FcmPushSenderTest {
             .andExpect(jsonPath("$.message.data.bondId").value(bond.toString()))
             .andExpect(jsonPath("$.message.data.kind").value("REVEAL"))
             .andExpect(jsonPath("$.message.android.collapse_key").value("REVEAL:$bond"))
+            // The deadline reaches the phone: 90 minutes left at send time, and the absolute instant for APNs.
+            .andExpect(jsonPath("$.message.android.ttl").value("5400s"))
+            .andExpect(jsonPath("$.message.apns.headers.apns-expiration").value(staleAfter.epochSecond.toString()))
             .andExpect(jsonPath("$.message.android.notification.title_loc_key").value("push_reveal_title"))
             .andExpect(jsonPath("$.message.android.notification.body_loc_key").value("push_reveal_body"))
             .andExpect(jsonPath("$.message.apns.headers.apns-collapse-id").value("REVEAL:$bond"))
@@ -101,6 +107,16 @@ internal class FcmPushSenderTest {
 
         sender.send(message) shouldBe PushDelivery.Accepted("projects/moyi-test/messages/0:1")
         server.verify()
+    }
+
+    @Test
+    fun `a push sent at or past its deadline asks for no time at all, never a negative one`() {
+        @Suppress("UNCHECKED_CAST")
+        fun ttlAt(now: Instant) =
+            ((FcmPushSender.payloadOf(message, now)["message"] as Map<String, Any>)["android"] as Map<String, Any>)["ttl"]
+        ttlAt(staleAfter.minusSeconds(1)) shouldBe "1s"
+        ttlAt(staleAfter) shouldBe "0s"
+        ttlAt(staleAfter.plusSeconds(60)) shouldBe "0s"
     }
 
     @Test

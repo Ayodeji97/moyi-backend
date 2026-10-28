@@ -77,7 +77,9 @@
 # the session's device, replaces and removes it, sees a logout forget it, a
 # deviceless or ended session answered 404, and the token in no log line; no
 # push is sent, since nothing requests one before N3. Last run on 2026-10-28,
-# N1_RUN_RECORD
+# from a jar of this change on 6ecece5, against a compose project of its own
+# (Postgres 55434, Valkey 63794) and --attach: 957 passed, 0 failed, 0 skipped,
+# 25 sections.
 # Before it, after the favourites
 # rulings' review fixes, from a jar of f737173's code, against a database of its
 # own and --attach, Postgres on 55432: 936 passed, 0 failed, 0 skipped, 24

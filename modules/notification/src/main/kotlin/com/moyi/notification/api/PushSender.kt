@@ -1,5 +1,6 @@
 package com.moyi.notification.api
 
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -22,6 +23,10 @@ interface PushSender {
  * [bondId]. Neither a name nor anything anybody wrote is here, so nothing of
  * the kind can reach a lock screen or the provider (FR-084, T-14).
  *
+ * [staleAfter] is the push's deadline, carried to the provider so that a phone
+ * offline when the push was accepted is not shown it after its day: the
+ * consumer's own expiry bounds only when the provider takes it (review of #96).
+ *
  * [token] redacts itself; this class's [toString] is the generated one and is
  * safe for that reason alone.
  */
@@ -29,6 +34,7 @@ data class PushMessage(
     val token: PushToken,
     val category: PushCategory,
     val bondId: UUID,
+    val staleAfter: Instant,
 )
 
 /**
