@@ -73,7 +73,10 @@
 # partner and today does not, and a favourite's row holds no time (V26).
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-28, for withdrawEntries
+# days are the tests' to show. Last run on 2026-10-28, after main (#97, V26) was
+# merged in, from a jar of 8c71dd0's code, against a database of its own and
+# --attach, under compose project moyi-0f with Postgres on 55443 and Valkey on
+# 56390: 944 passed, 0 failed, 0 skipped, 24 sections. Before it, for withdrawEntries
 # required on /block (ADR-0035 questions 1 and 11), from a jar of 445af62's code,
 # against a database of its own and --attach, on a compose project of its own
 # (Postgres on 55443, Valkey on 56390): 939 passed, 0 failed, 1 skipped (a
