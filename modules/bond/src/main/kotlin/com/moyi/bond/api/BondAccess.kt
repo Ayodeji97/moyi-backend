@@ -212,8 +212,9 @@ class BondMembership internal constructor(
     /**
      * Whether this member's writes are taken: the bond is open (`PENDING_MEMBER` or `ACTIVE`)
      * and they have not left it. The predicate every write path refuses with
-     * `409 BOND_ARCHIVED`; `gratitude`'s three older copies of it are owed a move here
-     * (ADR-0038, Owed).
+     * `409 BOND_ARCHIVED`; `gratitude`'s two older copies of it, in `ChangeEntry` and
+     * `SubmitEntry`, are owed a move here (ADR-0038, Owed). `ReactToEntry`'s third copy
+     * moved here under ADR-0037 question 11.
      */
     val takesWrites: Boolean get() = isOpen && !hasLeft
 

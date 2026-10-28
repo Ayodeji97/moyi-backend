@@ -49,9 +49,8 @@
 # reaction on the withdrawn entry gone with its words under a tag that does
 # not move twice, the withdrawer's own left where it was and no longer theirs
 # to take back, and both verbs answering as they do for an entry deleted by
-# hand. It holds no row: 409
-# REACTION_BUSY and FAVOURITE_BUSY, and the 204 a held row gets on a
-# tombstone, are the integration tests' alone.
+# hand. It holds no row: 409 REACTION_BUSY and FAVOURITE_BUSY, and the 204 a
+# held row gets on a tombstone, are the integration tests' alone.
 # Since slice C6a it reads the day's prompt: one for the bond before the
 # second member arrives, the same id for both members and each one's own
 # language, the same bytes after the partner opens, writes and reveals, an

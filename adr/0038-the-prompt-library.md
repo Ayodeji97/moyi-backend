@@ -279,8 +279,9 @@ Numbered as the plan numbers them, because code and tests cite them by number.
 - **FR-047's "refreshable without deploying"** (the owner's Q-P4), with `modules/admin`.
 - **The 100-prompt library and its `pt-PT`, `fr` and `es` texts** (Q-P6, FR-122). Each is a
   migration until the admin surface exists.
-- **Moving the three inline copies of `takesWrites`** (decision 13), with their state-map
-  `codeRef`s.
+- **Moving the two inline copies of `takesWrites`** (decision 13), with their state-map
+  `codeRef`s. *2026-10-28:* two remain, `ChangeEntry`'s and `SubmitEntry`'s;
+  `ReactToEntry`'s moved under ADR-0037 question 11.
 - **NFR-001 measured with the prompt in** (decision 19).
 - **The corpus.** Doc 06 and doc 07 amended (below), and ADR-0035 to ADR-0038 copied into
   `Gratitude/documents/adr/` on `docs/phase-3-daily-loop` (c6-corpus X3), as 0031 to 0034
