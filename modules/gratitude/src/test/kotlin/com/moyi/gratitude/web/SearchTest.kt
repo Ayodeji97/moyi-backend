@@ -362,7 +362,7 @@ internal class SearchTest(
         const val EMPTY_PAGE = """{"items":[],"nextCursor":null}"""
         const val FAMILY = "👨‍👩‍👧‍👦"
         val FULL_KEYS =
-            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction", "image")
 
         /** 10:00Z: late morning of [date] in Africa/Lagos. */
         fun at(date: LocalDate): Instant = Instant.parse("${date}T10:00:00Z")

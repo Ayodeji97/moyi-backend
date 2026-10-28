@@ -182,6 +182,7 @@ class OpenApiConfiguration {
             documentRevalidation(api)
             documentFavourites(api)
             documentReactions(api)
+            documentEntryImage(api)
             documentPrompts(api)
             documentSearch(api)
             documentOnThisDay(api)

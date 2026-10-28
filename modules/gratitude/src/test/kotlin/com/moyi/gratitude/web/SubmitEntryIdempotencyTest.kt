@@ -108,7 +108,7 @@ internal class SubmitEntryIdempotencyTest(
         val key = UUID.randomUUID().toString()
         val refused = submit(ada, """{"text":"look","imageMediaId":"${UUID.randomUUID()}"}""", key)
         refused.status shouldBe 422
-        refused.contentAsString shouldContain "\"code\":\"MEDIA_NOT_YET_SUPPORTED\""
+        refused.contentAsString shouldContain "\"field\":\"imageMediaId\""
         count("SELECT count(*) FROM idempotency_keys") shouldBe 0
 
         val corrected = submit(ada, """{"text":"look"}""", key)

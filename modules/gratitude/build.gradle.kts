@@ -22,6 +22,10 @@ dependencies {
     // reminder (spec §4 N2) and, from N3, the pushes a day earns. `notification`
     // is a leaf, so this makes no cycle (spec §2.1, ADR-0044).
     implementation(projects.modules.notification)
+    // `com.moyi.media.api` only: FR-044a's claim of a photo for an entry, and how a
+    // photo on an entry is shown to its reader (spec §4 D2, ADR-0048). `media` is
+    // a leaf, so this makes no cycle (spec §2.1, ADR-0047).
+    implementation(projects.modules.media)
 
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -29,6 +33,8 @@ dependencies {
     implementation("tools.jackson.module:jackson-module-kotlin")
 
     testImplementation(projects.common.testing)
+    // A registry for `media`'s processing meter, which this module's test context scans.
+    testImplementation("io.micrometer:micrometer-core")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testRuntimeOnly("org.springframework.boot:spring-boot-starter-flyway")

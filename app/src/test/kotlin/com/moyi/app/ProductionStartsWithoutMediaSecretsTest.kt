@@ -8,7 +8,8 @@ import java.io.File
 
 /**
  * Production's `config/deploy.yml` either names the media stand-in or supplies
- * every value the real storage needs (ADR-0047).
+ * every value the real storage needs (ADR-0047), and names image processing
+ * off in the application's container (ADR-0048).
  *
  * The lesson of #96's first deploy: a provider that defaults to the real
  * service and refuses to start without its secrets took production down when
@@ -46,6 +47,26 @@ internal class ProductionStartsWithoutMediaSecretsTest {
 
         withClue("config/deploy.yml would start a release whose media storage refuses to start (provider: ${provider ?: "<default R2>"})") {
             (standIn || ((provider == null || provider == "r2") && r2Complete)) shouldBe true
+        }
+    }
+
+    /**
+     * ADR-0048: the application's image is the buildpack's and has no libvips,
+     * so this container must name processing OFF, or VIPS, the default, refuses
+     * to start (seen: the jar, with production's environment and this line left
+     * out, refused to start). And it says so as the **string** `off`: YAML 1.1,
+     * which Kamal reads and SnakeYAML here reads too, takes a bare `off` for the
+     * boolean `false`. Spring Boot happens to bind "false" to `OFF` (seen too),
+     * so a bare `off` would still start; the file is held to the word it means
+     * rather than to that leniency.
+     */
+    @Test
+    fun `deploy-yml turns image processing off in the application's container, as the string off`() {
+        val processing = clear["MOYI_MEDIA_PROCESSING_PROVIDER"]
+        val found = "${processing?.javaClass?.simpleName}: $processing"
+
+        withClue("config/deploy.yml must set MOYI_MEDIA_PROCESSING_PROVIDER to the string \"off\" (found $found)") {
+            (processing is String && processing.trim().lowercase() == "off") shouldBe true
         }
     }
 }

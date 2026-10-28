@@ -43,6 +43,64 @@ internal class EntryReadabilityTest {
     private val revealed = unrevealed.copy(status = EntryStatus.REVEALED, revealedAt = now)
 
     /**
+     * Phase 4 D2: an entry's photo is disclosed exactly with its words, to a
+     * reader who reads it in full, and to nobody else. A withdrawn author's
+     * entry, whose row still holds its photo until the erasure reaches it, is
+     * a tombstone with no photo from the withdrawal's commit.
+     */
+    @Test
+    fun `a photo is disclosed with the words, and never on a tombstone or a locked entry`() {
+        val photo = UUID.randomUUID()
+        val withPhoto = unrevealed.withImage(photo, now)
+        val revealedWithPhoto = withPhoto.copy(status = EntryStatus.REVEALED, revealedAt = now)
+
+        withPhoto
+            .readBy(author)
+            .disclosed
+            .shouldNotBeNull()
+            .imageMediaId shouldBe photo
+        revealedWithPhoto
+            .readBy(partner)
+            .disclosed
+            .shouldNotBeNull()
+            .imageMediaId shouldBe photo
+
+        withPhoto.readBy(partner).disclosed.shouldBeNull()
+        revealedWithPhoto
+            .readBy(authorAfterWithdrawing)
+            .disclosed
+            .shouldNotBeNull()
+            .imageMediaId
+            .shouldBeNull()
+        revealedWithPhoto
+            .readBy(partnerAfterWithdrawal)
+            .disclosed
+            .shouldNotBeNull()
+            .imageMediaId
+            .shouldBeNull()
+        // A row with only one mark of its erasure, the photo still in it.
+        revealedWithPhoto
+            .copy(deletedAt = now)
+            .readBy(partner)
+            .disclosed
+            .shouldNotBeNull()
+            .imageMediaId
+            .shouldBeNull()
+    }
+
+    @Test
+    fun `a photo is given only to an entry that may still change, and the same photo again changes nothing`() {
+        val photo = UUID.randomUUID()
+        val withPhoto = unrevealed.withImage(photo, now.plusSeconds(1))
+
+        withPhoto.imageMediaId shouldBe photo
+        withPhoto.updatedAt shouldBe now.plusSeconds(1)
+        withPhoto.withImage(photo, now.plusSeconds(2)) shouldBe withPhoto
+        shouldThrow<IllegalStateException> { revealed.withImage(photo, now) }
+        shouldThrow<IllegalStateException> { unrevealed.erase(now).withImage(photo, now) }
+    }
+
+    /**
      * FR-093, as a table over the same readers: the gate's answer and one
      * thing more, whether the entry has been revealed. `FavouritesTest` holds
      * what each answer becomes over HTTP.

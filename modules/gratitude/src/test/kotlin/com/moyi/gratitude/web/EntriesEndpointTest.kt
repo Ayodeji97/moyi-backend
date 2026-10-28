@@ -177,20 +177,20 @@ internal class EntriesEndpointTest(
     }
 
     @Test
-    fun `a media id is refused rather than ignored, until Phase 4 can honour it`() {
+    fun `a photo id that names no photo of the caller's is refused on its field rather than ignored`() {
         val response = submit(ada, bondId, """{"text":"look","imageMediaId":"${UUID.randomUUID()}"}""")
 
         response.status shouldBe 422
-        response.contentAsString shouldContain "\"code\":\"MEDIA_NOT_YET_SUPPORTED\""
+        response.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+        response.contentAsString shouldContain "\"field\":\"imageMediaId\""
     }
 
     /**
-     * Fix round 1, I6: the same refusal for the other media field —
-     * `SubmitEntry`'s check is `imageMediaId != null || voiceMediaId !=
-     * null`, not just the first half of it.
+     * Fix round 1, I6, as Phase 4 D2 leaves it: a photo is attached
+     * (`EntryPhotoTest`), and a voice note is still refused until D3.
      */
     @Test
-    fun `a voice media id is refused too, not only an image one`() {
+    fun `a voice media id is refused, until D3 can honour it`() {
         val response = submit(ada, bondId, """{"text":"listen","voiceMediaId":"${UUID.randomUUID()}"}""")
 
         response.status shouldBe 422

@@ -57,6 +57,11 @@ moyi:
       # routes are tested in modules/media against MinIO; here only the
       # composition has to start.
       provider: unavailable
+    processing:
+      # VIPS, the default, refuses to start without libvips (ADR-0048). The
+      # pipeline is tested in modules/media; here only the composition starts.
+      # Quoted: a bare off is YAML's boolean false.
+      provider: "off"
   security:
     jwt:
       key-source: ephemeral
