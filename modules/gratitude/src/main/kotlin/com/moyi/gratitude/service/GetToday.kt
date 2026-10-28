@@ -186,7 +186,7 @@ internal class GetToday(
 
         val written = entries.findForDay(day.id)
         // After the entries, never before: the marker is read last.
-        val shown = written.shownTo(access.readerNow(membership), day.status, day.closedAt)
+        val shown = written.shownTo(access.readerNow(membership), day.status, day.closedAt, day.entryCount)
         // After the gate, and only for what it answered in full: a tombstone says `false` whatever rows
         // there are, and an entry the caller was never shown has no id here to ask about.
         val readInFull =

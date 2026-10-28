@@ -53,9 +53,9 @@ internal class ShownDayTest {
         // The gate's own answer is unchanged: favourites and reactions still hear it.
         erased.canBeReadBy(reader(bea)) shouldBe Readability.TOMBSTONE_UNSEEN
 
-        val shown = listOf(erased).shownTo(reader(bea), BondDayStatus.OPEN, closedAt = null)
+        val shown = listOf(erased).shownTo(reader(bea), BondDayStatus.OPEN, closedAt = null, entryCount = 0)
 
-        shown shouldBe emptyList<Entry>().shownTo(reader(bea), BondDayStatus.OPEN, closedAt = null)
+        shown shouldBe emptyList<Entry>().shownTo(reader(bea), BondDayStatus.OPEN, closedAt = null, entryCount = 0)
         shown.partners.shouldBeNull()
         shown.mine.shouldBeNull()
     }
@@ -65,7 +65,7 @@ internal class ShownDayTest {
         val erased = written(ada).copy(deletedAt = now, status = EntryStatus.DELETED)
         val beas = written(bea, now.plusSeconds(60))
 
-        val shown = listOf(erased, beas).shownTo(reader(bea), BondDayStatus.PARTIAL, closedAt = null)
+        val shown = listOf(erased, beas).shownTo(reader(bea), BondDayStatus.PARTIAL, closedAt = null, entryCount = 1)
 
         shown.partners.shouldBeNull()
         shown.mine?.readability shouldBe Readability.FULL
@@ -76,23 +76,24 @@ internal class ShownDayTest {
     fun `a tombstone the reader had read, and their own, are still shown`() {
         val revealed = written(ada).copy(status = EntryStatus.REVEALED, revealedAt = now)
         val seen = revealed.copy(deletedAt = now, status = EntryStatus.DELETED)
-        listOf(seen).shownTo(reader(bea), BondDayStatus.REVEALED, now).partners?.readability shouldBe Readability.TOMBSTONE
+        listOf(seen).shownTo(reader(bea), BondDayStatus.REVEALED, now, entryCount = 1).partners?.readability shouldBe Readability.TOMBSTONE
 
         val own = written(ada).copy(deletedAt = now, status = EntryStatus.DELETED)
-        listOf(own).shownTo(reader(ada), BondDayStatus.OPEN, closedAt = null).mine?.readability shouldBe Readability.TOMBSTONE
+        listOf(own).shownTo(reader(ada), BondDayStatus.OPEN, closedAt = null, entryCount = 0).mine?.readability shouldBe
+            Readability.TOMBSTONE
     }
 
     @Test
     fun `a withdrawn entry nothing has erased yet is no entry to a partner it was never revealed to`() {
         val adas = written(ada)
 
-        val shown = listOf(adas).shownTo(reader(bea, withdrawn = setOf(ada)), BondDayStatus.PARTIAL, closedAt = null)
+        val shown = listOf(adas).shownTo(reader(bea, withdrawn = setOf(ada)), BondDayStatus.PARTIAL, closedAt = null, entryCount = 1)
 
         shown.partners.shouldBeNull()
         // And the day is shown as the erasure will leave it, which is as a delete by hand leaves it.
         shown.status shouldBe BondDayStatus.OPEN
         // To its author, the tombstone, on the same day.
-        val hers = listOf(adas).shownTo(reader(ada, withdrawn = setOf(ada)), BondDayStatus.PARTIAL, closedAt = null)
+        val hers = listOf(adas).shownTo(reader(ada, withdrawn = setOf(ada)), BondDayStatus.PARTIAL, closedAt = null, entryCount = 1)
         hers.mine?.readability shouldBe Readability.TOMBSTONE
         hers.status shouldBe BondDayStatus.OPEN
     }
@@ -102,9 +103,43 @@ internal class ShownDayTest {
         val adas = written(ada)
         val beas = written(bea)
 
-        val shown = listOf(adas, beas).shownTo(reader(bea, withdrawn = setOf(ada)), BondDayStatus.PENDING_REVEAL, closedAt = null)
+        val shown =
+            listOf(
+                adas,
+                beas,
+            ).shownTo(reader(bea, withdrawn = setOf(ada)), BondDayStatus.PENDING_REVEAL, closedAt = null, entryCount = 2)
 
         shown.status shouldBe BondDayStatus.PARTIAL
+        shown.partners.shouldBeNull()
+        shown.mine?.readability shouldBe Readability.FULL
+    }
+
+    @Test
+    fun `a day read before an erasure committed and its entries after is shown as the entries say`() {
+        // The row was read counting Ada's entry; by the time the entries were read her delete had
+        // committed. The entries are the later statement, and the day is shown as the delete left it.
+        val erased = written(ada).copy(deletedAt = now, status = EntryStatus.DELETED)
+        listOf(erased).shownTo(reader(bea), BondDayStatus.PARTIAL, closedAt = null, entryCount = 1).status shouldBe BondDayStatus.OPEN
+        val beas = written(bea)
+        listOf(erased, beas).shownTo(reader(bea), BondDayStatus.PENDING_REVEAL, closedAt = null, entryCount = 2).status shouldBe
+            BondDayStatus.PARTIAL
+    }
+
+    /**
+     * BR-10, and the exception it leaves to the twin rule (ADR-0032 question 2): a day that
+     * settled before its partner's entry was erased keeps its status. Here a both-wrote day
+     * the close withheld because the bond had ended (ADR-0035 question 9), and then the
+     * partner deleted: the caller is shown no entry of theirs, and the day still says
+     * PENDING_REVEAL, where a partner who never wrote would have left it SOLO.
+     */
+    @Test
+    fun `a day settled before the partner's entry was erased keeps its status, though the entry is not shown`() {
+        val erased = written(ada).copy(deletedAt = now, status = EntryStatus.DELETED)
+        val beas = written(bea)
+
+        val shown = listOf(erased, beas).shownTo(reader(bea), BondDayStatus.PENDING_REVEAL, closedAt = now, entryCount = 2)
+
+        shown.status shouldBe BondDayStatus.PENDING_REVEAL
         shown.partners.shouldBeNull()
         shown.mine?.readability shouldBe Readability.FULL
     }
@@ -115,14 +150,15 @@ internal class ShownDayTest {
         val withdrawn = reader(bea, withdrawn = setOf(ada))
 
         // Nobody withdrawn: the row's status, whatever it is.
-        listOf(adas).shownTo(reader(bea), BondDayStatus.PARTIAL, closedAt = null).status shouldBe BondDayStatus.PARTIAL
+        listOf(adas).shownTo(reader(bea), BondDayStatus.PARTIAL, closedAt = null, entryCount = 1).status shouldBe BondDayStatus.PARTIAL
         // Already erased: the row has been stepped back by the erasure itself, and is not stepped again.
         val erased = adas.copy(deletedAt = now, status = EntryStatus.DELETED)
-        listOf(erased).shownTo(withdrawn, BondDayStatus.OPEN, closedAt = null).status shouldBe BondDayStatus.OPEN
+        listOf(erased).shownTo(withdrawn, BondDayStatus.OPEN, closedAt = null, entryCount = 0).status shouldBe BondDayStatus.OPEN
         // Settled: history, as `BondDay.withoutEntry` leaves it (BR-10), a withheld PENDING_REVEAL among it.
-        listOf(adas).shownTo(withdrawn, BondDayStatus.PENDING_REVEAL, closedAt = now).status shouldBe BondDayStatus.PENDING_REVEAL
-        listOf(adas).shownTo(withdrawn, BondDayStatus.SOLO, closedAt = now).status shouldBe BondDayStatus.SOLO
+        listOf(adas).shownTo(withdrawn, BondDayStatus.PENDING_REVEAL, closedAt = now, entryCount = 2).status shouldBe
+            BondDayStatus.PENDING_REVEAL
+        listOf(adas).shownTo(withdrawn, BondDayStatus.SOLO, closedAt = now, entryCount = 1).status shouldBe BondDayStatus.SOLO
         // A joining day stays SUSPENDED, as it does when erased.
-        listOf(adas).shownTo(withdrawn, BondDayStatus.SUSPENDED, closedAt = null).status shouldBe BondDayStatus.SUSPENDED
+        listOf(adas).shownTo(withdrawn, BondDayStatus.SUSPENDED, closedAt = null, entryCount = 1).status shouldBe BondDayStatus.SUSPENDED
     }
 }

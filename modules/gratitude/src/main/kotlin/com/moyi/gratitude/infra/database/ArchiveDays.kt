@@ -20,6 +20,8 @@ internal data class ArchiveDay(
     val status: BondDayStatus,
     /** When the close settled it, or `null`: with [status], whether an erasure may still step it back (`BondDayStatus.afterErasure`). */
     val closedAt: Instant?,
+    /** How many live entries the row counts: with [status], what the day said when it was read. */
+    val entryCount: Int,
     /** For a search ([ArchiveDays.matching]), which of this day's entries matched it. Empty for every other listing. */
     val matched: Set<EntryId> = emptySet(),
 )
@@ -229,7 +231,7 @@ internal class ArchiveDays(
     }
 
     internal companion object {
-        private const val SELECT = "SELECT d.id, d.date, d.status, d.closed_at FROM bond_days d"
+        private const val SELECT = "SELECT d.id, d.date, d.status, d.closed_at, d.entry_count FROM bond_days d"
 
         private val ROW =
             RowMapper { row, _ ->
@@ -238,6 +240,7 @@ internal class ArchiveDays(
                     row.getObject("date", LocalDate::class.java),
                     BondDayStatus.valueOf(row.getString("status")),
                     closedAtOf(row),
+                    row.getInt("entry_count"),
                 )
             }
 
@@ -307,7 +310,7 @@ internal class ArchiveDays(
         ): Pair<String, List<Any>> {
             val sql =
                 listOfNotNull(
-                    "SELECT d.id, d.date, d.status, d.closed_at, array_agg(e.id) AS matched",
+                    "SELECT d.id, d.date, d.status, d.closed_at, d.entry_count, array_agg(e.id) AS matched",
                     "FROM entries e JOIN bond_days d ON d.id = e.bond_day_id AND d.bond_id = e.bond_id",
                     "WHERE e.bond_id = ?",
                     before?.let { "AND d.date < ?" },
@@ -317,7 +320,7 @@ internal class ArchiveDays(
                     withdrawnMemberIds
                         .takeIf { it.isNotEmpty() }
                         ?.let { ids -> "AND e.author_member_id NOT IN (${ids.joinToString { "?" }})" },
-                    "GROUP BY d.id, d.date, d.status, d.closed_at",
+                    "GROUP BY d.id, d.date, d.status, d.closed_at, d.entry_count",
                     "ORDER BY d.date DESC",
                     "LIMIT ?",
                 ).joinToString("\n")
@@ -362,6 +365,7 @@ internal class ArchiveDays(
                     row.getObject("date", LocalDate::class.java),
                     BondDayStatus.valueOf(row.getString("status")),
                     closedAtOf(row),
+                    row.getInt("entry_count"),
                     (row.getArray("matched").array as Array<*>).map { EntryId(it as UUID) }.toSet(),
                 )
             }

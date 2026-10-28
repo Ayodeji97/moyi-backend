@@ -68,23 +68,29 @@ internal data class ShownDay(
  *   outbox's consumer erases them ([WithdrawEntries]). In between, the row still says
  *   `PARTIAL` or `PENDING_REVEAL` where a deletion by hand says `OPEN` or `PARTIAL`, and
  *   would tell the two apart, and a withdrawal from no entry at all (ADR-0028 decision 8).
- *   So a live entry whose author is among [Reader.withdrawnAuthors] is counted as the
- *   erasure will count it ([BondDayStatus.afterErasure]), and the response does not move
- *   when the erasure runs. A settled day is never stepped back, by either.
+ *   So the status is derived from **the entries this read can see**: the live rows that
+ *   were loaded, less those whose author is among [Reader.withdrawnAuthors]. When the row
+ *   counts more than that ([entryCount]), the day is stepped back as the erasure will step
+ *   it ([BondDayStatus.afterErasure]), and the response does not move when the erasure
+ *   runs. The same derivation covers a read that loaded the day before an erasure
+ *   committed and its entries after: the row is a statement older than the entries, and
+ *   the entries win. A settled day is never stepped back, by either (BR-10): its status
+ *   is history, and so is its square in the streak, whatever is erased later (ADR-0032
+ *   question 2 has the exception this leaves, and the owner's question on it).
  *
- * [status] and [closedAt] are the day's row; [reader] is built after the rows were loaded
- * (`readerNow`), as for every gate.
+ * [status], [closedAt] and [entryCount] are the day's row; [reader] is built after the
+ * rows were loaded (`readerNow`), as for every gate.
  */
 internal fun Collection<Entry>.shownTo(
     reader: Reader,
     status: BondDayStatus,
     closedAt: Instant?,
+    entryCount: Int,
 ): ShownDay {
     val sides = onEachSideOf(reader.memberId)
-    val live = filterNot { it.isErased }
-    val awaitingErasure = live.count { it.authorMemberId in reader.withdrawnAuthors }
+    val visible = count { !it.isErased && it.authorMemberId !in reader.withdrawnAuthors }
     return ShownDay(
-        status = if (awaitingErasure == 0) status else status.afterErasure(closedAt, remaining = live.size - awaitingErasure),
+        status = if (visible < entryCount) status.afterErasure(closedAt, remaining = visible) else status,
         mine = sides.mine?.shownOnItsDayTo(reader),
         partners = sides.partners?.shownOnItsDayTo(reader),
     )

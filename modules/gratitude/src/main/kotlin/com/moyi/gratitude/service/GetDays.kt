@@ -404,7 +404,7 @@ internal class GetDays(
         val written = entries.findForDays(days.map { it.id })
         // After the entries, never before: the marker is read last.
         val reader = access.readerNow(membership)
-        return days.map { day -> Read(day, written[day.id].orEmpty().shownTo(reader, day.status, day.closedAt)) }
+        return days.map { day -> Read(day, written[day.id].orEmpty().shownTo(reader, day.status, day.closedAt, day.entryCount)) }
     }
 
     /** The caller's own marks among [read]: asked after the gate, and only of what it answered in full. */

@@ -359,7 +359,11 @@ internal class ArchiveGateTest(
                         val id = rig.insertEntry(day, bond, author, state, words, at)
                         return Written(state, id?.toString(), words.takeIf { id != null }, at.takeIf { id != null })
                     }
-                    Cell(date.toString(), status.name, written(adasMember, adas, "ada"), written(beasMember, beas, "bea"))
+                    val cell = Cell(date.toString(), status.name, written(adasMember, adas, "ada"), written(beasMember, beas, "bea"))
+                    // The row counts its live entries, as every write and erasure keeps it counting them.
+                    val live = listOf(adas, beas).count { it.live }
+                    jdbc.update("UPDATE bond_days SET entry_count = ? WHERE id = ?", live, day) shouldBe 1
+                    cell
                 }
             }
         }
@@ -464,7 +468,8 @@ internal class ArchiveGateTest(
      * live entry on it that the erasure has not reached. Then it is what that erasure will leave,
      * as a delete by hand leaves it at once: a settled day and a joining day as they are, any
      * other `OPEN` with nothing live left and `PARTIAL` with one (`BondDay.withoutEntry`).
-     * Written here from that rule, not taken from the code under test.
+     * Written here from that rule, not taken from the code under test. Each row of the matrix
+     * counts its live entries ([matrix]), as the application's rows do.
      */
     private fun shownStatus(
         cell: Cell,
