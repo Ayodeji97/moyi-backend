@@ -92,7 +92,12 @@
 # deletes it and sees the object gone from MinIO, and finds the URL in no log
 # line. Since the display-name rule (ADR-0015, amended 2026-10-28) it sends a name holding
 # U+202E and is told 422 VALID_DISPLAY_NAME on displayName. Last run on 2026-10-28, for
-# feat/display-name-controls on main at 7656192, from a jar of that branch, on a fresh
+# feat/display-name-controls at b52ee87 (the review's fixes: a lone surrogate refused, a
+# name of only no-break spaces a 422), from a jar of that commit, on a fresh database that
+# applied V1 to V27 and V29 to V33 in that order, against its own compose project (moyi-0f:
+# Postgres 55443, Valkey 56390, MinIO 59100) and --attach: 1046 passed, 0 failed,
+# 1 skipped (the tag across the erasure, the poller having won the race), 28 sections.
+# Before it, on 2026-10-28, for that branch on main at 7656192, from a jar of the branch, on a fresh
 # database that applied V1 to V27 and V29 to V33 in that order, against its own compose
 # project (moyi-0f: Postgres 55443, Valkey 56390, MinIO 59100) and --attach: 1046 passed,
 # 0 failed, 1 skipped (the tag across the erasure, the poller having won the race),
