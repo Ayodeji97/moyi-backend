@@ -39,16 +39,18 @@ import javax.sql.DataSource
  * before Bea is shown it. In its twin, Cy writes nothing, and Dee does what Bea does. Bea
  * and Dee must be sent the same thing, byte for byte once ids are put in the order they
  * first appear, on all five routes and on the streak and the milestones besides (decision
- * 4: no count or status may differ either). An `ETag` is a keyed digest and cannot be
- * equal across bonds; where a withdrawal is waiting on its erasure, the first bond is also
+ * 4: no count or status may differ either). An `ETag` is a keyed digest of the bytes
+ * sent, and the bytes of two bonds differ by their ids, so the tags are not compared
+ * across bonds; where a withdrawal is waiting on its erasure, the first bond is also
  * compared with itself after the erasure, tags and all.
  *
  * **The history** is the same in every test: three days of last year, put down by hand
  * (the on-this-day date, on which Bea wrote alone and Ada wrote and erased before any
  * reveal; a day on which only Ada wrote and erased; and a day both wrote and read), and
- * today, written by requests. The tests differ in today. `prompt` is left out of `/today`:
- * it is a function of the bond's id and the date and nothing else (ADR-0038), so two bonds
- * are offered two prompts whatever anybody wrote.
+ * today, written by requests. The tests differ in today. Of `/today`'s `prompt` only
+ * whether there is one is compared: which prompt is a function of the bond's id and the
+ * date and nothing else (ADR-0038), so two bonds are offered two prompts whatever anybody
+ * wrote, but whether one is offered at all is the bond's state, and must match.
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
@@ -99,6 +101,9 @@ internal class UnseenErasureTwinTest(
 
         sameOnEveryRoute(erased, never, partnerEntryId = adas)
         rig.dayStatus(erased, TODAY.toString()) shouldBe "OPEN"
+        // Not vacuous: both open bonds are offered a prompt, and the comparison above saw it.
+        json.readTree(rig.bonds.today(bea, erased))["prompt"].isNull shouldBe false
+        json.readTree(rig.bonds.today(dee, never))["prompt"].isNull shouldBe false
     }
 
     @Test
@@ -195,7 +200,7 @@ internal class UnseenErasureTwinTest(
         bond: String,
     ): Map<String, String> {
         val routes = LinkedHashMap<String, String>()
-        routes["today"] = withoutPrompt(rig.bonds.today(reader, bond))
+        routes["today"] = promptAsPresence(rig.bonds.today(reader, bond))
         for (asked in listOf(emptyMap(), mapOf("limit" to "1"))) {
             routes["days $asked"] = rig.pages(reader, bond, asked).joinToString("\n")
             for (q in listOf(SHARED_WORDS, PARTNERS_WORDS, CALLERS_WORDS)) {
@@ -222,7 +227,11 @@ internal class UnseenErasureTwinTest(
         return UUID_PATTERN.replace(body) { seen.getValue(it.value) }
     }
 
-    private fun withoutPrompt(body: String): String = (json.readTree(body) as ObjectNode).apply { remove("prompt") }.toString()
+    /** [body] with `prompt` replaced by whether there is one: which prompt depends on the bond's id, whether depends on its state. */
+    private fun promptAsPresence(body: String): String =
+        (json.readTree(body) as ObjectNode)
+            .apply { put("prompt", if (get("prompt").isNull) "absent" else "offered") }
+            .toString()
 
     /**
      * The consumer erases what [bond]'s withdrawal took back, and Bea is sent the same bytes,
