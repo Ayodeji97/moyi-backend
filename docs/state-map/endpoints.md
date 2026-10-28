@@ -1314,7 +1314,7 @@ curl -X POST "$API/bonds/$BOND/entries" -H "Authorization: Bearer $TOKEN" -H "Id
 | 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | test |
 | 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written. | never-run |
 | 422 | `VALIDATION_FAILED` | The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. | smoke |
-| 422 | `VALIDATION_FAILED` | The text is missing or blank, is over 500 graphemes or 8192 bytes, or holds a NUL character or an unpaired surrogate. (the smoke script asserts the status and the field, not the code) | never-run |
+| 422 | `VALIDATION_FAILED` | The text is missing, blank or only invisible characters (zero-width spaces, joiners and the like), is over 500 graphemes counted as sent or 8192 bytes, or holds a NUL character or an unpaired surrogate. (the smoke script asserts the status and the field, not the code) | never-run |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another path. | smoke |
 | 422 | `MEDIA_NOT_YET_SUPPORTED` | The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. It is refused, not quietly dropped. | smoke |
 | 422 | `VALIDATION_FAILED` | promptId names no prompt: it is not an id, or no prompt in the library has it. One answer for both, on the field promptId, and only for a member of an open bond: a stranger gets the bond's 404 and an ended bond 409 BOND_ARCHIVED first. A retired prompt, another bond type's, or an earlier day's is accepted. | smoke |
@@ -1406,7 +1406,7 @@ curl -X PATCH "$API/entries/$ENTRY" -H "Authorization: Bearer $TOKEN" -H 'Conten
 | 404 | `NOT_FOUND` | The id is not a UUID, names no entry, names an entry in a bond you are not in, or names the entry your partner wrote. All four get this one answer, and never 403, so that it does not confirm the entry exists. | smoke |
 | 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. Only when the optional key is sent. | never-run |
 | 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written. The limit holds whether or not a key is sent. | never-run |
-| 422 | `VALIDATION_FAILED` | The text is missing or blank, is over 500 graphemes or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid. (a test asserts the status, not the code) | never-run |
+| 422 | `VALIDATION_FAILED` | The text is missing, blank or only invisible characters (zero-width spaces, joiners and the like), is over 500 graphemes counted as sent or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid. (a test asserts the status, not the code) | never-run |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another path. Only when the optional key is sent. | never-run |
 | 422 | `MEDIA_NOT_YET_SUPPORTED` | The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. (a test asserts the status, not the code) | never-run |
 
