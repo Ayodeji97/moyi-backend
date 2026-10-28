@@ -2578,3 +2578,16 @@ Wrong about: "required, with no default" being a property of a class. It is a pr
          before the class is asked. Also that `@NotNull` on a non-null Kotlin type means
          something: it is decoration, and the test that would have shown it had not been
          written.
+
+## 2026-10-28 · Feature · ME_TOO, the fifth reaction — the contract check that did not fire
+
+Expected: CI's oasdiff gate to fail without `breaking-api-change`. ADR-0024's amendment
+         records `response-property-enum-value-added` as an error (76 of them for two new
+         error codes), and a new value in `EntryResponse.reaction` is that check.
+Reality: `tufin/oasdiff:v1.34.1`, the image `oasdiff-action` v0.1.20 runs, reported it as
+         seven warnings and no error, so `--fail-on ERR` passed (v1.32.1 and v1.33.0 said
+         the same). The label is still applied, by ADR-0024's reasoning, but nothing makes
+         it so: a pull request that adds a value to a response enum can now reach `main`
+         unlabelled. Whether an error-code addition is still an error was not checked.
+Wrong about: the gate being the policy. ADR-0024 decided what a breaking change is; the
+         tool's severities are its own and can move under a version bump.

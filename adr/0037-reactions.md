@@ -3,7 +3,8 @@
 **Status:** Accepted · **Date:** 2026-10-13 · **Deciders:** Daniel, for the five rulings of
 2026-10-06 and for his rulings of 2026-10-21 on every question in "Questions that are the
 owner's" except the third, which was not put to him. Every other decision here was made by
-the plan or by the agents that ran it.
+the plan or by the agents that ran it. · **Amended:** 2026-10-28 (question 1 built: the fifth
+type, `ME_TOO`, by V27; decision 2 now reads five)
 
 ## Context
 
@@ -92,6 +93,7 @@ matched exactly (`ReactionType.named`: `heart` is not `HEART`, and nothing is tr
 set is written once, in the domain enum. The edge validator asks it, the contract's two
 enums are generated from it, and V23's `CHECK` holds the same four names. Adding or
 renaming a value is a migration and a breaking change for a generated client.
+*Amended 2026-10-28: five, with `ME_TOO` last; V27 replaced V23's `CHECK` (question 1).*
 
 *Beyond the plan, the implementer's, upheld by the review:* which refusal an odd body gets,
 and when.
@@ -443,6 +445,43 @@ is a review's finding of 2026-10-15, left as built.
    `MOVED` and `ME_TOO` ("I'm grateful for that too"), in the contract's enum, the table's
    `CHECK` and the domain enum.* Whether each is drawn as a glyph or a word is left to the
    design.
+
+   **Amendment, 2026-10-28: built.** `ReactionType` gains `ME_TOO`, last, in the ruling's
+   order; nothing else is renamed or reordered. The domain enum is still the one statement
+   of the set: the edge validator asks it (`ReactionType.named`) and both contract enums
+   are generated from it (`documentReactions`), so the contract gained `ME_TOO` in
+   `ReactionRequest.type` and in `EntryResponse.reaction` (before its `null`) and nothing
+   else. The table's `CHECK` is the one copy the database keeps:
+
+   - **V27** (`V27__gratitude_reaction_me_too.sql`, `modules:gratitude`) drops V23's
+     `CHECK` and adds the five under the same name, `reactions_type_check`, in one
+     `ALTER TABLE`, so the table is never without it. V23 named it explicitly;
+     `FlywayMigrationTest` reads the name back from `pg_constraint` and puts each of the
+     five, and six values that are not one of them, to the `CHECK` itself.
+   - **The number, and the order it must deploy in.** V27 was agreed with the work beside
+     it: V26 is #97 (favourites lose `created_at`); V29, V30 and V31 are the notifications
+     module's (#96, #99, #100). Flyway runs here without `outOfOrder`, and by its default
+     validation a database that has applied a version refuses to migrate when the image
+     brings a lower version it has not applied (reasoned from Flyway's defaults, not run).
+     **This pull request must reach `main` and be deployed before #96 (V29).** By the same
+     rule it must deploy after #97 (V26), or with it: if V27 reaches production first, V26
+     can only follow renumbered.
+   - **The cost of a rollback.** Once anyone has reacted `ME_TOO`, an image older than V27
+     cannot read that row: `Reactions.on` maps the column with `ReactionType.valueOf`,
+     which throws on a name the enum lacks. Run on this branch with `ME_TOO` taken out of
+     the enum and a `ME_TOO` row put in by hand: `/today`, the feed and the day were each
+     `500` for both members of that bond (`IllegalArgumentException: No enum constant
+     …ReactionType.ME_TOO`). On-this-day, search, an entry's `PATCH` and a write's replay
+     read through the same call and are reasoned to fail alike. No tolerance was built: it
+     would help only an image that has it, and the image a rollback goes to does not. A
+     rollback past V27 after a `ME_TOO` exists needs those rows mapped or removed first.
+   - **The contract.** oasdiff (`tufin/oasdiff:v1.34.1`, the image `oasdiff-action`
+     v0.1.20 runs, `breaking --composed=false --fail-on ERR`, against `main`'s document)
+     reports seven `response-property-enum-value-added` warnings, one per operation that
+     returns an `EntryResponse`, and no error; the request enum's new value is not
+     breaking. CI therefore does not demand `breaking-api-change`. It is still a breaking
+     change for a generated client by decision 2 and ADR-0024's amendment (an exhaustive
+     `when` over the enum stops compiling), so the pull request carries the label.
 2. **The routes' shape against doc 06.** `PUT`/`DELETE …/reaction` where doc 06 has
    `POST …/reactions` and `DELETE …/reactions/{type}` (decision 1). It follows from "one
    per member per entry". Turning it is a rename, and doc 06 is to be corrected either way:
