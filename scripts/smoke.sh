@@ -71,7 +71,10 @@
 # same for both; and after a leave, what was reached kept and nothing next, for both alike.
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-24, for the production
+# days are the tests' to show. Last run on 2026-10-28, for ME_TOO (ADR-0037
+# question 1, V27), from a jar of 91afa4d's code, against a database of its
+# own and --attach, under compose project moyi-0f with Postgres on 55453 and
+# Valkey on 56391: 935 passed, 0 failed, 0 skipped, 24 sections. Before it, on 2026-10-24, for the production
 # configuration (health at /healthz, the scrape on MGMT_PORT, problem types on
 # api.getmoyi.app), from a jar of b4386b9's code, against a database of its own
 # and --attach, Postgres on 55432: 932 passed, 0 failed, 0 skipped, 24 sections.
