@@ -1,7 +1,7 @@
 # ADR-0035 — The outbox poller and withdrawal
 
 **Status:** Accepted · **Date:** 2026-10-07 · **Deciders:** Daniel
-**Amended:** 2026-10-09 (the status; "Owed — C5b" discharged; the smoke run's section count corrected — ADR-0036)
+**Amended:** 2026-10-09 (the status; "Owed — C5b" discharged; the smoke run's section count corrected — ADR-0036) · 2026-10-28 (questions 1 and 11 built: `withdrawEntries` is required on `POST /block`; decision 11 amended)
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #58 on 2026-10-07. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -232,6 +232,45 @@ Absent, the flag is `true` for block and `false` for leave: FR-029a says "given 
 on blocking and "offered" on leaving. No body, `{}`, a JSON `null` body and an explicit
 `null` value are all "absent". **Withdrawal is offered on leave too**, which FR-029a
 requires and the spec did not cover.
+
+*Amended 2026-10-28, the owner's ruling on questions 1 and 11: on block there is no default.*
+An absent flag on `/block` is refused; on `/leave` it still keeps. Five decisions built it,
+made by the controller of the session that built it:
+
+1. **"Absent" is the set above, and each is the same `400`.** No body (with or without a
+   JSON `Content-Type`), a JSON `null` body, `{}` and `{"withdrawEntries": null}` are
+   `400 MALFORMED_REQUEST`, the same bytes and headers as a body that cannot be read, with
+   nothing quoted back; the bond is not ended, nobody is blocked, no marker and no event are
+   written. The handler throws the exception Spring raises for an unreadable body, so the
+   status, the code and the sentence stay in the one handler that answers it.
+2. **The guard runs first.** The flag is asked for in `BondsController.blockBond` after the
+   membership is resolved, so a non-member, an unknown bond and an id that is not a UUID
+   still get the one `404` with no body, as with any other. That is why the body stays
+   `required = false` on the annotation: Spring refuses a missing required body while it
+   resolves the arguments, before the guard. **One exception, kept:** a body that is
+   present and cannot be read, `{"withdrawEntry": false}` among them, is refused by Spring
+   before the handler runs, so a stranger gets that `400` too. That was so before, it
+   discloses nothing (the same bytes for every caller, as above), and it is out of scope
+   here. `BondEndingEndpointTest` holds both orders.
+3. **`/leave` is unchanged**, and so is `EndBondRequestReader`. What "absent" means on block
+   is decided where block is handled, as `EndBondRequest`'s KDoc always said.
+4. **The contract says it.** `/block`'s request body is required and refers to
+   `RequiredEndBondRequest`: one property, `withdrawEntries`, a boolean, required, and never
+   null. The handler still takes the shared, optional type, so `OpenApiConfiguration` states
+   the rule the route enforces, as it does for `If-Match`; a customiser was smaller than a
+   second request type and keeps one reader. `/leave` keeps `EndBondRequest` and an
+   optional body. Its prose said "the other route that takes this body has the opposite
+   default", which was no longer true; it now says that there the flag is required. So the
+   generated diff touches `/leave`'s description as well as `/block`, and nothing else of
+   `/leave`. It is breaking, and carries the `breaking-api-change` label.
+5. **Repeats are unchanged.** A repeated block with the flag behaves as before, and
+   repeating it with `true` withdraws what an earlier one kept. Only the bare repeat is gone:
+   it used to withdraw, and is now the `400`.
+
+The smoke run and every test that leaned on a bare block withdrawing send the flag now.
+The CLI already did: `moyi bond block` has refused to run without `--withdraw-entries` or
+`--keep-entries` since C5a. So did the Bruno collection's Block request, whose example body
+is `{"withdrawEntries": true}`.
 
 - **The body is read strictly.** Only JSON `true`, `false` or `null` is accepted as the
   value; an unknown key and a key sent twice are refused; each is the standing
@@ -628,6 +667,8 @@ Each is built one way and cheap to turn.
    *Ruled by the owner on 2026-10-21, with question 11, to be built: `withdrawEntries` is
    required on `POST /block`, and a request without it is `400`.* It is a breaking change to
    the contract and carries the `breaking-api-change` label.
+
+   *(Built 2026-10-28; decision 11's amendment has how. The `?: true` is gone.)*
 2. **No working export exists before the destructive act.** Doc 04 rests the destructive
    reading on "the confirm flow offers an export first". Export is Phase 5. Until then a
    withdrawal destroys the only copy. The spec said to reject withdrawal as unsupported
@@ -731,6 +772,8 @@ Each is built one way and cheap to turn.
     *Ruled by the owner on 2026-10-21, with question 1, to be built: the flag is required,
     and a bare `POST /block` is `400`.*
 
+    *(Built 2026-10-28, with question 1: see decision 11's amendment.)*
+
 ### The corpus
 
 What the corpus read found that concerns this slice, and what became of each. The corpus
@@ -802,7 +845,9 @@ are the corpus's at `docs/phase-3-daily-loop`, `9be5149`.
    only; no ShedLock; no ordering; no last attempt.
 7. **Doc 06:105-106, `/leave` and `/block` have no body** (X6). They owe
    `{"withdrawEntries": boolean}`, the opposite defaults, `400` for an unknown or repeated
-   key, and `415`. **Doc 06:155, `DELETE /entries/{id}`** owes "`204` for its author on an
+   key, and `415`. *(2026-10-28: not "the opposite defaults" any more. Doc 06 now owes an
+   optional body on `/leave` whose absent flag keeps, and a required body and flag on
+   `/block`, whose absence is `400` after the membership check. Owed; not edited here.)* **Doc 06:155, `DELETE /entries/{id}`** owes "`204` for its author on an
    ended bond". Doc 06:106's "byte-identical … same `ETag`" stays true.
 8. **Doc 04, BR-9**, "all write operations … return `409`, except export and deletion": an
    author's entry `DELETE` is now excepted too. **BR-10a** says "the blocker's"; it is

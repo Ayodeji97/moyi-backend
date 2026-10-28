@@ -218,7 +218,8 @@ service logs "a member ended bond {id}" for both paths and names no user (doc 18
 **Amended 2026-10-07 (slice C5a, ADR-0035 decisions 10 and 11).** Three things.
 
 - **The two routes take an optional body**, `{"withdrawEntries": boolean}` (FR-029a). Absent,
-  it is `true` on block and `false` on leave. The `204` is still byte-identical between the
+  it is `true` on block and `false` on leave. *(2026-10-28: on block it is no longer
+  optional; an absent flag is `400`, ADR-0035 decision 11's amendment.)* The `204` is still byte-identical between the
   two, with or without a withdrawal, and so is the other member's `GET /bonds/{id}`
   afterwards (`DiscreetExitTest`). Decision 2's "on an archived bond a block changes nothing
   visible at all" holds for the bond; a block that withdraws there does change the blocker's
