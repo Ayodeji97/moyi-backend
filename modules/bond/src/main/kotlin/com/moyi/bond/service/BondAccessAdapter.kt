@@ -17,6 +17,7 @@ import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.BondClosingStore
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.EntryWithdrawals
+import com.moyi.identity.api.UserDirectory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
@@ -43,6 +44,7 @@ import com.moyi.bond.domain.BondType as DomainBondType
  * also taking the `Membership` that proves it was checked.
  */
 @Service
+@Suppress("LongParameterList") // Seven collaborators, each one store or port the facts above are read from; nothing to bundle them into.
 internal class BondAccessAdapter(
     private val guard: BondAccessGuard,
     private val bonds: BondStore,
@@ -50,6 +52,7 @@ internal class BondAccessAdapter(
     private val closing: BondClosingStore,
     private val pasts: BondPasts,
     private val withdrawals: EntryWithdrawals,
+    private val users: UserDirectory,
 ) : BondAccess {
     @Transactional(readOnly = true)
     override fun membershipOf(
@@ -127,6 +130,21 @@ internal class BondAccessAdapter(
         limit: Int,
     ): List<UUID> = closing.everPairedAfter(after, limit)
 
+    /**
+     * Read through the caller's own membership row, as the guard reads it, so
+     * a membership from another bond could not name a stranger here even if
+     * one could be forged. Every member row, left ones included; the bond
+     * has two at most.
+     */
+    @Transactional(readOnly = true)
+    override fun partnerDisplayNameOf(membership: BondMembership): String? {
+        val bond = bonds.findByMember(BondId(membership.bondId), UserId(membership.userId)) ?: throw BondNotFoundException()
+        // "The other row" is the partner only while a bond has two seats, as every v1 bond does; a third would make it a guess.
+        check(bond.members.size <= 2) { "a bond has more than two member rows; the partner is no longer one row" }
+        val partner = bond.members.firstOrNull { it.id.value != membership.memberId } ?: return null
+        return displayNameOf(users.find(partner.userId.value))
+    }
+
     private fun assemble(
         membership: Membership,
         bond: Bond,
@@ -154,27 +172,6 @@ internal class BondAccessAdapter(
         )
 
     /**
-     * The second member's `joined_at` — the second-earliest across every
-     * member row, current or left — or `null` while the bond has only ever
-     * had one member row.
-     *
-     * **Derived from the member rows, not from `bond.status`.** `status ==
-     * PENDING_MEMBER` is *not* the same fact: `Bond.end` archives a bond with
-     * only one member exactly as readily as a two-member one (a creator who
-     * leaves, or requests deletion, before anyone accepts), so a status check
-     * alone would report the creator's own `joinedAt` as `activeSince` on a
-     * one-member `ARCHIVED` or `PENDING_DELETION` bond — the exact harm this
-     * field exists to prevent (fix round 1, Important #1). Left members keep
-     * their row (`states.md` §9), so this still answers correctly once a
-     * second member has joined and later left.
-     */
-    private fun activeSinceOf(bond: Bond): Instant? =
-        bond.members
-            .map { it.joinedAt }
-            .sorted()
-            .getOrNull(1)
-
-    /**
      * Closes over the real [AnchorTimeline] so [BondAnchorTimeline] can answer
      * every question without ever importing `bond.domain` itself — that type
      * lives in `bond.api`, which (like `domain`) depends on nothing else in
@@ -199,6 +196,28 @@ internal class BondAccessAdapter(
             isDegenerate = isDegenerate,
         )
 }
+
+/**
+ * The second member's `joined_at` — the second-earliest across every
+ * member row, current or left — or `null` while the bond has only ever
+ * had one member row.
+ *
+ * **Derived from the member rows, not from `bond.status`.** `status ==
+ * PENDING_MEMBER` is *not* the same fact: `Bond.end` archives a bond with
+ * only one member exactly as readily as a two-member one (a creator who
+ * leaves, or requests deletion, before anyone accepts), so a status check
+ * alone would report the creator's own `joinedAt` as `activeSince` on a
+ * one-member `ARCHIVED` or `PENDING_DELETION` bond — the exact harm this
+ * field exists to prevent (fix round 1, Important #1). Left members keep
+ * their row (`states.md` §9), so this still answers correctly once a
+ * second member has joined and later left. Top-level for the reason
+ * [toApi] is.
+ */
+private fun activeSinceOf(bond: Bond): Instant? =
+    bond.members
+        .map { it.joinedAt }
+        .sorted()
+        .getOrNull(1)
 
 /**
  * When the bond stopped being two people's ([BondClosingView.separatedAt],

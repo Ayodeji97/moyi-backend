@@ -48,6 +48,8 @@ internal class SearchController(
         val membership = access.guard(caller, bondId)
         val query = SearchQuery.parse(q, limit, cursor)
         joining.beforeRead(membership)
-        return DaysResponse.from(getDays.search(membership, query.terms, query.before, query.limit))
+        val page = getDays.search(membership, query.terms, query.before, query.limit)
+        // Once for the request, after the read: every day carries the archive's one shape (DayResponse).
+        return DaysResponse.from(page, access.partnerDisplayNameOf(membership))
     }
 }

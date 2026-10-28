@@ -6,10 +6,7 @@ import org.springframework.jdbc.core.PreparedStatementSetter
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
-import java.sql.Timestamp
 import java.time.Duration
-import java.time.Instant
-import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -20,8 +17,8 @@ import java.util.UUID
  * about the other person, which no response may carry (spec §6.6, FR-064).
  * [removeAllOf] is the one statement that does not, and it returns nothing.
  *
- * Plain SQL on [JdbcTemplate], as `StreakCalendar` is: a row here is two ids
- * and a time, with nothing to map and no state to track. That also keeps it
+ * Plain SQL on [JdbcTemplate], as `StreakCalendar` is: a row here is two ids,
+ * with nothing to map and no state to track. That also keeps it
  * out of Hibernate's persistence context, so the withdrawal's
  * `EntryStore.forgetLoaded` between erasures has nothing of this to forget.
  *
@@ -112,14 +109,12 @@ internal class Favourites(
      * It does **not** know about a withdrawal that has erased nothing yet:
      * that row is whole. The gate does, and is asked first.
      *
-     * A second mark changes nothing, including [now]: the row keeps the time
-     * it was first made. [now] is cut to microseconds here, so `created_at`
-     * reads back as written.
+     * The row holds no time: when a person marked an entry is, to an
+     * operator, when they were reading it (V26, ADR-0036 question 7).
      */
     fun mark(
         entryId: EntryId,
         memberId: UUID,
-        now: Instant,
         lockTimeout: Duration = MARK_LOCK_TIMEOUT,
     ): Boolean =
         transactions.waitingForALockAtMost(lockTimeout, jdbc) {
@@ -128,7 +123,6 @@ internal class Favourites(
                 Int::class.java,
                 entryId.value,
                 memberId,
-                Timestamp.from(now.truncatedTo(ChronoUnit.MICROS)),
             ) == 1
         } ?: false
 
@@ -201,8 +195,8 @@ internal class Favourites(
                 WHERE e.id = ? AND ${EntryRowGuard.REVEALED_AND_NOT_ERASED}
                 FOR SHARE
             ), marked AS (
-                INSERT INTO entry_favourites (entry_id, member_id, created_at)
-                SELECT id, ?, ? FROM markable
+                INSERT INTO entry_favourites (entry_id, member_id)
+                SELECT id, ? FROM markable
                 ON CONFLICT DO NOTHING
             )
             SELECT count(*) FROM markable

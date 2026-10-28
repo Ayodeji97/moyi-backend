@@ -8,7 +8,9 @@ import java.util.UUID
 /**
  * What another module may know about a caller's place in a bond (ADR-0026's
  * pattern, second use). `identity.api.UserDirectory` answers "who is this
- * person"; this answers "may they write here, and by whose calendar".
+ * person"; this answers "may they write here, and by whose calendar", and,
+ * for a module that cannot ask identity about a bond, what their partner is
+ * called ([partnerDisplayNameOf]).
  *
  * **[BondMembership]'s constructor is `internal`, and that is the mechanism.**
  * ADR-0026 made `bond.service.Membership` a value only `BondAccessGuard` can
@@ -108,6 +110,27 @@ interface BondAccess {
         after: UUID?,
         limit: Int,
     ): List<UUID>
+
+    /**
+     * The display name of the other member of [membership]'s bond, as
+     * identity holds it now, for the archive's author label (ADR-0036
+     * question 5, ruled 2026-10-21). `null` only while the bond has never had
+     * a second member: the creator's archive before anyone joined.
+     *
+     * **"The other member" is the other member row, whether or not they have
+     * left.** A partner who left or blocked keeps their row (`states.md` §9),
+     * and the archive still shows what they wrote (ADR-0028), so it still
+     * names them. An account identity no longer knows reads as
+     * `"Former member"`, the placeholder `GET /bonds/{bondId}` gives it, from
+     * the same one rule.
+     *
+     * Takes a [BondMembership] and not ids, so it cannot be asked about a bond
+     * the caller is not in: the guard that minted the membership is the
+     * check, and this runs no second one. Read at request time, never copied,
+     * for `BondViews`' reason: a changed name changes everywhere at once. It
+     * discloses nothing the caller's own `GET /bonds/{bondId}` does not.
+     */
+    fun partnerDisplayNameOf(membership: BondMembership): String?
 }
 
 /**
