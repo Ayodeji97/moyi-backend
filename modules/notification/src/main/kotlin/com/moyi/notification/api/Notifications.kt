@@ -34,6 +34,21 @@ interface Notifications {
      *   and it is dropped here.
      */
     fun request(request: PushRequest): Boolean
+
+    /**
+     * Calls off the push recorded under [dedupeKey], if it has not gone yet:
+     * one still `REQUESTED`, or `HELD` by quiet hours, becomes `CANCELLED` and
+     * is never sent. A push already settled, or never asked for, is left as it
+     * is. For a push whose reason has gone before it could be sent: the daily
+     * reminder of a member who has since written (ADR-0045).
+     *
+     * **Joins the caller's transaction and refuses to run without one**, so
+     * the push is called off exactly when the fact that made it pointless
+     * commits. Calling it twice is calling it once.
+     *
+     * @return whether this call cancelled a push.
+     */
+    fun cancel(dedupeKey: String): Boolean
 }
 
 /**

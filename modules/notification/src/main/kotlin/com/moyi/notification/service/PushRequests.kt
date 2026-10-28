@@ -65,6 +65,9 @@ internal class PushRequests(
         return recorded
     }
 
+    @Transactional(propagation = Propagation.MANDATORY)
+    override fun cancel(dedupeKey: String): Boolean = ledger.cancel(dedupeKey)
+
     internal companion object {
         const val AGGREGATE = "Notification"
         const val PUSH_REQUESTED = "PushRequested"

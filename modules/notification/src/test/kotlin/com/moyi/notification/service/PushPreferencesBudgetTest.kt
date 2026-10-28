@@ -179,6 +179,48 @@ internal class PushPreferencesBudgetTest(
     }
 
     @Test
+    fun `a push called off before it went is never sent, and calling it off twice is once`() {
+        clock.set(at("23:00"))
+        ask(push(ada, PushCategory.REMINDER, key = "held", quietHours = night))
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+        statuses(ada).getValue("held").first shouldBe "HELD"
+        ask(push(ada, PushCategory.REMINDER, key = "requested"))
+
+        transactions.execute { notifications.cancel("held") } shouldBe true
+        transactions.execute { notifications.cancel("held") } shouldBe false
+        // "requested" is still owed to the outbox; its delivery runs and finds nothing to send.
+        transactions.execute { notifications.cancel("requested") } shouldBe true
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+        held.releaseDue(Instant.parse("2026-10-15T06:00:00Z"), LIMIT) shouldBe 0
+
+        statuses(ada).values.map { it.first } shouldBe listOf("CANCELLED", "CANCELLED")
+        provider.sent.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a push already settled is not called off, and a key never asked for is nothing`() {
+        ask(push(ada, PushCategory.REMINDER, key = "sent"))
+        dispatcher.dispatchDue(evening, BUDGET)
+
+        transactions.execute { notifications.cancel("sent") } shouldBe false
+        transactions.execute { notifications.cancel("never-asked") } shouldBe false
+        statuses(ada).getValue("sent").first shouldBe "SENT"
+        // And a cancelled key stays spent: asking again records nothing new.
+        ask(push(ada, PushCategory.REMINDER, key = "cancelled"))
+        transactions.execute { notifications.cancel("cancelled") } shouldBe true
+        transactions.execute { notifications.request(push(ada, PushCategory.REMINDER, key = "cancelled")) } shouldBe false
+    }
+
+    @Test
+    fun `calling a push off refuses to run outside the caller's transaction`() {
+        ask(push(ada, PushCategory.REMINDER, key = "owed"))
+        io.kotest.assertions.throwables.shouldThrow<org.springframework.transaction.IllegalTransactionStateException> {
+            notifications.cancel("owed")
+        }
+        statuses(ada).getValue("owed").first shouldBe "REQUESTED"
+    }
+
+    @Test
     fun `a release run twice, or on two instances, hands each push back once`() {
         clock.set(at("23:00"))
         ask(push(ada, PushCategory.REVEAL, quietHours = night))
@@ -301,6 +343,46 @@ internal class PushPreferencesBudgetTest(
         }
         statuses(ada).values.map { it.first }.sorted() shouldBe listOf("DROPPED_BUDGET", "SENT")
         provider.sent.size shouldBe 1
+    }
+
+    @Test
+    fun `the budget's day is read once the lock is held, not before it was waited for`() {
+        // Two pushes of the remainder already sent this evening. The 23:59 reveal is being sent,
+        // holding her budget lock, when midnight passes; the milestone that waited on that lock
+        // belongs to the new day, which has room. Read before the wait, it counted yesterday.
+        spend(ada, 2, bondId = bond)
+        clock.set(at("23:59"))
+        ask(push(ada, PushCategory.REVEAL, key = "reveal"))
+        ask(push(ada, PushCategory.MILESTONE, key = "milestone"))
+
+        val firstIsSending = CountDownLatch(1)
+        val letFirstFinish = CountDownLatch(1)
+        val firstPid = CompletableFuture<Int>()
+        provider.duringSend = {
+            if (firstPid.complete(jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java)!!)) {
+                firstIsSending.countDown()
+                letFirstFinish.await(10, TimeUnit.SECONDS)
+            }
+        }
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            val first = pool.submit<Int> { dispatcher.dispatchDue(clock.instant(), 1).delivered }
+            firstIsSending.await(10, TimeUnit.SECONDS) shouldBe true
+            val pid = firstPid.get()
+            val second = pool.submit<Int> { dispatcher.dispatchDue(clock.instant(), 1).delivered }
+            await().atMost(Duration.ofSeconds(10)).until { second.isDone || waitsOnBudgetLockOf(pid) }
+            second.isDone shouldBe false
+
+            // Midnight in London passes while the second waits.
+            clock.set(at("23:59").plusSeconds(90))
+            letFirstFinish.countDown()
+            first.get(10, TimeUnit.SECONDS) shouldBe 1
+            second.get(10, TimeUnit.SECONDS) shouldBe 1
+        } finally {
+            letFirstFinish.countDown()
+            pool.shutdownNow()
+        }
+        statuses(ada) shouldBe mapOf("reveal" to ("SENT" to true), "milestone" to ("SENT" to false))
     }
 
     private fun push(

@@ -24,6 +24,13 @@ internal enum class NotificationStatus {
     /** Still unsent at `stale_after`: never sent late. */
     EXPIRED,
 
+    /**
+     * Called off before it went, because what it was about no longer holds:
+     * a reminder to write, for a member who has written since (ADR-0045).
+     * Not `SUPPRESSED`, which says the member turned the category off.
+     */
+    CANCELLED,
+
     /** Nothing more can be done: no phone, no valid token, or a refusal that would be repeated. */
     FAILED_PERMANENT,
 }

@@ -1,5 +1,6 @@
 package com.moyi.gratitude.service
 
+import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
@@ -9,6 +10,7 @@ import com.moyi.gratitude.api.ReminderRun
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.identity.api.UserDirectory
+import com.moyi.notification.api.HeldPushes
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.BeforeEach
@@ -51,6 +53,8 @@ internal class DailyRemindersTest(
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
     @Autowired private val clock: MutableClock,
+    @Autowired private val dispatcher: OutboxDispatcher,
+    @Autowired private val held: HeldPushes,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -136,6 +140,55 @@ internal class DailyRemindersTest(
         row["wanted"] shouldBe true
         // Bea turned reminders off: asked for all the same, and recorded unwanted, so the push consumer suppresses it.
         rowOf(bea)["wanted"] shouldBe false
+    }
+
+    @Test
+    fun `a reminder held by quiet hours is called off when the member writes before they end`() {
+        // The review's scenario: a 06:30 reminder, quiet hours 22:00 to 07:00, she writes at 06:45,
+        // and must not be told to write at 07:00. Lagos is UTC+1: 06:30 there is 05:30Z.
+        settings(
+            ada,
+            """{"reminderTimeLocal":"06:30","reminderTimezone":"Africa/Lagos","quietHoursStart":"22:00","quietHoursEnd":"07:00"}""",
+        )
+        val reminderAt = Instant.parse("2026-09-02T05:30:00Z")
+        clock.set(reminderAt)
+        reminders.remindDue(reminderAt.minusSeconds(300), reminderAt).requested shouldBe 1
+        dispatcher.dispatchDue(reminderAt, DISPATCH)
+        rowOf(ada)["status"] shouldBe "HELD"
+
+        clock.set(Instant.parse("2026-09-02T05:45:00Z"))
+        write(ada)
+
+        rowOf(ada)["status"] shouldBe "CANCELLED"
+        // 07:00 there: the hold ends, and there is nothing to release or send.
+        val seven = Instant.parse("2026-09-02T06:00:00Z")
+        clock.set(seven)
+        held.releaseDue(seven, DISPATCH) shouldBe 0
+        dispatcher.dispatchDue(seven, DISPATCH)
+        rowOf(ada)["status"] shouldBe "CANCELLED"
+        // A later sweep of the same window asks for nothing: the key is spent.
+        reminders.remindDue(reminderAt.minusSeconds(300), reminderAt).requested shouldBe 0
+    }
+
+    @Test
+    fun `an entry calls off only its own author's reminder for that day`() {
+        sweep()
+        clock.set(Instant.parse("2026-09-01T19:58:00Z"))
+        write(bea)
+
+        rowOf(bea)["status"] shouldBe "CANCELLED"
+        rowOf(ada)["status"] shouldBe "REQUESTED"
+    }
+
+    @Test
+    fun `a tick missed in a restart is caught up by the next, with exactly one push each`() {
+        // Both reminders fall at 20:00Z. The 20:00 tick never ran; the job's next two runs look
+        // back half an hour (ReminderJob.LOOKBACK), so both cover 20:00, and the key keeps it one.
+        reminders.remindDue(Instant.parse("2026-09-01T19:35:00Z"), Instant.parse("2026-09-01T20:05:00Z")).requested shouldBe 2
+        reminders.remindDue(Instant.parse("2026-09-01T19:40:00Z"), Instant.parse("2026-09-01T20:10:00Z")).requested shouldBe 0
+
+        jdbc.queryForObject("SELECT count(*) FROM notifications WHERE category = 'REMINDER'", Int::class.java) shouldBe 2
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'PushRequested'", Int::class.java) shouldBe 2
     }
 
     @Test
@@ -233,4 +286,8 @@ internal class DailyRemindersTest(
 
     private fun idOf(response: MockHttpServletResponse): String =
         Regex(""""id":"([^"]+)"""").find(response.contentAsString)!!.groupValues[1]
+
+    private companion object {
+        const val DISPATCH = 100
+    }
 }

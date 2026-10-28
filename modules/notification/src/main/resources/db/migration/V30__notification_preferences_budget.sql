@@ -29,10 +29,12 @@ ALTER TABLE notifications ADD COLUMN wanted boolean NOT NULL DEFAULT true;
 
 -- HELD: inside quiet hours, waiting for `not_before`, when the release puts
 -- it back to REQUESTED. Not final, like REQUESTED.
+-- CANCELLED: called off before it went, because its reason has gone: the
+-- daily reminder of a member who has written since it was asked for.
 ALTER TABLE notifications DROP CONSTRAINT notifications_status_check;
 ALTER TABLE notifications
     ADD CONSTRAINT notifications_status_check CHECK (
-        status IN ('REQUESTED', 'HELD', 'SENT', 'SUPPRESSED', 'DROPPED_BUDGET', 'EXPIRED', 'FAILED_PERMANENT')
+        status IN ('REQUESTED', 'HELD', 'SENT', 'SUPPRESSED', 'DROPPED_BUDGET', 'EXPIRED', 'CANCELLED', 'FAILED_PERMANENT')
     );
 
 -- Only a sent push took a slot, and only a sent push can have taken the

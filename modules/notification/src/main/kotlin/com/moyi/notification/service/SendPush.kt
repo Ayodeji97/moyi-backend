@@ -15,6 +15,7 @@ import com.moyi.notification.domain.QuietHours
 import com.moyi.notification.domain.SendResult
 import com.moyi.notification.domain.Settlement
 import com.moyi.notification.infra.database.NotificationStore
+import com.moyi.notification.infra.database.PushBudgetLedger
 import com.moyi.notification.infra.database.PushTokenStore
 import com.moyi.notification.infra.database.StoredPush
 import org.springframework.stereotype.Component
@@ -67,6 +68,7 @@ import java.time.Instant
 @Component
 internal class SendPush(
     private val ledger: NotificationStore,
+    private val budget: PushBudgetLedger,
     private val tokens: PushTokenStore,
     private val sender: PushSender,
     private val clock: Clock,
@@ -114,7 +116,7 @@ internal class SendPush(
             }
 
             else -> {
-                when (val slot = budgetSlot(push, now)) {
+                when (val slot = budgetSlot(push)) {
                     BudgetDecision.DROPPED -> Decision.Settle(NotificationStatus.DROPPED_BUDGET)
                     else -> Decision.Send(slot)
                 }
@@ -172,18 +174,20 @@ internal class SendPush(
      * FR-082, under the member's budget lock: held from here until this
      * delivery commits or rolls back, so a second push for the same member
      * counts this one's slot as spent, or sees it given back.
+     *
+     * **The time is read once the lock is held.** The wait can be a send's
+     * length; read before it, a push that waited across the member's midnight
+     * would count against the day that had ended.
      */
-    private fun budgetSlot(
-        push: StoredPush,
-        now: Instant,
-    ): BudgetDecision {
-        ledger.lockBudgetOf(push.userId)
+    private fun budgetSlot(push: StoredPush): BudgetDecision {
+        budget.lockBudgetOf(push.userId)
+        val now = clock.instant()
         val day = PushBudget.dayOf(now, push.zone)
-        val inBond = ledger.sentInBond(push.userId, push.bondId, day.start, day.end)
+        val inBond = budget.sentInBond(push.userId, push.bondId, day.start, day.end)
         return PushBudget.decide(
             sentInBondToday = inBond.sent,
             reservedSpentToday = inBond.reservedSpent,
-            sentAcrossBonds = ledger.sentSince(push.userId, now.minus(PushBudget.ACROSS_BONDS_WINDOW)),
+            sentAcrossBonds = budget.sentSince(push.userId, now.minus(PushBudget.ACROSS_BONDS_WINDOW)),
             revealClass = push.category.isRevealClass,
         )
     }
