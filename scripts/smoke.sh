@@ -74,7 +74,10 @@
 # partner and today does not, and a favourite's row holds no time (V26).
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-28, for the ruling that an
+# days are the tests' to show. Last run on 2026-10-28, after main (#97, V26) was
+# merged in, from a jar of 5b3ad04's code, against a database of its own and
+# --attach, under compose project moyi-0f with Postgres on 55443 and Valkey on
+# 56390: 939 passed, 0 failed, 0 skipped, 24 sections. Before it, for the ruling that an
 # entry erased before the partner saw it is no entry (ADR-0032 q2), from a jar
 # of 052df95's code (after its review fixes), against a database of its own (moyi_0f) and --attach,
 # Postgres on 55443 and Valkey on 56390 in a compose project of its own:
