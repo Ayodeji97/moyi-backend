@@ -453,6 +453,50 @@
     "curl": "curl -X PUT \"$API/bonds/$BOND/members/me/settings\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"reminderTimeLocal\": \"20:00\"}'"
   },
   {
+    "id": "GET /api/v1/bonds/{bondId}/members/me/notifications",
+    "summary": "read which kinds of push you want in this bond",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl \"$API/bonds/$BOND/members/me/notifications\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PUT /api/v1/bonds/{bondId}/members/me/notifications",
+    "summary": "turn kinds of push on or off in this bond, leaving the rest",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "categories is missing or null. A toggle that is not true or false is 400 MALFORMED_REQUEST instead; a toggle left out is kept, not an error.",
+        "evidence": "smoke",
+        "evidenceRef": "notifications: a PUT without categories is 422 on categories",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/MemberNotifications.kt#val categories: NotificationCategoriesRequest? = null,"
+      }
+    ],
+    "curl": "curl -X PUT \"$API/bonds/$BOND/members/me/notifications\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"categories\": {\"onThisDay\": true}}'"
+  },
+  {
     "id": "PATCH /api/v1/bonds/{bondId}/timezone",
     "summary": "propose a new time zone",
     "machine": "bond",
@@ -742,7 +786,7 @@
     "machine": "day",
     "auth": "bearer",
     "headers": [
-      "Content-Type (application/json, with exactly one key, {\"type\": \"HEART\", \"THANK_YOU\", \"SMILE\" or \"MOVED\"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)"
+      "Content-Type (application/json, with exactly one key, {\"type\": \"HEART\", \"THANK_YOU\", \"SMILE\", \"MOVED\" or \"ME_TOO\"}. The body is checked before the entry is looked at, so it is answered the same to everybody. Any other Content-Type, or none, is 415)"
     ],
     "requestErrors": [
       {
@@ -756,7 +800,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "type is missing, null, or not one of the four names exactly as written. Nothing is set.",
+        "reason": "type is missing, null, or not one of the five names exactly as written. Nothing is set.",
         "evidence": "smoke",
         "evidenceRef": "an unknown type once more, for its body",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/ReactionRequest.kt#internal class ReactionTypeConstraintValidator"
@@ -1008,6 +1052,28 @@
       }
     ],
     "curl": "curl -X DELETE \"$API/auth/sessions/$SESSION\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "PUT /api/v1/me/devices/current/push-token",
+    "summary": "give the current device a push token",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X PUT \"$API/me/devices/current/push-token\" -H \"Authorization: Bearer $TOKEN\" -H \"Content-Type: application/json\" -d '{\"token\":\"<FCM registration token>\"}'"
+  },
+  {
+    "id": "DELETE /api/v1/me/devices/current/push-token",
+    "summary": "remove the current device's push token",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X DELETE \"$API/me/devices/current/push-token\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
     "id": "GET /api/v1/me",

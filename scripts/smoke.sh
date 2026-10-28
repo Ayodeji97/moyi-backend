@@ -76,11 +76,65 @@
 # ellipsis are 500 as typed and a 201, while 500 and a trailing space are 501 and a 422.
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
-# days are the tests' to show. Last run on 2026-10-28, for the entry-text rulings, from a
-# jar of 59f28cd's code (the commit is d90ff4c after its subject was reworded; the commits
-# after it change only this header), against a database of its own and --attach, Postgres
-# on 55443: 942 passed, 0 failed, 0 skipped, 24 sections. Before it, on 2026-10-27, after the
-# favourites rulings' review fixes, from a jar of f737173's code, against a database of its
+# days are the tests' to show. Since Phase 4 N1 it registers a push token for
+# the session's device, replaces and removes it, sees a logout forget it, a
+# deviceless or ended session answered 404, and the token in no log line; no
+# push is sent by a route, since nothing requests one before N3. Since Phase 4
+# N2 it reads and sets a member's push toggles, sees the settings PUT leave
+# them alone and a stranger told the bond's 404, and runs the daily reminder
+# (and the release of held pushes) every five seconds: the member who wrote is
+# not reminded, the one who did not is, held by her quiet hours, released when
+# they are made to have passed, and taken by the logging provider. Since Phase 4
+# N3 a reveal on the wire sends one push to each member, logged twice by the logging
+# provider and SENT once each in the ledger, with neither the words nor the token in any
+# line, and the join asks one push of the member who was there. Last run on 2026-10-28,
+# after main (0a663d5, the squash of #99) was merged into N3, from a jar of that merge, on a
+# fresh database that applied V1 to V27, V29, V30 and V31, against its own compose project
+# (moyi-n3: Postgres 55438, Valkey 63798) and --attach: 1009 passed, 0 failed, 2 skipped
+# (both the tag across the erasure, the poller having won the race), 27 sections. Before
+# it, on 2026-10-28, after N2 with main and #96 (eb999d2) was merged into N3, from a jar of that merge, on a
+# fresh database that applied V1 to V27, V29, V30 and V31, against its own compose project
+# (moyi-n3: Postgres 55438, Valkey 63798) and --attach: 1011 passed, 0 failed, 0 skipped,
+# 27 sections. Before it, on 2026-10-28,
+# after the rebased N1 and N2 (2062b68) were merged into N3, from a jar of that merge,
+# against its own compose project (moyi-n3: Postgres 55438, Valkey 63798) and --attach:
+# 1008 passed, 0 failed, 0 skipped, 27 sections. The first run on that fresh database
+# failed three reminder probes: the job's ShedLock holds at least thirty seconds and the
+# probe waited twenty, so it now waits forty. Before it, on 2026-10-28,
+# for N3 after the rulings on its independent review (the on-this-day week counted from
+# the ledger, V31), from a jar of that code, against a fresh database of its own compose
+# project (moyi-n3: Postgres on 55438, Valkey on 63798) and --attach: 1004 passed,
+# 0 failed, 0 skipped, 27 sections. Before it, N3's first code, 1004, 0 and 0 on that
+# project's database after a first run, which had failed one probe of its own, which had
+# assumed the join's push was settled before a toggle PUT a second later (it is read when
+# the consumer runs), and now allows either. Before them, on
+# 2026-10-28, with main merged in (#96 as bd94436, #104's V27), from a jar of that
+# merge, on a fresh database that applied V1 to V27, V29 and V30, against its own
+# compose project (Postgres 55436, Valkey 63796) and --attach: 1000 passed, 0 failed,
+# 0 skipped, 26 sections. Before it, on 2026-10-28, after N1 was rebased onto main
+# (9fc8444) and merged in, from a jar of that merge, against its own compose project
+# (Postgres 55436, Valkey 63796) and --attach: 997 passed, 0 failed, 0 skipped, 26
+# sections. Before it, after the review of #99 (a reminder called off by writing, a
+# half-hour lookback), from a jar of that code on the pre-rebase N1, against a fresh
+# database and --attach, its own compose project (Postgres on 55436, Valkey on 63796):
+# 992 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won
+# the race), 26 sections; the change's first jar, 993, 0 and 0; and the run before
+# that found that a reminder falling before its bond began failed the whole sweep
+# (ADR-0045).
+# For N1, on 2026-10-28,
+# from a jar of 56a7941 (that change with main and #104, V27, merged in), against
+# a compose project of its own (moyi-n1, Postgres 55434, Valkey 63794) and
+# --attach: 959 passed, 0 failed, 1 skipped (the tag across the erasure, the
+# poller having won the race), 25 sections. Before it, on 6ecece5: 957 passed,
+# 0 failed, 0 skipped.
+# Before it, for ME_TOO after main
+# (#97, V26) was merged in, from a jar of a56ac42's code, against a database of
+# its own and --attach, under compose project moyi-0f with Postgres on 55443 and
+# Valkey on 56390: 939 passed, 0 failed, 0 skipped, 24 sections. Before it, for
+# ME_TOO (ADR-0037 question 1, V27), from a jar of 91afa4d's code, against a database of its
+# own and --attach, under compose project moyi-0f with Postgres on 55453 and
+# Valkey on 56391: 935 passed, 0 failed, 0 skipped, 24 sections. Before it, on 2026-10-27, after the favourites
+# rulings' review fixes, from a jar of f737173's code, against a database of its
 # own and --attach, Postgres on 55432: 936 passed, 0 failed, 0 skipped, 24
 # sections. Before it, for the favourites rulings, from a jar of 86ae0c9's code, against a database of its own and
 # --attach, Postgres on 55432 because another project's container held 5432:
@@ -283,7 +337,8 @@ if [ "$ATTACH" = 0 ]; then
   echo "booting $JAR (local profile) on $("$JAVA" -version 2>&1 | head -1), log: $MOYI_LOG"
   "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" --management.server.port="$MGMT_PORT" \
     --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" \
-    --moyi.scheduling.close.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
+    --moyi.scheduling.close.cron='*/5 * * * * *' \
+    --moyi.scheduling.reminders.cron='*/5 * * * * *' --moyi.scheduling.held-pushes.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
   for _ in $(seq 1 90); do
     grep -q "Started MoyiApplication" "$MOYI_LOG" && break
@@ -484,6 +539,7 @@ expect "DELETE the current session is a logout: 204" 204 "" -- -X DELETE "$API/a
 expect "…and the watch now lists no sessions" 200 '"sessions":[]' -- "$API/auth/sessions" -H "Authorization: Bearer $WATCH_ACCESS"
 expect "an unknown platform is 422 on device.platform" 422 '"field":"device.platform"' -- -X POST "$API/auth/login" -d "$(printf '{"email":"%s","password":"%s","device":{"platform":"BLACKBERRY","appVersion":"1","osVersion":"7"}}' "$EMAIL" "$PASSWORD")"
 flush_buckets
+
 
 echo; echo "password reset (FR-004, T-17, ADR-0022)"
 EMAILS_BEFORE="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
@@ -1695,6 +1751,12 @@ expect "the author's day is 304 on the tag from before all that" 304 "" -- "$API
 rows_are "…and the reaction is still the one that was set" "$RX_A_ENTRY" "1|HEART"
 expect "the reactor takes the bookmark off" 204 "" -- -X DELETE "$API/entries/$RX_A_ENTRY/favourite" -H "Authorization: Bearer $RX_B"
 
+# The fifth type, ME_TOO (ADR-0037 question 1, V27): taken, and read back by both, like the others.
+flush_buckets
+expect "PUT {\"type\":\"ME_TOO\"} is 204" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"ME_TOO"}'
+rows_are "…one row, now ME_TOO" "$RX_A_ENTRY" "1|ME_TOO"
+is "…read back by the reactor and the author on today, the feed and the day" "$(rx_views "$RX_B" "$RX_BOND" partnerEntry)|$(rx_views "$RX_A" "$RX_BOND" myEntry)" '"ME_TOO" "ME_TOO" "ME_TOO"|"ME_TOO" "ME_TOO" "ME_TOO"'
+
 # Replace. One per member per entry: a second type is put in place of the first.
 for type in SMILE THANK_YOU MOVED; do
   expect "PUT {\"type\":\"$type\"} replaces it: 204" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d "{\"type\":\"$type\"}"
@@ -2067,6 +2129,150 @@ if [ "$MI_MADE" = 6 ]; then
 else
   skip "milestones: the seventh day and the ending (the days could not be put in by hand)"
 fi
+
+echo; echo "push tokens (Phase 4 N1, ADR-0044)"
+# The token goes to the device of the caller's session and is kept by the
+# notification module. Nothing requests a push before slice N3, and no route
+# may trigger one, so this proves the route and the table, not a send.
+flush_buckets
+PUSH_TOKEN="smoke-push-token-$RANDOM$RANDOM"
+expect "push: sign in on a phone" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$NEW_PASSWORD")"
+PUSH_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"; PUSH_REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "push: PUT a token for the current device is 204" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+db_is "push: …and it is kept for that session's device, as ANDROID" "$(sql "SELECT p.platform FROM push_tokens p JOIN refresh_tokens t ON t.device_id = p.device_id JOIN users u ON u.id = t.user_id WHERE u.email='$EMAIL' AND p.token='$PUSH_TOKEN' AND t.revoked_at IS NULL AND t.rotated_at IS NULL")" "ANDROID"
+expect "push: PUT the same token again is 204, one row" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+db_is "push: …still one row" "$(sql "SELECT count(*) FROM push_tokens WHERE token='$PUSH_TOKEN'")" "1"
+expect "push: a token with a space in it is 422 on token" 422 '"field":"token"' -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d '{"token":"two words"}'
+expect "push: DELETE the token is 204" 204 "" -- -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS"
+db_is "push: …and it is gone" "$(sql "SELECT count(*) FROM push_tokens WHERE token='$PUSH_TOKEN'")" "0"
+expect "push: DELETE again is still 204" 204 "" -- -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS"
+expect "push: PUT it back" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+expect "push: logout is 204" 204 "" -- -X POST "$API/auth/logout" -d "{\"refreshToken\":\"$PUSH_REFRESH\"}"
+db_is "push: …and the logout forgot the device's token" "$(sql "SELECT count(*) FROM push_tokens WHERE token='$PUSH_TOKEN'")" "0"
+expect "push: PUT with the ended session's access token is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+expect "push: DELETE with it is 404 NOT_FOUND too" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $PUSH_ACCESS"
+expect "push: sign in without describing a device" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "{\"email\":\"$EMAIL\",\"password\":\"$NEW_PASSWORD\"}"
+BARE_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"; BARE_REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "push: a session with no device has nowhere to keep a token: 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $BARE_ACCESS" -d "{\"token\":\"$PUSH_TOKEN\"}"
+expect "push: …and DELETE from it is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/me/devices/current/push-token" -H "Authorization: Bearer $BARE_ACCESS"
+expect "push: logout of the bare session" 204 "" -- -X POST "$API/auth/logout" -d "{\"refreshToken\":\"$BARE_REFRESH\"}"
+expect "push: PUT without a bearer is 401" 401 '"code":"UNAUTHENTICATED"' -- -X PUT "$API/me/devices/current/push-token" -d "{\"token\":\"$PUSH_TOKEN\"}"
+expect "push: DELETE without a bearer is 401" 401 '"code":"UNAUTHENTICATED"' -- -X DELETE "$API/me/devices/current/push-token"
+# The local profile's push provider is the logging one; it and everything else must never print a token.
+if grep -q "$PUSH_TOKEN" "$MOYI_LOG"; then fail "push: the token is in no log line" "found in $MOYI_LOG"; else pass "push: the token is in no log line"; fi
+flush_buckets
+
+echo; echo "push preferences, quiet hours and the daily reminder (Phase 4 N2, ADR-0045)"
+# The toggles as a resource of their own, beside the settings it must survive;
+# then the daily reminder on the wire. The run starts the reminder job and the
+# release of held pushes every five seconds instead of every five minutes and
+# every minute. The reminder job asks about the five minutes that ended on the
+# last boundary, so both members' reminders are set to that boundary in a zone
+# at UTC with no DST (Africa/Abidjan): the one who wrote today is not reminded,
+# the one who did not is, and inside her quiet hours that push is held. Her
+# night is then made to have passed, by hand on the push's own row, and the
+# release hands it back and the logging provider takes it.
+flush_buckets
+verified_account "toggler" "203.0.113.140"; NB_A="$ACCOUNT_ACCESS"
+verified_account "toggled" "203.0.113.141"; NB_B="$ACCOUNT_ACCESS"
+verified_account "outsider-n" "203.0.113.142"; NB_O="$ACCOUNT_ACCESS"
+expect "notifications: a bond for two is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $NB_A" -d "$(bond_body "Us")"
+NB_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+NB_MADE="$(date -u +%s)"
+NB_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "notifications: readable while the bond waits for its second member" 200 '"reminder":true' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A"
+expect "notifications: …and settable while it waits" 200 '"proposal":true' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"proposal":true}}'
+expect "notifications: the other member joins it" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$NB_CODE/accept" -H "Authorization: Bearer $NB_B"
+NB_ALL_ON='{"categories":{"reminder":true,"partnerJoined":true,"reveal":true,"milestone":true,"onThisDay":false,"proposal":true}}'
+expect "notifications: a member who never chose has every category on but on-this-day" 200 '"onThisDay":false' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A"
+is "notifications: …exactly that" "$LAST_BODY" "$NB_ALL_ON"
+expect "notifications: a PUT sets what it is sent" 200 '"onThisDay":true' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"onThisDay":true,"milestone":false}}'
+expect "notifications: …and a later one keeps what it is not sent" 200 '"milestone":false' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"partnerJoined":false}}'
+is "notifications: …all three as set" "$LAST_BODY" '{"categories":{"reminder":true,"partnerJoined":false,"reveal":true,"milestone":false,"onThisDay":true,"proposal":true}}'
+expect "notifications: the settings PUT, which clears what it is not sent, is 200" 200 '"reminderTimeLocal":"21:00"' -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_A" -d '{"reminderTimeLocal":"21:00"}'
+expect "notifications: …and leaves the toggles alone" 200 '"onThisDay":true' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A"
+expect "notifications: the other member's are their own, still the defaults" 200 '"onThisDay":false' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_B"
+is "notifications: …exactly" "$LAST_BODY" "$NB_ALL_ON"
+expect "notifications: a PUT without categories is 422 on categories" 422 '"field":"categories"' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{}'
+expect "notifications: a toggle that is not a yes or no is 400" 400 '"code":"MALFORMED_REQUEST"' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"reveal":"sometimes"}}'
+expect "notifications: a stranger reading them is told the bond's 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_O"
+expect "notifications: …and writing them too" 404 '"code":"NOT_FOUND"' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_O" -d '{"categories":{"onThisDay":true}}'
+expect "notifications: without a bearer is 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/bonds/$NB_BOND/members/me/notifications"
+# Back to the defaults for the reminder below: only the reminder toggle matters to it.
+expect "notifications: reminders stay on" 200 '"reminder":true' -- -X PUT "$API/bonds/$NB_BOND/members/me/notifications" -H "Authorization: Bearer $NB_A" -d '{"categories":{"reminder":true}}'
+
+# The daily reminder. Its boundary must come after the bond was made (a reminder that fell before
+# its bond began is no reminder: ADR-0045), and a window more than four minutes old would close
+# before the job ran again. Up to five minutes' wait, the one long pause of this script.
+while [ $(( $(date -u +%s) - $(date -u +%s) % 300 )) -le "$NB_MADE" ]; do sleep 5; done
+[ "$(( $(date -u +%s) % 300 ))" -lt 240 ] || sleep $(( 300 - $(date -u +%s) % 300 + 1 ))
+NB_AT="$(python3 -c 'import time; t=int(time.time()); t-=t%300; print(time.strftime("%H:%M", time.gmtime(t)))')"
+NB_QUIET_FROM="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()-3600)))')"
+NB_QUIET_TO="$(python3 -c 'import time; print(time.strftime("%H:%M", time.gmtime(time.time()+3600)))')"
+NB_TOKEN="smoke-push-token-n2-$RANDOM$RANDOM"
+# He writes first: set before, his reminder could fall between the setting and the entry.
+expect "reminder: he writes today" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$NB_BOND/entries" -H "Authorization: Bearer $NB_B" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"thank you for the reminder I did not need"}'
+expect "reminder: she registers her phone" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $NB_A" -d "{\"token\":\"$NB_TOKEN\"}"
+expect "reminder: hers at the window's end, with quiet hours around now" 200 "\"quietHoursStart\":\"$NB_QUIET_FROM\"" -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_A" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\",\"quietHoursStart\":\"$NB_QUIET_FROM\",\"quietHoursEnd\":\"$NB_QUIET_TO\"}"
+expect "reminder: his at the same time, no quiet hours" 200 "\"reminderTimeLocal\":\"$NB_AT\"" -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_B" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\"}"
+NB_A_ROW=""
+# Up to forty seconds: the reminder job is timed every five here, but its ShedLock holds for
+# at least thirty (lockAtLeastFor), so a setting saved just after a run waits for the next
+# one up to thirty seconds later. Twenty was too short once (the N3 merge's first run).
+for _ in $(seq 1 80); do
+  NB_A_ROW="$(sql "SELECT n.status FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REMINDER' AND m.role = 'OWNER'")"
+  [ "$NB_A_ROW" = "HELD" ] || [ "$NB_A_ROW" = "psql-unavailable" ] && break
+  sleep 0.5
+done
+db_is "reminder: she had not written, so hers was asked for, and her quiet hours hold it" "$NB_A_ROW" "HELD"
+db_is "reminder: …held until her quiet hours end" "$(sql "SELECT to_char(not_before AT TIME ZONE 'UTC', 'HH24:MI') FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REMINDER'")" "$NB_QUIET_TO"
+db_is "reminder: he wrote, so none was asked for him" "$(sql "SELECT count(*) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NB_BOND' AND m.role = 'MEMBER'")" "0"
+db_is "reminder: its key is the member and the bond-day" "$(sql "SELECT dedupe_key LIKE 'reminder:%:' || to_char(now() AT TIME ZONE 'Africa/Lagos', 'YYYY-MM-DD') FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REMINDER'")" "t"
+sleep 6
+db_is "reminder: the job ran again on the same window and asked for nothing twice" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REMINDER'")" "1"
+# Her night passes, by hand: the hold ends now, and the window it was read under is gone.
+sql "UPDATE notifications SET not_before = now() - interval '1 second', quiet_hours_start = NULL, quiet_hours_end = NULL WHERE bond_id = '$NB_BOND' AND status = 'HELD'" >/dev/null
+NB_SENT=""
+for _ in $(seq 1 40); do
+  NB_SENT="$(sql "SELECT status || '|' || coalesce(provider_message_id, '') || '|' || reserved FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REMINDER'")"
+  [[ "$NB_SENT" == SENT* ]] || [ "$NB_SENT" = "psql-unavailable" ] && break
+  sleep 0.5
+done
+db_is "reminder: released when her hours end, and taken by the logging provider, out of the remainder" "$NB_SENT" "SENT|not-sent:log|false"
+if grep -q "$NB_TOKEN" "$MOYI_LOG"; then fail "reminder: the token is in no log line" "found in $MOYI_LOG"; else pass "reminder: the token is in no log line"; fi
+if grep -qE '"quietHours|quiet_hours' "$MOYI_LOG"; then fail "reminder: her quiet hours are in no log line" "found in $MOYI_LOG"; else pass "reminder: her quiet hours are in no log line"; fi
+flush_buckets
+
+echo; echo "the pushes a reveal and a join make (Phase 4 N3, ADR-0046)"
+# The same two members. He wrote today above and she has not; both phones are registered, and
+# her quiet hours are cleared, so her entry, the second, reveals the day and the outbox tells
+# each of them once, through the logging provider. When he joined the bond she was asked one
+# push, under the join's key, and him none. How hers settled depends on a race this script runs
+# on purpose: she turned partner-joined pushes off within a second or two of his joining, and the
+# consumer reads her settings when it runs (ADR-0045 decision 2), so it is SUPPRESSED if her
+# PUT came first and FAILED_PERMANENT (no phone yet) if it did not. Never SENT.
+NJ_ROW="$(sql "SELECT (n.status IN ('SUPPRESSED', 'FAILED_PERMANENT')) || '|' || (n.dedupe_key = 'joined:' || n.bond_id || ':' || n.user_id) FROM notifications n JOIN bond_members m ON m.user_id = n.user_id AND m.bond_id = n.bond_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'PARTNER_JOINED' AND m.role = 'OWNER'")"
+db_is "joined: the member who was there was asked one push, under the join's key, and it was not sent" "$NJ_ROW" "true|true"
+db_is "joined: …and the one who joined was asked none" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'PARTNER_JOINED'")" "1"
+NR_TOKEN="smoke-push-token-n3-$RANDOM$RANDOM"
+expect "reveal push: he registers his phone" 204 "" -- -X PUT "$API/me/devices/current/push-token" -H "Authorization: Bearer $NB_B" -d "{\"token\":\"$NR_TOKEN\"}"
+expect "reveal push: her quiet hours are cleared" 200 '"quietHoursStart":null' -- -X PUT "$API/bonds/$NB_BOND/members/me/settings" -H "Authorization: Bearer $NB_A" -d "{\"reminderTimeLocal\":\"$NB_AT\",\"reminderTimezone\":\"Africa/Abidjan\"}"
+NR_WORDS="the second entry of the reveal push $RANDOM"
+expect "reveal push: she writes the second entry, and the day is open" 201 "" -- -X POST "$API/bonds/$NB_BOND/entries" -H "Authorization: Bearer $NB_A" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"$NR_WORDS\"}"
+NR_SENT=""
+for _ in $(seq 1 40); do
+  NR_SENT="$(sql "SELECT count(DISTINCT user_id) || '|' || count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category = 'REVEAL' AND status = 'SENT'")"
+  [ "$NR_SENT" = "2|2" ] || [ "$NR_SENT" = "psql-unavailable" ] && break
+  sleep 0.5
+done
+db_is "reveal push: one push SENT to each member, and no more" "$NR_SENT" "2|2"
+db_is "reveal push: …each under its reveal key" "$(sql "SELECT count(*) FROM notifications n JOIN bond_days d ON n.dedupe_key = 'reveal:' || d.id || ':' || n.user_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REVEAL'")" "2"
+NR_LOGGED="$(grep -c "Push NOT sent (provider=log): category=REVEAL bond=$NB_BOND" "$MOYI_LOG" || true)"
+if [ "$NR_LOGGED" = "2" ]; then pass "reveal push: two sends logged by the logging provider"; else fail "reveal push: two sends logged by the logging provider" "found $NR_LOGGED"; fi
+db_is "reveal push: no solo, milestone or streak push came of it" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category NOT IN ('REMINDER', 'PARTNER_JOINED', 'REVEAL')")" "0"
+if grep -q "$NR_WORDS" "$MOYI_LOG"; then fail "reveal push: her words are in no log line" "found in $MOYI_LOG"; else pass "reveal push: her words are in no log line"; fi
+if grep -q "$NR_TOKEN" "$MOYI_LOG"; then fail "reveal push: his token is in no log line" "found in $MOYI_LOG"; else pass "reveal push: his token is in no log line"; fi
+flush_buckets
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

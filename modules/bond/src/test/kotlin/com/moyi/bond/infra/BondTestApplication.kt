@@ -33,9 +33,15 @@ import java.time.Duration
  * Identity's migrations still run — they are on the classpath through the
  * `api` dependency, and Flyway merges every module's — which costs a few
  * tables nothing here touches.
+ *
+ * **`com.moyi.notification` is scanned too, as of Phase 4 N3**, for the real
+ * `Notifications` behind `bond.notify` (ADR-0046): the partner-joined and
+ * proposal pushes are read from the ledger they are written to.
+ * `notification` is a leaf that knows nothing of this module, and its two
+ * providers are the logging ones (this module's test `application.yml`).
  */
-@SpringBootApplication(scanBasePackages = ["com.moyi.common", "com.moyi.bond"])
-@ConfigurationPropertiesScan("com.moyi.common", "com.moyi.bond")
+@SpringBootApplication(scanBasePackages = ["com.moyi.common", "com.moyi.bond", "com.moyi.notification"])
+@ConfigurationPropertiesScan("com.moyi.common", "com.moyi.bond", "com.moyi.notification")
 @EntityScan("com.moyi.bond")
 @EnableJpaRepositories("com.moyi.bond")
 internal class BondTestApplication {

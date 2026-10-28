@@ -166,6 +166,8 @@ internal class RequestDeletion(
             schedule(bond, now)
             log.info("Bond {} was scheduled for deletion by its only member", bond.id.value)
         } else {
+            // Two-party: it waits on the other member, who is told once (Q13, ADR-0046).
+            support.events.publish(ProposalOpened.of(proposal))
             log.info("A deletion was requested on bond {}", bond.id.value)
         }
     }
