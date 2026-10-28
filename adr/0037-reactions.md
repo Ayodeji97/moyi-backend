@@ -3,8 +3,8 @@
 **Status:** Accepted · **Date:** 2026-10-13 · **Deciders:** Daniel, for the five rulings of
 2026-10-06 and for his rulings of 2026-10-21 on every question in "Questions that are the
 owner's" except the third, which was not put to him. Every other decision here was made by
-the plan or by the agents that ran it.
-**Amended:** 2026-10-28 (the narrow `REMOVED` shape superseded — ADR-0032 question 2)
+the plan or by the agents that ran it. · **Amended:** 2026-10-28 (question 1 built: the fifth
+type, `ME_TOO`, by V27; decision 2 now reads five) · 2026-10-28 (the narrow `REMOVED` shape superseded — ADR-0032 question 2)
 
 ## Context
 
@@ -93,6 +93,7 @@ matched exactly (`ReactionType.named`: `heart` is not `HEART`, and nothing is tr
 set is written once, in the domain enum. The edge validator asks it, the contract's two
 enums are generated from it, and V23's `CHECK` holds the same four names. Adding or
 renaming a value is a migration and a breaking change for a generated client.
+*Amended 2026-10-28: five, with `ME_TOO` last; V27 replaced V23's `CHECK` (question 1).*
 
 *Beyond the plan, the implementer's, upheld by the review:* which refusal an odd body gets,
 and when.
@@ -411,6 +412,17 @@ something does, that change removes the member's rows of `reactions`, as of
 `entry_favourites`. A member's export should carry the reactions they left. Whether it
 carries the ones left on their entries is not decided anywhere.
 
+**Owed by the amendment of 2026-10-28** (question 1, `ME_TOO`):
+
+- **A CI pull request: `breaking` with `--flatten-allof`**, so that a new value of a
+  response enum inside an `allOf` schema fails without the label. Its error counts differ
+  from today's, so it is not this pull request's.
+- **A small pull request: `Reactions.on` skips a stored type it does not know**, with a
+  `WARN` line carrying the entry's id and the type only, so that a sixth value is an expand
+  step that a rollback survives. It does not help a rollback past V27.
+- **The outer corpus's doc 06:156** still lists the placeholder four; it is to read five.
+- Question 13's ruling, and the README's runbook step to follow it.
+
 **Not assigned.**
 
 - The time difference between a held row and an absent one on the two `DELETE`s
@@ -445,6 +457,63 @@ is a review's finding of 2026-10-15, left as built.
    `MOVED` and `ME_TOO` ("I'm grateful for that too"), in the contract's enum, the table's
    `CHECK` and the domain enum.* Whether each is drawn as a glyph or a word is left to the
    design.
+
+   **Amendment, 2026-10-28: built.** `ReactionType` gains `ME_TOO`, last, in the ruling's
+   order; nothing else is renamed or reordered. The domain enum is still the one statement
+   of the set: the edge validator asks it (`ReactionType.named`) and both contract enums
+   are generated from it (`documentReactions`), so the contract gained `ME_TOO` in
+   `ReactionRequest.type` and in `EntryResponse.reaction` (before its `null`) and nothing
+   else. The table's `CHECK` is the one copy the database keeps:
+
+   - **V27** (`V27__gratitude_reaction_me_too.sql`, `modules:gratitude`) drops V23's
+     `CHECK` and adds the five under the same name, `reactions_type_check`, in one
+     `ALTER TABLE`, so the table is never without it. V23 named it explicitly;
+     `FlywayMigrationTest` reads the name back from `pg_constraint` and puts each of the
+     five, and six values that are not one of them, to the `CHECK` itself.
+   - **The number, and the order it must merge in.** V27 was agreed with the work beside
+     it: V26 is #97 (favourites lose `created_at`); V29, V30 and V31 are the notifications
+     module's (#96, #99, #100). Flyway runs here without `outOfOrder`, so what matters is the
+     order the migrations reach `main`, not only production: every local and smoke
+     database migrates from `main` too. **The rule: #97 (V26), then this pull request
+     (V27), then #96, #99 and #100 (V29 to V31).** If this lands first, #97 renumbers to
+     V28 before it merges. If #96 lands first, this renumbers above V31. A database that
+     has already run V27 from this branch needs a one-off migrate with
+     `-outOfOrder=true` to take a lower version merged after it, or a reset. What a wrong
+     order does: Flyway's validation refuses the lower, unapplied version, the new
+     container never turns healthy, and the old one keeps serving. A blocked deploy, not
+     damaged data. (Reasoned from Flyway's defaults and Kamal's health-gated cutover; not
+     run.)
+   - **The cost of a rollback: an accepted exception to doc 10 §4.** Doc 10 §4, and the
+     README beside `kamal rollback`, say every migration stays backward-compatible with the
+     release before it. V27 does, until anyone reacts `ME_TOO`. From then on an image older
+     than V27 cannot read that row: `Reactions.on` maps the column with
+     `ReactionType.valueOf`, which throws on a name the enum lacks. Run on this branch with
+     `ME_TOO` taken out of the enum and a `ME_TOO` row put in by hand: `/today`, the feed
+     and the day were each `500` for both members of that bond (`IllegalArgumentException:
+     No enum constant …ReactionType.ME_TOO`). On-this-day, search, an entry's `PATCH` and a
+     write's replay read through the same call and are reasoned to fail alike. So once a
+     `ME_TOO` row exists, `kamal rollback` alone is not a recovery. The README's deploy
+     section now carries the step to run before a rollback past V27: either
+     `DELETE FROM reactions WHERE type = 'ME_TOO'` (the reaction is lost) or an `UPDATE`
+     mapping it to one of the four (the reaction is misstated). Which of the two is
+     question 13; the README gives both and recommends the delete. No tolerance was built
+     in this pull request: it would help only an image that has it, and the image a
+     rollback goes to does not. One is owed for the next value (Owed, below).
+   - **The contract.** oasdiff (`tufin/oasdiff:v1.34.1`, the image `oasdiff-action`
+     v0.1.20 runs, `breaking --composed=false --fail-on ERR`, against `main`'s document)
+     reports seven `response-property-enum-value-added` **warnings**, one per operation
+     that returns an `EntryResponse`, and no error; the request enum's new value is not
+     breaking. The cause is `allOf`, not the tool's version: `reaction` sits in
+     `EntryResponse`'s second `allOf` branch, and oasdiff lowers the severity when it
+     compares `allOf` branches one at a time. With `--flatten-allof` the same version
+     reports the seven as errors, and the same version still reports an error-code
+     addition as an error (440 on C5c's diff); both runs are the independent review's. So
+     under today's CI **any new value of a response enum inside an `allOf` schema reaches
+     `main` unlabelled**. CI therefore does not demand `breaking-api-change` here. It is
+     still a breaking change for a generated client by decision 2 and ADR-0024's amendment
+     (an exhaustive `when` over the enum stops compiling), so the pull request carries the
+     label. Running `breaking` with `--flatten-allof` is a CI pull request of its own
+     (Owed, below): its error counts differ from today's, so it does not ride on this one.
 2. **The routes' shape against doc 06.** `PUT`/`DELETE …/reaction` where doc 06 has
    `POST …/reactions` and `DELETE …/reactions/{type}` (decision 1). It follows from "one
    per member per entry". Turning it is a rename, and doc 06 is to be corrected either way:
@@ -544,6 +613,17 @@ is a review's finding of 2026-10-15, left as built.
     *Ruled by the owner on 2026-10-21, to be built: `unreact` is refused once the bond has
     ended, by `react`'s `hasLeft || !isOpen` check. A reaction the blocked member can no
     longer remove stays shown to the blocker.*
+
+12. *(Reserved: PR #103 adds question 12, the member who withdrew taking a reaction back. This
+    one is 13 so the two merge without renumbering.)*
+13. **A rollback past V27 after someone has reacted `ME_TOO`: delete or map?** Raised by
+    the amendment of 2026-10-28 (question 1). An image older than V27 answers `500` on any
+    read that carries a `ME_TOO` reaction, so before such a rollback the rows must go or
+    change. Delete (`DELETE FROM reactions WHERE type = 'ME_TOO'`): the reaction is lost,
+    and the author sees it disappear. Map (`UPDATE reactions SET type = '…' WHERE type =
+    'ME_TOO'`): the reaction stays but says something the reactor did not choose, which on
+    the one thing the other person is shown is a misstatement. **Built: the README's
+    runbook gives both and recommends delete.** The owner's to rule.
 
 ### The corpus
 

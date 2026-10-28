@@ -3,6 +3,7 @@ package com.moyi.identity.web
 import com.moyi.identity.domain.BreachedPasswordCorpus
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
+import com.moyi.notification.api.PushToken
 import jakarta.validation.Constraint
 import jakarta.validation.ConstraintValidator
 import jakarta.validation.ConstraintValidatorContext
@@ -81,6 +82,28 @@ internal class PasswordConstraintValidator : ConstraintValidator<ValidPassword, 
         // Not trimmed: ADR-0012 accepts spaces in a password, and silently
         // removing them would make the password the user typed unenterable.
         return validate(context) { Password.of(value) }
+    }
+}
+
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [PushTokenConstraintValidator::class])
+internal annotation class ValidPushToken(
+    val message: String = "is not a valid push token",
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+/** Asks `notification.api.PushToken` whether the value is a token, and reports its answer (ADR-0044). */
+internal class PushTokenConstraintValidator : ConstraintValidator<ValidPushToken, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean {
+        // Blank is `@NotBlank`'s, and too long is `@Size`'s, which states the limit in the contract: each
+        // reported once. The limit is `PushToken.MAX_LENGTH` in both places.
+        if (value.isNullOrBlank() || value.length > PushToken.MAX_LENGTH) return true
+        return validate(context) { PushToken(value) }
     }
 }
 

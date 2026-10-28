@@ -258,6 +258,7 @@ class OpenApiConfiguration {
             if (operation.operationId == SEARCH_OPERATION) add(HttpStatus.BAD_REQUEST)
             if (!public) addAll(listOf(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN))
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
+            if (operation.operationId in CURRENT_DEVICE_OPERATIONS) add(HttpStatus.NOT_FOUND)
             if (operation.operationId in CONFLICTING_OPERATIONS) add(HttpStatus.CONFLICT)
             if (operation.operationId in CONDITIONAL_OPERATIONS) {
                 addAll(listOf(HttpStatus.PRECONDITION_FAILED, HttpStatus.PRECONDITION_REQUIRED))
@@ -432,6 +433,14 @@ class OpenApiConfiguration {
         private const val ENTRY_TEXT_MAX_GRAPHEMES = 500
 
         /**
+         * The operations on `/me/devices/current/…`, which have no path
+         * parameter and still answer `404`: the session they name has ended,
+         * or began without describing a device (ADR-0044). By id, as
+         * [CONFLICTING_OPERATIONS] are.
+         */
+        private val CURRENT_DEVICE_OPERATIONS = setOf("registerPushToken", "forgetPushToken")
+
+        /**
          * The operations that answer `409`, by id.
          *
          * A list rather than a rule, because "can this conflict" is a property
@@ -450,6 +459,8 @@ class OpenApiConfiguration {
                 "revokeBondInvite",
                 "patchBond",
                 "replaceMemberSettings",
+                // Phase 4 N2: BOND_ARCHIVED, as the settings PUT (ADR-0045).
+                "replaceMemberNotifications",
                 // Slice B5. `cancelBondTimezoneChange` and `cancelBondDeletion`
                 // are deliberately absent: cancelling is never a conflict, it is
                 // either done or there was nothing there (a `404`).

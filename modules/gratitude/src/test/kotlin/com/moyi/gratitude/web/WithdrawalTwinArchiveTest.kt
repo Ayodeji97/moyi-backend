@@ -434,7 +434,7 @@ internal class WithdrawalTwinArchiveTest(
                 Marked(adas = true, beas = false),
             )
 
-        val TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED")
+        val TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO")
 
         /** On which days of [HISTORY] Bea reacts to Ada's entry, and Ada to Bea's: some both, some one, some neither. */
         fun readerReacts(index: Int): Boolean = index % 2 == 0

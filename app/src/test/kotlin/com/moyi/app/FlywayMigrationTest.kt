@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.context.ActiveProfiles
+import java.sql.SQLException
+import java.util.UUID
 import javax.sql.DataSource
 
 /**
@@ -46,6 +48,49 @@ class FlywayMigrationTest(
         )
     }
 
+    /**
+     * V27 (ADR-0037 question 1, the owner's ruling of 2026-10-21): the
+     * reaction set is five, and the table's one CHECK still has the name V23
+     * gave it, which is the name V27 dropped it by.
+     *
+     * Each value is put to the CHECK itself, with an `entry_id` no entry has.
+     * A CHECK is tested as the row is formed and the foreign key only after,
+     * so a value the CHECK allows reaches the key and is a
+     * `foreign_key_violation` (23503), and one it refuses never does and is a
+     * `check_violation` (23514). Nothing is ever written, so this needs no
+     * bond, no entry and no clean-up.
+     */
+    @Test
+    fun `the reactions table allows exactly the five types, under the CHECK V23 named`() {
+        assertEquals(
+            listOf("reactions_type_check"),
+            jdbcTemplate.queryForList(
+                "SELECT conname FROM pg_constraint WHERE conrelid = 'reactions'::regclass AND contype = 'c'",
+                String::class.java,
+            ),
+        )
+        val allowed = listOf("HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO")
+        val refused = listOf("LOVE", "me_too", "ME TOO", "METOO", " ME_TOO", "")
+        (allowed + refused).forEach { type ->
+            val expected = if (type in allowed) FOREIGN_KEY_VIOLATION else CHECK_VIOLATION
+            assertEquals(expected, sqlStateOfInserting(type), "inserting a reaction of type '$type'")
+        }
+    }
+
+    private fun sqlStateOfInserting(type: String): String? =
+        runCatching {
+            jdbcTemplate.update(
+                "INSERT INTO reactions (entry_id, member_id, type) VALUES (?, ?, ?)",
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                type,
+            )
+        }.exceptionOrNull()
+            ?.let { generateSequence(it) { cause -> cause.cause } }
+            ?.filterIsInstance<SQLException>()
+            ?.firstOrNull()
+            ?.sqlState
+
     @Test
     fun `a favourite keeps no time once V26 has run`() {
         // The owner's ruling on ADR-0036 question 7: when a person marked an entry is, to an
@@ -64,11 +109,13 @@ class FlywayMigrationTest(
         // V1 lives in `app` (database-wide extensions); V2 to V8 live in
         // `modules/identity`, V9, V10, V13, V18, V19 and V21 in `modules/bond` (its own
         // tables, its proposals, and the effective-anchor timeline), V11 in
-        // `common:web` (idempotency_keys, doc 06 §1), V12, V15, V17, V22, V23, V24, V25 and V26 in
-        // `modules/gratitude` (its tables, the close job's index, the streak, favourites, reactions, the prompt library,
-        // search, and the favourite's dropped time), V14
+        // `common:web` (idempotency_keys, doc 06 §1), V12, V15, V17, V22, V23, V24, V25, V26 and V27
+        // in `modules/gratitude` (its tables, the close job's index, the streak, favourites, reactions, the prompt
+        // library, search, the favourite's dropped time, the fifth reaction), V14
         // and V20 in `common:events` (the outbox, spec §8, and its consumers) and
-        // V16 in `modules/scheduling` (ShedLock's table). Versions are one global sequence across
+        // V16 in `modules/scheduling` (ShedLock's table), and V29, V30 and V31 in `modules/notification`
+        // (push tokens and the ledger, ADR-0044; the member's toggles, quiet hours and the budget,
+        // ADR-0045; the on-this-day allowance's index, ADR-0046). V28 is not yet anybody's. Versions are one global sequence across
         // modules. Flyway merges every `classpath:db/migration` it finds, which
         // is what lets a module own its schema without `app` restating it — and
         // this assertion is what notices when a module's migrations are not on
@@ -89,8 +136,8 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll((1..26).toList()),
-            "Expected every module's migrations through V26, found: $versions",
+            versions.containsAll((1..27).toList() + listOf(29, 30, 31)),
+            "Expected every module's migrations, V1 to V27, V29, V30 and V31, found: $versions",
         )
 
         val extensions =
@@ -134,5 +181,10 @@ class FlywayMigrationTest(
             webTables.contains("idempotency_keys"),
             "Expected common:web's idempotency_keys table (V11), found: $webTables",
         )
+    }
+
+    private companion object {
+        const val FOREIGN_KEY_VIOLATION = "23503"
+        const val CHECK_VIOLATION = "23514"
     }
 }

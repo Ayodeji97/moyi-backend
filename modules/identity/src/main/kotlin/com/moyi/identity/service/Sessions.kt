@@ -5,6 +5,7 @@ import com.moyi.identity.domain.Session
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.infra.database.DeviceStore
 import com.moyi.identity.infra.database.RefreshTokenStore
+import com.moyi.notification.api.PushTokens
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -57,11 +58,13 @@ internal class ListSessions(
  * `UPDATE` is the authorisation — a family that is not theirs, does not
  * exist, or is already over changes no row, and no row is 404 (doc 06 §2:
  * never a 403 that confirms an id). Under the per-user sessions lock like
- * every other session mutation (ADR-0021).
+ * every other session mutation (ADR-0021). The session's device forgets its
+ * push token in the same commit (ADR-0044).
  */
 @Service
 internal class RevokeSession(
     private val tokens: RefreshTokenStore,
+    private val pushTokens: PushTokens,
     private val clock: Clock,
     private val transactions: TransactionTemplate,
 ) {
@@ -76,7 +79,11 @@ internal class RevokeSession(
         val revoked =
             transactions.execute {
                 tokens.lockSessionsOf(userId)
-                tokens.revokeFamilyOf(userId, sessionId, now)
+                // Read before the revocation: once it is ended, the family has no live token to name its device.
+                val device = tokens.findLiveOf(userId, now).firstOrNull { it.familyId == sessionId }?.deviceId
+                tokens.revokeFamilyOf(userId, sessionId, now).also { revoked ->
+                    if (revoked) device?.let(pushTokens::forget)
+                }
             }!!
         if (!revoked) throw SessionNotFoundException()
         log.info("Session {} ended by user {}", sessionId, userId.value)

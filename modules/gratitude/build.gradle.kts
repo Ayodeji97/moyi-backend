@@ -18,6 +18,10 @@ dependencies {
     // `implementation`, not `api`: nothing that depends on gratitude learns about
     // identity by doing so. The tests use it too, for `FakeUserDirectory`.
     implementation(projects.modules.identity)
+    // `com.moyi.notification.api` only: `Notifications.request`, for the daily
+    // reminder (spec §4 N2) and, from N3, the pushes a day earns. `notification`
+    // is a leaf, so this makes no cycle (spec §2.1, ADR-0044).
+    implementation(projects.modules.notification)
 
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")
