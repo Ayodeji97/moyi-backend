@@ -1654,6 +1654,12 @@ expect "the author's day is 304 on the tag from before all that" 304 "" -- "$API
 rows_are "…and the reaction is still the one that was set" "$RX_A_ENTRY" "1|HEART"
 expect "the reactor takes the bookmark off" 204 "" -- -X DELETE "$API/entries/$RX_A_ENTRY/favourite" -H "Authorization: Bearer $RX_B"
 
+# The fifth type, ME_TOO (ADR-0037 question 1, V27): taken, and read back by both, like the others.
+flush_buckets
+expect "PUT {\"type\":\"ME_TOO\"} is 204" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d '{"type":"ME_TOO"}'
+rows_are "…one row, now ME_TOO" "$RX_A_ENTRY" "1|ME_TOO"
+is "…read back by the reactor and the author on today, the feed and the day" "$(rx_views "$RX_B" "$RX_BOND" partnerEntry)|$(rx_views "$RX_A" "$RX_BOND" myEntry)" '"ME_TOO" "ME_TOO" "ME_TOO"|"ME_TOO" "ME_TOO" "ME_TOO"'
+
 # Replace. One per member per entry: a second type is put in place of the first.
 for type in SMILE THANK_YOU MOVED; do
   expect "PUT {\"type\":\"$type\"} replaces it: 204" 204 "" -- -X PUT "$API/entries/$RX_A_ENTRY/reaction" -H "Authorization: Bearer $RX_B" -d "{\"type\":\"$type\"}"

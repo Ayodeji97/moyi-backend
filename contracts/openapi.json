@@ -4130,7 +4130,7 @@
             "reaction" : {
               "type" : [ "string", "null" ],
               "description" : "The reaction on this entry: the one left by the member who did not write it, or null. Both members are sent the same value. Always null on an erased entry.",
-              "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED", null ]
+              "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO", null ]
             },
             "status" : {
               "type" : "string",
@@ -4561,7 +4561,7 @@
           "type" : {
             "type" : "string",
             "description" : "The reaction to leave, by its exact name.",
-            "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED" ]
+            "enum" : [ "HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO" ]
           }
         },
         "required" : [ "type" ]
