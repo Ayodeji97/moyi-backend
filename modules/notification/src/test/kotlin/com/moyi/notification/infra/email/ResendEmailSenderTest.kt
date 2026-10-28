@@ -1,12 +1,19 @@
 package com.moyi.notification.infra.email
 
+import ch.qos.logback.classic.Level
+import ch.qos.logback.classic.Logger
+import ch.qos.logback.classic.spi.ILoggingEvent
+import ch.qos.logback.core.read.ListAppender
 import com.moyi.notification.api.EmailDelivery
 import com.moyi.notification.api.EmailMessage
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.types.shouldBeInstanceOf
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import org.slf4j.LoggerFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import org.springframework.http.HttpStatus
@@ -38,6 +45,16 @@ internal class ResendEmailSenderTest {
             properties(apiKey = "re_test_key", from = "Moyi <hello@moyi.test>"),
             builder,
         )
+
+    private val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
+    private val spring = LoggerFactory.getLogger("org.springframework") as Logger
+    private val captured = ListAppender<ILoggingEvent>()
+
+    @AfterEach
+    fun detach() {
+        root.detachAppender(captured)
+        spring.level = null
+    }
 
     @Test
     fun `sends the message the way Resend expects and reports the provider id`() {
@@ -152,6 +169,39 @@ internal class ResendEmailSenderTest {
             .andRespond(withSuccess("""{"id": ["not", "a", "string"]}""", MediaType.APPLICATION_JSON))
 
         sender.send(message()).shouldBeInstanceOf<EmailDelivery.Unavailable>()
+    }
+
+    @Test
+    fun `with Spring's HTTP client at TRACE, neither the address nor the link's token reaches a log line`() {
+        // DefaultRestClient prints an object body whole at DEBUG ("Writing [...]"),
+        // and this body is the recipient and a verification link. The sender
+        // hands the client bytes, which no converter writes and none prints.
+        captured.start()
+        root.addAppender(captured)
+        spring.level = Level.TRACE
+        // Distinctive, so a hit is this send's, and plainly fake, so gitleaks does not take it for a key.
+        val token = "the-link-token-under-test"
+        server
+            .expect(requestTo("https://api.resend.test/emails"))
+            .andExpect(jsonPath("$.to[0]").value("ada@example.com"))
+            .andExpect(jsonPath("$.text").value("Open https://moyi.test/verify?token=$token"))
+            .andRespond(withSuccess("""{"id":"x"}""", MediaType.APPLICATION_JSON))
+
+        sender
+            .send(
+                EmailMessage(
+                    to = "ada@example.com",
+                    subject = "Verify your address",
+                    text = "Open https://moyi.test/verify?token=$token",
+                    html = "<p><a href=\"https://moyi.test/verify?token=$token\">Open</a></p>",
+                ),
+            ).shouldBeInstanceOf<EmailDelivery.Accepted>()
+        server.verify()
+
+        val lines = captured.list.map { it.formattedMessage }
+        // The client did log at DEBUG ("Reading to [...]" for the answer): this test saw it write.
+        lines.any { it.startsWith("Reading to") } shouldBe true
+        lines.filter { line -> "ada@example.com" in line || token in line }.shouldBeEmpty()
     }
 
     @Test
