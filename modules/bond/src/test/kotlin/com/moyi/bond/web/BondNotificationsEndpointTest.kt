@@ -149,21 +149,21 @@ internal class BondNotificationsEndpointTest(
         )
         put(ada, bondId, """{"categories":{"milestone":false}}""").status shouldBe 200
 
-        val due = roster.remindersDueBetween(Instant.parse("2026-10-28T15:10:00Z"), Instant.parse("2026-10-28T15:15:00Z"))
+        val due = roster.remindersDueBetween(tomorrowAt("15:10"), tomorrowAt("15:15"))
 
         due.map { it.userId } shouldBe listOf(ada)
         val reminder = due.single()
         reminder.bondId shouldBe UUID.fromString(bondId)
-        reminder.remindAt shouldBe Instant.parse("2026-10-28T15:15:00Z")
-        // The bond's own day, by its anchor (Lagos, UTC+1): 16:15 on the 28th there, ending at 23:00Z.
-        reminder.bondDate shouldBe LocalDate.of(2026, 10, 28)
-        reminder.bondDayEndsAt shouldBe Instant.parse("2026-10-28T23:00:00Z")
+        reminder.remindAt shouldBe tomorrowAt("15:15")
+        // The bond's own day, by its anchor (Lagos, UTC+1): 16:15 there, ending at 23:00Z.
+        reminder.bondDate shouldBe tomorrowAt("15:15").atZone(ZoneId.of("Africa/Lagos")).toLocalDate()
+        reminder.bondDayEndsAt shouldBe tomorrowAt("23:00")
         reminder.recipient.zone shouldBe ZoneId.of("Asia/Kathmandu")
         reminder.recipient.quietHours shouldBe QuietHoursWindow(LocalTime.of(23, 0), LocalTime.of(6, 30))
         reminder.recipient.preferences shouldBe NotificationPreferences(milestone = false)
 
         // Bea's 20:00 in Lagos is 19:00Z.
-        roster.remindersDueBetween(Instant.parse("2026-10-28T18:55:00Z"), Instant.parse("2026-10-28T19:00:00Z")).map { it.userId } shouldBe
+        roster.remindersDueBetween(tomorrowAt("18:55"), tomorrowAt("19:00")).map { it.userId } shouldBe
             listOf(bea)
     }
 
@@ -202,7 +202,7 @@ internal class BondNotificationsEndpointTest(
             .andReturn()
             .response.status shouldBe 204
 
-        val due = roster.remindersDueBetween(Instant.parse("2026-10-28T18:55:00Z"), Instant.parse("2026-10-28T19:00:00Z"))
+        val due = roster.remindersDueBetween(tomorrowAt("18:55"), tomorrowAt("19:00"))
 
         due.map { it.userId } shouldContainExactlyInAnyOrder listOf(cal, dee)
         due.map { it.bondId.toString() }.toSet() shouldBe setOf(open)
@@ -281,6 +281,19 @@ internal class BondNotificationsEndpointTest(
             UUID.fromString(bondId),
             userId,
         )!!
+
+    /**
+     * [time] UTC tomorrow: after every bond this test makes, whose timeline begins when it is
+     * made. A fixed date passed while these tests still ran, and the roster rightly found no
+     * reminder that fell before its bond began.
+     */
+    private fun tomorrowAt(time: String): Instant =
+        Instant
+            .now()
+            .truncatedTo(
+                ChronoUnit.DAYS,
+            ).plus(Duration.ofDays(1))
+            .plus(Duration.between(LocalTime.MIDNIGHT, LocalTime.parse(time)))
 
     private fun bearer(userId: UUID): String = "Bearer ${tokens.issue(userId).token}"
 }
