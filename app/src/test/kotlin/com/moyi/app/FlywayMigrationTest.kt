@@ -92,13 +92,26 @@ class FlywayMigrationTest(
             ?.sqlState
 
     @Test
+    fun `a favourite keeps no time once V26 has run`() {
+        // The owner's ruling on ADR-0036 question 7: when a person marked an entry is, to an
+        // operator, when they were reading it. Two ids and nothing else.
+        val columns =
+            jdbcTemplate.queryForList(
+                "SELECT column_name FROM information_schema.columns " +
+                    "WHERE table_schema = 'public' AND table_name = 'entry_favourites' ORDER BY column_name",
+                String::class.java,
+            )
+        assertEquals(listOf("entry_id", "member_id"), columns, "entry_favourites should hold two ids and nothing else")
+    }
+
+    @Test
     fun `every module's migrations run, in one sequence, against one schema`() {
         // V1 lives in `app` (database-wide extensions); V2 to V8 live in
         // `modules/identity`, V9, V10, V13, V18, V19 and V21 in `modules/bond` (its own
         // tables, its proposals, and the effective-anchor timeline), V11 in
-        // `common:web` (idempotency_keys, doc 06 §1), V12, V15, V17, V22, V23, V24, V25 and V27 in
-        // `modules/gratitude` (its tables, the close job's index, the streak, favourites, reactions, the prompt library,
-        // search, the fifth reaction), V14
+        // `common:web` (idempotency_keys, doc 06 §1), V12, V15, V17, V22, V23, V24, V25, V26 and V27
+        // in `modules/gratitude` (its tables, the close job's index, the streak, favourites, reactions, the prompt
+        // library, search, the favourite's dropped time, the fifth reaction), V14
         // and V20 in `common:events` (the outbox, spec §8, and its consumers) and
         // V16 in `modules/scheduling` (ShedLock's table). Versions are one global sequence across
         // modules. Flyway merges every `classpath:db/migration` it finds, which
@@ -121,8 +134,8 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll((1..25).toList() + 27),
-            "Expected every module's migrations through V25, and V27, found: $versions",
+            versions.containsAll((1..27).toList()),
+            "Expected every module's migrations through V27, found: $versions",
         )
 
         val extensions =

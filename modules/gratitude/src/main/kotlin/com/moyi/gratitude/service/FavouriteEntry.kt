@@ -11,7 +11,6 @@ import com.moyi.gratitude.domain.Reader
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.Favourites
 import org.springframework.stereotype.Service
-import java.time.Clock
 import java.util.UUID
 
 /**
@@ -78,7 +77,6 @@ internal class FavouriteEntry(
     private val entries: EntryStore,
     private val favourites: Favourites,
     private val joining: ReconcileJoiningDay,
-    private val clock: Clock,
 ) {
     /**
      * Marks the entry for the caller. Repeatable: a second mark is a success
@@ -96,7 +94,7 @@ internal class FavouriteEntry(
         // For an entry the gate allows, the statement is the second line: nothing inserted means it was erased since.
         val refusal =
             when (entry.canBeFavouritedBy(reader)) {
-                Favouriting.ALLOWED -> if (favourites.mark(entryId, reader.memberId, clock.instant())) null else EntryImmutableException()
+                Favouriting.ALLOWED -> if (favourites.mark(entryId, reader.memberId)) null else EntryImmutableException()
                 Favouriting.NOT_YET_REVEALED -> EntryNotRevealedException()
                 Favouriting.ERASED -> EntryImmutableException()
                 Favouriting.NEVER_SHOWN -> EntryNotFoundException()

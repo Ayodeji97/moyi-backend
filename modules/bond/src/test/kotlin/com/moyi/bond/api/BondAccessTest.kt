@@ -218,6 +218,55 @@ internal class BondAccessTest(
         }
     }
 
+    @Test
+    fun `a member is told their partner's name, as it is now, for as long as the bond has had two`() {
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+
+        // The creator alone: nobody to name.
+        val alone =
+            create
+                .create(draft(ada))
+                .bond.id.value
+        access.partnerDisplayNameOf(access.membershipOf(ada, alone)).shouldBeNull()
+
+        // Two: each is told the other's name, never their own.
+        val bondId = bondForTwo(ada, bea)
+        access.partnerDisplayNameOf(access.membershipOf(ada, bondId)) shouldBe "Bea"
+        access.partnerDisplayNameOf(access.membershipOf(bea, bondId)) shouldBe "Ada"
+
+        // Read at the time of asking, not copied: a rename is the next answer.
+        users.rename(bea, "Beatrice")
+        access.partnerDisplayNameOf(access.membershipOf(ada, bondId)) shouldBe "Beatrice"
+    }
+
+    @Test
+    fun `a partner who left or blocked is still named, to the one who stayed and to them`() {
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+
+        val left = bondForTwo(ada, bea)
+        endBond.leave(guard.membershipOf(UserId(bea), BondId(left)), withdrawEntries = false)
+        access.partnerDisplayNameOf(access.membershipOf(ada, left)) shouldBe "Bea"
+        access.partnerDisplayNameOf(access.membershipOf(bea, left)) shouldBe "Ada"
+
+        val blocked = bondForTwo(ada, bea)
+        endBond.block(guard.membershipOf(UserId(ada), BondId(blocked)), withdrawEntries = true)
+        access.partnerDisplayNameOf(access.membershipOf(bea, blocked)) shouldBe "Ada"
+        access.partnerDisplayNameOf(access.membershipOf(ada, blocked)) shouldBe "Bea"
+    }
+
+    @Test
+    fun `a partner identity no longer knows is a former member, as the bond route names them`() {
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val bondId = bondForTwo(ada, bea)
+
+        users.forget(bea)
+
+        access.partnerDisplayNameOf(access.membershipOf(ada, bondId)) shouldBe "Former member"
+    }
+
     private fun bothClosingViewsOf(bondId: UUID): List<BondClosingView> =
         listOf(access.closingViewOf(bondId)!!, transactions.execute { access.lockClosingViewOf(bondId) }!!)
 
