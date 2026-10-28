@@ -1,0 +1,19 @@
+meta {
+  name: Media
+  type: http
+  seq: 31
+}
+
+get {
+  url: {{api}}/media/{{mediaId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  One of your own photos or voice notes: its kind, status, type and size. Only its owner can read it; anyone else gets 404, as for an id that names nothing. To delete it, send the same URL as DELETE (204, then 404): only while it is attached to no entry.
+}

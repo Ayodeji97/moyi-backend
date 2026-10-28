@@ -1,0 +1,37 @@
+meta {
+  name: Media upload intent
+  type: http
+  seq: 28
+}
+
+post {
+  url: {{api}}/media/upload-intent
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "kind": "IMAGE",
+    "contentType": "image/jpeg",
+    "sizeBytes": 20,
+    "checksum": "PHRGrKTxmilgJsKwA2/xG0zwslpJR9m54yBBR8s//J0="
+  }
+}
+
+script:post-response {
+  // The URL is a credential for one upload: kept as a runtime variable, never in a file.
+  bru.setVar("mediaId", res.body.mediaId);
+  bru.setVar("uploadUrl", res.body.uploadUrl);
+  bru.setVar("uploadChecksum", res.body.requiredHeaders["x-amz-checksum-sha256"]);
+}
+
+docs {
+  Asks for a URL to upload one photo or voice note to, straight to the storage (ADR-0047). The example declares the 20 bytes that Upload sends, `fake photo for bruno`, and their SHA-256; change one and the storage refuses the other. 201 with the URL, the headers the upload must carry, and when the URL stops working (15 minutes).
+
+  An image is JPEG, PNG, HEIC or WebP and at most 10 MB; a voice note at most 5 MB. Another type is 415 MEDIA_TYPE_UNSUPPORTED, too many bytes 413 MEDIA_QUOTA_EXCEEDED, a missing or malformed field 422. 30 an hour per user. In production, until the bucket exists, every intent is 503 MEDIA_STORAGE_UNAVAILABLE.
+}
