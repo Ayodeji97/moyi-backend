@@ -1,0 +1,19 @@
+meta {
+  name: Forget push token
+  type: http
+  seq: 25
+}
+
+delete {
+  url: {{api}}/me/devices/current/push-token
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Removes the push token of the device you signed in from: 204, whether or not it held one. A session with no device, or one that has ended, is 404.
+}

@@ -122,6 +122,11 @@ tasks.named<org.springframework.boot.gradle.tasks.bundling.BootBuildImage>("boot
 // HealthCheckTest — so tracking main only would leave the same staleness
 // hole open for a violation introduced under another module's src/test.
 tasks.named<Test>("test") {
+    // Gradle's default of 512 MB is too little for this suite: SecretsNeverLoggedTest raises
+    // every logger to TRACE and its console capture holds tens of megabytes, beside every
+    // cached application context. On a loaded machine (the module suites running beside it)
+    // it ran out of heap at feat/notification-push-ledger's head too, in that test or the next.
+    maxHeapSize = "1g"
     inputs
         .files(
             fileTree(rootDir) {

@@ -5,15 +5,22 @@ import com.moyi.identity.domain.UserId
 import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.infra.database.AccountStore
 import com.moyi.identity.infra.database.RefreshTokenStore
+import com.moyi.notification.api.PushTokens
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 
-/** Revokes refresh credentials without revealing whether a presented token exists. */
+/**
+ * Revokes refresh credentials without revealing whether a presented token exists.
+ *
+ * A session that ends forgets its device's push token in the same commit
+ * (ADR-0044): a phone that has signed out is not told about a reveal.
+ */
 @Service
 internal class LogoutUser(
     private val refreshTokens: RefreshTokenStore,
     private val accounts: AccountStore,
+    private val pushTokens: PushTokens,
     private val clock: Clock,
     private val transactions: TransactionTemplate,
 ) {
@@ -24,6 +31,7 @@ internal class LogoutUser(
             val token = refreshTokens.findByHash(hash) ?: return@executeWithoutResult
             refreshTokens.lockSessionsOf(token.userId)
             refreshTokens.revokeFamily(token.familyId, now)
+            token.deviceId?.let(pushTokens::forget)
         }
     }
 
@@ -33,6 +41,7 @@ internal class LogoutUser(
             refreshTokens.lockSessionsOf(UserId(currentUser.id))
             refreshTokens.revokeAllForUser(UserId(currentUser.id), now)
             accounts.revokeAllSessions(UserId(currentUser.id), now)
+            pushTokens.forgetAllOf(currentUser.id)
         }
     }
 }

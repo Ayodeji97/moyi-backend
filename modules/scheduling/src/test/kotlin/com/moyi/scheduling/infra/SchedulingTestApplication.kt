@@ -8,7 +8,12 @@ import com.moyi.common.events.StartFrom
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyKeyStore
 import com.moyi.gratitude.api.CloseResult
+import com.moyi.gratitude.api.DailyReminders
 import com.moyi.gratitude.api.DayCloser
+import com.moyi.gratitude.api.OnThisDayPushes
+import com.moyi.gratitude.api.OnThisDayRun
+import com.moyi.gratitude.api.ReminderRun
+import com.moyi.notification.api.HeldPushes
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.boot.autoconfigure.SpringBootApplication
@@ -54,6 +59,61 @@ internal class SchedulingTestApplication {
 
     @Bean
     fun consumer(): RecordingConsumer = RecordingConsumer()
+
+    @Bean
+    fun reminders(): RecordingReminders = RecordingReminders()
+
+    @Bean
+    fun heldPushes(): RecordingHeldPushes = RecordingHeldPushes()
+
+    @Bean
+    fun onThisDay(): RecordingOnThisDay = RecordingOnThisDay()
+}
+
+internal class RecordingOnThisDay : OnThisDayPushes {
+    val windows = CopyOnWriteArrayList<Pair<Instant, Instant>>()
+
+    override fun pushDue(
+        after: Instant,
+        upTo: Instant,
+    ): OnThisDayRun {
+        windows += after to upTo
+        return OnThisDayRun(due = 0, requested = 0, nothingToRemember = 0, failed = 0)
+    }
+}
+
+/** A [DailyReminders] that records the windows it was asked about. */
+internal class RecordingReminders : DailyReminders {
+    val windows = CopyOnWriteArrayList<Pair<Instant, Instant>>()
+
+    @Volatile
+    var next: () -> ReminderRun = { ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0) }
+
+    override fun remindDue(
+        after: Instant,
+        upTo: Instant,
+    ): ReminderRun {
+        windows += after to upTo
+        return next()
+    }
+
+    fun reset() {
+        windows.clear()
+        next = { ReminderRun(due = 0, requested = 0, alreadyWritten = 0, failed = 0) }
+    }
+}
+
+/** A [HeldPushes] that records when it was asked to release. */
+internal class RecordingHeldPushes : HeldPushes {
+    val calls = CopyOnWriteArrayList<Pair<Instant, Int>>()
+
+    override fun releaseDue(
+        now: Instant,
+        limit: Int,
+    ): Int {
+        calls += now to limit
+        return 0
+    }
 }
 
 /**

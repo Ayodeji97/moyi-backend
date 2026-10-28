@@ -35,6 +35,11 @@ moyi:
       # `log` — the default is Resend, which refuses to start without a key.
       provider: log
       from: "Moyi <hello@moyi.local>"
+    push:
+      # No Firebase project on a laptop: a push is a line in the log, with
+      # its category and Bond and never its token. FCM, the default, refuses
+      # to start without a service account (ADR-0044).
+      provider: log
   security:
     jwt:
       # Generated at startup: every token dies with the process, which is fine

@@ -95,6 +95,9 @@ internal class GratitudeCrossTenantTest(
             "DELETE /api/v1/bonds/{bondId}/timezone" to Fixture(),
             "POST /api/v1/bonds/{bondId}/deletion-request" to Fixture(),
             "DELETE /api/v1/bonds/{bondId}/deletion-request" to Fixture(),
+            // Phase 4 N2, copied from `bond`'s table with the rest.
+            "GET /api/v1/bonds/{bondId}/members/me/notifications" to Fixture(),
+            "PUT /api/v1/bonds/{bondId}/members/me/notifications" to Fixture(body = """{"categories":{"onThisDay":true}}"""),
             // Task 7. A body, since @Valid runs before the guard would ever
             // refuse anything about the bond — see EntriesController's own
             // KDoc on why that ordering is still fine (a fact about the

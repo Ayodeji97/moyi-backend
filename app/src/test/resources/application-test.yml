@@ -47,6 +47,10 @@ moyi:
       # email, and Resend would refuse to start without a key.
       provider: log
       from: "Moyi <test@moyi.test>"
+    push:
+      # Likewise: nothing here reaches FCM, which would refuse to start
+      # without a service account (ADR-0044).
+      provider: log
   security:
     jwt:
       key-source: ephemeral

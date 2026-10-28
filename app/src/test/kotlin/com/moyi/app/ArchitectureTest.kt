@@ -9,6 +9,7 @@ import com.lemonappdev.konsist.api.provider.modifier.KoVisibilityModifierProvide
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import java.io.File
 
 /**
  * Executable architecture rules — doc 16 §2.1: "Add Konsist enforcement,
@@ -123,14 +124,38 @@ class ArchitectureTest {
          */
         private val TRANSACTION_APIS = listOf("org.springframework.transaction.", "jakarta.transaction.")
 
-        /** The methods of `bond.api.BondAccess` that run no membership guard: written for the close job, and used by work like it. */
-        private val UNGUARDED_BOND_READS = listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep")
+        /**
+         * The methods of `bond.api` that run no membership guard: `BondAccess`'s, written for the
+         * close job and used by work like it, `ReminderRoster`'s, which names members of every
+         * bond for the daily reminder (ADR-0045), and `PushAudiences`', which names them for the
+         * pushes an event or the on-this-day sweep makes (ADR-0046).
+         */
+        private val UNGUARDED_BOND_READS =
+            listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep", "remindersDueBetween", "audienceOf", "onThisDayDueBetween")
 
         /**
-         * The work nobody asked for (`gratitude.service`): the close job's three steps and the
-         * withdrawal's consumer. Each reads a bond with no caller whose membership could be checked.
+         * The work nobody asked for (`gratitude.service`): the close job's three steps, the
+         * withdrawal's consumer, the daily reminder's sweep, the day's push consumer and the
+         * on-this-day sweep. Each reads a bond with no caller whose membership could be checked.
          */
-        private val WORK_WITH_NO_CALLER = setOf("CloseDay.kt", "CreateMissingDays.kt", "EvaluateStreaks.kt", "WithdrawEntries.kt")
+        private val WORK_WITH_NO_CALLER =
+            setOf(
+                "CloseDay.kt",
+                "CreateMissingDays.kt",
+                "EvaluateStreaks.kt",
+                "WithdrawEntries.kt",
+                "SendDailyReminders.kt",
+                "NotifyDayMembers.kt",
+                "SendOnThisDayPushes.kt",
+            )
+
+        /**
+         * The events no push is ever made of (ADR-0034 decision 11, ADR-0046): a streak that
+         * ended is the guilt FR-076 forbids, and one that went on is countdown pressure. Written
+         * here as the literals a consumer would have to spell to subscribe; a reaction publishes
+         * no event at all (ADR-0037 decision 10), so there is none to list for it.
+         */
+        private val NEVER_PUSHED = listOf("\"StreakBroken\"", "\"StreakExtended\"")
 
         private data class Location(
             val module: String,
@@ -362,7 +387,34 @@ class ArchitectureTest {
 
         assertTrue(
             violations.isEmpty(),
-            "Only the close job and the withdrawal's consumer may call BondAccess's unguarded reads. Found in: $violations",
+            "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer and the on-this-day " +
+                "sweep may call bond's unguarded reads. Found in: $violations",
+        )
+    }
+
+    @Test
+    fun `no event consumer subscribes to a streak breaking or going on`() {
+        // ADR-0034 decision 11 (the ruling at :240), ADR-0046: nothing is ever pushed, or done,
+        // because a streak ended or went on. A consumer subscribes by naming the event type in
+        // its `eventTypes`, so a consumer's file that spells either literal is the violation,
+        // wherever in the file it is: a constant two lines above `eventTypes` is how it would be
+        // written. Comments and KDoc may name them (they do, to say why not): they are written
+        // in backticks, never as string literals. `DayPushesTest` pins `gratitude.notify`'s set
+        // to the three it is, at run time, as the second half of this.
+        val consumers =
+            project
+                .classes()
+                .filter { it.resideInPath("..src/main..") }
+                .filter { declaration -> declaration.parents().any { it.name == "EventConsumer" } }
+        val violations =
+            consumers
+                .filter { declaration -> NEVER_PUSHED.any { it in declaration.containingFile.text } }
+                .map { it.name }
+
+        assertTrue(consumers.isNotEmpty(), "No EventConsumer was found: this rule would hold vacuously.")
+        assertTrue(
+            violations.isEmpty(),
+            "No event consumer may subscribe to StreakBroken or StreakExtended (ADR-0034 decision 11, ADR-0046). Found in: $violations",
         )
     }
 
@@ -393,6 +445,33 @@ class ArchitectureTest {
             "Only a module's api package is public; every other class, interface, object, " +
                 "type alias, top-level function and top-level property must be internal, " +
                 "so other modules physically cannot reach it. Found public: $violations",
+        )
+    }
+
+    @Test
+    fun `notification depends on no domain module, so that any module may tell it something`() {
+        // Spec §2.1, ADR-0044: identity already depends on notification (for
+        // EmailSender), and bond and gratitude on identity, so notification
+        // reading a device, a member or a bond would be a cycle. It stays a
+        // leaf: the modules that hold the facts resolve who is told what and
+        // hand it values. Gradle refuses a cycle with identity, bond or
+        // gratitude on its own; it would not refuse notification -> media,
+        // scheduling, admin or analytics, and it never sees an import. This does.
+        val others = MODULES - "notification"
+        val imports =
+            project.files
+                .filter { it.normalisedProjectPath.startsWith("/modules/notification/src/") }
+                .flatMap { file ->
+                    file.imports
+                        .filter { import -> others.any { import.name.startsWith("com.moyi.$it.") } }
+                        .map { "${file.name}: ${it.name}" }
+                }
+        val buildFile = File("../modules/notification/build.gradle.kts").readText()
+        val dependencies = others.filter { "projects.modules.$it" in buildFile }
+
+        assertTrue(
+            imports.isEmpty() && dependencies.isEmpty(),
+            "notification must depend on no domain module (spec §2.1, ADR-0044). Imports: $imports; build dependencies: $dependencies",
         )
     }
 
