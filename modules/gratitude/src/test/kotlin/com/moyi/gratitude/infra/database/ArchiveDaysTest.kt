@@ -321,8 +321,8 @@ internal class ArchiveDaysTest(
         // Some of the big bond's entries are marked, a hundred days apart.
         jdbc.update(
             """
-            INSERT INTO entry_favourites (entry_id, member_id, created_at)
-            SELECT e.id, ?, now() FROM entries e JOIN bond_days d ON d.id = e.bond_day_id
+            INSERT INTO entry_favourites (entry_id, member_id)
+            SELECT e.id, ? FROM entries e JOIN bond_days d ON d.id = e.bond_day_id
             WHERE e.bond_id = ? AND e.author_member_id = ? AND (d.date - DATE '2020-01-01') % 100 = 0
             """.trimIndent(),
             me,
@@ -331,8 +331,8 @@ internal class ArchiveDaysTest(
         )
         // And every other bond's entries are marked by their own authors, so the table is other people's marks, as it will be.
         jdbc.update(
-            "INSERT INTO entry_favourites (entry_id, member_id, created_at) " +
-                "SELECT id, author_member_id, now() FROM entries WHERE bond_id <> ?",
+            "INSERT INTO entry_favourites (entry_id, member_id) " +
+                "SELECT id, author_member_id FROM entries WHERE bond_id <> ?",
             bond,
         )
         jdbc.execute("ANALYZE bond_days")
@@ -440,7 +440,7 @@ internal class ArchiveDaysTest(
         entryId: UUID,
         memberId: UUID,
     ) {
-        jdbc.update("INSERT INTO entry_favourites (entry_id, member_id, created_at) VALUES (?, ?, now())", entryId, memberId) shouldBe 1
+        jdbc.update("INSERT INTO entry_favourites (entry_id, member_id) VALUES (?, ?)", entryId, memberId) shouldBe 1
     }
 
     private companion object {
