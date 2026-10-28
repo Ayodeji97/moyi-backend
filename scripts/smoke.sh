@@ -2234,6 +2234,10 @@ PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Con
 case "$PUT_STATUS" in 400|403) pass "media: the storage refuses a body other than the one declared ($PUT_STATUS)";; *) fail "media: forged body" "expected 400 or 403 from the storage, got $PUT_STATUS";; esac
 PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Content-Type: image/jpeg' -H "x-amz-checksum-sha256: $MEDIA_CHECKSUM_HEADER" --data-binary "@$MEDIA_FILE")"
 [ "$PUT_STATUS" = 200 ] && pass "media: the storage takes the declared bytes (200)" || fail "media: PUT" "expected 200 from the storage, got $PUT_STATUS"
+# No public bucket (NFR-047): while the object exists, its address without a
+# signature is refused. 403 only: a 200 is a public bucket, a 404 a wrong key.
+UNSIGNED_STATUS="$(curl -s -o /dev/null -w '%{http_code}' "${MEDIA_URL%%\?*}")"
+[ "$UNSIGNED_STATUS" = 403 ] && pass "media: an unsigned GET of the stored object is refused (403)" || fail "media: public bucket" "an unsigned GET of a stored object answered $UNSIGNED_STATUS"
 MEDIA_KEY="$(uuidgen)"
 expect "media: completing after the PUT is 200 UPLOADED" 200 '"status":"UPLOADED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS" -H "Idempotency-Key: $MEDIA_KEY"
 db_is "media: …and one MediaUploaded event was recorded" "$(sql "SELECT count(*) FROM outbox_events WHERE event_type='MediaUploaded' AND aggregate_id='$MEDIA_ID'")" "1"
@@ -2261,9 +2265,6 @@ if [ "$MINIO_OK" = 0 ]; then skip "media: …and the object is gone from MinIO"
 elif minio_has "$MEDIA_OBJECT"; then fail "media: object after delete" "MinIO still holds the deleted asset's object"; else pass "media: …and the object is gone from MinIO"; fi
 db_is "media: …the row says DELETED" "$(sql "SELECT status FROM media_assets WHERE id='$MEDIA_ID'")" "DELETED"
 expect "media: a deleted asset is 404 to its owner" 404 '"code":"NOT_FOUND"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
-# No public bucket (NFR-047): the key's address without a signature reads nothing.
-GONE_STATUS="$(curl -s -o /dev/null -w '%{http_code}' "${MEDIA_URL%%\?*}")"
-case "$GONE_STATUS" in 403|404) pass "media: an unsigned GET of the key reads nothing ($GONE_STATUS)";; *) fail "media: public bucket" "an unsigned GET answered $GONE_STATUS";; esac
 if grep -q "X-Amz-Signature=$(printf '%s' "$MEDIA_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
   fail "media: the upload URL is in no log line" "its signature is in $MOYI_LOG"
 else pass "media: the upload URL is in no log line"; fi
