@@ -74,7 +74,7 @@
 # before today, put in by hand: no day ends during a run, so paging and past
 # days are the tests' to show. Last run on 2026-10-28, for the ruling that an
 # entry erased before the partner saw it is no entry (ADR-0032 q2), from a jar
-# of 0f47f90's code, against a database of its own (moyi_0f) and --attach,
+# of 052df95's code (after its review fixes), against a database of its own (moyi_0f) and --attach,
 # Postgres on 55443 and Valkey on 56390 in a compose project of its own:
 # 935 passed, 0 failed, 0 skipped. Before it, on 2026-10-24, for the production
 # configuration (health at /healthz, the scrape on MGMT_PORT, problem types on
