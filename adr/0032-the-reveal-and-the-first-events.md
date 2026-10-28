@@ -1,7 +1,7 @@
 # ADR-0032 — The reveal, and the first events
 
 **Status:** Accepted · **Date:** 2026-10-05 · **Deciders:** Daniel
-**Amended:** 2026-10-05 (C3: the "Owed, C3" list discharged, decision 5 superseded — ADR-0033) · 2026-10-09 (the status; and the Revisit note on a second route by entry id, answered for favourites — ADR-0036)
+**Amended:** 2026-10-05 (C3: the "Owed, C3" list discharged, decision 5 superseded — ADR-0033) · 2026-10-09 (the status; and the Revisit note on a second route by entry id, answered for favourites — ADR-0036) · 2026-10-28 (question 2 built: a partner's entry erased before it was seen is no entry, on every route that renders a day)
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #53 on 2026-10-05. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -237,6 +237,41 @@ Each is built one way, pinned by one test, and cheap to turn.
    *Ruled by the owner on 2026-10-21, to be built: the partner sees nothing, in `GET /today`
    and in the archive.* The same ruling as ADR-0036's sixth question. Until it is built, the
    shape above is what is served.
+
+   *Built 2026-10-28* (branch `feat/unseen-erasure-hidden`). What "nothing" was made to mean,
+   and the decisions taken in building it:
+
+   - **Nothing is `partnerEntry: null`**, the value of a day the partner never wrote on. The
+     two are one answer, byte for byte, on every route that renders a day: `GET /today`,
+     `/days`, `/days/{date}`, search and on this day. `UnseenErasureTwinTest` holds each
+     route, and the streak and the milestones besides, to a twin bond whose partner never
+     wrote, for a delete and for a withdrawal, with the caller written and not.
+   - **The rule lives in one place**, `service.shownTo` (beside `onEachSideOf`), which
+     `GetToday` and `GetDays` both read every day through. The gate is unchanged:
+     `Readability.TOMBSTONE_UNSEEN` is still its answer, and favourites and reactions still
+     answer it as an entry that does not exist (`404`). Only a day stops drawing it. The
+     caller's own tombstone, and a partner's tombstone the caller had read (`TOMBSTONE`), are
+     as before. `PartnerEntryResponse.of` now refuses a `TOMBSTONE_UNSEEN` reading rather than
+     choose a shape for it, so that a renderer which skipped the rule fails instead of
+     carrying a second copy of it.
+   - **The listing needed no change.** An entry erased before its reveal was never revealed,
+     so ADR-0036's `SEEN` rule never lists a day for it alone, and search and on this day
+     also ask for a live row. A day the caller is listed on through their own entry is the
+     day a partner who never wrote would give.
+   - **The day's status is shown as its erasures will leave it.** A delete by hand steps an
+     unsettled day back at once (`BondDay.withoutEntry`); a withdrawal hides its author's
+     entries from its commit but steps the day back only when the outbox's consumer erases
+     them. In between, the row said `PARTIAL` (or `PENDING_REVEAL`) where a delete by hand
+     says `OPEN` (or `PARTIAL`), which told a withdrawal from a delete and from no entry at
+     all (ADR-0028 decision 8). `shownTo` now counts a withdrawn author's live entry as its
+     erasure will (`BondDayStatus.afterErasure`, which `withoutEntry` now uses too), so the
+     response does not move when the erasure runs. A settled day is never stepped back. This
+     changes what both members are shown of such a day, the withdrawer included, and only
+     until the erasure.
+   - **The contract loses a branch.** No route can produce `{authorMemberId, status:
+     REMOVED}` any more, so `ErasedEntryResponse` and the discriminator's `REMOVED` are gone
+     from `partnerEntry`'s `oneOf` on `TodayResponse` and `DayResponse`: a breaking change,
+     labelled `breaking-api-change`, with no generated client yet to break.
 3. **A replay spends a rate-limit token** (decision 11).
 
    *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
