@@ -7,11 +7,14 @@ import com.moyi.notification.api.EmailSender
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
+import org.springframework.http.StreamingHttpOutputMessage
 import org.springframework.web.client.HttpClientErrorException
 import org.springframework.web.client.HttpServerErrorException
 import org.springframework.web.client.ResourceAccessException
 import org.springframework.web.client.RestClient
 import org.springframework.web.client.RestClientException
+import tools.jackson.databind.json.JsonMapper
+import tools.jackson.module.kotlin.kotlinModule
 
 /**
  * [EmailSender] over Resend's HTTP API — the one class in this codebase that
@@ -35,6 +38,14 @@ import org.springframework.web.client.RestClientException
  * recipient, never the body, never the provider's error text — Resend's
  * validation messages quote the field that failed, which for a bad `to` is
  * the address (doc 11 NFR-044).
+ *
+ * **The body is handed to the client as bytes, never as an object.** Spring's
+ * `DefaultRestClient` writes every object body it serialises into its DEBUG
+ * line ("Writing [...]"), whole, through the object's `toString`; this body is
+ * the recipient and, for a verification or a reset, the link with its token.
+ * Bytes written through [StreamingHttpOutputMessage.Body] pass no converter
+ * and are never printed, at any level. The same reason, and the same answer,
+ * as the FCM sender's. `ResendEmailSenderTest` runs a send with Spring at TRACE.
  */
 internal class ResendEmailSender(
     private val client: RestClient,
@@ -51,12 +62,16 @@ internal class ResendEmailSender(
                     .contentType(MediaType.APPLICATION_JSON)
                     .headers { headers -> message.idempotencyKey?.let { headers.set(IDEMPOTENCY_KEY_HEADER, it) } }
                     .body(
-                        SendEmailRequest(
-                            from = from,
-                            to = listOf(message.to),
-                            subject = message.subject,
-                            text = message.text,
-                            html = message.html,
+                        bytes(
+                            MAPPER.writeValueAsBytes(
+                                SendEmailRequest(
+                                    from = from,
+                                    to = listOf(message.to),
+                                    subject = message.subject,
+                                    text = message.text,
+                                    html = message.html,
+                                ),
+                            ),
                         ),
                     ).retrieve()
                     .body(SendEmailResponse::class.java)
@@ -110,6 +125,10 @@ internal class ResendEmailSender(
     )
 
     internal companion object {
+        private val MAPPER: JsonMapper = JsonMapper.builder().addModule(kotlinModule()).build()
+
+        private fun bytes(content: ByteArray) = StreamingHttpOutputMessage.Body { it.write(content) }
+
         /** Resend's header; the same name Stripe uses, and the IETF draft standardises. */
         const val IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 

@@ -2739,6 +2739,24 @@ Wrong about: what a deploy is. It is two inputs, an image and a config, and only
          the checkout held. And about where a command's mistake lives: in the comment that
          everyone copies, not in the hands of the one who ran it.
 
+## 2026-10-27 · Fix · The email body — a log line no test could see
+
+Expected: a finding to confirm or dismiss. A review reported that the Resend sender on
+         `main` has the exposure FcmPushSender (PR #96) sends bytes to avoid: Spring's
+         `DefaultRestClient` logs an object body at DEBUG, through its `toString`.
+Reality: confirmed by running it. With `org.springframework` at DEBUG, one send through
+         MockRestServiceServer wrote `Writing [SendEmailRequest(from=…, to=[ada@example.com],
+         …, text=Open https://moyi.test/verify?token=…)]`: the recipient and the link's
+         token, for every verification and reset sent, once anyone lowered the level.
+         `SecretsNeverLoggedTest` could not see it because every test context uses the
+         logging email provider, and `application.yml` pins no client logger. The sender now
+         serialises the body itself and hands the client bytes, which pass no converter and
+         are never printed. `ResendEmailSenderTest` sends with Spring at TRACE and fails on
+         either value in any line; with the object body put back it went red.
+Wrong about: where the leaks are. Every pin in `application.yml` guards an inbound path;
+         the outbound client, which carries the token to the one place it should go, was
+         never looked at, because the tests never call it.
+
 ## 2026-10-28 · Feature · Media D2 — a photo made safe in a process of its own, and the word that YAML read as false
 
 Expected: the guards on untrusted bytes (a pixel ceiling, metadata stripped, four formats,
