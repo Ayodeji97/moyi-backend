@@ -21,6 +21,9 @@ dependencies {
     // root sees the EmailSender bean; identity depends on the module for the
     // `api` package only.
     implementation(projects.modules.notification)
+    // Phase 4 slice D1: the media routes, the R2 object store and V32
+    // (ADR-0047). A leaf: nothing else depends on it until D2.
+    implementation(projects.modules.media)
     // Phase 3 slice C3: the fifteen-minute close job and the key reaper,
     // with ShedLock's table (V16). It calls `gratitude.api.DayCloser`.
     implementation(projects.modules.scheduling)
@@ -134,5 +137,12 @@ tasks.named<Test>("test") {
                 exclude("**/build/**", "**/.gradle/**")
             },
         ).withPropertyName("konsistScannedSources")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    // ProductionStartsWithoutMediaSecretsTest reads the deploy file (ADR-0047): a
+    // change to it alone must rerun the tests rather than reuse a result. Seen:
+    // the line moved under an accessory, and the suite reported up to date.
+    inputs
+        .file(rootProject.layout.projectDirectory.file("config/deploy.yml"))
+        .withPropertyName("deployConfiguration")
         .withPathSensitivity(PathSensitivity.RELATIVE)
 }

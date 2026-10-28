@@ -40,6 +40,18 @@ moyi:
       # its category and Bond and never its token. FCM, the default, refuses
       # to start without a service account (ADR-0044).
       provider: log
+  media:
+    storage:
+      # The compose MinIO (docker-compose.yml), standing in for R2 (ADR-0047).
+      # The bucket is made by the compose file's minio-bucket job. Nothing is
+      # contacted at start-up, so the application starts without MinIO running;
+      # only a media request then answers 503.
+      provider: r2
+      r2:
+        endpoint: http://localhost:9000
+        bucket: moyi-media
+        access-key-id: moyi_dev_only
+        secret-access-key: moyi_dev_only_secret
   security:
     jwt:
       # Generated at startup: every token dies with the process, which is fine
