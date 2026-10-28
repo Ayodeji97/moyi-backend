@@ -292,6 +292,49 @@ enum class ErrorCode {
     MEDIA_NOT_YET_SUPPORTED,
 
     /**
+     * `POST /media/upload-intent` declaring more bytes than its kind allows:
+     * 10 MB for an image (FR-042), 5 MB for a voice note (FR-043). 413, doc
+     * 06:186's code. It refuses the upload, never an entry: text is the
+     * required part (FR-041). The detail names the limit.
+     */
+    MEDIA_QUOTA_EXCEEDED,
+
+    /**
+     * `POST /media/upload-intent` declaring a content type its kind does not
+     * accept: an image that is not JPEG, PNG, HEIC or WebP (FR-042), or a voice
+     * note in a format neither platform records (ADR-0047). 415. Distinct from
+     * [UNSUPPORTED_MEDIA_TYPE], which is about the request's own
+     * `Content-Type` header, not the file it announces.
+     */
+    MEDIA_TYPE_UNSUPPORTED,
+
+    /**
+     * `POST /media/{id}/complete` before the storage holds the declared upload:
+     * nothing has been PUT under its URL yet, or not the bytes declared. 409:
+     * nothing changed, and the client's move is to finish the PUT (the URL works
+     * until its `expiresAt`) and complete again, with a fresh Idempotency-Key or
+     * the same one, since a refusal is never recorded.
+     */
+    MEDIA_NOT_UPLOADED,
+
+    /**
+     * The object storage could not be reached, or none is configured: the
+     * deployment runs without media until the owner configures the bucket
+     * (ADR-0047). 503. Nothing was written; the client's move is to keep the
+     * entry's text and offer the photo or voice note again later.
+     */
+    MEDIA_STORAGE_UNAVAILABLE,
+
+    /**
+     * A completion or a deletion of an asset waited for its row lock past
+     * `lock_timeout` while another change to the same asset ran. 409: nothing
+     * changed, and the same request may be sent again, as for
+     * [FAVOURITE_BUSY] and [REACTION_BUSY]. No storage call is made under the
+     * lock (ADR-0047), so this means the database is struggling, and is rare.
+     */
+    MEDIA_BUSY,
+
+    /**
      * `GET /bonds/{bondId}/days/{date}` for a date that is not in the
      * caller's archive. 404.
      *

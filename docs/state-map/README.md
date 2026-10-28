@@ -1,7 +1,7 @@
 # The state map
 
 What the backend does in every state it can be in: every action, where it leads, what
-refuses it and why. Three machines (account, bond and day), each with diagrams and tables,
+refuses it and why. Four machines (account, bond, day and media), each with diagrams and tables,
 and one page of every endpoint with every answer it can give. All of it is built from
 hand-written data that a script checks against the API contract and the error codes. It is
 for learning the system as a set of state machines, not for building a client.
@@ -9,11 +9,13 @@ for learning the system as a set of state machines, not for building a client.
 - [Account](account.md): registering, signing in, sessions, password reset
 - [Bond](bond.md): pairing, invites, two-party consent, leaving and blocking
 - [Day](day.md): writing, the reveal, the close job
+- [Media](media.md): a photo or voice note uploaded straight to the storage, completed, read
+  and deleted by its owner (Phase 4 D1; the pipeline's states are drawn grey until D2)
 - [Endpoints](endpoints.md): each endpoint, what it needs, a curl line, and every answer
   with its cause
 - [Journeys](journeys.md): the five journeys of doc 02, traced as paths through the rows
 
-Those five pages are generated from `data/`. Do not edit them by hand. This page is written
+Those six pages are generated from `data/`. Do not edit them by hand. This page is written
 by hand.
 
 **The stamp.** Each generated page says `main @ <sha>`. That is the commit of `main` the map
