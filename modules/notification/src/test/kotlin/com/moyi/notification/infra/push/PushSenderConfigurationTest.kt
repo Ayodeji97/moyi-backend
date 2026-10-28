@@ -20,6 +20,7 @@ import org.springframework.boot.http.client.autoconfigure.imperative.ImperativeH
 import org.springframework.boot.restclient.autoconfigure.RestClientAutoConfiguration
 import org.springframework.boot.test.context.runner.ApplicationContextRunner
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -91,7 +92,7 @@ internal class PushSenderConfigurationTest {
                 logger.addAppender(captured)
                 try {
                     val bond = UUID.randomUUID()
-                    sender.send(PushMessage(PushToken("secret-device-token"), PushCategory.MILESTONE, bond)) shouldBe
+                    sender.send(PushMessage(PushToken("secret-device-token"), PushCategory.MILESTONE, bond, Instant.EPOCH)) shouldBe
                         PushDelivery.Accepted(LoggingPushSender.PROVIDER_MESSAGE_ID)
                     val line = captured.list.single().formattedMessage
                     line shouldContain "MILESTONE"

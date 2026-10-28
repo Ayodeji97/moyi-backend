@@ -550,7 +550,11 @@ internal class DaysConditionalTest(
     fun `whatever Accept says that JSON can answer, the read is the same bytes, called application-json and tagged as those bytes`() {
         val bond = pair()
         bothWrite(bond, DAY_ONE)
-        val shape = mapOf("the feed" to listOf("items", "nextCursor"), "the day" to listOf("date", "status", "myEntry", "partnerEntry"))
+        val shape =
+            mapOf(
+                "the feed" to listOf("items", "nextCursor"),
+                "the day" to listOf("date", "status", "myEntry", "partnerEntry", "partnerDisplayName"),
+            )
 
         reads(bond).forEach { (route, read) ->
             val plain = read(ada, emptyMap())

@@ -149,8 +149,8 @@ internal class SendPushTest(
         provider.sent.map { it.token.value } shouldContainExactlyInAnyOrder listOf("token-ada-phone", "token-ada-tablet")
         provider.sent.toSet() shouldBe
             setOf(
-                PushMessage(PushToken("token-ada-phone"), PushCategory.REVEAL, bond),
-                PushMessage(PushToken("token-ada-tablet"), PushCategory.REVEAL, bond),
+                PushMessage(PushToken("token-ada-phone"), PushCategory.REVEAL, bond, start.plus(Duration.ofDays(1))),
+                PushMessage(PushToken("token-ada-tablet"), PushCategory.REVEAL, bond, start.plus(Duration.ofDays(1))),
             )
         val row = notification(ada)
         row["status"] shouldBe "SENT"

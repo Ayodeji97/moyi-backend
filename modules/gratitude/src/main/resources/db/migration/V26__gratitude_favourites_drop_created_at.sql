@@ -1,0 +1,14 @@
+-- The owner's ruling of 2026-10-21 on ADR-0036 question 7: a favourite keeps no time.
+--
+-- V22 gave entry_favourites a created_at, because the corpus specifies one (doc 04,
+-- `memberId · entryId · createdAt`). Nothing returns it, orders by it or filters on it.
+-- What it does hold is, to an operator, the instant a person marked an entry, and for a
+-- partner's entry that is an instant at which they were reading it. FR-093 says a
+-- bookmark is private; that cannot be made to hold against an operator, because the
+-- favourites filter runs in SQL, so what can be done is to keep less.
+--
+-- Dropped outright, not in two steps: an image from before this migration still names
+-- the column in its INSERT, and a mark it serves after this has run is a 500. That is
+-- the seconds of a deploy in which the old container still serves, and any rollback to
+-- such an image until it is rolled forward (ADR-0036, amendment of 2026-10-27).
+ALTER TABLE entry_favourites DROP COLUMN created_at;

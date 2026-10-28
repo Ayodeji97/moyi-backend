@@ -605,7 +605,7 @@ internal class WithdrawEntriesTest(
         ) shouldBe MANY
         // And the partner kept every one of them: each erasure has a bookmark to remove (slice C5b).
         jdbc.update(
-            "INSERT INTO entry_favourites (entry_id, member_id, created_at) SELECT id, ?, created_at FROM entries WHERE bond_id = ?::uuid",
+            "INSERT INTO entry_favourites (entry_id, member_id) SELECT id, ? FROM entries WHERE bond_id = ?::uuid",
             rig.memberId(bond, bea),
             bond,
         ) shouldBe MANY

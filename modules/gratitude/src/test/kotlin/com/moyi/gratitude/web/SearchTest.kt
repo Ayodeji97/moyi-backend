@@ -162,7 +162,8 @@ internal class SearchTest(
         bothWrite(bond, DAY_ONE, "thank you for the walk", "and the tea")
 
         val day = rig.page(ada, bond, mapOf("q" to "walk"), route = "search")["items"][0]
-        day.propertyNames().toList() shouldContainExactlyInAnyOrder listOf("date", "status", "myEntry", "partnerEntry")
+        day.propertyNames().toList() shouldContainExactlyInAnyOrder
+            listOf("date", "status", "myEntry", "partnerEntry", "partnerDisplayName")
         day["myEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder FULL_KEYS
         day["partnerEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder FULL_KEYS
     }
