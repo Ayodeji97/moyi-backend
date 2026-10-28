@@ -70,8 +70,14 @@ internal object PushBudget {
         val remainderSpent = sentInBondToday - if (reservedSpentToday) RESERVED_PER_BOND_PER_DAY else 0
         return when {
             sentAcrossBonds >= ACROSS_BONDS -> BudgetDecision.DROPPED
+
+            // Three a day in one Bond, the reserved slot among them, whatever the counts say.
+            sentInBondToday >= PER_BOND_PER_DAY -> BudgetDecision.DROPPED
+
             revealClass && !reservedSpentToday -> BudgetDecision.RESERVED
+
             remainderSpent < PER_BOND_PER_DAY - RESERVED_PER_BOND_PER_DAY -> BudgetDecision.REMAINDER
+
             else -> BudgetDecision.DROPPED
         }
     }

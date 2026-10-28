@@ -79,6 +79,16 @@ internal class PushBudgetTest {
     }
 
     @Test
+    fun `the reserved slot is never a fourth push in one Bond`() {
+        // Three sent and the reserved slot unspent: a count the rule never makes by itself, but the
+        // ledger can hold one (the day is counted in the member's zone, and the zone can change).
+        PushBudget.decide(sentInBondToday = 3, reservedSpentToday = false, sentAcrossBonds = 3, revealClass = true) shouldBe
+            BudgetDecision.DROPPED
+        PushBudget.decide(sentInBondToday = 2, reservedSpentToday = false, sentAcrossBonds = 2, revealClass = true) shouldBe
+            BudgetDecision.RESERVED
+    }
+
+    @Test
     fun `the cross-Bond cap holds back even a reveal whose own Bond has room`() {
         PushBudget.decide(sentInBondToday = 0, reservedSpentToday = false, sentAcrossBonds = 6, revealClass = true) shouldBe
             BudgetDecision.DROPPED
