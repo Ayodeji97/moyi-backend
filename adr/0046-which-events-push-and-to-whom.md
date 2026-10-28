@@ -51,7 +51,7 @@ when `GET /bonds/{id}/on-this-day` would show the member something.
 | `MilestoneReached` (`EvaluateStreaks`) | `gratitude.notify` | `MILESTONE` | both members | `milestone:{bondDayId}:{userId}` | the event + 24 h |
 | `MemberJoined` (**new**, `AcceptInvite`) | `bond.notify` | `PARTNER_JOINED` | the member who was already there | `joined:{bondId}:{userId}` | the event + 24 h |
 | `ProposalOpened` (**new**, `ChangeTimezone`, `RequestDeletion`) | `bond.notify` | `PROPOSAL_OPENED` | the member who did not propose | `proposal:{proposalId}:{userId}` | the event + 24 h |
-| none; a timer (`OnThisDayJob`, `scheduling`) | `SendOnThisDayPushes` | `ON_THIS_DAY` | the member who opted in, alone | `on-this-day:{memberId}:{ISO week}` | end of the bond-day |
+| none; a timer (`OnThisDayJob`, `scheduling`) | `SendOnThisDayPushes` | `ON_THIS_DAY` | the member who opted in, alone, at most one in seven days | `on-this-day:{memberId}:{bondDate}` | end of the bond-day |
 
 The keys are the spec's, the user id ending each of a Bond's keys as it writes them (a
 bond-day and a proposal belong to one bond, so a user id names one member there). Gratitude's
@@ -66,7 +66,12 @@ spells `"StreakBroken"` or `"StreakExtended"` as a string literal, which is how 
 names what it subscribes to; KDoc names them in backticks to say why not. `DayPushesTest`
 pins `gratitude.notify`'s set to exactly `DayRevealed`, `DayClosed` and `MilestoneReached`,
 its id and `StartFrom.NOW`, and that no consumer bean in the context names a streak or a
-reaction event.
+reaction event. **The rule that bites is the run-time one** (review of #100):
+`EventSubscriptionsTest`, in `app`, asks every `EventConsumer` bean of the whole application
+context for its `eventTypes` and fails on any starting with `Streak`. The Konsist rule reads
+files, so a type named through a constant written in another file passes it; that mutation was
+run, and the Konsist rule stayed green while the run-time test went red. The Konsist rule stays
+as the early warning.
 
 **3. Both consumers start from `NOW`** (ADR-0041 Owed, ADR-0035 Owed): `BEGINNING` would push
 every reveal, milestone and join ever recorded on the first deploy.
@@ -83,8 +88,12 @@ alone, in `notification` (ADR-0045 decision 3). "Takes writes" is `BondStatus.is
 `PushAudiences` lives in a **new file** in `bond.api`, implemented by `PushAudiencesAdapter`,
 because a peer change (PR #97) is editing `BondAccess`, `BondAccessAdapter` and `BondViews`.
 It is unguarded, like `ReminderRoster` and the closer's view: it answers an event or a timer,
-never a request, and `ArchitectureTest`'s list of unguarded reads now holds its two methods,
-callable from `NotifyDayMembers` and `SendOnThisDayPushes` only (and from inside `bond`).
+never a request. What `ArchitectureTest` enforces is narrower than "only the consumers": its
+two method names join the list of unguarded reads, and the rule lets **any** file in
+`WORK_WITH_NO_CALLER` name any of them (the close job's three steps, the withdrawal's consumer,
+the reminder sweep, and now `NotifyDayMembers` and `SendOnThisDayPushes`). It is a text match
+on the names, and it is **not applied inside `bond`**, where `NotifyBondMembers` calls
+`audienceOf` and nothing stops a `bond` controller from doing the same.
 `ReminderCandidate.recipient()` is the one place a member row becomes a `PushRecipient`, for
 the reminder roster and the audience alike.
 
@@ -120,8 +129,8 @@ share; detekt's constructor limit would otherwise have refused `RequestDeletion`
 parameter. The edits to `AcceptInvite` and `ChangeTimezone` are one line each, plus the
 field.
 
-**8. On this day (FR-092): swept daily, sent at most weekly, only when the endpoint would
-answer.**
+**8. On this day (FR-092): swept daily, sent at most once in seven days, only when the
+endpoint would answer.**
 
 - `OnThisDayJob` (`scheduling`) runs every quarter-hour, ShedLock `on-this-day-pushes`, and
   asks `gratitude.api.OnThisDayPushes.pushDue` about the hour that ended on the last
@@ -137,14 +146,28 @@ answer.**
   bond that takes no writes from the member included. Empty, nothing is asked.
 - **Private**: the member's own answer holds only what they can already read, the other
   member's opt-in is never read, and the push carries a key and the Bond's id.
-- **At most one a week**: the key is the member and the ISO week of their bond-day, so the
-  first memory of a week is its only push.
+- **At most one in seven days, counted from the ledger** (ruling on the review of #100). Before
+  the archive is read, `notification.api.Notifications.hasLiveOrSent(userId, bondId,
+  ON_THIS_DAY, now - 7 days)` asks whether a push of this kind was asked for this member in the
+  last seven days and is `SENT` or still owed (`REQUESTED`, `HELD`). One that reached nobody
+  (`EXPIRED`, `DROPPED_BUDGET`, `SUPPRESSED`, `CANCELLED`, `FAILED_PERMANENT`) does not spend
+  the allowance. Ids and an instant in, a yes or no out: `notification` stays a leaf and learns
+  nothing of why. V31 indexes the ledger on `(user_id, category, created_at)` for it.
+- **The key is one per member per bond-day**, `on-this-day:{memberId}:{bondDate}`, so the
+  sweep's overlapping windows ask for nothing twice.
+
+  **Why not the ISO-week key first built**: it made the key the week's bound, and a key is
+  spent by the request, not by the delivery. The independent review showed the failure: a
+  member whose quiet hours run from 11:30 to 00:30 has her midday push held, then expired at
+  the bond-day's end, and the week's key was gone: she was never told that week, however many
+  memories it held, though she had opted in. A calendar week also allowed a push on a Sunday
+  and another on the Monday. **The spec says weekly; this is a rolling seven days**, a
+  deviation recorded for that reason.
 - **A midday swept after its bond-day ended asks for nothing** (review of #100). The window
   looks back an hour, and in a member zone far from the bond's anchor, midday can fall in the
   last hour of a bond-day: swept after its midnight, `GetDays.onThisDay` answers for the next
-  day, and a push asked under the ended day's key and deadline would expire at once and spend
-  the week's key. The clock is read after the answer, so a day not over then was not over when
-  the answer was read.
+  day, and a push asked under the ended day's key and deadline would expire at once. The clock
+  is read after the answer, so a day not over then was not over when the answer was read.
 
 **The spec says "a weekly sweep"; this sweeps daily.** A memory is a date in an earlier year:
 a sweep run on one day a week would look at one date in seven and could never tell a member
@@ -185,12 +208,25 @@ the second entry to a `SENT` row per member and a payload of a token, a category
 
 **Negative.** A Bond that ends between the fact and the consumer (two seconds) tells nobody,
 even though the fact happened while it was open. A push asked for during a deletion countdown
-that is later called off is never asked again. The on-this-day sweep reads each due member's
-archive answer in full to learn whether it is empty, once a day per opted-in member. A
-proposal answered within two seconds is told to nobody, and the outbox's ordering is not
-promised, so a reveal's push can come after a later milestone's.
+that is later called off is never asked again. A proposal answered within two seconds is told
+to nobody, and the outbox's ordering is not promised, so a reveal's push can come after a
+later milestone's. A member row whose zone or toggles cannot be read (both are validated on
+write, so only a hand-edited row) makes `audienceOf` throw, and that delivery is retried and
+counted failing **for both members**, not only the one whose row is wrong.
 
-**Neutral.** `bond`'s test context now scans `notification`, as `gratitude`'s does since N2.
+**The cost of the on-this-day sweep.** Every quarter-hour it reads the whole active-member
+roster (`reminderCandidates()`, the reminder job's scan of every member of every open bond,
+which it already runs every five minutes) and keeps the opted-in members whose midday fell in
+the window. For each of those it asks the ledger one indexed question. Only a member with no
+push sent or owed in the last seven days goes on to the expensive read, `GetDays.onThisDay`,
+which loads that member's candidate days and their entries in full to learn whether the answer
+is empty: at most once a day per such member, and in practice once a week for a member with a
+memory most days. The roster scan is the known cost at scale: a few thousand rows at doc 07's
+planned size, read four times an hour here and twelve by the reminder; a SQL prefilter on the
+zone's current offset is the step if it shows (ADR-0045, Alternatives).
+
+**Neutral.** `notification.api.Notifications` gains one read (`hasLiveOrSent`) and V31 one
+index. `bond`'s test context now scans `notification`, as `gratitude`'s does since N2.
 `gratitude`'s test context replaces the logging push provider with one that keeps what it is
 handed. `BondSupport` carries the outbox.
 
@@ -214,6 +250,12 @@ handed. `BondSupport` carries the outbox.
 - **The cross-Bond cap** (ADR-0045 Open) is unchanged here.
 - **The on-this-day time**: midday in the member's reminder zone, a default of ours.
 - **The words** in decision 9 are suggestions, and `copy.md`'s reminder line names the partner.
+- **A proposal opened and called off, again and again.** Each new proposal is a new push to the
+  partner, so a member who proposes and cancels repeatedly can push the other up to FR-082's
+  per-Bond bound: two a day from the remainder, since `PROPOSAL_OPENED` is not reveal-class
+  (ADR-0045 decision 5), and within the six a day across Bonds. The routes carry no bucket of
+  their own, only the global per-user one (120 a minute). Whether that is acceptable, or
+  proposals want a cooldown or a cap of their own, is the owner's question.
 
 ## Owed
 

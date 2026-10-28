@@ -83,9 +83,11 @@
 # N3 a reveal on the wire sends one push to each member, logged twice by the logging
 # provider and SENT once each in the ledger, with neither the words nor the token in any
 # line, and the join asks one push of the member who was there. Last run on 2026-10-28,
-# for N3, from a jar of its code, against the database of its own compose project
-# (moyi-n3: Postgres on 55438, Valkey on 63798) and --attach: 1004 passed, 0 failed,
-# 0 skipped, 27 sections. The first run, on that database fresh, failed one probe of its own, which had
+# for N3 after the rulings on its independent review (the on-this-day week counted from
+# the ledger, V31), from a jar of that code, against a fresh database of its own compose
+# project (moyi-n3: Postgres on 55438, Valkey on 63798) and --attach: 1004 passed,
+# 0 failed, 0 skipped, 27 sections. Before it, N3's first code, 1004, 0 and 0 on that
+# project's database after a first run, which had failed one probe of its own, which had
 # assumed the join's push was settled before a toggle PUT a second later (it is read when
 # the consumer runs), and now allows either. Before it, on
 # 2026-10-28, after the review of #99 (a reminder called off by writing, a half-hour

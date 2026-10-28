@@ -2639,9 +2639,14 @@ Reality: the consumers were small. What they touched was not. A dozen `gratitude
          none. The SOLO unlock needed no event: `DayClosed`, the day's status and the stamp
          the close already writes when a lone entry opens say it, and the stamp also says
          when it did not (the bond had separated). On-this-day is "weekly" in the spec, but a
-         sweep run once a week looks at one date in seven; it runs daily and the key is the
-         ISO week.
+         sweep run once a week looks at one date in seven; it runs daily. Its first weekly
+         bound was a dedupe key per ISO week, and the independent review broke it: a key is
+         spent by the request, so a push held by quiet hours and then expired took the
+         member's week with it. The bound is now seven days counted from the ledger, where
+         only a push sent or still owed counts. And the streak pin read files: a constant
+         from another file slipped past it, so a test now asks every consumer bean.
 Wrong about: what "add a consumer" costs a codebase whose tests count deliveries. And about
          redundant guards: the status check and the stamp check on the solo push each made
          the other unfalsifiable through the real close, so each has a test that forges the
-         other's half by SQL.
+         other's half by SQL. And about a dedupe key as a rate limit: it limits requests, and
+         what the member was owed was deliveries.
