@@ -1006,8 +1006,9 @@ decisions the rulings did not make themselves:
 49,147 octets as JSON. Counted as sent it is 8,192 characters and a `422`. The largest entry
 is now a backslash with 3,846 combining acutes and 499 U+001F, 10,688 octets out.
 `GetDays`' bound is measured per text and did not change; its KDoc and `DaysFeedTest`'s
-largest page were rebuilt for the new worst case (255,367 octets of 262,144 measured;
-ADR-0036 decision 6 carries the note).
+largest page were rebuilt for the new worst case (255,507 octets of 262,144 measured, with
+the longest reaction on every entry that can carry one; ADR-0036 decision 6 carries the
+note).
 
 **Owed, not done here:** the corpus — spec §3.2 and doc 04 §7 say "NFKC-normalised before
 counting" — lives in another repository and still says so; and the KMP client's counter

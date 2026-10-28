@@ -502,31 +502,34 @@ internal class GetDays(
 
         /**
          * 192 KiB (196,608 octets) of entry text in a page, counted as
-         * JSON carries it. Two of the largest days there can be fit in it
-         * (196,588 octets) and a third does not. With the most a page can
-         * carry besides text (fifty days of two entries are about 34 KB
-         * of ids, dates and field names) the largest response there can be
-         * is about 231 KB, under the 262,144 a response may be.
-         * `DaysFeedTest` builds that page and measures it: 230,663 octets,
-         * with the test clock's whole-second timestamps and no reactions.
-         * An instant in production carries microseconds, seven octets more
-         * in each of two fields of a hundred entries: about 1.4 KB. A
-         * reaction's longest name is seven octets more than `null` on each
-         * of them: 0.7 KB.
+         * JSON carries it. Nine of the largest days there can be fit in it
+         * (192,384 octets, two entries of 10,688 each) and a tenth does not;
+         * a day of smaller entries can make up the rest, to the octet.
+         * Besides its text every day costs about the same, about 1,174
+         * octets at the most (two entries' ids, dates and field names, a
+         * reaction on each, and the partner's name at its longest), so a
+         * page at the text bound is about the same size whichever days carry
+         * the text. `DaysFeedTest` builds that page and measures it: 255,507
+         * octets of the 262,144 a response may be, with the test clock's
+         * whole-second timestamps, the partner's name at its longest on
+         * every day and `THANK_YOU`, the longest reaction, on every entry
+         * that can carry one. An instant in production carries microseconds,
+         * seven octets more in each of two fields of a hundred entries:
+         * about 1.4 KB more than is measured.
          *
-         * So the margin is about 29 KB, and it is what a new field on an
-         * entry spends: a hundred entries a page, so every thirty octets
-         * added to one are 3 KB off it. `reaction` (slice C5c) spent 2.3.
-         * `partnerDisplayName` (ADR-0036 question 5) is on the day, so fifty
-         * a page, not a hundred, but a name of 80 characters can be written
-         * as 470 octets: at its largest it spends about 25 KB, and
-         * `DaysFeedTest` measures the largest page with it. What is left is
-         * about 4 KB, and a field on a day or an entry now needs this bound
-         * looked at again. The name it measures with is
-         * `ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH`, and
-         * `OpenApiContractTest` ("the longest display name identity takes is
-         * no longer than the archive's largest page was measured with") fails
-         * if identity ever takes a longer one.
+         * So the margin is about 6.6 KB, less those 1.4, and it is what a
+         * new field spends: a hundred entries a page, so every thirty octets
+         * added to one are 3 KB off it, and a field on a day or an entry
+         * needs this bound looked at again. (`reaction`, slice C5c, spent
+         * 2.3 KB of it; `partnerDisplayName`, ADR-0036 question 5, about
+         * 23.5 KB, a name of 80 characters being writable as 470 octets.
+         * Until ADR-0031's ruling 1 was built, 2026-10-28, the largest entry
+         * was 49,147 octets out, two such days filled the bound, and the
+         * page was measured at 230,663 before the name was added.) The name
+         * it measures with is `ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH`,
+         * and `OpenApiContractTest` ("the longest display name identity
+         * takes is no longer than the archive's largest page was measured
+         * with") fails if identity ever takes a longer one.
          */
         const val PAGE_TEXT_OCTETS = 192 * 1024
 

@@ -6,6 +6,8 @@ import com.moyi.common.testing.ArchivePageBudget
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
 import com.moyi.gratitude.domain.BondDayId
+import com.moyi.gratitude.domain.EntryText
+import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
@@ -437,6 +439,10 @@ internal class DaysFeedTest(
         GetDays.octetsAsJson("\\" + "\u0301".repeat(3_846) + "\u001f".repeat(499)) shouldBe 10_688
         GetDays.octetsAsJson("ab" + "\u0301".repeat(1_055)) shouldBe 2_112
         (18 * 10_688 + 2 * 2_112) shouldBe GetDays.PAGE_TEXT_OCTETS
+        ReactionType.entries.maxOf { it.name.length } shouldBe LONGEST_REACTION.length
+        // The worst case before ADR-0031's ruling 1 was built: one character trimmed, 8,192 as sent, and refused.
+        shouldThrow<IllegalArgumentException> { EntryText.of("a" + "\u001f".repeat(8_191)) }.message shouldBe
+            "an entry is at most 500 characters"
     }
 
     /**
@@ -470,7 +476,9 @@ internal class DaysFeedTest(
      *
      * Each day also carries the partner's name (ADR-0036 question 5), and it
      * is measured at its largest: 80 characters that JSON writes as 470
-     * octets, on all fifty days.
+     * octets, on all fifty days. And every entry that can carry a reaction
+     * carries the longest there is, `THANK_YOU`, from the partner: the twenty
+     * on the days with text (a tombstone carries none).
      */
     @Test
     fun `the largest page there can be - ten days of text at the page's bound among forty of tombstones - is under 256 KB`() {
@@ -486,12 +494,13 @@ internal class DaysFeedTest(
                 .map { DAY_ONE.plusDays(it) }
                 .onEach { date ->
                     clock.set(at(date))
-                    if (date in heavy) {
-                        rig.bonds.submit(ada, bond, largest)
-                        rig.bonds.submit(bea, bond, largest)
-                    } else if (date == filled) {
-                        rig.bonds.submit(ada, bond, filler)
-                        rig.bonds.submit(bea, bond, filler)
+                    if (date in heavy || date == filled) {
+                        val words = if (date in heavy) largest else filler
+                        val adas = rig.bonds.submit(ada, bond, words)
+                        val beas = rig.bonds.submit(bea, bond, words)
+                        // The longest reaction there is, on every entry that can carry one.
+                        rig.bonds.react(ada, beas, LONGEST_REACTION)
+                        rig.bonds.react(bea, adas, LONGEST_REACTION)
                     } else {
                         val written = bothWrite(bond, date)
                         rig.bonds.delete(ada, written.adas)
@@ -1050,6 +1059,9 @@ internal class DaysFeedTest(
 
         /** NFR-008. */
         const val MAX_RESPONSE = 262_144
+
+        /** The reaction whose name is longest as JSON, so the largest page is measured with it. */
+        const val LONGEST_REACTION = "THANK_YOU"
 
         const val HEX = "0123456789abcdef"
 
