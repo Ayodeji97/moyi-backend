@@ -25,6 +25,13 @@ import java.time.Instant
  */
 internal interface ObjectStore {
     /**
+     * Whether there is a storage behind this at all: false only for
+     * [UnavailableObjectStore]. A storage that is configured and cannot be
+     * reached at the moment is still configured; its calls throw.
+     */
+    val configured: Boolean get() = true
+
+    /**
      * A URL that accepts exactly one body under [key] until [expiresIn] has
      * passed: of [contentType], [sizeBytes] long, whose SHA-256 is
      * [checksumSha256]. Each of the three is signed, so the storage refuses a

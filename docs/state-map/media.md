@@ -20,18 +20,19 @@ stateDiagram-v2
     state "READY, attached to an entry" as media__READY_ATTACHED
     state "QUARANTINED" as media__QUARANTINED
     state "FAILED, a photo the pipeline refused" as media__FAILED
-    state "DELETED, by you" as media__DELETED
+    state "DELETED by you, with the entry it was on, or by the reaper" as media__DELETED
     media__NONE --> media__PENDING_UPLOAD: you - ask for a URL to upload a photo or a voice note to
     media__PENDING_UPLOAD --> media__UPLOADED: you - say the upload is done
-    media__PENDING_UPLOAD --> media__DELETED: you - delete one of your own photos or voice notes
+    media__PENDING_UPLOAD --> media__DELETED: you - delete one of your own photos or voice notes, system - hourly reaper finds it past its keeping, on no entry
     media__UPLOADED --> media__DELETED: you - delete one of your own photos or voice notes
     media__UPLOADED --> media__PROCESSING: system - media.process takes an uploaded photo up
     media__PROCESSING --> media__READY: system - media.process makes the photo's two variants
     media__PROCESSING --> media__FAILED: system - media.process refuses the photo's bytes
     media__PROCESSING --> media__DELETED: you - delete one of your own photos or voice notes
-    media__READY --> media__DELETED: you - delete one of your own photos or voice notes
-    media__FAILED --> media__DELETED: you - delete one of your own photos or voice notes
+    media__READY --> media__DELETED: you - delete one of your own photos or voice notes, system - hourly reaper finds it past its keeping, on no entry
+    media__FAILED --> media__DELETED: you - delete one of your own photos or voice notes, system - hourly reaper finds it past its keeping, on no entry
     media__READY --> media__READY_ATTACHED: you - write today's entry
+    media__READY_ATTACHED --> media__DELETED: system - entry it is on is erased deleted by its author, or taken back by a withdrawal
     classDef unbuilt fill:#eeeeee,stroke:#aaaaaa,color:#888888
     class media__QUARANTINED unbuilt
 ```
@@ -56,7 +57,7 @@ stateDiagram-v2
 | `PENDING_UPLOAD` | read one of your own photos or voice notes |  | stays | Its kind, status, type and size. No URL: nothing is ready to be shown until the pipeline (D2) makes it so. | smoke |
 | `UPLOADED` | read one of your own photos or voice notes |  | stays | Its kind, status, type and size. url, width and height are null until the photo is READY. | smoke |
 | `PENDING_UPLOAD` | delete one of your own photos or voice notes |  | `DELETED` | The asset is deleted, and after the commit whatever was uploaded under its key is removed from the storage. Nothing can be attached to an entry yet (D2), so every asset of yours can be deleted. | test |
-| `UPLOADED` | delete one of your own photos or voice notes |  | `DELETED` | The asset is deleted, and after the commit its upload is removed from the storage. If the storage cannot be reached then, the bucket's lifecycle rule removes it within two days. A photo being processed meanwhile is media.process's to clean up. | smoke |
+| `UPLOADED` | delete one of your own photos or voice notes |  | `DELETED` | The asset is deleted, and after the commit its upload is removed from the storage; if the storage cannot be reached then, media.purge deletes it once it can. A photo being processed meanwhile is media.process's to clean up. | smoke |
 | `PROCESSING` | say the upload is done |  | stays | It is already complete. Completing again changes nothing and records no second event. | test |
 | `READY` | say the upload is done |  | stays | It is already complete. Completing again changes nothing and records no second event. | test |
 | `READY_ATTACHED` | say the upload is done |  | stays | It is already complete. Completing again changes nothing and records no second event. | test |
@@ -66,7 +67,7 @@ stateDiagram-v2
 | `READY_ATTACHED` | read one of your own photos or voice notes |  | stays | As when it was attached to nothing: its owner is given the URL and the size. | smoke |
 | `FAILED` | read one of your own photos or voice notes |  | stays | Its kind, status FAILED, type and size; no URL. Why it failed is not said (the log has it, by id and rule). | never-run |
 | `PROCESSING` | delete one of your own photos or voice notes |  | `DELETED` | Deleted at once: the pipeline holds no lock while it works. It finds the photo deleted under the row lock when it is done, and removes what it made. | test |
-| `READY` | delete one of your own photos or voice notes |  | `DELETED` | Deleted, and after the commit its variants and any upload left are removed from the storage, on a best-effort basis (D5's media.purge is where an erasure that must not be given up on lives). | never-run |
+| `READY` | delete one of your own photos or voice notes |  | `DELETED` | Deleted, and after the commit its variants and any upload left are removed from the storage at once, on a best-effort basis; media.purge deletes the same keys again, retrying until the storage answers (D5), so nothing is left behind for good. | test |
 | `FAILED` | delete one of your own photos or voice notes |  | `DELETED` | Deleted; there is nothing left in the storage to remove but an upload the pipeline could not delete. | never-run |
 | `READY` | write today's entry |  | `READY_ATTACHED` | The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4). | smoke |
 
@@ -85,7 +86,7 @@ stateDiagram-v2
 | `DELETED` | read one of your own photos or voice notes |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | smoke |
 | `NONE` | delete one of your own photos or voice notes |  | 404 `NOT_FOUND` | Nothing of yours has this id: another person's photo, an id that names nothing and a value that is not an id all get this one answer, never 403, so that it does not confirm the asset exists. A partner reaches media only through an entry, never by its id. | doc 06:184, ADR-0047 §3 | smoke |
 | `DELETED` | delete one of your own photos or voice notes |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | test |
-| `READY_ATTACHED` | delete one of your own photos or voice notes |  | 409 `MEDIA_ATTACHED` | It is part of an entry now and stays with it; nothing changes. It leaves with the entry (D5's erasure). | doc 06:184, ADR-0048 §4 | smoke |
+| `READY_ATTACHED` | delete one of your own photos or voice notes |  | 409 `MEDIA_ATTACHED` | It is part of an entry now and stays with it; nothing changes. It leaves with the entry, when the entry is erased. | doc 06:184, ADR-0048 §4 | smoke |
 | `NONE` | write today's entry |  | 422 `VALIDATION_FAILED` | No photo of yours has this id: another user's, a v7 id, or nothing at all. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | smoke |
 | `PENDING_UPLOAD` | write today's entry |  | 422 `VALIDATION_FAILED` | Not READY. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | never-run |
 | `UPLOADED` | write today's entry |  | 422 `VALIDATION_FAILED` | Not READY: still to be processed. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | never-run |
@@ -101,3 +102,9 @@ stateDiagram-v2
 | `UPLOADED` | media.process takes an uploaded photo up | system |  | `PROCESSING` | media.process takes the photo up: PROCESSING, committed in a transaction of its own, so a photo being worked on is seen to be; processing_attempts counts only decodes, once the bytes are fetched and verified. A voice note is left UPLOADED, for D3; a deleted upload is skipped. At most five decodes begin (MediaAsset.MAX_ATTEMPTS). | test |
 | `PROCESSING` | media.process makes the photo's two variants | system |  | `READY` | The bytes are the declared ones (length, SHA-256) and one of the four allowed formats, the one declared; the header is within the pixel ceiling; libvips, in a sandbox with a time and a memory limit, makes a full and a display WebP with no metadata, within 350 and 150 KiB. READY under the row lock; the upload itself is deleted after the commit. | smoke |
 | `PROCESSING` | media.process refuses the photo's bytes | system |  | `FAILED` | The bytes are not the declared ones, not an allowed format, not the declared format (a HEIC must list HEVC images only), over the pixel or the decoded-bytes ceiling, unreadable (a truncated file included), too slow or impossible to fit: FAILED, final, and the upload is deleted. A storage that cannot be reached is not a refusal: the outbox retries, and the photo stays PROCESSING; an outage before the decode never counts against it. Once five decodes have begun and none finished, the next delivery fails it (TOO_MANY_ATTEMPTS) and succeeds. | smoke |
+| `PENDING_UPLOAD` | the hourly reaper finds it past its keeping, on no entry | system |  | `DELETED` | An upload never completed is deleted an hour after its URL stopped working; media.purge then deletes whatever was uploaded under its key, retrying until the storage answers. | test |
+| `READY` | the hourly reaper finds it past its keeping, on no entry | system |  | `DELETED` | A ready photo on no entry is deleted a day after the latest of its creation, its readiness and the moment an entry let it go (a PATCH that put another photo in its place); media.purge then deletes its objects. | test |
+| `FAILED` | the hourly reaper finds it past its keeping, on no entry | system |  | `DELETED` | A failed photo is deleted a day after it was made; media.purge then deletes anything an attempt left in the storage, variants included, found by the keys derived from its upload's. | test |
+| `READY_ATTACHED` | the hourly reaper finds it past its keeping, on no entry | system |  | `READY_ATTACHED` | Never reaped, however old: the reaper's one statement takes only an asset attached to nothing, and passes over a row a claim is changing at that moment rather than wait for it. | test |
+| `READY_ATTACHED` | the entry it is on is erased: deleted by its author, or taken back by a withdrawal | system |  | `DELETED` | Released with its entry, in the erasure's own transaction (the author's DELETE, the withdrawal, or the close job or a read reaching a withdrawn author's day first): DELETED, so its owner's GET is 404 and no entry shows it; media.purge deletes its objects seconds later, retrying for ever, so a URL handed out before reaches nothing. | test |
+| `READY_ATTACHED` | the nightly demotion finds it ninety days ready | system |  | `READY_ATTACHED` | Ninety days after it was made, the photo keeps only its display variant (tier 2) and is shown at that size from then on; media.purge deletes the full variant. Irreversible. | test |

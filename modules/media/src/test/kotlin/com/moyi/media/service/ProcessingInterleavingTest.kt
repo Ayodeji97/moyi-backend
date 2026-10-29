@@ -69,6 +69,7 @@ internal class ProcessingInterleavingTest(
         gate.reset()
         storage.puts = true
         storage.gets = true
+        storage.deletes = true
         storage.putsLeft = Int.MAX_VALUE
         jdbc.execute("TRUNCATE TABLE media_assets, idempotency_keys, outbox_deliveries, outbox_events")
     }
@@ -89,6 +90,45 @@ internal class ProcessingInterleavingTest(
         statusOf(mediaId) shouldBe "DELETED"
         stored(variantOf(upload, "full")) shouldBe false
         stored(variantOf(upload, "display")) shouldBe false
+        stored(upload) shouldBe false
+        // D5: the owner's delete handed the objects to media.purge, and so did the pipeline, whose variants
+        // were written after that delete, so a purge that ran in between cannot have been the last word.
+        jdbc.queryForObject(
+            "SELECT count(*) FROM outbox_events WHERE aggregate_id = ?::uuid AND event_type = 'MediaReleased'",
+            Int::class.java,
+            mediaId,
+        ) shouldBe 2
+    }
+
+    /**
+     * Review of #110: the owner deletes a photo while it is processed, and
+     * `media.purge` runs for that deletion **before** the attempt writes its
+     * full variant; the attempt then fails on the display one, so it never
+     * reaches the decision that would clean up after it. The retry finds the
+     * photo deleted, and must hand its objects to the purge again.
+     */
+    @Test
+    fun `a variant written after the deletion's purge, by an attempt that then failed, is purged on the retry`() {
+        val mediaId = client.upload(ada, TestImages.jpeg(64, 48))
+        val upload = storageKeyOf(mediaId)
+        gate.close()
+        storage.putsLeft = 1
+
+        val worker = CompletableFuture.supplyAsync { dispatcher.dispatchDue(clock.instant(), BUDGET) }
+        gate.awaitEntered()
+        client.delete(ada, mediaId).status shouldBe 204
+        // The deletion's purge, while the attempt is still decoding: nothing has been written yet.
+        dispatcher.dispatchDue(clock.instant(), BUDGET).delivered shouldBe 1
+        gate.open()
+        worker.get(30, TimeUnit.SECONDS).failed shouldBe 1
+        stored(variantOf(upload, "full")) shouldBe true
+
+        storage.putsLeft = Int.MAX_VALUE
+        clock.advance(Duration.ofMinutes(1))
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+
+        stored(variantOf(upload, "full")) shouldBe false
         stored(upload) shouldBe false
     }
 
@@ -208,13 +248,21 @@ internal class ProcessingInterleavingTest(
         }
     }
 
-    /** The real store, whose GETs and PUTs the test can make fail as an unreachable storage does. */
+    /** The real store, whose GETs, PUTs and DELETEs the test can make fail as an unreachable storage does. */
     internal class SwitchableStore(
         private val real: ObjectStore,
     ) : ObjectStore by real {
         @Volatile var puts = true
 
         @Volatile var gets = true
+
+        /** Off: every DELETE fails as an unreachable storage's does (`MediaPurgeTest`, D5). */
+        @Volatile var deletes = true
+
+        override fun delete(key: StorageKey) {
+            if (!deletes) throw ObjectStoreUnavailableException("The media storage could not delete an object (switched off by the test).")
+            real.delete(key)
+        }
 
         override fun open(key: StorageKey): InputStream? {
             if (!gets) throw ObjectStoreUnavailableException("The media storage could not be read (switched off by the test).")

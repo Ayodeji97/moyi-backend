@@ -4,6 +4,7 @@ import com.moyi.media.domain.ImageVariant
 import com.moyi.media.domain.MediaAsset
 import com.moyi.media.domain.MediaKind
 import com.moyi.media.domain.MediaStatus
+import com.moyi.media.domain.Retention
 import com.moyi.media.domain.StorageKey
 import com.moyi.media.domain.StoredVariant
 import org.springframework.jdbc.core.JdbcTemplate
@@ -165,17 +166,142 @@ internal class MediaAssetStore(
             kind.name,
         ) == 1
 
-    /** Detaches [id] from [entryId], only if it is [owner]'s and attached there. */
+    /**
+     * Detaches [id] from [entryId], only if it is [owner]'s and attached there,
+     * and records [at] as the moment it was let go: the reaper gives it a day
+     * from then ([Retention.UNATTACHED]).
+     */
     fun release(
         owner: UUID,
         id: UUID,
         entryId: UUID,
+        at: Instant,
     ): Boolean =
         jdbc.update(
-            "UPDATE media_assets SET attached_entry_id = NULL WHERE id = ? AND owner_user_id = ? AND attached_entry_id = ?",
+            "UPDATE media_assets SET attached_entry_id = NULL, detached_at = ? " +
+                "WHERE id = ? AND owner_user_id = ? AND attached_entry_id = ?",
+            Timestamp.from(at),
             id,
             owner,
             entryId,
+        ) == 1
+
+    /**
+     * An erasure (D5, spec D-9): every asset attached to [entryId] becomes
+     * DELETED, detached, as of [at]. Keyed by the attachment, which is this
+     * module's own record, and not by the ids the entry held: whatever is
+     * attached to an erased entry goes with it. Returns the ids it deleted;
+     * none the second time.
+     */
+    fun releaseAllOf(
+        entryId: UUID,
+        at: Instant,
+    ): List<UUID> =
+        jdbc.query(
+            "UPDATE media_assets SET status = 'DELETED', deleted_at = ?, attached_entry_id = NULL " +
+                "WHERE attached_entry_id = ? AND status <> 'DELETED' RETURNING id",
+            ID,
+            Timestamp.from(at),
+            entryId,
+        )
+
+    /**
+     * The reaper (D5): up to [limit] assets that are attached to nothing and
+     * past their keeping become DELETED as of [now]. An upload never completed,
+     * once its URL has been dead for [Retention.PENDING_GRACE]; a ready or
+     * failed asset, [Retention.UNATTACHED] after the latest of its creation,
+     * its readiness and the moment an entry let it go (doc 06:186).
+     *
+     * **An attached asset is never reaped**: `attached_entry_id IS NULL` is in
+     * the one statement that picks and changes, and a row a claim is changing
+     * at this moment is skipped (`SKIP LOCKED`) rather than waited for; the
+     * next run sees whether the claim committed. An asset being processed
+     * (UPLOADED, PROCESSING) is not this statement's: it is the stuck-pipeline
+     * alert's. Returns the ids it deleted.
+     *
+     * The rows are picked in a `MATERIALIZED` CTE so that the locking select
+     * runs exactly once: in a subquery the planner may rescan it, and change or
+     * lock more rows than [limit] (review of #110). The same for [demote].
+     */
+    fun reap(
+        now: Instant,
+        limit: Int,
+    ): List<UUID> =
+        jdbc.query(
+            """
+            WITH picked AS MATERIALIZED (
+                SELECT id FROM media_assets
+                WHERE attached_entry_id IS NULL
+                  AND ((status = 'PENDING_UPLOAD' AND expires_at < ?)
+                       OR (status IN ('READY', 'FAILED') AND GREATEST(created_at, ready_at, detached_at) < ?))
+                ORDER BY created_at
+                LIMIT ?
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE media_assets m SET status = 'DELETED', deleted_at = ?
+            FROM picked
+            WHERE m.id = picked.id
+            RETURNING m.id
+            """.trimIndent(),
+            ID,
+            Timestamp.from(now.minus(Retention.PENDING_GRACE)),
+            Timestamp.from(now.minus(Retention.UNATTACHED)),
+            limit,
+            Timestamp.from(now),
+        )
+
+    /**
+     * The demotion (D5, D-16): up to [limit] photos that are READY, attached,
+     * still tier 1, made more than [Retention.FULL_RESOLUTION] before [now],
+     * and holding a display variant become tier 2, recording only that
+     * variant and its size. Irreversible, so every condition is in the one
+     * statement that picks and changes, under the row lock. Returns the ids it
+     * demoted; their full variants are `media.purge`'s to delete.
+     */
+    fun demote(
+        now: Instant,
+        limit: Int,
+    ): List<UUID> =
+        jdbc.query(
+            """
+            WITH d AS MATERIALIZED (
+                SELECT a.id, jsonb_build_array(v.display) AS variant_array, v.display
+                FROM media_assets a
+                CROSS JOIN LATERAL (
+                    SELECT e AS display FROM jsonb_array_elements(a.variants) e WHERE e ->> 'variant' = 'DISPLAY' LIMIT 1
+                ) v
+                WHERE a.kind = 'IMAGE'
+                  AND a.status = 'READY'
+                  AND a.attached_entry_id IS NOT NULL
+                  AND a.tier = 1
+                  AND a.ready_at < ?
+                ORDER BY a.ready_at
+                LIMIT ?
+                FOR UPDATE OF a SKIP LOCKED
+            )
+            UPDATE media_assets m SET
+                tier = 2,
+                variants = d.variant_array,
+                width = (d.display ->> 'width')::int,
+                height = (d.display ->> 'height')::int
+            FROM d
+            WHERE m.id = d.id
+            RETURNING m.id
+            """.trimIndent(),
+            ID,
+            Timestamp.from(now.minus(Retention.FULL_RESOLUTION)),
+            limit,
+        )
+
+    /** `media.purge` deleted a released asset's objects at [at]. Only the first time counts. */
+    fun markPurged(
+        id: UUID,
+        at: Instant,
+    ): Boolean =
+        jdbc.update(
+            "UPDATE media_assets SET purged_at = ? WHERE id = ? AND status = 'DELETED' AND purged_at IS NULL",
+            Timestamp.from(at),
+            id,
         ) == 1
 
     /**
@@ -197,10 +323,13 @@ internal class MediaAssetStore(
     private companion object {
         const val SELECT =
             "SELECT id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, " +
-                "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict, processing_attempts " +
+                "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict, processing_attempts, tier " +
                 "FROM media_assets"
 
         val JSON: JsonMapper = JsonMapper.builder().build()
+
+        /** The `id` a `RETURNING id` hands back. */
+        val ID = RowMapper { rs, _ -> rs.getObject("id", UUID::class.java) }
 
         val ROW =
             RowMapper { rs, _ ->
@@ -219,6 +348,7 @@ internal class MediaAssetStore(
                     variants = variantsOf(rs.getString("variants")),
                     moderationVerdict = rs.getString("moderation_verdict"),
                     processingAttempts = rs.getInt("processing_attempts"),
+                    tier = rs.getInt("tier"),
                 )
             }
 

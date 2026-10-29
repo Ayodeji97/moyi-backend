@@ -94,6 +94,8 @@ internal class MediaAsset(
     val moderationVerdict: String? = null,
     /** How many attempts of `media.process` have begun on it, counted whatever became of them. */
     val processingAttempts: Int = 0,
+    /** 1 while a photo keeps its full-resolution variant, 2 once only the display variant is kept (D-16, D5). */
+    val tier: Int = 1,
 ) {
     /** A deleted asset is gone to its owner too: every route answers it as one that never existed. */
     val isGone: Boolean get() = status == MediaStatus.DELETED
@@ -128,6 +130,17 @@ internal class MediaAsset(
      * entry (D5's erasure); deleting it is `409 MEDIA_ATTACHED`.
      */
     val isDeletable: Boolean get() = attachedEntryId == null
+
+    /**
+     * The one key a photo's demotion gives up (D-16, D5): its full variant's,
+     * derived as [objectKeys] are, so `media.purge` finds it whether or not
+     * the row still records it. A released asset gives up all of [objectKeys].
+     */
+    val demotedKey: StorageKey
+        get() {
+            check(kind == MediaKind.IMAGE) { "only a photo is demoted" }
+            return StorageKey.forVariant(storageKey, ImageVariant.FULL)
+        }
 
     /**
      * Every key the storage may hold for this asset: its upload and, for a
@@ -189,7 +202,7 @@ internal class MediaAsset(
         }
     }
 
-    override fun toString(): String = "MediaAsset(id=$id, kind=$kind, status=$status)"
+    override fun toString(): String = "MediaAsset(id=$id, kind=$kind, status=$status, tier=$tier)"
 
     enum class Processing { PROCESS, GIVE_UP, NOT_THIS_KIND, NOTHING_TO_DO }
 

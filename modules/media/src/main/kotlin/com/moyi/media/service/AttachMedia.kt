@@ -7,6 +7,8 @@ import com.moyi.media.infra.database.MediaAssetStore
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
+import java.time.Clock
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
@@ -17,6 +19,7 @@ import java.util.UUID
 @Service
 internal class AttachMedia(
     private val assets: MediaAssetStore,
+    private val clock: Clock,
 ) : MediaAttachments {
     @Transactional(propagation = Propagation.MANDATORY)
     override fun claim(
@@ -32,7 +35,8 @@ internal class AttachMedia(
         mediaId: UUID,
         entryId: UUID,
     ) {
-        assets.release(owner, mediaId, entryId)
+        // Stamped, so the reaper gives the photo a day from now rather than from when it was made (D5).
+        assets.release(owner, mediaId, entryId, clock.instant().truncatedTo(ChronoUnit.MICROS))
     }
 
     private fun AttachableKind.asMediaKind(): MediaKind =

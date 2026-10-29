@@ -29,6 +29,10 @@
 # Needs: docker running (colima start), age, python3, curl, and the Bitwarden
 # CLI logged in (`bw login`); the secure note `moyi-prod` holds R2_ENDPOINT,
 # R2_DRILL_KEY_ID, R2_DRILL_SECRET and AGE_PRIVATE_KEY.
+#
+# Once moyi-prod also holds MIRROR_DRILL_KEY_ID (ops/media-mirror/README.md),
+# a last step fetches one photo from the media mirror and checks it is a WebP;
+# until then it says it was skipped.
 set -euo pipefail
 umask 077
 
@@ -85,6 +89,17 @@ PY
 ENDPOINT="$(field R2_ENDPOINT)"
 printf 'user = "%s:%s"\n' "$(field R2_DRILL_KEY_ID)" "$(field R2_DRILL_SECRET)" >"$WORK/r2.curl"
 field AGE_PRIVATE_KEY >"$WORK/age.key"
+# -- media mirror (ops/media-mirror), part 1 of 2: its read-only token, if
+# moyi-prod has one yet. Read here because item.json goes on the next line.
+MIRROR_SKIP="moyi-prod has no MIRROR_DRILL_KEY_ID"
+if field MIRROR_DRILL_KEY_ID >/dev/null 2>&1; then
+  MIRROR_SKIP=""
+  MIRROR_ENDPOINT="$(field MIRROR_ENDPOINT)"
+  MIRROR_BUCKET="$(field MIRROR_BUCKET)"
+  MIRROR_REGION="$(field MIRROR_REGION 2>/dev/null || echo auto)"
+  printf 'user = "%s:%s"\n' "$(field MIRROR_DRILL_KEY_ID)" "$(field MIRROR_DRILL_SECRET)" >"$WORK/mirror.curl"
+fi
+# -- end media mirror, part 1
 rm -f "$WORK/item.json"
 r2() { curl --fail --silent --show-error --config "$WORK/r2.curl" --aws-sigv4 "aws:amz:auto:s3" "$@"; }
 
@@ -175,6 +190,26 @@ sys.exit(0 if texts else 1)'; then READ=1; break; fi
 done
 [ -n "$READ" ] || die "no entry could be read back as $EMAIL: pick an account whose bond has a revealed day"
 echo "an entry was read back through the API"
+
+# -- media mirror (ops/media-mirror), part 2 of 2. The database restores without
+# the photos; this proves the photos have a second copy that can be read back:
+# one object under v/ in the mirror, fetched with the mirror's read-only token,
+# must be a WebP (RIFF....WEBP). No key is printed: a key reaches the bytes.
+if [ -z "$MIRROR_SKIP" ]; then
+  say "Fetching a photo from the media mirror"
+  mirror() { curl --fail --silent --show-error --config "$WORK/mirror.curl" --aws-sigv4 "aws:amz:$MIRROR_REGION:s3" "$@"; }
+  MKEY="$(mirror "$MIRROR_ENDPOINT/$MIRROR_BUCKET?list-type=2&prefix=v%2F&max-keys=1" \
+    | python3 -c 'import re,sys; keys=re.findall(r"<Key>([^<]+)</Key>", sys.stdin.read()); print(keys[0] if keys else "")')"
+  [ -n "$MKEY" ] || die "the media mirror holds nothing under v/"
+  mirror --output "$WORK/mirror.obj" "$MIRROR_ENDPOINT/$MIRROR_BUCKET/$MKEY"
+  [ "$(head -c 4 "$WORK/mirror.obj")" = RIFF ] && [ "$(dd if="$WORK/mirror.obj" bs=1 skip=8 count=4 2>/dev/null)" = WEBP ] \
+    || die "the object fetched from the media mirror is not a WebP"
+  echo "a WebP of $(wc -c <"$WORK/mirror.obj" | tr -d ' ') bytes was read back from the media mirror"
+  rm -f "$WORK/mirror.obj" "$WORK/mirror.curl"
+else
+  printf '\n== Media mirror step skipped: %s (ops/media-mirror/README.md)\n' "$MIRROR_SKIP"
+fi
+# -- end media mirror, part 2
 
 ELAPSED="$(( $(date +%s) - START ))"
 printf '\nRESTORE DRILL PASSED: %s restored and read back in %dm%02ds (RTO 4 h).\n' \
