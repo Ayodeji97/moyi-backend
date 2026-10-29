@@ -97,8 +97,18 @@
 # gone from MinIO; a PNG declared as a JPEG FAILED; the photo attached to an
 # entry, 409 MEDIA_ATTACHED to its deletion, the partner's locked day without a
 # trace of it and, once revealed, PROCESSING with no URL; another user's photo and
-# a failed one refused on imageMediaId; and the URL in no log line. Last run on
-# 2026-10-28 for D2, from a jar of this branch on main 7656192, on a fresh database
+# a failed one refused on imageMediaId; and the URL in no log line. Since Phase 4
+# D3 it uploads an M4A carrying a made-up title and waits for ffmpeg (on PATH) to
+# make it READY: an Ogg Opus of one channel at its URL, served as audio/ogg, with
+# no title, its length on the asset; a 62-second WAV and a WAV declared as an M4A
+# FAILED; and, with a photo, M4's first half: an entry with both, the voice note
+# locked away from the partner until the reveal and then playable by them while
+# the photo is still PROCESSING. Last run on 2026-10-29 for D3, from a jar of this
+# branch (on D2 at f5bc9bc), against its own compose project (moyi-d3: Postgres
+# 55443, Valkey 63803, MinIO 59006), the jar booted by hand on libvips 8.18.7 and
+# ffmpeg 9.0.2, and --attach: 1123 passed, 0 failed, 1 skipped (the tag across the
+# erasure, the poller having won the race), 30 sections. D2's: on
+# 2026-10-28, from a jar of this branch on main 7656192, on a fresh database
 # that applied 32 migrations to V33, against its own compose project (moyi-d2:
 # Postgres 55441, Valkey 63801, MinIO 59002), the jar booted by hand on libvips
 # 8.18.7, and --attach: 1081 passed, 0 failed, 1 skipped (the tag across the
