@@ -66,7 +66,7 @@ internal class RekognitionImageModeratorTest {
 
     @Test
     fun `it sends the bytes alone, signed for eu-central-1, asking from Rekognition's default confidence`() {
-        moderator.moderate(jpeg) shouldBe Moderated.Found(emptyList())
+        moderator.moderate(jpeg) shouldBe Moderated.Found(emptyList(), modelVersion = "7.0")
 
         val (headers, sent) = requests.single()
         headers["x-amz-target"] shouldBe "RekognitionService.DetectModerationLabels"
@@ -130,6 +130,32 @@ internal class RekognitionImageModeratorTest {
             body = """{"__type":"$type","Message":"fake"}"""
             assertThrows<ModeratorUnavailableException> { moderator.moderate(jpeg) }
         }
+    }
+
+    /**
+     * Review of #113: the labels read are version 7's. A taxonomy that is not
+     * version 7 might name what matters otherwise, and read as version 7 would
+     * pass it: an outage, retried and logged at ERROR, never a verdict.
+     */
+    @Test
+    fun `a moderation model that is not version 7 is an outage, never a pass, and the version is kept when it is`() {
+        body = """{"ModerationModelVersion":"8.0","ModerationLabels":[]}"""
+        assertThrows<ModeratorUnavailableException> { moderator.moderate(jpeg) }
+        body = """{"ModerationLabels":[]}"""
+        assertThrows<ModeratorUnavailableException> { moderator.moderate(jpeg) }
+
+        body = """{"ModerationModelVersion":"7.0","ModerationLabels":[]}"""
+        moderator.moderate(jpeg) shouldBe Moderated.Found(emptyList(), modelVersion = "7.0")
+    }
+
+    /** Review of #113: what leaves the box goes to Frankfurt, and only a stand-in on this machine stands in for AWS. */
+    @Test
+    fun `another region, or an endpoint on another host, is refused at start`() {
+        val key = MediaModerationProperties.Rekognition(accessKeyId = "AKIAFAKE", secretAccessKey = "fake-secret")
+        assertThrows<IllegalArgumentException> { RekognitionImageModerator.create(key.copy(region = "us-east-1")) }
+            .message!! shouldContain "eu-central-1"
+        assertThrows<IllegalArgumentException> { RekognitionImageModerator.create(key.copy(endpoint = "https://rekognition.example.test")) }
+        RekognitionImageModerator.create(key.copy(endpoint = "http://127.0.0.1:9")).shouldBeInstanceOf<RekognitionImageModerator>()
     }
 
     @Test

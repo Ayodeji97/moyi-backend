@@ -463,6 +463,16 @@
       "id": "event:operator-deletes",
       "label": "the operator deletes it (moyi media quarantine delete)",
       "actor": "system"
+    },
+    {
+      "id": "event:operator-holds",
+      "label": "the operator holds it back on a member's report (moyi media quarantine hold)",
+      "actor": "system"
+    },
+    {
+      "id": "event:operator-blocks",
+      "label": "the operator blocks it on a member's report (moyi media quarantine block)",
+      "actor": "system"
     }
   ],
   "everywhere": [

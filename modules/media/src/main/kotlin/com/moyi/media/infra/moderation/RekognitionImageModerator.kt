@@ -73,9 +73,9 @@ internal class RekognitionImageModerator(
                 .image(Image.builder().bytes(SdkBytes.fromByteArray(jpeg)).build())
                 .minConfidence(MIN_CONFIDENCE)
                 .build()
-        val labels =
+        val response =
             try {
-                client.detectModerationLabels(request).moderationLabels()
+                client.detectModerationLabels(request)
             } catch (refused: InvalidImageFormatException) {
                 return refusal(refused)
             } catch (refused: ImageTooLargeException) {
@@ -89,7 +89,14 @@ internal class RekognitionImageModerator(
                 log.warn("Rekognition could not be reached ({}): retried later", outage.javaClass.simpleName)
                 throw ModeratorUnavailableException("Rekognition could not be reached", outage)
             }
-        return Moderated.Found(findingsOf(labels))
+        val version = response.moderationModelVersion()
+        if (version?.substringBefore('.') != TAXONOMY_MAJOR) {
+            // The labels read below are version 7's. A new taxonomy may name what matters otherwise, and reading it
+            // as version 7 would pass what it no longer names: an outage, retried, and loud, until this is changed.
+            log.error("Rekognition answered with moderation model {}, not {}: held, not passed (ADR-0051)", version, TAXONOMY_MAJOR)
+            throw ModeratorUnavailableException("Rekognition's moderation model is $version, not $TAXONOMY_MAJOR")
+        }
+        return Moderated.Found(findingsOf(response.moderationLabels()), modelVersion = version)
     }
 
     private fun refusal(refused: RekognitionException): Moderated.Refused {
@@ -101,8 +108,13 @@ internal class RekognitionImageModerator(
         /** Rekognition's own default, and the lowest threshold the policy reads (`ModerationPolicy`). */
         const val MIN_CONFIDENCE = 50f
 
-        /** The default region of the owner's ruling Q1. */
+        /** The region of the owner's ruling Q1, and the only one: what leaves the box goes to Frankfurt. */
         const val REGION = "eu-central-1"
+
+        /** The taxonomy whose labels [findingsOf] reads: moderation labels version 7. */
+        const val TAXONOMY_MAJOR = "7"
+
+        private val LOOPBACK = setOf("localhost", "127.0.0.1", "::1", "[::1]")
 
         private const val EXPLICIT = "Explicit"
         private const val GRAPHIC_VIOLENCE = "Graphic Violence"
@@ -136,6 +148,21 @@ internal class RekognitionImageModerator(
         fun create(properties: MediaModerationProperties.Rekognition): RekognitionImageModerator {
             val keyId = properties.accessKeyId
             val secret = properties.secretAccessKey
+            // Pinned (review of #113): the region is the ruling's, and only a test's stand-in server on this
+            // machine may stand in for AWS's endpoint. Anything else is refused at start, not obeyed.
+            require(properties.region == REGION) {
+                "Photo moderation runs in $REGION only (the owner's ruling Q1); moyi.media.moderation.rekognition.region " +
+                    "names ${properties.region}."
+            }
+            properties.endpoint?.let { endpoint ->
+                require(
+                    java.net.URI
+                        .create(endpoint)
+                        .host in LOOPBACK,
+                ) {
+                    "moyi.media.moderation.rekognition.endpoint is for a test's stand-in on this machine only; it names another host."
+                }
+            }
             require(!keyId.isNullOrBlank() && !secret.isNullOrBlank()) {
                 "Photo moderation is Rekognition (the default) but moyi.media.moderation.rekognition.access-key-id and " +
                     "secret-access-key are not both set. Set them (MOYI_MEDIA_MODERATION_REKOGNITION_…), or set " +

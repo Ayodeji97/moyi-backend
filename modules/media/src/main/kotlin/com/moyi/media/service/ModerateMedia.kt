@@ -12,6 +12,7 @@ import com.moyi.media.domain.ModerationVerdict
 import com.moyi.media.infra.database.MediaAssetStore
 import com.moyi.media.infra.database.ModerationLog
 import com.moyi.media.infra.moderation.ImageModerator
+import com.moyi.media.infra.moderation.KnownImageCandidate
 import com.moyi.media.infra.moderation.KnownImageMatcher
 import com.moyi.media.infra.moderation.Moderated
 import com.moyi.media.infra.moderation.VoiceModerator
@@ -47,10 +48,14 @@ import java.time.temporal.ChronoUnit
  * made) is a refusal the same bytes would meet again: kept back for the
  * operator (`QUARANTINED`, `UNMODERATABLE`), never `FAILED`, never passed.
  *
- * **No lock is held while a moderator is asked**, as `media.process` holds none
- * while it decodes: the verdict is recorded under the row lock afterwards, and
- * only if the asset still needs one (deleted, erased or moderated meanwhile:
- * nothing is recorded).
+ * **No lock on the asset is held while a moderator is asked**, as
+ * `media.process` holds none while it decodes: the verdict is recorded under
+ * the row lock afterwards, and only if the asset still needs one (deleted,
+ * erased or moderated meanwhile: nothing is recorded). The delivery's own row
+ * lock and its pooled connection *are* held throughout, as every consumer's
+ * are (ADR-0035): the fetch (3 s at most), the conversion (10 s) and the
+ * vendor's call (15 s) are bounded to 28 s of the delivery's 60, and
+ * `ModerationBudgetTest` holds the sum (review of #113).
  *
  * Logs the asset's id, the verdict and the reason; never a key, a URL, a
  * byte, or what a vendor named.
@@ -104,7 +109,14 @@ internal class Moderation(
             }
 
             moderated is Moderated.Found -> {
-                val found = Findings(knownImage = false, findings = moderated.findings, moderator = moderator, matcher = matcher)
+                val found =
+                    Findings(
+                        knownImage = false,
+                        findings = moderated.findings,
+                        moderator = moderator,
+                        matcher = matcher,
+                        modelVersion = moderated.modelVersion,
+                    )
                 ModerationPolicy.decide(found) to found
             }
 
@@ -161,6 +173,7 @@ internal class Moderation(
                 "knownImages" to matcher,
                 "knownImage" to (found?.knownImage ?: false),
                 "reason" to decision.reason.name,
+                "modelVersion" to found?.modelVersion,
                 "findings" to found?.findings.orEmpty().map { mapOf("category" to it.category.name, "confidence" to it.confidence) },
             ),
         )
@@ -226,7 +239,7 @@ internal class ModerateImages(
                     moderation.decide(null, knownImage = false, moderator.name, matcher.name)
                 } else {
                     val bytes = Files.readAllBytes(jpeg)
-                    val known = matcher.matches(bytes)
+                    val known = matcher.matches(KnownImageCandidate(bytes, asset.checksumSha256))
                     moderation.decide(if (known) null else moderator.moderate(bytes), known, moderator.name, matcher.name)
                 }
             }

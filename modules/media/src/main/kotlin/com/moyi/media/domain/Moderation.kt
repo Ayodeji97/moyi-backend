@@ -47,6 +47,8 @@ internal data class Findings(
     val findings: List<Finding>,
     val moderator: String,
     val matcher: String,
+    /** The vendor's model or taxonomy version, for the record. */
+    val modelVersion: String? = null,
 )
 
 /** Why a verdict was given: kept in `moderation_scores` and the audit log, shown to nobody but the operator. */

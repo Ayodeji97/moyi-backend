@@ -93,7 +93,13 @@ internal class PurgeMedia(
             MediaReleases.MEDIA_DEMOTED -> {
                 val tierTwoPhoto = asset.kind == MediaKind.IMAGE && asset.tier == 2
                 check(tierTwoPhoto) { "A MediaDemoted event names an asset that is not a tier-2 photo." }
-                storage.delete(asset.demotedKey)
+                // Demotion takes only what has passed moderation, but a photo blocked after its demotion was
+                // published (a report, by hand) keeps its full variant as evidence too (review of #113).
+                if (asset.evidenceHeld) {
+                    log.info("Media {} is held as evidence; its full variant stays until the operator deletes it", asset.id)
+                } else {
+                    storage.delete(asset.demotedKey)
+                }
             }
 
             else -> {

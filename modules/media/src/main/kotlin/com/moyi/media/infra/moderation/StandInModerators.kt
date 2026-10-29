@@ -37,7 +37,7 @@ internal class StandInImageModerator : ImageModerator {
 internal class StandInKnownImageList : KnownImageMatcher {
     override val name: String = "stand-in"
 
-    override fun matches(jpeg: ByteArray): Boolean = Colour.mean(jpeg)?.isBlue == true
+    override fun matches(candidate: KnownImageCandidate): Boolean = Colour.mean(candidate.jpeg)?.isBlue == true
 }
 
 /** Finds nothing in any voice note: every one passes. Never in production, where `none` passes nothing. */

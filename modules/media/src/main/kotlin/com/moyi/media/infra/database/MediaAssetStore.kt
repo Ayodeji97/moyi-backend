@@ -273,7 +273,9 @@ internal class MediaAssetStore(
 
     /**
      * The demotion (D5, D-16): up to [limit] photos that are READY, attached,
-     * still tier 1, made more than [Retention.FULL_RESOLUTION] before [now],
+     * **passed by moderation** (D4, ADR-0051 decision 8: a photo not yet
+     * moderated keeps its full variant, so that one later found to be child
+     * abuse material has lost nothing of what is evidence), still tier 1, made more than [Retention.FULL_RESOLUTION] before [now],
      * and holding a display variant become tier 2, recording only that
      * variant and its size. Irreversible, so every condition is in the one
      * statement that picks and changes, under the row lock. Returns the ids it
@@ -295,6 +297,7 @@ internal class MediaAssetStore(
                   AND a.status = 'READY'
                   AND a.attached_entry_id IS NOT NULL
                   AND a.tier = 1
+                  AND a.moderation_verdict = 'PASSED'
                   AND a.ready_at < ?
                 ORDER BY a.ready_at
                 LIMIT ?

@@ -229,6 +229,8 @@ internal class MediaPurgeTest(
         val photo = readyPhoto()
         val upload = storageKeyOf(photo)
         attach(photo)
+        // Only what has passed moderation is demoted (D4, ADR-0051): as moderation would pass it.
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'PASSED', moderated_at = now() WHERE id = ?::uuid", photo)
 
         clock.advance(Duration.ofDays(91))
         lifecycle.demote(clock.instant(), LIMIT).changed shouldBe 1

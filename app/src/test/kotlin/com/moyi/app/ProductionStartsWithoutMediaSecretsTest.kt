@@ -73,6 +73,22 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     }
 
     /**
+     * ADR-0051 (review of #113): photos go to Rekognition in eu-central-1 and
+     * nowhere else. The application refuses another region and an endpoint
+     * other than a loopback test stand-in at start; the deployed file does not
+     * try either, as a plain value or as a secret.
+     */
+    @Test
+    fun `deploy-yml names no Rekognition region or endpoint, so eu-central-1 and AWS's own endpoint are what run`() {
+        val overrides = listOf("MOYI_MEDIA_MODERATION_REKOGNITION_REGION", "MOYI_MEDIA_MODERATION_REKOGNITION_ENDPOINT")
+        val named = overrides.filter { it in clear || it in secret }
+
+        withClue("config/deploy.yml overrides Rekognition's region or endpoint: $named") {
+            named shouldBe emptyList()
+        }
+    }
+
+    /**
      * ADR-0051: the stand-ins decide by colour (a photo that is not red passes)
      * and pass every voice note. A partner is shown what passes, so a stand-in
      * in production would show partners unmoderated media. None of the three

@@ -57,7 +57,7 @@ internal class MediaModerationConfigurationTest {
                 image.shouldBeInstanceOf<NoImageModeration>()
                 image.moderatesHere shouldBe false
                 context.getBean(VoiceModerator::class.java).moderatesHere shouldBe false
-                context.getBean(KnownImageMatcher::class.java).matches(byteArrayOf()) shouldBe false
+                context.getBean(KnownImageMatcher::class.java).matches(KnownImageCandidate(byteArrayOf(), "fake-sha")) shouldBe false
             }
     }
 
@@ -76,8 +76,8 @@ internal class MediaModerationConfigurationTest {
                 image.moderate(solid(Color(220, 20, 220))) shouldBe Moderated.Found(listOf(Finding(ModerationCategory.ADULT_NUDITY, 99.0)))
                 image.moderate(solid(Color(120, 160, 90))) shouldBe Moderated.Found(emptyList())
                 image.moderate(byteArrayOf(1, 2, 3)) shouldBe Moderated.Refused("UNREADABLE")
-                list.matches(solid(Color(20, 20, 220))) shouldBe true
-                list.matches(solid(Color(220, 20, 20))) shouldBe false
+                list.matches(KnownImageCandidate(solid(Color(20, 20, 220)), "fake-sha")) shouldBe true
+                list.matches(KnownImageCandidate(solid(Color(220, 20, 20)), "fake-sha")) shouldBe false
                 context.getBean(VoiceModerator::class.java).moderate(byteArrayOf(), 1_000) shouldBe Moderated.Found(emptyList())
             }
     }

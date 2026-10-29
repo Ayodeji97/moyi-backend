@@ -1,6 +1,7 @@
 package com.moyi.media.service
 
 import com.moyi.media.infra.moderation.ImageModerator
+import com.moyi.media.infra.moderation.KnownImageCandidate
 import com.moyi.media.infra.moderation.KnownImageMatcher
 import com.moyi.media.infra.moderation.Moderated
 import com.moyi.media.infra.moderation.VoiceModerator
@@ -51,12 +52,17 @@ internal class FakeImageModerator : ImageModerator {
 internal class FakeKnownImages : KnownImageMatcher {
     override val name: String = "fake-list"
 
-    @Volatile var answer: (ByteArray) -> Boolean = { false }
+    @Volatile var answer: (KnownImageCandidate) -> Boolean = { false }
+    val seen = CopyOnWriteArrayList<KnownImageCandidate>()
 
-    override fun matches(jpeg: ByteArray): Boolean = answer(jpeg)
+    override fun matches(candidate: KnownImageCandidate): Boolean {
+        seen += candidate
+        return answer(candidate)
+    }
 
     fun reset() {
         answer = { false }
+        seen.clear()
     }
 }
 

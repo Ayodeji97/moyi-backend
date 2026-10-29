@@ -119,8 +119,11 @@
 # fresh database that applied 35 migrations to V36, against its own compose project (moyi-d4:
 # Postgres 55449, Valkey 63809, MinIO 59018), the jar booted by hand (local profile, the stand-in
 # moderators) on libvips 8.18.7 and ffmpeg 9.0.2, and --attach: 1194 passed, 0 failed, 0 skipped,
-# 32 sections (an earlier run had one failure, the reveal push's log-line count, a timing flake that
-# passed in the runs before and after it). D3 last run
+# 32 sections. Again after the review of #113 (7730439 and its fixes), on a fresh database, the
+# same way: 1194 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the
+# race). The reveal push's log-line count that once found 0, and reminders left REQUESTED, were a
+# stray jar of the author's on the same database taking the deliveries (its jar file replaced under
+# it: NoClassDefFoundError), not the code; the probe now polls and says what it saw. D3 last run
 # on 2026-10-29, after main (d2429fc D2, 66032c0 D5) was merged in, from a jar of
 # that merge, on a fresh database that applied 34 migrations to V35, against its own
 # compose project (moyi-d3: Postgres 55443, Valkey 63803, MinIO 59006), the jar
@@ -2404,8 +2407,19 @@ for _ in $(seq 1 40); do
 done
 db_is "reveal push: one push SENT to each member, and no more" "$NR_SENT" "2|2"
 db_is "reveal push: …each under its reveal key" "$(sql "SELECT count(*) FROM notifications n JOIN bond_days d ON n.dedupe_key = 'reveal:' || d.id || ':' || n.user_id WHERE n.bond_id = '$NB_BOND' AND n.category = 'REVEAL'")" "2"
-NR_LOGGED="$(grep -c "Push NOT sent (provider=log): category=REVEAL bond=$NB_BOND" "$MOYI_LOG" || true)"
-if [ "$NR_LOGGED" = "2" ]; then pass "reveal push: two sends logged by the logging provider"; else fail "reveal push: two sends logged by the logging provider" "found $NR_LOGGED"; fi
+# The ledger's SENT is committed by the delivery that logged the send, so the lines are written by
+# now; but a log appender may hand them to the file a moment later. Polled, never loosened: two
+# lines exactly. On a failure, what the ledger and the log said (the smoke run of D4 once saw 0).
+NR_LOGGED=0
+for _ in $(seq 1 20); do
+  NR_LOGGED="$(grep -c "Push NOT sent (provider=log): category=REVEAL bond=$NB_BOND" "$MOYI_LOG" || true)"
+  [ "$NR_LOGGED" = "2" ] && break
+  sleep 0.5
+done
+if [ "$NR_LOGGED" = "2" ]; then pass "reveal push: two sends logged by the logging provider"
+else
+  fail "reveal push: two sends logged by the logging provider" "found $NR_LOGGED; the ledger said $NR_SENT; lines: $(grep "Push NOT sent (provider=log)" "$MOYI_LOG" | grep -o "category=[A-Z_]* bond=[0-9a-f-]*" | tail -6 | tr '\n' ' ')"
+fi
 db_is "reveal push: no solo, milestone or streak push came of it" "$(sql "SELECT count(*) FROM notifications WHERE bond_id = '$NB_BOND' AND category NOT IN ('REMINDER', 'PARTNER_JOINED', 'REVEAL')")" "0"
 if grep -q "$NR_WORDS" "$MOYI_LOG"; then fail "reveal push: her words are in no log line" "found in $MOYI_LOG"; else pass "reveal push: her words are in no log line"; fi
 if grep -q "$NR_TOKEN" "$MOYI_LOG"; then fail "reveal push: his token is in no log line" "found in $MOYI_LOG"; else pass "reveal push: his token is in no log line"; fi
@@ -2455,7 +2469,11 @@ UNSIGNED_STATUS="$(curl -s -o /dev/null -w '%{http_code}' "${MEDIA_URL%%\?*}")"
 MEDIA_KEY="$(uuidgen)"
 expect "media: completing after the PUT is 200 UPLOADED" 200 '"status":"UPLOADED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS" -H "Idempotency-Key: $MEDIA_KEY"
 db_is "media: …and one MediaUploaded event was recorded" "$(sql "SELECT count(*) FROM outbox_events WHERE event_type='MediaUploaded' AND aggregate_id='$MEDIA_ID'")" "1"
-expect "media: the same key again is a replay" 200 '"status":"UPLOADED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS" -H "Idempotency-Key: $MEDIA_KEY"
+# The replay answers with the asset as it is now, and since D3 a voice note is processed: by the
+# time the key is sent again, media.process may already have taken it up (PROCESSING) or failed
+# these 32 made-up bytes (FAILED). Seen in D4's smoke runs once the outbox poller was no longer
+# slowed by a stray process. The replay is the same asset, answered 200 and marked as a replay.
+expect "media: the same key again is a replay of the same asset" 200 "\"id\":\"$MEDIA_ID\"" -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS" -H "Idempotency-Key: $MEDIA_KEY"
 header_is "media: …marked as one" Idempotency-Replayed true
 expect "media: completion without an Idempotency-Key is 422" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS"
 expect "media: the owner reads it" 200 '"kind":"VOICE"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
@@ -2768,7 +2786,11 @@ is "moderation: …and the passed voice note READY, with its length" "$(python3 
 if [ "$PSQL_OK" = 1 ]; then
   MO_LIST="$(quarantine list 2>&1)"
   case "$MO_LIST" in *"$MO_RED"*EXTREME_VIOLENCE*) pass "moderation: the operator's list shows the quarantined photo and why";; *) fail "moderation: quarantine list" "${MO_LIST:0:300}";; esac
-  case "$MO_LIST" in *"$MO_KNOWN"*BLOCKED*KNOWN_IMAGE*) pass "moderation: …and the blocked one";; *) fail "moderation: quarantine list, blocked" "${MO_LIST:0:300}";; esac
+  is "moderation: the list's header names its seven columns, verdict first" \
+    "$(printf '%s\n' "$MO_LIST" | head -1)" "$(printf 'verdict\tmediaId\tkind\tstatus\treason\tattached\tmoderatedAt')"
+  if printf '%s\n' "$MO_LIST" | grep "$MO_KNOWN" | grep -q "^BLOCKED.*KNOWN_IMAGE.*DO NOT VIEW — runbook §2$"; then
+    pass "moderation: …and the blocked one, marked DO NOT VIEW"
+  else fail "moderation: quarantine list, blocked" "${MO_LIST:0:400}"; fi
   case "$MO_LIST" in *"$MO_NUDE"*) fail "moderation: …and nothing that passed" "the nude photo is listed";; *) pass "moderation: …and nothing that passed";; esac
   if MO_OUT="$(quarantine release "$MO_KNOWN" "smoke: trying" 2>&1)"; then fail "moderation: releasing a blocked asset is refused" "it was released: $MO_OUT"
   else case "$MO_OUT" in *"never released"*) pass "moderation: releasing a blocked asset is refused, never released (Q16)";; *) fail "moderation: release refused" "$MO_OUT";; esac; fi

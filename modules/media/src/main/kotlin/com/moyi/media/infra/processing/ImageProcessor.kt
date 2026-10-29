@@ -39,14 +39,23 @@ internal interface ImageProcessor {
     /**
      * The display variant at [webp] (ours, made by [encode]) as a JPEG in
      * [workDir], for the moderator, which reads JPEG and PNG and not WebP
-     * (ADR-0051). Null when it cannot be made: a refusal the same file would
-     * meet again, which moderation answers by holding the photo back.
+     * (ADR-0051). Null when libvips read the file and refused it: a refusal the
+     * same file would meet again, which moderation answers by holding the
+     * photo back. **Throws [ConversionUnavailableException]** when the program
+     * ran out of time (a loaded machine, not the file), and whatever starting
+     * the program throws: those are outages, retried, never a verdict
+     * (review of #113).
      */
     fun jpegForModeration(
         webp: Path,
         workDir: Path,
     ): Path?
 }
+
+/** The moderation copy could not be made for a reason that is not the file's: retried, as a storage outage is. */
+internal class ConversionUnavailableException(
+    message: String,
+) : RuntimeException(message)
 
 /** What [ImageProcessor.encode] made of a photo. */
 internal sealed interface Encoding {

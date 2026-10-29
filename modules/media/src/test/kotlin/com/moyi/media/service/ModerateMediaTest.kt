@@ -1,6 +1,7 @@
 package com.moyi.media.service
 
 import com.moyi.common.events.OutboxDispatcher
+import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.MutableClock
 import com.moyi.media.api.ImageViewStatus
@@ -17,6 +18,7 @@ import com.moyi.media.infra.moderation.ModeratorUnavailableException
 import com.moyi.media.infra.moderation.NoImageModeration
 import com.moyi.media.infra.moderation.NoKnownImageList
 import com.moyi.media.infra.moderation.NoVoiceModeration
+import com.moyi.media.infra.processing.ConversionUnavailableException
 import com.moyi.media.infra.processing.ImageProcessor
 import com.moyi.media.infra.processing.ProcessingOff
 import com.moyi.media.infra.processing.TestImages
@@ -35,6 +37,7 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.extension.ExtendWith
 import org.junit.jupiter.api.io.TempDir
 import org.springframework.beans.factory.annotation.Autowired
@@ -198,6 +201,57 @@ internal class ModerateMediaTest(
         json.readTree(client.get(ada, photo.toString()).contentAsString)["url"].isNull shouldBe true
         quarantinedCount("IMAGE", "BLOCKED") shouldBe before + 1
         audit(photo) shouldBe listOf("BLOCKED|moderation:fake|KNOWN_IMAGE")
+    }
+
+    /**
+     * The list is given what a vendor may match on (review of #113): the JPEG
+     * a perceptual matcher reads, and the SHA-256 of the bytes the phone
+     * uploaded, which an exact list matches, kept after the original is gone.
+     */
+    @Test
+    fun `the known-image list is given the display JPEG and the upload's own SHA-256`() {
+        val photo = readyPhoto(TestImages.jpeg(400, 300))
+
+        moderateAll()
+
+        val candidate = knownImages.seen.single()
+        candidate.uploadSha256 shouldBe jdbc.queryForObject("SELECT checksum FROM media_assets WHERE id = ?", String::class.java, photo)
+        ImageFormat.of(candidate.jpeg) shouldBe ImageFormat.JPEG
+        candidate.toString() shouldNotContain candidate.uploadSha256
+    }
+
+    /** What gave the verdict is kept with it: the vendor's model version (review of #113). */
+    @Test
+    fun `the moderator's model version is kept with the verdict`() {
+        moderator.answer = { Moderated.Found(emptyList(), modelVersion = "7.0") }
+        val photo = readyPhoto(TestImages.jpeg(400, 300))
+
+        moderateAll()
+
+        scores(photo) shouldContain "\"modelVersion\": \"7.0\""
+    }
+
+    /**
+     * Review of #113: a conversion that runs out of time is the machine's, not
+     * the photo's. It is thrown, the delivery is retried, and the photo is never
+     * held back for it.
+     */
+    @Test
+    fun `a moderation copy that runs out of time is an outage, thrown, and gives no verdict`() {
+        val photo = readyPhoto(TestImages.jpeg(400, 300))
+        val slow =
+            object : ImageProcessor by imageProcessor {
+                override fun jpegForModeration(
+                    webp: Path,
+                    workDir: Path,
+                ): Path = throw ConversionUnavailableException("ran out of time")
+            }
+        val event = ReceivedEvent(UUID.randomUUID(), "Media", photo, "MediaReady", mapOf("mediaId" to photo), clock.instant())
+
+        assertThrows<ConversionUnavailableException> { ModerateImages(moderation, slow, moderator, knownImages).handle(event) }
+
+        row(photo)["moderation_verdict"].shouldBeNull()
+        row(photo)["status"] shouldBe "READY"
     }
 
     @Test

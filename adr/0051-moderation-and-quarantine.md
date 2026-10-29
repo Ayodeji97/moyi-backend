@@ -45,13 +45,26 @@ declare no event type and claim nothing. So:
   D2's attempt-cap rule is kept in its intent: only what the asset itself could cause counts. Here
   that is a moderator's refusal of the bytes (`InvalidImageFormatException`, `ImageTooLarge`,
   `InvalidParameter`) or the JPEG not being made from our own WebP, and those hold the asset back
-  for a person (`QUARANTINED`, reason `UNMODERATABLE`), never `FAILED` and never passed. No cap is
-  needed: the one step that reads our own bytes runs in the sandbox under its time limit, and an
-  HTTP call cannot kill the process.
-- **No lock while the vendor is asked**, as `media.process` holds none while it decodes. The verdict
-  is recorded under the row lock afterwards, only on an asset still `READY` with no verdict: one
-  deleted, erased or released meanwhile gets none (`ModerateMediaTest` deletes the photo from
-  another thread inside the moderator's call; with a lock held it would wait for ever).
+  for a person (`QUARANTINED`, reason `UNMODERATABLE`), never `FAILED` and never passed. **A
+  conversion that runs out of time, or a program that cannot be started, is the machine's, not the
+  file's** (review of #113): `ConversionUnavailableException` or the start's own exception is
+  thrown and retried like an outage. Only libvips reading the file and refusing it is a refusal. No
+  cap is needed: the one step that reads our own bytes runs in the sandbox under its time limit,
+  and an HTTP call cannot kill the process.
+- **No lock on the asset while the vendor is asked**, as `media.process` holds none while it
+  decodes. The verdict is recorded under the asset's row lock afterwards, only on an asset still
+  `READY` with no verdict: one deleted, erased or released meanwhile gets none (`ModerateMediaTest`
+  deletes the photo from another thread inside the moderator's call; with the asset's row locked
+  it would wait).
+- **But the delivery's own row lock and a pooled connection are held throughout**, as for every
+  consumer (ADR-0035): the handler runs in the delivery's transaction. (An earlier draft said "no
+  lock" without that qualification; the review of #113 corrected it.) So the whole of one
+  moderation is bounded, well inside the delivery's 60 s: the fetch of the display variant (the
+  storage's 3 s per call), the conversion (10 s, `VipsImageProcessor.MODERATION_CONVERSION_TIMEOUT`,
+  below a photo's 40 s) and Rekognition's call (15 s, retries included; 7 s an attempt): **28 s**,
+  held by `ModerationCopyTest`. A known-image vendor, when wired, takes its bound from the 32 s
+  left. One delivery at a time per process (ADR-0050's known limit): a slow vendor delays the
+  worker's other deliveries by up to that bound per photo.
 
 **2. The verdict is one pure rule** (`ModerationPolicy`), over findings in this system's words
 (`CSAM`, `EXTREME_VIOLENCE`, `ADULT_NUDITY`), never a vendor's label:
@@ -90,7 +103,18 @@ Throttling, provisioned throughput, Rekognition's 5xx, a timeout, a network fail
 else not the bytes' fault (a refused credential, a missing permission) are outages: a
 misconfiguration holds photos back visibly (the outbox's dead-letter gauge) rather than
 quarantining every one. Logged by class and status, never AWS's message. `moderation_scores`
-keeps who looked, our categories with their confidences, and the reason; never a vendor label.
+keeps who looked, our categories with their confidences, the reason and **the vendor's
+`ModerationModelVersion`**; never a vendor label.
+
+**Taxonomy drift fails closed** (review of #113). The labels read are version 7's. An answer from
+any other major version (or none) is an outage: retried, logged at ERROR, and visible in the
+outbox's failing deliveries, never read as version 7, where a renamed label would pass what it no
+longer names. Changing the mapping and `TAXONOMY_MAJOR` together is how a new version is taken.
+
+**The region and the endpoint are pinned** (review of #113): `eu-central-1` only, a property that
+names another region is refused at start; an endpoint override is accepted only on a loopback
+address (a test's stand-in server), any other host refused at start; `config/deploy.yml` names
+neither (`ProductionStartsWithoutMediaSecretsTest`).
 
 Price, verified 2026-10-29 from the AWS price list (offer file of 2026-09-11, eu-central-1,
 `EUC1-Group2-ImagesProcessed`): **$0.0012 an image** for the first million a month (the pricing
@@ -98,8 +122,18 @@ page's $0.0010 is us-east-1's), so **about $2.40 a month at 2,000 photos**; 1,00
 the first 12 months on an older account. Q1's "~$2" holds.
 
 **3. The known-image list is a port with no vendor yet** (`KnownImageMatcher`, `none` by default and
-in production; a `stand-in` for local runs). Asked before the classifier, on the same JPEG; a match
-is `BLOCKED`. The realistic options for a small EU operator, researched 2026-10-29, none signed up to:
+in production; a `stand-in` for local runs). Asked before the classifier; a match is `BLOCKED`. It
+is given a `KnownImageCandidate` (review of #113): **the display JPEG**, which a perceptual matcher
+reads (PhotoDNA and Arachnid Shield's perceptual hashes survive the resize and re-encode), and **the
+SHA-256 of the bytes the phone uploaded**, declared, signed and verified before the original was
+deleted and kept on the row, which an exact list matches if it carries SHA-256. A list that carries
+only MD5 or SHA-1 of known files needs those of the original, which are not computed or kept today:
+`media.process` would compute them as it fetches the upload (it already reads every byte through a
+digest) and keep them, in the same change that wires such a vendor. No perceptual hash is computed
+here: PDQ or PhotoDNA hashing needs a vendor's library or service. What each candidate needs:
+PhotoDNA, the image (its service hashes it); Arachnid Shield, the image or its hashes (SHA-1, MD5,
+PhotoDNA); Safer, its own client-side hashes (PDQ, MD5) from its SDK; IWF, MD5/PhotoDNA of the
+original. The realistic options for a small EU operator, researched 2026-10-29, none signed up to:
 
 | Option | Fits Moyi? | Cost | What the owner must do |
 |---|---|---|---|
@@ -148,11 +182,11 @@ slice does not choose**: the port, the stand-in, the consumer and its tests are 
 `PASSED`, `QUARANTINED` and outage paths are tested with a fake), and the owner rules (open question
 3). Until then production's partners hear no voice note, which is where D3 left them.
 
-**6. Quarantine without a console.** The operator's three commands are database functions (V36),
-so the rules are written once: `media_quarantine_list`, `_release`, `_delete`, each writing its own
+**6. Quarantine without a console.** The operator's commands are database functions (V36),
+so the rules are written once: `media_quarantine_list`, `_release`, `_delete`, `_hold`, `_block`, each writing its own
 row in **`media_moderation_log`**, the table the Phase 5 console will read (every verdict
 moderation gives is written there too, by `moderation:<provider>`). `scripts/moyi media quarantine
-list|release|delete` names which to run, through `docker exec -i moyi-postgres psql` on the server
+list|release|delete|hold|block` names which to run, through `docker exec -i moyi-postgres psql` on the server
 (or `MOYI_OPS_PSQL`), with `MOYI_OPERATOR` naming who acts and a note required on every decision.
 The spec's **[inferred]** item, "`scripts/moyi` can carry this, as it does other operator
 commands", **did not hold**: `scripts/moyi` was a member's HTTP client with no operator command.
@@ -163,24 +197,58 @@ The quarantine command is its first, and the one that talks to the database (its
   outbox's two inserts, at READ COMMITTED, as `JdbcEventPublisher` makes them;
   `MediaQuarantineCommandsTest` runs the real `media.purge` against it), so the objects go as every
   deleted asset's do (ADR-0050).
-- **`BLOCKED` is final, in the database**: a trigger refuses any update that takes the verdict off
-  or makes a blocked asset anything but `QUARANTINED` or `DELETED`, whoever issues it; the release
-  function refuses and records `RELEASE_REFUSED`.
+- **Hold and block** (review of #113): the runbook's own steps for a member's report are functions
+  too, `media_quarantine_hold` (a `READY` asset held back, reason `REPORTED`) and
+  `media_quarantine_block` (made `BLOCKED` and held as evidence, whether ready, held back, or
+  deleted to its owner with its objects not yet purged), so a hand-written statement cannot drift
+  from the constraints. `moyi media quarantine hold|block`.
+- **The list** prints the function's seven columns in its order, **verdict first**, under a header
+  that names them, and a `BLOCKED` row ends `DO NOT VIEW — runbook §2` (review of #113: a blocked
+  row once read as `QUARANTINED`, the kind the runbook asks the operator to look at).
+- **`BLOCKED` is final, and its evidence held, in the database**, whoever writes the row
+  (`BEFORE INSERT OR UPDATE` and `BEFORE DELETE` triggers; the review of #113's four attacks, each
+  with a test that went red without its guard):
+  1. a verdict that becomes `BLOCKED`, by update or insert, sets `evidence_held` and the status
+     `QUARANTINED` (or keeps `DELETED`), whatever the statement said;
+  2. the verdict is never taken off, the status is only `QUARANTINED` or `DELETED`, and a deleted
+     blocked asset is never brought back;
+  3. `evidence_held` is cleared only inside `media_quarantine_delete`, which turns a
+     transaction-local setting (`moyi.evidence_release`) on for its own statement and off again.
+     Someone at psql who sets it by hand can clear a hold, as one who can drop the trigger can:
+     these stop a mistake or a script, not the database's owner;
+  4. a held row is never removed.
+  The release function refuses `BLOCKED` and records `RELEASE_REFUSED`.
 
 **7. Child abuse material is kept as evidence** (`evidence_held`, set with `BLOCKED`). Whoever
 deletes it (its owner's `DELETE`, an erasure, the reaper) it is `DELETED` to them, as anything
 deleted is; but `media.purge` and the owner's best-effort delete leave its objects, until the
 operator, after the report the runbook requires, runs `delete`, which clears the hold and publishes
 `MediaReleased` again. `ops/monitoring/media-check.sh` fails at once while anything is held, and no
-longer counts a held asset as "unpurged".
+longer counts a held asset as "unpurged". A demotion's purge leaves a held photo's full variant too
+(review of #113: a photo blocked after its demotion was published).
 
 **8. The rest of the lifecycle.** An unattached `QUARANTINED` asset is reaped a day after the latest
 of its creation, readiness and detachment, like a `READY` one (ADR-0050's owed question). A
 held-back asset cannot be claimed by an entry (the claim takes `READY` only, FR-044a); its owner's
 `GET /media/{id}` says `QUARANTINED`, so a client can say it will not be shared before it is sent.
-Demotion stays `READY`-only: a quarantined photo keeps its full variant until it is released (then
-demoted on its next night) or deleted. A tier-2 photo is moderated on the display variant it still
-has.
+**Demotion takes only what has `PASSED`** (review of #113), not every `READY` photo. Demotion
+deletes the full variant for good; a photo not yet moderated (a backlog while moderation is `none`,
+or a vendor outage of days) and later found to be child abuse material would have lost evidence.
+Of the two rules the review offered, "skip unless `PASSED` or moderation is `none`" and "only
+`PASSED`", this takes the second: one condition in the one statement that demotes, read from the
+row, with no configuration for the job to consult, and the cost of it is only that full variants
+wait (90 days and more) while nothing moderates, which in production means nothing is shown to a
+partner either. A quarantined photo keeps its full variant until it is released (then demoted on
+its next night) or deleted. A tier-2 photo is moderated on the display variant it still has.
+
+**Assets made `READY` before D4** have no `MediaReady`, and would never be moderated. V36 inserts
+one for each `READY` asset with no verdict that has none (the moderation consumers subscribe from
+the beginning, so they are handed them). Production has none; the statement makes it correct where
+some exist, and adds nothing when run again (`MediaReadyBackfillTest` runs it twice).
+
+**The media check** also alarms, once moderation is on (`MEDIA_MODERATION_ON=1`), on anything
+`READY` without a verdict for 30 minutes (FR-101, doc 11's pipeline bound), and on anything held
+back for the operator for more than `QUARANTINE_REVIEW_DAYS` (3 by default).
 
 **9. The takedown runbook** is `ops/moderation/takedown.md` (doc 09:32's "documented takedown and
 law-enforcement procedure"): reviewing the queue, the blocked path (do not view or copy; note what
@@ -236,9 +304,13 @@ table, three functions. No new error code. Two new consumers and one new event. 
 
 1. **CSAM classifier.** Rekognition has none. Accept hash matching alone (once wired), or add
    Thorn Safer (Match and Predict), which needs a contract?
-2. **The blocked author's view.** `NOT_SHARED` without the photo tells the author it was blocked
-   rather than quarantined. Acceptable, or should every held-back asset lose its URL (and Q10's
-   "the author still sees their own photo" be narrowed)?
+2. **The blocked author's view, a legal question as much as a product one.** `NOT_SHARED` without
+   the photo (and `GET /media/{id}` with no URL) tells the author it was blocked rather than held for
+   review, which sits against the runbook's "do not tell the uploader" (tipping off). Kept as built
+   on the coordinator's ruling of 2026-10-29; the runbook says the API distinguishes the two. For
+   the owner, with legal advice, beside question 5: may the API tell an uploader that their upload
+   was blocked, or must every held-back asset look the same to its author (Q10's "the author still
+   sees their own photo" narrowed)?
 3. **Voice moderation** (decision 5): which option, or none (accept that voice notes are not
    automatically moderated, and pass them), and the cost and data path that comes with it.
 4. **Self-harm images**: quarantine them (Rekognition's `Self-Harm`) or let them through?

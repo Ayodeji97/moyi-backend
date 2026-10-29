@@ -17,7 +17,9 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldEndWith
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.string.shouldStartWith
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -72,9 +74,17 @@ internal class MediaQuarantineCommandsTest(
         val passed = rows.insert(owner = ada, createdAt = clock.instant())
 
         val out = moyi("list").also { it.code shouldBe 0 }.out
+        val lines = out.lines()
 
-        out shouldContain "$violent\tIMAGE\tQUARANTINED\tQUARANTINED\tEXTREME_VIOLENCE\tf"
-        out shouldContain "$blocked\tIMAGE\tQUARANTINED\tBLOCKED\tKNOWN_IMAGE\tf"
+        // Review of #113: the header names the function's seven columns in its order, verdict first.
+        lines.first() shouldBe "verdict\tmediaId\tkind\tstatus\treason\tattached\tmoderatedAt"
+        val violentRow = lines.single { violent.toString() in it }
+        violentRow shouldStartWith "QUARANTINED\t$violent\tIMAGE\tQUARANTINED\tEXTREME_VIOLENCE\tf\t"
+        violentRow shouldNotContain "DO NOT VIEW"
+        // A BLOCKED row is child sexual abuse material: never viewed, and it says so on its own line.
+        val blockedRow = lines.single { blocked.toString() in it }
+        blockedRow shouldStartWith "BLOCKED\t$blocked\tIMAGE\tQUARANTINED\tKNOWN_IMAGE\tf\t"
+        blockedRow shouldEndWith "\tDO NOT VIEW — runbook §2"
         out shouldNotContain passed.toString()
         out shouldNotContain "in/" // no key
         audit(null) shouldContainExactly listOf("LISTED|op-fake-ada|")
@@ -160,7 +170,7 @@ internal class MediaQuarantineCommandsTest(
             it.err shouldContain "names nothing held back"
         }
         moyi("delete", "in/not-an-id", "note").code shouldBe 1
-        status(passed) shouldBe "READY|null"
+        status(passed) shouldBe "READY|PASSED"
     }
 
     @Test
@@ -198,7 +208,7 @@ internal class MediaQuarantineCommandsTest(
         stored(display(upload)) shouldBe true // held
         purgedAt(blocked) shouldBe false
         purgedAt(violent) shouldBe true
-        moyi("list").out shouldContain "$blocked\tIMAGE\tDELETED\tBLOCKED\tKNOWN_IMAGE"
+        moyi("list").out shouldContain "BLOCKED\t$blocked\tIMAGE\tDELETED\tKNOWN_IMAGE"
 
         moyi("delete", blocked.toString(), "reported: ref FAKE-0002").code shouldBe 0
         purge()
@@ -274,6 +284,164 @@ internal class MediaQuarantineCommandsTest(
             transactions.execute { attachments.claim(ada, id, AttachableKind.IMAGE, UUID.randomUUID()) } shouldBe false
         }
     }
+
+    // The four ways a person at psql could undo a hold (review of #113), each refused by the database itself.
+
+    @Test
+    fun `attack 1 - clearing the evidence hold by hand is refused`() {
+        val blocked = held("BLOCKED", "KNOWN_IMAGE")
+
+        assertThrows<DataAccessException> { jdbc.update("UPDATE media_assets SET evidence_held = false WHERE id = ?", blocked) }
+            .message
+            .shouldNotBeNull() shouldContain "held as evidence"
+
+        evidenceHeld(blocked) shouldBe true
+    }
+
+    @Test
+    fun `attack 2 - deleting a held row is refused`() {
+        val blocked = held("BLOCKED", "KNOWN_IMAGE")
+
+        assertThrows<DataAccessException> { jdbc.update("DELETE FROM media_assets WHERE id = ?", blocked) }
+            .message
+            .shouldNotBeNull() shouldContain "never removed"
+
+        evidenceHeld(blocked) shouldBe true
+    }
+
+    @Test
+    fun `attack 3 - a row made or set BLOCKED without its hold, or showable, is held and held back anyway`() {
+        val inserted = UUID.randomUUID()
+        jdbc.update(
+            """
+            INSERT INTO media_assets (id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, variants,
+                                      created_at, ready_at, moderation_verdict, moderated_at, evidence_held)
+            VALUES (?, ?, 'IMAGE', ?, 'image/jpeg', 1000, 'Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMDA=', 'READY', '[]'::jsonb,
+                    now(), now(), 'BLOCKED', now(), false)
+            """.trimIndent(),
+            inserted,
+            ada,
+            "in/${UUID.randomUUID()}",
+        )
+        val updated = rows.insert(owner = ada, createdAt = clock.instant())
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'BLOCKED', status = 'READY', evidence_held = false WHERE id = ?", updated)
+
+        for (id in listOf(inserted, updated)) {
+            status(id) shouldBe "QUARANTINED|BLOCKED"
+            evidenceHeld(id) shouldBe true
+            images.shownTo(bea, listOf(id)).getValue(id).status shouldBe ImageViewStatus.PROCESSING
+        }
+    }
+
+    @Test
+    fun `attack 4 - a blocked asset deleted to its owner is never brought back`() {
+        val blocked = held("BLOCKED", "KNOWN_IMAGE")
+        ownMedia.delete(ada, blocked)
+
+        assertThrows<DataAccessException> {
+            jdbc.update("UPDATE media_assets SET status = 'QUARANTINED', deleted_at = NULL WHERE id = ?", blocked)
+        }.message.shouldNotBeNull() shouldContain "never released"
+
+        status(blocked) shouldBe "DELETED|BLOCKED"
+        evidenceHeld(blocked) shouldBe true
+    }
+
+    /** The runbook's §3 for a member's report: hold it back, through a function, never a hand-written statement. */
+    @Test
+    fun `hold takes a reported ready photo from the partner, and only a ready one`() {
+        val photo = rows.insert(owner = ada, createdAt = clock.instant())
+        images.shownTo(bea, listOf(photo)).getValue(photo).status shouldBe ImageViewStatus.READY
+
+        moyi("hold", photo.toString(), "report: a third person's photo, 2026-10-29").let {
+            it.code shouldBe 0
+            it.out shouldContain "Held back"
+        }
+
+        status(photo) shouldBe "QUARANTINED|QUARANTINED"
+        images.shownTo(bea, listOf(photo)).getValue(photo).status shouldBe ImageViewStatus.PROCESSING
+        audit(photo) shouldContainExactly listOf("QUARANTINED|op-fake-ada|report: a third person's photo, 2026-10-29")
+        jdbc.queryForObject("SELECT moderation_scores ->> 'reason' FROM media_assets WHERE id = ?", String::class.java, photo) shouldBe
+            "REPORTED"
+        moyi("hold", photo.toString(), "again").let {
+            it.code shouldBe 1
+            it.err shouldContain "nothing ready to hold back"
+        }
+    }
+
+    @Test
+    fun `block holds reported material as evidence, ready, held back or deleted but not yet purged, and says what is gone`() {
+        val ready = rows.insert(owner = ada, createdAt = clock.instant())
+        val deleted = rows.insert(owner = ada, createdAt = clock.instant())
+        ownMedia.delete(ada, deleted)
+        val purged = rows.insert(owner = ada, createdAt = clock.instant())
+        ownMedia.delete(ada, purged)
+        purge()
+        // `deleted` was purged by that run too; put it back to "not yet purged", as a report a moment after an erasure finds it.
+        jdbc.update("UPDATE media_assets SET purged_at = NULL WHERE id = ?", deleted)
+
+        moyi("block", ready.toString(), "report: CSAM, 2026-10-29").out shouldContain "Blocked and held as evidence"
+        moyi("block", deleted.toString(), "report: CSAM, 2026-10-29").code shouldBe 0
+        moyi("block", purged.toString(), "report: CSAM, 2026-10-29").let {
+            it.code shouldBe 1
+            it.err shouldContain "already purged"
+        }
+
+        status(ready) shouldBe "QUARANTINED|BLOCKED"
+        status(deleted) shouldBe "DELETED|BLOCKED"
+        evidenceHeld(ready) shouldBe true
+        evidenceHeld(deleted) shouldBe true
+        moyi("list").out.lines().single { ready.toString() in it } shouldEndWith "DO NOT VIEW — runbook §2"
+        moyi("block", ready.toString(), "again").out shouldContain "Already blocked"
+    }
+
+    /**
+     * Review of #113: demotion deletes a photo's full variant. One not yet
+     * moderated keeps it, so that if it is then blocked (by moderation working
+     * through a backlog, or by a report) the evidence is whole; one that passed
+     * is demoted as before.
+     */
+    @Test
+    fun `demotion takes only what has passed, so a backlog blocked later keeps its full variant`() {
+        val longAgo = clock.instant().minus(Duration.ofDays(100))
+        val backlog =
+            rows.insert(
+                owner = ada,
+                createdAt = longAgo,
+                attachedTo = UUID.randomUUID(),
+                verdict = null,
+                upload = "in/${UUID.randomUUID()}",
+            )
+        val passed = rows.insert(owner = ada, createdAt = longAgo, attachedTo = UUID.randomUUID())
+
+        lifecycle.demote(clock.instant(), BUDGET).changed shouldBe 1
+
+        rows.tierOf(backlog) shouldBe 1
+        rows.tierOf(passed) shouldBe 2
+    }
+
+    /** And a photo blocked after its demotion was published keeps its full variant: the purge holds it (review of #113). */
+    @Test
+    fun `a demotion purged after the photo was blocked keeps its full variant`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val photo =
+            rows.insert(
+                owner = ada,
+                createdAt = clock.instant().minus(Duration.ofDays(100)),
+                attachedTo = UUID.randomUUID(),
+                upload = upload,
+            )
+        val full = "v/${upload.removePrefix("in/")}/full.webp"
+        putBehindTheApi(full, byteArrayOf(1, 2, 3))
+        lifecycle.demote(clock.instant(), BUDGET).changed shouldBe 1
+
+        moyi("block", photo.toString(), "report: CSAM, 2026-10-29").code shouldBe 0
+        purge()
+
+        stored(full) shouldBe true
+    }
+
+    private fun evidenceHeld(id: UUID): Boolean =
+        jdbc.queryForObject("SELECT evidence_held FROM media_assets WHERE id = ?", Boolean::class.java, id)!!
 
     private fun purge() {
         dispatcher.dispatchDue(Instant.now().plus(Duration.ofDays(2)), BUDGET)

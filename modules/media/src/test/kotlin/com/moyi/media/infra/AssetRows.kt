@@ -30,6 +30,7 @@ internal class AssetRows(
         withDisplay: Boolean = true,
         withVariants: Boolean = status == "READY",
         upload: String = "in/${UUID.randomUUID()}",
+        verdict: String? = if (status == "READY") "PASSED" else null,
     ): UUID {
         val id = UUID.randomUUID()
         val random = upload.removePrefix("in/")
@@ -46,9 +47,9 @@ internal class AssetRows(
             """
             INSERT INTO media_assets (id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, variants,
                                       width, height, attached_entry_id, tier, created_at, ready_at, expires_at, detached_at,
-                                      deleted_at)
+                                      deleted_at, moderation_verdict, moderated_at)
             VALUES (?, ?, ?, ?, 'image/jpeg', 1000, 'Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMDA=', ?, ?::jsonb,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """.trimIndent(),
             id,
             owner,
@@ -65,6 +66,8 @@ internal class AssetRows(
             expiresAt?.let(Timestamp::from),
             detachedAt?.let(Timestamp::from),
             if (status == "DELETED") Timestamp.from(createdAt) else null,
+            verdict,
+            verdict?.let { Timestamp.from(createdAt) },
         )
         return id
     }

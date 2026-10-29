@@ -75,20 +75,27 @@ internal data class MediaModerationProperties(
     internal data class Rekognition(
         val accessKeyId: String? = null,
         val secretAccessKey: String? = null,
+        /** eu-central-1, and only it: anything else is refused at start (Q1). Not a setting, but checked as one. */
         @field:NotBlank
         val region: String = RekognitionImageModerator.REGION,
-        /** Only for a test's stand-in server; never set in a deployment. */
+        /** Only for a test's stand-in server on this machine (a loopback address); any other host is refused at start. */
         val endpoint: String? = null,
         val connectTimeout: Duration = DEFAULT_CONNECT_TIMEOUT,
         val readTimeout: Duration = DEFAULT_READ_TIMEOUT,
-        /** The whole call, retries included: well inside the delivery's minute (ADR-0035). */
+        /**
+         * The whole call, retries included. With the fetch of the display
+         * variant (the storage's 3 s) and its conversion
+         * ([com.moyi.media.infra.processing.VipsImageProcessor.MODERATION_CONVERSION_TIMEOUT],
+         * 10 s), 28 s of the delivery's 60 (ADR-0035), held with the delivery's
+         * row lock and a pooled connection (ADR-0051 decision 1).
+         */
         val apiCallTimeout: Duration = DEFAULT_API_CALL_TIMEOUT,
         val apiCallAttemptTimeout: Duration = DEFAULT_READ_TIMEOUT,
     ) {
         private companion object {
             val DEFAULT_CONNECT_TIMEOUT: Duration = Duration.ofSeconds(2)
-            val DEFAULT_READ_TIMEOUT: Duration = Duration.ofSeconds(8)
-            val DEFAULT_API_CALL_TIMEOUT: Duration = Duration.ofSeconds(20)
+            val DEFAULT_READ_TIMEOUT: Duration = Duration.ofSeconds(7)
+            val DEFAULT_API_CALL_TIMEOUT: Duration = Duration.ofSeconds(15)
         }
 
         /** The generated one would print the secret. */

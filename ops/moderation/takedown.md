@@ -13,7 +13,7 @@ name. Every look and every decision is written to `media_moderation_log`, under 
 ```
 ssh root@91.98.71.136
 export MOYI_OPERATOR=daniel           # who is acting; recorded with every command
-moyi media quarantine list            # what is held back: id, kind, verdict, reason, attached?, when
+moyi media quarantine list            # what is held back: verdict, id, kind, status, reason, attached?, when
 ```
 
 (`moyi` is `scripts/moyi` from a checkout of this repository on the server, or copied there. It
@@ -31,13 +31,23 @@ reaches the database through `docker exec -i moyi-postgres psql`; nothing else i
 The partner is never told "removed" (Q10), and the author is never told why (Q10). Do not contact
 either member about a quarantine except as section 4 says.
 
+**But the API does tell the author which of the two it is.** A quarantined photo is "not shared" to
+its author *with* the photo; a blocked one *without* it, and `GET /media/{id}` says `QUARANTINED` and
+gives no URL. An author who uploaded child abuse material can therefore tell that it was blocked
+rather than held for review. That sits against section 2's "do not tell the uploader"; it is an open
+question for the owner, with legal advice (ADR-0051, open question 2), and the API is not changed
+until it is answered.
+
+**In the list, the verdict comes first, and a `BLOCKED` row ends `DO NOT VIEW — runbook §2`.** Look
+only at `QUARANTINED` rows (section 1). Never open a `BLOCKED` one.
+
 ## 1. Something is QUARANTINED (extreme violence, or nothing could moderate it)
 
 Not urgent: nobody but its author can see it. Look at the queue once a day while it is not empty.
 
 1. `moyi media quarantine list`.
-2. To decide, you have to see it. The photo is its author's and private; look only at the one you are
-   deciding on. Get its display variant's key from the row
+2. To decide, you have to see it, **if its verdict is `QUARANTINED`** (never a `BLOCKED` row: section
+   2). The photo is its author's and private; look only at the one you are deciding on. Get its display variant's key from the row
    (`SELECT storage_key FROM media_assets WHERE id = '<id>'`, then `v/<the part after in/>/display.webp`)
    and fetch it with the R2 dashboard. Do not save a copy.
 3. Decide:
@@ -106,16 +116,21 @@ does:
    gives the id. Check the reporter is a member of that bond: a report about a bond you are not in
    is not a report about this media.
 2. **Non-consensual or third-party intimate imagery** (Q16: no classifier can judge consent):
-   hold it back at once by deleting it (`moyi media quarantine delete` refuses anything not held
-   back; for a PASSED asset, set it QUARANTINED first:
-   `UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = 'QUARANTINED' WHERE id = '<id>' AND status = 'READY';`
-   then `moyi media quarantine delete <id> "report: NCII, <date>"`). Tell the reporter it is gone,
-   and nothing else. The author's own withdraw/erase (D5) remains open to them.
-3. Child sexual abuse material: as section 2, from step 1; set it `BLOCKED` first
-   (`UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = 'BLOCKED', evidence_held = true, moderated_at = now() WHERE id = '<id>';`)
-   so that nothing can release it and nothing purges it. (The database sets `evidence_held` with
-   `BLOCKED` even if the statement leaves it out; it is written here so the statement says what it
-   does.) The media check then fails, as it should, until the report is made.
+   hold it back at once, then delete it:
+   `moyi media quarantine hold <id> "report: NCII, <date>"`, then
+   `moyi media quarantine delete <id> "report: NCII, <date>"`. `hold` takes a `READY` asset only
+   (one already held back needs none; go straight to `delete`), sets the verdict, its time and the
+   reason `REPORTED`, and records who and why. Tell the reporter it is gone, and nothing else. The
+   author's own withdraw/erase (D5) remains open to them.
+3. Child sexual abuse material: `moyi media quarantine block <id> "report: <date>"` first, then section
+   2 from step 1. `block` makes it `BLOCKED` and holds it as evidence, whether it is ready, held back,
+   or already deleted to its owner with its objects not yet purged; it says `GONE` if they are. From
+   then nothing can release it and nothing purges it (the database holds both, ADR-0051 decision 6),
+   and the media check fails, as it should, until the report is made and the operator deletes it.
+
+   Do not write these as statements of your own: `hold` and `block` are the database's functions, so
+   they cannot drift from its constraints, and they are tested against a migrated database
+   (`MediaQuarantineCommandsTest`).
 4. Anything else: decide as section 1.
 
 ## 4. A law-enforcement request

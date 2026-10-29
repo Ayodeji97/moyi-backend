@@ -42,8 +42,31 @@ internal interface KnownImageMatcher {
     /** Which list was consulted, for the record; `none` when no list is. */
     val name: String
 
-    /** Whether [jpeg] matches a known image. Throws [ModeratorUnavailableException] for an outage. */
-    fun matches(jpeg: ByteArray): Boolean
+    /** Whether [candidate] matches a known image. Throws [ModeratorUnavailableException] for an outage. */
+    fun matches(candidate: KnownImageCandidate): Boolean
+}
+
+/**
+ * What a known-image list may match on (ADR-0051 decision 3), all of it this
+ * system has once the original is gone:
+ *
+ * - [jpeg], the display variant re-encoded as a JPEG: what a **perceptual**
+ *   matcher reads (PhotoDNA, Arachnid Shield's perceptual hashes, Safer's
+ *   PDQ-style matching), which survive resizing and re-encoding;
+ * - [uploadSha256], the SHA-256 (base64) of **the bytes the phone uploaded**,
+ *   declared, signed into the upload URL and verified by `media.process`
+ *   before the original was deleted: what an **exact** hash list matches, for
+ *   a list that carries SHA-256. Lists that carry only MD5 or SHA-1 of known
+ *   files would need those computed in `media.process` and kept (owed, when a
+ *   vendor that needs them is chosen).
+ *
+ * Neither is logged.
+ */
+internal class KnownImageCandidate(
+    val jpeg: ByteArray,
+    val uploadSha256: String,
+) {
+    override fun toString(): String = "KnownImageCandidate(<redacted>)"
 }
 
 /**
@@ -66,9 +89,14 @@ internal interface VoiceModerator {
 
 /** What a moderator made of what it was given. */
 internal sealed interface Moderated {
-    /** What it found, in this system's categories (none: nothing of concern). */
+    /**
+     * What it found, in this system's categories (none: nothing of concern),
+     * and the vendor's model or taxonomy version, if it says one, kept in
+     * `moderation_scores` so a verdict can be traced to what gave it.
+     */
     data class Found(
         val findings: List<Finding>,
+        val modelVersion: String? = null,
     ) : Moderated
 
     /** It cannot moderate these bytes, and would refuse them again; [why] is a word of ours. */
@@ -101,7 +129,7 @@ internal class NoImageModeration : ImageModerator {
 internal class NoKnownImageList : KnownImageMatcher {
     override val name: String = "none"
 
-    override fun matches(jpeg: ByteArray): Boolean = false
+    override fun matches(candidate: KnownImageCandidate): Boolean = false
 }
 
 /** No voice note is moderated in this process: none gets a verdict, so no partner hears one (ADR-0049 decision 7). */
