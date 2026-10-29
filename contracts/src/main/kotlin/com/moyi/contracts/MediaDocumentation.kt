@@ -51,7 +51,7 @@ private const val ENTRY_IMAGE_DESCRIPTION =
 
 private const val ENTRY_VOICE_DESCRIPTION =
     "An entry's voice note as the caller is played it. url and durationMs are present exactly when status is READY, " +
-        "to its author once it is transcoded, to the other member only once a ruling lets them; until then it is " +
+        "to its author once it is transcoded, to the other member only once it has passed moderation; until then it is " +
         "PROCESSING to them, whatever the reason. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), " +
         "valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a " +
         "credential for the voice note. durationMs is the length of what was transcoded, at most 61.1 seconds."

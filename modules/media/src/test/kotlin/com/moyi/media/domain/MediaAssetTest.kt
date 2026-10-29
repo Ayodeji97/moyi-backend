@@ -104,12 +104,12 @@ internal class MediaAssetTest {
     }
 
     /**
-     * Fail closed until the owner rules on FR-061 (ADR-0049 decision 7): the
+     * FR-061, the owner's ruling (ADR-0049 decision 7): the
      * partner hears a ready voice note as still processing, unless it carries
      * a verdict that lets them, which nothing gives a voice note yet.
      */
     @Test
-    fun `anyone else hears a ready voice note as processing until a ruling lets them`() {
+    fun `anyone else hears a ready voice note as processing until it has passed moderation`() {
         val voice = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200)
         voice.heardBy(owner = false) shouldBe MediaAsset.Heard.Processing
         pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, verdict = "QUARANTINED").heardBy(owner = false) shouldBe

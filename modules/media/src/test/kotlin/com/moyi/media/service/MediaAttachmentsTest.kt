@@ -175,7 +175,7 @@ internal class MediaAttachmentsTest(
     }
 
     /**
-     * Review of #111: fail closed until the owner rules on FR-061. Its owner
+     * FR-061, the owner's ruling: voice notes are moderated. Its owner
      * hears a ready voice note with a signed URL and its length; anybody else
      * hears it still processing, with neither.
      */

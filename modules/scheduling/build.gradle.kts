@@ -15,6 +15,10 @@ dependencies {
     // `notification.api.HeldPushes` and nothing else: the release of pushes
     // held by quiet hours (ADR-0045). The same "when, never what".
     implementation(projects.modules.notification)
+    // `media.api.MediaLifecycle` and nothing else: the reaper and the demotion
+    // (spec §4 D5, ADR-0050). The same "when, never what". `media` is a leaf,
+    // so this makes no cycle.
+    implementation(projects.modules.media)
     // OutboxDispatcher, for the poller: this module owns the trigger and the
     // meters, `common:events` the delivering (ADR-0035 decisions 7 and 8).
     implementation(projects.common.events)

@@ -106,6 +106,8 @@ internal class MediaAsset(
     val processingAttempts: Int = 0,
     /** A ready voice note's length in milliseconds (D3); on the asset only, never on the entry (spec D-10). */
     val durationMs: Int? = null,
+    /** 1 while a photo keeps its full-resolution variant, 2 once only the display variant is kept (D-16, D5). */
+    val tier: Int = 1,
 ) {
     /** A deleted asset is gone to its owner too: every route answers it as one that never existed. */
     val isGone: Boolean get() = status == MediaStatus.DELETED
@@ -140,6 +142,17 @@ internal class MediaAsset(
      * entry (D5's erasure); deleting it is `409 MEDIA_ATTACHED`.
      */
     val isDeletable: Boolean get() = attachedEntryId == null
+
+    /**
+     * The one key a photo's demotion gives up (D-16, D5): its full variant's,
+     * derived as [objectKeys] are, so `media.purge` finds it whether or not
+     * the row still records it. A released asset gives up all of [objectKeys].
+     */
+    val demotedKey: StorageKey
+        get() {
+            check(kind == MediaKind.IMAGE) { "only a photo is demoted" }
+            return StorageKey.forVariant(storageKey, ImageVariant.FULL)
+        }
 
     /**
      * Every key the storage may hold for this asset: its upload and, for a
@@ -209,8 +222,7 @@ internal class MediaAsset(
      * (on an entry, its author) hears it once it is [MediaStatus.READY].
      * **Anyone else** hears it only once it is ready and
      * [partnersMayHearIt]; until then it is still processing to them, with no
-     * URL and no length. Fail closed until the owner rules on FR-061
-     * (ADR-0049 decision 7, review of #111).
+     * URL and no length (ADR-0049 decision 7).
      */
     fun heardBy(owner: Boolean): Heard =
         when {
@@ -220,19 +232,18 @@ internal class MediaAsset(
         }
 
     /**
-     * **The one switch-point for who besides its owner hears a voice note.**
-     * FR-101 and Q1 name images, but FR-061 (03:68) says "media" becomes
-     * visible to the non-author only once it "passes moderation", R-25 (17:47)
+     * **Who besides its owner hears a voice note: only once it has passed
+     * moderation**, as a photo is shown (the owner's ruling on FR-061,
+     * 2026-10-29: "media" includes voice notes). FR-061 (03:68) makes media
+     * visible to the non-author once it "passes moderation", R-25 (17:47)
      * speaks of "harmful or illegal media", and doc 26:206 routes a reported
-     * voice note to "the FR-101 moderation path". Until the owner rules which
-     * reading holds, a voice note reaches a partner only with a verdict of
-     * [PASSED], which nothing gives a voice note yet: so, never. If the ruling
-     * is "images only", this becomes `true`; if it is "voice too", a
-     * moderator must give voice notes their verdict.
+     * voice note to the FR-101 path; FR-101, T-08 and Q1, which name images,
+     * are read as including voice. D4 gives voice notes their verdict; until
+     * then nothing does, and a partner never hears one.
      */
     private val partnersMayHearIt: Boolean get() = moderationVerdict == PASSED
 
-    override fun toString(): String = "MediaAsset(id=$id, kind=$kind, status=$status)"
+    override fun toString(): String = "MediaAsset(id=$id, kind=$kind, status=$status, tier=$tier)"
 
     enum class Processing { PROCESS, GIVE_UP, NOTHING_TO_DO }
 

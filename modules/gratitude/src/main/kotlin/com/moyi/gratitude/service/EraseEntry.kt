@@ -8,12 +8,13 @@ import com.moyi.gratitude.infra.database.BondDayStore
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.gratitude.infra.database.Favourites
 import com.moyi.gratitude.infra.database.Reactions
+import com.moyi.media.api.MediaErasure
 import org.springframework.stereotype.Component
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
 /**
- * Erases one entry: the words and media references go, the row stays as a
+ * Erases one entry: the words and the media go, the row stays as a
  * tombstone, and a day that was still being written is counted again
  * without it (BR-10).
  *
@@ -50,6 +51,7 @@ internal class EraseEntry(
     private val entries: EntryStore,
     private val favourites: Favourites,
     private val reactions: Reactions,
+    private val media: MediaErasure,
 ) {
     /**
      * The entry and its day as they now stand.
@@ -85,6 +87,16 @@ internal class EraseEntry(
      * it took reactions too it could be told from deleting each entry by
      * hand, by the reactions vanishing.
      *
+     * **And so does the media attached to it** (spec D-9, Phase 4 D5): the
+     * photo, and the voice note once D3 attaches one, are released to
+     * `media`, in this transaction, which deletes the assets and has their
+     * objects purged from the storage after the commit. Here, in the one
+     * routine, so that the author's delete, the withdrawal, the close job's
+     * pre-step and any erasure added later (account deletion) cannot come to
+     * differ in it. It is asked on every call, not only the one that erases:
+     * `media` keys it by the attachment and releases nothing twice, so a
+     * repeated call costs one statement and changes nothing.
+     *
      * [now] is cut to microseconds here, so `deleted_at` reads back as it
      * was written whoever the caller is.
      */
@@ -107,6 +119,8 @@ internal class EraseEntry(
             // The same lock is what a reaction being set at this moment waits for (`Reactions.set`).
             reactions.removeAllOn(entryId)
         }
+        // Under the entry's lock, which is what a claim of a photo for this entry waits for (`SubmitEntry`, `ChangeEntry`).
+        media.releaseAllOf(entryId.value)
         if (nextDay != day) days.update(nextDay)
         return erased to nextDay
     }

@@ -31,7 +31,8 @@ interface MediaAttachments {
     /**
      * Detaches [mediaId] from [entryId], if it is [owner]'s and attached there;
      * otherwise nothing. The asset is then the owner's alone again, as it was
-     * before the claim.
+     * before the claim, and the reaper deletes it a day from now unless it is
+     * attached again (D5). Not an erasure: that is [MediaErasure.releaseAllOf].
      */
     fun release(
         owner: UUID,

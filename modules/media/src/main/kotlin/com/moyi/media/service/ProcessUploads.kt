@@ -93,8 +93,8 @@ import java.util.Base64
  * taken up again.
  */
 @Component
-// What the pipeline works with, each named (the two processors are one switch's two halves); and one step per function, for
-// each kind, in the order the class KDoc gives.
+// What the pipeline works with, each named (the two processors are one switch's two halves, and D5 added the
+// purge's); and one step per function, for each kind, in the order the class KDoc gives.
 @Suppress("LongParameterList", "TooManyFunctions")
 internal class ProcessUploads(
     private val assets: MediaAssetStore,
@@ -104,6 +104,7 @@ internal class ProcessUploads(
     private val clock: Clock,
     transactionManager: PlatformTransactionManager,
     private val meters: MeterRegistry,
+    private val releases: MediaReleases,
 ) : EventConsumer {
     private val log = LoggerFactory.getLogger(javaClass)
     private val ownTransaction =
@@ -130,7 +131,12 @@ internal class ProcessUploads(
             }
 
             MediaAsset.Processing.NOTHING_TO_DO -> {
-                Unit
+                // Deleted after an attempt began: that attempt may have written a variant or a voice note's Opus after
+                // the owner's purge ran (a delivery that then failed and is retried here), so the objects are handed to
+                // media.purge again (D5, review of #110). Every key is derived, so a purge that finds nothing changes nothing.
+                if (asset.isGone && asset.processingAttempts > 0) {
+                    releases.released(asset.id, clock.instant().truncatedTo(ChronoUnit.MICROS))
+                }
             }
         }
     }
@@ -297,12 +303,15 @@ internal class ProcessUploads(
         val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
         val current = assets.lockAny(asset.id)
         if (current?.status != MediaStatus.PROCESSING) {
-            // Deleted while it was worked on: nothing written may outlive that.
+            // Deleted while it was worked on: nothing written may outlive that. At once if the storage
+            // answers; and for certain by media.purge, whose run for the deletion may have come before
+            // what was made here was written (D5).
             when (result) {
                 is Result.Ready -> result.variants.forEach { bestEffortDelete(it.key, asset) }
                 is Result.VoiceReady -> bestEffortDelete(StorageKey.forVoice(asset.storageKey), asset)
                 is Result.Refused -> Unit
             }
+            if (current?.isGone == true) releases.released(asset.id, now)
             log.info("Media {} was deleted while it was processed; what was made of it is removed", asset.id)
             return OUTCOME_GONE
         }
@@ -342,7 +351,7 @@ internal class ProcessUploads(
         )
     }
 
-    @Suppress("SwallowedException") // On purpose: the bucket's lifecycle rule is the fallback for in/ (ADR-0047).
+    @Suppress("SwallowedException") // On purpose: the lifecycle rule (in/) and media.purge (D5) are the fallbacks.
     private fun bestEffortDelete(
         key: StorageKey,
         asset: MediaAsset,

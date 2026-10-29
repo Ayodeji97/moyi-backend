@@ -79,8 +79,8 @@ internal data class ShownMedia(
  * reader then gets is `media`'s rule: a photo to its owner, the entry's
  * author, once it is ready, and to the partner only once it has also passed
  * moderation (FR-101), which until D4 is never; a voice note likewise to its
- * author once it is ready, and to the partner only once the owner's ruling on
- * FR-061 lets them, which until then is never (ADR-0049).
+ * author once it is ready, and to the partner only once it has also passed
+ * moderation (FR-061, the owner's ruling; ADR-0049), which until D4 is never.
  */
 @Service
 internal class EntryMedia(

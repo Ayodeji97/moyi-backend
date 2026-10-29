@@ -196,6 +196,9 @@ internal class EntryPhotoTest(
         body(patch(ada, entry, """{"text":"other words","imageMediaId":"$second"}"""))["image"]["id"].asString() shouldBe second.toString()
         photos.attachedTo(second) shouldBe UUID.fromString(entry)
         photos.attachedTo(first).shouldBeNull()
+        // Let go, not erased: still its owner's, and the reaper's day for it counts from now (D5).
+        jdbc.queryForMap("SELECT status, detached_at FROM media_assets WHERE id = ?", first) shouldBe
+            mapOf("status" to "READY", "detached_at" to java.sql.Timestamp.from(clock.instant()))
     }
 
     @Test

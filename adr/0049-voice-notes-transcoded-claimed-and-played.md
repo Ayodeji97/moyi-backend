@@ -140,26 +140,25 @@ and a refused voice note rolls back a photo claimed before it. **`MEDIA_NOT_YET_
 `ErrorCode`**: nothing throws it any more, and the contract's enum loses it (a breaking change for
 a client that names it).
 
-**7. Who hears it: its owner once it is ready; the partner not yet. Fail closed until the owner
-rules on FR-061** (the independent review of #111, ruled by the coordinator). The spec marks "voice
-is not moderated" **[inferred]**. The corpus, read for it, supports two readings:
+**7. Who hears it: its owner once it is ready; anyone else only once it has passed moderation.
+Voice notes are moderated** (the owner's ruling on FR-061, 2026-10-29). The spec marked "voice is not
+moderated" **[inferred]**; read against the corpus, it did not hold, and the owner settled it:
 
-- **Voice is not moderated.** FR-101 (03:115), the one requirement for moderation, says "uploaded
-  **images**"; T-08 (09:32) says "illegal or abusive **imagery**"; the owner's ruling Q1 chose an
-  image classifier (Rekognition `DetectModerationLabels`); doc 10:133 budgets "image moderation".
-- **Voice is "media", and media waits on moderation.** FR-061 (03:68): "media becomes visible to
-  the non-author when it reaches READY and passes moderation (FR-101)". R-25 (17:47): "harmful or
-  illegal **media** uploaded", mitigated by "automated moderation before reveal". Doc 26:206 routes a
-  member's report of "a photo or voice note" to "the FR-101 moderation path".
+- **FR-061 (03:68)**: "media becomes visible to the non-author when it reaches READY and passes
+  moderation (FR-101)". "Media" includes voice notes.
+- **R-25 (17:47)**: "harmful or illegal **media** uploaded", mitigated by automated moderation.
+- **Doc 26:206** routes a member's report of "a photo or voice note" to "the FR-101 moderation path".
+- FR-101 (03:115), T-08 (09:32) and the owner's Q1 name images; they are read as including voice
+  notes from now on. D4 moderates voice notes as well as photos; how (transcribe and moderate the
+  text, or a vendor that takes audio) is D4's to decide.
 
-Until the owner says which, a voice note is treated as a photo is before its verdict:
-`MediaAsset.heardBy(owner)` gives **its owner** (on an entry, its author) the URL and the length
-once it is `READY`, and **anyone else** `PROCESSING`, with no URL and no length, unless the asset
-carries the verdict `PASSED`, which nothing gives a voice note today. So the partner never hears
-one yet. **One switch-point**, `MediaAsset.partnersMayHearIt`: a ruling of "images only" makes it
-`true` (and the tests that hold the closed rule change with it); a ruling of "voice too" leaves it
-as it is and needs a moderator to give voice notes their verdict. `MediaAssetTest`,
-`MediaAttachmentsTest` and `EntryVoiceTest` hold the closed rule, and went red with it opened.
+So a voice note is shown as a photo is: `MediaAsset.heardBy(owner)` gives **its owner** (on an
+entry, its author) the URL and the length once it is `READY`, and **anyone else** `PROCESSING`,
+with no URL and no length, until the asset carries the verdict `PASSED`
+(`MediaAsset.partnersMayHearIt`, the one place the rule is written). Nothing gives a voice note a
+verdict until D4, so until then a partner never hears one: safe by construction, as photos were in
+D2. `MediaAssetTest`, `MediaAttachmentsTest` and `EntryVoiceTest` hold the rule, and went red with
+it removed (review of #111).
 
 **8. The shape.** The entry gains `voice: {id, status, url, durationMs}` or `null`, every field
 always sent, `url` and `durationMs` present exactly when `status` is `READY` (to the author once it
@@ -179,8 +178,8 @@ its length is refused after. Production starts as it is, and processes nothing u
 exists. The first half of M4 (15:110) runs end to end on the smoke stack: an entry with a photo and
 a voice note.
 
-**Negative.** Until the worker is deployed no voice note is processed in production. Until the
-owner rules on FR-061, a partner is shown a voice note as `PROCESSING` and never hears it
+**Negative.** Until the worker is deployed no voice note is processed in production. Until D4
+gives voice notes a verdict, a partner is shown one as `PROCESSING` and never hears it
 (decision 7). ffmpeg's options are those of 6.1 (Ubuntu
 24.04, the worker's) and 9.0 (checked on both); a version that renames one fails the start-up
 check or the notes, not silently. The in-process network bound is ffmpeg's own protocol list; the
@@ -211,16 +210,19 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
   24 kbit/s constrained VBR (`smoke.sh`'s voice section leaves one at a URL). If iOS will not play
   it, Q4 says AAC-LC 48 kbit/s for both; the container may be the cause rather than the codec (CAF
   holds Opus on iOS).
-- **FR-061's "media"**: the owner to rule whether it includes voice notes (decision 7, with the
-  sources for each reading). "Images only" opens `MediaAsset.partnersMayHearIt`; "voice too"
-  needs a moderator for voice.
-- **GATE: the media worker (provider `native`) is not deployed before D5's purge (#110) is live and
-  the owner has ruled on FR-061 (does "media" include voice notes).** The sources: FR-061 (03:68)
-  and R-25 (17:47) say "media", and 26:206 routes a reported voice note to the FR-101 path; FR-101
-  (03:115), T-08 (09:32) and Q1 say images. Without D5, a URL handed out before an erasure keeps
-  working for up to 25 hours (ADR-0048 Owed); without the ruling, opening voice to partners would
-  be a guess.
-- **The media worker** (ADR-0048 Owed): its image needs `ffmpeg` with `libopus` (Ubuntu 24.04's
+- **GATE: the media worker (provider `native`) is not deployed before D5's purge (#110, ADR-0050)
+  is live in production**, so that no URL handed out before an erasure outlives it (ADR-0048 Owed).
+  The FR-061 condition this gate carried is met: the owner ruled on 2026-10-29 that voice notes are
+  moderated. **D4 is not a further gate**: with no verdict a partner is never given a voice note
+  (or a photo), so the worker without D4 makes media visible to authors alone.
+- **D4: voice notes are moderated** (decision 7). D4 decides how, and gives a voice note its
+  `PASSED` (or `QUARANTINED`) as it does a photo; `MediaAsset.partnersMayHearIt` then lets the
+  partner hear it, unchanged.
+- **Media requires a verified email** (the owner's ruling, 2026-10-29): the `/media` routes are
+  refused to an account whose address is not verified. Owed as a separate small pull request, not
+  this one; it closes the open question D1 and D2 carried in their pull requests (#106, #108).
+- **The media worker** (ADR-0048 Owed), **a Kamal role** running the application's own image with its
+  own command (the owner's ruling, 2026-10-29), not an accessory: its image needs `ffmpeg` with `libopus` (Ubuntu 24.04's
   `ffmpeg` package has it, and the AMR decoders), `MOYI_MEDIA_PROCESSING_PROVIDER=native`, and its
   network limited to R2 and Postgres (spec R-E), which is the only network bound around ffmpeg
   beyond its protocol list.
@@ -228,13 +230,13 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
   Android `MediaRecorder` MPEG_4 and THREE_GPP file): the brands in decision 2 are read, not seen.
 - **R2, not run:** that a GET of `voice.ogg` is served with `audio/ogg`, as MinIO serves it.
 - **D5:** erasure purges `voice.ogg` as it purges a photo's variants (`MediaAsset.objectKeys`
-  names it); the reaper takes an unattached voice note after 24 hours like a photo. Only the owner
-  is given a voice note's URL until the FR-061 ruling, so ADR-0048's 25-hour exposure after an
-  erasure reaches no partner yet; the gate above keeps it so until D5 is live.
+  names it; `MediaPurgeTest` holds it, red with `voice.ogg` dropped from the keys); the reaper
+  takes an unattached voice note after 24 hours like a photo. **Done**: D5 merged first (#110),
+  and this branch carries the test. ADR-0050 already counts on this (its D3 note).
 - **`entries.voice_duration_ms`**: dead since D3 (decision 4); a later forward migration drops it.
 
 ## Revisit when
 
-The owner rules on voice moderation, or on FR-061. The iPhone playback test fails. ffmpeg changes
+D4 chooses how voice notes are moderated. The iPhone playback test fails. ffmpeg changes
 an option this uses, or a recorder is seen writing a brand decision 2 refuses. The worker is
 deployed (then the network bound moves into the container too).

@@ -39,6 +39,8 @@ internal class OwnAsset(
  * id that names nothing (CLAUDE.md: never 403).
  */
 @Service
+// What an owner's asset is read, shown and deleted with, each injected by Spring: one view per kind (D2, D3), the purge's (D5).
+@Suppress("LongParameterList")
 internal class OwnMedia(
     private val assets: MediaAssetStore,
     private val storage: ObjectStore,
@@ -46,6 +48,7 @@ internal class OwnMedia(
     private val transactions: TransactionTemplate,
     private val images: ShowImages,
     private val voices: PlayVoices,
+    private val releases: MediaReleases,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -78,17 +81,19 @@ internal class OwnMedia(
      * it is gone. An asset attached to an entry is `409 MEDIA_ATTACHED`: it is
      * the entry's now, and leaves with it (D5's erasure).
      *
-     * **The objects go after the commit, and on a best-effort basis**: the
-     * upload under `in/` and, for one already processed, what was kept of it
-     * under `v/` (a photo's variants, a voice note's Opus). If the storage cannot be reached, the bucket's lifecycle rule
-     * removes the upload within two days (ADR-0047); the variants have no such
-     * rule, and D5's `media.purge` is where an erasure that must not be given up
-     * on lives (spec D-9). Deleting before the commit would lose the bytes of an
-     * asset whose deletion then rolled back. A photo being processed while it is
+     * **The objects go after the commit, twice over.** At once, on a
+     * best-effort basis: the upload under `in/` and, for one already
+     * processed, what was kept of it under `v/` (a photo's variants, a voice
+     * note's Opus). And for certain: the deletion
+     * publishes `MediaReleased` in its transaction, and `media.purge` deletes
+     * the same keys again, retried until the storage answers (D5, ADR-0050), so
+     * a storage that could not be reached at the moment leaves nothing behind
+     * for good. Deleting before the commit would lose the bytes of an asset
+     * whose deletion then rolled back. A photo being processed while it is
      * deleted is `media.process`'s to clean up: it finds the asset deleted under
      * the row lock and removes what it made.
      */
-    @Suppress("SwallowedException") // On purpose: the deletion has committed, and the lifecycle rule is the fallback (ADR-0047).
+    @Suppress("SwallowedException") // On purpose: the deletion has committed, and media.purge is the guarantee (ADR-0050).
     fun delete(
         owner: UUID,
         mediaId: UUID,
@@ -98,9 +103,10 @@ internal class OwnMedia(
                 transactions.execute {
                     val asset = assets.lock(mediaId, owner)?.takeUnless { it.isGone } ?: throw MediaNotFoundException()
                     if (!asset.isDeletable) throw MediaAttachedException()
-                    check(assets.markDeleted(asset.id, clock.instant().truncatedTo(ChronoUnit.MICROS))) {
-                        "an unattached live asset under its row lock is deleted"
-                    }
+                    val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
+                    check(assets.markDeleted(asset.id, now)) { "an unattached live asset under its row lock is deleted" }
+                    // The guarantee: media.purge deletes the objects, retrying until it can (D5).
+                    releases.released(asset.id, now)
                     asset
                 }
             }
@@ -110,7 +116,7 @@ internal class OwnMedia(
                 storage.delete(key)
             } catch (unavailable: ObjectStoreUnavailableException) {
                 // The id, never the key: the key reaches the bytes.
-                log.warn("Media {} is deleted; an object of it is left to the storage's own clean-up", asset.id)
+                log.warn("Media {} is deleted; an object of it is left to media.purge", asset.id)
             }
         }
     }

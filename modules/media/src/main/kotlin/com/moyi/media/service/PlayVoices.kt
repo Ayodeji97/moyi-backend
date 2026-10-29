@@ -12,7 +12,7 @@ import java.util.UUID
 /**
  * [VoiceViews], and what the owner's own `GET /media/{id}` shows of a voice
  * note: the rule is [MediaAsset.heardBy]'s (its owner once ready; anyone else
- * only once a ruling lets them, ADR-0049), the URL
+ * only once it has passed moderation, ADR-0049), the URL
  * is signed by [HourlyUrls], as a photo's is.
  */
 @Service

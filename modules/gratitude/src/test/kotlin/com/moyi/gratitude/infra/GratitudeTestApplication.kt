@@ -95,6 +95,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
         ComponentScan.Filter(type = FilterType.CUSTOM, classes = [AutoConfigurationExcludeFilter::class]),
         ComponentScan.Filter(type = FilterType.REGEX, pattern = [GratitudeTestApplication.PUSH_CONSUMERS]),
         ComponentScan.Filter(type = FilterType.REGEX, pattern = [GratitudeTestApplication.MEDIA_ROUTES]),
+        ComponentScan.Filter(type = FilterType.REGEX, pattern = [GratitudeTestApplication.MEDIA_PURGE]),
     ],
 )
 @ConfigurationPropertiesScan("com.moyi.common", "com.moyi.gratitude", "com.moyi.bond", "com.moyi.notification")
@@ -126,6 +127,15 @@ internal class GratitudeTestApplication {
          * the view's rule and its signed URL (signing needs no storage).
          */
         const val MEDIA_ROUTES = """com\.moyi\.media\.web\..*"""
+
+        /**
+         * `media.purge` (Phase 4 D5), left out: what is on trial here is that every
+         * erasure releases its media to `media`, which these tests read in
+         * `media_assets` and the outbox; the deleting of objects is `media`'s to
+         * test against a storage (`MediaPurgeTest`), and this context's storage is
+         * an address nothing answers on.
+         */
+        const val MEDIA_PURGE = """com\.moyi\.media\.service\.PurgeMedia"""
 
         /**
          * The two push consumers (Phase 4 N3, ADR-0046), `gratitude.notify` and `bond.notify`,

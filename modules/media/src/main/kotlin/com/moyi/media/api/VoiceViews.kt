@@ -5,8 +5,8 @@ import java.util.UUID
 
 /**
  * How a voice note on an entry is played to one person (spec §4 D3): to its
- * owner once it is ready; to anybody else only once the owner's ruling on
- * FR-061 lets them (ADR-0049 decision 7), and until then it is still
+ * owner once it is ready; to anybody else only once it has also passed
+ * moderation (FR-061, the owner's ruling; ADR-0049 decision 7), and until then it is still
  * processing to them, with no URL and no length. Fail closed, as a photo is
  * before its moderation verdict.
  *

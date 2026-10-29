@@ -40,8 +40,8 @@ import javax.sql.DataSource
 /**
  * A voice note on an entry (spec §4 D3): attached in the entry's own
  * transaction by `media`'s claim (FR-044a), as a photo is, and played to its
- * author once it is ready; to the partner not until the owner rules on FR-061
- * (ADR-0049). The
+ * author once it is ready; to the partner only once it has passed moderation
+ * (FR-061, the owner's ruling; ADR-0049). The
  * FR-044a category of doc 12:56 is here for voice notes as the API answers it.
  * The voice notes are put in place by hand, as `media.process` leaves them
  * ([ProcessedVoices]).
@@ -122,7 +122,7 @@ internal class EntryVoiceTest(
         voices.attachedTo(voice) shouldBe UUID.fromString(entry["id"].asString())
     }
 
-    /** Review of #111: fail closed until the owner rules on FR-061 (ADR-0049 decision 7). */
+    /** FR-061, the owner's ruling: a voice note reaches the partner only once it has passed moderation (ADR-0049 decision 7). */
     @Test
     fun `once revealed the partner sees the voice note as processing, with no URL and no length, while its author plays it`() {
         val voice = voices.ready(owner = bea)

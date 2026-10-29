@@ -839,7 +839,7 @@ class OpenApiContractTest(
         voice.required.toSet() shouldBe voice.properties.keys
         voice.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING")
         listOf("url", "durationMs").forEach { voice.properties[it]!!.types shouldContain "null" }
-        voice.description.shouldNotBeNull() shouldContain "to the other member only once a ruling lets them"
+        voice.description.shouldNotBeNull() shouldContain "to the other member only once it has passed moderation"
 
         val full =
             api.components.schemas["EntryResponse"]!!

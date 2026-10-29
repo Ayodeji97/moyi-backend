@@ -107,12 +107,19 @@
 # no title, its length on the asset; a 62-second WAV and a WAV declared as an M4A
 # FAILED; and, with a photo, M4's first half: an entry with both, the voice note
 # locked away from the partner until the reveal and then PROCESSING to them, as
-# the photo is, until the owner rules on FR-061 (review of #111). Last run on
-# 2026-10-29 for D3 after the review of #111, from a jar of this branch (on D2 at
-# 0e73c8a), on a fresh database that applied 32 migrations to V33, against its
-# own compose project (moyi-d3: Postgres 55443, Valkey 63803, MinIO 59006), the jar
-# booted by hand on libvips 8.18.7 and ffmpeg 9.0.2, and --attach: 1145 passed, 0
-# failed, 0 skipped, 30 sections. D2 last run on 2026-10-29, after main (df44dcc: #101, #102, #103, #105, #109) was merged in, from a jar of
+# the photo is, until D4 moderates it (the owner's ruling on FR-061). D3_RUN_NOTE
+# Since Phase 4
+# D5 the photographer then deletes the entry the photo is on: the owner's GET of
+# it is 404, the row DELETED with one MediaReleased, media.purge stamps it within
+# seconds, the URL handed out before answers 404 and MinIO holds nothing of it.
+# D5 last run on 2026-10-29, after the review of #110 (V34 and V35), on D2 0e73c8a (with
+# main df44dcc), from a jar of that tree, on a fresh database that applied 34 migrations
+# to V35, against
+# its own compose project (moyi-d5: Postgres 55445, Valkey 63805, MinIO 59010), the
+# jar booted by hand on libvips from PATH, and --attach: 1110 passed, 0 failed, 0
+# skipped, 30 sections.
+# D2's: last run on
+# 2026-10-29, after main (df44dcc: #101, #102, #103, #105, #109) was merged in, from a jar of
 # that merge, on the moyi-d2 database (32 migrations to V33; Postgres 55441, Valkey 63801,
 # MinIO 59002), libvips 8.18.7, --attach: 1102 passed, 0 failed, 0 skipped. Before it, on
 # 2026-10-28 for D2, from a jar of this branch on main 7656192, on a fresh database
@@ -2550,6 +2557,30 @@ expect "photos: an outsider reaches neither the photo nor the day" 404 '"code":"
 if grep -q "$(printf '%s' "$PH_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
   fail "photos: the photo's URL is in no log line" "its signature is in $MOYI_LOG"
 else pass "photos: the photo's URL is in no log line"; fi
+
+echo; echo "erasure — an erased entry's photo leaves the storage with it (Phase 4 D5, ADR-0050)"
+# The photographer deletes the entry the photo is on. media is told in the same
+# transaction (the photo is DELETED at once), and the booted jar's outbox poller
+# runs media.purge, which deletes the objects within seconds: the URL handed out
+# above, a bearer credential for up to 25 hours, then reaches nothing.
+PH_ENTRY="$(sql "SELECT id FROM entries WHERE image_media_id='$PH_PHOTO'")"
+PH_VARIANT_KEY="v/${PH_UPLOAD_KEY#in/}/full.webp"
+is "erasure: the URL handed out reaches the photo before the erasure" "$(curl -s -o /dev/null -w '%{http_code}' "$PH_URL")" "200"
+expect "erasure: the author deletes the entry with the photo, 204" 204 "" -- -X DELETE "$API/entries/$PH_ENTRY" -H "Authorization: Bearer $PH_A"
+expect "erasure: the owner's GET of the erased entry's photo is 404" 404 '"code":"NOT_FOUND"' -- "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_A"
+db_is "erasure: …the photo is DELETED and attached to nothing" "$(sql "SELECT status || '|' || (attached_entry_id IS NULL) FROM media_assets WHERE id='$PH_PHOTO'")" "DELETED|true"
+db_is "erasure: …and one MediaReleased was recorded for it" "$(sql "SELECT count(*) FROM outbox_events WHERE event_type='MediaReleased' AND aggregate_id='$PH_PHOTO'")" "1"
+PURGED="f"
+for _ in $(seq 1 40); do
+  PURGED="$(sql "SELECT purged_at IS NOT NULL FROM media_assets WHERE id='$PH_PHOTO'")"
+  [ "$PURGED" = "t" ] && break
+  sleep 0.5
+done
+db_is "erasure: media.purge deletes its objects within seconds" "$PURGED" "t"
+is "erasure: …and the URL handed out before reaches nothing" "$(curl -s -o /dev/null -w '%{http_code}' "$PH_URL")" "404"
+if [ "$MINIO_OK" = 0 ]; then skip "erasure: …nothing of the photo is left in MinIO"
+elif minio_has "$PH_VARIANT_KEY"; then fail "erasure: …nothing of the photo is left in MinIO" "MinIO still holds its full variant"
+else pass "erasure: …nothing of the photo is left in MinIO"; fi
 rm -rf "$PHOTO_DIR"
 flush_buckets
 
@@ -2628,7 +2659,7 @@ expect "voice: the listener's locked entry says nothing of the voice note" 200 '
 if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no URL"; fi
 expect "voice: deleting a voice note on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_A"
 expect "voice: the listener writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, in words"}'
-expect "voice: once revealed the listener sees the voice note PROCESSING, until the owner rules on FR-061" 200 '"partnerEntry"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
+expect "voice: once revealed the listener sees the voice note PROCESSING, until it has passed moderation (FR-061)" 200 '"partnerEntry"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
 VO_PARTNER="$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['partnerEntry']))" <<<"$LAST_BODY")"
 is "voice: …PROCESSING to the listener, with no URL and no length" "$(python3 -c "import json,sys; v=json.load(sys.stdin)['voice']; print(v['status'], v['url'], v['durationMs'])" <<<"$VO_PARTNER")" "PROCESSING None None"
 is "voice: …and the photo still PROCESSING to the listener (FR-101)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_PARTNER")" "PROCESSING"

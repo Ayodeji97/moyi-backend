@@ -13,6 +13,8 @@ import com.moyi.gratitude.api.DayCloser
 import com.moyi.gratitude.api.OnThisDayPushes
 import com.moyi.gratitude.api.OnThisDayRun
 import com.moyi.gratitude.api.ReminderRun
+import com.moyi.media.api.LifecycleRun
+import com.moyi.media.api.MediaLifecycle
 import com.moyi.notification.api.HeldPushes
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -68,6 +70,51 @@ internal class SchedulingTestApplication {
 
     @Bean
     fun onThisDay(): RecordingOnThisDay = RecordingOnThisDay()
+
+    @Bean
+    fun mediaLifecycle(): RecordingMediaLifecycle = RecordingMediaLifecycle()
+}
+
+/**
+ * A [MediaLifecycle] that records what it was asked and answers from a script:
+ * what the reaper and the demotion do to assets is `media`'s to test
+ * (`MediaLifecycleTest`); here it is when they are asked, and how often.
+ */
+internal class RecordingMediaLifecycle : MediaLifecycle {
+    val reaps = CopyOnWriteArrayList<Pair<Instant, Int>>()
+    val demotions = CopyOnWriteArrayList<Pair<Instant, Int>>()
+
+    /** The answers the next calls give, in order; once used up, nothing changed. */
+    val answers = java.util.concurrent.ConcurrentLinkedQueue<LifecycleRun>()
+
+    /** On: every call throws, as a run whose statement fails every time does. */
+    @Volatile
+    var failing = false
+
+    override fun reap(
+        now: Instant,
+        limit: Int,
+    ): LifecycleRun {
+        reaps += now to limit
+        check(!failing) { "the reaper's statement failed (made to by the test)" }
+        return answers.poll() ?: LifecycleRun(changed = 0, more = false)
+    }
+
+    override fun demote(
+        now: Instant,
+        limit: Int,
+    ): LifecycleRun {
+        demotions += now to limit
+        check(!failing) { "the demotion's statement failed (made to by the test)" }
+        return answers.poll() ?: LifecycleRun(changed = 0, more = false)
+    }
+
+    fun reset() {
+        reaps.clear()
+        demotions.clear()
+        answers.clear()
+        failing = false
+    }
 }
 
 internal class RecordingOnThisDay : OnThisDayPushes {

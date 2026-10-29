@@ -95,7 +95,7 @@ internal data class EntryResponse private constructor(
     /**
      * The entry's voice note (spec §4 D3), or `null` when it has none. Its
      * author is given a URL and its length once it is transcoded; the partner
-     * only once the owner's ruling on FR-061 lets them (ADR-0049), and until
+     * only once it has passed moderation (FR-061, ADR-0049; D4), and until
      * then sees it as `PROCESSING`, with neither. Only ever on an entry read in full; a
      * tombstone says `null`. A locked entry is not this shape, and has no
      * voice note or sign of one (BR-8).

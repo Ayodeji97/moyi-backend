@@ -195,7 +195,9 @@ bucket (30 an hour per user, doc 06 §4) joins `RateLimitBucket`.
   `MOYI_MEDIA_STORAGE_R2_ENDPOINT` (`https://<account id>.eu.r2.cloudflarestorage.com`) and
   `MOYI_MEDIA_STORAGE_R2_BUCKET: moyi-media`, and list `MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID` and
   `MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY` as secrets; then PUT altered bytes to one intent's URL
-  and see R2 refuse them (decision 1).
+  and see R2 refuse them (decision 1). **Configure the storage only with or after D5 deployed**
+  (ADR-0050): before it, an erased entry's photo is never released and an asset deleted then never
+  has its objects purged, and nothing goes back for either.
 - **D2:** `media.process` must read the asset's status again and skip one that is `DELETED`: a
   `MediaUploaded` can name an asset deleted after it was published. And
   `media.process`, the signed GET URLs on `GET /media/{id}`, the FR-044a claim and
