@@ -2839,3 +2839,21 @@ Review:  the independent review of #108 found what each guard did not cover. The
          brands; only the item types in `iinf` tell AV1 from HEVC. Lesson: a guard named
          after its threat ("memory limit", "format allow-list") is a claim; each needed
          the fixture just inside it to show where it actually stops.
+
+## 2026-10-29 · Feature · Media D3 — ffmpeg held to one container, its codecs and files, and a length that had to be read twice
+
+Expected: D2's sandbox to carry ffmpeg as it carried libvips; the length a container states to
+         be the length it holds; "24 kbps" to be what `-b:a 24k` gives; and a guard per line,
+         each red alone.
+Reality: the sandbox carried it unchanged (512 MiB of address space: a transcode cannot start
+         its threads at 256, runs at 384, about 55 MB resident). An MP4 whose `mvhd` and
+         `mdhd` were patched to say 10 seconds held 90, `ffprobe` believed the headers, and
+         ffmpeg decoded all of it: so the transcode stops a second past the limit and its
+         result is measured again. Opus's default VBR made a pure tone 39 kbit/s; constrained,
+         25. And `ffprobe` with `-codec_whitelist` fails outright on any stream it may not
+         decode, which turned "strip the cover art" into "refuse the file that has one".
+Wrong about: the guards' independence. With the decoder list in place, `-map 0:a:0` cannot be
+         shown red (no file with a second stream gets that far), and within the pinned
+         demuxers nothing opens a second resource, so the protocol list had to be tested by
+         handing the processor a URL. Each guard was still broken and seen red on its own
+         test; the ones that sit behind another are named as such in ADR-0049.

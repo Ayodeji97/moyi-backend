@@ -186,15 +186,17 @@ internal class EntriesEndpointTest(
     }
 
     /**
-     * Fix round 1, I6, as Phase 4 D2 leaves it: a photo is attached
-     * (`EntryPhotoTest`), and a voice note is still refused until D3.
+     * Fix round 1, I6, as Phase 4 D3 leaves it: a voice note is attached
+     * (`EntryVoiceTest`), so an id that names none of the caller's is refused
+     * on its own field, as a photo's is, and never quietly dropped.
      */
     @Test
-    fun `a voice media id is refused, until D3 can honour it`() {
+    fun `a voice id that names no voice note of the caller's is refused on its field rather than ignored`() {
         val response = submit(ada, bondId, """{"text":"listen","voiceMediaId":"${UUID.randomUUID()}"}""")
 
         response.status shouldBe 422
-        response.contentAsString shouldContain "\"code\":\"MEDIA_NOT_YET_SUPPORTED\""
+        response.contentAsString shouldContain "\"code\":\"VALIDATION_FAILED\""
+        response.contentAsString shouldContain "\"field\":\"voiceMediaId\""
     }
 
     /**

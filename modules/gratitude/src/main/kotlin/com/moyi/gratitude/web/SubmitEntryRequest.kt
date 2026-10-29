@@ -27,11 +27,10 @@ import java.util.UUID
  * uncaught `IllegalArgumentException`, a `500` rather than FR-041's own
  * `422`). [ValidEntryText]'s own KDoc has the full account.
  *
- * [imageMediaId] and [voiceMediaId] carry no constraint of their own — a
- * well-formed id is refused all the same, by [com.moyi.gratitude.service.SubmitEntry]
- * (`422 MEDIA_NOT_YET_SUPPORTED`), because "not yet supported" is a fact
- * about this deployment, not about whether the value the caller sent is
- * shaped like a `UUID`.
+ * [imageMediaId] and [voiceMediaId] carry no constraint of their own — whether
+ * a well-formed id may be attached is `media`'s rule (FR-044a), asked by
+ * [com.moyi.gratitude.service.SubmitEntry] in the entry's transaction, not
+ * something the shape of the value can say.
  *
  * [intendedAt] is BR-3a's offline-draft claim: a client that composed an
  * entry before it could send it may say when. Optional, and trusted only

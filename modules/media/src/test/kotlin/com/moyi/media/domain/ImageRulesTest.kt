@@ -25,15 +25,15 @@ internal class ImageRulesTest {
         // A 24-megapixel phone photo, 8-bit RGB: 73 MB.
         ImageRules.headerRefusal(5712, 4284, 3, "uchar") shouldBe null
         // Within the pixel ceiling, over the byte ceiling: a 48-megapixel photo (146 MB) and 16-bit RGBA at 4096 × 4096 (128 MiB).
-        ImageRules.headerRefusal(8064, 6048, 3, "uchar") shouldBe ImageRefusal.TOO_LARGE_DECODED
-        ImageRules.headerRefusal(4096, 4096, 4, "ushort") shouldBe ImageRefusal.TOO_LARGE_DECODED
+        ImageRules.headerRefusal(8064, 6048, 3, "uchar") shouldBe MediaRefusal.TOO_LARGE_DECODED
+        ImageRules.headerRefusal(4096, 4096, 4, "ushort") shouldBe MediaRefusal.TOO_LARGE_DECODED
         // Exactly at the ceiling is allowed; one row more is not.
         ImageRules.headerRefusal(1024, 25600, 4, "uchar") shouldBe null
-        ImageRules.headerRefusal(1024, 25601, 4, "uchar") shouldBe ImageRefusal.TOO_LARGE_DECODED
+        ImageRules.headerRefusal(1024, 25601, 4, "uchar") shouldBe MediaRefusal.TOO_LARGE_DECODED
         // The pixel ceiling is asked first, and a header that says nothing usable is unreadable.
-        ImageRules.headerRefusal(30_000, 30_000, 1, "uchar") shouldBe ImageRefusal.TOO_MANY_PIXELS
-        ImageRules.headerRefusal(100, 100, 0, "uchar") shouldBe ImageRefusal.UNREADABLE
-        ImageRules.headerRefusal(100, 100, 3, "something new") shouldBe ImageRefusal.UNREADABLE
+        ImageRules.headerRefusal(30_000, 30_000, 1, "uchar") shouldBe MediaRefusal.TOO_MANY_PIXELS
+        ImageRules.headerRefusal(100, 100, 0, "uchar") shouldBe MediaRefusal.UNREADABLE
+        ImageRules.headerRefusal(100, 100, 3, "something new") shouldBe MediaRefusal.UNREADABLE
     }
 
     @Test

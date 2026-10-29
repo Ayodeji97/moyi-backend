@@ -88,6 +88,56 @@ internal class EntryReadabilityTest {
             .shouldBeNull()
     }
 
+    /** Phase 4 D3: a voice note is disclosed exactly as a photo is, and a withdrawal hides it before the row is erased. */
+    @Test
+    fun `a voice note is disclosed with the words, and never on a tombstone or a locked entry`() {
+        val voice = UUID.randomUUID()
+        val withVoice = unrevealed.withVoice(voice, now)
+        val revealedWithVoice = withVoice.copy(status = EntryStatus.REVEALED, revealedAt = now)
+
+        withVoice
+            .readBy(author)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId shouldBe voice
+        revealedWithVoice
+            .readBy(partner)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId shouldBe voice
+
+        withVoice.readBy(partner).disclosed.shouldBeNull()
+        revealedWithVoice
+            .readBy(authorAfterWithdrawing)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId
+            .shouldBeNull()
+        revealedWithVoice
+            .readBy(partnerAfterWithdrawal)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId
+            .shouldBeNull()
+        revealedWithVoice
+            .copy(deletedAt = now)
+            .readBy(partner)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId
+            .shouldBeNull()
+    }
+
+    @Test
+    fun `a voice note is given only to an entry that may still change, and the same one again changes nothing`() {
+        val voice = UUID.randomUUID()
+        val withVoice = unrevealed.withVoice(voice, now.plusSeconds(1))
+
+        withVoice.voiceMediaId shouldBe voice
+        withVoice.withVoice(voice, now.plusSeconds(2)) shouldBe withVoice
+        shouldThrow<IllegalStateException> { revealed.withVoice(voice, now) }
+    }
+
     @Test
     fun `a photo is given only to an entry that may still change, and the same photo again changes nothing`() {
         val photo = UUID.randomUUID()

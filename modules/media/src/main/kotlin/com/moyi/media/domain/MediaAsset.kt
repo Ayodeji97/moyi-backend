@@ -6,7 +6,7 @@ import java.util.UUID
 /**
  * Doc 04:175-182's lifecycle. D1 moves an asset through the first two steps and
  * to [DELETED]; D2 moves a photo on through [PROCESSING] to [READY] or
- * [FAILED]; D3 to D5 add the rest.
+ * [FAILED], and D3 a voice note; D4 and D5 add the rest.
  */
 internal enum class MediaStatus {
     PENDING_UPLOAD,
@@ -49,6 +49,16 @@ internal value class StorageKey(
         ): StorageKey {
             check(upload.value.startsWith(UPLOAD_PREFIX)) { "a variant is made from an upload's key" }
             return StorageKey("v/${upload.value.removePrefix(UPLOAD_PREFIX)}/${variant.label}.webp")
+        }
+
+        /**
+         * Where the Opus made of the voice note uploaded under [upload] is
+         * kept: `v/{uuid}/voice.ogg`, derived as a photo's variants are
+         * ([forVariant]) and for the same reasons (ADR-0049).
+         */
+        fun forVoice(upload: StorageKey): StorageKey {
+            check(upload.value.startsWith(UPLOAD_PREFIX)) { "a voice note is made from an upload's key" }
+            return StorageKey("v/${upload.value.removePrefix(UPLOAD_PREFIX)}/voice.ogg")
         }
     }
 }
@@ -94,6 +104,8 @@ internal class MediaAsset(
     val moderationVerdict: String? = null,
     /** How many attempts of `media.process` have begun on it, counted whatever became of them. */
     val processingAttempts: Int = 0,
+    /** A ready voice note's length in milliseconds (D3); on the asset only, never on the entry (spec D-10). */
+    val durationMs: Int? = null,
     /** 1 while a photo keeps its full-resolution variant, 2 once only the display variant is kept (D-16, D5). */
     val tier: Int = 1,
 ) {
@@ -144,38 +156,41 @@ internal class MediaAsset(
 
     /**
      * Every key the storage may hold for this asset: its upload and, for a
-     * photo, each variant's key, **whether or not the row records it**. The
-     * keys are derived from the upload's ([StorageKey.forVariant]), so an
-     * attempt that wrote one variant and then failed, before anything was
-     * recorded, leaves nothing a deletion cannot find (review of #108).
+     * photo, each variant's key, for a voice note its Opus, **whether or not
+     * the row records it**. The keys are derived from the upload's
+     * ([StorageKey.forVariant], [StorageKey.forVoice]), so an attempt that
+     * wrote an object and then failed, before anything was recorded, leaves
+     * nothing a deletion cannot find (review of #108).
      */
     val objectKeys: List<StorageKey>
         get() =
             listOf(storageKey) +
-                if (kind == MediaKind.IMAGE) ImageVariant.entries.map { StorageKey.forVariant(storageKey, it) } else emptyList()
+                when (kind) {
+                    MediaKind.IMAGE -> ImageVariant.entries.map { StorageKey.forVariant(storageKey, it) }
+                    MediaKind.VOICE -> listOf(StorageKey.forVoice(storageKey))
+                }
 
     /**
      * What `media.process` does with this asset when a `MediaUploaded` names it
-     * (spec §4 D2). Asked of the row as it is now, never of the event, which
-     * may be older: ADR-0047 owed it that **a deleted asset is skipped**, since
-     * an upload can be deleted after its event was published.
+     * (spec §4 D2, D3). Asked of the row as it is now, never of the event,
+     * which may be older: ADR-0047 owed it that **a deleted asset is skipped**,
+     * since an upload can be deleted after its event was published.
      *
-     * - A photo that is [MediaStatus.UPLOADED], or [MediaStatus.PROCESSING]
-     *   after an attempt that did not finish, is processed, **unless
-     *   [MAX_ATTEMPTS] decodes have already begun on it**: then it is given
-     *   up ([Processing.GIVE_UP], `FAILED`), so that a photo whose decode
-     *   never finishes (it kills the process, or a bug after it throws) is
-     *   not retried for ever (review of #108). Only a decode counts: an
-     *   outage before it is never the photo's fault, and the photo waits it
-     *   out (the owner's ruling).
-     * - A voice note is left exactly as it is: transcoding is D3's.
+     * - A photo or a voice note that is [MediaStatus.UPLOADED], or
+     *   [MediaStatus.PROCESSING] after an attempt that did not finish, is
+     *   processed, **unless [MAX_ATTEMPTS] decodes have already begun on
+     *   it**: then it is given up ([Processing.GIVE_UP], `FAILED`), so that
+     *   an upload whose decode never finishes (it kills the process, or a bug
+     *   after it throws) is not retried for ever (review of #108). Only a
+     *   decode counts, and a voice note's transcode is its decode: an outage
+     *   before it is never the upload's fault, and the upload waits it out
+     *   (the owner's ruling).
      * - Anything else has nothing left to do: deleted, ready, failed, or never
      *   completed.
      */
     val processing: Processing
         get() =
             when {
-                kind != MediaKind.IMAGE -> Processing.NOT_THIS_KIND
                 status != MediaStatus.UPLOADED && status != MediaStatus.PROCESSING -> Processing.NOTHING_TO_DO
                 processingAttempts >= MAX_ATTEMPTS -> Processing.GIVE_UP
                 else -> Processing.PROCESS
@@ -196,15 +211,50 @@ internal class MediaAsset(
             variants.firstOrNull { it.variant == ImageVariant.FULL }
                 ?: variants.firstOrNull { it.variant == ImageVariant.DISPLAY }
         return when {
-            status != MediaStatus.READY || best == null -> Shown.Processing
+            kind != MediaKind.IMAGE || status != MediaStatus.READY || best == null -> Shown.Processing
             !owner && moderationVerdict != PASSED -> Shown.Processing
             else -> Shown.Ready(best)
         }
     }
 
+    /**
+     * What a person is played of this voice note (spec §4 D3). **Its owner**
+     * (on an entry, its author) hears it once it is [MediaStatus.READY].
+     * **Anyone else** hears it only once it is ready and
+     * [partnersMayHearIt]; until then it is still processing to them, with no
+     * URL and no length (ADR-0049 decision 7).
+     */
+    fun heardBy(owner: Boolean): Heard =
+        when {
+            kind != MediaKind.VOICE || status != MediaStatus.READY || durationMs == null -> Heard.Processing
+            !owner && !partnersMayHearIt -> Heard.Processing
+            else -> Heard.Ready(StorageKey.forVoice(storageKey), durationMs)
+        }
+
+    /**
+     * **Who besides its owner hears a voice note: only once it has passed
+     * moderation**, as a photo is shown (the owner's ruling on FR-061,
+     * 2026-10-29: "media" includes voice notes). FR-061 (03:68) makes media
+     * visible to the non-author once it "passes moderation", R-25 (17:47)
+     * speaks of "harmful or illegal media", and doc 26:206 routes a reported
+     * voice note to the FR-101 path; FR-101, T-08 and Q1, which name images,
+     * are read as including voice. D4 gives voice notes their verdict; until
+     * then nothing does, and a partner never hears one.
+     */
+    private val partnersMayHearIt: Boolean get() = moderationVerdict == PASSED
+
     override fun toString(): String = "MediaAsset(id=$id, kind=$kind, status=$status, tier=$tier)"
 
-    enum class Processing { PROCESS, GIVE_UP, NOT_THIS_KIND, NOTHING_TO_DO }
+    enum class Processing { PROCESS, GIVE_UP, NOTHING_TO_DO }
+
+    sealed interface Heard {
+        data object Processing : Heard
+
+        data class Ready(
+            val key: StorageKey,
+            val durationMs: Int,
+        ) : Heard
+    }
 
     sealed interface Shown {
         data object Processing : Shown

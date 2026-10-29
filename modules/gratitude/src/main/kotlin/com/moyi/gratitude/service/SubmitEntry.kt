@@ -52,11 +52,9 @@ import java.util.UUID
  * P12); [EntryText.of] applies FR-041's limits to it, so this carries
  * nothing that could disagree with the domain about what "valid" means.
  *
- * [imageMediaId] is the photo to attach, claimed by [SubmitEntry] in the
- * entry's own transaction (FR-044a, spec §4 D2). [voiceMediaId] exists so
- * [SubmitEntry] can refuse it (`422 MEDIA_NOT_YET_SUPPORTED`, until D3) rather
- * than the web layer silently dropping a field it does not recognise — spec
- * §1 requires the refusal be visible to the caller.
+ * [imageMediaId] is the photo to attach and [voiceMediaId] the voice note,
+ * each claimed by [SubmitEntry] in the entry's own transaction (FR-044a, spec
+ * §4 D2 and D3).
  *
  * [intendedAt], BR-3a's offline-draft claim, is optional and rarely sent;
  * `null` means "filed against today, on the bond's own calendar" — exactly
@@ -84,15 +82,16 @@ internal data class EntryDraft(
  * [favourited] is **the caller's own** bookmark on it (FR-093), never
  * anybody else's, and has no default: whoever builds a view says what the
  * caller's mark is, or says why there cannot be one. [reaction] is the one
- * the other member has left on it (FR-048), and has none either. [image] is
- * its photo as the caller is shown it ([EntryImages]), and has none either.
+ * the other member has left on it (FR-048), and has none either. [media] is
+ * its photo and voice note as the caller is shown them ([EntryMedia]), and has
+ * none either.
  */
 internal data class EntryView(
     val entry: EntryReading,
     val day: BondDay,
     val favourited: Boolean,
     val reaction: ReactionType?,
-    val image: EntryImage?,
+    val media: ShownMedia?,
 )
 
 /**
@@ -169,8 +168,8 @@ internal data class Submission(
  *    found `RequestDeletion.cancel` making exactly that assumption, and
  *    `BondMembership`'s own KDoc now requires both be checked.
  * 2. `!membership.isOpen` — `409 BOND_ARCHIVED` (BR-9).
- * 3. A voice note — `422 MEDIA_NOT_YET_SUPPORTED` (spec §1, until D3):
- *    refused, never stored and quietly ignored.
+ * 3. (Until D3, a voice note was refused here, `422 MEDIA_NOT_YET_SUPPORTED`;
+ *    it is claimed at 4b now, ADR-0049.)
  * 4. `promptId` that names no prompt — `422 VALIDATION_FAILED` on `promptId`.
  * 4a. A photo `media` will not attach to this entry — `422 VALIDATION_FAILED`
  *    on `imageMediaId` (FR-044a, spec §4 D2): not the caller's, not `READY`,
@@ -182,6 +181,11 @@ internal data class Submission(
  *    reasoning). The photo's row is locked from here to the commit, after the
  *    bond's and before the day's; nothing that locks a photo takes a bond or a
  *    day, so the order closes no cycle.
+ * 4b. A voice note `media` will not attach to this entry — `422
+ *    VALIDATION_FAILED` on `voiceMediaId` (spec §4 D3), the same claim, made
+ *    the same way, after the photo's: its row is locked from here to the
+ *    commit too, and nothing that locks a voice note takes a photo, a bond or
+ *    a day.
  * 5. The day: [DayAssignment.resolve] resolves which Bond-day this entry is
  *    for against the bond's **effective-zone timeline**
  *    ([BondMembership.anchorTimeline], adapted by [asCalendar]) — not
@@ -288,7 +292,7 @@ internal class SubmitEntry(
     private val prompts: PromptLibrary,
     private val notifications: Notifications,
     private val attachments: MediaAttachments,
-    private val images: EntryImages,
+    private val media: EntryMedia,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -296,9 +300,9 @@ internal class SubmitEntry(
      * @param idempotency the request's `Idempotency-Key`, as `IdempotencyInterceptor` prepared it
      * @throws com.moyi.common.web.NotFoundException the caller is not a member of [bondId], or there is no such bond
      * @throws BondArchivedException `membership.hasLeft`, or the bond has ended (BR-9)
-     * @throws MediaNotYetSupportedException a voice note is named (spec §1, until D3)
      * @throws PromptNotKnownException `promptId` is not the id of a prompt the library has ever held (ADR-0038)
-     * @throws MediaNotAttachableException `imageMediaId` is not a photo `media` attaches to this entry (FR-044a)
+     * @throws MediaNotAttachableException `imageMediaId` is not a photo, or `voiceMediaId` not a voice note, `media`
+     *   attaches to this entry (FR-044a)
      * @throws DayClosedException the Bond-day this entry resolves to is settled — closed, or already revealed —
      *   and BR-3a has no other day to put it on
      * @throws EntryAlreadyExistsException a second entry from this member on this day (BR-2)
@@ -344,7 +348,6 @@ internal class SubmitEntry(
                             // `isOpen` would let this commit after the bond ended.
                             val membership = access.lockMembershipOf(userId, bondId)
                             if (membership.hasLeft || !membership.isOpen) throw BondArchivedException()
-                            if (draft.voiceMediaId != null) throw MediaNotYetSupportedException()
                             // Named or not, decided only for a member of an open bond: a stranger has had
                             // the bond's 404 and an ended bond its 409 by now (ADR-0038 decision 9). Any prompt
                             // the library holds, retired or not: an offline draft names the one it cached.
@@ -352,10 +355,12 @@ internal class SubmitEntry(
                                 draft.promptId?.let { raw ->
                                     PromptId.parse(raw)?.takeIf(prompts::exists) ?: throw PromptNotKnownException()
                                 }
-                            // Step 4a: the id is chosen now so the photo is claimed for the entry it will be.
+                            // Steps 4a and 4b: the id is chosen now so the media are claimed for the entry it will be.
                             val newEntry = EntryId(ids.opaque())
-                            draft.imageMediaId?.let { image -> claimPhoto(userId, image, newEntry) }
-                            val (view, entryId) = write(membership, newEntry, text, intendedAt, now, promptId, draft.imageMediaId)
+                            draft.imageMediaId?.let { image -> claim(userId, image, AttachableKind.IMAGE, newEntry) }
+                            draft.voiceMediaId?.let { voice -> claim(userId, voice, AttachableKind.VOICE, newEntry) }
+                            val (view, entryId) =
+                                write(membership, newEntry, text, intendedAt, now, promptId, draft.imageMediaId, draft.voiceMediaId)
                             // The key records what this produced by identity, never the words.
                             IdempotentResult(view, entryId.value, ResultKind.ENTRY, CREATED)
                         }
@@ -370,13 +375,14 @@ internal class SubmitEntry(
         return checkNotNull(submission) { "submit's transaction produces a Submission unless it threw" }
     }
 
-    /** Step 4a of the class KDoc: `media`'s claim, in this transaction, for the entry about to be written. */
-    private fun claimPhoto(
+    /** Steps 4a and 4b of the class KDoc: `media`'s claim, in this transaction, for the entry about to be written. */
+    private fun claim(
         owner: UUID,
-        image: UUID,
+        mediaId: UUID,
+        kind: AttachableKind,
         entry: EntryId,
     ) {
-        if (!attachments.claim(owner, image, AttachableKind.IMAGE, entry.value)) throw MediaNotAttachableException()
+        if (!attachments.claim(owner, mediaId, kind, entry.value)) throw MediaNotAttachableException(kind)
     }
 
     /**
@@ -446,7 +452,7 @@ internal class SubmitEntry(
             day,
             favourites.isMarkedBy(membership, reading),
             reactions.on(reading),
-            images.of(membership.userId, reading),
+            media.of(membership.userId, reading),
         )
     }
 
@@ -464,6 +470,7 @@ internal class SubmitEntry(
         now: Instant,
         promptId: PromptId?,
         imageMediaId: UUID?,
+        voiceMediaId: UUID?,
     ): Pair<EntryView, EntryId> {
         val bondId = membership.bondId
         val timeline = membership.anchorTimeline
@@ -519,6 +526,7 @@ internal class SubmitEntry(
                 intendedAt = resolution.resolvedAt,
                 now = now,
                 imageMediaId = imageMediaId,
+                voiceMediaId = voiceMediaId,
             )
         // The flush BR-2's index lives on. See EntryStore.insert's own KDoc:
         // the constraint is what refuses a second entry, raised here rather
@@ -536,7 +544,7 @@ internal class SubmitEntry(
         val persisted = checkNotNull(entries.find(entry.id))
         // Not asked of the tables: the row was inserted a moment ago in this transaction, and nobody can have marked it or reacted to it.
         val reading = persisted.readBy(membership.asReader())
-        return EntryView(reading, updated, favourited = false, reaction = null, image = images.of(membership.userId, reading)) to entry.id
+        return EntryView(reading, updated, favourited = false, reaction = null, media = media.of(membership.userId, reading)) to entry.id
     }
 
     /**

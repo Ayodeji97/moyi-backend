@@ -52,10 +52,13 @@ internal data class UploadIntentResponse(
  * URLs for ready variants"). [status] is the asset's own lifecycle state. Once
  * a photo is `READY`, [url] is a signed GET of the largest image kept of it,
  * valid for at least 24 hours and the same all hour (ADR-0048), and [width]
- * and [height] are that image's; before, all three are null. [contentType] and
- * [sizeBytes] are what was declared for the upload, not what is kept.
+ * and [height] are that image's; once a voice note is `READY`, [url] is a
+ * signed GET of its Ogg Opus, the same way (ADR-0049), and [durationMs] its
+ * length. Before, all are null, and each is null on the other kind.
+ * [contentType] and [sizeBytes] are what was declared for the upload, not
+ * what is kept.
  *
- * @property url a bearer credential for the image: keep it out of logs and analytics
+ * @property url a bearer credential for the photo or voice note: keep it out of logs and analytics
  */
 internal data class MediaResponse(
     val id: UUID,
@@ -66,9 +69,11 @@ internal data class MediaResponse(
     val url: String?,
     val width: Int?,
     val height: Int?,
+    val durationMs: Int?,
 ) {
     override fun toString(): String =
-        "MediaResponse(id=$id, kind=$kind, status=$status, url=${url?.let { "<redacted>" }}, width=$width, height=$height)"
+        "MediaResponse(id=$id, kind=$kind, status=$status, url=${url?.let { "<redacted>" }}, width=$width, height=$height, " +
+            "durationMs=$durationMs)"
 
     companion object {
         fun from(own: OwnAsset): MediaResponse =
@@ -81,6 +86,7 @@ internal data class MediaResponse(
                 own.url?.toString(),
                 own.width,
                 own.height,
+                own.durationMs,
             )
     }
 }

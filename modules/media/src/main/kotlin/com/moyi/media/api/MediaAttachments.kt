@@ -41,7 +41,8 @@ interface MediaAttachments {
     )
 }
 
-/** What an entry may carry. D3 adds the voice note. */
+/** What an entry may carry: one photo (D2) and one voice note (D3), FR-042 and FR-043. */
 enum class AttachableKind {
     IMAGE,
+    VOICE,
 }

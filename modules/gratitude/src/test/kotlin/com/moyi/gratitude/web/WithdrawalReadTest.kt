@@ -230,7 +230,8 @@ internal class WithdrawalReadTest(
         hers.contentAsString shouldNotContain ADAS_WORDS
         val own = json.readTree(hers.contentAsString)
         own["myEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder
-            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction", "image")
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction") +
+            listOf("image", "voice")
         own["myEntry"]["favourited"].asBoolean() shouldBe false
         own["myEntry"]["id"].asString() shouldBe adas.id
         own["myEntry"]["text"].isNull shouldBe true

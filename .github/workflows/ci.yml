@@ -62,12 +62,14 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
-      # libvips' command-line tools, which modules/media's tests run for real
-      # (ADR-0048): the photo pipeline decodes and re-encodes images the tests
-      # make, on Linux under the memory limit production uses. The libde265
+      # libvips' command-line tools and ffmpeg, which modules/media's tests run
+      # for real (ADR-0048, ADR-0049): the photo pipeline decodes and re-encodes
+      # images the tests make, and the voice pipeline transcodes recordings they
+      # make, on Linux under the memory limits production uses. The libde265
       # plugin is what lets libheif decode a HEIC. Ubuntu 24.04 ships libvips
-      # 8.15; the pipeline's options were checked against it (ADR-0048).
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools libheif-plugin-libde265
+      # 8.15 and ffmpeg 6.1 (with libopus and the AMR codecs); the pipelines'
+      # options were checked against both.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools libheif-plugin-libde265 ffmpeg
 
       - run: ./gradlew build
 

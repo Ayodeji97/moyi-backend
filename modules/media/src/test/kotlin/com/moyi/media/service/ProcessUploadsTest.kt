@@ -10,10 +10,12 @@ import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
 import com.moyi.media.infra.database.MediaAssetStore
 import com.moyi.media.infra.processing.TestImages
+import com.moyi.media.infra.processing.TestVoices
 import com.moyi.media.infra.processing.VipsImageProcessorTest
 import com.moyi.media.infra.processing.VipsImageProcessorTest.Companion.containsBytes
 import com.moyi.media.web.MediaClient
 import io.kotest.matchers.collections.shouldBeEmpty
+import io.kotest.matchers.ints.shouldBeInRange
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
@@ -21,6 +23,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
+import org.junit.jupiter.api.io.TempDir
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.system.CapturedOutput
@@ -35,6 +38,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
+import java.nio.file.Path
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -64,6 +68,9 @@ internal class ProcessUploadsTest(
     private val json = JsonMapper.builder().build()
     private val http = HttpClient.newHttpClient()
     private val ada = UUID.randomUUID()
+
+    @TempDir
+    lateinit var work: Path
 
     @AfterEach
     fun clear() {
@@ -104,10 +111,10 @@ internal class ProcessUploadsTest(
         readyTimings() shouldBe timedBefore + 1
     }
 
-    private fun readyTimings(): Long =
+    private fun readyTimings(kind: String = "IMAGE"): Long =
         meters
             .find(ProcessUploads.DURATION)
-            .tags("kind", "IMAGE", "outcome", "ready")
+            .tags("kind", kind, "outcome", "ready")
             .timer()
             ?.count() ?: 0
 
@@ -258,14 +265,104 @@ internal class ProcessUploadsTest(
     }
 
     @Test
-    fun `a voice note is left as it is, for D3`() {
-        val voice = "RIFF....WAVEfmt fake voice bytes".toByteArray()
-        val mediaId = client.upload(ada, voice, declaredType = "audio/wav", kind = "VOICE")
+    fun `an uploaded voice note becomes ready, one Opus file without its tags, the upload deleted and a URL for its owner`() {
+        val mediaId = client.upload(ada, TestVoices.m4aWithTagsAndChapters(work), declaredType = "audio/x-m4a", kind = "VOICE")
+        val upload = storageKeyOf(mediaId)
+        val timedBefore = readyTimings("VOICE")
 
         processAll()
 
-        jdbc.queryForMap("SELECT status, processing_attempts FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
-            mapOf("status" to "UPLOADED", "processing_attempts" to 0)
+        val row =
+            jdbc.queryForMap(
+                "SELECT status, duration_ms, processing_attempts, variants::text AS variants FROM media_assets WHERE id = ?::uuid",
+                mediaId,
+            )
+        row["status"] shouldBe "READY"
+        (row["duration_ms"] as Int) shouldBeInRange 1_900..2_200
+        row["processing_attempts"] shouldBe 1
+        // Nothing to record: the Opus is at the key derived from the upload's.
+        row["variants"] shouldBe "[]"
+        // The original bytes, tags and all, are not kept (spec §4 D3).
+        stored(upload) shouldBe false
+        stored(voiceOf(upload)) shouldBe true
+
+        val view = json.readTree(client.get(ada, mediaId).contentAsString)
+        view["status"].asString() shouldBe "READY"
+        view["durationMs"].asInt() shouldBe row["duration_ms"]
+        view["width"].isNull shouldBe true
+        val played =
+            http.send(HttpRequest.newBuilder(URI.create(view["url"].asString())).GET().build(), HttpResponse.BodyHandlers.ofByteArray())
+        played.statusCode() shouldBe 200
+        played.headers().firstValue("Content-Type").orElse("") shouldBe "audio/ogg"
+        played.body().copyOf(4).toString(Charsets.US_ASCII) shouldBe "OggS"
+        played.body().containsBytes("OpusHead".toByteArray()) shouldBe true
+        played.body().containsBytes(TestVoices.MARKER.toByteArray()) shouldBe false
+
+        // Doc 11:49's histogram, one more voice note in it.
+        readyTimings("VOICE") shouldBe timedBefore + 1
+    }
+
+    @Test
+    fun `a WAV declared as an M4A fails, and nothing is kept`(output: CapturedOutput) {
+        val mediaId = client.upload(ada, TestVoices.wav(2.0), declaredType = "audio/mp4", kind = "VOICE")
+        val upload = storageKeyOf(mediaId)
+
+        processAll()
+
+        statusOf(mediaId) shouldBe "FAILED"
+        stored(upload) shouldBe false
+        stored(voiceOf(upload)) shouldBe false
+        output.out shouldContain "Media $mediaId failed: NOT_THE_DECLARED_FORMAT"
+    }
+
+    @Test
+    fun `a recording in none of the allowed containers fails, whatever it was declared as`(output: CapturedOutput) {
+        val mp3 = "ID3".toByteArray() + ByteArray(64) { 0x55 }
+        val mediaId = client.upload(ada, mp3, declaredType = "audio/mp4", kind = "VOICE")
+
+        processAll()
+
+        statusOf(mediaId) shouldBe "FAILED"
+        output.out shouldContain "Media $mediaId failed: NOT_AN_ALLOWED_FORMAT"
+    }
+
+    @Test
+    fun `a voice note over 61 seconds fails, and nothing is kept`(output: CapturedOutput) {
+        val mediaId = client.upload(ada, TestVoices.wav(62.0), declaredType = "audio/wav", kind = "VOICE")
+        val upload = storageKeyOf(mediaId)
+
+        processAll()
+
+        jdbc.queryForMap("SELECT status, duration_ms FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
+            mapOf("status" to "FAILED", "duration_ms" to null)
+        stored(upload) shouldBe false
+        stored(voiceOf(upload)) shouldBe false
+        output.out shouldContain "Media $mediaId failed: TOO_LONG"
+    }
+
+    @Test
+    fun `a voice note on which five attempts began and none finished is failed by the next delivery, as a photo is`(
+        output: CapturedOutput,
+    ) {
+        val mediaId = client.upload(ada, TestVoices.wav(2.0), declaredType = "audio/wav", kind = "VOICE")
+        jdbc.update("UPDATE media_assets SET status = 'PROCESSING', processing_attempts = 5 WHERE id = ?::uuid", mediaId)
+
+        dispatcher.dispatchDue(clock.instant(), BUDGET).failed shouldBe 0
+
+        statusOf(mediaId) shouldBe "FAILED"
+        output.out shouldContain "Media $mediaId failed: TOO_MANY_ATTEMPTS"
+    }
+
+    @Test
+    fun `a ready voice note its owner deletes leaves nothing in the storage`() {
+        val mediaId = client.upload(ada, TestVoices.wav(2.0), declaredType = "audio/wav", kind = "VOICE")
+        val upload = storageKeyOf(mediaId)
+        processAll()
+        stored(voiceOf(upload)) shouldBe true
+
+        client.delete(ada, mediaId).status shouldBe 204
+
+        stored(voiceOf(upload)) shouldBe false
     }
 
     @Test
@@ -321,6 +418,8 @@ internal class ProcessUploadsTest(
         upload: String,
         label: String,
     ) = "v/${upload.removePrefix("in/")}/$label.webp"
+
+    private fun voiceOf(upload: String) = "v/${upload.removePrefix("in/")}/voice.ogg"
 
     private companion object {
         const val BUDGET = 20

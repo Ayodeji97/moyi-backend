@@ -309,16 +309,19 @@ there the asset's state decides it. CI installs `libvips-tools` and `libheif-plu
 ## Owed
 
 - **The media worker (the owner's Q5), before any photo is processed in production:** an image
-  with JRE 25, `libvips-tools` and `libheif-plugin-libde265` on Ubuntu 24.04 (and ffmpeg for D3),
-  running the same jar with `MOYI_MEDIA_PROCESSING_PROVIDER=vips`, non-root, read-only root, its
+  with JRE 25, `libvips-tools` and `libheif-plugin-libde265` on Ubuntu 24.04, and `ffmpeg` with
+  `libopus` for voice notes (ADR-0049), running the same jar with
+  `MOYI_MEDIA_PROCESSING_PROVIDER=native` (named `vips` before D3), non-root, read-only root, its
   network limited to R2 and Postgres (spec R-E, **[inferred feasible]**, not checked), `--memory=768m
   --cpus=1.5`; and in it, the web server and every consumer but `media.process` turned off, so the
-  worker claims only its own deliveries. The ruling says "a Kamal accessory"; an accessory runs a
-  fixed image and is not redeployed with the application, while a Kamal **role** runs the
-  application's own image with its own command and options. Which of the two is the owner's to say
-  at the deploy (open question, below). Until then `config/deploy.yml` keeps `"off"`. The worker's
-  JVM is capped (`-Xmx256m`) and its resident memory measured, to confirm decision 3's 768 MiB
-  arithmetic.
+  worker claims only its own deliveries. **It is a Kamal role, not an accessory** (the owner's
+  ruling, 2026-10-29): a role runs the application's own image with its own command and options,
+  and is redeployed with the application, where an accessory runs a fixed image that is not. Until
+  then `config/deploy.yml` keeps `"off"`. The worker's JVM is capped (`-Xmx256m`) and its resident
+  memory measured, to confirm decision 3's 768 MiB arithmetic. **Gate (ADR-0049): the worker is
+  not deployed before D5's purge (#110, ADR-0050) is live in production**, so that no URL handed
+  out before an erasure outlives it. (The owner ruled on FR-061 on 2026-10-29: voice notes are
+  moderated; with no verdict for them until D4, a partner is never given one, which needs no gate.)
 - **R2, not run:** one GET of a photo URL signed up to an hour earlier, against the real bucket,
   when uploads are switched on (MinIO serves it; R2's SigV4 is expected to, as S3's does).
 - **D3:** voice notes, still `UPLOADED` after `media.process` has passed them; D3 processes them,

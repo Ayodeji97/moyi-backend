@@ -11,6 +11,7 @@ import com.moyi.media.infra.AssetRows
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
 import com.moyi.media.infra.processing.TestImages
+import com.moyi.media.infra.processing.TestVoices
 import com.moyi.media.infra.storage.UnavailableObjectStore
 import com.moyi.media.web.MediaClient
 import io.kotest.assertions.throwables.shouldThrow
@@ -84,7 +85,7 @@ internal class MediaPurgeTest(
     @BeforeEach
     fun start() {
         rows.clear()
-        clock.set(Instant.parse("2026-10-28T09:00:00Z"))
+        clock.set(MediaTestApplication.START)
     }
 
     @AfterEach
@@ -118,6 +119,29 @@ internal class MediaPurgeTest(
         // A URL already handed out (a bearer credential for up to 25 hours) reaches nothing now.
         fetch(url) shouldBe 404
         rows.row(UUID.fromString(photo))["purged_at"].shouldNotBeNull()
+        undelivered().shouldBeEmpty()
+    }
+
+    /** D3 with D5: a voice note's Opus is one of its derived keys, so an erasure takes it as it takes a photo's variants. */
+    @Test
+    fun `an erased entry's voice note is gone from the storage once media purge runs, its upload and its Opus`() {
+        val voice = client.upload(ada, TestVoices.wav(2.0), declaredType = "audio/wav", kind = "VOICE")
+        deliver()
+        rows.statusOf(UUID.fromString(voice)) shouldBe "READY"
+        val upload = storageKeyOf(voice)
+        val opus = "v/${upload.removePrefix("in/")}/voice.ogg"
+        val url = urlOf(voice)
+        fetch(url) shouldBe 200
+        stored(opus) shouldBe true
+        transactions.execute { attachments.claim(ada, UUID.fromString(voice), AttachableKind.VOICE, entry) } shouldBe true
+
+        transactions.execute { erasure.releaseAllOf(entry) } shouldBe 1
+        deliver()
+
+        stored(opus) shouldBe false
+        stored(upload) shouldBe false
+        fetch(url) shouldBe 404
+        rows.row(UUID.fromString(voice))["purged_at"].shouldNotBeNull()
         undelivered().shouldBeEmpty()
     }
 

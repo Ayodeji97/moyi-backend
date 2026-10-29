@@ -24,15 +24,16 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
- * What a `PATCH` asks of an entry's media (spec §4 D2): a photo to attach, if
- * [image] is given, and whether it named a voice note, which is refused until D3.
+ * What a `PATCH` asks of an entry's media (spec §4 D2, D3): a photo to attach,
+ * if [image] is given, and a voice note, if [voice] is. Either absent leaves
+ * the entry's as it is.
  */
 internal data class MediaChange(
     val image: UUID?,
-    val voice: Boolean,
+    val voice: UUID?,
 ) {
     companion object {
-        val NONE = MediaChange(image = null, voice = false)
+        val NONE = MediaChange(image = null, voice = null)
     }
 }
 
@@ -68,7 +69,7 @@ internal class ChangeEntry(
     private val favourites: Favourites,
     private val reactions: Reactions,
     private val attachments: MediaAttachments,
-    private val images: EntryImages,
+    private val shown: EntryMedia,
 ) {
     fun change(
         userId: UUID,
@@ -89,19 +90,19 @@ internal class ChangeEntry(
      *
      * **The refusals, in the order a caller can meet them:** not the author
      * (`404`, the one answer everybody else gets); for an edit only, a bond
-     * that takes no writes (`409 BOND_ARCHIVED`); a voice note (`422
-     * MEDIA_NOT_YET_SUPPORTED`, until D3); and, under the entry's lock, an
-     * entry that can no longer be edited (`409 ENTRY_IMMUTABLE`), then a photo
-     * `media` will not attach to it (`422` on `imageMediaId`, FR-044a). A
-     * delete by its author meets none after the first.
+     * that takes no writes (`409 BOND_ARCHIVED`); and, under the entry's
+     * lock, an entry that can no longer be edited (`409 ENTRY_IMMUTABLE`),
+     * then a photo `media` will not attach to it (`422` on `imageMediaId`,
+     * FR-044a), then a voice note (`422` on `voiceMediaId`). A delete by its
+     * author meets none after the first.
      *
-     * **A photo is claimed under the entry's lock** (ADR-0048), once BR-7 has
-     * said the entry may still change, so a photo is never attached to an
-     * entry that was revealed meanwhile. A new photo in place of another lets
-     * the old one go: it is its owner's alone again, as an upload never
-     * attached is, which D5's reaper is to delete after 24 hours. The
-     * same photo again changes nothing. `PATCH` cannot remove a photo: an
-     * absent `imageMediaId` leaves the entry's photo as it is.
+     * **Media are claimed under the entry's lock** (ADR-0048, ADR-0049), once
+     * BR-7 has said the entry may still change, so nothing is ever attached to
+     * an entry that was revealed meanwhile. A new photo or voice note in place
+     * of another lets the old one go: it is its owner's alone again, as an
+     * upload never attached is, which D5's reaper is to delete after 24 hours.
+     * The same one again changes nothing. `PATCH` cannot remove either: an
+     * absent `imageMediaId` or `voiceMediaId` leaves the entry's as it is.
      *
      * **Both paths lock through [lockDays] first**, which is what orders the
      * entry's day against the joining day. For a delete [EraseEntry] then
@@ -121,20 +122,19 @@ internal class ChangeEntry(
                 transactions.execute {
                     val (initial, membership) = authorOf(userId, entryId, lock = true)
                     if (replacement != null && (membership.hasLeft || !membership.isOpen)) throw BondArchivedException()
-                    if (media.voice) throw MediaNotYetSupportedException()
                     val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
                     val day = lockDays(membership, initial.bondDayId, now)
                     val (changed, nextDay) =
                         if (replacement == null) {
                             eraser.erase(entryId, day.id, now)
                         } else {
-                            edit(userId, entryId, replacement, media.image, now) to day
+                            edit(userId, entryId, replacement, media, now) to day
                         }
                     // Not asked of the tables, because neither outcome can carry a mark or a reaction. An
                     // edit has just passed BR-7 under the entry's lock, so the entry is not revealed, and
                     // only a revealed entry can be marked or reacted to. A delete leaves a tombstone.
                     val reading = changed.readBy(membership.asReader())
-                    EntryView(reading, nextDay, favourited = false, reaction = null, image = images.of(membership.userId, reading))
+                    EntryView(reading, nextDay, favourited = false, reaction = null, media = shown.of(membership.userId, reading))
                 },
             )
         } catch (violation: DataIntegrityViolationException) {
@@ -143,25 +143,43 @@ internal class ChangeEntry(
 
     /**
      * Under the day's lock, which the caller took. The entry is read again under
-     * its own before BR-7 is asked, and only then is a new [image] claimed.
+     * its own before BR-7 is asked, and only then is a new photo or voice note
+     * claimed, the photo first.
      */
     private fun edit(
         userId: UUID,
         entryId: EntryId,
         replacement: EntryText,
-        image: UUID?,
+        media: MediaChange,
         now: Instant,
     ): Entry {
         val entry = entries.lockAndFind(entryId)
         if (!entry.isEditable) throw EntryImmutableException()
         var changed = entry.edit(replacement, now)
+        val image = media.image
         if (image != null && image != entry.imageMediaId) {
-            if (!attachments.claim(userId, image, AttachableKind.IMAGE, entryId.value)) throw MediaNotAttachableException()
-            entry.imageMediaId?.let { replaced -> attachments.release(userId, replaced, entryId.value) }
+            swap(userId, entryId, AttachableKind.IMAGE, claimed = image, replaced = entry.imageMediaId)
             changed = changed.withImage(image, now)
+        }
+        val voice = media.voice
+        if (voice != null && voice != entry.voiceMediaId) {
+            swap(userId, entryId, AttachableKind.VOICE, claimed = voice, replaced = entry.voiceMediaId)
+            changed = changed.withVoice(voice, now)
         }
         if (changed != entry) entries.update(changed)
         return changed
+    }
+
+    /** `media`'s claim of [claimed] for the entry (FR-044a), then the release of what it replaces, if anything. */
+    private fun swap(
+        userId: UUID,
+        entryId: EntryId,
+        kind: AttachableKind,
+        claimed: UUID,
+        replaced: UUID?,
+    ) {
+        if (!attachments.claim(userId, claimed, kind, entryId.value)) throw MediaNotAttachableException(kind)
+        replaced?.let { attachments.release(userId, it, entryId.value) }
     }
 
     /**
@@ -218,7 +236,7 @@ internal class ChangeEntry(
             checkNotNull(days.find(entry.bondDayId)),
             favourites.isMarkedBy(membership, reading),
             reactions.on(reading),
-            images.of(membership.userId, reading),
+            shown.of(membership.userId, reading),
         )
     }
 

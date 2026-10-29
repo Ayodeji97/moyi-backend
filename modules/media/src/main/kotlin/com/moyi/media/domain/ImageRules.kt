@@ -79,12 +79,12 @@ internal object ImageRules {
         height: Int,
         bands: Int,
         format: String,
-    ): ImageRefusal? {
+    ): MediaRefusal? {
         val sample = bytesPerSample(format)
         return when {
-            !mayDecode(width, height) -> ImageRefusal.TOO_MANY_PIXELS
-            bands <= 0 || sample == null -> ImageRefusal.UNREADABLE
-            width.toLong() * height * bands * sample > MAX_DECODED_BYTES -> ImageRefusal.TOO_LARGE_DECODED
+            !mayDecode(width, height) -> MediaRefusal.TOO_MANY_PIXELS
+            bands <= 0 || sample == null -> MediaRefusal.UNREADABLE
+            width.toLong() * height * bands * sample > MAX_DECODED_BYTES -> MediaRefusal.TOO_LARGE_DECODED
             else -> null
         }
     }
@@ -106,56 +106,6 @@ internal object ImageRules {
         edge: Int,
         fraction: Double,
     ): Int = maxOf(1, (edge * fraction).toInt())
-}
-
-/**
- * Why a photo cannot be made into its variants. Every one is final: the same
- * bytes would fail the same way again, so the asset becomes `FAILED` and the
- * delivery is not retried (spec §4 D2: "Unrecoverable input → FAILED"). A
- * storage or database that cannot be reached is not one of these; that is
- * thrown, and the outbox tries again.
- */
-internal enum class ImageRefusal {
-    /** Nothing is stored under the upload's key any more. */
-    SOURCE_MISSING,
-
-    /** The storage holds more bytes than were declared and signed. */
-    LONGER_THAN_DECLARED,
-
-    /** The bytes do not have the SHA-256 that was declared and signed. */
-    CHECKSUM_MISMATCH,
-
-    /** The first bytes are none of JPEG, PNG, WebP and HEIC ([ImageFormat]). */
-    NOT_AN_ALLOWED_FORMAT,
-
-    /** The first bytes are an allowed format, but not the one the upload declared. */
-    NOT_THE_DECLARED_FORMAT,
-
-    /** The header says more than [ImageRules.MAX_PIXELS], or no size at all. */
-    TOO_MANY_PIXELS,
-
-    /** The header says it decodes to more than [ImageRules.MAX_DECODED_BYTES]. */
-    TOO_LARGE_DECODED,
-
-    /** Declared and branded HEIC, but libvips reads another codec in it (an AVIF, say). */
-    NOT_HEVC,
-
-    /**
-     * [MediaAsset.MAX_ATTEMPTS] decodes began and none finished: a photo that
-     * keeps killing the process (or failing after its decode in a way that is
-     * thrown) is given up rather than retried for ever. An outage before the
-     * decode never counts towards it.
-     */
-    TOO_MANY_ATTEMPTS,
-
-    /** The decoder could not read it, or stopped at a limit (memory, CPU time). */
-    UNREADABLE,
-
-    /** No variant fitted its byte cap at any quality or size tried. */
-    CANNOT_FIT,
-
-    /** The work did not finish within its time limit. */
-    TIMED_OUT,
 }
 
 private const val KIBIBYTE = 1024L

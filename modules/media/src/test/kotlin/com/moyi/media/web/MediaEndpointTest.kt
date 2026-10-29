@@ -31,6 +31,7 @@ import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.Base64
 import java.util.UUID
 import javax.sql.DataSource
@@ -70,7 +71,7 @@ internal class MediaEndpointTest(
         val mediaId = UUID.fromString(body["mediaId"].asString())
         val uploadUrl = body["uploadUrl"].asString()
         mediaId.version() shouldBe 4
-        body["expiresAt"].asString() shouldBe "2026-10-28T09:15:00Z"
+        Instant.parse(body["expiresAt"].asString()) shouldBe MediaTestApplication.START.plusSeconds(15 * 60)
         body["requiredHeaders"]["content-type"].asString() shouldBe "image/jpeg"
         body["requiredHeaders"]["x-amz-checksum-sha256"].asString() shouldBe sha256(photo)
 
@@ -299,8 +300,8 @@ internal class MediaEndpointTest(
         val mediaId = uploaded(ada)
         val response = json.readTree(get(ada, mediaId).contentAsString)
         response.propertyNames().asSequence().toList() shouldContainExactly
-            listOf("id", "kind", "status", "contentType", "sizeBytes", "url", "width", "height")
-        listOf("url", "width", "height").forEach { response[it].isNull shouldBe true }
+            listOf("id", "kind", "status", "contentType", "sizeBytes", "url", "width", "height", "durationMs")
+        listOf("url", "width", "height", "durationMs").forEach { response[it].isNull shouldBe true }
     }
 
     @Test

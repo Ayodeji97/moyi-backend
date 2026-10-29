@@ -5,14 +5,19 @@ import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.events.StartFrom
 import com.moyi.media.domain.HeifItems
 import com.moyi.media.domain.ImageFormat
-import com.moyi.media.domain.ImageRefusal
 import com.moyi.media.domain.MediaAsset
+import com.moyi.media.domain.MediaKind
+import com.moyi.media.domain.MediaRefusal
 import com.moyi.media.domain.MediaStatus
 import com.moyi.media.domain.StorageKey
 import com.moyi.media.domain.StoredVariant
+import com.moyi.media.domain.VoiceFormat
+import com.moyi.media.domain.VoiceRules
 import com.moyi.media.infra.database.MediaAssetStore
 import com.moyi.media.infra.processing.Encoding
 import com.moyi.media.infra.processing.ImageProcessor
+import com.moyi.media.infra.processing.Transcoding
+import com.moyi.media.infra.processing.VoiceProcessor
 import com.moyi.media.infra.storage.ObjectStore
 import com.moyi.media.infra.storage.ObjectStoreUnavailableException
 import io.micrometer.core.instrument.MeterRegistry
@@ -37,58 +42,65 @@ import java.time.temporal.ChronoUnit
 import java.util.Base64
 
 /**
- * `media.process` (spec §4 D2): makes an uploaded photo into the images kept of
- * it, or fails it. It consumes `MediaUploaded`, which completion publishes
- * (ADR-0047), in the outbox's delivery transaction (ADR-0035), at least once.
+ * `media.process` (spec §4 D2, D3): makes an uploaded photo into the images
+ * kept of it, or a voice note into its Opus, or fails it. It consumes
+ * `MediaUploaded`, which completion publishes (ADR-0047), in the outbox's
+ * delivery transaction (ADR-0035), at least once.
  *
- * **It runs only where a processor does** ([ImageProcessor.processesHere]).
- * Where processing is off (production's API until the media worker exists,
- * ADR-0048), it declares no event type, so it subscribes to nothing and claims
- * nothing; the first process that processes subscribes it, and
- * [StartFrom.BEGINNING] hands it every upload published before then.
+ * **It runs only where the processors do** ([ImageProcessor.processesHere],
+ * [VoiceProcessor.processesHere], one switch for both). Where processing is off
+ * (production's API until the media worker exists, ADR-0048), it declares no
+ * event type, so it subscribes to nothing and claims nothing; the first
+ * process that processes subscribes it, and [StartFrom.BEGINNING] hands it
+ * every upload published before then.
  *
- * In order:
+ * In order, for either kind:
  *
  * 1. **The row, read again** ([MediaAsset.processing]). The event may be older
  *    than the asset: one deleted since is skipped (ADR-0047 owed this), and so
- *    is one already ready or failed (the same event twice) and a voice note
- *    (D3's). A photo on which [MediaAsset.MAX_ATTEMPTS] decodes began and
- *    none finished is given up: `FAILED`, and the delivery succeeds.
+ *    is one already ready or failed (the same event twice). An upload on which
+ *    [MediaAsset.MAX_ATTEMPTS] decodes began and none finished is given up:
+ *    `FAILED`, and the delivery succeeds.
  * 2. **The attempt is recorded in a transaction of its own**: `PROCESSING`,
- *    committed whatever becomes of this delivery, so a photo being worked on
+ *    committed whatever becomes of this delivery, so an upload being worked on
  *    is seen to be (D5's alert on anything `PROCESSING` for 30 minutes reads
  *    it). One more `processing_attempts` is committed the same way, but only
- *    once the bytes are fetched and verified, just before the decode: a
- *    storage outage spends none of the cap, however long it lasts, and a
- *    decode that kills the process is counted.
+ *    once the bytes are fetched and verified, just before the decode (a voice
+ *    note's transcode): a storage outage spends none of the cap, however long
+ *    it lasts, and a decode that kills the process is counted.
  * 3. **The work, holding no lock on the asset.** The upload is read once,
  *    never past its declared length, and must have the declared SHA-256; its
- *    first bytes must be one of the four allowed formats and the one declared
- *    ([ImageFormat], T-07), and a HEIC must hold HEVC images only
- *    ([HeifItems]). Only then does the processor see it. Each variant
- *    is written under `v/{uuid}/…` ([StorageKey.forVariant]).
+ *    first bytes must be one of its kind's allowed formats and the one
+ *    declared ([ImageFormat], [VoiceFormat], T-07), and a HEIC must hold HEVC
+ *    images only ([HeifItems]). Only then does a processor see it. What is
+ *    kept is written under `v/{uuid}/…` ([StorageKey.forVariant],
+ *    [StorageKey.forVoice]).
  * 4. **The decision, under the row lock**, on the status as it is then. Still
- *    `PROCESSING`: `READY` with the variants, or `FAILED`. Anything else means
- *    the owner deleted it meanwhile, and the variants just written are deleted
- *    again. A deletion therefore never waits on a photo being processed, and a
- *    photo processed never outlives its deletion.
+ *    `PROCESSING`: `READY` with what was made, or `FAILED`. Anything else
+ *    means the owner deleted it meanwhile, and what was just written is
+ *    deleted again. A deletion therefore never waits on an upload being
+ *    processed, and nothing processed outlives its deletion.
  * 5. **After the commit, the upload itself is deleted** (spec §4 D2: "delete
  *    in/…"), ready or failed: the original bytes, metadata and all, are never
  *    kept. If the storage cannot be reached then, the bucket's lifecycle rule
  *    removes them within two days (ADR-0047).
  *
- * **What is final and what is not.** A photo the rules refuse ([ImageRefusal])
- * is `FAILED`, and the delivery succeeds: retrying would refuse it again. A
- * storage that cannot be reached is thrown, the delivery is rolled back, and
- * the outbox tries again later (spec §4 D2: "transient → throw and let the
- * outbox back off"); the asset stays `PROCESSING` and is taken up again.
+ * **What is final and what is not.** An upload the rules refuse
+ * ([MediaRefusal]) is `FAILED`, and the delivery succeeds: retrying would
+ * refuse it again. A storage that cannot be reached is thrown, the delivery is
+ * rolled back, and the outbox tries again later (spec §4 D2: "transient →
+ * throw and let the outbox back off"); the asset stays `PROCESSING` and is
+ * taken up again.
  */
 @Component
-@Suppress("LongParameterList") // The pipeline's collaborators, each injected by Spring; D5 added the purge's.
+// What the pipeline works with, each named (the two processors are one switch's two halves, and D5 added the
+// purge's); and one step per function, for each kind, in the order the class KDoc gives.
+@Suppress("LongParameterList", "TooManyFunctions")
 internal class ProcessUploads(
     private val assets: MediaAssetStore,
     private val storage: ObjectStore,
-    private val processor: ImageProcessor,
+    private val images: ImageProcessor,
+    private val voices: VoiceProcessor,
     private val clock: Clock,
     transactionManager: PlatformTransactionManager,
     private val meters: MeterRegistry,
@@ -98,8 +110,12 @@ internal class ProcessUploads(
     private val ownTransaction =
         TransactionTemplate(transactionManager).apply { propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW }
 
+    init {
+        check(images.processesHere == voices.processesHere) { "photos and voice notes are processed in the same processes (ADR-0049)" }
+    }
+
     override val id: String = ID
-    override val eventTypes: Set<String> = if (processor.processesHere) setOf(CompleteUpload.MEDIA_UPLOADED) else emptySet()
+    override val eventTypes: Set<String> = if (images.processesHere) setOf(CompleteUpload.MEDIA_UPLOADED) else emptySet()
     override val startFrom: StartFrom = StartFrom.BEGINNING
 
     override fun handle(event: ReceivedEvent) {
@@ -114,10 +130,10 @@ internal class ProcessUploads(
                 if (ownTransaction.execute { assets.startProcessing(asset.id) } == true) attempt(asset)
             }
 
-            MediaAsset.Processing.NOT_THIS_KIND, MediaAsset.Processing.NOTHING_TO_DO -> {
-                // Deleted after an attempt began: that attempt may have written a variant after the owner's purge ran
-                // (a delivery that then failed and is retried here), so the objects are handed to media.purge again
-                // (D5, review of #110). Every key is derived, so a purge that finds nothing changes nothing.
+            MediaAsset.Processing.NOTHING_TO_DO -> {
+                // Deleted after an attempt began: that attempt may have written a variant or a voice note's Opus after
+                // the owner's purge ran (a delivery that then failed and is retried here), so the objects are handed to
+                // media.purge again (D5, review of #110). Every key is derived, so a purge that finds nothing changes nothing.
                 if (asset.isGone && asset.processingAttempts > 0) {
                     releases.released(asset.id, clock.instant().truncatedTo(ChronoUnit.MICROS))
                 }
@@ -129,11 +145,11 @@ internal class ProcessUploads(
      * [MediaAsset.MAX_ATTEMPTS] decodes began and none finished: `FAILED`, in
      * this delivery's transaction, and the delivery succeeds, so the outbox
      * stops retrying. Whatever an attempt left in the storage goes after the
-     * commit, as a failed photo's does.
+     * commit, as a failed upload's does.
      */
     private fun giveUp(asset: MediaAsset) {
         if (!assets.giveUp(asset.id)) return
-        log.warn("Media {} failed: {}", asset.id, ImageRefusal.TOO_MANY_ATTEMPTS)
+        log.warn("Media {} failed: {}", asset.id, MediaRefusal.TOO_MANY_ATTEMPTS)
         afterCommit { asset.objectKeys.forEach { bestEffortDelete(it, asset) } }
     }
 
@@ -147,7 +163,7 @@ internal class ProcessUploads(
         } finally {
             Timer
                 .builder(DURATION)
-                .description("Time to make an uploaded photo into its variants, or to fail it")
+                .description("Time to make an upload into what is kept of it, or to fail it")
                 .tag("kind", asset.kind.name)
                 .tag("outcome", outcome)
                 .register(meters)
@@ -155,51 +171,105 @@ internal class ProcessUploads(
         }
     }
 
-    /** Step 3: the upload, checked, and the variants, written. Holds no lock. */
+    /** Step 3: the upload, checked, and what is kept of it, written. Holds no lock. */
     private fun workOn(asset: MediaAsset): Result {
         val workDir = workDirectory()
         try {
             val source = workDir.resolve("upload")
-            val refusal = fetch(asset, source) ?: formatRefusal(asset, source)
-            if (refusal != null) return Result.Refused(refusal)
-            // The bytes are the declared format, so the declaration names it.
-            val format = ImageFormat.entries.single { it.agreesWith(asset.contentType) }
-            // The attempt counts from here, in a transaction of its own: the decode is where a photo can be the
-            // cause, an outage before it never is (owner's ruling on #108).
-            ownTransaction.executeWithoutResult { assets.countDecode(asset.id) }
-            return when (val encoding = processor.encode(source, format, workDir)) {
-                is Encoding.Refused -> {
-                    Result.Refused(encoding.reason)
-                }
-
-                is Encoding.Encoded -> {
-                    Result.Ready(
-                        encoding.variants.map { encoded ->
-                            val key = StorageKey.forVariant(asset.storageKey, encoded.variant)
-                            storage.put(key, encoded.file, WEBP)
-                            StoredVariant(encoded.variant, key, encoded.width, encoded.height, encoded.bytes)
-                        },
-                    )
-                }
+            fetch(asset, source)?.let { return Result.Refused(it) }
+            return when (asset.kind) {
+                MediaKind.IMAGE -> photo(asset, source, workDir)
+                MediaKind.VOICE -> voice(asset, source, workDir)
             }
         } finally {
             workDir.toFile().deleteRecursively()
         }
     }
 
-    /** T-07: the bytes are one of the four allowed formats, and the one declared. Null when they are. */
-    private fun formatRefusal(
+    /** A photo's variants (D2), once its bytes are a format allowed and declared. */
+    private fun photo(
         asset: MediaAsset,
         source: Path,
-    ): ImageRefusal? {
+        workDir: Path,
+    ): Result {
+        imageFormatRefusal(asset, source)?.let { return Result.Refused(it) }
+        // The bytes are the declared format, so the declaration names it.
+        val format = ImageFormat.entries.single { it.agreesWith(asset.contentType) }
+        countDecode(asset)
+        return when (val encoding = images.encode(source, format, workDir)) {
+            is Encoding.Refused -> {
+                Result.Refused(encoding.reason)
+            }
+
+            is Encoding.Encoded -> {
+                Result.Ready(
+                    encoding.variants.map { encoded ->
+                        val key = StorageKey.forVariant(asset.storageKey, encoded.variant)
+                        storage.put(key, encoded.file, WEBP)
+                        StoredVariant(encoded.variant, key, encoded.width, encoded.height, encoded.bytes)
+                    },
+                )
+            }
+        }
+    }
+
+    /** A voice note's Opus (D3), once its bytes are a container allowed and declared. */
+    private fun voice(
+        asset: MediaAsset,
+        source: Path,
+        workDir: Path,
+    ): Result {
+        voiceFormatRefusal(asset, source)?.let { return Result.Refused(it) }
+        // The bytes are the declared container, and each content type is one container's.
+        val format = VoiceFormat.entries.single { it.agreesWith(asset.contentType) }
+        countDecode(asset)
+        return when (val transcoding = voices.transcode(source, format, workDir)) {
+            is Transcoding.Refused -> {
+                Result.Refused(transcoding.reason)
+            }
+
+            is Transcoding.Transcoded -> {
+                storage.put(StorageKey.forVoice(asset.storageKey), transcoding.file, VoiceRules.KEPT_CONTENT_TYPE)
+                Result.VoiceReady(transcoding.durationMs)
+            }
+        }
+    }
+
+    /** T-07: the bytes are one of the allowed voice containers, and the one declared. Null when they are. */
+    private fun voiceFormatRefusal(
+        asset: MediaAsset,
+        source: Path,
+    ): MediaRefusal? {
+        val format = Files.newInputStream(source).use { VoiceFormat.of(it.readNBytes(VoiceFormat.SNIFF_BYTES)) }
+        return when {
+            format == null -> MediaRefusal.NOT_AN_ALLOWED_FORMAT
+            !format.agreesWith(asset.contentType) -> MediaRefusal.NOT_THE_DECLARED_FORMAT
+            else -> null
+        }
+    }
+
+    /**
+     * The attempt counts from here, in a transaction of its own: the decode is
+     * where an upload can be the cause, an outage before it never is (owner's
+     * ruling on #108).
+     */
+    private fun countDecode(asset: MediaAsset) {
+        ownTransaction.executeWithoutResult { assets.countDecode(asset.id) }
+    }
+
+    /** T-07: the bytes are one of the four allowed image formats, and the one declared. Null when they are. */
+    private fun imageFormatRefusal(
+        asset: MediaAsset,
+        source: Path,
+    ): MediaRefusal? {
         val format = Files.newInputStream(source).use { ImageFormat.of(it.readNBytes(ImageFormat.SNIFF_BYTES)) }
         return when {
-            format == null -> ImageRefusal.NOT_AN_ALLOWED_FORMAT
+            format == null -> MediaRefusal.NOT_AN_ALLOWED_FORMAT
 
-            !format.agreesWith(asset.contentType) -> ImageRefusal.NOT_THE_DECLARED_FORMAT
+            !format.agreesWith(asset.contentType) -> MediaRefusal.NOT_THE_DECLARED_FORMAT
 
             // A HEIC's brands are a claim; its items are what is decoded (an AV1 under HEIC brands decodes as AV1).
-            format == ImageFormat.HEIC && !HeifItems.isHevcOnly(Files.readAllBytes(source)) -> ImageRefusal.NOT_HEVC
+            format == ImageFormat.HEIC && !HeifItems.isHevcOnly(Files.readAllBytes(source)) -> MediaRefusal.NOT_HEVC
 
             else -> null
         }
@@ -213,14 +283,14 @@ internal class ProcessUploads(
     private fun fetch(
         asset: MediaAsset,
         target: Path,
-    ): ImageRefusal? {
+    ): MediaRefusal? {
         val digest = MessageDigest.getInstance("SHA-256")
-        val stream = storage.open(asset.storageKey) ?: return ImageRefusal.SOURCE_MISSING
+        val stream = storage.open(asset.storageKey) ?: return MediaRefusal.SOURCE_MISSING
         val withinLength = stream.use { input -> Files.newOutputStream(target).use { copyAtMost(input, it, asset.sizeBytes, digest) } }
         val checksum = Base64.getEncoder().encodeToString(digest.digest())
         return when {
-            !withinLength -> ImageRefusal.LONGER_THAN_DECLARED
-            checksum != asset.checksumSha256 -> ImageRefusal.CHECKSUM_MISMATCH
+            !withinLength -> MediaRefusal.LONGER_THAN_DECLARED
+            checksum != asset.checksumSha256 -> MediaRefusal.CHECKSUM_MISMATCH
             else -> null
         }
     }
@@ -235,8 +305,12 @@ internal class ProcessUploads(
         if (current?.status != MediaStatus.PROCESSING) {
             // Deleted while it was worked on: nothing written may outlive that. At once if the storage
             // answers; and for certain by media.purge, whose run for the deletion may have come before
-            // these variants were written (D5).
-            if (result is Result.Ready) result.variants.forEach { bestEffortDelete(it.key, asset) }
+            // what was made here was written (D5).
+            when (result) {
+                is Result.Ready -> result.variants.forEach { bestEffortDelete(it.key, asset) }
+                is Result.VoiceReady -> bestEffortDelete(StorageKey.forVoice(asset.storageKey), asset)
+                is Result.Refused -> Unit
+            }
             if (current?.isGone == true) releases.released(asset.id, now)
             log.info("Media {} was deleted while it was processed; what was made of it is removed", asset.id)
             return OUTCOME_GONE
@@ -249,8 +323,16 @@ internal class ProcessUploads(
                     OUTCOME_READY
                 }
 
+                is Result.VoiceReady -> {
+                    check(assets.markVoiceReady(asset.id, result.durationMs, now)) {
+                        "a voice note under its row lock, PROCESSING, becomes READY"
+                    }
+                    log.info("Media {} is ready ({} ms)", asset.id, result.durationMs)
+                    OUTCOME_READY
+                }
+
                 is Result.Refused -> {
-                    check(assets.markFailed(asset.id)) { "a photo under its row lock, PROCESSING, becomes FAILED" }
+                    check(assets.markFailed(asset.id)) { "an upload under its row lock, PROCESSING, becomes FAILED" }
                     // The id and the rule, never the key or anything the file said.
                     log.warn("Media {} failed: {}", asset.id, result.reason)
                     OUTCOME_FAILED
@@ -294,8 +376,12 @@ internal class ProcessUploads(
             val variants: List<StoredVariant>,
         ) : Result
 
+        data class VoiceReady(
+            val durationMs: Int,
+        ) : Result
+
         data class Refused(
-            val reason: ImageRefusal,
+            val reason: MediaRefusal,
         ) : Result
     }
 

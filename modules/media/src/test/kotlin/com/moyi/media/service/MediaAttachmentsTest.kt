@@ -5,6 +5,8 @@ import com.moyi.media.api.AttachableKind
 import com.moyi.media.api.ImageViewStatus
 import com.moyi.media.api.ImageViews
 import com.moyi.media.api.MediaAttachments
+import com.moyi.media.api.VoiceViewStatus
+import com.moyi.media.api.VoiceViews
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
 import com.moyi.media.web.HeldRow
@@ -40,6 +42,7 @@ import javax.sql.DataSource
 internal class MediaAttachmentsTest(
     @Autowired private val attachments: MediaAttachments,
     @Autowired private val images: ImageViews,
+    @Autowired private val voices: VoiceViews,
     @Autowired private val transactions: TransactionTemplate,
     @Autowired private val ids: IdGenerator,
     @Autowired private val dataSource: DataSource,
@@ -155,11 +158,86 @@ internal class MediaAttachmentsTest(
         images.shownTo(ada, listOf(asset(ada, status = "DELETED"), UUID.randomUUID())).shouldBeEmpty()
     }
 
+    @Test
+    fun `a ready voice note is claimed as a voice note, never as a photo, and a photo never as a voice note`() {
+        val voice = voiceNote(ada)
+        val photo = asset(ada)
+
+        claim(ada, voice, kind = AttachableKind.IMAGE) shouldBe false
+        claim(ada, photo, kind = AttachableKind.VOICE) shouldBe false
+        claim(bea, voice, kind = AttachableKind.VOICE) shouldBe false
+        claim(ada, voiceNote(ada, status = "PROCESSING"), kind = AttachableKind.VOICE) shouldBe false
+        attachedTo(voice).shouldBeNull()
+
+        claim(ada, voice, kind = AttachableKind.VOICE) shouldBe true
+        attachedTo(voice) shouldBe entry
+        claim(ada, voice, kind = AttachableKind.VOICE, entryId = UUID.randomUUID()) shouldBe false
+    }
+
+    /**
+     * FR-061, the owner's ruling: voice notes are moderated. Its owner
+     * hears a ready voice note with a signed URL and its length; anybody else
+     * hears it still processing, with neither.
+     */
+    @Test
+    fun `its owner is played a ready voice note with a signed URL and its length, and anybody else is told it is processing`() {
+        val voice = voiceNote(ada)
+
+        val toAda = voices.heardBy(ada, listOf(voice)).getValue(voice)
+        toAda.status shouldBe VoiceViewStatus.READY
+        toAda.durationMs shouldBe 4_200
+        toAda.url.toString() shouldContain "/voice.ogg?"
+        toAda.url.toString() shouldContain "X-Amz-Signature="
+        toAda.toString() shouldNotContain toAda.url.toString()
+
+        val toBea = voices.heardBy(bea, listOf(voice)).getValue(voice)
+        toBea.status shouldBe VoiceViewStatus.PROCESSING
+        toBea.url.shouldBeNull()
+        toBea.durationMs.shouldBeNull()
+    }
+
+    @Test
+    fun `a voice note not yet transcoded is processing to everyone, and a deleted one or a photo is played to nobody`() {
+        val waiting = voiceNote(ada, status = "PROCESSING")
+        val heard = voices.heardBy(ada, listOf(waiting)).getValue(waiting)
+        heard.status shouldBe VoiceViewStatus.PROCESSING
+        heard.url.shouldBeNull()
+        heard.durationMs.shouldBeNull()
+
+        voices.heardBy(ada, listOf(voiceNote(ada, status = "DELETED"), UUID.randomUUID())).shouldBeEmpty()
+        val photo = asset(ada)
+        voices.heardBy(ada, listOf(photo)).getValue(photo).status shouldBe VoiceViewStatus.PROCESSING
+    }
+
     private fun claim(
         owner: UUID,
         mediaId: UUID,
         entryId: UUID = entry,
-    ): Boolean = transactions.execute { attachments.claim(owner, mediaId, AttachableKind.IMAGE, entryId) }!!
+        kind: AttachableKind = AttachableKind.IMAGE,
+    ): Boolean = transactions.execute { attachments.claim(owner, mediaId, kind, entryId) }!!
+
+    /** A voice note as `media.process` leaves one, written directly: its Opus is at the key derived from its upload's. */
+    private fun voiceNote(
+        owner: UUID,
+        status: String = "READY",
+    ): UUID {
+        val id = ids.opaque()
+        jdbc.update(
+            """
+            INSERT INTO media_assets (id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, duration_ms,
+                                      created_at, deleted_at)
+            VALUES (?, ?, 'VOICE', ?, 'audio/mp4', 1000, 'Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMDA=', ?, ?, now(),
+                    CASE WHEN ? = 'DELETED' THEN now() END)
+            """.trimIndent(),
+            id,
+            owner,
+            "in/${UUID.randomUUID()}",
+            status,
+            4_200.takeIf { status == "READY" },
+            status,
+        )
+        return id
+    }
 
     private fun attachedTo(mediaId: UUID): UUID? =
         jdbc.queryForObject("SELECT attached_entry_id FROM media_assets WHERE id = ?", UUID::class.java, mediaId)

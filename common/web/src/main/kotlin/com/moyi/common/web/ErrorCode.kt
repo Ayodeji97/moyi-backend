@@ -283,16 +283,6 @@ enum class ErrorCode {
     DAY_CLOSED,
 
     /**
-     * `POST /bonds/{bondId}/entries` or `PATCH /entries/{entryId}` naming
-     * `voiceMediaId` (spec §1): refused outright rather than stored and
-     * silently ignored, because voice notes have nowhere to go until Phase 4
-     * slice D3. 422 — the request is well-formed, the media reference is
-     * simply not one this deployment can honour today. A photo
-     * (`imageMediaId`) is attached since D2 (ADR-0048).
-     */
-    MEDIA_NOT_YET_SUPPORTED,
-
-    /**
      * `POST /media/upload-intent` declaring more bytes than its kind allows:
      * 10 MB for an image (FR-042), 5 MB for a voice note (FR-043). 413, doc
      * 06:186's code. It refuses the upload, never an entry: text is the

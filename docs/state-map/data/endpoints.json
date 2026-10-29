@@ -58,14 +58,6 @@
       },
       {
         "status": 422,
-        "code": "MEDIA_NOT_YET_SUPPORTED",
-        "reason": "The request named a voice note (voiceMediaId), which nothing can store until Phase 4 slice D3. It is refused, not quietly dropped. A photo is attached since D2.",
-        "evidence": "smoke",
-        "evidenceRef": "an entry carrying a voice note is 422 MEDIA_NOT_YET_SUPPORTED",
-        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (draft.voiceMediaId != null) throw MediaNotYetSupportedException()"
-      },
-      {
-        "status": 422,
         "code": "VALIDATION_FAILED",
         "reason": "promptId names no prompt: it is not an id, or no prompt in the library has it. One answer for both, on the field promptId, and only for a member of an open bond: a stranger gets the bond's 404 and an ended bond 409 BOND_ARCHIVED first. A retired prompt, another bond type's, or an earlier day's is accepted.",
         "evidence": "smoke",
@@ -144,19 +136,11 @@
       },
       {
         "status": 422,
-        "code": "MEDIA_NOT_YET_SUPPORTED",
-        "reason": "The request named a voice note (voiceMediaId), which nothing can store until Phase 4 slice D3. (a test asserts the status, not the code)",
-        "evidence": "never-run",
-        "evidenceRef": "",
-        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (media.voice) throw MediaNotYetSupportedException()"
-      },
-      {
-        "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "imageMediaId names no photo media will attach to this entry: not yours, not READY, or on another entry. Asked under the entry's lock, after ENTRY_IMMUTABLE; nothing changes. A new photo in place of the entry's lets the old one go; an absent imageMediaId leaves the photo as it is.",
+        "reason": "imageMediaId names no photo, or voiceMediaId no voice note, media will attach to this entry: not yours, not READY, of the other kind, or on another entry; one answer on the field it names. Asked under the entry's lock, after ENTRY_IMMUTABLE, the photo first; nothing changes. A new one in place of the entry's lets the old one go; an absent field leaves the entry's as it is.",
         "evidence": "test",
-        "evidenceRef": "EntryPhotoTest#PATCH with another user's photo is refused on imageMediaId, and the entry is unchanged",
-        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (!attachments.claim(userId, image, AttachableKind.IMAGE, entryId.value)) throw MediaNotAttachableException()"
+        "evidenceRef": "EntryVoiceTest#PATCH with another user's voice note is refused on voiceMediaId, and the entry is unchanged",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (!attachments.claim(userId, claimed, kind, entryId.value)) throw MediaNotAttachableException(kind)"
       }
     ],
     "curl": "curl -X PATCH \"$API/entries/$ENTRY\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"text\": \"...\"}'"

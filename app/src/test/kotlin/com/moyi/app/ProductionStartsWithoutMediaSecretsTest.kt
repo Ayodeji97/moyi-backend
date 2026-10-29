@@ -51,17 +51,18 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     }
 
     /**
-     * ADR-0048: the application's image is the buildpack's and has no libvips,
-     * so this container must name processing OFF, or VIPS, the default, refuses
-     * to start (seen: the jar, with production's environment and this line left
-     * out, refused to start). And it says so as the **string** `off`: YAML 1.1,
+     * ADR-0048, ADR-0049: the application's image is the buildpack's and has
+     * neither libvips nor ffmpeg, so this container must name processing OFF,
+     * which turns off photos and voice notes alike, or NATIVE, the default,
+     * refuses to start (seen: the jar, with production's environment and this
+     * line left out, refused to start). And it says so as the **string** `off`: YAML 1.1,
      * which Kamal reads and SnakeYAML here reads too, takes a bare `off` for the
      * boolean `false`. Spring Boot happens to bind "false" to `OFF` (seen too),
      * so a bare `off` would still start; the file is held to the word it means
      * rather than to that leniency.
      */
     @Test
-    fun `deploy-yml turns image processing off in the application's container, as the string off`() {
+    fun `deploy-yml turns photo and voice processing off in the application's container, as the string off`() {
         val processing = clear["MOYI_MEDIA_PROCESSING_PROVIDER"]
         val found = "${processing?.javaClass?.simpleName}: $processing"
 

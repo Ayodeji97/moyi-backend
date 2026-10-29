@@ -1076,7 +1076,8 @@ internal class DaysFeedTest(
         const val FAMILY = "👨‍👩‍👧‍👦"
 
         val FULL_KEYS =
-            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction", "image")
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction") +
+                listOf("image", "voice")
         val PROBLEM_KEYS = listOf("type", "title", "status", "detail", "instance", "code", "errors")
 
         /** 10:00Z: late morning of [date] in Africa/Lagos. */

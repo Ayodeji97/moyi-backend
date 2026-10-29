@@ -59,13 +59,13 @@ internal data class DayResponse(
                             view.date,
                             it.disclosed?.id in view.marked,
                             view.reactions[it.disclosed?.id],
-                            view.images[it.disclosed?.id],
+                            view.media[it.disclosed?.id],
                         )
                     },
                 partnerEntry =
                     view.partnerEntry?.let {
                         val id = it.disclosed?.id
-                        PartnerEntryResponse.of(it, view.date, id in view.marked, view.reactions[id], view.images[id])
+                        PartnerEntryResponse.of(it, view.date, id in view.marked, view.reactions[id], view.media[id])
                     },
                 partnerDisplayName = partnerDisplayName,
             )

@@ -49,7 +49,7 @@ internal class EntryChangesController(
                 caller.id,
                 entryIdOrNotFound(entryId),
                 EntryText.of(checkNotNull(request.text)),
-                MediaChange(image = request.imageMediaId, voice = request.voiceMediaId != null),
+                MediaChange(image = request.imageMediaId, voice = request.voiceMediaId),
                 IdempotencyInterceptor.requestOrNull(http),
             )
         val response = ResponseEntity.ok()
@@ -85,7 +85,8 @@ internal fun entryIdOrNotFound(raw: String): EntryId =
 /**
  * The words, which are required and replace the entry's, and since D2 a photo:
  * [imageMediaId] attaches one (FR-044a), in place of any the entry has; absent,
- * the entry's photo is left as it is. [voiceMediaId] is refused until D3.
+ * the entry's photo is left as it is. Since D3 [voiceMediaId] does the same for
+ * a voice note.
  * Validation delegates to the same domain factory as submission.
  */
 internal data class PatchEntryRequest(

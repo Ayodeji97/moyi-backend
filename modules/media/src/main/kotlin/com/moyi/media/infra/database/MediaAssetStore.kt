@@ -84,15 +84,16 @@ internal class MediaAssetStore(
         jdbc.update("UPDATE media_assets SET status = 'UPLOADED' WHERE id = ? AND status = 'PENDING_UPLOAD'", id) == 1
 
     /**
-     * An attempt begins: a photo UPLOADED, or PROCESSING after an attempt that
-     * did not finish, becomes PROCESSING. Nothing is counted yet: an attempt
-     * the storage stops before the decode spends none ([countDecode]). Returns
-     * whether it moved; a photo deleted, finished or given up since is left alone.
+     * An attempt begins: a photo or voice note UPLOADED, or PROCESSING after an
+     * attempt that did not finish, becomes PROCESSING. Nothing is counted yet:
+     * an attempt the storage stops before the decode spends none
+     * ([countDecode]). Returns whether it moved; an upload deleted, finished or
+     * given up since is left alone.
      */
     fun startProcessing(id: UUID): Boolean =
         jdbc.update(
             "UPDATE media_assets SET status = 'PROCESSING' " +
-                "WHERE id = ? AND kind = 'IMAGE' AND status IN ('UPLOADED', 'PROCESSING') AND processing_attempts < ?",
+                "WHERE id = ? AND status IN ('UPLOADED', 'PROCESSING') AND processing_attempts < ?",
             id,
             MediaAsset.MAX_ATTEMPTS,
         ) == 1
@@ -110,14 +111,14 @@ internal class MediaAssetStore(
     }
 
     /**
-     * A photo whose attempts have all begun and none finished becomes FAILED:
+     * An upload whose attempts have all begun and none finished becomes FAILED:
      * only one still waiting or left PROCESSING, and only once
      * [MediaAsset.MAX_ATTEMPTS] have begun. Returns whether it moved.
      */
     fun giveUp(id: UUID): Boolean =
         jdbc.update(
             "UPDATE media_assets SET status = 'FAILED' " +
-                "WHERE id = ? AND kind = 'IMAGE' AND status IN ('UPLOADED', 'PROCESSING') AND processing_attempts >= ?",
+                "WHERE id = ? AND status IN ('UPLOADED', 'PROCESSING') AND processing_attempts >= ?",
             id,
             MediaAsset.MAX_ATTEMPTS,
         ) == 1
@@ -139,6 +140,25 @@ internal class MediaAssetStore(
             id,
         ) == 1
     }
+
+    /**
+     * A voice note, PROCESSING to READY, with its length (spec D-10: on the
+     * asset only). Only a voice note, and only from PROCESSING. Its Opus is at
+     * the key derived from its upload's (`StorageKey.forVoice`), so there is
+     * nothing else to record.
+     */
+    fun markVoiceReady(
+        id: UUID,
+        durationMs: Int,
+        at: Instant,
+    ): Boolean =
+        jdbc.update(
+            "UPDATE media_assets SET status = 'READY', duration_ms = ?, ready_at = ? " +
+                "WHERE id = ? AND kind = 'VOICE' AND status = 'PROCESSING'",
+            durationMs,
+            Timestamp.from(at),
+            id,
+        ) == 1
 
     /** PROCESSING to FAILED. Only from PROCESSING. */
     fun markFailed(id: UUID): Boolean =
@@ -323,7 +343,8 @@ internal class MediaAssetStore(
     private companion object {
         const val SELECT =
             "SELECT id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, " +
-                "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict, processing_attempts, tier " +
+                "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict, processing_attempts, tier, " +
+                "duration_ms " +
                 "FROM media_assets"
 
         val JSON: JsonMapper = JsonMapper.builder().build()
@@ -349,6 +370,7 @@ internal class MediaAssetStore(
                     moderationVerdict = rs.getString("moderation_verdict"),
                     processingAttempts = rs.getInt("processing_attempts"),
                     tier = rs.getInt("tier"),
+                    durationMs = rs.getInt("duration_ms").takeUnless { rs.wasNull() },
                 )
             }
 

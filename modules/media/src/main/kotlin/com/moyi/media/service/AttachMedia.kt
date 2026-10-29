@@ -42,5 +42,6 @@ internal class AttachMedia(
     private fun AttachableKind.asMediaKind(): MediaKind =
         when (this) {
             AttachableKind.IMAGE -> MediaKind.IMAGE
+            AttachableKind.VOICE -> MediaKind.VOICE
         }
 }

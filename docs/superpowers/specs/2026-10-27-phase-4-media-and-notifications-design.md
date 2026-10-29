@@ -258,7 +258,9 @@ Same consumer, `kind = VOICE`: magic bytes for the formats both platforms record
 (+1 s grace) → transcode to mono Opus at the bitrate Q4 fixes, metadata stripped → ≤500 KB →
 `READY` with `duration_ms`. The entry shape gains `voice: {id, status, url?, durationMs?}`;
 voice is not moderated (FR-101 names images) **[inferred: the corpus has no voice moderation
-requirement; confirm]**. NFR-103: nothing requires listening.
+requirement; confirm]**. *Checked at D3 and ruled by the owner on 2026-10-29: voice notes **are**
+moderated (FR-061's "media" includes them; R-25, 26:206), so the partner sees a voice note
+`PROCESSING` until D4 gives it a verdict (ADR-0049 decision 7).* NFR-103: nothing requires listening.
 
 **Tests:** a 61 s file is refused; a WAV renamed `.m4a` is refused; output plays (probe the
 codec of the result); the transcoder is killed at its timeout. **Smoke:** an entry with photo and
@@ -277,8 +279,25 @@ to a table the console will read **[inferred: `scripts/moyi` can carry this, as 
 operator commands]**, and the takedown/law-enforcement runbook (09:32).
 
 **Migration V28** if a quarantine audit table is needed before Phase 5's `audit_log`.
-**Tests:** a fake moderator returning each verdict; partner's view per verdict; vendor timeout →
-retry; `gratitude_media_quarantined_total`. **Smoke:** none against a real vendor; the fake is
+**Voice notes too** (the owner's ruling on FR-061, 2026-10-29): D4 moderates voice notes as well
+as photos, and a partner hears one only once it has `PASSED` (`MediaAsset.partnersMayHearIt`,
+ADR-0049 decision 7). How is D4's to decide: transcribe and moderate the text, or a vendor that
+takes audio; either way behind the same kind of port, run after the transcode, on the Opus.
+
+**What is moderated for, and what each verdict does** (the owner's ruling Q16, 2026-10-29, which
+narrows FR-101's "failures are quarantined"): child sexual abuse material is always blocked (hash
+matching against a known-CSAM list plus the classifier), never released by the operator tool, and
+reported as the law requires through the takedown runbook; extreme illegal content (real violence,
+gore) is `QUARANTINED` for operator review; adult nudity between bond members is **allowed**, not
+quarantined (18+, D-14, NFR-056), and comes back `PASSED` with a `sensitive` flag that the API
+exposes so the partner's client blurs it behind "tap to view" (D4 names the field, and it is a
+contract change); non-consensual or third-party intimate images are beyond any classifier, and are
+met by the withdraw/erase that exists (D5 purges within seconds), a report action routed to human
+review and takedown (26:206), and honest help text a receiver can screenshot. D4 switches on
+exactly the vendor categories these need.
+
+**Tests:** a fake moderator returning each verdict, for a photo and for a voice note; partner's
+view per verdict; vendor timeout → retry; `gratitude_media_quarantined_total`. **Smoke:** none against a real vendor; the fake is
 selected by profile, as `LOG` is for email (ADR-0017).
 
 ### D5 — the lifecycle jobs
@@ -410,11 +429,11 @@ reasoning each recommendation carried is in this file's history (`git log -p`).
 
 | # | Question | Ruling |
 |---|---|---|
-| 1 | Moderation | **Illegal content only** (CSAM-adjacent and extreme-violence labels, never nudity); **AWS Rekognition `DetectModerationLabels`, eu-central-1**, ~$2/month at 2k images. Verify the price on the AWS page at D4 |
+| 1 | Moderation | **Illegal content only** (CSAM-adjacent and extreme-violence labels, never nudity); **AWS Rekognition `DetectModerationLabels`, eu-central-1**, ~$2/month at 2k images. Verify the price on the AWS page at D4. *Added 2026-10-29 (FR-061): voice notes are moderated too; D4 chooses how (ADR-0049)* |
 | 2 | Image variants | **Two WebP:** *full* 2048 px ≤350 KB, *display* 1280 px ≤150 KB; no server thumbnail; tier 2 keeps *display* only |
 | 3 | Voice length | **60 s** |
 | 4 | Voice format | **Opus, mono, 24 kbps**, after a half-day iPhone playback test; **AAC-LC 48 kbps** for both if it fails; never both |
-| 5 | Where processing runs | **A separate worker container** (JRE 25 + ffmpeg + libvips, same jar, `media-worker` profile), `--memory=768m --cpus=1.5`, a Kamal accessory |
+| 5 | Where processing runs | **A separate worker container** (JRE 25 + ffmpeg + libvips, same jar, `media-worker` profile), `--memory=768m --cpus=1.5`, a Kamal accessory. *Amended 2026-10-29 by the owner: a Kamal **role** (the application's own image with its own command), not an accessory (ADR-0048)* |
 | 6 | Push copy | **Localisation keys only**; no partner or Bond name on a lock screen; owner writes the final words |
 | 7 | Defaults | Quiet hours **off**; a reveal inside them is **held to their end**; all categories on except on-this-day (opt-in) |
 | 8 | Solo-unlock push | **Push it** (departs from the recommendation). Constraint carried into N3: a neutral "opened" wording with its own key, nothing that says who did not write; FR-076's no-guilt rule still governs the copy |
@@ -425,6 +444,7 @@ reasoning each recommendation carried is in this file's history (`git log -p`).
 | 13 | Pending-proposal push | **Push it** (departs from the recommendation): one push to the other member per proposal, no reminders, no name; needs a new `ProposalOpened` event (N3) |
 | 14 | FCM transfer (OQ-05) | **Accept** with SCCs and a short TIA; payloads carry only keys and opaque ids |
 | 15 | Media backup (R-D) | **Mirror `moyi-media` nightly** to a second, locked bucket; built in D5 |
+| 16 | Moderation categories (D4; added 2026-10-29) | **Narrows FR-101's "failures are quarantined" to these, and fixes which vendor categories D4 switches on.** *Child sexual abuse material:* always blocked: hash matching against a known-CSAM list **plus** the vendor's classifier; never released through the operator tool; reported as the law requires, through the takedown runbook (09:32). *Extreme illegal content* (real violence, gore): `QUARANTINED` for operator review. *Adult nudity between bond members:* allowed, never quarantined (an 18+ product, D-14, NFR-056; intimate content is the product's own): the verdict is `PASSED` with a `sensitive` flag the API exposes, and the partner's client shows it blurred, "tap to view" (D4 names the field). *Non-consensual or third-party intimate images:* no classifier can judge consent, so: the withdraw/erase that exists (D5 purges in seconds); a report action routed to human review and takedown (26:206 already routes reports to the FR-101 path); and honest help text that a receiver can screenshot. Applies to photos and voice notes alike (FR-061 ruling) |
 
 ---
 
@@ -436,7 +456,7 @@ reasoning each recommendation carried is in this file's history (`git log -p`).
 | R-B | **CPU.** Four Ampere vCPUs serve API, Postgres and processing. Per item: a 60 s voice note to Opus well under a second, an image resize/encode around a second **[inferred, measure on the box as Argon2 was]**. ≤2,000 entries/day (07:382) is nothing on average; evening peaks are bursts | `--cpus=1.5` on the worker so the reveal path keeps its cores; processing is async, so a queue is a delay, never an error; NFR-006 is measured on text |
 | R-C | **R2 cost.** Storage $0.015/GB-month, Class A $4.50/M, Class B $0.36/M, egress free, 10 GB and 1 M Class A free each month ([R2 pricing](https://developers.cloudflare.com/r2/pricing)). At 2,000 users the D-16 steady state of ~150 GB is ~$2.10/month, as 10:124 says; a worst-case abuser is bounded by 30 intents/hour × 10 MB, and the reaper removes what is never attached | Cost alert on the R2 dashboard; the intent limit; the bucket lifecycle backstop |
 | R-D | **No backup for media.** Backups are `pg_dump` only (`ops/backup`); R2 loss loses every photo and voice note (10:187 mirrors only Postgres) | Ruled (Q15): a nightly mirror of `moyi-media` to a second, bucket-locked R2 bucket in another jurisdiction or provider **[decide at D5: same-account R2 shares the account as a failure domain]**; a slice in D5 |
-| R-E | **Native code on untrusted input** (T-07). libvips and ffmpeg have a CVE history | The worker runs non-root, read-only root, no network but R2 and Postgres **[inferred feasible on a Kamal accessory]**, per-job timeout and `ulimit`; images rebuilt on a schedule |
+| R-E | **Native code on untrusted input** (T-07). libvips and ffmpeg have a CVE history | The worker runs non-root, read-only root, no network but R2 and Postgres **[inferred feasible on a Kamal role, as the worker now is (Q5 amended)]**, per-job timeout and `ulimit`; images rebuilt on a schedule |
 | R-F | **FCM's 60 s budget.** The outbox poller ticks every 2 s, then two hops (gratitude consumer → `PushRequested` → push consumer) | Two ticks ≈ 4 s; the reveal-latency histogram (11:44) proves it |
 | R-G | **Push is unreliable by nature** (17:30 R-14) | Already the rule: the client is correct with no push at all (25:69) |
 | R-H | **Apple's lead time** (15:109) | Q11: enrol now (owner's existing Apple account, if it is a paid Program membership) |

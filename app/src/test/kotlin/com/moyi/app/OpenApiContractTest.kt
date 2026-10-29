@@ -789,7 +789,20 @@ class OpenApiContractTest(
         full.required shouldContain "reaction"
         // The whole of what an entry says: a field added for a reaction's time, or its maker, fails here.
         full.properties.keys shouldBe
-            setOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction", "image")
+            setOf(
+                "id",
+                "bondId",
+                "date",
+                "authorMemberId",
+                "text",
+                "status",
+                "createdAt",
+                "intendedAt",
+                "favourited",
+                "reaction",
+                "image",
+                "voice",
+            )
         // No schema of a reaction beyond its type exists to carry more.
         api.components.schemas.keys
             .filter { "eaction" in it } shouldBe listOf("ReactionRequest")
@@ -816,6 +829,25 @@ class OpenApiContractTest(
             .allOf
             .last()
             .properties.keys shouldBe setOf("authorMemberId", "status")
+    }
+
+    /** Phase 4 D3, ADR-0049: `{id, status, url?, durationMs?}`, and nowhere on a locked entry (BR-8). */
+    @Test
+    fun `an entry's voice note is an id, a status and, once playable, a URL and a length, every field always sent`() {
+        val voice = api.components.schemas["EntryVoiceResponse"]!!
+        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs")
+        voice.required.toSet() shouldBe voice.properties.keys
+        voice.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING")
+        listOf("url", "durationMs").forEach { voice.properties[it]!!.types shouldContain "null" }
+        voice.description.shouldNotBeNull() shouldContain "to the other member only once it has passed moderation"
+
+        val full =
+            api.components.schemas["EntryResponse"]!!
+                .allOf
+                .last()
+        full.required shouldContain "voice"
+        full.properties["voice"]!!.oneOf.map { it.`$ref` ?: it.types.single() } shouldBe
+            listOf("#/components/schemas/EntryVoiceResponse", "null")
     }
 
     @Test

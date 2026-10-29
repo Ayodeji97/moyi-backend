@@ -1,8 +1,8 @@
 package com.moyi.media.infra.processing
 
 import com.moyi.media.domain.ImageFormat
-import com.moyi.media.domain.ImageRefusal
 import com.moyi.media.domain.ImageVariant
+import com.moyi.media.domain.MediaRefusal
 import java.nio.file.Path
 
 /**
@@ -46,7 +46,7 @@ internal sealed interface Encoding {
 
     /** The photo cannot be made into variants, for [reason]. */
     data class Refused(
-        val reason: ImageRefusal,
+        val reason: MediaRefusal,
     ) : Encoding
 }
 

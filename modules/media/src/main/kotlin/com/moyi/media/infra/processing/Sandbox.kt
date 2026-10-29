@@ -20,7 +20,7 @@ import java.util.concurrent.TimeUnit
  *   memory is never at stake. On macOS `/bin/sh` refuses `ulimit -v`
  *   ("cannot modify limit: Invalid argument"), so a limited run never starts
  *   there (exit 125); [memoryLimitBytes] is `null` on macOS and nothing is limited
- *   ([MediaProcessingProperties.Vips.allowUnlimitedMemory] says when that is
+ *   ([MediaProcessingProperties.allowUnlimitedMemory] says when that is
  *   allowed; production is Linux).
  * - **No inherited environment.** The program sees `PATH` and what the caller
  *   passes, nothing of this process's secrets.
