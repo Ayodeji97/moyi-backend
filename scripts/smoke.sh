@@ -108,10 +108,11 @@
 # FAILED; and, with a photo, M4's first half: an entry with both, the voice note
 # locked away from the partner until the reveal and then playable by them while
 # the photo is still PROCESSING. Last run on 2026-10-29 for D3, from a jar of this
-# branch (on D2 at f5bc9bc), against its own compose project (moyi-d3: Postgres
-# 55443, Valkey 63803, MinIO 59006), the jar booted by hand on libvips 8.18.7 and
-# ffmpeg 9.0.2, and --attach: 1123 passed, 0 failed, 1 skipped (the tag across the
-# erasure, the poller having won the race), 30 sections. D2 last run on 2026-10-29, after main (df44dcc: #101, #102, #103, #105, #109) was merged in, from a jar of
+# branch after D2 (0e73c8a, with main d9c2de4) was merged in, on a fresh database
+# that applied 32 migrations to V33, against its own compose project (moyi-d3:
+# Postgres 55443, Valkey 63803, MinIO 59006), the jar booted by hand on libvips
+# 8.18.7 and ffmpeg 9.0.2, and --attach: 1144 passed, 0 failed, 0 skipped, 30
+# sections. D2 last run on 2026-10-29, after main (df44dcc: #101, #102, #103, #105, #109) was merged in, from a jar of
 # that merge, on the moyi-d2 database (32 migrations to V33; Postgres 55441, Valkey 63801,
 # MinIO 59002), libvips 8.18.7, --attach: 1102 passed, 0 failed, 0 skipped. Before it, on
 # 2026-10-28 for D2, from a jar of this branch on main 7656192, on a fresh database
