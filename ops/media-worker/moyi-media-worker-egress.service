@@ -1,0 +1,15 @@
+# Limits the media worker's network to Postgres and Cloudflare (R2) as each of
+# its containers starts (ops/media-worker/egress-limit.sh, ADR-0052).
+[Unit]
+Description=Moyi media worker: limit each worker container's network to Postgres and R2
+Wants=docker.service
+After=docker.service
+PartOf=docker.service
+
+[Service]
+ExecStart=/usr/local/sbin/moyi-media-worker-egress watch
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

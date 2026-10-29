@@ -411,12 +411,21 @@ has no mechanism to show it as a *requested reviewer*.
 
 With [Kamal 2](https://kamal-deploy.org), from a Mac, to one Hetzner server
 (`config/deploy.yml`). CI (`.github/workflows/ci.yml`) builds, tests and, on
-every merge to `main`, publishes the image to GHCR via Spring Boot's Cloud
-Native Buildpacks support (`./gradlew bootBuildImage`, no hand-maintained
-Dockerfile). One tag (the commit's SHA, and `latest`) serves linux/arm64,
+every merge to `main`, publishes the image to GHCR, built from
+`app/Dockerfile` (Ubuntu 24.04, Temurin's JRE 25, libvips and ffmpeg;
+ADR-0052). One tag (the commit's SHA, and `latest`) serves linux/arm64,
 for the Hetzner CAX server, and linux/amd64, each built natively on its own
 runner. A deploy never builds: it names a commit on `main` that CI has
-already published.
+already published. The one image runs as two Kamal roles: `web`, the API
+behind kamal-proxy, and `media-worker`, which decodes uploaded photos and
+voice notes and has no port (`ops/media-worker/README.md`).
+
+To build the image locally (the context is the directory holding the jar):
+
+```
+./gradlew :app:bootJar
+docker build -f app/Dockerfile -t moyi:local app/build/libs
+```
 
 ```
 git switch main && git pull --ff-only
@@ -457,7 +466,8 @@ What it needs on the Mac:
   per command.
 - SSH access as root with `~/.ssh/moyi_hetzner`.
 
-Useful afterwards: `kamal app logs -f`, `kamal app details`,
+Useful afterwards: `kamal app logs -f` (`--roles=media-worker` for the
+worker), `kamal app details`,
 `kamal accessory logs postgres`, and `kamal rollback <version>`, which
 returns to a previous image in seconds. Migrations are not rolled back, so
 every migration stays backward-compatible with the release before it

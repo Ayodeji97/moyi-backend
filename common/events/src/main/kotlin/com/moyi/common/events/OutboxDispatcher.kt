@@ -33,6 +33,14 @@ interface OutboxDispatcher {
      * it has not yet handled.
      */
     fun backlog(now: Instant): List<ConsumerBacklog>
+
+    /**
+     * The ids of the consumers this process delivers to: every consumer it has,
+     * or those `moyi.events.registration.only` names (ADR-0052). Unlike
+     * [backlog], which reads every consumer ever registered in the database,
+     * this is this process's own.
+     */
+    fun consumerIds(): Set<String>
 }
 
 /**
@@ -454,6 +462,8 @@ internal class JdbcOutboxDispatcher(
                 run.consumerIds,
                 run.eventTypes,
             ).isNotEmpty()
+
+    override fun consumerIds(): Set<String> = registry.consumers().mapTo(mutableSetOf()) { it.id }
 
     override fun backlog(now: Instant): List<ConsumerBacklog> {
         val at = now.truncatedTo(ChronoUnit.MICROS)

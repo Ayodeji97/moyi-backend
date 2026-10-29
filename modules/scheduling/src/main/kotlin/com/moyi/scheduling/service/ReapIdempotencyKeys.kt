@@ -22,7 +22,8 @@ internal class ReapIdempotencyKeys(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    @Scheduled(cron = HOURLY)
+    // Configurable only so that the media worker can switch it off ("-"), as it does every job but the outbox's (ADR-0052).
+    @Scheduled(cron = "\${moyi.scheduling.idempotency-keys.cron:$HOURLY}")
     @SchedulerLock(name = LOCK, lockAtMostFor = "PT10M", lockAtLeastFor = "PT30S")
     fun run() {
         reapOnce()

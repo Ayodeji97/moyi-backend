@@ -58,6 +58,12 @@ import java.time.temporal.ChronoUnit
  * deliveries of the type go on being written and nobody claims them: they show
  * in the pending and age gauges, which is the reminder.
  *
+ * **A process may run some consumers and not others**
+ * ([RegistrationProperties.only], ADR-0052): the media worker runs the media
+ * pipeline's and nothing else. One it leaves out is not "this process's": it
+ * is neither registered here nor claimed, so the process that does run it (the
+ * API) keeps every delivery of it.
+ *
  * A context with no consumers touches nothing, so this bean costs the contexts
  * that only publish (or have no outbox tables at all) no statement.
  */
@@ -69,6 +75,8 @@ internal class ConsumerRegistry(
     private val clock: Clock,
     private val properties: RegistrationProperties,
 ) : SmartInitializingSingleton {
+    // Before [byId]: building it logs ([selected]).
+    private val log = LoggerFactory.getLogger(javaClass)
     private val byId: Map<String, EventConsumer> =
         consumers
             .groupBy { it.id }
@@ -78,9 +86,8 @@ internal class ConsumerRegistry(
                 // would say which.
                 check(sameId.size == 1) { "Two event consumers share the id '$id'; delivery state is keyed by it, so it must be unique." }
                 sameId.single()
-            }
+            }.let { all -> selected(all, properties.only) }
     private val transactions = TransactionTemplate(transactionManager)
-    private val log = LoggerFactory.getLogger(javaClass)
 
     /** The consumer registered in this process under [id]; none when another instance's build owns it. */
     fun consumer(id: String): EventConsumer? = byId[id]
@@ -220,6 +227,25 @@ internal class ConsumerRegistry(
             "or maintenance on the table. The application will not start with a consumer it has not registered.",
         refused,
     )
+
+    /**
+     * The consumers [RegistrationProperties.only] names, or all of them when it
+     * names none. An id it names that is not among them refuses the start: the
+     * process meant to run that consumer would otherwise run without it, and
+     * nothing would say so until its queue was found growing.
+     */
+    private fun selected(
+        all: Map<String, EventConsumer>,
+        only: Set<String>,
+    ): Map<String, EventConsumer> {
+        if (only.isEmpty()) return all
+        val unknown = (only - all.keys).sorted()
+        check(unknown.isEmpty()) {
+            "moyi.events.registration.only names consumers this application does not have: $unknown (it has ${all.keys.sorted()})."
+        }
+        log.info("Event consumers limited to {} by moyi.events.registration.only", only.sorted())
+        return all.filterKeys { it in only }
+    }
 
     private fun DataAccessException.isLockTimeout(): Boolean =
         generateSequence<Throwable>(this) { it.cause }.filterIsInstance<SQLException>().any { it.sqlState == LOCK_NOT_AVAILABLE }

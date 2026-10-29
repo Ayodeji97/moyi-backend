@@ -32,7 +32,7 @@ the wire (ADR-0048 Owed); give voice notes their verdict (ADR-0049 decision 7).
 subscribing only where its kind is processed **and** a moderator is configured; otherwise they
 declare no event type and claim nothing. So:
 
-- Production's API (processing `off`) never calls a vendor; the media worker, when it exists, does.
+- Production's API (processing `off`) never calls a vendor; the media worker (ADR-0052) does.
 - `none`, the provider production names, **passes nothing**: nothing gets a verdict, so no partner is
   shown anything. Switching a moderator on later hands the consumer every asset made before, which
   is why the two kinds are two consumers: voice moderation can be switched on after photos without

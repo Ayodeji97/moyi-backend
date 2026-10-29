@@ -231,7 +231,10 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
   own command (the owner's ruling, 2026-10-29), not an accessory: its image needs `ffmpeg` with `libopus` (Ubuntu 24.04's
   `ffmpeg` package has it, and the AMR decoders), `MOYI_MEDIA_PROCESSING_PROVIDER=native`, and its
   network limited to R2 and Postgres (spec R-E), which is the only network bound around ffmpeg
-  beyond its protocol list.
+  beyond its protocol list. **Built: ADR-0052** (the image carries ffmpeg 6.1.1 with libopus on both
+  architectures; the network limit is put in from the host, to Postgres and Cloudflare's ranges,
+  since R2 has none of its own). The gate above is met: production runs `ce41f22`, which carries
+  #110.
 - **A recording from each platform through the pipeline once** (an iPhone's Voice Memos M4A, an
   Android `MediaRecorder` MPEG_4 and THREE_GPP file): the brands in decision 2 are read, not seen.
 - **R2, not run:** that a GET of `voice.ogg` is served with `audio/ogg`, as MinIO serves it.

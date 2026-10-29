@@ -1,0 +1,62 @@
+# The media worker (the owner's Q5; ADR-0052): the application's own jar and
+# image, run as the Kamal role `media-worker` with this profile, so that the
+# uploads users send are decoded in a container of their own and never in the
+# process that serves the API.
+#
+# It turns off everything that is not the media pipeline. What stays on: the
+# database, Flyway's check of the schema, the outbox poller, and the three
+# consumers below. The role's environment adds MOYI_MEDIA_PROCESSING_PROVIDER
+# native, the JVM's cap and the ready file (config/deploy.yml).
+#
+# MediaWorkerProfileTest starts the application with this profile and holds
+# each of these lines.
+
+spring:
+  main:
+    # No web server: no API route, no /healthz and no actuator port. Nothing
+    # listens in the worker's container; Docker's health check reads the ready
+    # file below instead.
+    web-application-type: none
+    # Without a web server nothing keeps the JVM running: the outbox poller's
+    # thread is a daemon and, with virtual threads on, so is the scheduler's.
+    # Seen: the worker started, took its first deliveries and exited 0 a second
+    # later, interrupting them. This keeps a non-daemon thread alive until the
+    # context closes.
+    keep-alive: true
+
+moyi:
+  events:
+    registration:
+      # The worker claims only its own deliveries: the pipeline
+      # (`media.process`) and moderation, which runs where media is processed
+      # (ADR-0051). Every other consumer (the withdrawal, the pushes, the
+      # purge) stays the API's, which runs them all. A name here that matches
+      # no consumer refuses the start.
+      only:
+        - media.process
+        - media.moderate-image
+        - media.moderate-voice
+  scheduling:
+    # Every timed job off ("-" is Spring's disabled cron): the API runs them.
+    # Each is ShedLocked, so running them here as well would be safe, but it
+    # would put their work on the box's smallest container. The outbox
+    # poller stays: it is how the consumers above are handed their work.
+    # A job added later and not listed here would run in the worker too;
+    # MediaWorkerProfileTest fails until it is.
+    close:
+      cron: "-"
+    reminders:
+      cron: "-"
+    held-pushes:
+      cron: "-"
+    on-this-day:
+      cron: "-"
+    media-reaper:
+      cron: "-"
+    media-demotion:
+      cron: "-"
+    idempotency-keys:
+      cron: "-"
+  # Written once the application is ready, removed as it stops (ReadyFile).
+  # /tmp is the worker's tmpfs: its root file system is read-only.
+  ready-file: /tmp/moyi-ready

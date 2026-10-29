@@ -12,9 +12,11 @@ import java.time.Duration
  * start when it cannot run.**
  *
  * [Provider.OFF] has to be asked for by name, and turns off both. Production's
- * `config/deploy.yml` asks, until the media worker the owner ruled for (Q5) is
- * deployed: the API's own image has neither libvips nor ffmpeg, and the worker
- * is the one process meant to decode what users upload.
+ * `config/deploy.yml` asks for every container but the media worker the owner
+ * ruled for (Q5), which alone names NATIVE (ADR-0052): the worker is the one
+ * process meant to decode what users upload. Since ADR-0052 the API runs the
+ * same image, which carries libvips and ffmpeg, so in the API it is that line,
+ * and no missing program, that keeps decoding out.
  *
  * Every value arrives from the environment, as `MOYI_MEDIA_PROCESSING_…`.
  */

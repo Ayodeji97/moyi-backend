@@ -9,7 +9,7 @@ installed on the server beyond what is there.
 | `https://getmoyi.app/` answers | UptimeRobot, every 5 min | the link pages are down |
 | the nightly backup checked in | Healthchecks.io, period 1 day, grace 2 h | a night passes with no successful backup (`backup.sh` pings `PING_URL`) |
 | the close job is running | Healthchecks.io, period 1 hour, grace 30 min | `close-check.sh` reports a problem (at once, through `/fail`), or stops reporting at all |
-| the media pipeline is moving | Healthchecks.io, period 15 min, grace 30 min | `media-check.sh` finds a photo PROCESSING for 30 minutes (doc 11:97, P2), a deleted asset unpurged after a day, or a media job that stopped running; or stops reporting. What to do: [media-pipeline-stuck.md](media-pipeline-stuck.md) |
+| the media pipeline is moving | Healthchecks.io, period 15 min, grace 30 min | `media-check.sh` finds an upload UPLOADED for 30 minutes (the media worker is not taking uploads, ADR-0052), a photo PROCESSING for 30 minutes (doc 11:97, P2), a deleted asset unpurged after a day, a media job that stopped running, or a media worker running without its network limit; or stops reporting. What to do: [media-pipeline-stuck.md](media-pipeline-stuck.md) |
 
 The last three are heartbeats: the server reports in, and **silence is the
 alarm**. That catches what an outside probe cannot see: a backup that quietly
