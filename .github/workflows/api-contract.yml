@@ -59,14 +59,33 @@ jobs:
           base: base-openapi.json
           revision: contracts/openapi.json
           fail-on: ERR
+          # Without it oasdiff compares an allOf schema's branches one at a time and
+          # reports a new value of a response enum inside a branch as a WARN, not an
+          # ERR, so it passes unlabelled. EntryResponse, for one, is an allOf
+          # (ADR-0024 amendment of 2026-10-29; found on ME_TOO, ADR-0037).
+          flatten-allof: true
+          # The action uploads both documents to oasdiff.com by default to build a
+          # review page. Nothing here reads that page, and no document leaves CI
+          # without a decision to send it.
+          review: false
 
-      - if: steps.diff.outcome == 'failure' && !contains(github.event.pull_request.labels.*.name, 'breaking-api-change')
+      # The step fails both when it found a break (oasdiff exits 1 and the action
+      # writes the `breaking` output) and when oasdiff could not compare the two
+      # documents at all (exit 2 or more: a load error, or an allOf whose branches
+      # cannot be flattened; the action stops before writing any output). Only the
+      # first is the label's to wave through.
+      - if: steps.diff.outcome == 'failure' && steps.diff.outputs.breaking == ''
+        run: |
+          echo "::error::oasdiff could not compare contracts/openapi.json with the base branch's copy (see the step above). No label accepts that: fix the document or the comparison."
+          exit 1
+
+      - if: steps.diff.outcome == 'failure' && steps.diff.outputs.breaking != '' && !contains(github.event.pull_request.labels.*.name, 'breaking-api-change')
         run: |
           echo "::error::contracts/openapi.json changes the API in a way that breaks a client generated from the previous document. If that is intended, label the PR 'breaking-api-change' and say so in the description (doc 06 §5)."
           exit 1
 
       # A labelled break is allowed through, on the record.
-      - if: steps.diff.outcome == 'failure' && contains(github.event.pull_request.labels.*.name, 'breaking-api-change')
+      - if: steps.diff.outcome == 'failure' && steps.diff.outputs.breaking != '' && contains(github.event.pull_request.labels.*.name, 'breaking-api-change')
         run: echo "Breaking change accepted under the breaking-api-change label." >> "$GITHUB_STEP_SUMMARY"
 
   publish:

@@ -2,6 +2,7 @@ package com.moyi.gratitude.infra.database
 
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.ReactionType
+import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementSetter
 import org.springframework.jdbc.core.RowMapper
@@ -156,6 +157,17 @@ internal class Reactions(
      * Ordered, so that if a row were ever put beside another on one entry
      * by hand, which no request can do, both members would still be shown
      * the same one.
+     *
+     * **A stored type this version does not know is skipped, not thrown on**
+     * (ADR-0037, Owed by the amendment of 2026-10-28). The `CHECK` lets no
+     * request store one, but a rollback can leave one behind: an image that
+     * predates a migration adding a type reads a database that already holds
+     * it. `valueOf` made every read of that day a `500`; skipped, the entry
+     * reads as carrying no reaction, which is what this version can say about
+     * it, and one `WARN` line names the entry's id and the stored name, and
+     * nothing of anyone's words. It is an expand step: it makes a sixth type
+     * survivable for an image built after this, not `ME_TOO` for one built
+     * before V27.
      */
     fun on(entryIds: Collection<EntryId>): Map<EntryId, ReactionType> {
         if (entryIds.isEmpty()) return emptyMap()
@@ -165,12 +177,21 @@ internal class Reactions(
             .query(
                 "SELECT entry_id, type FROM reactions WHERE entry_id IN ($placeholders) ORDER BY entry_id, member_id",
                 PreparedStatementSetter { statement -> entryIds.forEachIndexed { index, id -> statement.setObject(index + 1, id.value) } },
-                RowMapper { row, _ -> EntryId(row.getObject("entry_id", UUID::class.java)) to ReactionType.valueOf(row.getString("type")) },
-            ).forEach { (entry, type) -> found.putIfAbsent(entry, type) }
+                RowMapper { row, _ -> EntryId(row.getObject("entry_id", UUID::class.java)) to row.getString("type") },
+            ).forEach { (entry, stored) ->
+                val type = ReactionType.named(stored)
+                if (type == null) {
+                    log.warn("Skipped a reaction of a type this version does not know: entry {}, type {}", entry.value, stored)
+                } else {
+                    found.putIfAbsent(entry, type)
+                }
+            }
         return found
     }
 
     private companion object {
+        private val log = LoggerFactory.getLogger(Reactions::class.java)
+
         val SET =
             """
             WITH reactable AS (

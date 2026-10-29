@@ -20,6 +20,7 @@ import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -29,8 +30,11 @@ import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Import
 import org.springframework.dao.DataIntegrityViolationException
@@ -90,6 +94,7 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
+@ExtendWith(OutputCaptureExtension::class)
 @Import(EntryChangesTest.TimeConfiguration::class, MarkerReadLastTest.AccessConfiguration::class)
 @Suppress("LongParameterList", "LargeClass") // What Spring hands the test; and one feature's rules, kept where they can be read together.
 internal class ReactionsTest(
@@ -779,6 +784,39 @@ internal class ReactionsTest(
         // And an id nobody has.
         reactions.set(EntryId(UUID.randomUUID()), beaMember, ReactionType.HEART) shouldBe false
         rows().shouldBeEmpty()
+    }
+
+    @Test
+    fun `a stored type this version does not know reads as no reaction, with one WARN naming the entry and the type`(
+        output: CapturedOutput,
+    ) {
+        val bond = pair()
+        val beaMember = rig.memberId(bond, bea)
+        val adaMember = rig.memberId(bond, ada)
+        val adas = EntryId(UUID.fromString(rig.submit(ada, bond, ADAS_WORDS)))
+        val beas = EntryId(UUID.fromString(rig.submit(bea, bond, BEAS_WORDS)))
+        reactions.set(adas, beaMember, ReactionType.HEART) shouldBe true
+        reactions.set(beas, adaMember, ReactionType.SMILE) shouldBe true
+
+        // What a rollback leaves: a newer image's migration widened the CHECK and a member
+        // used the new type. DDL is transactional in Postgres, so the constraint is back
+        // when this rolls back, and no other test sees the row.
+        transactions.executeWithoutResult { status ->
+            jdbc.execute("ALTER TABLE reactions DROP CONSTRAINT reactions_type_check")
+            jdbc.update("UPDATE reactions SET type = 'A_SIXTH' WHERE entry_id = ?", adas.value)
+
+            reactions.on(listOf(adas, beas)) shouldBe mapOf(beas to ReactionType.SMILE)
+
+            status.setRollbackOnly()
+        }
+
+        val warned = output.out.lines().filter { "Skipped a reaction of a type this version does not know" in it }
+        warned shouldHaveSize 1
+        warned.single() shouldContain adas.value.toString()
+        warned.single() shouldContain "A_SIXTH"
+        output.out shouldNotContain ADAS_WORDS
+        output.out shouldNotContain BEAS_WORDS
+        reactions.on(listOf(adas)) shouldBe mapOf(adas to ReactionType.HEART)
     }
 
     @Test
