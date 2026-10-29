@@ -141,9 +141,10 @@ internal enum class ImageRefusal {
     NOT_HEVC,
 
     /**
-     * [MediaAsset.MAX_ATTEMPTS] attempts began and none finished: a photo that
-     * keeps failing in a way that is thrown (a storage outage that outlasts
-     * them, a process killed mid-photo) is given up rather than retried for ever.
+     * [MediaAsset.MAX_ATTEMPTS] decodes began and none finished: a photo that
+     * keeps killing the process (or failing after its decode in a way that is
+     * thrown) is given up rather than retried for ever. An outage before the
+     * decode never counts towards it.
      */
     TOO_MANY_ATTEMPTS,
 

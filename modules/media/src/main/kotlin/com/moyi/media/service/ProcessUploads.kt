@@ -52,13 +52,15 @@ import java.util.Base64
  * 1. **The row, read again** ([MediaAsset.processing]). The event may be older
  *    than the asset: one deleted since is skipped (ADR-0047 owed this), and so
  *    is one already ready or failed (the same event twice) and a voice note
- *    (D3's). A photo on which [MediaAsset.MAX_ATTEMPTS] attempts began and
+ *    (D3's). A photo on which [MediaAsset.MAX_ATTEMPTS] decodes began and
  *    none finished is given up: `FAILED`, and the delivery succeeds.
- * 2. **The attempt is recorded in a transaction of its own**: `PROCESSING`, and
- *    one more `processing_attempts`, committed whatever becomes of this
- *    delivery, so a photo being worked on is seen to be (D5's alert on
- *    anything `PROCESSING` for 30 minutes reads it) and the count survives
- *    the rollback of an attempt that throws.
+ * 2. **The attempt is recorded in a transaction of its own**: `PROCESSING`,
+ *    committed whatever becomes of this delivery, so a photo being worked on
+ *    is seen to be (D5's alert on anything `PROCESSING` for 30 minutes reads
+ *    it). One more `processing_attempts` is committed the same way, but only
+ *    once the bytes are fetched and verified, just before the decode: a
+ *    storage outage spends none of the cap, however long it lasts, and a
+ *    decode that kills the process is counted.
  * 3. **The work, holding no lock on the asset.** The upload is read once,
  *    never past its declared length, and must have the declared SHA-256; its
  *    first bytes must be one of the four allowed formats and the one declared
@@ -117,7 +119,7 @@ internal class ProcessUploads(
     }
 
     /**
-     * [MediaAsset.MAX_ATTEMPTS] attempts began and none finished: `FAILED`, in
+     * [MediaAsset.MAX_ATTEMPTS] decodes began and none finished: `FAILED`, in
      * this delivery's transaction, and the delivery succeeds, so the outbox
      * stops retrying. Whatever an attempt left in the storage goes after the
      * commit, as a failed photo's does.
@@ -155,6 +157,9 @@ internal class ProcessUploads(
             if (refusal != null) return Result.Refused(refusal)
             // The bytes are the declared format, so the declaration names it.
             val format = ImageFormat.entries.single { it.agreesWith(asset.contentType) }
+            // The attempt counts from here, in a transaction of its own: the decode is where a photo can be the
+            // cause, an outage before it never is (owner's ruling on #108).
+            ownTransaction.executeWithoutResult { assets.countDecode(asset.id) }
             return when (val encoding = processor.encode(source, format, workDir)) {
                 is Encoding.Refused -> {
                     Result.Refused(encoding.reason)

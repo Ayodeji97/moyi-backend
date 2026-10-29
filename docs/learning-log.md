@@ -2784,7 +2784,9 @@ Review:  the independent review of #108 found what each guard did not cover. The
          so there is now a decoded-bytes ceiling, 100 MiB, chosen by measuring peak RSS in
          an Ubuntu container: 283 MiB for a HEIC just under it. Dropping the ICC profile
          without converting turned a Display P3 green into another green. An attempt that
-         threw was retried for ever. And an AVIF with HEIC's brands passed every brand
+         threw was retried for ever; capped at five, it then failed every photo uploaded
+         during a half-minute storage outage, so the owner ruled that only a decode counts
+         (a killed process still does, an outage never). And an AVIF with HEIC's brands passed every brand
          check, including libvips' own `heif-compression`, which it derives from those
          brands; only the item types in `iinf` tell AV1 from HEVC. Lesson: a guard named
          after its threat ("memory limit", "format allow-list") is a claim; each needed

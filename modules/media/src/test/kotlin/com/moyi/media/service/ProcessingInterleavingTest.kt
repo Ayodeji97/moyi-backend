@@ -4,6 +4,7 @@ import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.MutableClock
 import com.moyi.media.domain.ImageFormat
+import com.moyi.media.domain.MediaAsset
 import com.moyi.media.domain.StorageKey
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
@@ -29,6 +30,7 @@ import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
+import java.io.InputStream
 import java.nio.file.Path
 import java.time.Duration
 import java.util.UUID
@@ -66,6 +68,7 @@ internal class ProcessingInterleavingTest(
     fun clear() {
         gate.reset()
         storage.puts = true
+        storage.gets = true
         storage.putsLeft = Int.MAX_VALUE
         jdbc.execute("TRUNCATE TABLE media_assets, idempotency_keys, outbox_deliveries, outbox_events")
     }
@@ -106,6 +109,34 @@ internal class ProcessingInterleavingTest(
 
         jdbc.queryForMap("SELECT status, processing_attempts FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
             mapOf("status" to "READY", "processing_attempts" to 2)
+    }
+
+    /**
+     * The owner's ruling on #108: an outage is not the photo's fault. A storage
+     * that cannot be read fails the delivery before anything is decoded, so it
+     * spends none of the photo's [com.moyi.media.domain.MediaAsset.MAX_ATTEMPTS];
+     * however long it lasts, the photo waits, PROCESSING, and is made when the
+     * storage is back.
+     */
+    @Test
+    fun `a storage that cannot be read for more deliveries than the attempt cap leaves the photo waiting, and ready once it is back`() {
+        val mediaId = client.upload(ada, TestImages.jpeg(64, 48))
+        storage.gets = false
+
+        repeat(MediaAsset.MAX_ATTEMPTS + 2) {
+            dispatcher.dispatchDue(clock.instant(), BUDGET).failed shouldBe 1
+            clock.advance(Duration.ofHours(1))
+        }
+
+        jdbc.queryForMap("SELECT status, processing_attempts FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
+            mapOf("status" to "PROCESSING", "processing_attempts" to 0)
+
+        storage.gets = true
+        clock.advance(Duration.ofHours(1))
+        dispatcher.dispatchDue(clock.instant(), BUDGET).delivered shouldBe 1
+
+        jdbc.queryForMap("SELECT status, processing_attempts FROM media_assets WHERE id = ?::uuid", mediaId) shouldBe
+            mapOf("status" to "READY", "processing_attempts" to 1)
     }
 
     /**
@@ -177,11 +208,18 @@ internal class ProcessingInterleavingTest(
         }
     }
 
-    /** The real store, whose PUTs the test can make fail as an unreachable storage does. */
+    /** The real store, whose GETs and PUTs the test can make fail as an unreachable storage does. */
     internal class SwitchableStore(
         private val real: ObjectStore,
     ) : ObjectStore by real {
         @Volatile var puts = true
+
+        @Volatile var gets = true
+
+        override fun open(key: StorageKey): InputStream? {
+            if (!gets) throw ObjectStoreUnavailableException("The media storage could not be read (switched off by the test).")
+            return real.open(key)
+        }
 
         /** How many more PUTs succeed before the storage is "unreachable"; unlimited unless a test sets it. */
         @Volatile var putsLeft = Int.MAX_VALUE

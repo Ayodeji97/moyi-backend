@@ -149,11 +149,12 @@ internal class MediaAsset(
      *
      * - A photo that is [MediaStatus.UPLOADED], or [MediaStatus.PROCESSING]
      *   after an attempt that did not finish, is processed, **unless
-     *   [MAX_ATTEMPTS] attempts have already begun on it**: then it is given
-     *   up ([Processing.GIVE_UP], `FAILED`), so that a photo whose every
-     *   attempt throws (an outage that outlasts them, a process killed
-     *   mid-photo, a bug) is not retried every fifteen minutes for ever
-     *   (review of #108).
+     *   [MAX_ATTEMPTS] decodes have already begun on it**: then it is given
+     *   up ([Processing.GIVE_UP], `FAILED`), so that a photo whose decode
+     *   never finishes (it kills the process, or a bug after it throws) is
+     *   not retried for ever (review of #108). Only a decode counts: an
+     *   outage before it is never the photo's fault, and the photo waits it
+     *   out (the owner's ruling).
      * - A voice note is left exactly as it is: transcoding is D3's.
      * - Anything else has nothing left to do: deleted, ready, failed, or never
      *   completed.
@@ -213,10 +214,11 @@ internal class MediaAsset(
         const val PASSED = "PASSED"
 
         /**
-         * Attempts of `media.process` that may begin on one photo. With the
-         * outbox's backoff (2 s doubling) five attempts span about half a
-         * minute of retries: enough for a blip, not for a photo that never
-         * finishes.
+         * Decodes `media.process` may begin on one photo
+         * (`processing_attempts`, counted just before libvips runs). A storage
+         * outage before the decode counts nothing, so it can last as long as
+         * it lasts; five decodes that never finish are a photo that never
+         * will.
          */
         const val MAX_ATTEMPTS = 5
     }

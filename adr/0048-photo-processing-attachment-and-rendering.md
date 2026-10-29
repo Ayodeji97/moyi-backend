@@ -55,19 +55,21 @@ worker the owner ruled for, and why production's API never runs it.
    photo, or one left `PROCESSING` by an attempt that did not finish, is processed; a deleted
    upload, a ready or failed one, and anything not yet completed is left alone (ADR-0047's debt);
    a voice note is left `UPLOADED` for D3. The statement that starts an attempt repeats the
-   status condition as its backstop. **Five attempts at most** (`MediaAsset.MAX_ATTEMPTS`, review
-   of #108): once five have begun and none finished, the next delivery marks the photo `FAILED`
-   (`TOO_MANY_ATTEMPTS`) in its own transaction and succeeds, so the outbox stops; the upload
-   and any variant an attempt left are deleted after the commit. This covers every way an attempt
-   can end without deciding: an outage, a bug that throws, a JVM killed mid-photo. With the
-   outbox's backoff (2 s doubling) five attempts span about half a minute, so a storage outage
-   longer than that fails the photos uploaded during it; the owner sends them again. The rule
-   is the domain's, and `startProcessing` (`processing_attempts < 5`) and `giveUp`
-   (`processing_attempts >= 5`) repeat it as their backstops.
-2. **The attempt is recorded in a transaction of its own** (`PROCESSING`, `processing_attempts +
-   1`, `REQUIRES_NEW`), committed whatever becomes of the delivery, so a photo being worked on is
-   seen to be (D5's alert on `PROCESSING` for 30 minutes reads it) and the count survives a
-   rollback.
+   status condition as its backstop. **Five decodes at most** (`MediaAsset.MAX_ATTEMPTS`, review
+   of #108): once five decodes have begun on a photo and none finished, the next delivery marks it
+   `FAILED` (`TOO_MANY_ATTEMPTS`) in its own transaction and succeeds, so the outbox stops; the
+   upload and any variant an attempt left are deleted after the commit. **Only a decode counts**
+   (the owner's ruling on #108): `processing_attempts` is incremented once the bytes are fetched
+   and verified, immediately before libvips runs, in a transaction of its own. A storage that
+   cannot be reached (GET, HEAD) or any other failure before that throws as before, and the outbox
+   backs off and retries without spending the cap, however long the outage lasts; a JVM killed
+   mid-decode, the poison case, has already counted. The rule is the domain's, and
+   `startProcessing` (`processing_attempts < 5`) and `giveUp` (`processing_attempts >= 5`)
+   repeat it as their backstops.
+2. **The attempt is recorded in a transaction of its own** (`PROCESSING`, `REQUIRES_NEW`),
+   committed whatever becomes of the delivery, so a photo being worked on is seen to be (D5's
+   alert on `PROCESSING` for 30 minutes reads it). The decode's count (step 1) is committed the
+   same way, so it survives the rollback of an attempt that throws.
 3. **The work holds no lock on the asset.** The upload is read once, never past one byte more than
    its declared length (`LONGER_THAN_DECLARED`), and must have the declared SHA-256
    (`CHECKSUM_MISMATCH`). This settles, for the pipeline, the integrity question ADR-0047 left
@@ -141,7 +143,8 @@ stays `PROCESSING` and is taken up again. `gratitude.media.processing.duration{k
   admits. **What it refuses**: an 8-bit RGB photo over about 35 megapixels, so a 48-megapixel phone
   photo (139 MiB decoded) is refused and a 24-megapixel one (70 MiB) is not; a 16-bit RGBA image
   over about 13 megapixels. Phones shoot 12 to 24 megapixels by default; 48 is a mode one chooses.
-  That is a product cost the owner may want to weigh against the memory budget.
+  **The ceiling stays** (the owner's ruling on #108): the client downscales a photo to 2048 px on
+  its longer edge before uploading it (Owed, moyi-app), which also makes every upload smaller.
 - **The address-space limit, and the container's arithmetic.** `memoryLimit` (`ulimit -v`) is
   640 MiB, the least of 512, 576 and 640 MiB under which every format just under the ceiling
   decoded whole: at 576 MiB the HEIC exited 0 with a truncated image (`vips avg` could not read
@@ -275,8 +278,11 @@ that process's other deliveries. `vipsheader` is native code reading untrusted b
 pixel ceiling is known, in the sandbox but before any limit of ours on size. Variants deleted on a
 best-effort basis can outlive their asset until D5. The pipeline's CLI options are those of libvips
 8.15 to 8.18 (checked on both); a libvips that renames them fails the start-up check or the photos,
-not silently. The decoded-bytes ceiling refuses a 48-megapixel photo. A storage outage longer than
-the five attempts' half-minute fails the photos uploaded during it. Until D5, a URL handed out
+not silently. The decoded-bytes ceiling refuses a 48-megapixel photo that the client has not
+downscaled (Owed, moyi-app). An outage of the storage never fails a photo: it waits, `PROCESSING`,
+and is made when the storage is back. A storage that fails only on the PUT of a variant, after a
+decode has run, does spend an attempt, since the count is taken before the decode so that a killed
+process is counted; five such in a row fail the photo. Until D5, a URL handed out
 before an erasure works for up to 25 hours after it (Owed).
 
 **Neutral.** One new error code (`MEDIA_ATTACHED`). The media state machine gains `PROCESSING`,
@@ -331,6 +337,10 @@ there the asset's state decides it. CI installs `libvips-tools` and `libheif-plu
   Today only the owner is ever given a URL, so this exposes nothing to anyone else; once D4 gives
   partners URLs, a partner could keep reaching a photo its author took back, until the URL
   expires. **D5 owns the fix**: the purge on erasure, and the owner's view of a released photo.
+- **moyi-app, when the app adds photos (owner's ruling on #108):** the client downscales a photo
+  to 2048 px on its longer edge before it uploads it, so that what a phone shoots in its
+  48-megapixel mode stays under the 100 MiB decoded-bytes ceiling (decision 3), which is not
+  raised. Without it such a photo is `FAILED` with `TOO_LARGE_DECODED`.
 - **D5:** erasure releases and purges an erased entry's photo (D-9), the reaper deletes a photo
   unattached for 24 hours (a released one included) and variants a best-effort delete left behind.
 

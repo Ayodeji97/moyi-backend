@@ -84,16 +84,29 @@ internal class MediaAssetStore(
 
     /**
      * An attempt begins: a photo UPLOADED, or PROCESSING after an attempt that
-     * did not finish, becomes PROCESSING and counts one more attempt. Returns
-     * whether it moved; a photo deleted or finished since is left alone.
+     * did not finish, becomes PROCESSING. Nothing is counted yet: an attempt
+     * the storage stops before the decode spends none ([countDecode]). Returns
+     * whether it moved; a photo deleted, finished or given up since is left alone.
      */
     fun startProcessing(id: UUID): Boolean =
         jdbc.update(
-            "UPDATE media_assets SET status = 'PROCESSING', processing_attempts = processing_attempts + 1 " +
+            "UPDATE media_assets SET status = 'PROCESSING' " +
                 "WHERE id = ? AND kind = 'IMAGE' AND status IN ('UPLOADED', 'PROCESSING') AND processing_attempts < ?",
             id,
             MediaAsset.MAX_ATTEMPTS,
         ) == 1
+
+    /**
+     * An attempt reaches the decode: its bytes are fetched and verified, and
+     * libvips is about to read them. Counted before it runs, so a decode that
+     * never returns (the process killed with it) is counted too.
+     */
+    fun countDecode(id: UUID) {
+        jdbc.update(
+            "UPDATE media_assets SET processing_attempts = processing_attempts + 1 WHERE id = ? AND status = 'PROCESSING'",
+            id,
+        )
+    }
 
     /**
      * A photo whose attempts have all begun and none finished becomes FAILED:
