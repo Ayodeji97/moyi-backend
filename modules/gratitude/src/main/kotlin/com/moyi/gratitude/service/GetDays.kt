@@ -68,8 +68,17 @@ internal data class DaysPage(
  * else chooses a shape: not the day's status, not a column the query read. A
  * closed `SOLO` day whose entry was never revealed is its author's alone
  * (ADR-0033 decision 9), and it is the entry's `revealedAt`, asked by the
- * gate, that says so. Which row of a day is "mine" is [onEachSideOf]'s, the
- * rule `GET /today` uses.
+ * gate, that says so. How a picked day is shown is [shownTo]'s, the rule
+ * `GET /today` uses: which row is "mine", an entry erased before the caller
+ * was ever shown it left out, and the status as the day's erasures will
+ * leave it.
+ *
+ * **So the query must not list a day for that entry alone**, or the day would
+ * come back empty where a day the partner never wrote on is not listed at
+ * all. It does not: an entry erased before its reveal was never revealed, and
+ * [ArchiveDays]'s rule lists a day for its author or for a revealed row. Search
+ * and on this day ask for a live row besides. `UnseenErasureTwinTest` holds the
+ * five routes to the twin who never wrote.
  *
  * **Who has withdrawn is asked after the entries are loaded, not before**
  * ([readerNow], which has the reasoning). The [BondMembership] this is handed
@@ -82,16 +91,17 @@ internal data class DaysPage(
  *
  * **A page has two bounds.** The count the caller asked for, and
  * [PAGE_TEXT_OCTETS] of entry text **as it will be sent**. An entry is at
- * most 8,192 octets as it arrives and can be six times that as JSON: the
- * largest there can be is 49,147 octets on the wire ([octetsAsJson] has
- * how). So one day can be 98 KB, and the largest page by count would be
- * nearly nineteen times the 256 KB a response may be (NFR-008). Days are
+ * most 8,192 octets as it arrives and more than that as JSON: the largest
+ * there can be is 10,688 octets on the wire ([octetsAsJson] has how), so one
+ * day can be 21 KB, and the largest page by count would be over four times
+ * the 256 KB a response may be (NFR-008). (Until ADR-0031's ruling 1 was
+ * built, 2026-10-28, an entry could be 49,147 octets out and a day 98 KB.) Days are
  * taken in order while the text **this caller will be sent** stays within
  * the bound; a tombstone and a locked entry send none. The first day is
  * always taken, so a page is never empty for its size. Text is measured as
  * JSON will carry it, because that is what the limit is on: measured as it
- * arrived, two of the largest days would count as 32 KB and be sent as
- * 197 KB.
+ * arrived, nine of the largest days would count as 147 KB and be sent as
+ * 192 KB.
  *
  * **`favouritesOnly`** asks the query for days holding an entry the caller
  * has marked, excluding known withdrawn authors before the limit, and then
@@ -145,7 +155,7 @@ internal class GetDays(
      * [textOctets] is the page's bound on text and is [PAGE_TEXT_OCTETS] for
      * every caller there is. It is a parameter only so that a test can make
      * it smaller than one day: no day can be large enough to reach the
-     * real one alone (the largest is 98,294 octets of text, half of it), and
+     * real one alone (the largest is 21,376 octets of text, a ninth of it), and
      * the rule that the first day is always taken would otherwise be a line
      * nothing could show to be needed.
      *
@@ -404,10 +414,7 @@ internal class GetDays(
         val written = entries.findForDays(days.map { it.id })
         // After the entries, never before: the marker is read last.
         val reader = access.readerNow(membership)
-        return days.map { day ->
-            val sides = written[day.id].orEmpty().onEachSideOf(membership.memberId)
-            Read(day, sides.mine?.readBy(reader), sides.partners?.readBy(reader))
-        }
+        return days.map { day -> Read(day, written[day.id].orEmpty().shownTo(reader, day.status, day.closedAt, day.entryCount)) }
     }
 
     /** The caller's own marks among [read]: asked after the gate, and only of what it answered in full. */
@@ -426,7 +433,7 @@ internal class GetDays(
     private fun mediaOn(
         membership: BondMembership,
         read: List<Read>,
-    ): Map<EntryId, ShownMedia> = media.of(membership.userId, read.flatMap { listOfNotNull(it.mine, it.partners) })
+    ): Map<EntryId, ShownMedia> = media.of(membership.userId, read.flatMap { it.readings })
 
     /**
      * A page being filled: days that will be shown are offered in order,
@@ -454,23 +461,22 @@ internal class GetDays(
             day: Read,
             kept: Set<EntryId>,
             reacted: Map<EntryId, ReactionType>,
-            shown: Map<EntryId, ShownMedia>,
+            media: Map<EntryId, ShownMedia>,
         ) {
             more = more || taken.size == limit || (taken.isNotEmpty() && octets + day.octets > textOctets)
             if (!more) {
-                taken += day.shown(kept, reacted, shown)
+                taken += day.shown(kept, reacted, media)
                 octets += day.octets
             }
         }
     }
 
-    /** A candidate day after the gate: what the caller may see of each side. */
+    /** A candidate day after the gate: what the caller may see of each side, and the status they are shown ([shownTo]). */
     private class Read(
         val day: ArchiveDay,
-        val mine: EntryReading?,
-        val partners: EntryReading?,
+        private val shown: ShownDay,
     ) {
-        private val readings = listOfNotNull(mine, partners)
+        val readings = listOfNotNull(shown.mine, shown.partners)
 
         val readInFull: List<EntryId> = readings.filter { it.readability == Readability.FULL }.mapNotNull { it.disclosed?.id }
 
@@ -491,16 +497,16 @@ internal class GetDays(
         fun shown(
             kept: Set<EntryId>,
             reacted: Map<EntryId, ReactionType>,
-            shown: Map<EntryId, ShownMedia>,
+            media: Map<EntryId, ShownMedia>,
         ): DayView =
             DayView(
                 day.date,
-                day.status,
-                mine,
-                partners,
+                shown.status,
+                shown.mine,
+                shown.partners,
                 kept,
                 reacted.filterKeys { it in readInFull },
-                shown.filterKeys { it in readInFull },
+                media.filterKeys { it in readInFull },
             )
 
         /** The octets of text this day will send to this caller. A reading that discloses no text sends none. */
@@ -530,31 +536,34 @@ internal class GetDays(
 
         /**
          * 192 KiB (196,608 octets) of entry text in a page, counted as
-         * JSON carries it. Two of the largest days there can be fit in it
-         * (196,588 octets) and a third does not. With the most a page can
-         * carry besides text (fifty days of two entries are about 34 KB
-         * of ids, dates and field names) the largest response there can be
-         * is about 231 KB, under the 262,144 a response may be.
-         * `DaysFeedTest` builds that page and measures it: 230,663 octets,
-         * with the test clock's whole-second timestamps and no reactions.
-         * An instant in production carries microseconds, seven octets more
-         * in each of two fields of a hundred entries: about 1.4 KB. A
-         * reaction's longest name is seven octets more than `null` on each
-         * of them: 0.7 KB.
+         * JSON carries it. Nine of the largest days there can be fit in it
+         * (192,384 octets, two entries of 10,688 each) and a tenth does not;
+         * a day of smaller entries can make up the rest, to the octet.
+         * Besides its text every day costs about the same, about 1,174
+         * octets at the most (two entries' ids, dates and field names, a
+         * reaction on each, and the partner's name at its longest), so a
+         * page at the text bound is about the same size whichever days carry
+         * the text. `DaysFeedTest` builds that page and measures it: 255,507
+         * octets of the 262,144 a response may be, with the test clock's
+         * whole-second timestamps, the partner's name at its longest on
+         * every day and `THANK_YOU`, the longest reaction, on every entry
+         * that can carry one. An instant in production carries microseconds,
+         * seven octets more in each of two fields of a hundred entries:
+         * about 1.4 KB more than is measured.
          *
-         * So the margin is about 29 KB, and it is what a new field on an
-         * entry spends: a hundred entries a page, so every thirty octets
-         * added to one are 3 KB off it. `reaction` (slice C5c) spent 2.3.
-         * `partnerDisplayName` (ADR-0036 question 5) is on the day, so fifty
-         * a page, not a hundred, but a name of 80 characters can be written
-         * as 470 octets: at its largest it spends about 25 KB, and
-         * `DaysFeedTest` measures the largest page with it. What is left is
-         * about 4 KB, and a field on a day or an entry now needs this bound
-         * looked at again. The name it measures with is
-         * `ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH`, and
-         * `OpenApiContractTest` ("the longest display name identity takes is
-         * no longer than the archive's largest page was measured with") fails
-         * if identity ever takes a longer one.
+         * So the margin is about 6.6 KB, less those 1.4, and it is what a
+         * new field spends: a hundred entries a page, so every thirty octets
+         * added to one are 3 KB off it, and a field on a day or an entry
+         * needs this bound looked at again. (`reaction`, slice C5c, spent
+         * 2.3 KB of it; `partnerDisplayName`, ADR-0036 question 5, about
+         * 23.5 KB, a name of 80 characters being writable as 470 octets.
+         * Until ADR-0031's ruling 1 was built, 2026-10-28, the largest entry
+         * was 49,147 octets out, two such days filled the bound, and the
+         * page was measured at 230,663 before the name was added.) The name
+         * it measures with is `ArchivePageBudget.MEASURED_DISPLAY_NAME_LENGTH`,
+         * and `OpenApiContractTest` ("the longest display name identity
+         * takes is no longer than the archive's largest page was measured
+         * with") fails if identity ever takes a longer one.
          */
         const val PAGE_TEXT_OCTETS = 192 * 1024
 
@@ -572,11 +581,14 @@ internal class GetDays(
          * It matters because an entry is bounded by octets as sent to us
          * (8,192), not by octets as we send it, and its limit of 500
          * characters does not make up the difference. That limit is counted
-         * on the text trimmed, and U+001C to U+001F are trimmed as space
-         * and escaped as controls. So `a` followed by 8,191 of them is
-         * accepted as one character, is 8,192 octets in and 49,147 out, and
-         * a page of such entries counted raw would be past the limit while
-         * looking a sixth of the way to it.
+         * on the text as sent (ADR-0031, ruling 1), and a control is a
+         * character of its own, so at most 499 can be controls; but one more
+         * character can be a backslash carrying 3,846 combining marks. That
+         * entry is 8,192 octets in and 10,688 out, and a page of such entries
+         * counted raw would be past the limit while looking three-quarters
+         * of the way to it. Until the ruling was built the limit was counted
+         * on the text trimmed, U+001C to U+001F trim as space, and `a`
+         * followed by 8,191 of them was one character and 49,147 octets out.
          */
         fun octetsAsJson(text: String): Int =
             text.toByteArray(Charsets.UTF_8).size +

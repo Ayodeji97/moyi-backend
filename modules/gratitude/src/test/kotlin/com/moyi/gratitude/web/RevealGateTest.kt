@@ -364,14 +364,16 @@ internal class RevealGateTest(
     }
 
     @Test
-    fun `a partner who never could read a withdrawn entry sees its author and that it is gone, and nothing else`() {
+    fun `a partner who never could read an erased entry sees nothing of it, not even that it was written`() {
         // A reveal time that has not come yet: nothing submitted below is revealed by its own submission.
         jdbc.update("UPDATE bonds SET reveal_time_local = '23:59:59' WHERE id = ?::uuid", bondId)
         // BR-8: while the entry was live this reader was entitled to author
         // and status. An erasure does not entitle them to more — not the id,
-        // not when it was written. A gate that answers the wide tombstone
-        // here fails the exact-equality assertion: the wide shape carries
-        // `id`, `date`, `createdAt`, `intendedAt` and a `text` key.
+        // not when it was written — and since the owner's ruling of 2026-10-21
+        // not that it was written at all: the day shows the `null` of a
+        // partner who never wrote (ADR-0032 question 2). A gate that answers
+        // the wide tombstone here fails the exact-equality assertion, and so
+        // does a renderer that draws the gate's answer as a shape.
         val adaMemberId = authorMemberIdOf(submit(ada, bondId, """{"text":"words I took back"}""").also { it.status shouldBe 201 })
 
         for (state in ERASED_STATES.filter { "revealed_at = NULL" in it }) {
@@ -392,7 +394,8 @@ internal class RevealGateTest(
                     // The arm is what it says it is: Bea's own entry is there
                     // exactly when she has written.
                     asPartner.contains("\"myEntry\":null") shouldBe !beaHasWritten
-                    partnerEntryJson(asPartner) shouldBe """{"authorMemberId":"$adaMemberId","status":"REMOVED"}"""
+                    asPartner shouldContain "\"partnerEntry\":null"
+                    asPartner shouldNotContain adaMemberId
                     asPartner shouldNotContain "words I took back"
                 }
             }
@@ -404,8 +407,9 @@ internal class RevealGateTest(
         // The row an erasure leaves half-way: `text` NULL and `deleted_at`
         // set, `status` still SUBMITTED. It has to come back through the
         // mapper — `Entry`'s constructor admits a missing text on either mark
-        // of an erasure — and render as a tombstone to both people. A
-        // constructor that looked at the status alone answers 500 here.
+        // of an erasure — and render as a tombstone to its author, and as
+        // nothing to a partner who never read it. A constructor that looked
+        // at the status alone answers 500 here.
         val submitted = submit(ada, bondId, """{"text":"words I took back"}""")
         submitted.status shouldBe 201
         val adaMemberId = authorMemberIdOf(submitted)
@@ -420,7 +424,8 @@ internal class RevealGateTest(
         myEntryJson(asAuthor.contentAsString) shouldContain "\"text\":null"
         myEntryJson(asAuthor.contentAsString) shouldContain "\"status\":\"DELETED\""
         asPartner.status shouldBe 200
-        partnerEntryJson(asPartner.contentAsString) shouldBe """{"authorMemberId":"$adaMemberId","status":"REMOVED"}"""
+        asPartner.contentAsString shouldContain "\"partnerEntry\":null"
+        asPartner.contentAsString shouldNotContain adaMemberId
     }
 
     @Test

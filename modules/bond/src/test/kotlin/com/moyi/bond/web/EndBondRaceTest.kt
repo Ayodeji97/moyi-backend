@@ -208,7 +208,13 @@ internal class EndBondRaceTest(
         userId: UUID,
         bondId: String,
     ): MockHttpServletResponse =
-        mockMvc.post("/api/v1/bonds/$bondId/block") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+        mockMvc
+            .post("/api/v1/bonds/$bondId/block") {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"withdrawEntries":true}"""
+            }.andReturn()
+            .response
 
     private fun revokeInvite(
         userId: UUID,

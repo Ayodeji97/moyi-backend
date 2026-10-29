@@ -68,7 +68,8 @@ import javax.sql.DataSource
  *   partner's entry read in full, yes; the caller's own, `409
  *   REACTION_ON_OWN_ENTRY`; the partner's tombstone, `409 ENTRY_IMMUTABLE`;
  *   anything the caller was never shown, the one `404`; and on a bond that
- *   has ended, `409 BOND_ARCHIVED`, though taking one back is always allowed.
+ *   has ended, `409 BOND_ARCHIVED`, for taking one back from the partner's
+ *   entry as for setting one (ADR-0037 question 11).
  * - **A reaction is the one thing the other person sees.** Both members are
  *   shown the same value, and nothing else the reactor does moves a byte of
  *   what the author is answered.
@@ -293,9 +294,9 @@ internal class ReactionsTest(
         (puts + deletes + sibling).map(::comparable).toSet().size shouldBe 1
         rows().shouldBeEmpty()
 
-        // Erased before it was ever revealed: she was told an author and REMOVED, never its id. Still the same answer.
+        // Erased before it was ever revealed: she is shown nothing of it, never its id. Still the same answer.
         rig.delete(ada, adas)
-        json.readTree(rig.today(bea, bond))["partnerEntry"]["status"].asString() shouldBe "REMOVED"
+        json.readTree(rig.today(bea, bond))["partnerEntry"].isNull shouldBe true
         val unseen = listOf(react(bea, adas), unreact(bea, adas))
         unseen.forEach { it.status shouldBe 404 }
         (unseen + puts).map(::comparable).toSet().size shouldBe 1
@@ -315,9 +316,8 @@ internal class ReactionsTest(
 
         rig.delete(ada, adas)
 
-        val removed = json.readTree(rig.today(bea, bond))["partnerEntry"]
-        removed.propertyNames().toList() shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-        removed["status"].asString() shouldBe "REMOVED"
+        // Erased before she was shown it: no shape at all, the `null` of an entry never written (ADR-0032 question 2).
+        json.readTree(rig.today(bea, bond))["partnerEntry"].isNull shouldBe true
         // His own tombstone is the wide shape, and says null.
         for (view in views(ada, bond)) {
             view["myEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder FULL_KEYS
@@ -375,6 +375,8 @@ internal class ReactionsTest(
         }
         // What the withdrawing member left on the partner's entry is not withdrawn: it is still shown to both.
         for (user in listOf(ada, bea)) reactionShown(user, day.bond, day.beas) shouldBe listOf("SMILE", "SMILE", "SMILE")
+        // Nor can they take it back now: the bond has ended (ADR-0037 question 11).
+        json.readTree(unreact(ada, day.beas).contentAsString)["code"].asString() shouldBe "BOND_ARCHIVED"
 
         // As a tombstone does: no reaction can be set, although the row is live; one can be taken back.
         val refused = react(bea, day.adas, "MOVED")
@@ -395,37 +397,64 @@ internal class ReactionsTest(
 
     // ---- a bond that has ended ----
 
+    /**
+     * ADR-0037 question 11, as the owner ruled it on 2026-10-21: after an
+     * ending a removal the other person sees is contact too, so taking a
+     * reaction back from the partner's entry is refused as setting one is.
+     * The reaction that cannot be taken back stays shown to both.
+     */
     @Test
-    fun `no reaction can be left once the bond has ended, by the one who left or the one who stayed, and one can still be taken back`() {
-        for (ending in listOf("leave", "block keeping entries", "deletion countdown")) {
+    fun `once the bond has ended no reaction can be left, changed or taken back, by the one who left or the one who stayed`() {
+        for (ending in ENDINGS) {
             withClue(ending) {
                 rig.clear()
                 val day = revealedDay()
                 react(bea, day.adas, "HEART").status shouldBe 204
-                when (ending) {
-                    "leave" -> rig.leave(bea, day.bond)
-                    "block keeping entries" -> rig.block(bea, day.bond, withdraw = false)
-                    else -> listOf(ada, bea).forEach { requestDeletion(it, day.bond) }
-                }
+                react(ada, day.beas, "SMILE").status shouldBe 204
+                end(ending, day.bond)
                 // Not vacuous: both entries are still read in full by both.
                 for (user in listOf(ada, bea)) shown(user, day.bond, day.beas).forEach { it["text"].asString() shouldBe BEAS_WORDS }
 
-                // Neither a new one nor a change to the one that is there.
+                // Neither a new one, nor a change to the one that is there, nor taking it back.
                 for ((user, target) in listOf(ada to day.beas, bea to day.adas)) {
-                    val refused = react(user, target, "MOVED")
-                    refused.status shouldBe 409
-                    json.readTree(refused.contentAsString)["code"].asString() shouldBe "BOND_ARCHIVED"
-                    json.readTree(refused.contentAsString)["detail"].asString() shouldBe "This bond has ended. It is read only now."
+                    for (refused in listOf(react(user, target, "MOVED"), unreact(user, target))) {
+                        refused.status shouldBe 409
+                        json.readTree(refused.contentAsString)["code"].asString() shouldBe "BOND_ARCHIVED"
+                        json.readTree(refused.contentAsString)["detail"].asString() shouldBe "This bond has ended. It is read only now."
+                    }
                 }
-                rows() shouldBe listOf(Row(day.adas, day.beaMember, "HEART"))
-                // What was left before the ending is still shown, to both.
-                for (user in listOf(ada, bea)) reactionShown(user, day.bond, day.adas) shouldBe listOf("HEART", "HEART", "HEART")
+                rows() shouldContainExactlyInAnyOrder listOf(Row(day.adas, day.beaMember, "HEART"), Row(day.beas, day.adaMember, "SMILE"))
+                // What was left before the ending is still shown, to both: the blocker included.
+                for (user in listOf(ada, bea)) {
+                    reactionShown(user, day.bond, day.adas) shouldBe listOf("HEART", "HEART", "HEART")
+                    reactionShown(user, day.bond, day.beas) shouldBe listOf("SMILE", "SMILE", "SMILE")
+                }
+            }
+        }
+    }
 
-                // Taking one's own back is always allowed, as deleting one's own entry is.
-                unreact(ada, day.beas).status shouldBe 204
+    /**
+     * What question 11's ruling leaves as it was: the refusal is the
+     * `ALLOWED` branch's alone. Taking nothing back from one's own entry is
+     * success on an ended bond, and so is taking a row off a tombstone, so
+     * that a withdrawal and its twin deleted by hand still answer alike.
+     */
+    @Test
+    fun `once the bond has ended, taking a reaction back from one's own entry or from a tombstone is still 204`() {
+        for (ending in ENDINGS) {
+            withClue(ending) {
+                rig.clear()
+                val day = revealedDay()
+                rig.delete(ada, day.adas)
+                // A row on the tombstone, put there by hand: the state a request answered just before the erasure leaves.
+                row(day.adas, day.beaMember, "HEART")
+                end(ending, day.bond)
+
+                unreact(bea, day.beas).status shouldBe 204
+                unreact(ada, day.adas).status shouldBe 204
+                rows() shouldBe listOf(Row(day.adas, day.beaMember, "HEART"))
                 unreact(bea, day.adas).status shouldBe 204
                 rows().shouldBeEmpty()
-                for (user in listOf(ada, bea)) reactionShown(user, day.bond, day.adas) shouldBe listOf(null, null, null)
             }
         }
     }
@@ -445,6 +474,12 @@ internal class ReactionsTest(
         json.readTree(react(bea, day.adas).contentAsString)["code"].asString() shouldBe "ENTRY_IMMUTABLE"
         json.readTree(react(ada, day.beas).contentAsString)["code"].asString() shouldBe "BOND_ARCHIVED"
         rows().shouldBeEmpty()
+        // Taking one back: the same 404, then success on one's own entry and on a tombstone, and only then the ending.
+        comparable(unreact(bea, waiting)) shouldBe comparable(unreact(eve, waiting))
+        unreact(bea, waiting).status shouldBe 404
+        unreact(ada, waiting).status shouldBe 204
+        unreact(bea, day.adas).status shouldBe 204
+        json.readTree(unreact(ada, day.beas).contentAsString)["code"].asString() shouldBe "BOND_ARCHIVED"
     }
 
     // ---- the body ----
@@ -837,10 +872,10 @@ internal class ReactionsTest(
         interruptible.disarm()
         rows() shouldBe listOf(Row(day.adas, day.beaMember, "MOVED"))
         for (user in listOf(ada, bea)) reactionShown(user, day.bond, day.adas) shouldBe listOf("MOVED", "MOVED", "MOVED")
-        // The bond has ended: the next one is refused, and this one can still be taken back.
+        // The bond has ended: the next one is refused, and so is taking this one back (ADR-0037 question 11).
         json.readTree(react(bea, day.adas, "HEART").contentAsString)["code"].asString() shouldBe "BOND_ARCHIVED"
-        unreact(bea, day.adas).status shouldBe 204
-        rows().shouldBeEmpty()
+        json.readTree(unreact(bea, day.adas).contentAsString)["code"].asString() shouldBe "BOND_ARCHIVED"
+        rows() shouldBe listOf(Row(day.adas, day.beaMember, "MOVED"))
     }
 
     /**
@@ -850,7 +885,9 @@ internal class ReactionsTest(
      * stopped at its read of the entry, which is after it resolved the
      * caller's membership for the route. Decided from that first membership,
      * the reaction would be left on an entry both people are already shown
-     * as a tombstone, or on a bond that has ended.
+     * as a tombstone, or on a bond that has ended. A `DELETE` on a bond
+     * that has ended would remove the reaction where the second look refuses
+     * (ADR-0037 question 11).
      *
      * The request is stopped by a lock on the table, taken as its first
      * resolution returns, and the test waits until Postgres reports its read
@@ -859,10 +896,18 @@ internal class ReactionsTest(
      */
     @Test
     fun `who has withdrawn and whether the bond has ended are asked after the entry is read, so an ending during that read refuses`() {
-        for ((ending, code) in listOf("a block that withdraws" to "ENTRY_IMMUTABLE", "a leave that keeps the entries" to "BOND_ARCHIVED")) {
-            withClue(ending) {
+        val arms =
+            listOf(
+                Triple("a block that withdraws", "ENTRY_IMMUTABLE", "PUT"),
+                Triple("a leave that keeps the entries", "BOND_ARCHIVED", "PUT"),
+                // Taking one back is refused after an ending too (ADR-0037 question 11), and asked of the same second look.
+                Triple("a leave that keeps the entries", "BOND_ARCHIVED", "DELETE"),
+            )
+        for ((ending, code, verb) in arms) {
+            withClue("$verb, $ending") {
                 rig.clear()
                 val day = revealedDay()
+                if (verb == "DELETE") react(bea, day.adas, "SMILE").status shouldBe 204
                 withAnotherTransaction { holder ->
                     val holderPid = backendPidOf(holder)
                     interruptible.afterResolution(1) {
@@ -870,7 +915,7 @@ internal class ReactionsTest(
                         holder.createStatement().use { it.execute("LOCK TABLE entries IN ACCESS EXCLUSIVE MODE") }
                     }
 
-                    val reacting = pool.submit(Callable { react(bea, day.adas) })
+                    val reacting = pool.submit(Callable { if (verb == "PUT") react(bea, day.adas) else unreact(bea, day.adas) })
                     await().atMost(Duration.ofSeconds(10)).until { reacting.isDone || waitingBehind(holderPid).isNotEmpty() }
                     reacting.isDone shouldBe false
                     interruptible.fired shouldBe true
@@ -885,7 +930,7 @@ internal class ReactionsTest(
                     json.readTree(refused.contentAsString)["code"].asString() shouldBe code
                     // Nothing was erased: the row is whole, and it is the request's own second look that refused.
                     entry(day.adas)["text"] shouldBe ADAS_WORDS
-                    rows().shouldBeEmpty()
+                    rows() shouldBe if (verb == "PUT") emptyList() else listOf(Row(day.adas, day.beaMember, "SMILE"))
                 }
             }
         }
@@ -1149,6 +1194,19 @@ internal class ReactionsTest(
             }.andReturn()
             .response
 
+    /** Ends [bond] as [ending] says: Bea leaves, Bea blocks and keeps the entries, or both ask for its deletion. */
+    private fun end(
+        ending: String,
+        bond: String,
+    ) {
+        when (ending) {
+            "leave" -> rig.leave(bea, bond)
+            "block keeping entries" -> rig.block(bea, bond, withdraw = false)
+            "deletion countdown" -> listOf(ada, bea).forEach { requestDeletion(it, bond) }
+            else -> error(ending)
+        }
+    }
+
     private fun requestDeletion(
         user: UUID,
         bond: String,
@@ -1189,6 +1247,9 @@ internal class ReactionsTest(
         val MIDNIGHT: Instant = Instant.parse("2026-09-15T23:02:00Z")
         const val DAY = 86_400L
         const val MEGABYTE = 1024 * 1024
+
+        /** The three ways a bond ends with both entries still read in full: [end] makes each. */
+        val ENDINGS = listOf("leave", "block keeping entries", "deletion countdown")
 
         val TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO")
         const val ME_TOO = "ME_TOO"

@@ -44,34 +44,3 @@ internal data class LockedEntryResponse(
 internal enum class LockedEntryStatus {
     LOCKED,
 }
-
-/**
- * A partner's entry that was deleted or withdrawn **before it was ever
- * revealed** ([com.moyi.gratitude.domain.Readability.TOMBSTONE_UNSEEN]):
- * who wrote it, and that it is gone — and nothing else.
- *
- * The same reasoning as [LockedEntryResponse], for the same reader. While
- * the entry was live this caller was entitled to BR-8's two fields; an
- * erasure does not entitle them to more. [EntryResponse]'s tombstone carries
- * an id, a date and two timestamps — when the partner wrote, which BR-8
- * withholds — so this is a distinct type with nowhere to put them, not that
- * one with fields left out.
- */
-internal data class ErasedEntryResponse(
-    val authorMemberId: UUID,
-    val status: ErasedEntryStatus = ErasedEntryStatus.REMOVED,
-) : PartnerEntryResponse
-
-/**
- * One value, for the reason [LockedEntryStatus] is — and **`REMOVED`, not
- * `DELETED`, on purpose.** This is a view literal, as `LOCKED` is; the domain
- * still says [com.moyi.gratitude.domain.EntryStatus.DELETED]. `DELETED` on
- * the wire is already [EntryResponse]'s wide tombstone, and
- * `TodayResponse.partnerEntry` is discriminated on `status` — one value, one
- * schema — which is what a generated client builds its sealed types from
- * (doc 06 §2). `REMOVED` tells this reader nothing they lacked, and does not
- * distinguish a delete from a withdrawal.
- */
-internal enum class ErasedEntryStatus {
-    REMOVED,
-}

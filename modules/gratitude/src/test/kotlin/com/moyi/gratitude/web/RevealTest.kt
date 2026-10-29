@@ -199,21 +199,22 @@ internal class RevealTest(
     }
 
     /**
-     * What a partner can see of a delete made **before** the reveal, as built
-     * (ADR-0031 decision 10 ruled the shape before any request could reach
-     * it; ADR-0032 records that C2 makes it reachable and leaves the question
-     * with the owner). The day steps back to `OPEN`, and the partner is shown
-     * that an entry was removed — its author and that fact, nothing else.
+     * What a partner can see of a delete made **before** the reveal: nothing.
+     * ADR-0031 decision 10 ruled an author-and-`REMOVED` shape before any
+     * request could reach it, C2 made it reachable, and the owner ruled on
+     * 2026-10-21 that the partner sees nothing (ADR-0032 question 2). The day
+     * steps back to `OPEN`, and `partnerEntry` is the `null` of a partner who
+     * never wrote (`UnseenErasureTwinTest` holds every route to that twin).
      */
     @Test
-    fun `a delete before the reveal shows the partner an author and that it is gone, and nothing else`() {
+    fun `a delete before the reveal shows the partner nothing, as if nothing had been written`() {
         val adas = idOf(submit(ada, """{"text":"hers, thought better of"}"""))
 
         deleteEntry(ada, adas).status shouldBe 204
 
         val forBea = today(bea).contentAsString
         forBea shouldContain "\"bondDay\":{\"date\":\"2026-09-15\",\"status\":\"OPEN\"}"
-        partnerEntryOf(forBea) shouldMatch Regex("""\{"authorMemberId":"[0-9a-f-]{36}","status":"REMOVED"}""")
+        forBea shouldContain "\"partnerEntry\":null"
         forBea shouldNotContain adas
         entryCount() shouldBe 0
     }

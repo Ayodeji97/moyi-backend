@@ -11,10 +11,13 @@ import com.moyi.bond.service.ListBonds
 import com.moyi.bond.service.UpdateBond
 import com.moyi.common.security.CurrentUser
 import com.moyi.common.web.IfMatch
+import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
+import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.http.server.ServletServerHttpRequest
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PatchMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -153,9 +156,24 @@ internal class BondsController(
      * Unlike leave it is accepted on a bond that has already ended: blocking
      * somebody who left first is what the requirement is for.
      *
-     * The same optional body as [leaveBond], with the other default: here
-     * withdrawal is *given* unless the caller declines it (FR-029a). Repeating
-     * the call with the flag on withdraws what an earlier one kept.
+     * The same body as [leaveBond], read by the same reader, **and here the
+     * flag is required** (ADR-0035 questions 1 and 11, the owner's ruling of
+     * 2026-10-21). It used to default to withdrawing, which made an absent
+     * field the one that erases. No body, `{}` and an explicit `null` are
+     * each the `400` an unreadable body gets, byte for byte, and nothing is
+     * ended or withdrawn. Repeating the call with the flag on withdraws what
+     * an earlier one kept.
+     *
+     * **The flag is asked for after the guard**, so a stranger who sends no
+     * body gets the one `404` like any other stranger. That is why
+     * `required = false` stays on the annotation: Spring would refuse a
+     * missing body while resolving the arguments, before this method runs. A
+     * body that is there and cannot be read is still refused there, before
+     * the guard, for member and stranger alike, as on [leaveBond].
+     *
+     * The refusal is the exception Spring raises for an unreadable body
+     * itself, so its status, code and sentence stay in the one handler that
+     * answers it, and cannot drift from it.
      */
     @PostMapping("/{bondId}/block")
     @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -163,9 +181,13 @@ internal class BondsController(
         caller: CurrentUser,
         @PathVariable bondId: String,
         @RequestBody(required = false) request: EndBondRequest?,
+        http: HttpServletRequest,
     ) {
         val membership = guard.membershipOf(UserId(caller.id), bondIdOrNotFound(bondId))
-        endBond.block(membership, withdrawEntries = request?.withdrawEntries ?: true)
+        val withdrawEntries =
+            request?.withdrawEntries
+                ?: throw HttpMessageNotReadableException("The flag is required on this route", ServletServerHttpRequest(http))
+        endBond.block(membership, withdrawEntries = withdrawEntries)
     }
 
     private fun bondIdOrNotFound(raw: String): BondId =

@@ -37,8 +37,8 @@ import java.util.UUID
  * [of] renders what the gate answered — so the text is absent even while the
  * row still holds some. **This wide tombstone is only for a reader who could
  * read the entry before it was erased** — its author, or a partner it had
- * been revealed to. A partner it was never revealed to gets
- * [ErasedEntryResponse], which has no id and no timestamps to give.
+ * been revealed to. A partner it was never revealed to is shown no entry at
+ * all (`service.shownTo`).
  * `DELETE /entries/{entryId}` is what erases an entry, and every response
  * that renders one afterwards says so: `GET /today`, both archive routes
  * (`DayResponse`), and an
@@ -52,7 +52,7 @@ import java.util.UUID
  *
  * Implements [PartnerEntryResponse] so `TodayResponse.partnerEntry`, and
  * `DayResponse.partnerEntry` on both archive routes, can carry
- * this, [LockedEntryResponse] or [ErasedEntryResponse] behind one field —
+ * this or [LockedEntryResponse] behind one field —
  * BR-1's own decision is what picks which, in [PartnerEntryResponse.of].
  */
 @ConsistentCopyVisibility
@@ -130,8 +130,8 @@ internal data class EntryResponse private constructor(
          * `TOMBSTONE` (`text = null`, `status = DELETED`). `LOCKED`,
          * `TOMBSTONE_UNSEEN` and `NOT_A_MEMBER` disclose nothing and are
          * **not this shape at all**: [PartnerEntryResponse.of] gives the
-         * first two their own minimal types, and a non-member is shown
-         * nothing.
+         * first its own minimal type, a day leaves the second out
+         * (`service.shownTo`), and a non-member is shown nothing.
          *
          * [favourited] is the caller's own mark on this entry, as the caller
          * of this function found it. **It is rendered only on a `FULL`

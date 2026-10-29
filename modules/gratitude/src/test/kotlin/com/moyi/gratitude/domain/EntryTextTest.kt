@@ -1,6 +1,7 @@
 package com.moyi.gratitude.domain
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
 import io.kotest.matchers.ints.shouldBeGreaterThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
@@ -87,23 +88,149 @@ internal class EntryTextTest {
     }
 
     /**
-     * **The spec's choice, flagged to the owner (ADR-0031, P12's open
-     * question).** The 500 is counted on the NFKC form, and NFKC turns a
-     * typographic ellipsis into three full stops — so a text of exactly 500
-     * characters as its author sees them is refused if one of them is `…`.
-     * A client's counter has to normalise the same way or it will say "fits"
-     * for a text the server answers `422`. Kept because spec §3.2 says
-     * "normalised before counting"; this test is what changes if the owner
-     * decides otherwise.
+     * **The owner's ruling of 2026-10-21 (ADR-0031, ruling 1).** The 500 are
+     * counted as typed: grapheme clusters of the text as sent. This test was
+     * `the 500 is counted on the NFKC form, so an ellipsis counts as three`,
+     * which pinned the spec's earlier choice: NFKC turns a typographic
+     * ellipsis into three full stops, so 499 letters and an ellipsis were 502
+     * and refused, though the author's own counter said 500.
      */
     @Test
-    fun `the 500 is counted on the NFKC form, so an ellipsis counts as three`() {
-        val fits = "a".repeat(497) + "\u2026"
-        val looksLikeItFits = "a".repeat(499) + "\u2026"
-        graphemesOf(looksLikeItFits) shouldBe 500
+    fun `the 500 is counted as typed, so an ellipsis counts as one`() {
+        val fits = "a".repeat(499) + "\u2026"
+        graphemesOf(fits) shouldBe 500
+        graphemesOf(Normalizer.normalize(fits, Normalizer.Form.NFKC)) shouldBe 502
 
         EntryText.of(fits).value shouldBe fits
-        shouldThrow<IllegalArgumentException> { EntryText.of(looksLikeItFits) }.message shouldBe "an entry is at most 500 characters"
+        val over = "a".repeat(500) + "\u2026"
+        shouldThrow<IllegalArgumentException> { EntryText.of(over) }.message shouldBe "an entry is at most 500 characters"
+    }
+
+    /**
+     * "As sent" is the raw string, untrimmed (ADR-0031's amendment, decision
+     * 1): leading and trailing whitespace a client sent is stored, so it is
+     * counted, as the client's own text field counts it.
+     */
+    @Test
+    fun `whitespace a client sent is counted - 500 letters and a trailing space are 501`() {
+        EntryText.of("a".repeat(500)).value shouldBe "a".repeat(500)
+        for (over in listOf("a".repeat(500) + " ", " " + "a".repeat(500), "a".repeat(499) + "\n\n")) {
+            shouldThrow<IllegalArgumentException> { EntryText.of(over) }.message shouldBe "an entry is at most 500 characters"
+        }
+    }
+
+    /**
+     * The other direction from the ellipsis: a text whose NFKC form has *more*
+     * graphemes than the raw is accepted on the raw. U+FB01 (the `fi`
+     * ligature) is one grapheme that NFKC makes two; U+FDFA is one that NFKC
+     * makes eighteen characters, spaces among them.
+     */
+    @Test
+    fun `a text whose NFKC form has more graphemes than the raw is decided on the raw`() {
+        val ligatures = "\uFB01".repeat(500)
+        graphemesOf(ligatures) shouldBe 500
+        graphemesOf(Normalizer.normalize(ligatures, Normalizer.Form.NFKC)) shouldBe 1000
+        EntryText.of(ligatures).value shouldBe ligatures
+
+        val salawat = "\uFDFA".repeat(400)
+        graphemesOf(Normalizer.normalize(salawat, Normalizer.Form.NFKC)) shouldBeGreaterThan 500
+        EntryText.of(salawat).value shouldBe salawat
+
+        shouldThrow<IllegalArgumentException> { EntryText.of("\uFB01".repeat(501)) }.message shouldBe
+            "an entry is at most 500 characters"
+    }
+
+    /**
+     * **The owner's ruling of 2026-10-21 (ADR-0031, ruling 2).** An entry of
+     * only zero-width characters is refused as empty. "Zero-width" is
+     * Unicode's `Default_Ignorable_Code_Point` set, and each case below is a
+     * different part of it: the zero-width space, non-joiner and joiner, the
+     * word joiner, the byte-order mark, the soft hyphen, a variation selector,
+     * the combining grapheme joiner, the Hangul fillers, and a tag character
+     * (U+E0041, outside the BMP: a surrogate pair). `Character.getType ==
+     * FORMAT` alone would miss the variation selector, U+034F and the fillers.
+     */
+    @Test
+    fun `an entry of only zero-width characters is refused as empty, whichever kind they are`() {
+        val invisible =
+            listOf(
+                "\u200B",
+                "\u200C",
+                "\u200D",
+                "\u2060",
+                "\uFEFF",
+                "\u00AD",
+                "\uFE0F",
+                "\u034F",
+                "\u3164",
+                "\uDB40\uDC41",
+                "\u115F\u1160",
+                "\uFFA0",
+                "\u200B\u200B\u200B",
+            )
+        for (text in invisible) {
+            withClue(text.codePoints().toArray().joinToString { "U+%04X".format(it) }) {
+                shouldThrow<IllegalArgumentException> { EntryText.of(text) }.message shouldBe "an entry must say something"
+            }
+        }
+    }
+
+    @Test
+    fun `zero-width characters mixed with whitespace are still nothing`() {
+        for (text in listOf(" \u200B ", "\n\u200D\t\uFEFF\n", "\u00A0\u2060\u3000", "\u200B \uDB40\uDC41 \uFE0F")) {
+            shouldThrow<IllegalArgumentException> { EntryText.of(text) }.message shouldBe "an entry must say something"
+        }
+    }
+
+    /**
+     * The ruling refuses an entry of *only* invisible characters. One beside
+     * a visible character is part of what was written and is kept exactly:
+     * ZWJs join a family emoji, U+FE0F asks for the emoji form of a heart,
+     * and a flag is two regional indicators.
+     */
+    @Test
+    fun `a zero-width character beside a visible one is accepted and stored exactly`() {
+        val family = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66"
+        val heart = "\u2764\uFE0F"
+        val flag = "\uD83C\uDDF3\uD83C\uDDEC"
+        for (text in listOf("a\u200B", "\u200Ba", " \u200D thank you", family, heart, flag, "\uDB40\uDC41x")) {
+            EntryText.of(text).value shouldBe text
+        }
+    }
+
+    /**
+     * The one place the set is stated ([Invisible]), checked against the file
+     * it was copied from: DerivedCoreProperties-16.0.0.txt (the Unicode
+     * version JDK 25 ships) ends its `Default_Ignorable_Code_Point` list with
+     * "Total code points: 4174". A range mistyped, dropped or doubled changes
+     * the total or an edge.
+     */
+    @Test
+    fun `the default-ignorable set has the 4174 code points Unicode 16 lists`() {
+        (0..Character.MAX_CODE_POINT).count(Invisible::isDefaultIgnorable) shouldBe 4174
+        for (edge in listOf(0x00AD, 0x180F, 0x2065, 0xFFF8, 0x1BCA3, 0x1D17A, 0xE0000, 0xE0FFF)) {
+            Invisible.isDefaultIgnorable(edge) shouldBe true
+        }
+        for (outside in listOf(0x00AC, 0x00AE, 0x2070, 0xFFF9, 0x1D17B, 0xE1000, 'a'.code, ' '.code, 0x00A0)) {
+            Invisible.isDefaultIgnorable(outside) shouldBe false
+        }
+    }
+
+    /**
+     * ADR-0031's amendment, decision 3: both rulings tighten the rule, and
+     * development and production databases hold entries written under the
+     * old one. Reading such a row back must not fail, so the read path checks
+     * only what storage guarantees, and still refuses what no row can hold.
+     */
+    @Test
+    fun `a row the old rule accepted is read back unchanged, though the new rule refuses it`() {
+        for (old in listOf("\u200B", "\u200D\uFEFF ", "a".repeat(500) + " ", "\n" + "a".repeat(500))) {
+            shouldThrow<IllegalArgumentException> { EntryText.of(old) }
+            EntryText.fromStorage(old).value shouldBe old
+        }
+        shouldThrow<IllegalArgumentException> { EntryText.fromStorage("a\u0000") }
+        shouldThrow<IllegalArgumentException> { EntryText.fromStorage("a\uD800") }
+        shouldThrow<IllegalArgumentException> { EntryText.fromStorage("\uD83D\uDE00".repeat(2049)) }
     }
 
     @Test

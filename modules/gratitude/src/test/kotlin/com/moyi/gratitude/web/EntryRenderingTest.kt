@@ -13,6 +13,7 @@ import com.moyi.gratitude.service.EntryImageStatus
 import com.moyi.gratitude.service.EntryVoice
 import com.moyi.gratitude.service.EntryVoiceStatus
 import com.moyi.gratitude.service.ShownMedia
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
@@ -152,17 +153,9 @@ internal class EntryRenderingTest {
         hidden.text.shouldBeNull()
         hidden.favourited shouldBe false
 
-        // The narrow shapes have nowhere to put one.
+        // The narrow shape has nowhere to put one.
         PartnerEntryResponse.of(entry.readBy(partner), date, favourited = true, reaction = null, media = null) shouldBe
             LockedEntryResponse(author.memberId)
-        PartnerEntryResponse.of(
-            entry.copy(deletedAt = now).readBy(partner),
-            date,
-            favourited = true,
-            reaction = null,
-            media = null,
-        ) shouldBe
-            ErasedEntryResponse(author.memberId, ErasedEntryStatus.REMOVED)
     }
 
     @Test
@@ -227,17 +220,9 @@ internal class EntryRenderingTest {
             hidden.reaction.shouldBeNull()
         }
 
-        // The narrow shapes have nowhere to put one.
+        // The narrow shape has nowhere to put one.
         PartnerEntryResponse.of(entry.readBy(partner), date, favourited = false, reaction = moved, media = null) shouldBe
             LockedEntryResponse(author.memberId)
-        PartnerEntryResponse.of(
-            entry.copy(deletedAt = now).readBy(partner),
-            date,
-            favourited = false,
-            reaction = moved,
-            media = null,
-        ) shouldBe
-            ErasedEntryResponse(author.memberId, ErasedEntryStatus.REMOVED)
     }
 
     @Test
@@ -352,17 +337,22 @@ internal class EntryRenderingTest {
     }
 
     @Test
-    fun `a partner who never could read the entry gets author and REMOVED, and no wide shape exists for them`() {
+    fun `a partner's entry erased before they could read it is no shape at all, and the renderer refuses to choose one`() {
         // BR-8: the wide tombstone carries an id and two timestamps this
-        // reader was never entitled to. The narrow type has nowhere to put
-        // them, and the wide one refuses to be built.
+        // reader was never entitled to, and refuses to be built. Since the
+        // owner's ruling of 2026-10-21 the day leaves the entry out
+        // (`service.shownTo`, `ShownDayTest`), so no reading of this answer
+        // should reach a renderer; one that does is a renderer that skipped
+        // that rule, and is refused rather than given the old `REMOVED`.
         val unseen = entry.copy(deletedAt = now).readBy(partner)
 
-        PartnerEntryResponse.of(unseen, date, favourited = false, reaction = null, media = null) shouldBe
-            ErasedEntryResponse(author.memberId, ErasedEntryStatus.REMOVED)
-        // A view literal: distinct from the wide tombstone's DELETED, so `status` discriminates.
-        ErasedEntryStatus.entries.map { it.name } shouldBe listOf("REMOVED")
+        shouldThrow<IllegalStateException> { PartnerEntryResponse.of(unseen, date, favourited = false, reaction = null, media = null) }
         EntryResponse.of(unseen, date, favourited = false, reaction = null, media = null).shouldBeNull()
+        // And no partner shape is left that could carry it: the narrow one is BR-8's lock alone.
+        PartnerEntryResponse::class.java.permittedSubclasses
+            .map { it.simpleName }
+            .toSet() shouldBe
+            setOf("EntryResponse", "LockedEntryResponse")
     }
 
     @Test
@@ -386,8 +376,10 @@ internal class EntryRenderingTest {
             ) as EntryResponse
         read.text.shouldBeNull()
         read.status shouldBe EntryStatus.DELETED
-        PartnerEntryResponse.of(entry.readBy(partnerNow), date, favourited = false, reaction = null, media = null) shouldBe
-            ErasedEntryResponse(author.memberId, ErasedEntryStatus.REMOVED)
+        // Never revealed to her: no shape at all, as for a delete (the day leaves it out, `ShownDayTest`).
+        shouldThrow<IllegalStateException> {
+            PartnerEntryResponse.of(entry.readBy(partnerNow), date, favourited = false, reaction = null, media = null)
+        }
         EntryResponse.of(entry.readBy(partnerNow), date, favourited = false, reaction = null, media = null).shouldBeNull()
         entry.text.shouldNotBeNull()
     }

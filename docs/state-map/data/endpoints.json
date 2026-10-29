@@ -43,7 +43,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "The text is missing or blank, is over 500 graphemes or 8192 bytes, or holds a NUL character or an unpaired surrogate. (the smoke script asserts the status and the field, not the code)",
+        "reason": "The text is missing, blank or only invisible characters (zero-width spaces, joiners and the like), is over 500 graphemes counted as sent or 8192 bytes, or holds a NUL character or an unpaired surrogate. (the smoke script asserts the status and the field, not the code)",
         "evidence": "never-run",
         "evidenceRef": "",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntryConstraints.kt#return validate(context) { EntryText.of(value) }"
@@ -121,7 +121,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "The text is missing or blank, is over 500 graphemes or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid. (a test asserts the status, not the code)",
+        "reason": "The text is missing, blank or only invisible characters (zero-width spaces, joiners and the like), is over 500 graphemes counted as sent or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid. (a test asserts the status, not the code)",
         "evidence": "never-run",
         "evidenceRef": "",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/EntryChangesController.kt#@field:NotNull @field:ValidEntryText val text: String? = null,"
@@ -306,7 +306,7 @@
     "machine": "bond",
     "auth": "bearer",
     "headers": [
-      "Content-Type (application/json, and only when a body is sent. The body is optional and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block takes them back. Any other Content-Type is refused with 415, even with no body)"
+      "Content-Type (application/json. The body is required and holds one key, {\"withdrawEntries\": true or false}: whether your own entries in this bond are taken back. With no body, no key, or null, a block is refused with 400. Any other Content-Type is refused with 415, even with no body)"
     ],
     "requestErrors": [
       {
@@ -316,6 +316,14 @@
         "evidence": "smoke",
         "evidenceRef": "a misspelt flag to /block is 400 MALFORMED_REQUEST",
         "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/EndBondRequest.kt#context.reportInputMismatch<Nothing>(EndBondRequest::class.java, \"one key, once\")"
+      },
+      {
+        "status": 400,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The flag is missing: no body, {}, or {\"withdrawEntries\": null}. The same bytes as a body that cannot be read, and nothing is ended or withdrawn. Unlike that refusal it is answered after membership is looked at, so a stranger who sends no flag gets the 404 below (ADR-0035 question 1).",
+        "evidence": "test",
+        "evidenceRef": "BondEndingEndpointTest#an absent flag is refused in every state a block is accepted in, and writes nothing",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/BondsController.kt#?: throw HttpMessageNotReadableException(\"The flag is required on this route\", ServletServerHttpRequest(http))"
       },
       {
         "status": 404,
@@ -824,10 +832,10 @@
       {
         "status": 409,
         "code": "BOND_ARCHIVED",
-        "reason": "The bond has ended, or you have left it: after an ending a reaction would be contact. Told last, only to a caller who could otherwise have reacted. Taking one back is still allowed.",
+        "reason": "The bond has ended, or you have left it: after an ending a reaction would be contact. Told last, only to a caller who could otherwise have reacted. Taking one back from the partner's entry is refused the same way.",
         "evidence": "smoke",
         "evidenceRef": "PUT …/reaction by the one who stayed is 409 BOND_ARCHIVED",
-        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#membership.hasLeft || !membership.isOpen -> BondArchivedException()"
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#!membership.takesWrites -> BondArchivedException()"
       }
     ],
     "curl": "curl -X PUT \"$API/entries/$ENTRY/reaction\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"type\": \"HEART\"}'"
@@ -846,6 +854,14 @@
         "evidence": "smoke",
         "evidenceRef": "DELETE /entries/<an id nobody was issued>/reaction is 404",
         "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GratitudeErrors.kt#internal class EntryNotFoundException : NotFoundException(\"That entry was not found.\")"
+      },
+      {
+        "status": 409,
+        "code": "BOND_ARCHIVED",
+        "reason": "The bond has ended, or you have left it, and the entry is your partner's, read in full: a removal the other person sees is contact too (ADR-0037 question 11). Nothing is removed, and the reaction is still shown to both. Told before REACTION_BUSY, whoever holds the row. On your own entry, and on one shown to you as erased, it is 204.",
+        "evidence": "smoke",
+        "evidenceRef": "DELETE …/reaction on the ended bond is 409 BOND_ARCHIVED",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReactToEntry.kt#answer == Reacting.ALLOWED && !membership.takesWrites -> BondArchivedException()"
       },
       {
         "status": 409,
@@ -872,7 +888,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank or over 80 characters; locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created.",
+        "reason": "A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank (by every Unicode space, so a name of only no-break spaces too) or over 80 characters, or, once trimmed, holds a control character, a format character other than ZWNJ and ZWJ, or an unpaired surrogate (errors code VALID_DISPLAY_NAME, and NOT_BLANK too for an empty or all-space name; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created.",
         "evidence": "smoke",
         "evidenceRef": "a 422 spends a token too (validation runs after the limiter)",
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/RegisterRequest.kt#@field:AssertTrue(message = \"must be confirmed\")"

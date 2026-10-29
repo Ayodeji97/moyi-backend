@@ -1,7 +1,7 @@
 # ADR-0032 — The reveal, and the first events
 
 **Status:** Accepted · **Date:** 2026-10-05 · **Deciders:** Daniel
-**Amended:** 2026-10-05 (C3: the "Owed, C3" list discharged, decision 5 superseded — ADR-0033) · 2026-10-09 (the status; and the Revisit note on a second route by entry id, answered for favourites — ADR-0036)
+**Amended:** 2026-10-05 (C3: the "Owed, C3" list discharged, decision 5 superseded — ADR-0033) · 2026-10-09 (the status; and the Revisit note on a second route by entry id, answered for favourites — ADR-0036) · 2026-10-28 (question 2 built: a partner's entry erased before it was seen is no entry, on every route that renders a day, for a day not yet settled; question 4 added for the settled exception)
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #53 on 2026-10-05. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -237,9 +237,77 @@ Each is built one way, pinned by one test, and cheap to turn.
    *Ruled by the owner on 2026-10-21, to be built: the partner sees nothing, in `GET /today`
    and in the archive.* The same ruling as ADR-0036's sixth question. Until it is built, the
    shape above is what is served.
+
+   *Built 2026-10-28* (branch `feat/unseen-erasure-hidden`). What "nothing" was made to mean,
+   and the decisions taken in building it:
+
+   - **Nothing is `partnerEntry: null`**, the value of a day the partner never wrote on.
+     **For a day that had not settled when the entry was erased**, the two are one answer,
+     byte for byte, on every route that renders a day: `GET /today`, `/days`,
+     `/days/{date}`, search and on this day. `UnseenErasureTwinTest` holds each route, and
+     the streak and the milestones besides, to a twin bond whose partner never wrote, for a
+     delete and for a withdrawal, with the caller written and not.
+   - **The exception: a day that settled first keeps what it settled as** (BR-10: settled
+     history is authoritative; the owner's ruling of 2026-10-22 that a withheld both-wrote
+     day counts complete). The scenario: a member leaves, the close withholds a both-wrote
+     day as `PENDING_REVEAL` (ADR-0035 question 9), and then the partner deletes their
+     entry, as an author may on an ended bond, or withdraws it. The caller is shown no
+     partner entry, as ruled, but the day still says `PENDING_REVEAL` and keeps its
+     complete square in the streak, where a partner who never wrote would have left it
+     `SOLO`. Likewise a lone entry on a bond that ended before its day did closes `SOLO`,
+     unrevealed, and keeps that status, and whatever the streak made of it, when its author
+     erases it, where no entry would have closed `EMPTY`. For such a day an erasure is told from no entry.
+     Pinned by `ShownDayTest`, "a day settled before the partner's entry was erased keeps
+     its status, though the entry is not shown" (and the settled cases of "the status
+     steps back only as an erasure would step it back"). Question 4 below is the owner's.
+   - **The rule lives in one place**, `service.shownTo` (beside `onEachSideOf`), which
+     `GetToday` and `GetDays` both read every day through. The gate is unchanged:
+     `Readability.TOMBSTONE_UNSEEN` is still its answer, and favourites and reactions still
+     answer it as an entry that does not exist (`404`). Only a day stops drawing it. The
+     caller's own tombstone, and a partner's tombstone the caller had read (`TOMBSTONE`), are
+     as before. `PartnerEntryResponse.of` now refuses a `TOMBSTONE_UNSEEN` reading rather than
+     choose a shape for it, so that a renderer which skipped the rule fails instead of
+     carrying a second copy of it.
+   - **The listing needed no change.** An entry erased before its reveal was never revealed,
+     so ADR-0036's `SEEN` rule never lists a day for it alone, and search and on this day
+     also ask for a live row. A day the caller is listed on through their own entry is the
+     day a partner who never wrote would give.
+   - **The day's status is shown as its erasures will leave it.** A delete by hand steps an
+     unsettled day back at once (`BondDay.withoutEntry`); a withdrawal hides its author's
+     entries from its commit but steps the day back only when the outbox's consumer erases
+     them. In between, the row said `PARTIAL` (or `PENDING_REVEAL`) where a delete by hand
+     says `OPEN` (or `PARTIAL`), which told a withdrawal from a delete and from no entry at
+     all (ADR-0028 decision 8). `shownTo` now derives the status from the entries the read
+     can see: the live rows loaded, less a withdrawn author's. When the row counts more
+     than that, an unsettled day is stepped back as the erasure will step it
+     (`BondDayStatus.afterErasure`, which `withoutEntry` now uses too), so the response
+     does not move when the erasure runs. The same derivation covers a read that loaded the
+     day just before a delete committed and its entries just after (review, 2026-10-28):
+     the entries are the later statement and win. A read still writes nothing; the step is
+     taken at read time. A settled day is never stepped back. This changes what both
+     members are shown of such a day, the withdrawer included, and only until the erasure.
+     It supersedes the `PARTIAL` before the erasure that ADR-0035 question 4 accepted.
+   - **The contract loses a branch.** No route can produce `{authorMemberId, status:
+     REMOVED}` any more, so `ErasedEntryResponse` and the discriminator's `REMOVED` are gone
+     from `partnerEntry`'s `oneOf` on `TodayResponse` and `DayResponse`: a breaking change,
+     labelled `breaking-api-change`, with no generated client yet to break.
 3. **A replay spends a rate-limit token** (decision 11).
 
    *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
+4. **A settled day's status and streak square survive a later erasure** (question 2, as
+   built, 2026-10-28). A day that settled before the partner's entry was erased keeps the
+   status and the square it settled with: after a leave, a both-wrote day the close
+   withheld stays `PENDING_REVEAL` and complete when the partner then deletes or withdraws,
+   and a lone entry's `SOLO` day stays `SOLO`. The caller is shown no partner entry, but
+   the status and the streak say one was there, where a partner who never wrote would have
+   left `SOLO` (or `EMPTY`) and that square. Built: history stands (BR-10, and the ruling
+   of 2026-10-22 that a withheld both-wrote day counts complete); `ShownDayTest` pins it.
+   Turn it by showing a settled day's status as its erasure would have left it unsettled.
+   The cheapest form is read-side and one line: drop `isSettledWith(closedAt)` from the
+   step `shownTo` takes, for the shown status only, writing nothing. That turns the status
+   on every route; the streak square and the milestones would still count the day unless
+   the erasure also recounts the streak (`RecalculateStreak` exists), which is a write and
+   the larger half of the change.
 
 ## Revisit when
 

@@ -10,7 +10,6 @@ import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.gratitude.web.EntryChangesTest
 import com.moyi.identity.api.UserDirectory
-import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldNotContain
@@ -347,9 +346,10 @@ internal class WithdrawalRaceTest(
     // --- what is asserted outright ---
 
     /**
-     * Asked on the day itself, through `GET /today`. The partner is told an
-     * entry was removed and by whom, and nothing that would name it or date
-     * it (BR-8: it was never hers to see). The withdrawer does not read the
+     * Asked on the day itself, through `GET /today`. The partner is shown no
+     * entry of the withdrawer's at all, the `null` of one never written (the
+     * owner's ruling of 2026-10-21, ADR-0032 question 2: it was never hers to
+     * see, and nor is that it was written). The withdrawer does not read the
      * partner's words. And no row says otherwise.
      */
     private fun nothingOfEitherWasShown(
@@ -357,9 +357,7 @@ internal class WithdrawalRaceTest(
         adasEntry: String,
     ) {
         val hers = rig.today(bea, bond)
-        val removed = json.readTree(hers)["partnerEntry"]
-        removed.propertyNames().toList() shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-        removed["status"].asString() shouldBe "REMOVED"
+        json.readTree(hers)["partnerEntry"].isNull shouldBe true
         hers shouldNotContain adasEntry
         hers shouldNotContain ADAS_WORDS
 

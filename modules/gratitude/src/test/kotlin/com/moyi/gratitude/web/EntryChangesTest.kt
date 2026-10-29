@@ -241,8 +241,8 @@ internal class EntryChangesTest(
      * Bea is the one who ends it each time, so each ending is tried for the
      * member who left (her) and the one who stayed (Ada); and each for an
      * entry the partner had read and for one they never had, because what
-     * the partner is left with differs: the wide tombstone, or `REMOVED`
-     * and nothing else.
+     * the partner is left with differs: the wide tombstone, or nothing at
+     * all (the owner's ruling of 2026-10-21, ADR-0032 question 2).
      */
     @Test
     fun `an author deletes their own entry after the bond has ended, however it ended, and nobody else can`() {
@@ -321,7 +321,7 @@ internal class EntryChangesTest(
         edit.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
     }
 
-    /** The wide tombstone for a partner who had read the entry; an author and `REMOVED`, and nothing else, for one who never had. */
+    /** The wide tombstone for a partner who had read the entry; nothing, the `null` of an entry never written, for one who never had. */
     private fun tombstoneIsWhatBothRead(
         author: UUID,
         partner: UUID,
@@ -336,8 +336,8 @@ internal class EntryChangesTest(
             theirs["status"].asString() shouldBe "DELETED"
             theirs["text"].isNull shouldBe true
         } else {
-            theirs.propertyNames().toList().sorted() shouldBe listOf("authorMemberId", "status")
-            theirs["status"].asString() shouldBe "REMOVED"
+            theirs.isNull shouldBe true
+            partners.contentAsString shouldNotContain id
         }
         val own = json.readTree(today(author).contentAsString)["myEntry"]
         own["id"].asString() shouldBe id
@@ -387,6 +387,28 @@ internal class EntryChangesTest(
         patchEntry(ada, id, """{"text":"${"a".repeat(501)}"}""").status shouldBe 422
         patchEntry(ada, id, """{"text":"ok","imageMediaId":"${UUID.randomUUID()}"}""").status shouldBe 422
         patchEntry(ada, id, "{}").status shouldBe 422
+    }
+
+    /**
+     * The owner's rulings of 2026-10-21 (ADR-0031) reach an edit as they reach
+     * a submission, through the same `EntryText.of`: only zero-width
+     * characters is a `422` and leaves the entry as it was; 499 letters and an
+     * ellipsis are 500 as typed and are a `200`, stored as sent.
+     */
+    @Test
+    fun `an edit to only zero-width characters is refused, and 499 letters and an ellipsis fit`() {
+        val id = entryId(submit(ada, bondId, """{"text":"before"}"""))
+
+        for (invisible in listOf("\\u200b", "\\ufeff\\u200d", " \\u2060\\n")) {
+            val refused = patchEntry(ada, id, """{"text":"$invisible"}""")
+            refused.status shouldBe 422
+            refused.contentAsString shouldContain "\"field\":\"text\""
+            jdbc.queryForObject("SELECT text FROM entries", String::class.java) shouldBe "before"
+        }
+
+        val typed = "a".repeat(499) + "\u2026"
+        patchEntry(ada, id, """{"text":"$typed"}""").status shouldBe 200
+        jdbc.queryForObject("SELECT text FROM entries", String::class.java) shouldBe typed
     }
 
     @Test
@@ -469,10 +491,10 @@ internal class EntryChangesTest(
                 block(bea, """{"withdrawEntries":false}""").status shouldBe 204
             }
 
-            // The default: Bea's entries are withdrawn and, with no poller
+            // Withdrawing: Bea's entries are withdrawn and, with no poller
             // in this context, not yet erased. Her own delete erases them now.
             Ending.BLOCK_WITHDRAWING -> {
-                block(bea, null).status shouldBe 204
+                block(bea, """{"withdrawEntries":true}""").status shouldBe 204
                 jdbc.queryForObject("SELECT count(*) FROM bond_entry_withdrawals", Int::class.java) shouldBe 1
             }
 
@@ -491,15 +513,13 @@ internal class EntryChangesTest(
 
     private fun block(
         userId: UUID,
-        body: String?,
+        body: String,
     ): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/bonds/$bondId/block") {
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(userId).token}")
-                if (body != null) {
-                    contentType = MediaType.APPLICATION_JSON
-                    content = body
-                }
+                contentType = MediaType.APPLICATION_JSON
+                content = body
             }.andReturn()
             .response
 

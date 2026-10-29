@@ -9,8 +9,8 @@ import java.text.Normalizer
  * **Stored exactly as sent** (ruling P12; spec §3.2 and doc 04 §7: "stored
  * raw and unmodified"). [value] is the string the member's client sent — not
  * normalised, not trimmed, nothing folded, collapsed or stripped. NFKC and
- * `trim` are used below only to **decide** whether the text is acceptable,
- * on a copy that is then thrown away.
+ * `trim` are used below only to **decide** whether the text is blank, on a
+ * copy that is then thrown away.
  *
  * An earlier version stored `NFKC(raw).trim()` and said normalisation
  * "changes nothing a person wrote to mean". That was false. NFKC is a lossy,
@@ -41,30 +41,44 @@ import java.text.Normalizer
  *   expands to eighteen characters); that does not matter to storage, since
  *   the NFKC form is never stored.
  *
- * - **Blank, on the normalised and trimmed form.** `isNotBlank()` rather
- *   than Java's `String.isBlank`, because ADR-0029 §13 found the two
- *   disagree: `U+00A0` (a non-breaking space) is not blank to Java and is to
- *   Kotlin. An entry that is one non-breaking space reads as nothing at all.
+ * - **Blank, on the normalised and trimmed form**, where blank means every
+ *   code point is whitespace (Kotlin's `isWhitespace`, as `isNotBlank` uses,
+ *   not Java's `String.isBlank`: ADR-0029 §13 found the two disagree, and
+ *   `U+00A0`, a non-breaking space, is whitespace only to Kotlin) **or
+ *   invisible** ([Invisible], Unicode's `Default_Ignorable_Code_Point`). An
+ *   entry that is one non-breaking space, or one zero-width space, reads as
+ *   nothing at all: the owner's ruling of 2026-10-21 (ADR-0031, ruling 2)
+ *   refuses the second as the first always was. An invisible character
+ *   beside a visible one is part of what was written — a ZWJ inside a family
+ *   emoji, U+FE0F after a heart — and is kept like the rest.
  *
- * - **Grapheme count, on the NFKC form, trimmed** — spec §3.2's rule:
- *   "NFKC-normalised before counting". `500` is what a person means by
- *   "characters": a ZWJ family emoji, a flag (two regional indicators) and a
- *   base letter with combining marks are each one. [Graphemes.count] walks the text
- *   with a `BreakIterator` so the count is of what was typed, not of how it
- *   is encoded. **Counting on the NFKC form has a cost the spec accepted and
- *   the owner has been asked about** (ADR-0031, P12): a typographic ellipsis
- *   counts as three, so a client's own counter must normalise the same way
- *   or it will show "fits" for a text this refuses.
+ * - **Grapheme count, on the text as sent** — raw, not normalised, not
+ *   trimmed: the owner's ruling of 2026-10-21 (ADR-0031, ruling 1), which
+ *   replaced spec §3.2's "NFKC-normalised before counting". `500` is what a
+ *   person means by "characters": a ZWJ family emoji, a flag (two regional
+ *   indicators) and a base letter with combining marks are each one.
+ *   [Graphemes.count] walks the text with a `BreakIterator` so the count is of
+ *   what was typed, not of how it is encoded. A typographic ellipsis is one,
+ *   as the author's own counter shows it (under NFKC it was three). The cost
+ *   moved rather than vanished: leading and trailing whitespace a client
+ *   sends is stored, so it is counted, and 500 letters and a trailing space
+ *   are 501 — which is also what a client counting its own text field sees.
  *
  * **Order matters.** The cheap checks on the raw string run first, so a
  * megabyte of text is refused by one `String.toByteArray` call rather than
  * after being normalised and walked boundary by boundary.
  *
- * **Reading a row back goes through [of] too** (`GratitudeMappers.toDomain`).
- * Every check is a function of the raw string alone, so a text that was
- * accepted is accepted again, unchanged. Rows written before P12 hold the
- * NFKC-trimmed form; they pass for the same reason and are returned as they
- * were stored — what NFKC removed from them cannot be put back.
+ * **Two factories: [of] writes, [fromStorage] reads.** Every write — a
+ * submission, an edit — goes through [of] and meets every rule, the newest
+ * included. Reading a row back (`GratitudeMappers.toDomain`) goes through
+ * [fromStorage], which checks only what a stored text is guaranteed to be
+ * and what a reader relies on: no NUL, no unpaired surrogate, within the
+ * octets. Not blank and not the grapheme count: the 2026-10-21 rulings
+ * tightened both, and rows written under the older rule are in real
+ * databases — a zero-width-only entry, or 500 graphemes and a trailing
+ * space. Re-judged by [of], each would make every read of its day a `500`.
+ * Rows written before P12 hold the NFKC-trimmed form and are returned as
+ * they were stored: what NFKC removed from them cannot be put back.
  */
 @JvmInline
 internal value class EntryText private constructor(
@@ -88,22 +102,53 @@ internal value class EntryText private constructor(
 
         /**
          * [raw], kept as it is, if it passes — see the class KDoc for what
-         * each limit is measured on.
+         * each limit is measured on. The write path: a submission and an edit.
          *
          * @throws IllegalArgumentException naming whichever limit was crossed
          *   first — NUL, an unpaired surrogate, octets, blank, then
          *   graphemes, in that order.
          */
         fun of(raw: String): EntryText {
+            requireStorable(raw)
+            // Only to decide. What is returned, and stored, is `raw`.
+            val judged = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
+            require(saysSomething(judged)) { "an entry must say something" }
+            require(Graphemes.count(raw) <= MAX_GRAPHEMES) { "an entry is at most $MAX_GRAPHEMES characters" }
+            return EntryText(raw)
+        }
+
+        /**
+         * A stored row's text, read back — [raw] as it is, checked only for
+         * what storage guarantees (see the class KDoc for why blank and the
+         * grapheme count are not re-judged here). For the read path alone
+         * (`GratitudeMappers`); anything a member sends goes through [of].
+         *
+         * @throws IllegalArgumentException for a NUL, an unpaired surrogate or
+         *   more than [MAX_OCTETS] octets — none of which a row can hold, so
+         *   a failure here is a broken row, not an old one.
+         */
+        fun fromStorage(raw: String): EntryText {
+            requireStorable(raw)
+            return EntryText(raw)
+        }
+
+        /** NUL, an unpaired surrogate, the octets: in that order, on the raw string. */
+        private fun requireStorable(raw: String) {
             require(NUL !in raw) { "an entry cannot contain the NUL character" }
             require(!hasUnpairedSurrogate(raw)) { "an entry cannot contain an unpaired surrogate" }
             require(raw.toByteArray(Charsets.UTF_8).size <= MAX_OCTETS) { "an entry is at most $MAX_OCTETS bytes" }
-            // Only to decide. What is returned, and stored, is `raw`.
-            val counted = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
-            require(counted.isNotBlank()) { "an entry must say something" }
-            require(Graphemes.count(counted) <= MAX_GRAPHEMES) { "an entry is at most $MAX_GRAPHEMES characters" }
-            return EntryText(raw)
         }
+
+        /**
+         * Whether [text] holds one code point that is neither whitespace (Kotlin's
+         * `isWhitespace`, which `isNotBlank` uses) nor invisible ([Invisible]). No
+         * supplementary code point is whitespace, so only a BMP one is asked.
+         */
+        private fun saysSomething(text: String): Boolean =
+            text.codePoints().anyMatch { codePoint ->
+                !(Character.isBmpCodePoint(codePoint) && codePoint.toChar().isWhitespace()) &&
+                    !Invisible.isDefaultIgnorable(codePoint)
+            }
 
         /**
          * Whether [text] is not well-formed UTF-16: a high surrogate that no
