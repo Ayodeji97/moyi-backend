@@ -1,10 +1,13 @@
 # ADR-0037 — Reactions
 
-**Status:** Accepted · **Date:** 2026-10-13 · **Deciders:** Daniel, for the five rulings of
+**Status:** Accepted · **Date:** 2026-10-13 · **Amended:** 2026-10-28 (question 11 built:
+`DELETE …/reaction` on the partner's entry is `409 BOND_ARCHIVED` once the bond has ended;
+decisions 5 and 9 qualified; question 12 opened, the withdrawer's case awaiting the owner)
+· **Deciders:** Daniel, for the five rulings of
 2026-10-06 and for his rulings of 2026-10-21 on every question in "Questions that are the
 owner's" except the third, which was not put to him. Every other decision here was made by
 the plan or by the agents that ran it. · **Amended:** 2026-10-28 (question 1 built: the fifth
-type, `ME_TOO`, by V27; decision 2 now reads five)
+type, `ME_TOO`, by V27; decision 2 now reads five) · 2026-10-28 (the narrow `REMOVED` shape superseded — ADR-0032 question 2)
 
 ## Context
 
@@ -165,6 +168,9 @@ still cannot give an author a row.
 decision 14 allows there. A bookmark is the member's own and the other person never sees
 it; a reaction is made to be seen, and after an ending that is contact. Taking one's own
 reaction back is always allowed, as deleting one's own entry is (ADR-0035 decision 15).
+*Amended 2026-10-28 (question 11, as the owner ruled it):* not from the partner's entry read
+in full. There a removal the other person sees is contact too, and `DELETE` is `409
+BOND_ARCHIVED` as `PUT` is.
 
 **No lock on the bond is taken**, beyond decision 11's reconcile. Taking it would put a
 reaction behind a withdrawal's delivery, holding a pooled connection, which is the stall
@@ -260,7 +266,8 @@ required and nullable, and **both members are sent the same value**: `Reactions.
 entries and no member. It is `null` unless the gate's answer is `FULL`. Two layers hold
 that, as for `favourited`: the services ask only about entries read in full, and
 `EntryResponse.of` forces `null` off `FULL` whatever it is handed. The narrow `LOCKED` and
-`REMOVED` shapes gain nothing. Nothing says when it was left, by whom beyond "the other
+`REMOVED` shapes gain nothing. *(Superseded in part 2026-10-28, ADR-0032 question 2: there is
+no `REMOVED` shape any more; such an entry is no entry, and `LOCKED` is the one narrow shape.)* Nothing says when it was left, by whom beyond "the other
 one", or how many times it was changed.
 
 A fresh write and an edit answer `reaction: null` without a query, since an entry nobody
@@ -278,7 +285,12 @@ once, at the ending, and not again at the erasure.
 FR-029a withdraws entries. And if a withdrawal removed reactions too, it could be told from
 deleting each entry by hand by the reactions vanishing. The member who withdrew is still
 shown what they left and may take each back; they cannot change it (decision 5). *The plan
-recorded this as the owner's to turn* (question 5).
+recorded this as the owner's to turn* (question 5). *Amended 2026-10-28, awaiting the
+owner's confirmation:* question 11's predicate, built as ruled, also refuses the member who
+withdrew. A withdrawal is an ending, so as built that member can no longer take back the
+reaction they left on the partner's entry, and it stays, shown to both. The owner closed
+question 5, with "may take each back" in it, as "stands as built" on 2026-10-21, the same day
+question 11 was ruled; nobody has decided which of the two gives way here (question 12).
 
 **10. No event and no notification.** FR-080's list of pushes has no reaction, and an
 outbox row would be a timed record of a reading. A refused reaction writes the handler's
@@ -445,7 +457,8 @@ carries the ones left on their entries is not decided anywhere.
 
 Each is built one way. The first six are the ones the plan and the brief named; 7 and 8 are
 decisions made on 2026-10-10 by the agent running the plan, which the owner has not seen; 11
-is a review's finding of 2026-10-15, left as built.
+is a review's finding of 2026-10-15, left as built; 12 is a review's finding of 2026-10-28,
+on what building 11 did to decision 9.
 
 1. **The placeholder set.** Four names, in the contract, the table's `CHECK` and the
    domain enum. Built as ruled. The final set, and whether each is drawn as a glyph or a
@@ -575,7 +588,7 @@ is a review's finding of 2026-10-15, left as built.
    |---|---|---|
    | A reaction on an entry | `reaction` on every entry read in full, the same for both members | **gap in the design**: `states.md` has no reaction in any section, and `tokens.md` §4's `EntryCard` has two properties (`authorName`, `entryText`) and four variants, with no slot for one |
    | A control to leave, change and take back a reaction | `PUT` and `DELETE`, both `204` and repeatable | **gap in the design**: none is drawn. Nothing says an entry can take one; it is the partner's entry whose `status` is `REVEALED`, on a bond that has not ended |
-   | The control on an archived bond | `PUT` is `409 BOND_ARCHIVED`, `DELETE` is `204` | **gap in the design**: `states.md` §9 says every write there is `409`; a reaction left before the ending can still be taken back |
+   | The control on an archived bond | `PUT` is `409 BOND_ARCHIVED`, `DELETE` is `204` (2026-10-28: now `409 BOND_ARCHIVED` on the partner's entry, question 11) | **gap in the design**: `states.md` §9 says every write there is `409`; a reaction left before the ending can still be taken back |
    | A reaction on a tombstone | always `null` | nothing to draw |
    | When a reaction was left | not sent | none may be drawn (`tokens.md`: no timestamp slot on an entry card) |
 
@@ -613,8 +626,70 @@ is a review's finding of 2026-10-15, left as built.
     ended, by `react`'s `hasLeft || !isOpen` check. A reaction the blocked member can no
     longer remove stays shown to the blocker.*
 
-12. *(Reserved: PR #103 adds question 12, the member who withdrew taking a reaction back. This
-    one is 13 so the two merge without renumbering.)*
+    **Amended 2026-10-28: built.** What was decided in building it:
+
+    1. **Only the `ALLOWED` branch changes.** A partner's entry the caller reads in full, on
+       a bond that has ended or that the caller has left, is `409 BOND_ARCHIVED` before
+       anything is removed, for either member. `NEVER_SHOWN` stays the one `404`. `OWN_ENTRY`
+       and `ERASED` stay `204` on an ended bond, so the `ERASED` branch is untouched and a
+       withdrawal and its twin deleted by hand still answer alike, as this question's own
+       reasoning required. **Awaiting the owner's confirmation:** the predicate does not
+       spare the withdrawer of decision 9, so as built that member can no longer take back
+       their reaction on the partner's entry either. Question 5 had closed with "may take
+       each back" standing; question 12 puts the conflict to the owner.
+    2. **One predicate, from one place.** Both verbs ask `!membership.takesWrites`, which
+       `BondMembership` in `bond.api` defines as `isOpen && !hasLeft`. `react`'s own copy,
+       `membership.hasLeft || !membership.isOpen`, is gone; it was the same thing negated.
+       `ChangeEntry` and `SubmitEntry` keep theirs (ADR-0038, Owed); this change does not
+       touch them.
+    3. **Before `REACTION_BUSY`.** On an ended bond the ending is told whoever holds the
+       row: the removal could not be made anyway, so "try again" would be wrong. No
+       existing lock-wait test changes, since each one either runs on an open bond or takes
+       its row back from a tombstone. A new one pins the order: `ReactionLockWaitTest`, "on
+       an ended bond taking a reaction back is BOND_ARCHIVED at once, not REACTION_BUSY…".
+    4. **Nothing else changes.** The reaction stays shown to both members, the blocker
+       included. No read path changes.
+    5. **The contract.** `DELETE …/reaction` already listed `409`, for `REACTION_BUSY`, so
+       the only change to `contracts/openapi.json` is the operation's description. oasdiff
+       (v1.11.7, `breaking --fail-on ERR`, run locally against `main`) reports nothing, so
+       the PR needs no `breaking-api-change` label. A client is still answered `409
+       BOND_ARCHIVED` where it was answered `204`, and a client that treats every `409` on
+       this route as `REACTION_BUSY` would retry forever. The code tells them apart.
+
+    Run: `ReactionsTest` ("once the bond has ended no reaction can be left, changed or taken
+    back…", "…taking a reaction back from one's own entry or from a tombstone is still
+    204", and the refusals' order); the smoke's ended-bond and withdrawal sections. Question
+    9's table row "`DELETE` is `204`" on an archived bond is now `409` on the partner's
+    entry, which agrees with `states.md` §9 ("every write there is `409`"). Nothing is drawn
+    yet, so that row's gap in the design remains.
+
+12. **The member who withdrew can no longer take their reaction back.** Raised by the
+    review of 2026-10-28. Built literally as question 11's predicate, so the member who
+    withdrew can no longer take their reaction back from the partner's entry. That reverses
+    a line of decision 9 ("may take each back") which the owner kept when closing question 5
+    on the same day question 11 was ruled. **Built: refused, `409 BOND_ARCHIVED`, the
+    reaction kept and shown to both** (`ReactionsTest`, "a withdrawn author's entry answers
+    as a tombstone does…"; the smoke's withdrawal section).
+
+    The obvious turn, exempting a caller whose own id is in `withdrawnMemberIds`, **is not
+    twin-safe.** In the world where they withdrew, the reaction could still vanish after the
+    ending. In the twin, where they deleted each entry by hand and then left, it could not.
+    The partner sees the difference: it is decision 9's own argument against removing
+    reactions at a withdrawal.
+
+    The cheapest twin-safe turn is to **exempt a caller who has left**, so that
+    `unreact`'s `ALLOWED` branch refuses only when the bond is not open and the caller has
+    not left (`!isOpen && !hasLeft`, no longer `takesWrites`). Both twins have left, so both
+    answer `204` alike.
+    - What it costs: whoever left can again change what the stayer sees after the ending.
+      That includes a blocker on the blocked member's entries. Question 11's concern, the
+      blocked member reaching the blocker, stays closed, since the blocked member is the
+      one who stayed.
+    - What it does not cover: a member who stayed and withdraws later by blocking an
+      ended bond. A block there does not stamp `leftAt` (`Bond.end`), so that withdrawer is
+      still refused, as is their twin.
+
+    *Not decided by anyone; the owner's to rule.*
 13. **A rollback past V27 after someone has reacted `ME_TOO`: delete or map?** Raised by
     the amendment of 2026-10-28 (question 1). An image older than V27 answers `500` on any
     read that carries a `ME_TOO` reaction, so before such a rollback the rows must go or

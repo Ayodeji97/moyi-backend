@@ -1098,7 +1098,7 @@
     },
     "/api/v1/bonds/{bondId}/block" : {
       "post" : {
-        "description" : "Ends the bond for both members, with the same `204` as `POST /bonds/{bondId}/leave`, and keeps the two accounts from being paired again. Also accepted on a bond that has already ended, and may be repeated. The body is optional. **When `withdrawEntries` is absent or null, or there is no body, every entry the caller wrote in this bond is withdrawn: the entries are ERASED, for both members, and this cannot be undone.** Send `{\"withdrawEntries\": false}` to keep them. A later call with `true`, or with no body, withdraws what an earlier one kept. A body with any other key, with the key twice, or with a value that is not JSON true, false or null is `400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body.",
+        "description" : "Ends the bond for both members, with the same `204` as `POST /bonds/{bondId}/leave`, and keeps the two accounts from being paired again. Also accepted on a bond that has already ended, and may be repeated. **The body is required, and so is `withdrawEntries`.** When it is `true`, every entry the caller wrote in this bond is withdrawn: the entries are ERASED, for both members, and this cannot be undone. Send `{\"withdrawEntries\": false}` to keep them. When the flag is absent or null, or there is no body, the answer is `400 MALFORMED_REQUEST` and nothing is ended or withdrawn; a caller who is not a member is answered `404` first. A later call with `true` withdraws what an earlier one kept. A body with any other key, with the key twice, or with a value that is not JSON true or false is `400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body.",
         "operationId" : "blockBond",
         "parameters" : [ {
           "in" : "path",
@@ -1112,10 +1112,11 @@
           "content" : {
             "application/json" : {
               "schema" : {
-                "$ref" : "#/components/schemas/EndBondRequest"
+                "$ref" : "#/components/schemas/RequiredEndBondRequest"
               }
             }
-          }
+          },
+          "required" : true
         },
         "responses" : {
           "204" : {
@@ -1971,7 +1972,7 @@
     },
     "/api/v1/bonds/{bondId}/leave" : {
       "post" : {
-        "description" : "Ends the bond for both members. It stays readable to both, and takes no further entries. The body is optional. **When `withdrawEntries` is absent or null, or there is no body, the caller's entries are kept.** When it is `true`, every entry the caller wrote in this bond is erased, for both members, and this cannot be undone. The other route that takes this body has the opposite default. `409 BOND_ARCHIVED` on a bond that has already ended, and nothing is withdrawn then. A body with any other key, with the key twice, or with a value that is not JSON true, false or null is `400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body.",
+        "description" : "Ends the bond for both members. It stays readable to both, and takes no further entries. The body is optional. **When `withdrawEntries` is absent or null, or there is no body, the caller's entries are kept.** When it is `true`, every entry the caller wrote in this bond is erased, for both members, and this cannot be undone. The other route that ends a bond has no default: there the flag is required. `409 BOND_ARCHIVED` on a bond that has already ended, and nothing is withdrawn then. A body with any other key, with the key twice, or with a value that is not JSON true, false or null is `400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body.",
         "operationId" : "leaveBond",
         "parameters" : [ {
           "in" : "path",
@@ -3589,7 +3590,7 @@
     },
     "/api/v1/entries/{entryId}/reaction" : {
       "delete" : {
-        "description" : "Takes the caller's reaction back. Repeatable: no reaction is success, and so is an entry that has since been erased, or one the caller wrote. `404` is every entry the caller was never shown, the same as for an id that does not exist. `409 REACTION_BUSY` means another operation holds the reaction, which can be the caller's own request still running (two removals at once, or one over the caller's own `PUT`); retry the removal. It is never given for an entry the caller is shown as erased, or for one the caller wrote: there the answer is `204`. Allowed on a bond that has ended.",
+        "description" : "Takes the caller's reaction back. Repeatable: no reaction is success, and so is an entry that has since been erased, or one the caller wrote. `404` is every entry the caller was never shown, the same as for an id that does not exist. `409 BOND_ARCHIVED` is the partner's entry on a bond that has ended, or that the caller has left: the reaction stays, and is still shown. `409 REACTION_BUSY` means another operation holds the reaction, which can be the caller's own request still running (two removals at once, or one over the caller's own `PUT`); retry the removal. Neither is given for an entry the caller is shown as erased, or for one the caller wrote: there the answer is `204`, on a bond that has ended too.",
         "operationId" : "unreactToEntry",
         "parameters" : [ {
           "in" : "path",
@@ -4772,7 +4773,6 @@
               "mapping" : {
                 "DELETED" : "#/components/schemas/EntryResponse",
                 "LOCKED" : "#/components/schemas/LockedEntryResponse",
-                "REMOVED" : "#/components/schemas/ErasedEntryResponse",
                 "REVEALED" : "#/components/schemas/EntryResponse",
                 "SUBMITTED" : "#/components/schemas/EntryResponse"
               },
@@ -4780,8 +4780,6 @@
             },
             "oneOf" : [ {
               "$ref" : "#/components/schemas/EntryResponse"
-            }, {
-              "$ref" : "#/components/schemas/ErasedEntryResponse"
             }, {
               "$ref" : "#/components/schemas/LockedEntryResponse"
             }, {
@@ -4900,24 +4898,6 @@
             }
           },
           "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "intendedAt", "reaction", "status", "text" ]
-        } ]
-      },
-      "ErasedEntryResponse" : {
-        "allOf" : [ {
-          "$ref" : "#/components/schemas/PartnerEntryResponse"
-        }, {
-          "type" : "object",
-          "properties" : {
-            "authorMemberId" : {
-              "type" : "string",
-              "format" : "uuid"
-            },
-            "status" : {
-              "type" : "string",
-              "enum" : [ "REMOVED" ]
-            }
-          },
-          "required" : [ "authorMemberId", "status" ]
         } ]
       },
       "FieldViolation" : {
@@ -5317,7 +5297,7 @@
           },
           "text" : {
             "type" : "string",
-            "description" : "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does not count either), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted. The text is stored and returned exactly as sent — not normalised, not trimmed. The 500 are counted on its NFKC-normalised, trimmed form (so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused.",
+            "description" : "FR-041: at least one character that is neither whitespace (Unicode-aware, so a lone non-breaking space does not count either) nor invisible (Unicode's Default_Ignorable_Code_Point: a text of only zero-width spaces, joiners, variation selectors and the like is refused as empty; the published `pattern` does not express this, and matches such a text), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted. The text is stored and returned exactly as sent — not normalised, not trimmed. The 500 are counted as typed, on the text as sent, untrimmed (so a typographic ellipsis counts as one, and a leading or trailing space counts too), and so are the octets. U+0000 is refused.",
             "maxLength" : 8192,
             "minLength" : 1,
             "pattern" : "[\\s\\S]*\\S[\\s\\S]*"
@@ -5471,6 +5451,16 @@
         },
         "required" : [ "acceptedTermsVersion", "displayName", "email", "locale", "password" ]
       },
+      "RequiredEndBondRequest" : {
+        "type" : "object",
+        "properties" : {
+          "withdrawEntries" : {
+            "type" : "boolean",
+            "description" : "Whether to withdraw the caller's own entries in this bond. `true` erases every one, for both members, and this cannot be undone; `false` keeps them. Required, and never null."
+          }
+        },
+        "required" : [ "withdrawEntries" ]
+      },
       "ResendVerificationRequest" : {
         "type" : "object",
         "properties" : {
@@ -5603,7 +5593,7 @@
           },
           "text" : {
             "type" : "string",
-            "description" : "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does not count either), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted. The text is stored and returned exactly as sent — not normalised, not trimmed. The 500 are counted on its NFKC-normalised, trimmed form (so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused.",
+            "description" : "FR-041: at least one character that is neither whitespace (Unicode-aware, so a lone non-breaking space does not count either) nor invisible (Unicode's Default_Ignorable_Code_Point: a text of only zero-width spaces, joiners, variation selectors and the like is refused as empty; the published `pattern` does not express this, and matches such a text), at most 8192 UTF-8 octets and at most 500 user-perceived characters (graphemes, not UTF-16 code units — an emoji sequence can be one grapheme and several of those). `maxLength` here states the octet cap in UTF-16 characters, which is not the same unit as either real limit and both are wider than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a guarantee. The server enforces both limits exactly and is the only authority on whether a given body is accepted. The text is stored and returned exactly as sent — not normalised, not trimmed. The 500 are counted as typed, on the text as sent, untrimmed (so a typographic ellipsis counts as one, and a leading or trailing space counts too), and so are the octets. U+0000 is refused.",
             "maxLength" : 8192,
             "minLength" : 1,
             "pattern" : "[\\s\\S]*\\S[\\s\\S]*"
@@ -5645,7 +5635,6 @@
               "mapping" : {
                 "DELETED" : "#/components/schemas/EntryResponse",
                 "LOCKED" : "#/components/schemas/LockedEntryResponse",
-                "REMOVED" : "#/components/schemas/ErasedEntryResponse",
                 "REVEALED" : "#/components/schemas/EntryResponse",
                 "SUBMITTED" : "#/components/schemas/EntryResponse"
               },
@@ -5653,8 +5642,6 @@
             },
             "oneOf" : [ {
               "$ref" : "#/components/schemas/EntryResponse"
-            }, {
-              "$ref" : "#/components/schemas/ErasedEntryResponse"
             }, {
               "$ref" : "#/components/schemas/LockedEntryResponse"
             }, {

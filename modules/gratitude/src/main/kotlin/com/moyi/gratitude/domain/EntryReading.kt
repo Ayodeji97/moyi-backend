@@ -74,6 +74,12 @@ internal enum class Readability {
      * nothing else — no id, no timestamps. A withdrawal is held to the same
      * line, from the same moment as above: it hides words, and must not be
      * the thing that tells a partner when the words were written.
+     *
+     * **A day shows nothing for it** (the owner's ruling of 2026-10-21,
+     * ADR-0032 question 2): not even the author and that it is gone, so that
+     * it is the day of a partner who never wrote. That is the day's rule
+     * (`service.shownTo`), not this answer's, which is unchanged: favourites
+     * and reactions still read it as an entry that does not exist.
      */
     TOMBSTONE_UNSEEN,
 

@@ -2756,3 +2756,51 @@ Reality: confirmed by running it. With `org.springframework` at DEBUG, one send 
 Wrong about: where the leaks are. Every pin in `application.yml` guards an inbound path;
          the outbound client, which carries the token to the one place it should go, was
          never looked at, because the tests never call it.
+
+## 2026-10-28 · Feature · An unseen erasure shows nothing — and the status was a second tell
+
+Expected: one rendering change. A partner's entry erased before the caller saw it reads as
+         `TOMBSTONE_UNSEEN`; render it as `partnerEntry: null` instead of the narrow `REMOVED`
+         shape, and remove that shape from the contract.
+Reality: the entry was the easy half. Between a withdrawal's commit and the outbox's erasure
+         the day row still said `PARTIAL` or `PENDING_REVEAL`, where a hand delete showed
+         `OPEN` at once, so the status told a withdrawal from a delete and moved again when the
+         erasure ran. The day's shown status is now derived from the entries the read can see,
+         stepped as the erasure will step it, by the one function `BondDay.withoutEntry` uses.
+         A review then found the same derivation also closes a read skew (row read before an
+         erasure, entries after), and that a day which settled before the erasure keeps its
+         status and streak square — BR-10 against the new ruling, recorded as an owner's
+         question rather than decided here. Twin bonds, compared byte for byte, were the test
+         that found the status tell; reading the code had not.
+Wrong about: "the partner sees nothing" being a statement about one field. It is a statement
+         about every byte a twin who never wrote would differ in, and the status is one.
+
+## 2026-10-28 · Feature · withdrawEntries required on POST /block — where "required" is checked decides who learns what
+
+Expected: `@RequestBody(required = true)` and a non-null field, and a bare block is a `400`.
+Reality: Spring resolves a required body before the handler runs, so the `400` would have come
+         before the membership guard, and a stranger could tell a bond's route from a dead one
+         by whether a bare block was `400` or `404`. The body stays optional to Spring; the
+         handler refuses an absent flag after the guard, by throwing the same exception an
+         unreadable body raises, so the status, code and sentence stay in the one handler that
+         already answered it. A test compares the bytes and headers of the two refusals. The
+         contract still says the body and the flag are required, by a customiser, so a
+         generated client is told the truth.
+Wrong about: a framework's "required" being free. It is a check, and it runs where the
+         framework runs it, which here was before authorisation.
+
+## 2026-10-28 · Fix · No reaction taken back after an ending — the ruling named the blocked member; the check also covered the withdrawer
+
+Expected: one line in `unreact` and the tests the brief named. The ruling (ADR-0037
+         question 11) was framed around a block: the blocked member taking reactions off the
+         blocker's entries.
+Reality: the check the ruling names, `react`'s `hasLeft || !isOpen`, is about the bond and
+         not about who blocked whom. It also refuses the withdrawer of decision 9, who
+         "may take each back", and the smoke had a probe pinning exactly that ("…and can
+         take it back: 204"). It is turned, and decisions 5 and 9 carry dated amendments.
+         Also: with the third `throw`, detekt's `ThrowsCount` failed the full build after
+         the class's tests were green. `unreact` now builds one refusal and throws it once,
+         as `react` does. The mutation was run again on that shape: five tests red.
+Wrong about: where a ruling's reach ends. It reaches as far as the predicate it names,
+         not as far as the example it was argued from, so search every probe and decision
+         that says the old answer.

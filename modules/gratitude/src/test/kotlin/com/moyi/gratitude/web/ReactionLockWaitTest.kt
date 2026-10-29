@@ -301,6 +301,35 @@ internal class ReactionLockWaitTest(
     }
 
     /**
+     * On a bond that has ended the ending is answered first (ADR-0037
+     * question 11): the caller could not take the reaction back whoever held
+     * its row, so the answer is not "try again". Nothing is removed and the
+     * held row is not waited on.
+     */
+    @Test
+    fun `on an ended bond taking a reaction back is BOND_ARCHIVED at once, not REACTION_BUSY, while an erasure holds its row`() {
+        react(bea, adas).status shouldBe 204
+        rig.leave(ada, bond)
+
+        whileErasing(adas) { eraser ->
+            val removing = pool.submit(Callable { unreact(bea, adas) })
+            val refused =
+                try {
+                    removing.get(BOUND.toMillis(), TimeUnit.MILLISECONDS)
+                } finally {
+                    eraser.rollbackIfStill(removing)
+                }
+            refused.status shouldBe 409
+            json.readTree(refused.contentAsString)["code"].asString() shouldBe "BOND_ARCHIVED"
+            refusedAtOnce("SELECT 1 FROM reactions WHERE entry_id = '$adas' FOR UPDATE NOWAIT")
+            eraser.rollback()
+        }
+
+        // The eraser rolled back: the reaction is there, as the refusal left it.
+        reactionsOn(adas) shouldBe 1
+    }
+
+    /**
      * The refusal is about the caller's own row and comes after every `404`
      * decision: with the row held, somebody the entry was never shown to is
      * told exactly what they are told of an id nobody has, and the entry's

@@ -525,7 +525,7 @@
     "rule": "BR-3a, ADR-0031 §20",
     "evidence": "test",
     "evidenceRef": "SubmitEntrySettledDayTest#a claimed day that is already stamped closed sends the draft to today, whatever its status",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#val isSettled: Boolean get() = closedAt != null || status.isClosed"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#fun isSettledWith(closedAt: Instant?): Boolean = closedAt != null || isClosed"
   },
   {
     "id": "entry-none-write",
@@ -1104,68 +1104,6 @@
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#redirectOnce(membership, claimed, calendar, now) ?: throw DayClosedException()"
   },
   {
-    "id": "partner-removed-write",
-    "region": "day.partnerEntry",
-    "from": "REMOVED",
-    "action": "POST /api/v1/bonds/{bondId}/entries",
-    "actor": "you",
-    "when": "the bond takes entries, and you have no live entry for today",
-    "guards": [
-      {
-        "region": "account",
-        "states": [
-          "SIGNED_IN"
-        ]
-      },
-      {
-        "region": "bond",
-        "states": [
-          "ACTIVE"
-        ]
-      }
-    ],
-    "outcome": "ok",
-    "to": "REMOVED",
-    "status": 201,
-    "code": null,
-    "reason": "Your partner deleted their entry before the reveal. Your write is accepted and their removed entry stays as it is; nothing is revealed until they write again. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
-    "rule": "",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/DayEntries.kt#val ordered = sortedWith(compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value })"
-  },
-  {
-    "id": "partner-removed-write-again",
-    "region": "day.partnerEntry",
-    "from": "REMOVED",
-    "action": "POST /api/v1/bonds/{bondId}/entries",
-    "actor": "you",
-    "when": "a new request, the bond takes entries, and you have a live entry for today",
-    "guards": [
-      {
-        "region": "account",
-        "states": [
-          "SIGNED_IN"
-        ]
-      },
-      {
-        "region": "bond",
-        "states": [
-          "ACTIVE"
-        ]
-      }
-    ],
-    "outcome": "refused",
-    "to": "REMOVED",
-    "status": 409,
-    "code": "ENTRY_ALREADY_EXISTS",
-    "reason": "One entry per member per day: you have a live entry for today, so a second is refused, and your partner's removed entry stays as it is. (the probe that shows this answer runs before the partner has written; nothing runs it here) On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
-    "rule": "BR-2",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#throw EntryAlreadyExistsException()"
-  },
-  {
     "id": "partner-deleted-write",
     "region": "day.partnerEntry",
     "from": "DELETED",
@@ -1261,8 +1199,8 @@
     "reason": "Deleting before the reveal steps the day back: it is counted again without your entry.",
     "rule": "BR-10, ADR-0032 §8",
     "evidence": "test",
-    "evidenceRef": "RevealTest#a delete before the reveal shows the partner an author and that it is gone, and nothing else",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#entryCount == 1 -> BondDayStatus.OPEN"
+    "evidenceRef": "RevealTest#a delete before the reveal shows the partner nothing, as if nothing had been written",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#remaining == 0 -> OPEN"
   },
   {
     "id": "day-partial-delete-again",
@@ -1312,7 +1250,7 @@
     "rule": "ADR-0032 §8",
     "evidence": "test",
     "evidenceRef": "RevealTest#deleting on a PENDING_REVEAL day returns it to PARTIAL, and a rewrite follows the reveal rule again",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> BondDayStatus.PARTIAL"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> PARTIAL"
   },
   {
     "id": "day-pending-reveal-delete-again",
@@ -1462,7 +1400,7 @@
     "rule": "ADR-0032 §8",
     "evidence": "smoke",
     "evidenceRef": "DELETE before reveal frees the author's slot",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.SUSPENDED -> status"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#isSettledWith(closedAt) || this == SUSPENDED -> this"
   },
   {
     "id": "day-suspended-delete-closed",
@@ -1487,7 +1425,7 @@
     "rule": "BR-10",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#val isSettled: Boolean get() = closedAt != null || status.isClosed"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#fun isSettledWith(closedAt: Instant?): Boolean = closedAt != null || isClosed"
   },
   {
     "id": "day-not-opened-today",
@@ -1612,11 +1550,11 @@
     "to": "OPEN",
     "status": 200,
     "code": null,
-    "reason": "The day has a row and no live entry, after a delete or an empty joining day. The response says OPEN, as it does for a day with no row; a member whose partner deleted is also shown that an entry was removed.",
+    "reason": "The day has a row and no live entry, after a delete or an empty joining day. The response says OPEN, as it does for a day with no row, and a partner's entry deleted before you could read it is not there: the day is the one a partner who never wrote would give (ADR-0032 q2, ruled 2026-10-21).",
     "rule": "",
     "evidence": "test",
-    "evidenceRef": "RevealTest#a delete before the reveal shows the partner an author and that it is gone, and nothing else",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+    "evidenceRef": "RevealTest#a delete before the reveal shows the partner nothing, as if nothing had been written",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = shown.status,"
   },
   {
     "id": "day-partial-today",
@@ -1649,7 +1587,7 @@
     "rule": "BR-8",
     "evidence": "smoke",
     "evidenceRef": "the partner's today is PARTIAL, with the entry locked",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = shown.status,"
   },
   {
     "id": "day-pending-reveal-today",
@@ -1682,7 +1620,7 @@
     "rule": "FR-062",
     "evidence": "smoke",
     "evidenceRef": "both have written and the day is PENDING_REVEAL, not PARTIAL",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = shown.status,"
   },
   {
     "id": "day-revealed-today",
@@ -1800,7 +1738,7 @@
     "rule": "doc 04 §8.3a",
     "evidence": "smoke",
     "evidenceRef": "…and the day it landed on opens SUSPENDED, not OPEN",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = shown.status,"
   },
   {
     "id": "day-suspended-today-ended",
@@ -1832,7 +1770,7 @@
     "rule": "doc 04 §8.3a",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = day.status,"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#status = shown.status,"
   },
   {
     "id": "day-not-opened-streak",
@@ -2311,7 +2249,7 @@
     "to": "NONE",
     "status": 200,
     "code": null,
-    "reason": "partnerEntry is null: your partner has no entry on today.",
+    "reason": "partnerEntry is null: your partner has no entry on today, or wrote one and took it back before you could read it. The two are one answer (ADR-0032 q2, ruled 2026-10-21).",
     "rule": "",
     "evidence": "test",
     "evidenceRef": "RevealGateTest#a day nobody has written to yet is OPEN with two absent entries",
@@ -2382,39 +2320,6 @@
     "evidence": "smoke",
     "evidenceRef": "the partner reads the author's edited words",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val everReadable = authorMemberId == reader.memberId || revealedAt != null"
-  },
-  {
-    "id": "partner-removed-today",
-    "region": "day.partnerEntry",
-    "from": "REMOVED",
-    "action": "GET /api/v1/bonds/{bondId}/today",
-    "actor": "you",
-    "when": "",
-    "guards": [
-      {
-        "region": "account",
-        "states": [
-          "SIGNED_IN"
-        ]
-      },
-      {
-        "region": "bond",
-        "states": [
-          "ACTIVE",
-          "PENDING_DELETION",
-          "ARCHIVED"
-        ]
-      }
-    ],
-    "outcome": "ok",
-    "to": "REMOVED",
-    "status": 200,
-    "code": null,
-    "reason": "Your partner deleted or withdrew it before you could ever read it. You are shown who wrote it and the word REMOVED: no id and no times, which were never yours to see.",
-    "rule": "BR-8, ADR-0032 q2",
-    "evidence": "test",
-    "evidenceRef": "RevealTest#a delete before the reveal shows the partner an author and that it is gone, and nothing else",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/TodayResponse.kt#Readability.TOMBSTONE_UNSEEN -> reading.authorMemberId?.let { ErasedEntryResponse(it) }"
   },
   {
     "id": "partner-deleted-today",
@@ -3121,7 +3026,7 @@
     "to": "OPEN",
     "status": null,
     "code": null,
-    "reason": "A withdrawal erases each of its author's entries by the routine a delete uses, some seconds after the bond ends, so a day still running steps back exactly as it would for a delete.",
+    "reason": "A withdrawal erases each of its author's entries by the routine a delete uses, some seconds after the bond ends, so a day still running steps back exactly as it would for a delete. You are shown the day as that erasure will leave it from the moment the bond ends, so it does not read PARTIAL in between.",
     "rule": "FR-029a, ADR-0035 §13",
     "evidence": "test",
     "evidenceRef": "WithdrawEntriesTest#a withdrawal leaves the rows and the answers that a run of single deletes leaves, and the close job then settles both alike",
@@ -3157,7 +3062,7 @@
     "to": "PARTIAL",
     "status": null,
     "code": null,
-    "reason": "Your partner's entry is erased before anything was revealed, so the day steps back to yours alone and the reveal never happens.",
+    "reason": "Your partner's entry is erased before anything was revealed, so the day steps back to yours alone and the reveal never happens. You are shown PARTIAL from the moment the bond ends, before the erasure reaches the row.",
     "rule": "FR-029a, ADR-0035 §13",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -3265,11 +3170,11 @@
     "to": "OPEN",
     "status": 204,
     "code": null,
-    "reason": "Your partner deleted before the reveal, so the day steps back. You are shown that an entry of theirs was removed.",
+    "reason": "Your partner deleted before the reveal, so the day steps back. You are shown nothing of it: partnerEntry is null, as if they had never written (ADR-0032 q2, ruled 2026-10-21).",
     "rule": "ADR-0032 §8",
     "evidence": "test",
-    "evidenceRef": "RevealTest#a delete before the reveal shows the partner an author and that it is gone, and nothing else",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#entryCount == 1 -> BondDayStatus.OPEN"
+    "evidenceRef": "RevealTest#a delete before the reveal shows the partner nothing, as if nothing had been written",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#remaining == 0 -> OPEN"
   },
   {
     "id": "day-pending-reveal-partner-deletes",
@@ -3287,7 +3192,7 @@
     "rule": "ADR-0032 §8",
     "evidence": "test",
     "evidenceRef": "RevealTest#deleting on a PENDING_REVEAL day returns it to PARTIAL, and a rewrite follows the reveal rule again",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> BondDayStatus.PARTIAL"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#else -> PARTIAL"
   },
   {
     "id": "entry-submitted-partner-writes",
@@ -3532,14 +3437,14 @@
     "when": "",
     "guards": [],
     "outcome": "ok",
-    "to": "REMOVED",
+    "to": "NONE",
     "status": 204,
     "code": null,
-    "reason": "A delete before the reveal is visible to you as a removal: who wrote, and that it is gone.",
-    "rule": "ADR-0032 q2",
+    "reason": "A delete before the reveal leaves you nothing: partnerEntry is null, the answer for a partner who never wrote, on today and in the archive (ADR-0032 q2 and ADR-0036 q6, ruled 2026-10-21).",
+    "rule": "ADR-0032 q2, ADR-0036 q6",
     "evidence": "test",
-    "evidenceRef": "RevealTest#a delete before the reveal shows the partner an author and that it is gone, and nothing else",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#erased -> Readability.TOMBSTONE_UNSEEN"
+    "evidenceRef": "RevealTest#a delete before the reveal shows the partner nothing, as if nothing had been written",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/DayEntries.kt#readBy(reader).takeUnless { it.readability == Readability.TOMBSTONE_UNSEEN }"
   },
   {
     "id": "partner-visible-partner-deletes",
@@ -3558,42 +3463,6 @@
     "evidence": "test",
     "evidenceRef": "RevealTest#an entry deleted after the reveal is a tombstone to both, and the other entry is untouched",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#erased && everReadable -> Readability.TOMBSTONE"
-  },
-  {
-    "id": "partner-removed-partner-rewrites",
-    "region": "day.partnerEntry",
-    "from": "REMOVED",
-    "action": "POST /api/v1/bonds/{bondId}/entries",
-    "actor": "partner",
-    "when": "you have not written, or the bond's reveal time is still ahead",
-    "guards": [],
-    "outcome": "ok",
-    "to": "LOCKED",
-    "status": 201,
-    "code": null,
-    "reason": "Your partner wrote again after deleting. Today shows a live entry in preference to an erased one, so you see the new one, locked.",
-    "rule": "ADR-0032 §14",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/DayEntries.kt#val ordered = sortedWith(compareBy<Entry> { it.isErased }.thenByDescending { it.createdAt }.thenBy { it.id.value })"
-  },
-  {
-    "id": "partner-removed-partner-rewrites-revealed",
-    "region": "day.partnerEntry",
-    "from": "REMOVED",
-    "action": "POST /api/v1/bonds/{bondId}/entries",
-    "actor": "partner",
-    "when": "you have written, and the bond has no reveal time or it has passed, and the day did not end before the bond became two people",
-    "guards": [],
-    "outcome": "ok",
-    "to": "VISIBLE",
-    "status": 201,
-    "code": null,
-    "reason": "Your partner wrote again after deleting, and you had written meanwhile. Theirs is the day's second live entry, so both are revealed and you read it.",
-    "rule": "BR-1, ADR-0032 §8",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/RevealDay.kt#val revealed = entry.reveal(next.revealedAt)"
   },
   {
     "id": "partner-locked-reveal-time",
@@ -3730,14 +3599,14 @@
     "when": "",
     "guards": [],
     "outcome": "ok",
-    "to": "REMOVED",
+    "to": "NONE",
     "status": null,
     "code": null,
-    "reason": "A withdrawal hides the entry from the moment the bond ends, before anything is erased. You never could read it, so you see only that it is gone.",
-    "rule": "FR-029a, ADR-0035 §12",
+    "reason": "A withdrawal hides the entry from the moment the bond ends, before anything is erased. You never could read it, so you are shown nothing of it, as for a delete: partnerEntry is null, and the day reads as the erasure will leave it.",
+    "rule": "FR-029a, ADR-0035 §12, ADR-0032 q2",
     "evidence": "test",
-    "evidenceRef": "WithdrawalReadTest#an entry withdrawn before it was ever revealed is author and REMOVED to the partner, and nothing else",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val erased = isErased || authorMemberId in reader.withdrawnAuthors"
+    "evidenceRef": "WithdrawalReadTest#an entry withdrawn before it was ever revealed is nothing to the partner, and the day is as a delete leaves it",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/DayEntries.kt#readBy(reader).takeUnless { it.readability == Readability.TOMBSTONE_UNSEEN }"
   },
   {
     "id": "partner-visible-partner-withdraws",
@@ -4044,7 +3913,7 @@
     "to": "OPEN",
     "status": 204,
     "code": null,
-    "reason": "Right after the call the day still reads PARTIAL. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14).",
+    "reason": "Right after the call the day's row still says PARTIAL, but both of you are shown OPEN from the call, as a delete by hand would show it. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14).",
     "rule": "FR-029a, ADR-0035 §13, §14",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -4108,7 +3977,7 @@
     "to": "PARTIAL",
     "status": 204,
     "code": null,
-    "reason": "After the call your entry is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14).",
+    "reason": "Both of you are shown PARTIAL from the call, as a delete by hand would show it, though the row says PENDING_REVEAL until your entry is erased. After the call it is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14).",
     "rule": "FR-029a, ADR-0035 §13, §14",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -4305,7 +4174,7 @@
     "rule": "doc 04 §8.3a",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.SUSPENDED -> status"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#isSettledWith(closedAt) || this == SUSPENDED -> this"
   },
   {
     "id": "entry-none-block",
@@ -4347,7 +4216,7 @@
     "from": "SUBMITTED",
     "action": "POST /api/v1/bonds/{bondId}/block",
     "actor": "you",
-    "when": "the body is absent, or does not say withdrawEntries: false",
+    "when": "the body says withdrawEntries: true",
     "guards": [
       {
         "region": "account",
@@ -4369,10 +4238,10 @@
     "to": "DELETED",
     "status": 204,
     "code": null,
-    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, sees only that it is gone. The rows themselves are erased afterwards: in seconds as a rule, and much later if the poller is stopped or a delivery is backing off.",
+    "reason": "Your entries are taken back in the same transaction. From that commit yours reads as DELETED with no text, to you as well; your partner, who never could read it, is shown nothing of it, as if you had not written. The rows themselves are erased afterwards: in seconds as a rule, and much later if the poller is stopped or a delivery is backing off.",
     "rule": "FR-029a, ADR-0035 §11, §12",
     "evidence": "test",
-    "evidenceRef": "WithdrawalReadTest#an entry withdrawn before it was ever revealed is author and REMOVED to the partner, and nothing else",
+    "evidenceRef": "WithdrawalReadTest#an entry withdrawn before it was ever revealed is nothing to the partner, and the day is as a delete leaves it",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Entry.kt#val erased = isErased || authorMemberId in reader.withdrawnAuthors"
   },
   {
@@ -4415,7 +4284,7 @@
     "from": "REVEALED",
     "action": "POST /api/v1/bonds/{bondId}/block",
     "actor": "you",
-    "when": "the body is absent, or does not say withdrawEntries: false",
+    "when": "the body says withdrawEntries: true",
     "guards": [
       {
         "region": "account",
@@ -4469,7 +4338,7 @@
     "to": "REVEALED",
     "status": 204,
     "code": null,
-    "reason": "Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. Repeating the block without the flag takes it back after all.",
+    "reason": "Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. Repeating the block with withdrawEntries: true takes it back after all.",
     "rule": "FR-029a, ADR-0035 §11, §15",
     "evidence": "smoke",
     "evidenceRef": "a block that says to keep the entries is 204",
@@ -4582,7 +4451,7 @@
     "from": "PARTIAL",
     "action": "POST /api/v1/bonds/{bondId}/block",
     "actor": "you",
-    "when": "the body is absent, or does not say withdrawEntries: false, and the day's one live entry is yours",
+    "when": "the body says withdrawEntries: true, and the day's one live entry is yours",
     "guards": [
       {
         "region": "account",
@@ -4603,7 +4472,7 @@
     "to": "OPEN",
     "status": 204,
     "code": null,
-    "reason": "Right after the call the day still reads PARTIAL. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14).",
+    "reason": "Right after the call the day's row still says PARTIAL, but both of you are shown OPEN from the call, as a delete by hand would show it. Your entry is erased afterwards by the routine a delete uses (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), and a day still running then steps back exactly as it would for a delete. If the close job reaches the day first, it does the erasing itself before it decides anything (ADR-0035 §14).",
     "rule": "FR-029a, ADR-0035 §13, §14",
     "evidence": "test",
     "evidenceRef": "WithdrawEntriesTest#a withdrawal leaves the rows and the answers that a run of single deletes leaves, and the close job then settles both alike",
@@ -4648,7 +4517,7 @@
     "from": "PENDING_REVEAL",
     "action": "POST /api/v1/bonds/{bondId}/block",
     "actor": "you",
-    "when": "the body is absent, or does not say withdrawEntries: false",
+    "when": "the body says withdrawEntries: true",
     "guards": [
       {
         "region": "account",
@@ -4669,7 +4538,7 @@
     "to": "PARTIAL",
     "status": 204,
     "code": null,
-    "reason": "After the call your entry is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14).",
+    "reason": "Both of you are shown PARTIAL from the call, as a delete by hand would show it, though the row says PENDING_REVEAL until your entry is erased. After the call it is erased (in seconds as a rule, and much later if the poller is stopped or a delivery is backing off), so the day steps back to your partner's entry alone. If the reveal time or the close job reaches the day first, it erases your entry itself before deciding, so the reveal does not happen either way (ADR-0035 §14).",
     "rule": "FR-029a, ADR-0035 §13, §14",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -4872,7 +4741,7 @@
     "rule": "doc 04 §8.3a",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.SUSPENDED -> status"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#isSettledWith(closedAt) || this == SUSPENDED -> this"
   },
   {
     "id": "list-the-archive-not_opened",
@@ -4976,7 +4845,7 @@
     "to": "NOT_OPENED",
     "status": 204,
     "code": null,
-    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown.",
+    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry and an erased one: anything you were shown. On a bond that has ended, or that you have left, the partner's entry read in full is BOND_ARCHIVED and the reaction stays (ADR-0037 question 11).",
     "rule": "FR-048",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -5084,7 +4953,7 @@
     "to": "OPEN",
     "status": 204,
     "code": null,
-    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown.",
+    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry and an erased one: anything you were shown. On a bond that has ended, or that you have left, the partner's entry read in full is BOND_ARCHIVED and the reaction stays (ADR-0037 question 11).",
     "rule": "FR-048",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -5192,7 +5061,7 @@
     "to": "PARTIAL",
     "status": 204,
     "code": null,
-    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown.",
+    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry and an erased one: anything you were shown. On a bond that has ended, or that you have left, the partner's entry read in full is BOND_ARCHIVED and the reaction stays (ADR-0037 question 11).",
     "rule": "FR-048",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -5300,7 +5169,7 @@
     "to": "PENDING_REVEAL",
     "status": 204,
     "code": null,
-    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown.",
+    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry and an erased one: anything you were shown. On a bond that has ended, or that you have left, the partner's entry read in full is BOND_ARCHIVED and the reaction stays (ADR-0037 question 11).",
     "rule": "FR-048",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -5408,7 +5277,7 @@
     "to": "REVEALED",
     "status": 204,
     "code": null,
-    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown.",
+    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry and an erased one: anything you were shown. On a bond that has ended, or that you have left, the partner's entry read in full is BOND_ARCHIVED and the reaction stays (ADR-0037 question 11).",
     "rule": "FR-048",
     "evidence": "smoke",
     "evidenceRef": "DELETE /entries/{id}/reaction is 204",
@@ -5516,7 +5385,7 @@
     "to": "SOLO",
     "status": 204,
     "code": null,
-    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown.",
+    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry and an erased one: anything you were shown. On a bond that has ended, or that you have left, the partner's entry read in full is BOND_ARCHIVED and the reaction stays (ADR-0037 question 11).",
     "rule": "FR-048",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -5624,7 +5493,7 @@
     "to": "EMPTY",
     "status": 204,
     "code": null,
-    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown.",
+    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry and an erased one: anything you were shown. On a bond that has ended, or that you have left, the partner's entry read in full is BOND_ARCHIVED and the reaction stays (ADR-0037 question 11).",
     "rule": "FR-048",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -5732,7 +5601,7 @@
     "to": "FROZEN",
     "status": 204,
     "code": null,
-    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown.",
+    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry and an erased one: anything you were shown. On a bond that has ended, or that you have left, the partner's entry read in full is BOND_ARCHIVED and the reaction stays (ADR-0037 question 11).",
     "rule": "FR-048",
     "evidence": "never-run",
     "evidenceRef": "",
@@ -6164,7 +6033,7 @@
     "to": "SUSPENDED",
     "status": 204,
     "code": null,
-    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry, an erased one and an ended bond: anything you were shown.",
+    "reason": "Taking a reaction back is independent of today's day status; the entry is addressed directly. Absent is success, as is your own entry and an erased one: anything you were shown. On a bond that has ended, or that you have left, the partner's entry read in full is BOND_ARCHIVED and the reaction stays (ADR-0037 question 11).",
     "rule": "FR-048",
     "evidence": "never-run",
     "evidenceRef": "",

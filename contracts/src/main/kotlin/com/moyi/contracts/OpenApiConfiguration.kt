@@ -81,10 +81,9 @@ import org.springframework.http.HttpStatus
  *   it made would have been refused as `422 VALIDATION_FAILED`.
  * - **The `partnerEntry` discriminator.** `gratitude.web.TodayResponse.partnerEntry`
  *   is a Kotlin sealed interface's `oneOf` — springdoc already splits it into
- *   its three branches,
- *   [EntryResponse][com.moyi.gratitude.web.EntryResponse],
- *   [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse] and
- *   [ErasedEntryResponse][com.moyi.gratitude.web.ErasedEntryResponse], on its
+ *   its branches,
+ *   [EntryResponse][com.moyi.gratitude.web.EntryResponse] and
+ *   [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse], on its
  *   own, but adds no `discriminator`, so a generated client has to try each
  *   shape structurally to learn which one it received rather than read one
  *   field. [discriminatePartnerEntry] adds one, keyed on `status`, which
@@ -94,7 +93,7 @@ import org.springframework.http.HttpStatus
  *   the partner has written. springdoc gives a nullable `$ref` its
  *   `{"type": "null"}` branch (it does for `myEntry`) but not a nullable
  *   sealed interface's `oneOf`, which left the document claiming the field is
- *   always one of the three objects. [admitAbsentPartnerEntry] adds the
+ *   always one of the objects. [admitAbsentPartnerEntry] adds the
  *   missing branch.
  *
  * **F9 (whole-branch review) — three things a generated client could not
@@ -117,9 +116,8 @@ import org.springframework.http.HttpStatus
  *   property to be `required`, and several generators (and every strict
  *   validator) drop a discriminator that is not. [requireDiscriminatorProperty]
  *   closes that on every branch:
- *   [EntryResponse][com.moyi.gratitude.web.EntryResponse],
- *   [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse] and
- *   [ErasedEntryResponse][com.moyi.gratitude.web.ErasedEntryResponse].
+ *   [EntryResponse][com.moyi.gratitude.web.EntryResponse] and
+ *   [LockedEntryResponse][com.moyi.gratitude.web.LockedEntryResponse].
  * - **`Idempotency-Replayed` is now a declared response header.**
  *   The handler sets it on every replay (from
  *   [IdempotentOutcome][com.moyi.common.web.idempotency.IdempotentOutcome]'s
@@ -237,16 +235,20 @@ class OpenApiConfiguration {
             text.maxLength = ENTRY_TEXT_MAX_OCTETS
             text.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
             text.description =
-                "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does " +
-                "not count either), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
+                "FR-041: at least one character that is neither whitespace (Unicode-aware, so a lone " +
+                "non-breaking space does not count either) nor invisible (Unicode's Default_Ignorable_Code_Point: " +
+                "a text of only zero-width spaces, joiners, variation selectors and the like is refused as " +
+                "empty; the published `pattern` does not express this, and matches such a text), at most " +
+                "$ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
                 "$ENTRY_TEXT_MAX_GRAPHEMES user-perceived characters (graphemes, not UTF-16 code units — an " +
                 "emoji sequence can be one grapheme and several of those). `maxLength` here states the octet " +
                 "cap in UTF-16 characters, which is not the same unit as either real limit and both are wider " +
                 "than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a " +
                 "guarantee. The server enforces both limits exactly and is the only authority on whether a " +
                 "given body is accepted. The text is stored and returned exactly as sent — not normalised, " +
-                "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted on its NFKC-normalised, trimmed form " +
-                "(so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused."
+                "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted as typed, on the text as sent, " +
+                "untrimmed (so a typographic ellipsis counts as one, and a leading or trailing space counts too), " +
+                "and so are the octets. U+0000 is refused."
         }
     }
 
@@ -494,7 +496,8 @@ class OpenApiConfiguration {
                 "favouriteEntry",
                 // Slice C5c. REACTION_ON_OWN_ENTRY, ENTRY_IMMUTABLE (a tombstone)
                 // and BOND_ARCHIVED. Taking back a locked reaction is a retryable
-                // REACTION_BUSY conflict, as `unfavouriteEntry`'s is.
+                // REACTION_BUSY conflict, as `unfavouriteEntry`'s is, and taking
+                // one back on an ended bond is BOND_ARCHIVED (ADR-0037 question 11).
                 "reactToEntry",
                 "unreactToEntry",
                 // 409 MEDIA_NOT_UPLOADED: completed before the storage holds the declared bytes;
@@ -589,10 +592,17 @@ private val MEDIA_STATUSES =
  * `.*\S.*`'s own shape. No `(?U)` counterpart is needed: JS, Python and
  * .NET's `\S` already excludes the Unicode whitespace category `(?U)` exists
  * to add in Java, so the two patterns reject the same strings in every case
- * this constant is used for (a lone non-breaking space, an all-whitespace
- * multi-line value). This is the *documented* pattern only — the server's
+ * of whitespace this constant is used for (a lone non-breaking space, an
+ * all-whitespace multi-line value). This is the *documented* pattern only — the server's
  * own enforcement (`bond.web.NOT_ONLY_SPACE`, `gratitude.web.ValidEntryText`)
  * is untouched by this constant.
+ *
+ * **For an entry's text it is looser than the server.** Since ADR-0031's
+ * ruling 2 was built (2026-10-28) the server also refuses a text of only
+ * invisible characters (Unicode's `Default_Ignorable_Code_Point`), and no
+ * flag-free pattern says that: a text of one U+200B matches `\S` here and
+ * is a `422` there. The entry text's description says so. For a bond's
+ * name the two still agree.
  */
 private const val NOT_ONLY_SPACE_DOCUMENTED_PATTERN = "[\\s\\S]*\\S[\\s\\S]*"
 
@@ -637,8 +647,6 @@ private const val ENTRY_RESPONSE = "EntryResponse"
 private const val LOCKED_ENTRY_RESPONSE = "LockedEntryResponse"
 private const val ENTRY_RESPONSE_REF = "#/components/schemas/$ENTRY_RESPONSE"
 private const val LOCKED_ENTRY_RESPONSE_REF = "#/components/schemas/$LOCKED_ENTRY_RESPONSE"
-private const val ERASED_ENTRY_RESPONSE = "ErasedEntryResponse"
-private const val ERASED_ENTRY_RESPONSE_REF = "#/components/schemas/$ERASED_ENTRY_RESPONSE"
 
 /**
  * Gives `TodayResponse.partnerEntry`'s `oneOf` a `discriminator` — the fix
@@ -653,8 +661,7 @@ private const val ERASED_ENTRY_RESPONSE_REF = "#/components/schemas/$ERASED_ENTR
  * **springdoc already resolves the `oneOf` itself.** `PartnerEntryResponse`
  * is a Kotlin `sealed interface`, which compiles to a JVM sealed type
  * (`Class.permittedSubclasses`), and swagger-core reads that to split the
- * property into `oneOf: [EntryResponse, ErasedEntryResponse,
- * LockedEntryResponse]` without an
+ * property into `oneOf: [EntryResponse, LockedEntryResponse]` without an
  * annotation on any of them — the KDoc's fear of an *empty* `partnerEntry`
  * schema does not hold against this springdoc version. What springdoc does
  * not add is a `discriminator`: a `oneOf` without one is a set of shapes a
@@ -663,18 +670,17 @@ private const val ERASED_ENTRY_RESPONSE_REF = "#/components/schemas/$ERASED_ENTR
  * gap a `sealed class` closes on the Kotlin side that this document was
  * leaving open on the wire side.
  *
- * `status` is the discriminator, because all three branches already carry a
+ * `status` is the discriminator, because both branches already carry a
  * field of that name and nothing was added to any type to support this:
  * [com.moyi.gratitude.domain.EntryStatus] (`SUBMITTED`, `REVEALED`,
  * `DELETED`) on [com.moyi.gratitude.web.EntryResponse]'s branch, the
  * one-value `LockedEntryStatus.LOCKED` on
- * [com.moyi.gratitude.web.LockedEntryResponse]'s, and the one-value
- * `ErasedEntryStatus.REMOVED` on
- * [com.moyi.gratitude.web.ErasedEntryResponse]'s (Task 8, fix rounds 1–2: a
- * partner's entry erased before it was ever revealed). **`REMOVED` is its
- * own literal precisely so this discriminator can exist**: `DELETED` is
- * already [com.moyi.gratitude.web.EntryResponse]'s wide tombstone, and a
- * discriminator maps a value to exactly one schema. Every value any of the enums
+ * [com.moyi.gratitude.web.LockedEntryResponse]'s. A discriminator maps a
+ * value to exactly one schema. (Until 2026-10-28 there was a third branch,
+ * `ErasedEntryResponse`, discriminated by its own `REMOVED` because `DELETED`
+ * is already the wide tombstone's. The owner's ruling of 2026-10-21 shows a
+ * partner's entry erased before it was ever revealed as no entry, `null`, so
+ * nothing serves it and it is gone: ADR-0032 question 2.) Every value any of the enums
  * can hold is mapped explicitly rather than left to the OpenAPI default (a
  * mapping miss falls back to the value naming a schema directly —
  * `"SUBMITTED"` names no schema in this document, so an unmapped value
@@ -683,7 +689,7 @@ private const val ERASED_ENTRY_RESPONSE_REF = "#/components/schemas/$ERASED_ENTR
  * The named `PartnerEntryResponse` schema in `components.schemas` itself
  * stays the empty object springdoc produces for the interface — it is
  * referenced only as each branch's own `allOf` marker, asserts nothing on
- * its own, and rewriting it to a `oneOf` of the three types that already
+ * its own, and rewriting it to a `oneOf` of the types that already
  * `allOf` it would be a schema that describes itself. Harmless, and left
  * alone.
  */
@@ -702,7 +708,6 @@ private fun discriminatePartnerEntry(api: OpenAPI) {
                         "REVEALED" to ENTRY_RESPONSE_REF,
                         "DELETED" to ENTRY_RESPONSE_REF,
                         "LOCKED" to LOCKED_ENTRY_RESPONSE_REF,
-                        "REMOVED" to ERASED_ENTRY_RESPONSE_REF,
                     ),
                 )
     }
@@ -718,7 +723,7 @@ private fun discriminatePartnerEntry(api: OpenAPI) {
  * response there is: the one before the partner writes.
  *
  * The branch is added to the existing `oneOf`, the same shape `myEntry`
- * already has, rather than wrapping the three in an outer `anyOf`. The
+ * already has, rather than wrapping the branches in an outer `anyOf`. The
  * discriminator still describes every object the field can hold; `null` has
  * no `status` to discriminate on and matches only the null branch.
  * Idempotent, so a second pass over the same document adds nothing.
@@ -743,10 +748,9 @@ private const val NULL_TYPE = "null"
  * Marks [DISCRIMINATOR_PROPERTY] — and every other field — `required` on each of
  * [discriminatePartnerEntry]'s branches — F9, whole-branch review.
  * [discriminatePartnerEntry] gives `partnerEntry`'s `oneOf` a `discriminator`
- * keyed on `status`, but none of its three branches
+ * keyed on `status`, but none of its branches
  * ([com.moyi.gratitude.web.EntryResponse],
- * [com.moyi.gratitude.web.LockedEntryResponse],
- * [com.moyi.gratitude.web.ErasedEntryResponse]) declared a `required` array of
+ * [com.moyi.gratitude.web.LockedEntryResponse]) declared a `required` array of
  * its own, which left the discriminator property optional in every branch —
  * legal JSON Schema, but the OpenAPI spec requires a discriminator's own
  * property to be `required`, and several generators (and every strict
@@ -760,7 +764,7 @@ private const val NULL_TYPE = "null"
  * than the schema's own (empty) `properties`.
  */
 private fun requireDiscriminatorProperty(api: OpenAPI) {
-    listOf(ENTRY_RESPONSE, LOCKED_ENTRY_RESPONSE, ERASED_ENTRY_RESPONSE).forEach { name ->
+    listOf(ENTRY_RESPONSE, LOCKED_ENTRY_RESPONSE).forEach { name ->
         val fields =
             api.components.schemas[name]
                 ?.allOf
@@ -768,7 +772,7 @@ private fun requireDiscriminatorProperty(api: OpenAPI) {
         // Every field of every branch is always present, the discriminator
         // among them. For EntryResponse, `text` above all: it is nullable,
         // and only `required` lets a client tell a tombstone (`"text": null`)
-        // from a field that was never sent. For the two narrow branches the
+        // from a field that was never sent. For the narrow branch the
         // author is the one thing they carry besides the discriminator.
         fields.properties
             .orEmpty()
@@ -782,19 +786,29 @@ private fun requireDiscriminatorProperty(api: OpenAPI) {
  * Says, on each of the two routes that end a bond, what an absent
  * `withdrawEntries` does there (ADR-0035 decision 11).
  *
- * One request type serves both and the flag's default is opposite on the
- * two: absent, the caller's entries are erased on one and kept on the
- * other, and an erasure cannot be undone. Generated, the type is an
+ * One request type serves both and an absent flag means something
+ * different on each: on `/leave` the caller's entries are kept, and on
+ * `/block` the request is refused with `400` (ADR-0035 questions 1 and 11),
+ * where until 2026-10-28 it erased them. Generated, the shared type is an
  * optional nullable boolean with nothing beside it, so a person writing a
- * client from this document could not learn that leaving the field out
- * destroys something. The default is stated on each operation, because a
- * `default` on the shared schema would be right for one route and wrong
- * for the other; the schema's own description says only that it depends.
+ * client from this document could not learn either from it. What absence
+ * means is stated on each operation, because a `default` on the shared
+ * schema would be right for one route and wrong for the other; the
+ * schema's own description says only that it depends.
  *
  * **Neither description names the ending** (ADR-0028 decision 8). Each
  * route's path already is its name; the prose calls the other one "the
- * other route that takes this body", so nothing here adds to what tells
+ * other route that ends a bond", so nothing here adds to what tells
  * the two apart. `OpenApiContractTest` holds both points.
+ *
+ * **On one route the flag is required** (ADR-0035 questions 1 and 11, the
+ * owner's ruling of 2026-10-21), and there the body is required too, and
+ * refers to [REQUIRED_END_BOND_REQUEST]: the same one property, required and
+ * never null. The handler still takes the shared, optional type, so that the
+ * guard runs before an absent flag is refused, and springdoc can only see
+ * that; the document states the rule the route enforces, as it does for
+ * `If-Match`. A schema of its own rather than a change to the shared one,
+ * which is still right for the other route.
  *
  * By operation id and schema name, as the configuration's own lists of
  * operations are and for their reason: this module names no controller.
@@ -805,7 +819,23 @@ private fun requireDiscriminatorProperty(api: OpenAPI) {
 private fun documentEndingDefaults(api: OpenAPI) {
     api.paths.values.flatMap { it.readOperations() }.forEach { operation ->
         ENDING_DESCRIPTIONS[operation.operationId]?.let { operation.description = it }
+        if (operation.operationId in FLAG_REQUIRED_OPERATIONS) {
+            operation.requestBody.required = true
+            operation.requestBody.content.values
+                .forEach { it.schema = Schema<Any>().`$ref`("#/components/schemas/$REQUIRED_END_BOND_REQUEST") }
+        }
     }
+    api.components.addSchemas(
+        REQUIRED_END_BOND_REQUEST,
+        ObjectSchema()
+            .addProperty(
+                WITHDRAW_ENTRIES_PROPERTY,
+                BooleanSchema().description(
+                    "Whether to withdraw the caller's own entries in this bond. `true` erases every one, for both " +
+                        "members, and this cannot be undone; `false` keeps them. Required, and never null.",
+                ),
+            ).addRequiredItem(WITHDRAW_ENTRIES_PROPERTY),
+    )
     api.components.schemas[END_BOND_REQUEST]
         ?.properties
         ?.get(WITHDRAW_ENTRIES_PROPERTY)
@@ -817,10 +847,26 @@ private fun documentEndingDefaults(api: OpenAPI) {
 
 /** `EndBondRequest`'s schema name and its one property: see [documentEndingDefaults]. */
 private const val END_BOND_REQUEST = "EndBondRequest"
+
+/** The same body with its flag required, on the routes in [FLAG_REQUIRED_OPERATIONS]: see [documentEndingDefaults]. */
+private const val REQUIRED_END_BOND_REQUEST = "RequiredEndBondRequest"
+
+/** The endings on which `withdrawEntries` must be sent, by operation id (ADR-0035 question 1). */
+private val FLAG_REQUIRED_OPERATIONS = setOf("blockBond")
 private const val WITHDRAW_ENTRIES_PROPERTY = "withdrawEntries"
 
+/** Where [ENDING_BODY_RULES] names the values a route accepts for the flag. */
+private const val ACCEPTED = "{accepted}"
+
+/**
+ * The body rules both endings share, with [ACCEPTED] standing for the values
+ * the route takes for the flag: `/leave` takes `null` as absent, `/block`
+ * refuses it (ADR-0035 question 1). One text, so the two cannot drift apart in
+ * anything else. A constant and not a function: the file is at detekt's
+ * `TooManyFunctions` threshold.
+ */
 private const val ENDING_BODY_RULES =
-    "A body with any other key, with the key twice, or with a value that is not JSON true, false or null is " +
+    "A body with any other key, with the key twice, or with a value that is not JSON $ACCEPTED is " +
         "`400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body."
 
 /** What each ending does with an absent flag, by operation id: see [documentEndingDefaults]. */
@@ -830,17 +876,19 @@ private val ENDING_DESCRIPTIONS =
             "Ends the bond for both members. It stays readable to both, and takes no further entries. " +
             "The body is optional. **When `withdrawEntries` is absent or null, or there is no body, the caller's " +
             "entries are kept.** When it is `true`, every entry the caller wrote in this bond is erased, for both " +
-            "members, and this cannot be undone. The other route that takes this body has the opposite default. " +
+            "members, and this cannot be undone. The other route that ends a bond has no default: there the " +
+            "flag is required. " +
             "`409 BOND_ARCHIVED` on a bond that has already ended, and nothing is withdrawn then. " +
-            ENDING_BODY_RULES,
+            ENDING_BODY_RULES.replace(ACCEPTED, "true, false or null"),
         "blockBond" to
             "Ends the bond for both members, with the same `204` as `POST /bonds/{bondId}/leave`, and keeps the " +
             "two accounts from being paired again. Also accepted on a bond that has already ended, and may be " +
-            "repeated. The body is optional. **When `withdrawEntries` is absent or null, or there is no body, every " +
-            "entry the caller wrote in this bond is withdrawn: the entries are ERASED, for both members, and this " +
-            "cannot be undone.** Send `{\"withdrawEntries\": false}` to keep them. A later call with `true`, or " +
-            "with no body, withdraws what an earlier one kept. " +
-            ENDING_BODY_RULES,
+            "repeated. **The body is required, and so is `withdrawEntries`.** When it is `true`, every entry the " +
+            "caller wrote in this bond is withdrawn: the entries are ERASED, for both members, and this cannot be " +
+            "undone. Send `{\"withdrawEntries\": false}` to keep them. When the flag is absent or null, or there is " +
+            "no body, the answer is `400 MALFORMED_REQUEST` and nothing is ended or withdrawn; a caller who is not a " +
+            "member is answered `404` first. A later call with `true` withdraws what an earlier one kept. " +
+            ENDING_BODY_RULES.replace(ACCEPTED, "true or false"),
     )
 
 /**
@@ -1107,11 +1155,12 @@ private val REACTION_DESCRIPTIONS =
         "unreactToEntry" to
             "Takes the caller's reaction back. Repeatable: no reaction is success, and so is an entry that has since " +
             "been erased, or one the caller wrote. `404` is every entry the caller was never shown, the same as for an " +
-            "id that does not exist. `409 REACTION_BUSY` means another operation holds the reaction, which can be the " +
-            "caller's own request still running (two removals at once, or one over the caller's own `PUT`); retry the " +
-            "removal. " +
-            "It is never given for an entry the caller is shown as erased, or for one the caller wrote: there the " +
-            "answer is `204`. Allowed on a bond that has ended.",
+            "id that does not exist. `409 BOND_ARCHIVED` is the partner's entry on a bond that has ended, or that the " +
+            "caller has left: the reaction stays, and is still shown. `409 REACTION_BUSY` means another operation " +
+            "holds the reaction, which can be the caller's own request still running (two removals at once, or one " +
+            "over the caller's own `PUT`); retry the removal. " +
+            "Neither is given for an entry the caller is shown as erased, or for one the caller wrote: there the " +
+            "answer is `204`, on a bond that has ended too.",
     )
 
 /**

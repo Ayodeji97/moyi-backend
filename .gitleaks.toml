@@ -21,3 +21,16 @@ regexTarget = "match"
 regexes = [
   '''-----BEGIN (RSA )?PRIVATE KEY-----[`"')\.]''',
 ]
+
+# A Bruno environment file holds names, never values, for anything secret.
+# Bruno writes a variable's value into the file whenever it is edited in the
+# app without being marked secret, which is how PR #93 first carried a test
+# account's password onto a public branch. Any value given to a secret-shaped
+# name in an environment file fails the scan (a `{{template}}` reference is a name, not
+# a value, and passes); secrets belong in `vars:secret`, whose
+# values Bruno keeps out of the file.
+[[rules]]
+id = "bruno-env-secret-value"
+description = "A secret-shaped Bruno variable with a value in a .bru file"
+path = '''tools/bruno/environments/[^/]+\.bru$'''
+regex = '''(?im)^\s*(password|passwd|secret|token|[a-z]*Token|apiKey|inviteCode|privateKey)\s*:\s*[^\s{]\S*'''
