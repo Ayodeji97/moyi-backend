@@ -1,5 +1,6 @@
 package com.moyi.identity.service
 
+import com.moyi.common.security.VerifiedEmails
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.identity.api.UserDirectory
 import com.moyi.identity.infra.IdentityTestApplication
@@ -27,6 +28,7 @@ import javax.sql.DataSource
 @SpringBootTest(classes = [IdentityTestApplication::class])
 internal class AccountDirectoryTest(
     @Autowired private val directory: UserDirectory,
+    @Autowired private val verifiedEmails: VerifiedEmails,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
@@ -72,6 +74,16 @@ internal class AccountDirectoryTest(
         val found = directory.findAll(listOf(ada, nobody))
         found shouldHaveSize 1
         found shouldContainKey ada
+    }
+
+    @Test
+    fun `media's port says whether an address is verified, and an unknown id is not (ADR-0049)`() {
+        val ada = insertUser("ada@example.com", "Ada", verified = true)
+        val bob = insertUser("bob@example.com", "Bob", verified = false)
+
+        verifiedEmails.isVerified(ada) shouldBe true
+        verifiedEmails.isVerified(bob) shouldBe false
+        verifiedEmails.isVerified(UUID.randomUUID()) shouldBe false
     }
 
     @Test

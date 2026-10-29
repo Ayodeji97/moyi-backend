@@ -20,6 +20,9 @@ interface MediaAttachments {
      * v7 id (media ids are v4, doc 06:14), another person's asset, one not yet
      * ready, one of the other kind, one attached already. Telling them apart
      * would tell a caller whether somebody else's asset exists.
+     *
+     * Throws (`403 EMAIL_NOT_VERIFIED`) when [owner] has not confirmed their
+     * address (ADR-0049): a fact about the caller's own account, not the asset.
      */
     fun claim(
         owner: UUID,

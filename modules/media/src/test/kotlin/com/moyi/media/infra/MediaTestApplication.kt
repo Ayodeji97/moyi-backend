@@ -20,7 +20,8 @@ import java.time.temporal.ChronoUnit
  * Testcontainers Postgres and Valkey and a MinIO of its own
  * ([MediaIntegrationTest]). `media` is a leaf, so nothing of any domain module
  * is here. [TokenRevocations] is identity's port and revokes nothing: a token
- * the test issuer minted is valid by construction.
+ * the test issuer minted is valid by construction. [FakeVerifiedEmails] is its
+ * other, and verifies everyone a test does not say otherwise of.
  */
 @SpringBootApplication(scanBasePackages = ["com.moyi.common", "com.moyi.media"])
 @ConfigurationPropertiesScan("com.moyi.common", "com.moyi.media")
@@ -28,6 +29,10 @@ import java.time.temporal.ChronoUnit
 internal class MediaTestApplication {
     @Bean
     fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }
+
+    /** Identity's other port: everyone verified unless a test says otherwise (ADR-0049). */
+    @Bean
+    fun verifiedEmails(): FakeVerifiedEmails = FakeVerifiedEmails()
 
     @Bean
     @Primary

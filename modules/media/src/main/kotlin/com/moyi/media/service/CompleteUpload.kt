@@ -2,6 +2,7 @@ package com.moyi.media.service
 
 import com.moyi.common.events.EventPublisher
 import com.moyi.common.events.OutboxEvent
+import com.moyi.common.security.VerifiedEmails
 import com.moyi.common.web.idempotency.IdempotentExecution
 import com.moyi.common.web.idempotency.IdempotentRequest
 import com.moyi.common.web.idempotency.IdempotentResult
@@ -32,6 +33,10 @@ internal class Completion(
  *
  * In order (ADR-0047 decision 2):
  *
+ * 0. **The caller's address is verified** (the owner's ruling, 2026-10-29,
+ *    ADR-0049), before the asset is read: the refusal names the caller's own
+ *    account and nothing of the id, and it is outside the key, so the same
+ *    key completes once the address is confirmed.
  * 1. **The asset is read and authorised, with no transaction open.** Another
  *    person's, a deleted one or none is the one `404`, before the storage is
  *    asked anything.
@@ -54,7 +59,12 @@ internal class Completion(
  * **A replay is a read**: the asset is read again by its owner, and an asset
  * deleted since is the same `404` as one that never existed. A second
  * completion under a new key changes nothing and publishes nothing.
+ *
+ * `LongParameterList` is suppressed: the seventh collaborator is ADR-0049's check,
+ * which belongs where the intent's is, in the service; each is used, and there is
+ * nothing to bundle them into.
  */
+@Suppress("LongParameterList")
 @Service
 internal class CompleteUpload(
     private val assets: MediaAssetStore,
@@ -63,6 +73,7 @@ internal class CompleteUpload(
     private val execution: IdempotentExecution,
     private val clock: Clock,
     private val transactions: TransactionTemplate,
+    private val verifiedEmails: VerifiedEmails,
 ) {
     fun complete(
         owner: UUID,
@@ -70,6 +81,7 @@ internal class CompleteUpload(
         idempotency: IdempotentRequest,
     ): Completion {
         require(idempotency.userId == owner) { "the Idempotency-Key was prepared for a different caller than the one completing" }
+        verifiedEmails.requireVerified(owner)
         val seen = readOwn(mediaId, owner)
         val headed = if (seen.status == MediaStatus.PENDING_UPLOAD) Headed(headOf(seen)) else null
         val completion =

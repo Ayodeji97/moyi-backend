@@ -2,6 +2,7 @@ package com.moyi.gratitude.infra
 
 import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
+import com.moyi.common.security.VerifiedEmails
 import com.moyi.common.web.idempotency.IdempotencyConfiguration
 import com.moyi.identity.api.UserDirectory
 import io.micrometer.core.instrument.MeterRegistry
@@ -105,6 +106,10 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
 internal class GratitudeTestApplication {
     @Bean
     fun userDirectory(): UserDirectory = FakeUserDirectory()
+
+    /** `media`'s claim asks identity's other port (ADR-0049); here it reads the same fake directory. */
+    @Bean
+    fun verifiedEmails(directory: UserDirectory): VerifiedEmails = VerifiedEmails { directory.find(it)?.emailVerified == true }
 
     @Bean
     fun tokenRevocations(): TokenRevocations = TokenRevocations { TokenRevocation(invalidBefore = null) }
