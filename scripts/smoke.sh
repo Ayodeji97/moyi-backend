@@ -46,12 +46,12 @@
 # and with nothing else the partner does; one's own entry refused, the one 404
 # on both verbs for everything the caller was never shown, and each body that
 # is not one known type; after an ending that withdraws nothing, no new
-# reaction and the old one still removable; and after a withdrawal, the
+# reaction and the old one not removable either; and after a withdrawal, the
 # reaction on the withdrawn entry gone with its words under a tag that does
-# not move twice, the withdrawer's own left where it was, and both verbs
-# answering as they do for an entry deleted by hand. It holds no row: 409
-# REACTION_BUSY and FAVOURITE_BUSY, and the 204 a held row gets on a
-# tombstone, are the integration tests' alone.
+# not move twice, the withdrawer's own left where it was and no longer theirs
+# to take back, and both verbs answering as they do for an entry deleted by
+# hand. It holds no row: 409 REACTION_BUSY and FAVOURITE_BUSY, and the 204 a
+# held row gets on a tombstone, are the integration tests' alone.
 # Since slice C6a it reads the day's prompt: one for the bond before the
 # second member arrives, the same id for both members and each one's own
 # language, the same bytes after the partner opens, writes and reveals, an
@@ -91,7 +91,12 @@
 # (409 before the PUT, a replay under the same key, 422 without one), reads it as
 # its owner and is told 404 as another user, refuses a GIF (415) and 11 MB (413),
 # deletes it and sees the object gone from MinIO, and finds the URL in no log
-# line. Last run on 2026-10-29, for withdrawEntries required on /block, after main (e85ba1d,
+# line. Last run on 2026-10-29, for no reaction taken back after an ending (ADR-0037
+# q11), after main (df153d3, #102) was merged in, from a jar of f7e0654's code, on a fresh
+# database that applied V1 to V27 and V29 to V33, against its own compose project (moyi-0f:
+# Postgres 55443, Valkey 56390, MinIO 59273) and --attach: 1057 passed, 0 failed, 0 skipped,
+# 28 sections; on 2026-10-28 the same branch after #106, from 61510be, 1046, 0 and 0 in 28.
+# Before them, on 2026-10-29, for withdrawEntries required on /block, after main (e85ba1d,
 # #101) was merged in, from a jar of 6c6c3cd's code, on a fresh database that applied V1
 # to V27 and V29 to V33, against its own compose project (moyi-0f: Postgres 55443, Valkey
 # 56390, MinIO 59273) and --attach: 1056 passed, 0 failed, 0 skipped, 28 sections. Two runs
@@ -1872,7 +1877,9 @@ rows_are "…and one on the reactor's" "$RX_B_ENTRY" "1|THANK_YOU"
 
 # An ending that withdraws nothing. A reaction is seen by the other person, so
 # none may be left once the bond has ended, by either of them: after an ending
-# that would be contact. One left before it stays, and can still be taken back.
+# that would be contact. One left before it stays, and cannot be taken back from
+# the partner's entry either: a removal the other person sees is contact too
+# (ADR-0037 question 11). One's own entry is still 204.
 flush_buckets
 revealed_bond "a bond to be left with a reaction on it" "$RX_C" "$RX_B" "$RX_C_TEXT" "$RX_B2_TEXT"
 RX_BOND3="$RB_BOND"; RX_C_ENTRY="$RB_A_ENTRY"; RX_B2_ENTRY="$RB_B_ENTRY"
@@ -1885,10 +1892,11 @@ rows_are "the refused replacement changed nothing: the reaction from before the 
 rows_are "…and nothing was left on the other entry" "$RX_B2_ENTRY" "0|"
 is "…and both are still shown it: the one who left" "$(rx_views "$RX_C" "$RX_BOND3" myEntry)" '"MOVED" "MOVED" "MOVED"'
 is "…and the one who stayed" "$(rx_views "$RX_B" "$RX_BOND3" partnerEntry)" '"MOVED" "MOVED" "MOVED"'
-expect "DELETE …/reaction on the ended bond is 204" 204 "" -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
-rows_are "…and it is gone" "$RX_C_ENTRY" "0|"
-is "…for both of them" "$(rx_views "$RX_C" "$RX_BOND3" myEntry)|$(rx_views "$RX_B" "$RX_BOND3" partnerEntry)" 'null null null|null null null'
-expect "…and 204 again" 204 "" -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
+expect "DELETE …/reaction on the ended bond is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
+expect "…and DELETE by the one who left, on the other's entry" 409 '"code":"BOND_ARCHIVED"' -- -X DELETE "$API/entries/$RX_B2_ENTRY/reaction" -H "Authorization: Bearer $RX_C"
+expect "…while DELETE on one's own entry is still 204" 204 "" -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_C"
+rows_are "…and the reaction is still there" "$RX_C_ENTRY" "1|MOVED"
+is "…still shown to both of them" "$(rx_views "$RX_C" "$RX_BOND3" myEntry)|$(rx_views "$RX_B" "$RX_BOND3" partnerEntry)" '"MOVED" "MOVED" "MOVED"|"MOVED" "MOVED" "MOVED"'
 
 # The twin, deleted by hand: the author deletes their entry and then leaves.
 # What its reactor is answered is kept, to be compared below with what the
@@ -1910,8 +1918,8 @@ RX_HAND_DELETE="$(whole_response)"
 # The withdrawal. Each has a reaction on the other's entry (set above). The
 # author blocks, which takes their entries back: the reaction ON the withdrawn
 # entry stops being shown at once and its row goes with the words; the
-# reaction the withdrawer LEFT on the partner's entry stays, and is theirs to
-# take back (ADR-0037 decision 9).
+# reaction the withdrawer LEFT on the partner's entry stays, and can no longer
+# be changed or taken back (ADR-0037 decision 9, and question 11 as ruled).
 flush_buckets
 expect "the reactor's feed before the ending" 200 '"reaction":"HEART"' -- "$API/bonds/$RX_BOND/days" -H "Authorization: Bearer $RX_B"
 RX_B_FEED_TAG="$(tag)"
@@ -1955,9 +1963,9 @@ is "…the twin's response: with nothing held, a withdrawal and a deletion by ha
 is "the one who withdrew is still shown the reaction they left" "$(rx_views "$RX_A" "$RX_BOND" partnerEntry)" '"THANK_YOU" "THANK_YOU" "THANK_YOU"'
 is "…and none on their own tombstone" "$(rx_views "$RX_A" "$RX_BOND" myEntry)" 'null null null'
 expect "they cannot change it: 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/entries/$RX_B_ENTRY/reaction" -H "Authorization: Bearer $RX_A" -d '{"type":"HEART"}'
-expect "…and can take it back: 204" 204 "" -- -X DELETE "$API/entries/$RX_B_ENTRY/reaction" -H "Authorization: Bearer $RX_A"
-rows_are "…which removes it" "$RX_B_ENTRY" "0|"
-is "…for the partner too" "$(rx_views "$RX_B" "$RX_BOND" myEntry)" 'null null null'
+expect "…nor take it back: 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X DELETE "$API/entries/$RX_B_ENTRY/reaction" -H "Authorization: Bearer $RX_A"
+rows_are "…which leaves it there" "$RX_B_ENTRY" "1|THANK_YOU"
+is "…still shown to the partner" "$(rx_views "$RX_B" "$RX_BOND" myEntry)" '"THANK_YOU" "THANK_YOU" "THANK_YOU"'
 
 RX_LEAKED=""
 for words in "$RX_A_TEXT" "$RX_B_TEXT" "$RX_SOLO_TEXT" "$RX_C_TEXT" "$RX_B2_TEXT" "$RX_HAND_TEXT" "$RX_O_TEXT"; do grep -qF "$words" "$MOYI_LOG" && RX_LEAKED="$RX_LEAKED [$words]"; done

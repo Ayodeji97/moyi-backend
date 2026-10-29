@@ -2788,3 +2788,19 @@ Reality: Spring resolves a required body before the handler runs, so the `400` w
          generated client is told the truth.
 Wrong about: a framework's "required" being free. It is a check, and it runs where the
          framework runs it, which here was before authorisation.
+
+## 2026-10-28 · Fix · No reaction taken back after an ending — the ruling named the blocked member; the check also covered the withdrawer
+
+Expected: one line in `unreact` and the tests the brief named. The ruling (ADR-0037
+         question 11) was framed around a block: the blocked member taking reactions off the
+         blocker's entries.
+Reality: the check the ruling names, `react`'s `hasLeft || !isOpen`, is about the bond and
+         not about who blocked whom. It also refuses the withdrawer of decision 9, who
+         "may take each back", and the smoke had a probe pinning exactly that ("…and can
+         take it back: 204"). It is turned, and decisions 5 and 9 carry dated amendments.
+         Also: with the third `throw`, detekt's `ThrowsCount` failed the full build after
+         the class's tests were green. `unreact` now builds one refusal and throws it once,
+         as `react` does. The mutation was run again on that shape: five tests red.
+Wrong about: where a ruling's reach ends. It reaches as far as the predicate it names,
+         not as far as the example it was argued from, so search every probe and decision
+         that says the old answer.

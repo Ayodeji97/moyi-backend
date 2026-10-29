@@ -765,11 +765,11 @@ class OpenApiContractTest(
         (type.types ?: setOf(type.type)) shouldBe setOf("string")
         type.enum.map { it.toString() } shouldBe REACTION_TYPES
 
-        // Absent is success, on a tombstone and on an ended bond too; a row held by another transaction is REACTION_BUSY.
+        // Absent is success, on a tombstone too; a row held by another transaction is REACTION_BUSY; an ended bond is BOND_ARCHIVED.
         reaction.delete.operationId shouldBe "unreactToEntry"
         reaction.delete.responses.keys shouldContainExactlyInAnyOrder listOf("204", "401", "403", "404", "409", "429", "500")
         reaction.delete.description shouldContain "409 REACTION_BUSY"
-        reaction.delete.description shouldContain "never given for an entry the caller is shown as erased"
+        reaction.delete.description shouldContain "Neither is given for an entry the caller is shown as erased"
         reaction.delete.responses["204"]!!.content shouldBe null
         reaction.delete.requestBody shouldBe null
         reaction.delete.parameters.map { it.name } shouldBe listOf("entryId")
@@ -811,7 +811,8 @@ class OpenApiContractTest(
         val remove = reaction.delete.description.shouldNotBeNull()
         remove shouldContain "no reaction is success"
         remove shouldContain "never shown"
-        remove shouldContain "Allowed on a bond that has ended"
+        remove shouldContain "`409 BOND_ARCHIVED`"
+        remove shouldNotContain "Allowed on a bond that has ended"
 
         api.components.schemas["EntryResponse"]!!
             .allOf
