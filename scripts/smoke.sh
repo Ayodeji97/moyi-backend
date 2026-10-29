@@ -72,6 +72,9 @@
 # same for both; and after a leave, what was reached kept and nothing next, for both alike.
 # Since the favourites rulings (ADR-0036 questions 5 and 7) every day of the archive names the
 # partner and today does not, and a favourite's row holds no time (V26).
+# Since the entry-text rulings (ADR-0031, the owner's rulings 1 and 2) an entry of only
+# zero-width characters is the blank 422, on a submission and an edit, and 499 letters and an
+# ellipsis are 500 as typed and a 201, while 500 and a trailing space are 501 and a 422.
 # Every day it reads is today, but for last year's and the milestones' six
 # before today, put in by hand: no day ends during a run, so paging and past
 # days are the tests' to show. Since Phase 4 N1 it registers a push token for
@@ -91,7 +94,13 @@
 # (409 before the PUT, a replay under the same key, 422 without one), reads it as
 # its owner and is told 404 as another user, refuses a GIF (415) and 11 MB (413),
 # deletes it and sees the object gone from MinIO, and finds the URL in no log
-# line. Last run on 2026-10-29, for no reaction taken back after an ending (ADR-0037
+# line. Last run on 2026-10-29, for the entry-text rulings (ADR-0031 rulings 1 and 2), after
+# main (51df716, #103) was merged in, from a jar of b534158's code, on a fresh database that
+# applied V1 to V27 and V29 to V33, against its own compose project (moyi-0f: Postgres 55443,
+# Valkey 56390, MinIO 59273) and --attach: 1062 passed, 0 failed, 1 skipped (the tag across
+# the erasure, the poller having won the race), 28 sections; on 2026-10-28 the same branch
+# after #106, from 091bfa2, 1051, 0 and 0 in 28. Before it,
+# on 2026-10-29, for no reaction taken back after an ending (ADR-0037
 # q11), after main (df153d3, #102) was merged in, from a jar of f7e0654's code, on a fresh
 # database that applied V1 to V27 and V29 to V33, against its own compose project (moyi-0f:
 # Postgres 55443, Valkey 56390, MinIO 59273) and --attach: 1057 passed, 0 failed, 0 skipped,
@@ -1048,6 +1057,12 @@ if grep -qF "$ENTRY_TEXT" "$MOYI_LOG"; then fail "text in log" "the entry text a
 # the field, not a 500 from an uncaught IllegalArgumentException.
 expect "an entry of one non-breaking space is 422 on text, not 500" 422 '"field":"text"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"\u00a0"}'
 
+# ADR-0031, ruling 2 (the owner, 2026-10-21): a text of only zero-width
+# characters (Unicode's default-ignorable set) is refused as blank, the same
+# 422 on the field. A zero-width space, a joiner and a byte-order mark, sent as
+# the escapes a client that escapes non-ASCII would send.
+expect "an entry of only zero-width characters is 422 on text, as blank" 422 '"field":"text"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"\u200b\u200d\ufeff"}'
+
 # An unpaired UTF-16 surrogate has no UTF-8 form: it used to be a 201 whose row
 # held '?' in its place (found 2026-10-04). It is a 422 on the field now.
 expect "an entry with an unpaired surrogate is 422 on text" 422 '"field":"text"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"thank you\ud800"}'
@@ -1094,7 +1109,19 @@ expect "…and the day it landed on opens SUSPENDED, not OPEN" 200 '"status":"SU
 
 expect "DELETE before reveal frees the author's slot" 204 '' -- -X DELETE "$API/entries/$SOLO_ENTRY" -H "Authorization: Bearer $AUTHOR_ACCESS"
 expect "the author can write a replacement on the same day" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$SOLO_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d '{"text":"replacement after deletion"}'
+SOLO_REPLACEMENT="$(printf '%s' "$LAST_BODY" | jget id)"
 expect "today deterministically selects the live replacement" 200 '"text":"replacement after deletion"' -- "$API/bonds/$SOLO_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
+
+# ADR-0031, ruling 1 (the owner, 2026-10-21): the 500 are counted as typed, on
+# the text as sent. 499 letters and a typographic ellipsis are 500 so; under
+# NFKC they were 502 and a 422. Untrimmed: a trailing space is counted too.
+expect "DELETE frees the slot once more" 204 '' -- -X DELETE "$API/entries/$SOLO_REPLACEMENT" -H "Authorization: Bearer $AUTHOR_ACCESS"
+AS_TYPED_TEXT="$(python3 -c 'print("a" * 499 + "\u2026")')"
+expect "499 letters and an ellipsis are 500 as typed, and are 201" 201 "\"text\":\"$AS_TYPED_TEXT\"" -- -X POST "$API/bonds/$SOLO_BOND/entries" -H "Authorization: Bearer $AUTHOR_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"$AS_TYPED_TEXT\"}"
+AS_TYPED_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+expect "an edit to 500 letters and a trailing space is 501, 422 on text" 422 '"field":"text"' -- -X PATCH "$API/entries/$AS_TYPED_ENTRY" -H "Authorization: Bearer $AUTHOR_ACCESS" -d "{\"text\":\"$(python3 -c 'print("a" * 500)') \"}"
+expect "an edit to only zero-width characters is 422 on text" 422 '"field":"text"' -- -X PATCH "$API/entries/$AS_TYPED_ENTRY" -H "Authorization: Bearer $AUTHOR_ACCESS" -d '{"text":"\u2060\u00ad"}'
+expect "…and the entry is as it was" 200 "\"text\":\"$AS_TYPED_TEXT\"" -- "$API/bonds/$SOLO_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
 
 echo; echo "gratitude — a timed reveal waits in its own status (FR-062, ADR-0032)"
 flush_buckets

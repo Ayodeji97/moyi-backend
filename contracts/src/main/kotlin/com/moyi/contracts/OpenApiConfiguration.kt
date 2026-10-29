@@ -234,16 +234,20 @@ class OpenApiConfiguration {
             text.maxLength = ENTRY_TEXT_MAX_OCTETS
             text.pattern = NOT_ONLY_SPACE_DOCUMENTED_PATTERN
             text.description =
-                "FR-041: at least one non-whitespace character (Unicode-aware, so a lone non-breaking space does " +
-                "not count either), at most $ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
+                "FR-041: at least one character that is neither whitespace (Unicode-aware, so a lone " +
+                "non-breaking space does not count either) nor invisible (Unicode's Default_Ignorable_Code_Point: " +
+                "a text of only zero-width spaces, joiners, variation selectors and the like is refused as " +
+                "empty; the published `pattern` does not express this, and matches such a text), at most " +
+                "$ENTRY_TEXT_MAX_OCTETS UTF-8 octets and at most " +
                 "$ENTRY_TEXT_MAX_GRAPHEMES user-perceived characters (graphemes, not UTF-16 code units — an " +
                 "emoji sequence can be one grapheme and several of those). `maxLength` here states the octet " +
                 "cap in UTF-16 characters, which is not the same unit as either real limit and both are wider " +
                 "than this hint suggests for multi-byte text: treat it as a coarse client-side backstop, not a " +
                 "guarantee. The server enforces both limits exactly and is the only authority on whether a " +
                 "given body is accepted. The text is stored and returned exactly as sent — not normalised, " +
-                "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted on its NFKC-normalised, trimmed form " +
-                "(so a typographic ellipsis counts as three), the octets on the text as sent. U+0000 is refused."
+                "not trimmed. The $ENTRY_TEXT_MAX_GRAPHEMES are counted as typed, on the text as sent, " +
+                "untrimmed (so a typographic ellipsis counts as one, and a leading or trailing space counts too), " +
+                "and so are the octets. U+0000 is refused."
         }
     }
 
@@ -587,10 +591,17 @@ private val MEDIA_STATUSES =
  * `.*\S.*`'s own shape. No `(?U)` counterpart is needed: JS, Python and
  * .NET's `\S` already excludes the Unicode whitespace category `(?U)` exists
  * to add in Java, so the two patterns reject the same strings in every case
- * this constant is used for (a lone non-breaking space, an all-whitespace
- * multi-line value). This is the *documented* pattern only — the server's
+ * of whitespace this constant is used for (a lone non-breaking space, an
+ * all-whitespace multi-line value). This is the *documented* pattern only — the server's
  * own enforcement (`bond.web.NOT_ONLY_SPACE`, `gratitude.web.ValidEntryText`)
  * is untouched by this constant.
+ *
+ * **For an entry's text it is looser than the server.** Since ADR-0031's
+ * ruling 2 was built (2026-10-28) the server also refuses a text of only
+ * invisible characters (Unicode's `Default_Ignorable_Code_Point`), and no
+ * flag-free pattern says that: a text of one U+200B matches `\S` here and
+ * is a `422` there. The entry text's description says so. For a bond's
+ * name the two still agree.
  */
 private const val NOT_ONLY_SPACE_DOCUMENTED_PATTERN = "[\\s\\S]*\\S[\\s\\S]*"
 

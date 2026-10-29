@@ -1,7 +1,7 @@
 # ADR-0031 — The Bond-day, and the first entry
 
 **Status:** Accepted · **Date:** 2026-09-29 · **Deciders:** Daniel
-**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review) · 2026-10-05 (C2: the Owed list discharged, decision 17's read rule qualified — ADR-0032; C3: its Owed list discharged — ADR-0033) · 2026-10-28 (decision 10's narrow tombstone, `ErasedEntryResponse`, superseded — ADR-0032 question 2)
+**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review) · 2026-10-05 (C2: the Owed list discharged, decision 17's read rule qualified — ADR-0032; C3: its Owed list discharged — ADR-0033) · 2026-10-28 (decision 10's narrow tombstone, `ErasedEntryResponse`, superseded — ADR-0032 question 2) · 2026-10-28 (the owner's two `EntryText` rulings of 2026-10-21 built: the 500 counted as typed, an entry of only invisible characters refused; decision 23 annotated, and "Rulings — the owner, 2026-10-21" gains the decisions they were built with)
 
 ## Context
 
@@ -556,8 +556,12 @@ built now:
 
 - **Stored: the raw string**, not normalised and not trimmed. Conservative by construction:
   raw text can be normalised later, normalised text can never be restored.
-- **Blank** is judged on the NFKC-normalised, trimmed form.
-- **The 500 graphemes** are counted on that same form, which is the spec's rule.
+- **Blank** is judged on the NFKC-normalised, trimmed form. *(Since 2026-10-28 blank also
+  means only invisible characters — Unicode's `Default_Ignorable_Code_Point` — the owner's
+  ruling 2, below.)*
+- ~~**The 500 graphemes** are counted on that same form, which is the spec's rule.~~
+  *Superseded 2026-10-28 by the owner's ruling 1, built: the 500 are counted on the raw
+  text as sent, untrimmed. See "Rulings — the owner, 2026-10-21", below.*
 - **The 8192 octets** are measured on the stored bytes, because that is what V12's
   `entries_text_octets_check` measures, and the two must agree or an accepted text is a
   `500` at the insert. The NFKC form can be larger than the raw; it is never stored, so
@@ -570,14 +574,17 @@ built now:
 
 Costs: entries keep leading and trailing whitespace a client did not strip (a later slice
 can trim on read). Rows a development database wrote before this hold the normalised form
-and stay that way. **One product question is open, flagged to Daniel and not ruled:**
+and stay that way. ~~**One product question is open, flagged to Daniel and not ruled:**
 counting on the NFKC form means an iOS typographic ellipsis counts as three of the 500, so a
 client's counter must normalise the same way or a member sees "fits" and gets a `422`. The
 spec chose this; a test (`the 500 is counted on the NFKC form`) pins it and is the one to
-change if he decides otherwise.
+change if he decides otherwise.~~
 
-*(Ruled by the owner on 2026-10-21: counted on the text as typed, to be built. See
-"Rulings — the owner, 2026-10-21", below.)*
+*(Ruled by the owner on 2026-10-21: counted on the text as typed. Built 2026-10-28; the
+test is now `the 500 is counted as typed, so an ellipsis counts as one`. That cost is gone,
+and a smaller one replaces it: the server counts the leading and trailing whitespace it
+stores, so 500 letters and a trailing space are 501 — which is what a client counting its
+own text field sees too. See "Rulings — the owner, 2026-10-21", below.)*
 
 **24. An `@Idempotent` request's body is buffered by the interceptor, bounded, and a body
 it cannot take is a `4xx`.** The caching filter used to read every `POST`/`PUT`/`PATCH` body
@@ -933,8 +940,8 @@ and the rows asserted still whole.*
   first): whether the 500 should be counted on the raw text rather than the NFKC form, and
   whether an entry made only of zero-width characters should be refused. The C1 follow-up
   left both alone on purpose.
-  *(Both ruled by the owner on 2026-10-21, and both to be built: "Rulings — the owner,
-  2026-10-21", below.)*
+  *(Both ruled by the owner on 2026-10-21, and both built on 2026-10-28: "Rulings — the
+  owner, 2026-10-21", below.)*
 - **V13's backfill is covered twice.** `AnchorIntervalBackfillTest` migrates a database to
   just before V13, inserts bonds in every state and in the zones where a date is easiest to
   get wrong, runs V13, and loads each timeline through the application's own loader; the
@@ -946,8 +953,8 @@ and the rows asserted still whole.*
 ## Rulings — the owner, 2026-10-21
 
 The two questions about `EntryText` that decision 23 and "Owed" left open. They were put to
-the owner on 2026-10-03 and not recorded then as his. Neither ruling is built here; both are
-to be built in a later pull request.
+the owner on 2026-10-03 and not recorded then as his. Neither ruling was built when it was
+recorded; both are built now (2026-10-28), with the decisions under "Built" below.
 
 1. **The 500 are counted on the NFKC form** (decision 23), so an iOS typographic ellipsis
    counts as three of them.
@@ -960,6 +967,64 @@ to be built in a later pull request.
    zero-width character in place, so such a text passes the blank check and is stored.
 
    *Ruled by the owner on 2026-10-21, to be built: it is refused as empty, a `422`.*
+
+### Built, 2026-10-28
+
+Both rulings, in `EntryText` (`modules/gratitude/.../domain/EntryText.kt`), with five
+decisions the rulings did not make themselves:
+
+1. **"As sent" is the raw string, untrimmed.** `Graphemes.count(raw)`: no NFKC and no trim in
+   the count. Leading and trailing whitespace a client sent is stored (decision 23), so it is
+   counted, as the client's own text field counts it: 500 letters and a trailing space are
+   501 and a `422`. 499 letters and `…` are 500 and a `201` (they were 502 under NFKC).
+2. **"Zero-width" is Unicode's `Default_Ignorable_Code_Point` set**, not a hand-picked list:
+   the set Unicode defines as rendered as nothing. Stated once, in `domain/Invisible.kt`,
+   copied from `DerivedCoreProperties-16.0.0.txt` (Unicode 16.0 is what JDK 25 ships), and
+   counted by a test against that file's own total, 4174 code points. `Character.getType ==
+   FORMAT` was not used: it misses the variation selectors, U+034F, the Hangul fillers and
+   the reserved tag-block points, and includes visible format characters. The blank check
+   keeps its form (after NFKC and `trim`, which the ruling left alone) and asks for one code
+   point that is neither whitespace (Kotlin's `isWhitespace`, as `isNotBlank` used) nor
+   default-ignorable. Same message, "an entry must say something", the same `422`. An
+   invisible character beside a visible one — a ZWJ in a family emoji, U+FE0F after a heart —
+   is part of the text and is kept. **Search is not changed**: `SearchTerms` keeps its own
+   count and blank rule until ADR-0039's question 11 is ruled.
+3. **Reading a row back never fails on a row the old rule accepted.** Both rulings tighten
+   `EntryText.of`, and development and production databases hold entries written under the
+   old rule: a zero-width-only entry, or 500 graphemes and a trailing space. The mapper ran
+   `of` on every read, so either would have made every read of its day a `500`. The factory
+   is split: `of` is the write path (every rule); `fromStorage` checks only what a stored
+   text is and a reader relies on (NUL, unpaired surrogate, octets) and is used by
+   `GratitudeMappers` alone. **Edits go through `of`**, so an edit of an old entry that is
+   now over-long must fit the new count; that is correct, an edit being a new write.
+4. **The order of checks stays**: NUL, unpaired surrogate, octets, blank (now with the
+   ignorables), graphemes.
+5. **The edge is unchanged in shape**: `@ValidEntryText` still asks `EntryText.of`. The
+   contract's two `text` descriptions say what is counted and that invisible-only text is
+   refused; no schema changed, but more requests are refused than before: an entry of only
+   invisible characters, and one whose raw text is over 500 graphemes though its trimmed
+   NFKC form was not.
+
+**A consequence found by the build, not by the plan:** the archive's worst-case entry
+(ADR-0036 decision 6) was `a` and 8,191 U+001F, one character under the trimmed count and
+49,147 octets as JSON. Counted as sent it is 8,192 characters and a `422`. The largest entry
+is now a backslash with 3,846 combining acutes and 499 U+001F, 10,688 octets out.
+`GetDays`' bound is measured per text and did not change; its KDoc and `DaysFeedTest`'s
+largest page were rebuilt for the new worst case (255,507 octets of 262,144 measured, with
+the longest reaction on every entry that can carry one; ADR-0036 decision 6 carries the
+note).
+
+**An open product question for the owner, found in review and not built:** an entry of
+only C0 control characters (U+0001, say) or only U+2800 (the braille blank, which renders
+as an empty cell) is still accepted. Neither is default-ignorable, so ruling 2 as built does
+not reach them, and neither is whitespace to Kotlin (U+001C–U+001F are, and are refused).
+Whether "says nothing" should take in either is the owner's to rule; `Invisible` is the one
+place a wider set would go.
+
+**Owed, not done here:** the corpus — spec §3.2 and doc 04 §7 say "NFKC-normalised before
+counting" — lives in another repository and still says so; and the KMP client's counter
+(`moyi-app`) should count grapheme clusters of the raw text, which is now what the server
+counts.
 
 ## Revisit when
 

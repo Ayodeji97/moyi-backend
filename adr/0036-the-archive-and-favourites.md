@@ -236,6 +236,16 @@ earlier than `limit` would have put it.
   hundred entries: about 1.4 KB more than was measured (the conformance review's
   arithmetic; not built). The margin is about 31 KB, and a new field on an entry spends it
   at a hundred entries a page.
+  *(2026-10-28, ADR-0031's ruling 1 built: the 500 are counted on the text as sent, so `a`
+  and 8,191 U+001F are a `422` and the largest entry is now 10,688 octets out — a
+  backslash with 3,846 combining acutes, and 499 U+001F. The bound and `octetsAsJson` are
+  unchanged. `DaysFeedTest` now fills the page with nine days of two such entries and one
+  that brings the text to 196,608 exactly, among forty days of tombstones, with `THANK_YOU`
+  (the longest reaction) on each of the twenty entries that can carry one, and measures
+  255,507 octets of 262,144, with the partner's name at its longest on every day (added
+  2026-10-27, about 23.5 KB of it). Every day costs about 1,174 octets beside its text, so
+  a page at the text bound is that size whichever entries carry the text: the margin is
+  about 6.6 KB, less the 1.4 KB of production timestamps.)*
 - The count is an upper bound on what the serializer writes, never under: the reviewer
   compared it with the application's mapper over every scalar of the Basic Multilingual
   Plane.
@@ -1074,7 +1084,8 @@ Each is built one way and cheap to turn.
 
    **What it costs decision 6.** The name is on fifty days a page, and identity takes 80
    characters with no rule against controls, which JSON writes as six octets each: at its
-   largest about 25 KB of the margin, which leaves about 4 KB. `DaysFeedTest` builds the
+   largest about 25 KB of the margin, which leaves about 4 KB (about 6.6 KB as measured on
+   2026-10-28, decision 6's note). `DaysFeedTest` builds the
    largest page with the longest name on every day and measures it, and
    `OpenApiContractTest` fails if identity's limit ever grows past the length it measured
    with (`ArchivePageBudget`). On-this-day is not measured: it is capped at one day a year
@@ -1242,9 +1253,12 @@ Added after the conformance review, which found these missing from the list:
   and fails first.
 - A field is added to a day, or the display name's limit or its rules change: since
   2026-10-27 the name spends most of that margin at its largest (question 5's amendment),
-  and about 4 KB is left.
+  and about 4 KB is left. *(Measured 2026-10-28 with the longest reaction too: about
+  6.6 KB, less 1.4 KB of production timestamps; decision 6's note.)*
 - The entry limit changes, or `EntryText` starts counting control characters: the worst
-  case of decision 6 moves with it.
+  case of decision 6 moves with it. *(Happened 2026-10-28: ADR-0031's ruling 1 counts the
+  500 on the text as sent, so a control is a character; the worst case was rebuilt and
+  re-measured, decision 6's note.)*
 - A second route by entry id arrives (reactions, C5c): decision 11, or its own reason.
 - A read path is added that renders an entry (search, on-this-day, C6): it lists by
   decision 1's predicate, renders through the gate and reads the marker last (decision
