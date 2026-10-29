@@ -218,6 +218,10 @@ internal class MediaAssetStore(
      * next run sees whether the claim committed. An asset being processed
      * (UPLOADED, PROCESSING) is not this statement's: it is the stuck-pipeline
      * alert's. Returns the ids it deleted.
+     *
+     * The rows are picked in a `MATERIALIZED` CTE so that the locking select
+     * runs exactly once: in a subquery the planner may rescan it, and change or
+     * lock more rows than [limit] (review of #110). The same for [demote].
      */
     fun reap(
         now: Instant,
@@ -225,8 +229,7 @@ internal class MediaAssetStore(
     ): List<UUID> =
         jdbc.query(
             """
-            UPDATE media_assets SET status = 'DELETED', deleted_at = ?
-            WHERE id IN (
+            WITH picked AS MATERIALIZED (
                 SELECT id FROM media_assets
                 WHERE attached_entry_id IS NULL
                   AND ((status = 'PENDING_UPLOAD' AND expires_at < ?)
@@ -235,13 +238,16 @@ internal class MediaAssetStore(
                 LIMIT ?
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING id
+            UPDATE media_assets m SET status = 'DELETED', deleted_at = ?
+            FROM picked
+            WHERE m.id = picked.id
+            RETURNING m.id
             """.trimIndent(),
             ID,
-            Timestamp.from(now),
             Timestamp.from(now.minus(Retention.PENDING_GRACE)),
             Timestamp.from(now.minus(Retention.UNATTACHED)),
             limit,
+            Timestamp.from(now),
         )
 
     /**
@@ -258,12 +264,7 @@ internal class MediaAssetStore(
     ): List<UUID> =
         jdbc.query(
             """
-            UPDATE media_assets m SET
-                tier = 2,
-                variants = d.variant_array,
-                width = (d.display ->> 'width')::int,
-                height = (d.display ->> 'height')::int
-            FROM (
+            WITH d AS MATERIALIZED (
                 SELECT a.id, jsonb_build_array(v.display) AS variant_array, v.display
                 FROM media_assets a
                 CROSS JOIN LATERAL (
@@ -277,7 +278,13 @@ internal class MediaAssetStore(
                 ORDER BY a.ready_at
                 LIMIT ?
                 FOR UPDATE OF a SKIP LOCKED
-            ) d
+            )
+            UPDATE media_assets m SET
+                tier = 2,
+                variants = d.variant_array,
+                width = (d.display ->> 'width')::int,
+                height = (d.display ->> 'height')::int
+            FROM d
             WHERE m.id = d.id
             RETURNING m.id
             """.trimIndent(),

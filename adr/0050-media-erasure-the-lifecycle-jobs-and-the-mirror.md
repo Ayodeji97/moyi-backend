@@ -30,8 +30,9 @@ refuses it. `gratitude` calls it from `EraseEntry.erase`, the routine an author'
 withdrawal's consumer and the close job's and a read's withdrawal pre-steps (`EraseWithdrawnEntries`)
 all go through, so the four cannot come to differ, and account deletion (Phase 5) gets it by
 erasing through the same routine. It is called on every `erase`, not only the one that erases: it
-releases nothing twice, so a repeated delete costs one statement and mends an entry erased before
-this existed.
+releases nothing twice, so a repeated call costs one statement and changes nothing. No asset is
+attached to an entry erased before this (production has had no storage, so no asset exists), and
+nothing backfills one.
 
 - **Keyed by the entry, not by ids** (the spec wrote `release(ids)`). Which asset is attached where
   is `media`'s own record; keyed by it, a caller cannot forget an id (the voice note, once D3
@@ -68,7 +69,8 @@ succeeds, so a purge delivered twice, or after a best-effort delete, changes not
 - **It holds no lock on the asset while it reaches the storage** (ADR-0047 decision 2): it reads
   the row, deletes, and only then writes `purged_at`.
 
-**3. The reaper, hourly.** One statement picks and changes, under the row locks, up to a batch of
+**3. The reaper, hourly.** One statement picks (in a `MATERIALIZED` CTE, so the locking select runs once) and changes,
+under the row locks, up to a batch of
 assets **attached to nothing** that are either `PENDING_UPLOAD` an hour past their URL's expiry, or
 `READY`/`FAILED` for a day counted from the **latest of their creation, their readiness and the
 moment an entry let them go** (`detached_at`, V36, stamped by `MediaAttachments.release`). The
@@ -110,7 +112,9 @@ consumer, and that is what it is: the outbox's poller is its timer, and its retr
 every quarter-hour as the close-job check is: it fails at once on a photo `PROCESSING` for 30
 minutes (doc 11:97), a `DELETED` asset not purged after a day (an erasure that keeps failing is a
 privacy matter someone must hear about), or either job's ShedLock row not taken on time; and
-silence alarms too. `ops/monitoring/media-pipeline-stuck.md` is doc 11:111's runbook.
+silence alarms too. The ShedLock row says a job started, not that it finished: a job that throws on
+every run is seen only in the application's log (and, for the reaper, a day later as nothing
+reaped); exporting the jobs' last-success gauges is owed with the rest of doc 11's metrics. `ops/monitoring/media-pipeline-stuck.md` is doc 11:111's runbook.
 
 **7. The media mirror (Q15).** `ops/media-mirror/`: a nightly systemd timer (04:30 UTC) runs the
 MinIO client `mc`, from the image `docker-compose.yml` already pins, so nothing is installed on the

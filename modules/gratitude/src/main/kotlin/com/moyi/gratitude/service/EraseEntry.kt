@@ -95,8 +95,7 @@ internal class EraseEntry(
      * pre-step and any erasure added later (account deletion) cannot come to
      * differ in it. It is asked on every call, not only the one that erases:
      * `media` keys it by the attachment and releases nothing twice, so a
-     * repeated delete costs one statement and mends an entry erased before
-     * this existed.
+     * repeated call costs one statement and changes nothing.
      *
      * [now] is cut to microseconds here, so `deleted_at` reads back as it
      * was written whoever the caller is.
