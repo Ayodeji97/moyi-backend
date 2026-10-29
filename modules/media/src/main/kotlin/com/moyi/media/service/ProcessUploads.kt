@@ -115,7 +115,12 @@ internal class ProcessUploads(
             }
 
             MediaAsset.Processing.NOT_THIS_KIND, MediaAsset.Processing.NOTHING_TO_DO -> {
-                Unit
+                // Deleted after an attempt began: that attempt may have written a variant after the owner's purge ran
+                // (a delivery that then failed and is retried here), so the objects are handed to media.purge again
+                // (D5, review of #110). Every key is derived, so a purge that finds nothing changes nothing.
+                if (asset.isGone && asset.processingAttempts > 0) {
+                    releases.released(asset.id, clock.instant().truncatedTo(ChronoUnit.MICROS))
+                }
             }
         }
     }

@@ -100,6 +100,38 @@ internal class ProcessingInterleavingTest(
         ) shouldBe 2
     }
 
+    /**
+     * Review of #110: the owner deletes a photo while it is processed, and
+     * `media.purge` runs for that deletion **before** the attempt writes its
+     * full variant; the attempt then fails on the display one, so it never
+     * reaches the decision that would clean up after it. The retry finds the
+     * photo deleted, and must hand its objects to the purge again.
+     */
+    @Test
+    fun `a variant written after the deletion's purge, by an attempt that then failed, is purged on the retry`() {
+        val mediaId = client.upload(ada, TestImages.jpeg(64, 48))
+        val upload = storageKeyOf(mediaId)
+        gate.close()
+        storage.putsLeft = 1
+
+        val worker = CompletableFuture.supplyAsync { dispatcher.dispatchDue(clock.instant(), BUDGET) }
+        gate.awaitEntered()
+        client.delete(ada, mediaId).status shouldBe 204
+        // The deletion's purge, while the attempt is still decoding: nothing has been written yet.
+        dispatcher.dispatchDue(clock.instant(), BUDGET).delivered shouldBe 1
+        gate.open()
+        worker.get(30, TimeUnit.SECONDS).failed shouldBe 1
+        stored(variantOf(upload, "full")) shouldBe true
+
+        storage.putsLeft = Int.MAX_VALUE
+        clock.advance(Duration.ofMinutes(1))
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+        dispatcher.dispatchDue(clock.instant(), BUDGET)
+
+        stored(variantOf(upload, "full")) shouldBe false
+        stored(upload) shouldBe false
+    }
+
     @Test
     fun `a storage that fails while a photo is processed is retried by the outbox, and the photo is made ready then`() {
         val mediaId = client.upload(ada, TestImages.jpeg(64, 48))

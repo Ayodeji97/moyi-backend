@@ -71,10 +71,17 @@ internal class MediaStorageHangsTest(
         jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE aggregate_id = ?::uuid", Int::class.java, mediaId) shouldBe 0
     }
 
-    /** Advisory and row locks any other backend holds right now: the request's key lock, if it had a transaction open. */
+    /**
+     * Advisory and row locks any other client session on this database holds
+     * right now: the request's key lock, if it had a transaction open. Client
+     * sessions only, on this database only: an autovacuum ANALYZE takes a
+     * transaction id too, and once made this test fail on CI (review of #110).
+     */
     private fun locksHeldByOthers(): Int =
         jdbc.queryForObject(
-            "SELECT count(*) FROM pg_locks WHERE pid <> pg_backend_pid() AND locktype IN ('advisory', 'transactionid')",
+            "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid " +
+                "WHERE l.pid <> pg_backend_pid() AND l.locktype IN ('advisory', 'transactionid') " +
+                "AND a.backend_type = 'client backend' AND a.datname = current_database()",
             Int::class.java,
         )!!
 
