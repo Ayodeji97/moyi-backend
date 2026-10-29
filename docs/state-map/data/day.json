@@ -4216,7 +4216,7 @@
     "from": "SUBMITTED",
     "action": "POST /api/v1/bonds/{bondId}/block",
     "actor": "you",
-    "when": "the body is absent, or does not say withdrawEntries: false",
+    "when": "the body says withdrawEntries: true",
     "guards": [
       {
         "region": "account",
@@ -4284,7 +4284,7 @@
     "from": "REVEALED",
     "action": "POST /api/v1/bonds/{bondId}/block",
     "actor": "you",
-    "when": "the body is absent, or does not say withdrawEntries: false",
+    "when": "the body says withdrawEntries: true",
     "guards": [
       {
         "region": "account",
@@ -4338,7 +4338,7 @@
     "to": "REVEALED",
     "status": 204,
     "code": null,
-    "reason": "Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. Repeating the block without the flag takes it back after all.",
+    "reason": "Your revealed entry stays readable to both of you, in a record neither can add to. You may still delete it yourself. Repeating the block with withdrawEntries: true takes it back after all.",
     "rule": "FR-029a, ADR-0035 §11, §15",
     "evidence": "smoke",
     "evidenceRef": "a block that says to keep the entries is 204",
@@ -4451,7 +4451,7 @@
     "from": "PARTIAL",
     "action": "POST /api/v1/bonds/{bondId}/block",
     "actor": "you",
-    "when": "the body is absent, or does not say withdrawEntries: false, and the day's one live entry is yours",
+    "when": "the body says withdrawEntries: true, and the day's one live entry is yours",
     "guards": [
       {
         "region": "account",
@@ -4517,7 +4517,7 @@
     "from": "PENDING_REVEAL",
     "action": "POST /api/v1/bonds/{bondId}/block",
     "actor": "you",
-    "when": "the body is absent, or does not say withdrawEntries: false",
+    "when": "the body says withdrawEntries: true",
     "guards": [
       {
         "region": "account",

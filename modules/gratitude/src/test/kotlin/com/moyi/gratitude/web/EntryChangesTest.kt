@@ -469,10 +469,10 @@ internal class EntryChangesTest(
                 block(bea, """{"withdrawEntries":false}""").status shouldBe 204
             }
 
-            // The default: Bea's entries are withdrawn and, with no poller
+            // Withdrawing: Bea's entries are withdrawn and, with no poller
             // in this context, not yet erased. Her own delete erases them now.
             Ending.BLOCK_WITHDRAWING -> {
-                block(bea, null).status shouldBe 204
+                block(bea, """{"withdrawEntries":true}""").status shouldBe 204
                 jdbc.queryForObject("SELECT count(*) FROM bond_entry_withdrawals", Int::class.java) shouldBe 1
             }
 
@@ -491,15 +491,13 @@ internal class EntryChangesTest(
 
     private fun block(
         userId: UUID,
-        body: String?,
+        body: String,
     ): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/bonds/$bondId/block") {
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(userId).token}")
-                if (body != null) {
-                    contentType = MediaType.APPLICATION_JSON
-                    content = body
-                }
+                contentType = MediaType.APPLICATION_JSON
+                content = body
             }.andReturn()
             .response
 

@@ -151,7 +151,7 @@ internal class BondLockFreshReadTest(
         val response =
             whileQueuedBehindTheBondLock(
                 bond.id,
-                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/block") },
+                request = { post(bond.ada, "/api/v1/bonds/${bond.id}/block", """{"withdrawEntries":true}""") },
                 committedMeanwhile = { holder -> holder.partnerJoins(bond.id, bond.bea) },
             )
 
@@ -621,7 +621,17 @@ internal class BondLockFreshReadTest(
     private fun post(
         userId: UUID,
         path: String,
-    ): MockHttpServletResponse = mockMvc.post(path) { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }.andReturn().response
+        body: String? = null,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post(path) {
+                header(HttpHeaders.AUTHORIZATION, bearer(userId))
+                if (body != null) {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = body
+                }
+            }.andReturn()
+            .response
 
     private fun leftAt(
         bondId: String,

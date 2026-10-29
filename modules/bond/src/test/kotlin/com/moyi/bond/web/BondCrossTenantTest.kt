@@ -68,12 +68,15 @@ internal class BondCrossTenantTest(
             // invite id is even looked at.
             "POST /api/v1/bonds/{bondId}/invites" to Fixture(),
             "DELETE /api/v1/bonds/{bondId}/invites/{inviteId}" to Fixture(),
-            // Slice B3. Neither takes a body: a non-member must be refused
-            // before anything about the bond's state is examined — including,
-            // for block, that it is archived, which is the one state that path
-            // accepts from a member.
+            // Slice B3. A non-member must be refused before anything about
+            // the bond's state is examined — including, for block, that it is
+            // archived, which is the one state that path accepts from a
+            // member. Leave's body is optional. Block's flag is required
+            // (ADR-0035 question 1), so its fixture sends one: without it a
+            // member would be refused too. That a stranger who sends none
+            // still gets this 404 is `BondEndingEndpointTest`'s.
             "POST /api/v1/bonds/{bondId}/leave" to Fixture(),
-            "POST /api/v1/bonds/{bondId}/block" to Fixture(),
+            "POST /api/v1/bonds/{bondId}/block" to Fixture(body = """{"withdrawEntries":false}"""),
             // Slice B4. The PATCH needs a body **and** an `If-Match`, or it is
             // refused at 428 before the guard is what is being tested — which
             // would make this case pass for the wrong reason.

@@ -773,19 +773,29 @@ private fun requireDiscriminatorProperty(api: OpenAPI) {
  * Says, on each of the two routes that end a bond, what an absent
  * `withdrawEntries` does there (ADR-0035 decision 11).
  *
- * One request type serves both and the flag's default is opposite on the
- * two: absent, the caller's entries are erased on one and kept on the
- * other, and an erasure cannot be undone. Generated, the type is an
+ * One request type serves both and an absent flag means something
+ * different on each: on `/leave` the caller's entries are kept, and on
+ * `/block` the request is refused with `400` (ADR-0035 questions 1 and 11),
+ * where until 2026-10-28 it erased them. Generated, the shared type is an
  * optional nullable boolean with nothing beside it, so a person writing a
- * client from this document could not learn that leaving the field out
- * destroys something. The default is stated on each operation, because a
- * `default` on the shared schema would be right for one route and wrong
- * for the other; the schema's own description says only that it depends.
+ * client from this document could not learn either from it. What absence
+ * means is stated on each operation, because a `default` on the shared
+ * schema would be right for one route and wrong for the other; the
+ * schema's own description says only that it depends.
  *
  * **Neither description names the ending** (ADR-0028 decision 8). Each
  * route's path already is its name; the prose calls the other one "the
- * other route that takes this body", so nothing here adds to what tells
+ * other route that ends a bond", so nothing here adds to what tells
  * the two apart. `OpenApiContractTest` holds both points.
+ *
+ * **On one route the flag is required** (ADR-0035 questions 1 and 11, the
+ * owner's ruling of 2026-10-21), and there the body is required too, and
+ * refers to [REQUIRED_END_BOND_REQUEST]: the same one property, required and
+ * never null. The handler still takes the shared, optional type, so that the
+ * guard runs before an absent flag is refused, and springdoc can only see
+ * that; the document states the rule the route enforces, as it does for
+ * `If-Match`. A schema of its own rather than a change to the shared one,
+ * which is still right for the other route.
  *
  * By operation id and schema name, as the configuration's own lists of
  * operations are and for their reason: this module names no controller.
@@ -796,7 +806,23 @@ private fun requireDiscriminatorProperty(api: OpenAPI) {
 private fun documentEndingDefaults(api: OpenAPI) {
     api.paths.values.flatMap { it.readOperations() }.forEach { operation ->
         ENDING_DESCRIPTIONS[operation.operationId]?.let { operation.description = it }
+        if (operation.operationId in FLAG_REQUIRED_OPERATIONS) {
+            operation.requestBody.required = true
+            operation.requestBody.content.values
+                .forEach { it.schema = Schema<Any>().`$ref`("#/components/schemas/$REQUIRED_END_BOND_REQUEST") }
+        }
     }
+    api.components.addSchemas(
+        REQUIRED_END_BOND_REQUEST,
+        ObjectSchema()
+            .addProperty(
+                WITHDRAW_ENTRIES_PROPERTY,
+                BooleanSchema().description(
+                    "Whether to withdraw the caller's own entries in this bond. `true` erases every one, for both " +
+                        "members, and this cannot be undone; `false` keeps them. Required, and never null.",
+                ),
+            ).addRequiredItem(WITHDRAW_ENTRIES_PROPERTY),
+    )
     api.components.schemas[END_BOND_REQUEST]
         ?.properties
         ?.get(WITHDRAW_ENTRIES_PROPERTY)
@@ -808,10 +834,26 @@ private fun documentEndingDefaults(api: OpenAPI) {
 
 /** `EndBondRequest`'s schema name and its one property: see [documentEndingDefaults]. */
 private const val END_BOND_REQUEST = "EndBondRequest"
+
+/** The same body with its flag required, on the routes in [FLAG_REQUIRED_OPERATIONS]: see [documentEndingDefaults]. */
+private const val REQUIRED_END_BOND_REQUEST = "RequiredEndBondRequest"
+
+/** The endings on which `withdrawEntries` must be sent, by operation id (ADR-0035 question 1). */
+private val FLAG_REQUIRED_OPERATIONS = setOf("blockBond")
 private const val WITHDRAW_ENTRIES_PROPERTY = "withdrawEntries"
 
+/** Where [ENDING_BODY_RULES] names the values a route accepts for the flag. */
+private const val ACCEPTED = "{accepted}"
+
+/**
+ * The body rules both endings share, with [ACCEPTED] standing for the values
+ * the route takes for the flag: `/leave` takes `null` as absent, `/block`
+ * refuses it (ADR-0035 question 1). One text, so the two cannot drift apart in
+ * anything else. A constant and not a function: the file is at detekt's
+ * `TooManyFunctions` threshold.
+ */
 private const val ENDING_BODY_RULES =
-    "A body with any other key, with the key twice, or with a value that is not JSON true, false or null is " +
+    "A body with any other key, with the key twice, or with a value that is not JSON $ACCEPTED is " +
         "`400 MALFORMED_REQUEST`; nothing is ignored. A `Content-Type` that is not JSON is `415`, with or without a body."
 
 /** What each ending does with an absent flag, by operation id: see [documentEndingDefaults]. */
@@ -821,17 +863,19 @@ private val ENDING_DESCRIPTIONS =
             "Ends the bond for both members. It stays readable to both, and takes no further entries. " +
             "The body is optional. **When `withdrawEntries` is absent or null, or there is no body, the caller's " +
             "entries are kept.** When it is `true`, every entry the caller wrote in this bond is erased, for both " +
-            "members, and this cannot be undone. The other route that takes this body has the opposite default. " +
+            "members, and this cannot be undone. The other route that ends a bond has no default: there the " +
+            "flag is required. " +
             "`409 BOND_ARCHIVED` on a bond that has already ended, and nothing is withdrawn then. " +
-            ENDING_BODY_RULES,
+            ENDING_BODY_RULES.replace(ACCEPTED, "true, false or null"),
         "blockBond" to
             "Ends the bond for both members, with the same `204` as `POST /bonds/{bondId}/leave`, and keeps the " +
             "two accounts from being paired again. Also accepted on a bond that has already ended, and may be " +
-            "repeated. The body is optional. **When `withdrawEntries` is absent or null, or there is no body, every " +
-            "entry the caller wrote in this bond is withdrawn: the entries are ERASED, for both members, and this " +
-            "cannot be undone.** Send `{\"withdrawEntries\": false}` to keep them. A later call with `true`, or " +
-            "with no body, withdraws what an earlier one kept. " +
-            ENDING_BODY_RULES,
+            "repeated. **The body is required, and so is `withdrawEntries`.** When it is `true`, every entry the " +
+            "caller wrote in this bond is withdrawn: the entries are ERASED, for both members, and this cannot be " +
+            "undone. Send `{\"withdrawEntries\": false}` to keep them. When the flag is absent or null, or there is " +
+            "no body, the answer is `400 MALFORMED_REQUEST` and nothing is ended or withdrawn; a caller who is not a " +
+            "member is answered `404` first. A later call with `true` withdraws what an earlier one kept. " +
+            ENDING_BODY_RULES.replace(ACCEPTED, "true or false"),
     )
 
 /**
