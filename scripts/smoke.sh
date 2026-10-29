@@ -91,7 +91,13 @@
 # (409 before the PUT, a replay under the same key, 422 without one), reads it as
 # its owner and is told 404 as another user, refuses a GIF (415) and 11 MB (413),
 # deletes it and sees the object gone from MinIO, and finds the URL in no log
-# line. Last run on 2026-10-28, for withdrawEntries required on /block (ADR-0035 q1, q11), after main (35119af, #106) was
+# line. Last run on 2026-10-29, for withdrawEntries required on /block, after main (e85ba1d,
+# #101) was merged in, from a jar of 6c6c3cd's code, on a fresh database that applied V1
+# to V27 and V29 to V33, against its own compose project (moyi-0f: Postgres 55443, Valkey
+# 56390, MinIO 59273) and --attach: 1056 passed, 0 failed, 0 skipped, 28 sections. Two runs
+# before it on the same jar stopped in the media section with 503: another project's MinIO
+# held this project's port. Before them, on 2026-10-28, for withdrawEntries required on
+# /block (ADR-0035 q1, q11), after main (35119af, #106) was
 # merged in, from a jar of 11d1e68's code, on a fresh database that applied V1 to V27
 # and V29 to V33, against its own compose project (moyi-0f: Postgres 55443, Valkey
 # 56390, MinIO 59100) and --attach: 1053 passed, 0 failed, 0 skipped, 28 sections. Before it, on 2026-10-28,
