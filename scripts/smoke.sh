@@ -106,8 +106,8 @@
 # make it READY: an Ogg Opus of one channel at its URL, served as audio/ogg, with
 # no title, its length on the asset; a 62-second WAV and a WAV declared as an M4A
 # FAILED; and, with a photo, M4's first half: an entry with both, the voice note
-# locked away from the partner until the reveal and then playable by them while
-# the photo is still PROCESSING. Last run on 2026-10-29 for D3, from a jar of this
+# locked away from the partner until the reveal and then PROCESSING to them, as
+# the photo is, until the owner rules on FR-061 (review of #111). Last run on 2026-10-29 for D3, from a jar of this
 # branch after D2 (0e73c8a, with main d9c2de4) was merged in, on a fresh database
 # that applied 32 migrations to V33, against its own compose project (moyi-d3:
 # Postgres 55443, Valkey 63803, MinIO 59006), the jar booted by hand on libvips
@@ -2628,12 +2628,12 @@ expect "voice: the listener's locked entry says nothing of the voice note" 200 '
 if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no URL"; fi
 expect "voice: deleting a voice note on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_A"
 expect "voice: the listener writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, in words"}'
-expect "voice: once revealed the listener can play the voice note, with no moderation to wait on" 200 '"durationMs":' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
+expect "voice: once revealed the listener sees the voice note PROCESSING, until the owner rules on FR-061" 200 '"partnerEntry"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
 VO_PARTNER="$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['partnerEntry']))" <<<"$LAST_BODY")"
-is "voice: …the voice note READY to the listener" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['status'])" <<<"$VO_PARTNER")" "READY"
+is "voice: …PROCESSING to the listener, with no URL and no length" "$(python3 -c "import json,sys; v=json.load(sys.stdin)['voice']; print(v['status'], v['url'], v['durationMs'])" <<<"$VO_PARTNER")" "PROCESSING None None"
 is "voice: …and the photo still PROCESSING to the listener (FR-101)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_PARTNER")" "PROCESSING"
-VO_PARTNER_URL="$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['url'])" <<<"$VO_PARTNER")"
-[ "$(curl -s -o /dev/null -w '%{http_code}' "$VO_PARTNER_URL")" = 200 ] && pass "voice: …and the listener's URL plays (200)" || fail "voice: listener URL" "the URL the listener was given does not answer 200"
+if printf '%s' "$LAST_BODY" | grep -q 'X-Amz'; then fail "voice: …no signed URL anywhere in the listener's day" "found one"; else pass "voice: …no signed URL anywhere in the listener's day"; fi
+expect "voice: the speaker still plays it READY on the revealed day" 200 '"durationMs":' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_A"
 expect "voice: an outsider reaches neither the voice note nor the day" 404 '"code":"NOT_FOUND"' -- "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_O"
 if grep -q "$(printf '%s' "$VO_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
   fail "voice: the voice note's URL is in no log line" "its signature is in $MOYI_LOG"

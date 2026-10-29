@@ -1,4 +1,4 @@
-# ADR-0049 — Voice notes: transcoded to Opus by ffmpeg in the sandbox, claimed by an entry in its own transaction, and played to both members
+# ADR-0049 — Voice notes: transcoded to Opus by ffmpeg in the sandbox, claimed by an entry in its own transaction, and played to their owner
 
 **Status:** Accepted · **Date:** 2026-10-29 · **Deciders:** Daniel
 
@@ -82,8 +82,12 @@ test that went red with it removed and green restored (the pull request lists th
   `VoiceRules.LIMIT_MS`, 61 seconds (Q3's 60 and the spec's second of grace), without the
   transcode running. A container can say less than it holds (seen: an MP4 of 90 seconds whose
   `mvhd`/`mdhd` say 10, which `ffprobe` believes), so **the transcode stops one second past the
-  limit (`-t 62`) and its result's length is read again**, and a result over 61 seconds and 20
-  milliseconds (Opus's 6.5 ms pre-skip, with room) is refused too. A length the container cannot
+  limit (`-t 62`) and its result's length is read again**, and a result over 61.1 seconds is
+  refused too. The 100 ms of slack (`VoiceRules.ENCODER_SLACK_MS`) is measured, on a tone of exactly
+  61.000 s: what Opus and the upload's decoder add is 6.5 ms from WAV, and from AAC 62.5 ms on
+  ffmpeg 6.1.1 (the worker's) but 6.5 ms on 9.0.2; an ADTS note's length is an estimate that
+  already overstates it (61.04 to 61.09 s), so it is refused at the probe. Seen with `-t` removed:
+  the transcode of the 90-second MP4 wrote 90 seconds (review of #111). A length the container cannot
   say (`N/A`) is refused: no recorder writes one.
 - **The output is bounded**: `-fs` one byte past 500 KiB (doc 06:186's "≤500 KB after
   transcoding", a KB being 1024 bytes as in ADR-0048), so ffmpeg stops writing there, and a
@@ -93,6 +97,10 @@ test that went red with it removed and green restored (the pull request lists th
   `-map_chapters -1`): no title, comment, date or recorder tag, no chapter. Seen: without either
   flag, the made-up title or chapter of the test's M4A was in the Ogg. `-map 0:a:0` cannot be
   shown red on its own: decision 3's decoder list refuses every file with a second stream first.
+  **No fingerprint of this server's build** (`-fflags +bitexact -flags:a +bitexact`, review of
+  #111): the Ogg's vendor string is `ffmpeg` and its encoder tag `Lavc libopus`, with no versions;
+  without them they were `Lavf60.16.100` and `Lavc60.31.102`. libopus adds no vendor of its own
+  there.
 - **What is kept is Opus, one channel, 24 kbit/s** (Q4): `libopus`, constrained VBR (unconstrained,
   a pure tone came out at 39 kbit/s; constrained, 25), `-application voip`, in Ogg (RFC 7845),
   and is read back to be one Opus channel before it is kept.
@@ -132,27 +140,30 @@ and a refused voice note rolls back a photo claimed before it. **`MEDIA_NOT_YET_
 `ErrorCode`**: nothing throws it any more, and the contract's enum loses it (a breaking change for
 a client that names it).
 
-**7. Who hears it: both members, once it is ready. A voice note is not moderated.** The spec's
-[inferred], checked against the corpus:
+**7. Who hears it: its owner once it is ready; the partner not yet. Fail closed until the owner
+rules on FR-061** (the independent review of #111, ruled by the coordinator). The spec marks "voice
+is not moderated" **[inferred]**. The corpus, read for it, supports two readings:
 
-- FR-101 (03:115), the one requirement for moderation, says "uploaded **images**"; T-08 (09:32)
-  says "illegal or abusive **imagery**"; the owner's ruling Q1 chose an image classifier (Rekognition
-  `DetectModerationLabels`); doc 10:133 budgets "image moderation". Nothing in the corpus requires
-  an automated check of audio.
-- Two lines are broader. FR-061 (03:68) says "media becomes visible to the non-author when it
-  reaches READY and passes moderation (FR-101)", and R-25 (17:47) speaks of "harmful or illegal
-  media". Both cite or mirror FR-101, which is images. Doc 26:206 routes a member's report of "a
-  photo or voice note" to "the FR-101 moderation path", which is the human review of a report,
-  not a classifier.
+- **Voice is not moderated.** FR-101 (03:115), the one requirement for moderation, says "uploaded
+  **images**"; T-08 (09:32) says "illegal or abusive **imagery**"; the owner's ruling Q1 chose an
+  image classifier (Rekognition `DetectModerationLabels`); doc 10:133 budgets "image moderation".
+- **Voice is "media", and media waits on moderation.** FR-061 (03:68): "media becomes visible to
+  the non-author when it reaches READY and passes moderation (FR-101)". R-25 (17:47): "harmful or
+  illegal **media** uploaded", mitigated by "automated moderation before reveal". Doc 26:206 routes a
+  member's report of "a photo or voice note" to "the FR-101 moderation path".
 
-So the spec's reading holds, with FR-061's wording as the one loose end (owed: the owner to say
-whether FR-061's "media" means images, as this ADR reads it). `MediaAsset.heard` is the one place
-the rule lives: a voice note is played to its owner and to anyone who may read its entry alike,
-once `READY`. Should a ruling add moderation, that property and its test change, as
-`shownTo`'s verdict is the photo's.
+Until the owner says which, a voice note is treated as a photo is before its verdict:
+`MediaAsset.heardBy(owner)` gives **its owner** (on an entry, its author) the URL and the length
+once it is `READY`, and **anyone else** `PROCESSING`, with no URL and no length, unless the asset
+carries the verdict `PASSED`, which nothing gives a voice note today. So the partner never hears
+one yet. **One switch-point**, `MediaAsset.partnersMayHearIt`: a ruling of "images only" makes it
+`true` (and the tests that hold the closed rule change with it); a ruling of "voice too" leaves it
+as it is and needs a moderator to give voice notes their verdict. `MediaAssetTest`,
+`MediaAttachmentsTest` and `EntryVoiceTest` hold the closed rule, and went red with it opened.
 
 **8. The shape.** The entry gains `voice: {id, status, url, durationMs}` or `null`, every field
-always sent, `url` and `durationMs` present exactly when `status` is `READY`. It is only ever on a
+always sent, `url` and `durationMs` present exactly when `status` is `READY` (to the author once it
+is ready; to the partner, decision 7). It is only ever on a
 reading in full (`DisclosedEntry` carries the voice note's id there and nowhere else): a locked
 entry has no voice note, field or flag (BR-8, `RevealGateTest` extended), and a tombstone's is
 `null`. `GET /media/{id}` gains `durationMs`. NFR-103 (voice is never the only way to do anything)
@@ -168,8 +179,9 @@ its length is refused after. Production starts as it is, and processes nothing u
 exists. The first half of M4 (15:110) runs end to end on the smoke stack: an entry with a photo and
 a voice note.
 
-**Negative.** Until the worker is deployed no voice note is processed in production. The partner
-hears a voice note nobody has moderated (decision 7). ffmpeg's options are those of 6.1 (Ubuntu
+**Negative.** Until the worker is deployed no voice note is processed in production. Until the
+owner rules on FR-061, a partner is shown a voice note as `PROCESSING` and never hears it
+(decision 7). ffmpeg's options are those of 6.1 (Ubuntu
 24.04, the worker's) and 9.0 (checked on both); a version that renames one fails the start-up
 check or the notes, not silently. The in-process network bound is ffmpeg's own protocol list; the
 container's is owed. iOS's playback of Ogg Opus is not yet known (owed, below).
@@ -199,7 +211,15 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
   24 kbit/s constrained VBR (`smoke.sh`'s voice section leaves one at a URL). If iOS will not play
   it, Q4 says AAC-LC 48 kbit/s for both; the container may be the cause rather than the codec (CAF
   holds Opus on iOS).
-- **FR-061's "media"**: the owner to confirm it means images (decision 7).
+- **FR-061's "media"**: the owner to rule whether it includes voice notes (decision 7, with the
+  sources for each reading). "Images only" opens `MediaAsset.partnersMayHearIt`; "voice too"
+  needs a moderator for voice.
+- **GATE: the media worker (provider `native`) is not deployed before D5's purge (#110) is live and
+  the owner has ruled on FR-061 (does "media" include voice notes).** The sources: FR-061 (03:68)
+  and R-25 (17:47) say "media", and 26:206 routes a reported voice note to the FR-101 path; FR-101
+  (03:115), T-08 (09:32) and Q1 say images. Without D5, a URL handed out before an erasure keeps
+  working for up to 25 hours (ADR-0048 Owed); without the ruling, opening voice to partners would
+  be a guess.
 - **The media worker** (ADR-0048 Owed): its image needs `ffmpeg` with `libopus` (Ubuntu 24.04's
   `ffmpeg` package has it, and the AMR decoders), `MOYI_MEDIA_PROCESSING_PROVIDER=native`, and its
   network limited to R2 and Postgres (spec R-E), which is the only network bound around ffmpeg
@@ -208,9 +228,9 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
   Android `MediaRecorder` MPEG_4 and THREE_GPP file): the brands in decision 2 are read, not seen.
 - **R2, not run:** that a GET of `voice.ogg` is served with `audio/ogg`, as MinIO serves it.
 - **D5:** erasure purges `voice.ogg` as it purges a photo's variants (`MediaAsset.objectKeys`
-  names it); the reaper takes an unattached voice note after 24 hours like a photo. ADR-0048's
-  "D4 must not ship before D5's purge" holds for voice notes already: a partner is given a voice
-  note's URL today, so until D5 a URL handed out before an erasure plays for up to 25 hours.
+  names it); the reaper takes an unattached voice note after 24 hours like a photo. Only the owner
+  is given a voice note's URL until the FR-061 ruling, so ADR-0048's 25-hour exposure after an
+  erasure reaches no partner yet; the gate above keeps it so until D5 is live.
 - **`entries.voice_duration_ms`**: dead since D3 (decision 4); a later forward migration drops it.
 
 ## Revisit when

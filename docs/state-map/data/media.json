@@ -803,7 +803,7 @@
     "to": "READY_ATTACHED",
     "status": 201,
     "code": null,
-    "reason": "The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4). A voice note is claimed the same way, on voiceMediaId, after the photo.",
+    "reason": "The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4). A voice note is claimed the same way, on voiceMediaId, after the photo, and shown the same way: READY to its author, PROCESSING to the partner until the owner rules on FR-061 (ADR-0049).",
     "rule": "FR-044a, FR-101, spec §4 D2, ADR-0048 §4-5, spec §4 D3",
     "evidence": "smoke",
     "evidenceRef": "photos: an entry with the author's ready photo is 201, and the author sees it READY",

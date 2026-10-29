@@ -318,7 +318,11 @@ there the asset's state decides it. CI installs `libvips-tools` and `libheif-plu
   application's own image with its own command and options. Which of the two is the owner's to say
   at the deploy (open question, below). Until then `config/deploy.yml` keeps `"off"`. The worker's
   JVM is capped (`-Xmx256m`) and its resident memory measured, to confirm decision 3's 768 MiB
-  arithmetic.
+  arithmetic. **Gate (ADR-0049, review of #111): the media worker (provider `native`, named `vips`
+  here before D3) is not deployed before D5's purge (#110) is live and the owner has ruled on
+  FR-061 (does "media" include voice notes).** FR-061 (03:68) and R-25 (17:47) say "media", and
+  26:206 routes a reported voice note to the FR-101 moderation path; FR-101 (03:115), T-08 and Q1
+  say images. The worker also needs ffmpeg with libopus (ADR-0049).
 - **R2, not run:** one GET of a photo URL signed up to an hour earlier, against the real bucket,
   when uploads are switched on (MinIO serves it; R2's SigV4 is expected to, as S3's does).
 - **D3:** voice notes, still `UPLOADED` after `media.process` has passed them; D3 processes them,
