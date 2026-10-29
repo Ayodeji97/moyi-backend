@@ -19,6 +19,8 @@ import java.time.Instant
  * a storage that will not come.
  */
 internal class UnavailableObjectStore : ObjectStore {
+    override val configured: Boolean = false
+
     override fun presignUpload(
         key: StorageKey,
         contentType: String,

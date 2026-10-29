@@ -69,6 +69,7 @@ internal class ProcessingInterleavingTest(
         gate.reset()
         storage.puts = true
         storage.gets = true
+        storage.deletes = true
         storage.putsLeft = Int.MAX_VALUE
         jdbc.execute("TRUNCATE TABLE media_assets, idempotency_keys, outbox_deliveries, outbox_events")
     }
@@ -90,6 +91,13 @@ internal class ProcessingInterleavingTest(
         stored(variantOf(upload, "full")) shouldBe false
         stored(variantOf(upload, "display")) shouldBe false
         stored(upload) shouldBe false
+        // D5: the owner's delete handed the objects to media.purge, and so did the pipeline, whose variants
+        // were written after that delete, so a purge that ran in between cannot have been the last word.
+        jdbc.queryForObject(
+            "SELECT count(*) FROM outbox_events WHERE aggregate_id = ?::uuid AND event_type = 'MediaReleased'",
+            Int::class.java,
+            mediaId,
+        ) shouldBe 2
     }
 
     @Test
@@ -208,13 +216,21 @@ internal class ProcessingInterleavingTest(
         }
     }
 
-    /** The real store, whose GETs and PUTs the test can make fail as an unreachable storage does. */
+    /** The real store, whose GETs, PUTs and DELETEs the test can make fail as an unreachable storage does. */
     internal class SwitchableStore(
         private val real: ObjectStore,
     ) : ObjectStore by real {
         @Volatile var puts = true
 
         @Volatile var gets = true
+
+        /** Off: every DELETE fails as an unreachable storage's does (`MediaPurgeTest`, D5). */
+        @Volatile var deletes = true
+
+        override fun delete(key: StorageKey) {
+            if (!deletes) throw ObjectStoreUnavailableException("The media storage could not delete an object (switched off by the test).")
+            real.delete(key)
+        }
 
         override fun open(key: StorageKey): InputStream? {
             if (!gets) throw ObjectStoreUnavailableException("The media storage could not be read (switched off by the test).")
