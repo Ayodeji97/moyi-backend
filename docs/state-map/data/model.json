@@ -326,7 +326,7 @@
             },
             {
               "id": "DELETED",
-              "label": "DELETED, by you"
+              "label": "DELETED: by you, with the entry it was on, or by the reaper"
             }
           ]
         }
@@ -437,6 +437,21 @@
     {
       "id": "event:photo-refused",
       "label": "media.process refuses the photo's bytes",
+      "actor": "system"
+    },
+    {
+      "id": "event:entry-erased",
+      "label": "the entry it is on is erased: deleted by its author, or taken back by a withdrawal",
+      "actor": "system"
+    },
+    {
+      "id": "event:media-reaped",
+      "label": "the hourly reaper finds it past its keeping, on no entry",
+      "actor": "system"
+    },
+    {
+      "id": "event:media-demoted",
+      "label": "the nightly demotion finds it ninety days ready",
       "actor": "system"
     }
   ],
