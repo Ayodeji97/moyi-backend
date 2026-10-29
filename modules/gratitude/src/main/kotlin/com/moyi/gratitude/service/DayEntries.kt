@@ -1,6 +1,11 @@
 package com.moyi.gratitude.service
 
+import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.Entry
+import com.moyi.gratitude.domain.EntryReading
+import com.moyi.gratitude.domain.Readability
+import com.moyi.gratitude.domain.Reader
+import java.time.Instant
 import java.util.UUID
 
 /** The two entries a day is rendered from, for one member: theirs and the other person's, either of which may not exist. */
@@ -32,3 +37,65 @@ internal fun Collection<Entry>.onEachSideOf(memberId: UUID): DayEntries {
         partners = ordered.firstOrNull { it.authorMemberId != memberId },
     )
 }
+
+/** One day as one [Reader] is shown it: the status to show, and each side's entry after the gate, or `null` for nothing. */
+internal data class ShownDay(
+    val status: BondDayStatus,
+    val mine: EntryReading?,
+    val partners: EntryReading?,
+)
+
+/**
+ * Every row filed against one day, **as [reader] is shown that day**: one rule for
+ * `GET /today` and every route of the archive (the feed, a day alone, search and on this
+ * day), so that none of them can show a day another way.
+ *
+ * Each side is [onEachSideOf]'s row, read through the gate ([Entry.readBy]). Two things
+ * more, both the owner's ruling of 2026-10-21 (ADR-0032 question 2, ADR-0036 question 6):
+ *
+ * - **An entry erased before it was ever shown to [reader] is not there.** The gate's
+ *   answer for it is [Readability.TOMBSTONE_UNSEEN], and a day renders that as absence:
+ *   `null`, the very value a day the partner never wrote on carries. That the partner
+ *   wrote and thought better of it is not the reader's to know (FR-064), so the two days
+ *   must be one answer. The gate's answer is unchanged, and favourites and reactions still
+ *   answer it as an entry that does not exist; only a day stops drawing it. A tombstone
+ *   the reader could once read ([Readability.TOMBSTONE]) is still shown, and their own
+ *   entry can never be unseen to them.
+ * - **[status] is the day's as its erasures will leave it.** A deletion by hand steps an
+ *   unsettled day back in the transaction that erases ([com.moyi.gratitude.domain.BondDay.withoutEntry]),
+ *   and the day the partner never wrote on was never stepped forward. A withdrawal hides
+ *   its author's entries from its commit, but the day is stepped back only when the
+ *   outbox's consumer erases them ([WithdrawEntries]). In between, the row still says
+ *   `PARTIAL` or `PENDING_REVEAL` where a deletion by hand says `OPEN` or `PARTIAL`, and
+ *   would tell the two apart, and a withdrawal from no entry at all (ADR-0028 decision 8).
+ *   So the status is derived from **the entries this read can see**: the live rows that
+ *   were loaded, less those whose author is among [Reader.withdrawnAuthors]. When the row
+ *   counts more than that ([entryCount]), the day is stepped back as the erasure will step
+ *   it ([BondDayStatus.afterErasure]), and the response does not move when the erasure
+ *   runs. The same derivation covers a read that loaded the day before an erasure
+ *   committed and its entries after: the row is a statement older than the entries, and
+ *   the entries win. A settled day is never stepped back, by either (BR-10): its status
+ *   is history, and so is its square in the streak, whatever is erased later (ADR-0032
+ *   question 2 has the exception this leaves, and the owner's question on it).
+ *
+ * [status], [closedAt] and [entryCount] are the day's row; [reader] is built after the
+ * rows were loaded (`readerNow`), as for every gate.
+ */
+internal fun Collection<Entry>.shownTo(
+    reader: Reader,
+    status: BondDayStatus,
+    closedAt: Instant?,
+    entryCount: Int,
+): ShownDay {
+    val sides = onEachSideOf(reader.memberId)
+    val visible = count { !it.isErased && it.authorMemberId !in reader.withdrawnAuthors }
+    return ShownDay(
+        status = if (visible < entryCount) status.afterErasure(closedAt, remaining = visible) else status,
+        mine = sides.mine?.shownOnItsDayTo(reader),
+        partners = sides.partners?.shownOnItsDayTo(reader),
+    )
+}
+
+/** The gate's answer, unless it is that [reader] was never shown this entry and it is gone: then nothing. */
+private fun Entry.shownOnItsDayTo(reader: Reader): EntryReading? =
+    readBy(reader).takeUnless { it.readability == Readability.TOMBSTONE_UNSEEN }

@@ -4,7 +4,7 @@
 2026-10-06 and for his rulings of 2026-10-21 on every question in "Questions that are the
 owner's" except the third, which was not put to him. Every other decision here was made by
 the plan or by the agents that ran it. · **Amended:** 2026-10-28 (question 1 built: the fifth
-type, `ME_TOO`, by V27; decision 2 now reads five)
+type, `ME_TOO`, by V27; decision 2 now reads five) · 2026-10-28 (the narrow `REMOVED` shape superseded — ADR-0032 question 2)
 
 ## Context
 
@@ -260,7 +260,8 @@ required and nullable, and **both members are sent the same value**: `Reactions.
 entries and no member. It is `null` unless the gate's answer is `FULL`. Two layers hold
 that, as for `favourited`: the services ask only about entries read in full, and
 `EntryResponse.of` forces `null` off `FULL` whatever it is handed. The narrow `LOCKED` and
-`REMOVED` shapes gain nothing. Nothing says when it was left, by whom beyond "the other
+`REMOVED` shapes gain nothing. *(Superseded in part 2026-10-28, ADR-0032 question 2: there is
+no `REMOVED` shape any more; such an entry is no entry, and `LOCKED` is the one narrow shape.)* Nothing says when it was left, by whom beyond "the other
 one", or how many times it was changed.
 
 A fresh write and an edit answer `reaction: null` without a query, since an entry nobody

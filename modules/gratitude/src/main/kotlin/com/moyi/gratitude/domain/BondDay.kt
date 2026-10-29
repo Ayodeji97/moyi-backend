@@ -61,6 +61,27 @@ internal enum class BondDayStatus(
      */
     SUSPENDED(isClosed = false),
     FROZEN(isClosed = true),
+    ;
+
+    /** [BondDay.isSettled], for a caller holding a day's status and its `closedAt` straight off a row. */
+    fun isSettledWith(closedAt: Instant?): Boolean = closedAt != null || isClosed
+
+    /**
+     * The status a day in this status, closed at [closedAt], takes when an erasure leaves
+     * it [remaining] live entries: what [BondDay.withoutEntry] does to the status, for a
+     * caller holding a row's columns and not the aggregate. A settled day keeps its status
+     * (BR-10) and so does a [SUSPENDED] one; otherwise the day is [OPEN] again once nothing
+     * live is left on it, and [PARTIAL] while one entry is.
+     */
+    fun afterErasure(
+        closedAt: Instant?,
+        remaining: Int,
+    ): BondDayStatus =
+        when {
+            isSettledWith(closedAt) || this == SUSPENDED -> this
+            remaining == 0 -> OPEN
+            else -> PARTIAL
+        }
 }
 
 /**
@@ -144,7 +165,7 @@ internal data class BondDay(
      * sentence, a day "already `REVEALED` before midnight": revealed by the
      * second submission, and not yet stamped by a close.
      */
-    val isSettled: Boolean get() = closedAt != null || status.isClosed
+    val isSettled: Boolean get() = status.isSettledWith(closedAt)
 
     /**
      * Counts the insert BR-2 accepted. Suspended days remain excluded until
@@ -164,15 +185,7 @@ internal data class BondDay(
         if (isSettled) {
             this
         } else {
-            copy(
-                entryCount = entryCount - 1,
-                status =
-                    when {
-                        status == BondDayStatus.SUSPENDED -> status
-                        entryCount == 1 -> BondDayStatus.OPEN
-                        else -> BondDayStatus.PARTIAL
-                    },
-            )
+            copy(entryCount = entryCount - 1, status = status.afterErasure(closedAt, remaining = entryCount - 1))
         }
 
     /**

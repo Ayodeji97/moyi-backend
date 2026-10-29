@@ -32,8 +32,9 @@
 # bond, and a misspelt flag ends nothing; and the poller announces no delivery
 # in the log. Since slice C5b it reads the archive: the feed and one day of it
 # for each member, the 422 of each unreadable parameter, the two 404s, a day
-# only one has written, the two shapes of an entry the caller was never shown
-# (an author and a status, no other key) and no time of erasure on any shape,
+# only one has written, the shape of an entry the caller was never shown (an
+# author and a status, no other key), nothing at all once such an entry is
+# erased (on the feed, the day and today), and no time of erasure on any shape,
 # a bookmark set and taken off and never shown to the other, what may not be
 # marked and by whom, If-None-Match answered 304 on a tag that moves with the
 # caller's own mark and not with the partner's, the archive as JSON whatever
@@ -90,7 +91,11 @@
 # (409 before the PUT, a replay under the same key, 422 without one), reads it as
 # its owner and is told 404 as another user, refuses a GIF (415) and 11 MB (413),
 # deletes it and sees the object gone from MinIO, and finds the URL in no log
-# line. Last run on 2026-10-28, after main (b2da5a7, the squash of #100, V31) was merged
+# line. Last run on 2026-10-28, for an unseen erasure shown as nothing (ADR-0032 q2), after main (35119af, #106) was
+# merged in, from a jar of 28157c5's code, on a fresh database that applied V1 to V27
+# and V29 to V33, against its own compose project (moyi-0f: Postgres 55443, Valkey
+# 56390, MinIO 59100) and --attach: 1048 passed, 0 failed, 0 skipped, 28 sections. Before it, on 2026-10-28,
+# after main (b2da5a7, the squash of #100, V31) was merged
 # into D1, from a jar of that merge, on a fresh database that applied V1 to V27 and V29
 # to V33 in that order, against its own compose project (moyi-d1: Postgres 55440, Valkey
 # 63800, MinIO 59000) and --attach: 1045 passed, 0 failed, 0 skipped, 28 sections.
@@ -1444,11 +1449,13 @@ ARC_HIDDEN_DAY="$(no_instance)"
 expect "…as a date nobody wrote on is" 404 '"code":"DAY_NOT_FOUND"' -- "$API/bonds/$ARC_BOND2/days/1999-01-01" -H "Authorization: Bearer $ARC_O"
 is "…the same body, so the route does not say whether the partner wrote" "$(no_instance)" "$ARC_HIDDEN_DAY"
 
-# A third bond, for the two shapes of a partner's entry the caller was never
-# shown, as the jar's own serializer writes them: an author and a status, and
-# no other key (BR-8). The archive lists such a day only for a member with an
-# entry of their own on it, so one member writes and deletes, which leaves
-# their tombstone, and then the other writes alone.
+# A third bond, for what a partner's entry the caller was never shown is, as
+# the jar's own serializer writes it: an author and a status, and no other key
+# (BR-8), while it is live; and nothing at all once it is erased, the null of
+# an entry never written (the owner's ruling of 2026-10-21, ADR-0032 q2). The
+# archive lists such a day only for a member with an entry of their own on it,
+# so one member writes and deletes, which leaves their tombstone, and then the
+# other writes alone.
 flush_buckets
 ARC_GONE_TEXT="thank you for waiting up for me"
 ARC_LOCKED_TEXT="thank you for the lift to the station"
@@ -1471,13 +1478,16 @@ expect "…and the day alone" 200 '"status":"LOCKED"' -- "$API/bonds/$ARC_BOND3/
 is "…is that same item" "$(at "")" "$ARC_LOCKED_ITEM"
 no_times "…with no such key either"
 expect "the other deletes theirs too, before anybody read it" 204 "" -- -X DELETE "$API/entries/$ARC_LOCKED_ENTRY" -H "Authorization: Bearer $ARC_M"
-expect "the first member's archive now" 200 '"status":"REMOVED"' -- "$API/bonds/$ARC_BOND3/days" -H "Authorization: Bearer $ARC_O"
-is "…carries the partner's entry as exactly an author and REMOVED, no other key" "$(at items.0.partnerEntry)" "{\"authorMemberId\": \"$ARC_LOCKED_AUTHOR\", \"status\": \"REMOVED\"}"
-[[ "$LAST_BODY" != *"$ARC_LOCKED_ENTRY"* ]] && pass "…and still not its id" || fail "removed entry read" "${LAST_BODY:0:300}"
+expect "the first member's archive still lists the day, through their own tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND3/days" -H "Authorization: Bearer $ARC_O"
+is "…and the partner's entry is not there: null, as for a partner who never wrote" "$(raw items.0.myEntry.id)|$(at items.0.partnerEntry)|$(at items.1)" "$ARC_GONE_ENTRY|null|absent"
+[[ "$LAST_BODY" != *"$ARC_LOCKED_ENTRY"* && "$LAST_BODY" != *"$ARC_LOCKED_AUTHOR"* && "$LAST_BODY" != *REMOVED* ]] && pass "…not its id, not its author, and no REMOVED" || fail "unseen erasure shown" "${LAST_BODY:0:300}"
 no_times "…and no key says when it was removed"
 ARC_REMOVED_ITEM="$(at items.0)"
-expect "…and the day alone" 200 '"status":"REMOVED"' -- "$API/bonds/$ARC_BOND3/days/$ARC_DATE" -H "Authorization: Bearer $ARC_O"
+expect "…and the day alone" 200 '"partnerEntry":null' -- "$API/bonds/$ARC_BOND3/days/$ARC_DATE" -H "Authorization: Bearer $ARC_O"
 is "…is that same item" "$(at "")" "$ARC_REMOVED_ITEM"
+expect "…and today shows the same nothing" 200 '"partnerEntry":null' -- "$API/bonds/$ARC_BOND3/today" -H "Authorization: Bearer $ARC_O"
+is "…beside the same tombstone of their own, on a day that reads OPEN" "$(raw myEntry.id)|$(raw myEntry.status)|$(raw bondDay.status)" "$ARC_GONE_ENTRY|DELETED|OPEN"
+[[ "$LAST_BODY" != *"$ARC_LOCKED_ENTRY"* && "$LAST_BODY" != *"$ARC_LOCKED_AUTHOR"* && "$LAST_BODY" != *REMOVED* ]] && pass "…not its id, not its author, and no REMOVED" || fail "unseen erasure shown on today" "${LAST_BODY:0:300}"
 
 # A bookmark is the caller's own. The marker marks the writer's entry; the
 # writer, reading the same entry as their own, is told nothing about it.
