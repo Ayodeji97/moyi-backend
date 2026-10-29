@@ -2757,6 +2757,24 @@ Wrong about: where the leaks are. Every pin in `application.yml` guards an inbou
          the outbound client, which carries the token to the one place it should go, was
          never looked at, because the tests never call it.
 
+## 2026-10-28 · Feature · An unseen erasure shows nothing — and the status was a second tell
+
+Expected: one rendering change. A partner's entry erased before the caller saw it reads as
+         `TOMBSTONE_UNSEEN`; render it as `partnerEntry: null` instead of the narrow `REMOVED`
+         shape, and remove that shape from the contract.
+Reality: the entry was the easy half. Between a withdrawal's commit and the outbox's erasure
+         the day row still said `PARTIAL` or `PENDING_REVEAL`, where a hand delete showed
+         `OPEN` at once, so the status told a withdrawal from a delete and moved again when the
+         erasure ran. The day's shown status is now derived from the entries the read can see,
+         stepped as the erasure will step it, by the one function `BondDay.withoutEntry` uses.
+         A review then found the same derivation also closes a read skew (row read before an
+         erasure, entries after), and that a day which settled before the erasure keeps its
+         status and streak square — BR-10 against the new ruling, recorded as an owner's
+         question rather than decided here. Twin bonds, compared byte for byte, were the test
+         that found the status tell; reading the code had not.
+Wrong about: "the partner sees nothing" being a statement about one field. It is a statement
+         about every byte a twin who never wrote would differ in, and the status is one.
+
 ## 2026-10-28 · Feature · withdrawEntries required on POST /block — where "required" is checked decides who learns what
 
 Expected: `@RequestBody(required = true)` and a non-null field, and a bare block is a `400`.

@@ -241,8 +241,8 @@ internal class EntryChangesTest(
      * Bea is the one who ends it each time, so each ending is tried for the
      * member who left (her) and the one who stayed (Ada); and each for an
      * entry the partner had read and for one they never had, because what
-     * the partner is left with differs: the wide tombstone, or `REMOVED`
-     * and nothing else.
+     * the partner is left with differs: the wide tombstone, or nothing at
+     * all (the owner's ruling of 2026-10-21, ADR-0032 question 2).
      */
     @Test
     fun `an author deletes their own entry after the bond has ended, however it ended, and nobody else can`() {
@@ -321,7 +321,7 @@ internal class EntryChangesTest(
         edit.contentAsString shouldContain "\"code\":\"BOND_ARCHIVED\""
     }
 
-    /** The wide tombstone for a partner who had read the entry; an author and `REMOVED`, and nothing else, for one who never had. */
+    /** The wide tombstone for a partner who had read the entry; nothing, the `null` of an entry never written, for one who never had. */
     private fun tombstoneIsWhatBothRead(
         author: UUID,
         partner: UUID,
@@ -336,8 +336,8 @@ internal class EntryChangesTest(
             theirs["status"].asString() shouldBe "DELETED"
             theirs["text"].isNull shouldBe true
         } else {
-            theirs.propertyNames().toList().sorted() shouldBe listOf("authorMemberId", "status")
-            theirs["status"].asString() shouldBe "REMOVED"
+            theirs.isNull shouldBe true
+            partners.contentAsString shouldNotContain id
         }
         val own = json.readTree(today(author).contentAsString)["myEntry"]
         own["id"].asString() shouldBe id

@@ -1,7 +1,7 @@
 # ADR-0035 — The outbox poller and withdrawal
 
 **Status:** Accepted · **Date:** 2026-10-07 · **Deciders:** Daniel
-**Amended:** 2026-10-09 (the status; "Owed — C5b" discharged; the smoke run's section count corrected — ADR-0036) · 2026-10-28 (questions 1 and 11 built: `withdrawEntries` is required on `POST /block`; decision 11 amended)
+**Amended:** 2026-10-09 (the status; "Owed — C5b" discharged; the smoke run's section count corrected — ADR-0036) · 2026-10-28 (decision 12's narrow shape and question 4's `PARTIAL` before the erasure superseded — ADR-0032 question 2) · 2026-10-28 (questions 1 and 11 built: `withdrawEntries` is required on `POST /block`; decision 11 amended)
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #58 on 2026-10-07. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -309,6 +309,10 @@ the commit of the ending, both people get a tombstone, the author included: the 
 for a reader who could read the entry before, `{authorMemberId, status: REMOVED}` for a
 partner it was never revealed to. `Entry.isErased` does not change; it is the row's own
 state, which the edit rule and the reveal read.
+*(Amended 2026-10-28, ADR-0032 question 2 as built: the narrow `{authorMemberId, status:
+REMOVED}` is superseded. A day shows a partner nothing of an entry withdrawn before they
+were shown it, `partnerEntry: null`, and the day's status as the erasure will leave it. The
+gate's answer and the marker-last rule below are unchanged.)*
 
 **The marker is read last.** A path that renders an entry without holding the bond's lock
 loads the entries first, then asks `bond` who has withdrawn, and builds its `Reader` from
@@ -690,6 +694,12 @@ Each is built one way and cheap to turn.
    day. A reviewer's twin-bond comparison; `WithdrawalReadTest` pins `PARTIAL`.
 
    *Ruled by the owner on 2026-10-21: it stands as built, and the question is closed.*
+
+   *Superseded 2026-10-28 by ADR-0032 question 2 as built:* the partner is shown no
+   `REMOVED` and no entry, and both members are shown the day as the erasure will leave it,
+   `OPEN` (or `PARTIAL`), from the ending's commit. A read still writes nothing: the row
+   keeps its `PARTIAL` until the consumer runs, and the status is stepped at read time
+   (`service.shownTo`). `WithdrawalReadTest` now pins `OPEN`, and the row's `PARTIAL`.
 5. **A read that began before an ending can answer as if the ending had not happened.**
    `GET /today` and the two replays read the entries and then the marker, as two
    statements at `READ COMMITTED`, and those are two instants. A response whose marker

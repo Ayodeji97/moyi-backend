@@ -4773,7 +4773,6 @@
               "mapping" : {
                 "DELETED" : "#/components/schemas/EntryResponse",
                 "LOCKED" : "#/components/schemas/LockedEntryResponse",
-                "REMOVED" : "#/components/schemas/ErasedEntryResponse",
                 "REVEALED" : "#/components/schemas/EntryResponse",
                 "SUBMITTED" : "#/components/schemas/EntryResponse"
               },
@@ -4781,8 +4780,6 @@
             },
             "oneOf" : [ {
               "$ref" : "#/components/schemas/EntryResponse"
-            }, {
-              "$ref" : "#/components/schemas/ErasedEntryResponse"
             }, {
               "$ref" : "#/components/schemas/LockedEntryResponse"
             }, {
@@ -4901,24 +4898,6 @@
             }
           },
           "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "intendedAt", "reaction", "status", "text" ]
-        } ]
-      },
-      "ErasedEntryResponse" : {
-        "allOf" : [ {
-          "$ref" : "#/components/schemas/PartnerEntryResponse"
-        }, {
-          "type" : "object",
-          "properties" : {
-            "authorMemberId" : {
-              "type" : "string",
-              "format" : "uuid"
-            },
-            "status" : {
-              "type" : "string",
-              "enum" : [ "REMOVED" ]
-            }
-          },
-          "required" : [ "authorMemberId", "status" ]
         } ]
       },
       "FieldViolation" : {
@@ -5655,7 +5634,6 @@
               "mapping" : {
                 "DELETED" : "#/components/schemas/EntryResponse",
                 "LOCKED" : "#/components/schemas/LockedEntryResponse",
-                "REMOVED" : "#/components/schemas/ErasedEntryResponse",
                 "REVEALED" : "#/components/schemas/EntryResponse",
                 "SUBMITTED" : "#/components/schemas/EntryResponse"
               },
@@ -5663,8 +5641,6 @@
             },
             "oneOf" : [ {
               "$ref" : "#/components/schemas/EntryResponse"
-            }, {
-              "$ref" : "#/components/schemas/ErasedEntryResponse"
             }, {
               "$ref" : "#/components/schemas/LockedEntryResponse"
             }, {
