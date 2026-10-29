@@ -765,7 +765,20 @@ class OpenApiContractTest(
         full.required shouldContain "reaction"
         // The whole of what an entry says: a field added for a reaction's time, or its maker, fails here.
         full.properties.keys shouldBe
-            setOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction", "image", "voice")
+            setOf(
+                "id",
+                "bondId",
+                "date",
+                "authorMemberId",
+                "text",
+                "status",
+                "createdAt",
+                "intendedAt",
+                "favourited",
+                "reaction",
+                "image",
+                "voice",
+            )
         // No schema of a reaction beyond its type exists to carry more.
         api.components.schemas.keys
             .filter { "eaction" in it } shouldBe listOf("ReactionRequest")

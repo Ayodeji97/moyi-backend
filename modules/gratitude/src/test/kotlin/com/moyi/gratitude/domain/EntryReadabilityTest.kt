@@ -95,13 +95,37 @@ internal class EntryReadabilityTest {
         val withVoice = unrevealed.withVoice(voice, now)
         val revealedWithVoice = withVoice.copy(status = EntryStatus.REVEALED, revealedAt = now)
 
-        withVoice.readBy(author).disclosed.shouldNotBeNull().voiceMediaId shouldBe voice
-        revealedWithVoice.readBy(partner).disclosed.shouldNotBeNull().voiceMediaId shouldBe voice
+        withVoice
+            .readBy(author)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId shouldBe voice
+        revealedWithVoice
+            .readBy(partner)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId shouldBe voice
 
         withVoice.readBy(partner).disclosed.shouldBeNull()
-        revealedWithVoice.readBy(authorAfterWithdrawing).disclosed.shouldNotBeNull().voiceMediaId.shouldBeNull()
-        revealedWithVoice.readBy(partnerAfterWithdrawal).disclosed.shouldNotBeNull().voiceMediaId.shouldBeNull()
-        revealedWithVoice.copy(deletedAt = now).readBy(partner).disclosed.shouldNotBeNull().voiceMediaId.shouldBeNull()
+        revealedWithVoice
+            .readBy(authorAfterWithdrawing)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId
+            .shouldBeNull()
+        revealedWithVoice
+            .readBy(partnerAfterWithdrawal)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId
+            .shouldBeNull()
+        revealedWithVoice
+            .copy(deletedAt = now)
+            .readBy(partner)
+            .disclosed
+            .shouldNotBeNull()
+            .voiceMediaId
+            .shouldBeNull()
     }
 
     @Test
