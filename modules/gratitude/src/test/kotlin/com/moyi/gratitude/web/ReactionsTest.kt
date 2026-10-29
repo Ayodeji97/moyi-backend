@@ -294,9 +294,9 @@ internal class ReactionsTest(
         (puts + deletes + sibling).map(::comparable).toSet().size shouldBe 1
         rows().shouldBeEmpty()
 
-        // Erased before it was ever revealed: she was told an author and REMOVED, never its id. Still the same answer.
+        // Erased before it was ever revealed: she is shown nothing of it, never its id. Still the same answer.
         rig.delete(ada, adas)
-        json.readTree(rig.today(bea, bond))["partnerEntry"]["status"].asString() shouldBe "REMOVED"
+        json.readTree(rig.today(bea, bond))["partnerEntry"].isNull shouldBe true
         val unseen = listOf(react(bea, adas), unreact(bea, adas))
         unseen.forEach { it.status shouldBe 404 }
         (unseen + puts).map(::comparable).toSet().size shouldBe 1
@@ -316,9 +316,8 @@ internal class ReactionsTest(
 
         rig.delete(ada, adas)
 
-        val removed = json.readTree(rig.today(bea, bond))["partnerEntry"]
-        removed.propertyNames().toList() shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-        removed["status"].asString() shouldBe "REMOVED"
+        // Erased before she was shown it: no shape at all, the `null` of an entry never written (ADR-0032 question 2).
+        json.readTree(rig.today(bea, bond))["partnerEntry"].isNull shouldBe true
         // His own tombstone is the wide shape, and says null.
         for (view in views(ada, bond)) {
             view["myEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder FULL_KEYS

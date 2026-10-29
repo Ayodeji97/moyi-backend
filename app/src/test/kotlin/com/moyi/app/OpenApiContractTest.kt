@@ -21,6 +21,7 @@ import io.kotest.matchers.maps.shouldContainKey
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldNotContainIgnoringCase
@@ -256,6 +257,31 @@ class OpenApiContractTest(
         // is the route's own name; its prose, and the other route's, do not
         // repeat it.
         listOf(leave, other, flag).forEach { it shouldNotContainIgnoringCase "block" }
+    }
+
+    @Test
+    fun `one ending requires its body and its flag, never null, and the other takes both as optional`() {
+        // ADR-0035 questions 1 and 11, the owner's ruling of 2026-10-21. The
+        // handler takes the shared optional type, so that the guard runs
+        // before the flag is asked for; springdoc can see only that, and
+        // without the customiser the document would say the body may be left
+        // out of a route that refuses it.
+        val leave = api.paths["/api/v1/bonds/{bondId}/leave"]!!.post.requestBody
+        val other = api.paths["/api/v1/bonds/{bondId}/block"]!!.post.requestBody
+
+        leave.required shouldNotBe true
+        leave.content["application/json"]!!.schema.`$ref` shouldBe "#/components/schemas/EndBondRequest"
+
+        other.required shouldBe true
+        other.content.keys shouldBe setOf("application/json")
+        other.content["application/json"]!!.schema.`$ref` shouldBe "#/components/schemas/RequiredEndBondRequest"
+        val required = api.components.schemas["RequiredEndBondRequest"]!!
+        required.required shouldBe listOf("withdrawEntries")
+        required.properties.keys shouldBe setOf("withdrawEntries")
+        val flag = required.properties["withdrawEntries"]!!
+        // A boolean and nothing else: `null` is not one of its types.
+        (flag.types ?: setOf(flag.type)) shouldBe setOf("boolean")
+        flag.description.shouldNotBeNull() shouldNotContainIgnoringCase "block"
     }
 
     @Test
@@ -523,7 +549,7 @@ class OpenApiContractTest(
         day.properties["partnerEntry"] shouldBe today["partnerEntry"]
         day.properties["myEntry"] shouldBe today["myEntry"]
         day.properties["partnerEntry"]!!.discriminator.shouldNotBeNull()
-        day.properties["partnerEntry"]!!.oneOf.size shouldBe 4
+        day.properties["partnerEntry"]!!.oneOf.size shouldBe 3
         day.properties["date"]!!.format shouldBe "date"
 
         val page = api.components.schemas["DaysResponse"]!!
@@ -703,19 +729,17 @@ class OpenApiContractTest(
     }
 
     @Test
-    fun `an entry says whether its reader kept it, and the two shapes for an entry never shown have no such field`() {
+    fun `an entry says whether its reader kept it, and the shape for an entry never shown has no such field`() {
         val full =
             api.components.schemas["EntryResponse"]!!
                 .allOf
                 .last()
         full.properties["favourited"]!!.types shouldBe setOf("boolean")
         full.required shouldContain "favourited"
-        listOf("LockedEntryResponse", "ErasedEntryResponse").forEach { name ->
-            api.components.schemas[name]!!
-                .allOf
-                .last()
-                .properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-        }
+        api.components.schemas["LockedEntryResponse"]!!
+            .allOf
+            .last()
+            .properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
     }
 
     @Test
@@ -799,17 +823,19 @@ class OpenApiContractTest(
     }
 
     @Test
-    fun `partnerEntry is one of three branches, discriminated on status with no value naming two`() {
+    fun `partnerEntry is one of two branches, discriminated on status with no value naming two`() {
         // springdoc resolves the sealed interface to a `oneOf` of its
         // branches; OpenApiConfiguration adds the `discriminator`, which is
         // what a generated client builds its sealed types from (doc 06 §2).
-        // A discriminator maps a value to exactly one schema, so the three
-        // branches' `status` enums must be disjoint — which is why a
-        // partner's never-revealed erased entry says `REMOVED`, not the wide
-        // tombstone's `DELETED`.
+        // A discriminator maps a value to exactly one schema, so the
+        // branches' `status` enums must be disjoint. There were three until
+        // the owner's ruling of 2026-10-21 (ADR-0032 question 2): a partner's
+        // entry erased before it was revealed is now `null`, and its
+        // `ErasedEntryResponse` and `REMOVED` are gone from the document.
         val today = api.components.schemas["TodayResponse"]!!
         val partnerEntry = today.properties["partnerEntry"]!!
-        val branches = listOf("EntryResponse", "LockedEntryResponse", "ErasedEntryResponse")
+        val branches = listOf("EntryResponse", "LockedEntryResponse")
+        api.components.schemas.keys shouldNotContain "ErasedEntryResponse"
 
         partnerEntry.oneOf.mapNotNull { it.`$ref` } shouldContainExactlyInAnyOrder branches.map { "#/components/schemas/$it" }
         partnerEntry.discriminator.shouldNotBeNull()
@@ -820,7 +846,6 @@ class OpenApiContractTest(
                 "REVEALED" to "#/components/schemas/EntryResponse",
                 "DELETED" to "#/components/schemas/EntryResponse",
                 "LOCKED" to "#/components/schemas/LockedEntryResponse",
-                "REMOVED" to "#/components/schemas/ErasedEntryResponse",
             )
 
         // The mapping is the document's claim; each branch's own `status`
@@ -849,8 +874,8 @@ class OpenApiContractTest(
         // writes. springdoc says so for a nullable `$ref` (myEntry) and not
         // for a nullable sealed interface's `oneOf`; OpenApiConfiguration adds
         // the branch. Without it the contract claims the field is always one
-        // of the three objects, and a strict client rejects the ordinary
-        // first response of every day.
+        // of the objects, and a strict client rejects the ordinary first
+        // response of every day.
         val today = api.components.schemas["TodayResponse"]!!
 
         listOf("myEntry", "partnerEntry").forEach { name ->
@@ -859,22 +884,20 @@ class OpenApiContractTest(
                 branches.filter { it.`$ref` == null }.map { it.types } shouldBe listOf(setOf("null"))
             }
         }
-        // Exactly the three objects and the null: nothing else was admitted.
-        today.properties["partnerEntry"]!!.oneOf.size shouldBe 4
+        // Exactly the two objects and the null: nothing else was admitted.
+        today.properties["partnerEntry"]!!.oneOf.size shouldBe 3
     }
 
     @Test
-    fun `the two narrow partnerEntry branches carry an author and a status, both required, and nothing else`() {
+    fun `the narrow partnerEntry branch carries an author and a status, both required, and nothing else`() {
         // BR-8: the type has nowhere to put anything else.
-        listOf("LockedEntryResponse" to "LOCKED", "ErasedEntryResponse" to "REMOVED").forEach { (name, status) ->
-            val fields =
-                api.components.schemas[name]!!
-                    .allOf
-                    .last()
-            fields.properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-            fields.required shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-            fields.properties["status"]!!.enum shouldBe listOf(status)
-        }
+        val fields =
+            api.components.schemas["LockedEntryResponse"]!!
+                .allOf
+                .last()
+        fields.properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+        fields.required shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
+        fields.properties["status"]!!.enum shouldBe listOf("LOCKED")
     }
 
     @Test
@@ -1026,7 +1049,7 @@ class OpenApiContractTest(
         sent.required.orEmpty() shouldNotContain "promptId"
         val patched = api.components.schemas["PatchEntryRequest"]!!
         patched.properties.keys shouldNotContain "promptId"
-        for (shape in listOf("EntryResponse", "LockedEntryResponse", "ErasedEntryResponse")) {
+        for (shape in listOf("EntryResponse", "LockedEntryResponse")) {
             api.components.schemas[shape]!!.toString() shouldNotContain "promptId"
         }
     }

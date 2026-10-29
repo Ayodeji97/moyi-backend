@@ -138,11 +138,16 @@ internal class WithdrawalRig(
             .response.status shouldBe 204
     }
 
-    /** With no [withdraw], no body: a block withdraws unless it is declined (FR-029a). */
+    /**
+     * A block always sends the flag: without it the route refuses (ADR-0035
+     * question 1). [withdraw] defaults to taking the entries, the default a
+     * bare block had before the owner's ruling, so that what each test here
+     * asks for did not move when the flag became required.
+     */
     fun block(
         user: UUID,
         bond: String,
-        withdraw: Boolean? = null,
+        withdraw: Boolean = true,
     ) {
         end("block", user, bond, withdraw)
     }

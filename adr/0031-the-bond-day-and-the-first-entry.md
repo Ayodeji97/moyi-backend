@@ -1,7 +1,7 @@
 # ADR-0031 — The Bond-day, and the first entry
 
 **Status:** Accepted · **Date:** 2026-09-29 · **Deciders:** Daniel
-**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review) · 2026-10-05 (C2: the Owed list discharged, decision 17's read rule qualified — ADR-0032; C3: its Owed list discharged — ADR-0033)
+**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review) · 2026-10-05 (C2: the Owed list discharged, decision 17's read rule qualified — ADR-0032; C3: its Owed list discharged — ADR-0033) · 2026-10-28 (decision 10's narrow tombstone, `ErasedEntryResponse`, superseded — ADR-0032 question 2)
 
 ## Context
 
@@ -183,7 +183,8 @@ locked entry there is, silently, because nothing about the type says it must not
 shape" to "it appears here" for a compiler to miss, because there is no such path to forget.
 `RevealGateTest`'s first case pins the wire shape byte for byte against exactly this. The rework
 added a second type built on the same reasoning, `ErasedEntryResponse`, for an entry withdrawn
-before it was ever revealed (decision 10).
+before it was ever revealed (decision 10). *(Superseded 2026-10-28, ADR-0032 question 2: that
+entry is now no entry, `partnerEntry: null`, and the type is gone.)*
 
 **8. An `Idempotency-Key` is locked, reserved, used and completed in the same transaction as the
 write it guards, and what it records is the result's identity, never a body.** The first version
@@ -315,7 +316,9 @@ not reveal an entry whose own timestamp was never set. As built:
   timestamps the lock was hiding, so they get `ErasedEntryResponse`: the author and
   `status: REMOVED`, nothing else. This is unreachable until a `DELETE` exists. It was built
   now because the gate was being built now, and the shape is cheapest to set before any client
-  reads it.
+  reads it. *(Superseded 2026-10-28 by ADR-0032 question 2 as built: a partner an entry was
+  never revealed to is shown no entry once it is erased, so the narrow tombstone and its
+  `REMOVED` are gone; the wide one stands.)*
 - **`REMOVED`, not `DELETED`, for the narrow one.** The ruling that created the narrow tombstone
   was about its fields; its first literal was `DELETED`, which is also the wide tombstone's, and
   a discriminator maps one value to one schema, so the discriminator had to come out. That cost
@@ -337,7 +340,8 @@ does not add is a `discriminator`, so a generated client would have to try each 
 structurally. `OpenApiConfiguration.discriminatePartnerEntry` adds one, mapped explicitly for
 every value any branch can send: `SUBMITTED`, `REVEALED` and `DELETED` to `EntryResponse`,
 `LOCKED` to `LockedEntryResponse`, `REMOVED` to `ErasedEntryResponse`. An unmapped value would
-fall back to naming a schema directly, and none of these names one.
+fall back to naming a schema directly, and none of these names one. *(Superseded in part
+2026-10-28, ADR-0032 question 2: two object branches now, and no `REMOVED`.)*
 `requireDiscriminatorProperty` marks every field of every branch `required`, the discriminator
 among them. The field is `PartnerEntryResponse?`, `null` until the partner writes, and springdoc
 gives a nullable sealed interface no null branch (it gives `myEntry`, a nullable `$ref`, one);
@@ -700,7 +704,7 @@ in the error contract, recorded under Owed.
   start has moved. C1 cannot produce such a row. A later writer that opens days by any other
   route can (Owed).
 - **The contract changed inside the unmerged slice.** `EntryResponse.text` is nullable;
-  `ErasedEntryResponse` exists; `partnerEntry` is nullable and has three object branches;
+  `ErasedEntryResponse` exists (until 2026-10-28, ADR-0032 question 2); `partnerEntry` is nullable and has three object branches;
   `Idempotency-Replayed` is a declared response header. None of it is breaking against `main`
   beyond the error codes above, because none of C1 has merged.
 - **Two more things in V11 and V12 since the rework:** the key's CHECK (decision 25), and a

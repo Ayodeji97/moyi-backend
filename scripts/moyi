@@ -335,10 +335,10 @@ case "$cmd" in
           usage="usage: moyi bond block (--withdraw-entries | --keep-entries)   (say which: withdrawing erases your entries for both of you, for good)"
         fi
         [ $# -le 1 ] || die "$usage"
-        # The flag is always sent, never left to the server's default. The two routes' defaults are opposite,
-        # and the server's for this one erases: a bare command would destroy what was written without a word
-        # typed or printed about it. So that one asks which, and a bare leave says "keep" in so many words;
-        # what is printed afterwards is then what was asked for, whatever the server's defaults become.
+        # The flag is always sent, never left to the server. A block's used to erase, and the server now refuses
+        # one without it (ADR-0035 question 1); a command that asked nothing would only fail. So that one asks
+        # which, and a bare leave says "keep" in so many words; what is printed afterwards is then what was
+        # asked for, whatever the server's defaults become.
         case "$sub ${1:-}" in
           *" --withdraw-entries") withdraw=true ;;
           *" --keep-entries")     withdraw=false ;;

@@ -68,7 +68,7 @@ internal class DiscreetExitTest(
     @Test
     fun `after a leave and after a block, the other member sees exactly the same thing`() {
         val left = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave") }
-        val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block") }
+        val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":true}""") }
 
         withClue("the 204 itself") {
             blocked.ending.status shouldBe left.ending.status
@@ -101,7 +101,7 @@ internal class DiscreetExitTest(
         // disclosure T-09 forbids — and the most dangerous kind, because it
         // would arrive at exactly the person who must not be told.
         val left = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave") }
-        val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block") }
+        val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":true}""") }
 
         val leftWrite = post(left.other, "/api/v1/bonds/${left.bondId}/invites")
         val blockedWrite = post(blocked.other, "/api/v1/bonds/${blocked.bondId}/invites")
@@ -141,7 +141,7 @@ internal class DiscreetExitTest(
         post(bea, "/api/v1/bonds/$bondId/leave").status shouldBe 204
         val before = getBond(bea, bondId)
 
-        post(ada, "/api/v1/bonds/$bondId/block").status shouldBe 204
+        post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":true}""").status shouldBe 204
 
         val after = getBond(bea, bondId)
         withClue("what Bea sees after being blocked") {
@@ -166,7 +166,7 @@ internal class DiscreetExitTest(
         // that a member who left cannot start a mutual deletion, which account
         // deletion (FR-008) and export (FR-009) still cover.
         val left = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave") }
-        val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block") }
+        val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":true}""") }
 
         val afterLeave = post(left.other, "/api/v1/bonds/${left.bondId}/deletion-request")
         val afterBlock = post(blocked.other, "/api/v1/bonds/${blocked.bondId}/deletion-request")
@@ -186,7 +186,6 @@ internal class DiscreetExitTest(
         val left = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave", """{"withdrawEntries":false}""") }
         val blocked = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":true}""") }
         val leftSilently = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave") }
-        val blockedSilently = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block") }
         val leftWithdrawing = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/leave", """{"withdrawEntries":true}""") }
         val blockedKeeping = endedBond { ada, bondId -> post(ada, "/api/v1/bonds/$bondId/block", """{"withdrawEntries":false}""") }
 
@@ -194,13 +193,12 @@ internal class DiscreetExitTest(
         withdrawalsIn(left) shouldBe 0
         withdrawalsIn(blocked) shouldBe 1
         withdrawalsIn(leftSilently) shouldBe 0
-        withdrawalsIn(blockedSilently) shouldBe 1
         withdrawalsIn(leftWithdrawing) shouldBe 1
         withdrawalsIn(blockedKeeping) shouldBe 0
 
         val leftDetail = getBond(left.other, left.bondId)
         leftDetail.contentAsString shouldContain "\"status\":\"ARCHIVED\""
-        listOf(blocked, leftSilently, blockedSilently, leftWithdrawing, blockedKeeping).forEach { other ->
+        listOf(blocked, leftSilently, leftWithdrawing, blockedKeeping).forEach { other ->
             withClue("the 204 itself") {
                 other.ending.status shouldBe left.ending.status
                 other.ending.contentAsString shouldBe ""
