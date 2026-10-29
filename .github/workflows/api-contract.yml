@@ -59,6 +59,15 @@ jobs:
           base: base-openapi.json
           revision: contracts/openapi.json
           fail-on: ERR
+          # Without it oasdiff compares an allOf schema's branches one at a time and
+          # reports a new value of a response enum inside a branch as a WARN, not an
+          # ERR, so it passes unlabelled. EntryResponse, for one, is an allOf
+          # (ADR-0024 amendment of 2026-10-29; found on ME_TOO, ADR-0037).
+          flatten-allof: true
+          # The action uploads both documents to oasdiff.com by default to build a
+          # review page. Nothing here reads that page, and no document leaves CI
+          # without a decision to send it.
+          review: false
 
       - if: steps.diff.outcome == 'failure' && !contains(github.event.pull_request.labels.*.name, 'breaking-api-change')
         run: |
