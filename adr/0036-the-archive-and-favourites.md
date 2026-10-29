@@ -1,7 +1,7 @@
 # ADR-0036 — The archive and favourites
 
 **Status:** Accepted · **Date:** 2026-10-09 · **Deciders:** Daniel
-**Amended:** 2026-10-13 ("Owed, C5c" discharged or carried, item by item; decision 12's unmark narrowed on a tombstone by `01752a7`, which the owner accepted on 2026-10-21 — ADR-0037 question 8); 2026-10-27 (questions 5 and 7 built as ruled: the partner's name on every day, and `entry_favourites.created_at` dropped by V26)
+**Amended:** 2026-10-13 ("Owed, C5c" discharged or carried, item by item; decision 12's unmark narrowed on a tombstone by `01752a7`, which the owner accepted on 2026-10-21 — ADR-0037 question 8); 2026-10-27 (questions 5 and 7 built as ruled: the partner's name on every day, and `entry_favourites.created_at` dropped by V26); 2026-10-28 (question 6 built: a partner's entry erased before it was seen is not shown; decision 1's table and its bullet follow)
 
 ## Context
 
@@ -60,7 +60,8 @@ reader may see of an entry; its answers are `FULL`, `TOMBSTONE` (erased, and the
 read it before), `LOCKED`, `TOMBSTONE_UNSEEN` (erased, never shown to this reader) and
 `NOT_A_MEMBER`. The **marker** is ADR-0035's: the bond's record that a member withdrew their
 entries. A **wide tombstone** is the full entry shape with `text: null`; the two narrow shapes
-are `{authorMemberId, status: LOCKED}` and `{authorMemberId, status: REMOVED}`.
+are `{authorMemberId, status: LOCKED}` and `{authorMemberId, status: REMOVED}` (the second
+served until 2026-10-28, question 6).
 
 ## Decision
 
@@ -78,7 +79,7 @@ corpus gives. Case by case:
 | `SOLO` on a bond that ended before the day did: never revealed (ADR-0033 decision 9) | its author only |
 | `SUSPENDED` from before the second member joined | the creator only; with both entries, each sees their own and the other's stays `LOCKED` |
 | Holding only the partner's unrevealed entry (`PARTIAL`, or today) | not the caller |
-| Listed for the caller through their own entry, where the partner wrote and erased theirs before any reveal | the caller, with the partner's entry as `{authorMemberId, status: REMOVED}`, **for good** |
+| Listed for the caller through their own entry, where the partner wrote and erased theirs before any reveal | the caller, with no partner entry (`null`), as if the partner had never written *(amended 2026-10-28; until then `{authorMemberId, status: REMOVED}`, for good)* |
 | `PARTIAL` or `PENDING_REVEAL` | whoever wrote on it; the partner's entry is `LOCKED` |
 | Closed `EMPTY` after its author deleted their only entry | **the author only, as `status: EMPTY` with their own tombstone** |
 | No entry row at all, whatever the status | nobody |
@@ -101,6 +102,14 @@ corpus gives. Case by case:
   every such cell. Hiding it would be a rule of its own: render an entry never shown as
   absent once its day has closed. Noted by the whole-branch privacy review; the smoke run
   now reads the shape from the jar. Question 6.
+  *(Amended 2026-10-28: question 6 was ruled the other way and is built. The day is listed
+  as before, through the caller's own entry, and the partner's entry erased before any
+  reveal is not in it: `partnerEntry: null`, the day a partner who never wrote gives (for
+  a day not yet settled when the entry was erased; ADR-0032 question 4 has the rest). The
+  rule is one function that every day renderer reads through (`service.shownTo`), not a
+  rule of the archive's, and it holds on today as well; the gate's answer is unchanged.
+  `ArchiveGateTest`'s matrix now expects absence in those cells. ADR-0032 question 2 has the
+  decisions taken in building it.)*
 - **It reads no column of the day.** A `SOLO` or `REVEALED` status is not evidence that an
   entry was revealed (ADR-0033 decision 9), and `bond_days.revealed_at` is unset on a `SOLO`
   day whose lone entry was revealed.
@@ -227,6 +236,16 @@ earlier than `limit` would have put it.
   hundred entries: about 1.4 KB more than was measured (the conformance review's
   arithmetic; not built). The margin is about 31 KB, and a new field on an entry spends it
   at a hundred entries a page.
+  *(2026-10-28, ADR-0031's ruling 1 built: the 500 are counted on the text as sent, so `a`
+  and 8,191 U+001F are a `422` and the largest entry is now 10,688 octets out — a
+  backslash with 3,846 combining acutes, and 499 U+001F. The bound and `octetsAsJson` are
+  unchanged. `DaysFeedTest` now fills the page with nine days of two such entries and one
+  that brings the text to 196,608 exactly, among forty days of tombstones, with `THANK_YOU`
+  (the longest reaction) on each of the twenty entries that can carry one, and measures
+  255,507 octets of 262,144, with the partner's name at its longest on every day (added
+  2026-10-27, about 23.5 KB of it). Every day costs about 1,174 octets beside its text, so
+  a page at the text bound is that size whichever entries carry the text: the margin is
+  about 6.6 KB, less the 1.4 KB of production timestamps.)*
 - The count is an upper bound on what the serializer writes, never under: the reviewer
   compared it with the application's mapper over every scalar of the Basic Multilingual
   Plane.
@@ -236,6 +255,13 @@ earlier than `limit` would have put it.
   real value as its default, and a test passes 1. That is a test hook in a production
   signature, noted by the reviewer and kept.
 - A tombstone and a locked entry send no text and count for nothing.
+- *Noted 2026-10-28 (ADR-0015, amended).* Identity now refuses a display name holding a
+  control character or a format character other than ZWNJ and ZWJ. The worst name it accepts
+  escapes to at most 3 octets a UTF-16 unit (a BMP character's UTF-8, or 2 for `"` and `\`),
+  against 6 before, so `DaysFeedTest`'s largest page, built from U+001F through a fake
+  directory, now over-counts and still bounds the page. Neither that test nor
+  `ArchivePageBudget` is changed, because #105 rewrites the test. **Re-measuring the page with
+  the new worst name is owed once #105 has merged.**
 - *Rejected:* a maximum `limit` below 16, which gives up page size for every ordinary
   archive to bound a pathological one; and shortening text in the list on the server, which
   `states.md` §6 puts on the client and which would make the list and the day view two
@@ -1015,7 +1041,7 @@ Each is built one way and cheap to turn.
    | Delete your own entry from the day view (§6) | `myEntry.id` | served |
    | A solo day card | `status: SOLO`, one entry, the other absent | **gap in the design**: §6 draws none |
    | A day of tombstones after a withdrawal (§9) | listed for both, wide tombstones | **gap in the design**: §9 says it owes this drawing before C5 |
-   | An emptied day; a pre-join day for its creator; a day still waiting; a day on which the partner wrote and erased before any reveal | `status: EMPTY`, `SUSPENDED`, `PARTIAL`, `PENDING_REVEAL` with the caller's own entry; for the last, the partner's entry as an author and `REMOVED` with nothing to draw | **gap in the design**: none is drawn in the archive (the last is also question 6) |
+   | An emptied day; a pre-join day for its creator; a day still waiting; a day on which the partner wrote and erased before any reveal | `status: EMPTY`, `SUSPENDED`, `PARTIAL`, `PENDING_REVEAL` with the caller's own entry; for the last, the partner's entry as an author and `REMOVED` with nothing to draw *(since 2026-10-28 no partner entry at all, question 6)* | **gap in the design**: none is drawn in the archive (the last is also question 6) |
    | Archived bond, read only (§9) | both routes answer for both members, the one who left included | served |
    | No timestamp on an entry card (`tokens.md`) | `createdAt` and `intendedAt` are sent, as since C1 | the client does not draw them |
    | Search chip (§6) | none | C6 |
@@ -1065,7 +1091,8 @@ Each is built one way and cheap to turn.
 
    **What it costs decision 6.** The name is on fifty days a page, and identity takes 80
    characters with no rule against controls, which JSON writes as six octets each: at its
-   largest about 25 KB of the margin, which leaves about 4 KB. `DaysFeedTest` builds the
+   largest about 25 KB of the margin, which leaves about 4 KB (about 6.6 KB as measured on
+   2026-10-28, decision 6's note). `DaysFeedTest` builds the
    largest page with the longest name on every day and measures it, and
    `OpenApiContractTest` fails if identity's limit ever grows past the length it measured
    with (`ArchivePageBudget`). On-this-day is not measured: it is capped at one day a year
@@ -1079,6 +1106,19 @@ Each is built one way and cheap to turn.
 
    *Ruled by the owner on 2026-10-21, to be built: hidden.* The same ruling as ADR-0032's
    second question.
+
+   *Built 2026-10-28.* Hidden on every walk and on today, from the erasure (or the
+   withdrawal's commit) and not only once the day has closed: the partner's entry is
+   `null`, and a day that had not settled when the entry was erased is byte for byte the
+   day of a partner who never wrote, on the feed, one day, search and on this day
+   (`UnseenErasureTwinTest`). A day that settled first keeps the status and streak square
+   it settled with (BR-10), so for it alone the status still says an entry was there:
+   ADR-0032 question 2 has the scenario, and its question 4 is the owner's. Decision 1's rule lists no
+   day for such an entry alone, so the listing needed no change. Built not as an archive
+   rule rendering an entry from its day's state, the objection above, but as one rule of how
+   any day is shown (`service.shownTo`). ADR-0032 question 2 records the decisions,
+   including the status a withdrawal's day is shown with before its erasure, and the
+   `REMOVED` branch leaving the contract.
 7. **`entry_favourites.created_at`** (decision 10). The corpus specifies the column;
    nothing returns it, orders by it or filters on it; to an operator it is the time a
    person was reading. Built: kept, as specified. Dropping it is an edit to V22 while the
@@ -1220,9 +1260,12 @@ Added after the conformance review, which found these missing from the list:
   and fails first.
 - A field is added to a day, or the display name's limit or its rules change: since
   2026-10-27 the name spends most of that margin at its largest (question 5's amendment),
-  and about 4 KB is left.
+  and about 4 KB is left. *(Measured 2026-10-28 with the longest reaction too: about
+  6.6 KB, less 1.4 KB of production timestamps; decision 6's note.)*
 - The entry limit changes, or `EntryText` starts counting control characters: the worst
-  case of decision 6 moves with it.
+  case of decision 6 moves with it. *(Happened 2026-10-28: ADR-0031's ruling 1 counts the
+  500 on the text as sent, so a control is a character; the worst case was rebuilt and
+  re-measured, decision 6's note.)*
 - A second route by entry id arrives (reactions, C5c): decision 11, or its own reason.
 - A read path is added that renders an entry (search, on-this-day, C6): it lists by
   decision 1's predicate, renders through the gate and reads the marker last (decision

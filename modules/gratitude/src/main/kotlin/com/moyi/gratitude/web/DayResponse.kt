@@ -9,12 +9,14 @@ import java.time.LocalDate
  * One day of the archive (FR-090): the day `GET /today` shows while it is
  * today, without the streak, and with the partner's name.
  *
- * [status] is the day's own, shared deliberately as it is on `today`
- * (`TodayResponse` has the reasoning). [myEntry] and [partnerEntry] are the
- * only places content can appear, and each is rendered from BR-1's answer by
- * the same two functions `today` uses, so an entry looks the same on both
- * routes: in full, a tombstone, or for a partner's entry the caller was
- * never shown, an author and a status and nothing else.
+ * [status] is the day's, as its erasures will leave it, shared deliberately
+ * as it is on `today` (`TodayResponse` has the reasoning). [myEntry] and
+ * [partnerEntry] are the only places content can appear, and each is rendered
+ * from BR-1's answer by the same two functions `today` uses, so an entry looks
+ * the same on both routes: in full, a tombstone, or for a partner's entry the
+ * caller has not been shown, an author and a status and nothing else; once
+ * such an entry is erased, `null`, as if it had never been written
+ * (`service.shownTo`, ADR-0032 question 2).
  *
  * **Nothing here is about the other person beyond that.** No `deletedAt` or
  * `updatedAt` (when somebody erased or changed something is not the reader's

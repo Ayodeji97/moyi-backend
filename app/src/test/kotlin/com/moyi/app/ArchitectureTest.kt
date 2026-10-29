@@ -119,6 +119,19 @@ class ArchitectureTest {
         private const val READER_FACTORY_FILE = "BondCalendars"
 
         /**
+         * A use of `EntryText`'s read-path factory, however it is spelled: a
+         * call, a function reference, or a bare call after an import. The
+         * name is distinctive enough to match as a word.
+         */
+        private val ENTRY_TEXT_FROM_STORAGE = Regex("""\bfromStorage\b""")
+
+        /** The one package that maps a stored row's text (`GratitudeMappers`). */
+        private const val ENTRY_TEXT_READ_PATH = "com.moyi.gratitude.infra.database"
+
+        /** Where `EntryText` and its factories are declared. */
+        private const val ENTRY_TEXT_FILE = "EntryText"
+
+        /**
          * Every way a class can open or join a transaction by import:
          * Spring's annotation, `TransactionTemplate` and the manager behind
          * it, and Jakarta's own `@Transactional`.
@@ -577,6 +590,28 @@ class ArchitectureTest {
             violations.isEmpty(),
             "Only `BondMembership.asReader()` ($READER_FACTORY_FILE) may construct a gratitude Reader: it is the " +
                 "evidence that the member id and the bond id came from one checked membership. Found in: $violations",
+        )
+    }
+
+    @Test
+    fun `an entry's text is read from storage only by the database layer`() {
+        // `EntryText.fromStorage` skips the blank and grapheme checks so that a
+        // row written under an older rule can still be read (ADR-0031,
+        // "Built, 2026-10-28", decision 3). Anything a member sends must go
+        // through `EntryText.of`; were a controller or a service to reach for
+        // `fromStorage`, a text the rules refuse would be accepted and stored.
+        // Text-matched, as the Reader rule above is and for its reason.
+        val violations =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
+                .filter { it.name != ENTRY_TEXT_FILE && ENTRY_TEXT_FROM_STORAGE.containsMatchIn(it.text) }
+                .filterNot { it.packagee?.name == ENTRY_TEXT_READ_PATH }
+                .map { it.name }
+
+        assertTrue(
+            violations.isEmpty(),
+            "Only $ENTRY_TEXT_READ_PATH may call EntryText.fromStorage: it is for rows already stored, and " +
+                "anything a member sends goes through EntryText.of. Found in: $violations",
         )
     }
 

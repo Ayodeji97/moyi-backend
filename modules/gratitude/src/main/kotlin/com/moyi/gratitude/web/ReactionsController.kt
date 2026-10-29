@@ -39,7 +39,7 @@ import org.springframework.web.bind.annotation.RestController
  * The method names are the API's `operationId`s, and
  * `contracts.OpenApiConfiguration` lists `reactToEntry` among the operations
  * that can answer `409`, together with `unreactToEntry` for its retryable
- * lock conflict.
+ * lock conflict and its ended bond.
  */
 @RestController
 @RequestMapping("/api/v1/entries")
@@ -64,10 +64,11 @@ internal class ReactionsController(
     }
 
     /**
-     * `204` when absent or removed, whatever has become of the entry or the
-     * bond; `409 REACTION_BUSY` when another operation holds it on an entry
-     * the caller reads in full, the caller's own overlapping request
-     * included.
+     * `204` when absent or removed, whatever has become of the entry; `409
+     * BOND_ARCHIVED` on a partner's entry read in full once the bond has
+     * ended, or the caller has left it; `409 REACTION_BUSY` when another
+     * operation holds it on an entry the caller reads in full, the caller's
+     * own overlapping request included.
      */
     @DeleteMapping("/{entryId}/reaction")
     @ResponseStatus(HttpStatus.NO_CONTENT)

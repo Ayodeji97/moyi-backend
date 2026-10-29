@@ -15,7 +15,9 @@ auth:bearer {
 }
 
 docs {
-  Takes your reaction back: 204, and 204 again if there was none. Allowed after the bond has ended, and on an entry that has since been deleted. An entry you were never shown is 404.
+  Takes your reaction back: 204, and 204 again if there was none. Allowed on an entry that has since been deleted. An entry you were never shown is 404.
+
+  409 BOND_ARCHIVED once the bond has ended, or you have left it, on your partner's entry: the reaction stays, still shown to both of you. On your own entry, or on one that has been deleted or withdrawn, it is still 204.
 
   409 REACTION_BUSY means something else is changing that reaction at this moment, on an entry you can read in full; send it again. That can be your own other request: two of these at once, or this one over your own React. It is never the answer for an entry that has been deleted or withdrawn, or for one you wrote: those are 204.
 }

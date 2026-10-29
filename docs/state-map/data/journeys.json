@@ -242,7 +242,7 @@
       },
       {
         "row": "bond-archived-block",
-        "note": "Later you decide not to leave your words with them. You send no body, so your entries go."
+        "note": "Later you decide not to leave your words with them. You send withdrawEntries: true, so your entries go."
       },
       {
         "row": "entry-revealed-block-withdraws",

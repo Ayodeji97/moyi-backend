@@ -23,9 +23,13 @@ import jakarta.validation.constraints.Size
  * **The email and password constraints delegate to the domain** rather than
  * restating its rules, and `password` carries a second one — [NotBreached],
  * which is ADR-0012's breached-password corpus; see [ValidEmail] for the three confirmed 500s that
- * restating them produced. `displayName`, `locale` and `acceptedTermsVersion`
- * keep ordinary annotations because their domain rules are `isNotBlank` and
- * nothing more — there is no second definition to drift from.
+ * restating them produced. `displayName` keeps `@NotBlank` and `@Size`, which
+ * mirror `User`'s own two rules (and `@Size` is what publishes `maxLength`,
+ * which `OpenApiContractTest` holds to `ArchivePageBudget`), and asks the
+ * domain for its character rule through [ValidDisplayName] (ADR-0015, amended
+ * 2026-10-28). `locale` and `acceptedTermsVersion` keep ordinary annotations
+ * because their domain rules are `isNotBlank` and nothing more — there is no
+ * second definition to drift from.
  */
 internal data class RegisterRequest(
     @field:NotBlank
@@ -40,6 +44,7 @@ internal data class RegisterRequest(
     val password: String,
     @field:NotBlank
     @field:Size(max = User.MAX_DISPLAY_NAME_LENGTH)
+    @field:ValidDisplayName
     val displayName: String,
     /** BCP 47 language tag. Defaulted rather than required — the client sends the device's. */
     @field:NotBlank

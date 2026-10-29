@@ -75,14 +75,18 @@ internal fun BondDay.applyTo(entity: BondDayEntity) {
 }
 
 /**
- * `EntryText.of` re-validates on the way out exactly as `ZoneId.of` does
- * above, including the 500-grapheme cap — which V12's `CHECK` does not
- * restate; the schema bounds `text` by octets alone. A row the database
- * would accept but this function would refuse to read cannot exist today
- * because every write already goes through `EntryText.of` first (`Entry.submit`),
- * so the two bounds never actually diverge — but they are two separate
- * statements of the limit, not one, and only the schema's is enforced at
- * the boundary a second writer could someday bypass.
+ * `EntryText.fromStorage` on the way out, **not** `EntryText.of`. `of` is the
+ * write path's check and has tightened since rows were first written: the
+ * owner's rulings of 2026-10-21 (ADR-0031) refuse a text of only zero-width
+ * characters and count the 500 on the text as sent, trailing spaces
+ * included. A row written under the old rule — and development and
+ * production databases hold them — would fail `of`, and every read of its
+ * day would be a `500`. `fromStorage` checks only what a stored text is and
+ * a reader relies on (no NUL, no unpaired surrogate, within the octets, the
+ * last also V12's `CHECK`); a row that fails it is broken, not old, and
+ * fails here loudly as a zone the tzdb dropped does above. The grapheme cap
+ * is not re-checked on read; the schema bounds `text` by octets alone, and
+ * every write goes through `of` first (`Entry.submit`, an edit).
  *
  * A `NULL` text maps to `null`, not to a failure: that is a tombstone (see
  * [Entry]'s own KDoc), and [Entry]'s `init` is what refuses a missing text
@@ -94,7 +98,7 @@ internal fun EntryEntity.toDomain(): Entry =
         bondDayId = BondDayId(bondDayId),
         bondId = bondId,
         authorMemberId = authorMemberId,
-        text = text?.let(EntryText::of),
+        text = text?.let(EntryText::fromStorage),
         imageMediaId = imageMediaId,
         voiceMediaId = voiceMediaId,
         voiceDurationMs = voiceDurationMs,

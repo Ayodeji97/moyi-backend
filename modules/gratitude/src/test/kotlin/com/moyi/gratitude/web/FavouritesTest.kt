@@ -229,9 +229,9 @@ internal class FavouritesTest(
         puts.first().contentAsString shouldNotContain "ENTRY_NOT_REVEALED"
         marks().shouldBeEmpty()
 
-        // Erased before it was ever revealed: she was told an author and REMOVED, never its id. Still the same answer.
+        // Erased before it was ever revealed: she is shown nothing of it, never its id. Still the same answer.
         rig.delete(ada, adas)
-        today(bea, bond)["partnerEntry"]["status"].asString() shouldBe "REMOVED"
+        today(bea, bond)["partnerEntry"].isNull shouldBe true
         val unseen = listOf(favourite(bea, adas), unfavourite(bea, adas))
         unseen.forEach { it.status shouldBe 404 }
         (unseen + puts).map(::comparable).toSet().size shouldBe 1
@@ -249,8 +249,8 @@ internal class FavouritesTest(
 
         rig.delete(ada, adas)
 
-        today(bea, bond)["partnerEntry"].propertyNames().toList() shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-        today(bea, bond)["partnerEntry"]["status"].asString() shouldBe "REMOVED"
+        // Erased before she was shown it: no shape at all, the `null` of an entry never written (ADR-0032 question 2).
+        today(bea, bond)["partnerEntry"].isNull shouldBe true
         // Her own tombstone is the wide shape, and says false.
         val own = today(ada, bond)["myEntry"]
         own.propertyNames().toList() shouldContainExactlyInAnyOrder FULL_KEYS
