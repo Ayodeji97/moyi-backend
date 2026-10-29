@@ -97,7 +97,15 @@
 # gone from MinIO; a PNG declared as a JPEG FAILED; the photo attached to an
 # entry, 409 MEDIA_ATTACHED to its deletion, the partner's locked day without a
 # trace of it and, once revealed, PROCESSING with no URL; another user's photo and
-# a failed one refused on imageMediaId; and the URL in no log line. Last run on
+# a failed one refused on imageMediaId; and the URL in no log line. Since Phase 4
+# D5 the photographer then deletes the entry the photo is on: the owner's GET of
+# it is 404, the row DELETED with one MediaReleased, media.purge stamps it within
+# seconds, the URL handed out before answers 404 and MinIO holds nothing of it.
+# Last run on 2026-10-29 for D5, from a jar of this branch on D2 f5bc9bc, on a
+# fresh database that applied 33 migrations to V36, against its own compose
+# project (moyi-d5: Postgres 55445, Valkey 63805, MinIO 59010), the jar booted by
+# hand on libvips from PATH, and --attach: 1089 passed, 0 failed, 1 skipped (the
+# tag across the erasure, the poller having won the race), 30 sections. D2's: last run on
 # 2026-10-28 for D2, from a jar of this branch on main 7656192, on a fresh database
 # that applied 32 migrations to V33, against its own compose project (moyi-d2:
 # Postgres 55441, Valkey 63801, MinIO 59002), the jar booted by hand on libvips
@@ -2441,6 +2449,30 @@ expect "photos: an outsider reaches neither the photo nor the day" 404 '"code":"
 if grep -q "$(printf '%s' "$PH_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
   fail "photos: the photo's URL is in no log line" "its signature is in $MOYI_LOG"
 else pass "photos: the photo's URL is in no log line"; fi
+
+echo; echo "erasure — an erased entry's photo leaves the storage with it (Phase 4 D5, ADR-0050)"
+# The photographer deletes the entry the photo is on. media is told in the same
+# transaction (the photo is DELETED at once), and the booted jar's outbox poller
+# runs media.purge, which deletes the objects within seconds: the URL handed out
+# above, a bearer credential for up to 25 hours, then reaches nothing.
+PH_ENTRY="$(sql "SELECT id FROM entries WHERE image_media_id='$PH_PHOTO'")"
+PH_VARIANT_KEY="v/${PH_UPLOAD_KEY#in/}/full.webp"
+is "erasure: the URL handed out reaches the photo before the erasure" "$(curl -s -o /dev/null -w '%{http_code}' "$PH_URL")" "200"
+expect "erasure: the author deletes the entry with the photo, 204" 204 "" -- -X DELETE "$API/entries/$PH_ENTRY" -H "Authorization: Bearer $PH_A"
+expect "erasure: the owner's GET of the erased entry's photo is 404" 404 '"code":"NOT_FOUND"' -- "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_A"
+db_is "erasure: …the photo is DELETED and attached to nothing" "$(sql "SELECT status || '|' || (attached_entry_id IS NULL) FROM media_assets WHERE id='$PH_PHOTO'")" "DELETED|true"
+db_is "erasure: …and one MediaReleased was recorded for it" "$(sql "SELECT count(*) FROM outbox_events WHERE event_type='MediaReleased' AND aggregate_id='$PH_PHOTO'")" "1"
+PURGED="f"
+for _ in $(seq 1 40); do
+  PURGED="$(sql "SELECT purged_at IS NOT NULL FROM media_assets WHERE id='$PH_PHOTO'")"
+  [ "$PURGED" = "t" ] && break
+  sleep 0.5
+done
+db_is "erasure: media.purge deletes its objects within seconds" "$PURGED" "t"
+is "erasure: …and the URL handed out before reaches nothing" "$(curl -s -o /dev/null -w '%{http_code}' "$PH_URL")" "404"
+if [ "$MINIO_OK" = 0 ]; then skip "erasure: …nothing of the photo is left in MinIO"
+elif minio_has "$PH_VARIANT_KEY"; then fail "erasure: …nothing of the photo is left in MinIO" "MinIO still holds its full variant"
+else pass "erasure: …nothing of the photo is left in MinIO"; fi
 rm -rf "$PHOTO_DIR"
 flush_buckets
 
