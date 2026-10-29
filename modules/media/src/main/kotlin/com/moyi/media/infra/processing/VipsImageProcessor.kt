@@ -1,9 +1,9 @@
 package com.moyi.media.infra.processing
 
 import com.moyi.media.domain.ImageFormat
-import com.moyi.media.domain.ImageRefusal
 import com.moyi.media.domain.ImageRules
 import com.moyi.media.domain.ImageVariant
+import com.moyi.media.domain.MediaRefusal
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
@@ -65,7 +65,7 @@ internal class VipsImageProcessor(
             }
         ImageRules.headerRefusal(header.width, header.height, header.bands, header.format)?.let { return Encoding.Refused(it) }
         // A HEIF container may hold AV1 (AVIF) or other codecs under a HEIC brand: the codec libvips reads decides.
-        if (format == ImageFormat.HEIC && header.heifCompression != HEVC) return Encoding.Refused(ImageRefusal.NOT_HEVC)
+        if (format == ImageFormat.HEIC && header.heifCompression != HEVC) return Encoding.Refused(MediaRefusal.NOT_HEVC)
 
         val decoded = workDir.resolve(DECODED)
         val decode =
@@ -124,12 +124,12 @@ internal class VipsImageProcessor(
                 // What is kept must be a WebP, whatever the program said: one that ran out of
                 // memory has been seen to exit 0 having written nothing (libvips 8.15 under a
                 // tight `ulimit -v`), and an empty or foreign file is never served.
-                if (!isWebp(out)) return Step.Failed(ImageRefusal.UNREADABLE)
+                if (!isWebp(out)) return Step.Failed(MediaRefusal.UNREADABLE)
                 val bytes = Files.size(out)
                 if (bytes <= variant.maxBytes) return Step.Done(EncodedVariant(variant, out, size.width, size.height, bytes))
             }
         }
-        return Step.Failed(ImageRefusal.CANNOT_FIT)
+        return Step.Failed(MediaRefusal.CANNOT_FIT)
     }
 
     /** `vipsheader -a`'s size, bands, sample format and (for a HEIF) codec; anything else it says is not read. */
@@ -141,7 +141,7 @@ internal class VipsImageProcessor(
     ): Step<Header> =
         when (val outcome = sandbox.run(listOf(vipsheader.toString(), "-a", file.toString()), environment, workDir, deadline)) {
             Sandbox.Outcome.TimedOut -> {
-                Step.Failed(ImageRefusal.TIMED_OUT)
+                Step.Failed(MediaRefusal.TIMED_OUT)
             }
 
             is Sandbox.Outcome.Exited -> {
@@ -151,7 +151,7 @@ internal class VipsImageProcessor(
                 val format = outcome.field("format")
                 val read = listOf(width, height, bands, format).all { it != null }
                 if (outcome.code != 0 || !read) {
-                    Step.Failed(ImageRefusal.UNREADABLE)
+                    Step.Failed(MediaRefusal.UNREADABLE)
                 } else {
                     Step.Done(Header(width!!, height!!, bands!!, format!!, outcome.field("heif-compression")))
                 }
@@ -167,10 +167,10 @@ internal class VipsImageProcessor(
         workDir: Path,
         deadline: Sandbox.Deadline,
         environment: Map<String, String>,
-    ): ImageRefusal? =
+    ): MediaRefusal? =
         when (val outcome = sandbox.run(command, environment, workDir, deadline)) {
-            Sandbox.Outcome.TimedOut -> ImageRefusal.TIMED_OUT
-            is Sandbox.Outcome.Exited -> if (outcome.code == 0) null else ImageRefusal.UNREADABLE
+            Sandbox.Outcome.TimedOut -> MediaRefusal.TIMED_OUT
+            is Sandbox.Outcome.Exited -> if (outcome.code == 0) null else MediaRefusal.UNREADABLE
         }
 
     private fun Sandbox.Outcome.Exited.field(name: String): String? =
@@ -201,7 +201,7 @@ internal class VipsImageProcessor(
         ) : Step<T>
 
         data class Failed(
-            val reason: ImageRefusal,
+            val reason: MediaRefusal,
         ) : Step<Nothing>
     }
 

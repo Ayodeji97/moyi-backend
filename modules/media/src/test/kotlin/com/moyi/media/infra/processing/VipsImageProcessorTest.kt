@@ -1,8 +1,8 @@
 package com.moyi.media.infra.processing
 
 import com.moyi.media.domain.ImageFormat
-import com.moyi.media.domain.ImageRefusal
 import com.moyi.media.domain.ImageVariant
+import com.moyi.media.domain.MediaRefusal
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldNotContain
@@ -63,7 +63,7 @@ internal class VipsImageProcessorTest {
         // A few kilobytes that say 900 million pixels.
         (Files.size(bomb) < 1024L * 1024) shouldBe true
 
-        processor.encode(bomb, ImageFormat.PNG, dir) shouldBe Encoding.Refused(ImageRefusal.TOO_MANY_PIXELS)
+        processor.encode(bomb, ImageFormat.PNG, dir) shouldBe Encoding.Refused(MediaRefusal.TOO_MANY_PIXELS)
 
         // The decode writes `decoded.v`; it never ran.
         Files.exists(dir.resolve("decoded.v")) shouldBe false
@@ -136,7 +136,7 @@ internal class VipsImageProcessorTest {
         Files.delete(dir.resolve("wide.v"))
         val deep = dir.resolve("deep.png")
 
-        processor.encode(deep, ImageFormat.PNG, dir) shouldBe Encoding.Refused(ImageRefusal.TOO_LARGE_DECODED)
+        processor.encode(deep, ImageFormat.PNG, dir) shouldBe Encoding.Refused(MediaRefusal.TOO_LARGE_DECODED)
 
         Files.exists(dir.resolve(VipsImageProcessor.DECODED)) shouldBe false
     }
@@ -186,13 +186,13 @@ internal class VipsImageProcessorTest {
         val whole = TestImages.noiseJpeg(400, 300)
         val truncated = whole.copyOf(whole.size * 6 / 10)
 
-        processor.encode(file("cut.jpg", truncated), ImageFormat.JPEG, dir) shouldBe Encoding.Refused(ImageRefusal.UNREADABLE)
+        processor.encode(file("cut.jpg", truncated), ImageFormat.JPEG, dir) shouldBe Encoding.Refused(MediaRefusal.UNREADABLE)
     }
 
     @Test
     fun `bytes that start like a JPEG and are not one are unreadable`() {
         val broken = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte()) + "not really a photo".toByteArray()
-        processor.encode(file("broken.jpg", broken), ImageFormat.JPEG, dir) shouldBe Encoding.Refused(ImageRefusal.UNREADABLE)
+        processor.encode(file("broken.jpg", broken), ImageFormat.JPEG, dir) shouldBe Encoding.Refused(MediaRefusal.UNREADABLE)
     }
 
     @Test
@@ -208,7 +208,7 @@ internal class VipsImageProcessorTest {
         val processor = VipsImageProcessor(fake.resolve("vips"), fake.resolve("vipsheader"), Sandbox(null), Duration.ofSeconds(2))
 
         processor.encode(file("photo.jpg", TestImages.jpeg(10, 10)), ImageFormat.JPEG, dir) shouldBe
-            Encoding.Refused(ImageRefusal.TIMED_OUT)
+            Encoding.Refused(MediaRefusal.TIMED_OUT)
 
         val pid = Files.readString(dir.resolve("vips.pid")).trim().toLong()
         ProcessHandle.of(pid).map { it.isAlive }.orElse(false) shouldBe false
@@ -226,7 +226,7 @@ internal class VipsImageProcessorTest {
         val processor = VipsImageProcessor(fake.resolve("vips"), fake.resolve("vipsheader"), Sandbox(null), Duration.ofSeconds(10))
 
         processor.encode(file("photo.jpg", TestImages.jpeg(10, 10)), ImageFormat.JPEG, dir) shouldBe
-            Encoding.Refused(ImageRefusal.UNREADABLE)
+            Encoding.Refused(MediaRefusal.UNREADABLE)
     }
 
     private fun file(

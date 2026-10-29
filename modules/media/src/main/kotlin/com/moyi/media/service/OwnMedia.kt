@@ -1,7 +1,9 @@
 package com.moyi.media.service
 
 import com.moyi.media.api.ImageViewStatus
+import com.moyi.media.api.VoiceViewStatus
 import com.moyi.media.domain.MediaAsset
+import com.moyi.media.domain.MediaKind
 import com.moyi.media.infra.database.MediaAssetStore
 import com.moyi.media.infra.storage.ObjectStore
 import com.moyi.media.infra.storage.ObjectStoreUnavailableException
@@ -16,15 +18,18 @@ import java.util.UUID
 /**
  * An owner's asset as `GET /media/{id}` and a completion show it: the asset, and
  * once it is a ready photo the signed URL of the largest image kept and that
- * image's size. The URL is a bearer credential: [toString] leaves it out.
+ * image's size, or once it is a ready voice note the signed URL of its Opus and
+ * its length. The URL is a bearer credential: [toString] leaves it out.
  */
 internal class OwnAsset(
     val asset: MediaAsset,
     val url: URI?,
-    val width: Int?,
-    val height: Int?,
+    val width: Int? = null,
+    val height: Int? = null,
+    val durationMs: Int? = null,
 ) {
-    override fun toString(): String = "OwnAsset(asset=$asset, url=${url?.let { "<redacted>" }}, width=$width, height=$height)"
+    override fun toString(): String =
+        "OwnAsset(asset=$asset, url=${url?.let { "<redacted>" }}, width=$width, height=$height, durationMs=$durationMs)"
 }
 
 /**
@@ -40,6 +45,7 @@ internal class OwnMedia(
     private val clock: Clock,
     private val transactions: TransactionTemplate,
     private val images: ShowImages,
+    private val voices: PlayVoices,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -49,11 +55,22 @@ internal class OwnMedia(
         mediaId: UUID,
     ): OwnAsset = viewOf(assets.find(mediaId, owner)?.takeUnless { it.isGone } ?: throw MediaNotFoundException())
 
-    /** [asset] as its owner is shown it: the URL and size of the largest image kept, once it is ready. */
-    fun viewOf(asset: MediaAsset): OwnAsset {
-        val shown = images.toOwner(asset).takeIf { it.status == ImageViewStatus.READY }
-        return OwnAsset(asset, shown?.url, shown?.width, shown?.height)
-    }
+    /**
+     * [asset] as its owner is shown it, once it is ready: a photo's URL and the
+     * size of the largest image kept, or a voice note's URL and its length.
+     */
+    fun viewOf(asset: MediaAsset): OwnAsset =
+        when (asset.kind) {
+            MediaKind.IMAGE -> {
+                val shown = images.toOwner(asset).takeIf { it.status == ImageViewStatus.READY }
+                OwnAsset(asset, shown?.url, width = shown?.width, height = shown?.height)
+            }
+
+            MediaKind.VOICE -> {
+                val heard = voices.toOwner(asset).takeIf { it.status == VoiceViewStatus.READY }
+                OwnAsset(asset, heard?.url, durationMs = heard?.durationMs)
+            }
+        }
 
     /**
      * Deletes the owner's unattached asset: `DELETED` under its row lock, then,
@@ -62,8 +79,8 @@ internal class OwnMedia(
      * the entry's now, and leaves with it (D5's erasure).
      *
      * **The objects go after the commit, and on a best-effort basis**: the
-     * upload under `in/` and, for a photo already processed, its variants under
-     * `v/`. If the storage cannot be reached, the bucket's lifecycle rule
+     * upload under `in/` and, for one already processed, what was kept of it
+     * under `v/` (a photo's variants, a voice note's Opus). If the storage cannot be reached, the bucket's lifecycle rule
      * removes the upload within two days (ADR-0047); the variants have no such
      * rule, and D5's `media.purge` is where an erasure that must not be given up
      * on lives (spec D-9). Deleting before the commit would lose the bytes of an

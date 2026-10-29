@@ -8,7 +8,9 @@ package com.moyi.media.domain
  * - **IMAGE**: JPEG, PNG, HEIC and WebP, at most 10 MB before processing (FR-042).
  * - **VOICE**: at most 5 MB (FR-043). FR-043 names no input format; these are
  *   what the two platforms' recorders produce, the formats D3's magic-byte
- *   check reads (spec §4 D3): MPEG-4 audio (`ftypM4A`), Ogg, AMR, WebM and WAV.
+ *   check reads (spec §4 D3): MPEG-4 audio, 3GPP, Ogg, WebM, AMR, AAC (ADTS)
+ *   and WAV. The list is [VoiceFormat]'s, so the intent accepts exactly what
+ *   the pipeline can read (ADR-0049).
  *
  * "MB" is read as a mebibyte, the larger reading, so that a phone's "10 MB"
  * photo is never refused by a unit. The retained cap after processing (500 KB
@@ -23,7 +25,7 @@ internal enum class MediaKind(
     val maxUploadBytes: Long,
 ) {
     IMAGE(setOf("image/jpeg", "image/png", "image/heic", "image/webp"), MEBIBYTES_10),
-    VOICE(setOf("audio/mp4", "audio/x-m4a", "audio/ogg", "audio/amr", "audio/webm", "audio/wav", "audio/x-wav"), MEBIBYTES_5),
+    VOICE(VoiceFormat.entries.flatMap { it.contentTypes }.toSet(), MEBIBYTES_5),
     ;
 
     companion object {

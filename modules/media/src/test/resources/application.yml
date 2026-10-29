@@ -22,10 +22,10 @@ moyi:
   # which knows the container's address.
   media:
     processing:
-      # The real libvips, from PATH (CI installs it). Nothing is processed until a
-      # test runs the outbox's dispatcher; this context has no poller.
-      provider: vips
-      vips:
-        # macOS cannot enforce the memory limit; on Linux (CI) this changes nothing
-        # and the limit is applied (ADR-0048).
-        allow-unlimited-memory: true
+      # The real libvips and ffmpeg, from PATH (CI installs them). Nothing is
+      # processed until a test runs the outbox's dispatcher; this context has no
+      # poller.
+      provider: native
+      # macOS cannot enforce the memory limits; on Linux (CI) this changes nothing
+      # and the limits are applied (ADR-0048, ADR-0049).
+      allow-unlimited-memory: true

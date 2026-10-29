@@ -24,7 +24,20 @@ internal class UploadDeclarationTest {
 
     @Test
     fun `a voice note in each recorder format is accepted`() {
-        for (type in listOf("audio/mp4", "audio/x-m4a", "audio/ogg", "audio/amr", "audio/webm", "audio/wav", "audio/x-wav")) {
+        // D3 adds audio/3gpp and audio/aac, two of Android's recorder formats (ADR-0047 owed the check).
+        val types =
+            listOf(
+                "audio/mp4",
+                "audio/x-m4a",
+                "audio/3gpp",
+                "audio/ogg",
+                "audio/amr",
+                "audio/aac",
+                "audio/webm",
+                "audio/wav",
+                "audio/x-wav",
+            )
+        for (type in types) {
             UploadDeclaration.of("VOICE", type, 1000, checksum).shouldBeInstanceOf<UploadDeclaration.Outcome.Accepted>()
         }
     }

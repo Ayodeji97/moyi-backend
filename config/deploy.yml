@@ -132,12 +132,13 @@ env:
     # _SECRET_ACCESS_KEY as secrets; without them the default provider, R2,
     # refuses to start.
     MOYI_MEDIA_STORAGE_PROVIDER: unavailable
-    # No photo is processed in this container (ADR-0048): its image is the
-    # buildpack's, with no libvips, and the owner ruled that photos are decoded
-    # in a media worker of their own (Q5), which is not deployed yet. With this
-    # line an uploaded photo waits, UPLOADED, for that worker; nothing is lost.
-    # Never remove it from this container: VIPS, the default, refuses to start
-    # without libvips. The worker will set MOYI_MEDIA_PROCESSING_PROVIDER: vips.
+    # No photo or voice note is processed in this container (ADR-0048,
+    # ADR-0049): its image is the buildpack's, with neither libvips nor ffmpeg,
+    # and the owner ruled that uploads are decoded in a media worker of their
+    # own (Q5), which is not deployed yet. With this line an upload waits,
+    # UPLOADED, for that worker; nothing is lost. Never remove it from this
+    # container: NATIVE, the default, refuses to start without libvips and
+    # ffmpeg. The worker will set MOYI_MEDIA_PROCESSING_PROVIDER: native.
     # Quoted: YAML 1.1, which Kamal reads, takes a bare off for the boolean false.
     # Spring Boot would read "false" as OFF anyway (seen), but the file says what it means.
     MOYI_MEDIA_PROCESSING_PROVIDER: "off"

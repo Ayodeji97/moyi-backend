@@ -53,13 +53,13 @@ moyi:
         access-key-id: moyi_dev_only
         secret-access-key: moyi_dev_only_secret
     processing:
-      # libvips' command-line tools from PATH (`brew install vips`), which turn an
-      # uploaded photo into its two WebP variants (ADR-0048). VIPS, the default,
+      # libvips' command-line tools and ffmpeg from PATH (`brew install vips
+      # ffmpeg`), which turn an uploaded photo into its two WebP variants
+      # (ADR-0048) and a voice note into Opus (ADR-0049). NATIVE, the default,
       # refuses to start without them; set `provider: off` to run without. macOS
-      # cannot enforce the memory limit, so it is waived here, and only here.
-      provider: vips
-      vips:
-        allow-unlimited-memory: true
+      # cannot enforce the memory limits, so they are waived here, and only here.
+      provider: native
+      allow-unlimited-memory: true
   security:
     jwt:
       # Generated at startup: every token dies with the process, which is fine

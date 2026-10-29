@@ -60,14 +60,16 @@ internal class MediaAssetTest {
     }
 
     @Test
-    fun `media-process works on an uploaded photo, or one whose last attempt did not finish, and on nothing else`() {
+    fun `media-process works on an uploaded photo or voice note, or one whose last attempt did not finish, and on nothing else`() {
         pending(MediaStatus.UPLOADED).processing shouldBe MediaAsset.Processing.PROCESS
         pending(MediaStatus.PROCESSING).processing shouldBe MediaAsset.Processing.PROCESS
         // ADR-0047's debt: an asset deleted after its MediaUploaded was published is skipped.
         for (status in MediaStatus.entries - MediaStatus.UPLOADED - MediaStatus.PROCESSING) {
             pending(status).processing shouldBe MediaAsset.Processing.NOTHING_TO_DO
         }
-        pending(MediaStatus.UPLOADED, kind = MediaKind.VOICE).processing shouldBe MediaAsset.Processing.NOT_THIS_KIND
+        // Since D3 a voice note is processed too, by the same rule.
+        pending(MediaStatus.UPLOADED, kind = MediaKind.VOICE).processing shouldBe MediaAsset.Processing.PROCESS
+        pending(MediaStatus.PROCESSING, kind = MediaKind.VOICE, attempts = 5).processing shouldBe MediaAsset.Processing.GIVE_UP
     }
 
     @Test
@@ -81,11 +83,31 @@ internal class MediaAssetTest {
     }
 
     @Test
-    fun `a photo's object keys are its upload and both variants', recorded or not, and a voice note's its upload`() {
+    fun `a photo's object keys are its upload and both variants', a voice note's its upload and its Opus, recorded or not`() {
         val photo = pending(MediaStatus.PROCESSING)
         photo.objectKeys shouldBe listOf(photo.storageKey) + ImageVariant.entries.map { StorageKey.forVariant(photo.storageKey, it) }
         val voice = pending(MediaStatus.UPLOADED, kind = MediaKind.VOICE)
-        voice.objectKeys shouldBe listOf(voice.storageKey)
+        voice.objectKeys shouldBe listOf(voice.storageKey, StorageKey.forVoice(voice.storageKey))
+        // Derived from the upload's random part, as a photo's variants are: nothing of the asset's id or owner.
+        StorageKey.forVoice(StorageKey("in/0b6e6a37-1b1e-4c55-9d4e-8a1c7b0e2f11")).value shouldBe
+            "v/0b6e6a37-1b1e-4c55-9d4e-8a1c7b0e2f11/voice.ogg"
+    }
+
+    /** Spec §4 D3: a voice note waits on no moderation verdict (ADR-0049). */
+    @Test
+    fun `a ready voice note is played to its owner and to anyone else alike, with its length`() {
+        val voice = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200)
+        voice.heard shouldBe MediaAsset.Heard.Ready(StorageKey.forVoice(voice.storageKey), 4_200)
+        // A photo's rule is not a voice note's, nor the other way about.
+        voice.shownTo(owner = true) shouldBe MediaAsset.Shown.Processing
+        pending(MediaStatus.READY, variants = listOf(variant(ImageVariant.FULL))).heard shouldBe MediaAsset.Heard.Processing
+    }
+
+    @Test
+    fun `a voice note that is not ready is processing to everyone`() {
+        for (status in MediaStatus.entries - MediaStatus.READY) {
+            pending(status, kind = MediaKind.VOICE, durationMs = 4_200).heard shouldBe MediaAsset.Heard.Processing
+        }
     }
 
     @Test
@@ -125,8 +147,10 @@ internal class MediaAssetTest {
         variants: List<StoredVariant> = emptyList(),
         verdict: String? = null,
         attempts: Int = 0,
+        durationMs: Int? = null,
     ) = MediaAsset(
         processingAttempts = attempts,
+        durationMs = durationMs,
         id = UUID.randomUUID(),
         ownerUserId = UUID.randomUUID(),
         kind = kind,
