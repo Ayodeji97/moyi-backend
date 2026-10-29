@@ -1,0 +1,19 @@
+meta {
+  name: Delete media
+  type: http
+  seq: 33
+}
+
+delete {
+  url: {{api}}/media/{{mediaId}}
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Deletes one of your own photos or voice notes: 204, then 404. Its upload and, for a processed photo, its two variants are removed from the storage after the commit. A photo on an entry is 409 MEDIA_ATTACHED and stays: it leaves with the entry (ADR-0048). Anyone else's, or an id that names nothing, is 404.
+}

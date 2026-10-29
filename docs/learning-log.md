@@ -2804,3 +2804,38 @@ Reality: the check the ruling names, `react`'s `hasLeft || !isOpen`, is about th
 Wrong about: where a ruling's reach ends. It reaches as far as the predicate it names,
          not as far as the example it was argued from, so search every probe and decision
          that says the old answer.
+
+## 2026-10-28 · Feature · Media D2 — a photo made safe in a process of its own, and the word that YAML read as false
+
+Expected: the guards on untrusted bytes (a pixel ceiling, metadata stripped, four formats,
+         a time limit, a memory limit) to be one test each, each red when its line goes; a
+         presigned GET "rounded to the hour" to be a matter of the expiry; and
+         `MOYI_MEDIA_PROCESSING_PROVIDER: off` to say off.
+Reality: libvips runs as a program in a sandbox, and each guard did turn its test red:
+         without the ceiling a 30,000 × 30,000 PNG of a few kilobytes decoded (libvips
+         streams PNG, so it was slow, not fatal); without `keep=none` the WebP carried
+         an EXIF chunk; without the kill the decoder outlived the test; without the env
+         clear the program printed this machine's tokens. The memory limit could only be
+         seen on Linux (macOS refuses `ulimit -v`), so its test ran in an Ubuntu container
+         from classes compiled on the Mac, and went red there with the limit removed. A
+         URL stable for the hour needs the signing instant fixed, not the expiry, and the
+         SDK's presigner has no way to say so; its SigV4 signer does. And YAML 1.1, which
+         Kamal reads, takes a bare `off` for `false`.
+Wrong about: what a guard on untrusted input is. Half of them were not lines of Kotlin but
+         a process boundary, and the test had to run where the boundary is enforced. And
+         about the YAML trap's cost: I wrote down that "false" would fail the start, then
+         booted the jar with it, and it started: Spring Boot binds "false" to OFF. The
+         quotes stay because the file should say what it means; the claim was corrected
+         before it shipped.
+Review:  the independent review of #108 found what each guard did not cover. The pixel
+         ceiling did not bound memory (a 16-bit RGBA PNG decodes to eight bytes a pixel),
+         so there is now a decoded-bytes ceiling, 100 MiB, chosen by measuring peak RSS in
+         an Ubuntu container: 283 MiB for a HEIC just under it. Dropping the ICC profile
+         without converting turned a Display P3 green into another green. An attempt that
+         threw was retried for ever; capped at five, it then failed every photo uploaded
+         during a half-minute storage outage, so the owner ruled that only a decode counts
+         (a killed process still does, an outage never). And an AVIF with HEIC's brands passed every brand
+         check, including libvips' own `heif-compression`, which it derives from those
+         brands; only the item types in `iinf` tell AV1 from HEVC. Lesson: a guard named
+         after its threat ("memory limit", "format allow-list") is a claim; each needed
+         the fixture just inside it to show where it actually stops.

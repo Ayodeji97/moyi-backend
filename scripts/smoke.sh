@@ -94,7 +94,22 @@
 # (409 before the PUT, a replay under the same key, 422 without one), reads it as
 # its owner and is told 404 as another user, refuses a GIF (415) and 11 MB (413),
 # deletes it and sees the object gone from MinIO, and finds the URL in no log
-# line. Since the display-name rule (ADR-0015, amended 2026-10-28) it sends a name holding
+# line (a voice note since D2, so that the pipeline leaves it UPLOADED). Since
+# Phase 4 D2 it uploads a JPEG carrying a GPS position in its EXIF and waits for
+# libvips (on PATH) to make it READY: a URL and a size for its owner, the same URL
+# twice in the hour, a WebP at that URL with no EXIF and no position, the upload
+# gone from MinIO; a PNG declared as a JPEG FAILED; the photo attached to an
+# entry, 409 MEDIA_ATTACHED to its deletion, the partner's locked day without a
+# trace of it and, once revealed, PROCESSING with no URL; another user's photo and
+# a failed one refused on imageMediaId; and the URL in no log line. D2 last run on
+# 2026-10-29, after main (df44dcc: #101, #102, #103, #105, #109) was merged in, from a jar of
+# that merge, on the moyi-d2 database (32 migrations to V33; Postgres 55441, Valkey 63801,
+# MinIO 59002), libvips 8.18.7, --attach: 1102 passed, 0 failed, 0 skipped. Before it, on
+# 2026-10-28 for D2, from a jar of this branch on main 7656192, on a fresh database
+# that applied 32 migrations to V33, against its own compose project (moyi-d2:
+# Postgres 55441, Valkey 63801, MinIO 59002), the jar booted by hand on libvips
+# 8.18.7, and --attach: 1081 passed, 0 failed, 1 skipped (the tag across the
+# erasure, the poller having won the race), 29 sections. Since the display-name rule (ADR-0015, amended 2026-10-28) it sends a name holding
 # U+202E and is told 422 VALID_DISPLAY_NAME on displayName. Last run on 2026-10-29, for
 # feat/display-name-controls after main (d9c2de4, #105) was merged in, from a jar of
 # 7e421b3's code, on a fresh database that applied V1 to V27 and V29 to V33, against its own
@@ -1064,8 +1079,9 @@ expect "an entry with no Idempotency-Key is 422 VALIDATION_FAILED" 422 '"code":"
 LONG_KEY="$(python3 -c 'print("k" * 256)')"
 expect "a key of 256 characters is 422 on the header" 422 '"field":"Idempotency-Key","code":"SIZE"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $LONG_KEY" -d '{"text":"the key is too long"}'
 
-# Spec §1: media is refused, never stored and quietly ignored, until Phase 4.
-expect "an entry carrying a media id is 422 MEDIA_NOT_YET_SUPPORTED" 422 '"code":"MEDIA_NOT_YET_SUPPORTED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"look at this\",\"imageMediaId\":\"$(python3 -c 'import uuid; print(uuid.uuid4())')\"}"
+# Spec §1: a voice note is refused, never stored and quietly ignored, until D3.
+# (A photo is attached since D2: the photos section near the end.)
+expect "an entry carrying a voice note is 422 MEDIA_NOT_YET_SUPPORTED" 422 '"code":"MEDIA_NOT_YET_SUPPORTED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"listen to this\",\"voiceMediaId\":\"$(python3 -c 'import uuid; print(uuid.uuid4())')\"}"
 
 # BR-1/BR-8: the partner's own read of the day sees PARTIAL and a locked
 # entry — the author and the status, nothing else, on the wire and in the log.
@@ -2365,15 +2381,17 @@ echo; echo "media — an upload straight to the storage, and the four /media rou
 # never through this server (FR-044). The local profile points the app at
 # docker-compose.yml's MinIO and its moyi-media bucket; with --attach, start the
 # server against a MinIO that has that bucket. The file is a few bytes that
-# start like a JPEG: nothing reads them before D2's pipeline.
+# start like an Ogg voice note: a voice note, so that D2's pipeline, which
+# processes photos and leaves voice notes to D3, does not move it out of
+# UPLOADED while these probes read it. The photos section below has the pipeline.
 verified_account "uploader" "203.0.113.120"; MEDIA_ACCESS="$ACCOUNT_ACCESS"
 verified_account "onlooker" "203.0.113.121"; ONLOOKER_ACCESS="$ACCOUNT_ACCESS"
 MEDIA_FILE="$(mktemp)"
-printf '\xff\xd8\xff\xe0 fake smoke photo %s' "$RANDOM" > "$MEDIA_FILE"
+printf 'OggS fake smoke voice note %s' "$RANDOM" > "$MEDIA_FILE"
 MEDIA_SIZE="$(wc -c < "$MEDIA_FILE" | tr -d '[:space:]')"
 MEDIA_SUM="$(openssl dgst -sha256 -binary "$MEDIA_FILE" | base64)"
 media_intent() { printf '{"kind":"%s","contentType":"%s","sizeBytes":%s,"checksum":"%s"}' "$1" "$2" "$3" "$MEDIA_SUM"; }
-expect "media: an intent for a photo is 201 with an upload URL" 201 '"uploadUrl"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d "$(media_intent IMAGE image/jpeg "$MEDIA_SIZE")"
+expect "media: an intent for a voice note is 201 with an upload URL" 201 '"uploadUrl"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d "$(media_intent VOICE audio/ogg "$MEDIA_SIZE")"
 MEDIA_ID="$(printf '%s' "$LAST_BODY" | jget mediaId)"
 MEDIA_URL="$(printf '%s' "$LAST_BODY" | jget uploadUrl)"
 MEDIA_CHECKSUM_HEADER="$(printf '%s' "$LAST_BODY" | python3 -c "import json,sys; print(json.load(sys.stdin)['requiredHeaders']['x-amz-checksum-sha256'])")"
@@ -2383,9 +2401,9 @@ expect "media: the owner reads it while it waits, PENDING_UPLOAD" 200 '"status":
 expect "media: completing before the PUT is 409 MEDIA_NOT_UPLOADED" 409 '"code":"MEDIA_NOT_UPLOADED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS" -H "Idempotency-Key: $(uuidgen)"
 # The upload, as a phone makes it: straight to the storage, with the signed headers.
 PUT_FORGED="$(mktemp)"; cp "$MEDIA_FILE" "$PUT_FORGED"; printf 'X' >> "$PUT_FORGED"
-PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Content-Type: image/jpeg' -H "x-amz-checksum-sha256: $MEDIA_CHECKSUM_HEADER" --data-binary "@$PUT_FORGED")"
+PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Content-Type: audio/ogg' -H "x-amz-checksum-sha256: $MEDIA_CHECKSUM_HEADER" --data-binary "@$PUT_FORGED")"
 case "$PUT_STATUS" in 400|403) pass "media: the storage refuses a body other than the one declared ($PUT_STATUS)";; *) fail "media: forged body" "expected 400 or 403 from the storage, got $PUT_STATUS";; esac
-PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Content-Type: image/jpeg' -H "x-amz-checksum-sha256: $MEDIA_CHECKSUM_HEADER" --data-binary "@$MEDIA_FILE")"
+PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Content-Type: audio/ogg' -H "x-amz-checksum-sha256: $MEDIA_CHECKSUM_HEADER" --data-binary "@$MEDIA_FILE")"
 [ "$PUT_STATUS" = 200 ] && pass "media: the storage takes the declared bytes (200)" || fail "media: PUT" "expected 200 from the storage, got $PUT_STATUS"
 # No public bucket (NFR-047): while the object exists, its address without a
 # signature is refused. 403 only: a 200 is a public bucket, a 404 a wrong key.
@@ -2422,6 +2440,101 @@ if grep -q "X-Amz-Signature=$(printf '%s' "$MEDIA_URL" | sed -E 's/.*X-Amz-Signa
   fail "media: the upload URL is in no log line" "its signature is in $MOYI_LOG"
 else pass "media: the upload URL is in no log line"; fi
 rm -f "$MEDIA_FILE" "$PUT_FORGED"
+flush_buckets
+
+echo; echo "photos — processed by libvips, attached to an entry, shown to each member (Phase 4 D2, ADR-0048)"
+# The booted jar's outbox poller runs media.process (the local profile turns on
+# VIPS, so libvips' command-line tools must be on PATH; with --attach, start the
+# server with them). The photo is made here: a JPEG from libvips, with an EXIF
+# block written in by hand that says where it was taken (51° 30′ 12.34″ N, made
+# up). What comes back at the URL must carry none of it.
+PHOTO_DIR="$(mktemp -d)"
+vips black "$PHOTO_DIR/plain.jpg" 64 48 --bands 3
+python3 - "$PHOTO_DIR/plain.jpg" "$PHOTO_DIR/photo.jpg" <<'PY'
+import struct, sys
+jpeg = open(sys.argv[1], "rb").read()
+tiff = b"MM" + struct.pack(">HI", 42, 8)
+tiff += struct.pack(">H", 1) + struct.pack(">HHII", 0x8825, 4, 1, 26) + struct.pack(">I", 0)
+tiff += struct.pack(">H", 2)
+tiff += struct.pack(">HHI", 1, 2, 2) + b"N\x00\x00\x00"
+tiff += struct.pack(">HHII", 2, 5, 3, 56) + struct.pack(">I", 0)
+tiff += struct.pack(">6I", 51, 1, 30, 1, 1234, 100)
+body = b"Exif\x00\x00" + tiff
+open(sys.argv[2], "wb").write(jpeg[:2] + b"\xff\xe1" + struct.pack(">H", len(body) + 2) + body + jpeg[2:])
+PY
+vips black "$PHOTO_DIR/plain.png" 32 32 --bands 3
+LATITUDE_HEX="$(python3 -c 'import struct; print(struct.pack(">6I", 51, 1, 30, 1, 1234, 100).hex())')"
+# has_bytes <file> <hex> — whether the file holds those bytes anywhere.
+has_bytes() { python3 -c "import sys; sys.exit(0 if bytes.fromhex(sys.argv[2]) in open(sys.argv[1], 'rb').read() else 1)" "$1" "$2"; }
+# upload_photo <access> <file> <declared type> — intent, PUT straight to MinIO, completion; leaves the id in PHOTO_ID.
+upload_photo() {
+  local access="$1" file="$2" type="$3" size sum url header
+  size="$(wc -c < "$file" | tr -d '[:space:]')"; sum="$(openssl dgst -sha256 -binary "$file" | base64)"
+  curl -s -X POST "$API/media/upload-intent" -H "Authorization: Bearer $access" -H 'Content-Type: application/json' \
+    -d "{\"kind\":\"IMAGE\",\"contentType\":\"$type\",\"sizeBytes\":$size,\"checksum\":\"$sum\"}" > "$PHOTO_DIR/intent.json"
+  PHOTO_ID="$(jget mediaId < "$PHOTO_DIR/intent.json")"; url="$(jget uploadUrl < "$PHOTO_DIR/intent.json")"
+  header="$(python3 -c "import json,sys; print(json.load(sys.stdin)['requiredHeaders']['x-amz-checksum-sha256'])" < "$PHOTO_DIR/intent.json")"
+  curl -s -o /dev/null -X PUT "$url" -H "Content-Type: $type" -H "x-amz-checksum-sha256: $header" --data-binary "@$file"
+  curl -s -o /dev/null -X POST "$API/media/$PHOTO_ID/complete" -H "Authorization: Bearer $access" -H "Idempotency-Key: $(uuidgen)"
+}
+# await_photo <access> <id> — until its status is no longer UPLOADED or PROCESSING (at most 40 s); prints it.
+await_photo() {
+  local status=""
+  for _ in $(seq 1 80); do
+    status="$(curl -s "$API/media/$2" -H "Authorization: Bearer $1" | jget status)"
+    case "$status" in UPLOADED|PROCESSING) sleep 0.5 ;; *) break ;; esac
+  done
+  printf '%s' "$status"
+}
+verified_account "photographer" "203.0.113.150"; PH_A="$ACCOUNT_ACCESS"
+verified_account "viewer" "203.0.113.151"; PH_B="$ACCOUNT_ACCESS"
+verified_account "outsider-p" "203.0.113.152"; PH_O="$ACCOUNT_ACCESS"
+
+has_bytes "$PHOTO_DIR/photo.jpg" "$LATITUDE_HEX" && pass "photos: the JPEG uploaded carries a GPS latitude in its EXIF" || fail "photos: fixture" "the made-up latitude is not in the JPEG"
+upload_photo "$PH_A" "$PHOTO_DIR/photo.jpg" image/jpeg; PH_PHOTO="$PHOTO_ID"
+PH_UPLOAD_KEY="$(sql "SELECT storage_key FROM media_assets WHERE id='$PH_PHOTO'")"
+is "photos: an uploaded photo becomes READY" "$(await_photo "$PH_A" "$PH_PHOTO")" "READY"
+expect "photos: …and its owner is given a URL and its size" 200 '"width":64' -- "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_A"
+PH_URL="$(printf '%s' "$LAST_BODY" | jget url)"
+expect "photos: …the same URL on a second read in the same hour" 200 "\"url\":\"$PH_URL\"" -- "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_A"
+curl -s -o "$PHOTO_DIR/served.webp" "$PH_URL"
+[ "$(head -c 4 "$PHOTO_DIR/served.webp")" = "RIFF" ] && [ "$(dd if="$PHOTO_DIR/served.webp" bs=1 skip=8 count=4 2>/dev/null)" = "WEBP" ] \
+  && pass "photos: the image at its URL is a WebP" || fail "photos: served format" "the bytes at the URL are not a WebP"
+if has_bytes "$PHOTO_DIR/served.webp" "$LATITUDE_HEX" || has_bytes "$PHOTO_DIR/served.webp" "$(printf 'Exif' | xxd -p)"; then
+  fail "photos: …with no EXIF and no GPS position in it" "the served WebP still holds EXIF or the latitude"
+else pass "photos: …with no EXIF and no GPS position in it"; fi
+if [ "$MINIO_OK" = 0 ]; then skip "photos: the upload itself is gone from MinIO once the photo is ready"
+elif minio_has "$PH_UPLOAD_KEY"; then fail "photos: the upload itself is gone from MinIO once the photo is ready" "MinIO still holds the original bytes"
+else pass "photos: the upload itself is gone from MinIO once the photo is ready"; fi
+db_is "photos: …and two variants are recorded" "$(sql "SELECT jsonb_array_length(variants) FROM media_assets WHERE id='$PH_PHOTO'")" "2"
+
+upload_photo "$PH_A" "$PHOTO_DIR/plain.png" image/jpeg; PH_FAKED="$PHOTO_ID"
+is "photos: a PNG declared as a JPEG becomes FAILED" "$(await_photo "$PH_A" "$PH_FAKED")" "FAILED"
+expect "photos: …which its owner reads as FAILED, with no URL" 200 '"status":"FAILED","contentType":"image/jpeg","sizeBytes":' -- "$API/media/$PH_FAKED" -H "Authorization: Bearer $PH_A"
+case "$LAST_BODY" in *'"url":null'*) pass "photos: …the URL is null";; *) fail "photos: …the URL is null" "${LAST_BODY:0:200}";; esac
+if grep -q "Media $PH_FAKED failed: NOT_THE_DECLARED_FORMAT" "$MOYI_LOG"; then pass "photos: …and the log says why, by id and rule"; else fail "photos: failure logged" "no line names $PH_FAKED and NOT_THE_DECLARED_FORMAT"; fi
+
+expect "photos: a bond for the photographer and the viewer is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $PH_A" -d "$(bond_body "Us")"
+PH_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+PH_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "photos: …which the viewer joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$PH_CODE/accept" -H "Authorization: Bearer $PH_B"
+expect "photos: another user's photo on an entry is 422 on imageMediaId" 422 '"field":"imageMediaId"' -- -X POST "$API/bonds/$PH_BOND/entries" -H "Authorization: Bearer $PH_B" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"not mine to show\",\"imageMediaId\":\"$PH_PHOTO\"}"
+expect "photos: a failed photo on an entry is 422 on imageMediaId" 422 '"field":"imageMediaId"' -- -X POST "$API/bonds/$PH_BOND/entries" -H "Authorization: Bearer $PH_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"a broken one\",\"imageMediaId\":\"$PH_FAKED\"}"
+expect "photos: an entry with the author's ready photo is 201, and the author sees it READY" 201 '"status":"READY"' -- -X POST "$API/bonds/$PH_BOND/entries" -H "Authorization: Bearer $PH_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"look at the light today\",\"imageMediaId\":\"$PH_PHOTO\"}"
+db_is "photos: …the photo is attached to that entry" "$(sql "SELECT (m.attached_entry_id = e.id) FROM media_assets m JOIN entries e ON e.image_media_id = m.id WHERE m.id='$PH_PHOTO'")" "t"
+expect "photos: the partner's locked entry says nothing of the photo" 200 '"status":"LOCKED"' -- "$API/bonds/$PH_BOND/today" -H "Authorization: Bearer $PH_B"
+if printf '%s' "$LAST_BODY" | grep -q -e "$PH_PHOTO" -e '"image"' -e 'X-Amz'; then fail "photos: …no id, no image field, no URL" "the locked day carries something of the photo"; else pass "photos: …no id, no image field, no URL"; fi
+expect "photos: deleting a photo on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_A"
+expect "photos: its owner still reads it, READY" 200 '"status":"READY"' -- "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_A"
+expect "photos: the viewer writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$PH_BOND/entries" -H "Authorization: Bearer $PH_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, no photo"}'
+expect "photos: once revealed the viewer sees the photo PROCESSING, with no URL" 200 '"status":"PROCESSING","url":null' -- "$API/bonds/$PH_BOND/today" -H "Authorization: Bearer $PH_B"
+if printf '%s' "$LAST_BODY" | grep -q 'X-Amz'; then fail "photos: …and no signed URL anywhere in the viewer's day" "found one"; else pass "photos: …and no signed URL anywhere in the viewer's day"; fi
+expect "photos: the photographer sees it READY on the revealed day" 200 '"status":"READY","url":"http' -- "$API/bonds/$PH_BOND/today" -H "Authorization: Bearer $PH_A"
+expect "photos: an outsider reaches neither the photo nor the day" 404 '"code":"NOT_FOUND"' -- "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_O"
+if grep -q "$(printf '%s' "$PH_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
+  fail "photos: the photo's URL is in no log line" "its signature is in $MOYI_LOG"
+else pass "photos: the photo's URL is in no log line"; fi
+rm -rf "$PHOTO_DIR"
 flush_buckets
 
 echo; echo "database state"

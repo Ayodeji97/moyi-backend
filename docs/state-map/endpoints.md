@@ -16,11 +16,13 @@ Any of these can follow any endpoint below. They are not repeated under each one
 | 405 | `METHOD_NOT_ALLOWED` | The path exists; this verb does not. |
 | 406 | `UNSUPPORTED_MEDIA_TYPE` | An Accept header that rules out JSON. There is no code of its own: it is the one a 415 carries. Read from the code; nothing runs it, and the contract documents no 406. |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | A Content-Type this endpoint does not read. |
-| 422 | `VALIDATION_FAILED` | The request parsed but a field or a required header is missing or not valid. |
+| 422 | `VALIDATION_FAILED` | The request parsed but a field or a required header is missing or not valid. In the media machine this answer is a row: attaching a photo to an entry (imageMediaId) is refused or not by the state of the asset (FR-044a), so each state says what it answers. |
 | 429 | `RATE_LIMITED` | A rate-limit bucket is empty; Retry-After says when to try again. The buckets are kept in Redis and fail open: if Redis cannot be reached every request is let through, with no X-RateLimit headers, and nothing is 429 until it is back. |
 | 500 | `INTERNAL_ERROR` | Anything unanticipated. It never carries the underlying message. |
 
 `401 UNAUTHENTICATED` is also a row in the regions `account` and `account.session`, where it depends on the state.
+
+`422 VALIDATION_FAILED` is also a row in the regions `media`, where it depends on the state.
 
 ## Account
 
@@ -1411,6 +1413,14 @@ curl -X POST "$API/bonds/$BOND/entries" -H "Authorization: Bearer $TOKEN" -H "Id
 | `day.partnerEntry` | `LOCKED` | a new request, the bond takes entries, and you have a live entry for today | 409 `ENTRY_ALREADY_EXISTS` | Both of you have written and the day is waiting for its reveal time, so a write from you is a second entry: it is refused, and your partner's entry stays locked. (the probe that shows this answer runs before the partner has written; nothing runs it here) On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-2 | never-run |
 | `day.partnerEntry` | `VISIBLE` | a new request, and the bond takes entries | 409 `DAY_CLOSED` | You can read your partner's words only on a revealed day, and a revealed day takes no new entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-10 | test |
 | `day.partnerEntry` | `DELETED` | a new request, and the bond takes entries | 409 `DAY_CLOSED` | A tombstone with its id and dates is shown only for an entry you could once read, so the day was revealed, and a revealed day takes no new entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-10 | never-run |
+| `media` | `NONE` |  | 422 `VALIDATION_FAILED` | No photo of yours has this id: another user's, a v7 id, or nothing at all. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | smoke |
+| `media` | `PENDING_UPLOAD` |  | 422 `VALIDATION_FAILED` | Not READY. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | never-run |
+| `media` | `UPLOADED` |  | 422 `VALIDATION_FAILED` | Not READY: still to be processed. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | never-run |
+| `media` | `PROCESSING` |  | 422 `VALIDATION_FAILED` | Not READY yet. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | test |
+| `media` | `READY` |  | 201 → `READY_ATTACHED` | The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4). | FR-044a, FR-101, spec §4 D2, ADR-0048 §4-5 | smoke |
+| `media` | `READY_ATTACHED` |  | 422 `VALIDATION_FAILED` | Already on another entry. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | test |
+| `media` | `FAILED` |  | 422 `VALIDATION_FAILED` | Not READY: the pipeline refused it. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | smoke |
+| `media` | `DELETED` |  | 422 `VALIDATION_FAILED` | Deleted. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4 | never-run |
 
 #### Whatever the state
 
@@ -1422,7 +1432,7 @@ curl -X POST "$API/bonds/$BOND/entries" -H "Authorization: Bearer $TOKEN" -H "Id
 | 422 | `VALIDATION_FAILED` | The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. | smoke |
 | 422 | `VALIDATION_FAILED` | The text is missing, blank or only invisible characters (zero-width spaces, joiners and the like), is over 500 graphemes counted as sent or 8192 bytes, or holds a NUL character or an unpaired surrogate. (the smoke script asserts the status and the field, not the code) | never-run |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another path. | smoke |
-| 422 | `MEDIA_NOT_YET_SUPPORTED` | The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. It is refused, not quietly dropped. | smoke |
+| 422 | `MEDIA_NOT_YET_SUPPORTED` | The request named a voice note (voiceMediaId), which nothing can store until Phase 4 slice D3. It is refused, not quietly dropped. A photo is attached since D2. | smoke |
 | 422 | `VALIDATION_FAILED` | promptId names no prompt: it is not an id, or no prompt in the library has it. One answer for both, on the field promptId, and only for a member of an open bond: a stranger gets the bond's 404 and an ended bond 409 BOND_ARCHIVED first. A retired prompt, another bond type's, or an earlier day's is accepted. | smoke |
 
 ### GET /bonds/{bondId}/today
@@ -1513,7 +1523,8 @@ curl -X PATCH "$API/entries/$ENTRY" -H "Authorization: Bearer $TOKEN" -H 'Conten
 | 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is written. The limit holds whether or not a key is sent. | never-run |
 | 422 | `VALIDATION_FAILED` | The text is missing, blank or only invisible characters (zero-width spaces, joiners and the like), is over 500 graphemes counted as sent or 8192 bytes, or holds a NUL character or an unpaired surrogate; or an Idempotency-Key was sent and is not valid. (a test asserts the status, not the code) | never-run |
 | 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another path. Only when the optional key is sent. | never-run |
-| 422 | `MEDIA_NOT_YET_SUPPORTED` | The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. (a test asserts the status, not the code) | never-run |
+| 422 | `MEDIA_NOT_YET_SUPPORTED` | The request named a voice note (voiceMediaId), which nothing can store until Phase 4 slice D3. (a test asserts the status, not the code) | never-run |
+| 422 | `VALIDATION_FAILED` | imageMediaId names no photo media will attach to this entry: not yours, not READY, or on another entry. Asked under the entry's lock, after ENTRY_IMMUTABLE; nothing changes. A new photo in place of the entry's lets the old one go; an absent imageMediaId leaves the photo as it is. | test |
 
 ### DELETE /entries/{entryId}
 
@@ -1899,6 +1910,10 @@ curl -X POST "$API/media/upload-intent" -H "Authorization: Bearer $TOKEN" -H 'Co
 | `media` | `NONE` | no storage is configured | 503 `MEDIA_STORAGE_UNAVAILABLE` | No storage is configured: production, until the owner makes the bucket. Signing an upload URL needs no network, so a configured storage that is down does not refuse an intent; the completion does. Nothing is recorded; keep the entry's words and offer the photo again later. | ADR-0047 §5 | test |
 | `media` | `PENDING_UPLOAD` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
 | `media` | `UPLOADED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
+| `media` | `PROCESSING` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
+| `media` | `READY` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
+| `media` | `READY_ATTACHED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
+| `media` | `FAILED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
 | `media` | `DELETED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
 
 #### Whatever the state
@@ -1931,6 +1946,10 @@ curl -X POST "$API/media/$MEDIA/complete" -H "Authorization: Bearer $TOKEN" -H "
 | `media` | `PENDING_UPLOAD` | the storage holds nothing under the asset's key, or not the declared length and digest | 409 `MEDIA_NOT_UPLOADED` | Nothing has been uploaded under the URL yet, or not the bytes declared. Nothing changes and the key is not recorded: finish the upload (the URL works until its expiresAt), then complete again. | ADR-0047 §2 | smoke |
 | `media` | `PENDING_UPLOAD` | the storage cannot be reached | 503 `MEDIA_STORAGE_UNAVAILABLE` | The storage did not answer within 3 s (two attempts of 1.5 s). It is asked before any transaction opens, so nothing was locked or recorded meanwhile, the Idempotency-Key included; complete again later. | ADR-0047 §2 | test |
 | `media` | `UPLOADED` |  | 200 stays | It is already complete. Completing again, under the same key or a new one, changes nothing and records no second event; the same key is answered as a replay. | doc 06:182, ADR-0047 §2 | test |
+| `media` | `PROCESSING` |  | 200 stays | It is already complete. Completing again changes nothing and records no second event. | doc 06:182, ADR-0047 §2 | test |
+| `media` | `READY` |  | 200 stays | It is already complete. Completing again changes nothing and records no second event. | doc 06:182, ADR-0047 §2 | test |
+| `media` | `READY_ATTACHED` |  | 200 stays | It is already complete. Completing again changes nothing and records no second event. | doc 06:182, ADR-0047 §2 | test |
+| `media` | `FAILED` |  | 200 stays | It is already complete. Completing again changes nothing and records no second event. | doc 06:182, ADR-0047 §2 | test |
 | `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184, ADR-0047 §3 | test |
 
 #### Whatever the state
@@ -1963,7 +1982,11 @@ curl "$API/media/$MEDIA" -H "Authorization: Bearer $TOKEN"
 |---|---|---|---|---|---|---|
 | `media` | `NONE` |  | 404 `NOT_FOUND` | Nothing of yours has this id: another person's photo, an id that names nothing and a value that is not an id all get this one answer, never 403, so that it does not confirm the asset exists. A partner reaches media only through an entry, never by its id. | doc 06:183, BR-1, ADR-0047 §3 | smoke |
 | `media` | `PENDING_UPLOAD` |  | 200 stays | Its kind, status, type and size. No URL: nothing is ready to be shown until the pipeline (D2) makes it so. | doc 06:183 | smoke |
-| `media` | `UPLOADED` |  | 200 stays | Its kind, status, type and size. No URL until the pipeline (D2) has made its variants. | doc 06:183 | smoke |
+| `media` | `UPLOADED` |  | 200 stays | Its kind, status, type and size. url, width and height are null until the photo is READY. | doc 06:183 | smoke |
+| `media` | `PROCESSING` |  | 200 stays | Its kind, status PROCESSING, type and size; no URL yet. | doc 06:183, ADR-0048 §5 | never-run |
+| `media` | `READY` |  | 200 stays | Its kind, status, type and size, and a signed GET of the largest image kept with that image's width and height. The URL is signed as of the start of the hour for 25 hours: at least 24 hours from now, ending on the hour, the same all hour. | doc 06:183, doc 05:169, ADR-0048 §5 | smoke |
+| `media` | `READY_ATTACHED` |  | 200 stays | As when it was attached to nothing: its owner is given the URL and the size. | doc 06:183, ADR-0048 §5 | smoke |
+| `media` | `FAILED` |  | 200 stays | Its kind, status FAILED, type and size; no URL. Why it failed is not said (the log has it, by id and rule). | doc 06:183, ADR-0048 §2 | never-run |
 | `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | smoke |
 
 ### DELETE /media/{mediaId}
@@ -1986,7 +2009,11 @@ curl -X DELETE "$API/media/$MEDIA" -H "Authorization: Bearer $TOKEN"
 |---|---|---|---|---|---|---|
 | `media` | `NONE` |  | 404 `NOT_FOUND` | Nothing of yours has this id: another person's photo, an id that names nothing and a value that is not an id all get this one answer, never 403, so that it does not confirm the asset exists. A partner reaches media only through an entry, never by its id. | doc 06:184, ADR-0047 §3 | smoke |
 | `media` | `PENDING_UPLOAD` |  | 204 → `DELETED` | The asset is deleted, and after the commit whatever was uploaded under its key is removed from the storage. Nothing can be attached to an entry yet (D2), so every asset of yours can be deleted. | doc 06:184, ADR-0047 §3 | test |
-| `media` | `UPLOADED` |  | 204 → `DELETED` | The asset is deleted, and after the commit its object is removed from the storage. If the storage cannot be reached then, the bucket's lifecycle rule removes the upload within two days. | doc 06:184, ADR-0047 §3 | smoke |
+| `media` | `UPLOADED` |  | 204 → `DELETED` | The asset is deleted, and after the commit its upload is removed from the storage. If the storage cannot be reached then, the bucket's lifecycle rule removes it within two days. A photo being processed meanwhile is media.process's to clean up. | doc 06:184, ADR-0047 §3 | smoke |
+| `media` | `PROCESSING` |  | 204 → `DELETED` | Deleted at once: the pipeline holds no lock while it works. It finds the photo deleted under the row lock when it is done, and removes what it made. | doc 06:184, ADR-0048 §2 | test |
+| `media` | `READY` |  | 204 → `DELETED` | Deleted, and after the commit its variants and any upload left are removed from the storage, on a best-effort basis (D5's media.purge is where an erasure that must not be given up on lives). | doc 06:184, ADR-0048 §4 | never-run |
+| `media` | `READY_ATTACHED` |  | 409 `MEDIA_ATTACHED` | It is part of an entry now and stays with it; nothing changes. It leaves with the entry (D5's erasure). | doc 06:184, ADR-0048 §4 | smoke |
+| `media` | `FAILED` |  | 204 → `DELETED` | Deleted; there is nothing left in the storage to remove but an upload the pipeline could not delete. | doc 06:184 | never-run |
 | `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | test |
 
 #### Whatever the state

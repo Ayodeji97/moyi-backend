@@ -21,7 +21,7 @@ internal class PatchEntry(
         userId: UUID,
         id: EntryId,
         text: EntryText,
-        media: Boolean,
+        media: MediaChange,
         request: IdempotentRequest?,
     ): EntryChangeResult {
         if (request == null) return EntryChangeResult(changes.change(userId, id, text, media), false)

@@ -124,7 +124,10 @@ internal enum class Reacting {
  * Everything of an entry a reader who can — or once could — read it may
  * have: [Readability.FULL] or [Readability.TOMBSTONE]. [text] is `null`
  * exactly on the tombstone, and [status] is then [EntryStatus.DELETED]
- * whichever mark the row's erasure had reached.
+ * whichever mark the row's erasure had reached. [imageMediaId] is the
+ * entry's photo, and is `null` on the tombstone too: a withdrawal hides the
+ * photo with the words from its commit, before the row is erased (ADR-0048).
+ * Which of the photo the reader is then shown is `media`'s to say (FR-101).
  *
  * Only [EntryReading] builds one, and only for those two answers. A `data
  * class` for its value semantics; its `toString` prints [EntryText]'s own
@@ -139,6 +142,7 @@ internal data class DisclosedEntry(
     val intendedAt: Instant,
     val status: EntryStatus,
     val text: EntryText?,
+    val imageMediaId: UUID?,
 )
 
 /**
@@ -167,14 +171,15 @@ internal class EntryReading private constructor(
     val disclosed: DisclosedEntry?
         get() =
             when (readability) {
-                Readability.FULL -> disclose(entry.status, entry.text)
-                Readability.TOMBSTONE -> disclose(EntryStatus.DELETED, null)
+                Readability.FULL -> disclose(entry.status, entry.text, entry.imageMediaId)
+                Readability.TOMBSTONE -> disclose(EntryStatus.DELETED, null, null)
                 Readability.TOMBSTONE_UNSEEN, Readability.LOCKED, Readability.NOT_A_MEMBER -> null
             }
 
     private fun disclose(
         status: EntryStatus,
         text: EntryText?,
+        imageMediaId: UUID?,
     ) = DisclosedEntry(
         id = entry.id,
         bondId = entry.bondId,
@@ -184,6 +189,7 @@ internal class EntryReading private constructor(
         intendedAt = entry.intendedAt,
         status = status,
         text = text,
+        imageMediaId = imageMediaId,
     )
 
     /** Never the entry, nor anything of it: only what the gate answered. */

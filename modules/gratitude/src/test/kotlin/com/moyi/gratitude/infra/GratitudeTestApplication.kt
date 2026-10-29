@@ -4,6 +4,8 @@ import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
 import com.moyi.common.web.idempotency.IdempotencyConfiguration
 import com.moyi.identity.api.UserDirectory
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.boot.SpringBootConfiguration
 import org.springframework.boot.autoconfigure.AutoConfigurationExcludeFilter
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration
@@ -86,12 +88,13 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
 @SpringBootConfiguration
 @EnableAutoConfiguration
 @ComponentScan(
-    basePackages = ["com.moyi.common", "com.moyi.gratitude", "com.moyi.bond", "com.moyi.notification"],
+    basePackages = ["com.moyi.common", "com.moyi.gratitude", "com.moyi.bond", "com.moyi.notification", "com.moyi.media"],
     excludeFilters = [
         // @SpringBootApplication's own two.
         ComponentScan.Filter(type = FilterType.CUSTOM, classes = [TypeExcludeFilter::class]),
         ComponentScan.Filter(type = FilterType.CUSTOM, classes = [AutoConfigurationExcludeFilter::class]),
         ComponentScan.Filter(type = FilterType.REGEX, pattern = [GratitudeTestApplication.PUSH_CONSUMERS]),
+        ComponentScan.Filter(type = FilterType.REGEX, pattern = [GratitudeTestApplication.MEDIA_ROUTES]),
     ],
 )
 @ConfigurationPropertiesScan("com.moyi.common", "com.moyi.gratitude", "com.moyi.bond", "com.moyi.notification")
@@ -110,7 +113,20 @@ internal class GratitudeTestApplication {
     @Primary
     fun capturingPushSender(): CapturingPushSender = CapturingPushSender()
 
+    /** `media.process` times every photo; the application gets its registry from the actuator. */
+    @Bean
+    fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
+
     companion object {
+        /**
+         * `media`'s own routes, left out: this module reaches `media` through
+         * `media.api` alone (the claim and the photo's view, Phase 4 D2), and
+         * its tests put a processed photo in place by hand rather than upload
+         * one. Everything else of `media` is here, real: the claim's statement,
+         * the view's rule and its signed URL (signing needs no storage).
+         */
+        const val MEDIA_ROUTES = """com\.moyi\.media\.web\..*"""
+
         /**
          * The two push consumers (Phase 4 N3, ADR-0046), `gratitude.notify` and `bond.notify`,
          * left out of the shared context. A dozen tests here count the outbox's deliveries

@@ -528,6 +528,20 @@ class ArchitectureTest {
     }
 
     @Test
+    fun `a native program is started in one class only, the media sandbox`() {
+        // T-07, ADR-0048: a decoder run on what a user uploaded runs in a process of its
+        // own, with a time limit, a memory limit and none of this process's environment.
+        // That is Sandbox's whole job; a second place that started a process would have
+        // none of it.
+        val starters =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
+                .filter { file -> "ProcessBuilder(" in file.text || "Runtime.getRuntime().exec" in file.text }
+                .map { it.name }
+        assertEquals(listOf("Sandbox"), starters, "only the media Sandbox may start a process (T-07, ADR-0048)")
+    }
+
+    @Test
     fun `no file imports java-util-Date`() {
         val violations =
             project.files

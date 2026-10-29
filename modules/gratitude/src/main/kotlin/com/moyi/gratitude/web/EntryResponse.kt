@@ -4,6 +4,8 @@ import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryStatus
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
+import com.moyi.gratitude.service.EntryImage
+import com.moyi.gratitude.service.EntryImageStatus
 import com.moyi.gratitude.service.EntryView
 import java.time.Instant
 import java.time.LocalDate
@@ -78,6 +80,15 @@ internal data class EntryResponse private constructor(
      * whatever rows there are.
      */
     val reaction: ReactionType?,
+    /**
+     * The entry's photo (spec §4 D2, doc 06:138), or `null` when it has none.
+     * Its author is given a URL once the photo is ready; the partner only once
+     * it is ready **and** has passed moderation, and until then sees it as
+     * `PROCESSING` (FR-101), with no URL and no size. Only ever on an entry read
+     * in full; a tombstone says `null`. A locked entry is not this shape, and
+     * has no photo or sign of one (BR-8).
+     */
+    val image: EntryImageResponse?,
 ) : PartnerEntryResponse {
     /**
      * Never the words (doc 18 §5/§9): this is the one object in the module
@@ -89,11 +100,11 @@ internal data class EntryResponse private constructor(
     override fun toString(): String =
         "EntryResponse(id=$id, bondId=$bondId, date=$date, authorMemberId=$authorMemberId, " +
             "text=${if (text == null) "null" else "(redacted)"}, status=$status, createdAt=$createdAt, intendedAt=$intendedAt, " +
-            "favourited=$favourited, reaction=$reaction)"
+            "favourited=$favourited, reaction=$reaction, image=$image)"
 
     companion object {
         /** `null` exactly when [of] is: BR-1 did not grant the caller this shape. */
-        fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date, view.favourited, view.reaction)
+        fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date, view.favourited, view.reaction, view.image)
 
         /**
          * **The only way to build this response** — the constructor is
@@ -130,6 +141,7 @@ internal data class EntryResponse private constructor(
             date: LocalDate,
             favourited: Boolean,
             reaction: ReactionType?,
+            image: EntryImage?,
         ): EntryResponse? =
             reading.disclosed?.let { entry ->
                 EntryResponse(
@@ -143,7 +155,34 @@ internal data class EntryResponse private constructor(
                     intendedAt = entry.intendedAt,
                     favourited = favourited && reading.readability == Readability.FULL,
                     reaction = reaction.takeIf { reading.readability == Readability.FULL },
+                    // Forced here as the reaction is, so that no route has to remember: never on a tombstone.
+                    image = image?.takeIf { reading.readability == Readability.FULL }?.let(EntryImageResponse::from),
                 )
             }
+    }
+}
+
+/**
+ * A photo on an entry, as the caller is shown it (spec §4 D2):
+ * `{id, status, url?, width?, height?}`. [url], [width] and [height] are
+ * present exactly when [status] is `READY`. [url] is a signed GET, valid for
+ * at least 24 hours, ending on the hour and the same all hour so it can be
+ * cached by (doc 05:169); it is a bearer credential for the photo, so it is
+ * never logged and [toString] leaves it out.
+ *
+ * @property url keep it out of logs and analytics; fetch it again after it expires
+ */
+internal data class EntryImageResponse(
+    val id: UUID,
+    val status: EntryImageStatus,
+    val url: String?,
+    val width: Int?,
+    val height: Int?,
+) {
+    override fun toString(): String = "EntryImageResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }})"
+
+    companion object {
+        fun from(image: EntryImage): EntryImageResponse =
+            EntryImageResponse(image.id, image.status, image.url?.toString(), image.width, image.height)
     }
 }

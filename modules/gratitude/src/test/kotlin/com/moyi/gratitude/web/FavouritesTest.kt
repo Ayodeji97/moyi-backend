@@ -964,7 +964,7 @@ internal class FavouritesTest(
         const val DAY = 86_400L
 
         val FULL_KEYS =
-            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction", "image")
 
         const val ADAS_FIRST_WORDS = "ada-first-thoughts-on-the-rain"
         const val ADAS_WORDS = "ada-thanks-for-the-walk-home"

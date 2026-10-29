@@ -8,6 +8,8 @@ import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.domain.PromptId
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Reader
+import com.moyi.gratitude.service.EntryImage
+import com.moyi.gratitude.service.EntryImageStatus
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -15,6 +17,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.junit.jupiter.api.Test
+import java.net.URI
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -52,64 +55,134 @@ internal class EntryRenderingTest {
     fun `a locked entry renders as BR-8's shape, and is never the full shape with its words left out`() {
         val locked = entry.readBy(partner)
 
-        PartnerEntryResponse.of(locked, date, favourited = false, reaction = null) shouldBe LockedEntryResponse(author.memberId)
+        PartnerEntryResponse.of(locked, date, favourited = false, reaction = null, image = null) shouldBe
+            LockedEntryResponse(author.memberId)
         // The full shape carries an id, a createdAt and an intendedAt: BR-8
         // forbids every one of them on a locked entry, text or no text.
-        EntryResponse.of(locked, date, favourited = false, reaction = null).shouldBeNull()
+        EntryResponse.of(locked, date, favourited = false, reaction = null, image = null).shouldBeNull()
     }
 
     @Test
     fun `a non-member's reading renders as nothing at all`() {
         val revealed = entry.copy(status = EntryStatus.REVEALED, revealedAt = now)
 
-        PartnerEntryResponse.of(revealed.readBy(stranger), date, favourited = false, reaction = null).shouldBeNull()
-        EntryResponse.of(revealed.readBy(stranger), date, favourited = false, reaction = null).shouldBeNull()
+        PartnerEntryResponse.of(revealed.readBy(stranger), date, favourited = false, reaction = null, image = null).shouldBeNull()
+        EntryResponse.of(revealed.readBy(stranger), date, favourited = false, reaction = null, image = null).shouldBeNull()
     }
 
     @Test
     fun `a full reading renders with its words, for its author and for a partner once revealed`() {
-        EntryResponse.of(entry.readBy(author), date, favourited = false, reaction = null).shouldNotBeNull().text shouldBe
+        EntryResponse.of(entry.readBy(author), date, favourited = false, reaction = null, image = null).shouldNotBeNull().text shouldBe
             "thank you for the coffee"
 
         val revealed = entry.copy(status = EntryStatus.REVEALED, revealedAt = now)
-        val rendered = PartnerEntryResponse.of(revealed.readBy(partner), date, favourited = false, reaction = null)
+        val rendered = PartnerEntryResponse.of(revealed.readBy(partner), date, favourited = false, reaction = null, image = null)
         (rendered as EntryResponse).text shouldBe "thank you for the coffee"
         rendered.status shouldBe EntryStatus.REVEALED
     }
 
     @Test
+    @Suppress("LongMethod") // A table of readings; each call names every argument the renderer takes, the photo's since D2.
     fun `the caller's mark is rendered on a full reading and on nothing else, whatever the caller of the renderer says`() {
         val revealed = entry.copy(status = EntryStatus.REVEALED, revealedAt = now)
-        EntryResponse.of(revealed.readBy(author), date, favourited = true, reaction = null).shouldNotBeNull().favourited shouldBe true
-        EntryResponse.of(revealed.readBy(author), date, favourited = false, reaction = null).shouldNotBeNull().favourited shouldBe false
-        (PartnerEntryResponse.of(revealed.readBy(partner), date, favourited = true, reaction = null) as EntryResponse).favourited shouldBe
+        EntryResponse
+            .of(
+                revealed.readBy(author),
+                date,
+                favourited = true,
+                reaction = null,
+                image = null,
+            ).shouldNotBeNull()
+            .favourited shouldBe
+            true
+        EntryResponse
+            .of(
+                revealed.readBy(author),
+                date,
+                favourited = false,
+                reaction = null,
+                image = null,
+            ).shouldNotBeNull()
+            .favourited shouldBe
+            false
+        (
+            PartnerEntryResponse.of(
+                revealed.readBy(partner),
+                date,
+                favourited = true,
+                reaction = null,
+                image = null,
+            ) as EntryResponse
+        ).favourited shouldBe
             true
 
         // A tombstone says false: an erased row, and a withdrawn author's row that is still whole.
         val erased = revealed.copy(deletedAt = now)
-        EntryResponse.of(erased.readBy(author), date, favourited = true, reaction = null).shouldNotBeNull().favourited shouldBe false
-        (PartnerEntryResponse.of(erased.readBy(partner), date, favourited = true, reaction = null) as EntryResponse).favourited shouldBe
+        EntryResponse
+            .of(
+                erased.readBy(author),
+                date,
+                favourited = true,
+                reaction = null,
+                image = null,
+            ).shouldNotBeNull()
+            .favourited shouldBe
+            false
+        (
+            PartnerEntryResponse.of(
+                erased.readBy(partner),
+                date,
+                favourited = true,
+                reaction = null,
+                image = null,
+            ) as EntryResponse
+        ).favourited shouldBe
             false
         val afterWithdrawal = Reader(memberId = partner.memberId, bondId = bondId, withdrawnAuthors = setOf(author.memberId))
-        val hidden = PartnerEntryResponse.of(revealed.readBy(afterWithdrawal), date, favourited = true, reaction = null) as EntryResponse
+        val hidden =
+            PartnerEntryResponse.of(
+                revealed.readBy(afterWithdrawal),
+                date,
+                favourited = true,
+                reaction = null,
+                image = null,
+            ) as EntryResponse
         hidden.text.shouldBeNull()
         hidden.favourited shouldBe false
 
         // The narrow shape has nowhere to put one.
-        PartnerEntryResponse.of(entry.readBy(partner), date, favourited = true, reaction = null) shouldBe
+        PartnerEntryResponse.of(entry.readBy(partner), date, favourited = true, reaction = null, image = null) shouldBe
             LockedEntryResponse(author.memberId)
     }
 
     @Test
+    @Suppress("LongMethod") // As the mark's: a table of readings, every argument named.
     fun `the reaction is rendered on a full reading, the same to both members, and on nothing else whatever the caller says`() {
         val revealed = entry.copy(status = EntryStatus.REVEALED, revealedAt = now)
         val moved = ReactionType.MOVED
         // To the author and to the member who left it alike: it is the entry's, not the caller's.
-        EntryResponse.of(revealed.readBy(author), date, favourited = false, reaction = moved).shouldNotBeNull().reaction shouldBe moved
-        (PartnerEntryResponse.of(revealed.readBy(partner), date, favourited = false, reaction = moved) as EntryResponse).reaction shouldBe
+        EntryResponse
+            .of(
+                revealed.readBy(author),
+                date,
+                favourited = false,
+                reaction = moved,
+                image = null,
+            ).shouldNotBeNull()
+            .reaction shouldBe
+            moved
+        (
+            PartnerEntryResponse.of(
+                revealed.readBy(partner),
+                date,
+                favourited = false,
+                reaction = moved,
+                image = null,
+            ) as EntryResponse
+        ).reaction shouldBe
             moved
         EntryResponse
-            .of(revealed.readBy(author), date, favourited = false, reaction = null)
+            .of(revealed.readBy(author), date, favourited = false, reaction = null, image = null)
             .shouldNotBeNull()
             .reaction
             .shouldBeNull()
@@ -117,7 +190,7 @@ internal class EntryRenderingTest {
         // A tombstone says null: an erased row, and a withdrawn author's row that is still whole and still has one.
         val erased = revealed.copy(deletedAt = now)
         EntryResponse
-            .of(erased.readBy(author), date, favourited = false, reaction = moved)
+            .of(erased.readBy(author), date, favourited = false, reaction = moved, image = null)
             .shouldNotBeNull()
             .reaction
             .shouldBeNull()
@@ -127,6 +200,7 @@ internal class EntryRenderingTest {
                 date,
                 favourited = false,
                 reaction = moved,
+                image = null,
             ) as EntryResponse
         ).reaction.shouldBeNull()
         for (reader in listOf(author, partner)) {
@@ -137,14 +211,36 @@ internal class EntryRenderingTest {
                     date,
                     favourited = false,
                     reaction = moved,
+                    image = null,
                 ) as EntryResponse
             hidden.status shouldBe EntryStatus.DELETED
             hidden.reaction.shouldBeNull()
         }
 
         // The narrow shape has nowhere to put one.
-        PartnerEntryResponse.of(entry.readBy(partner), date, favourited = false, reaction = moved) shouldBe
+        PartnerEntryResponse.of(entry.readBy(partner), date, favourited = false, reaction = moved, image = null) shouldBe
             LockedEntryResponse(author.memberId)
+    }
+
+    @Test
+    fun `the photo is rendered on a full reading, whatever the caller of the renderer passes on anything else`() {
+        val photo = UUID.randomUUID()
+        val image =
+            EntryImage(photo, EntryImageStatus.READY, URI.create("https://storage.example.test/v/x/full.webp?X-Amz-Signature=fake"), 4, 3)
+        val revealed = entry.withImage(photo, now).copy(status = EntryStatus.REVEALED, revealedAt = now)
+
+        EntryResponse.of(revealed.readBy(author), date, favourited = false, reaction = null, image = image).shouldNotBeNull().image shouldBe
+            EntryImageResponse(photo, EntryImageStatus.READY, image.url.toString(), 4, 3)
+        // A tombstone has no photo, even one its caller passes.
+        EntryResponse
+            .of(revealed.copy(deletedAt = now).readBy(partner), date, favourited = false, reaction = null, image = image)
+            .shouldNotBeNull()
+            .image
+            .shouldBeNull()
+        // And a response prints no URL.
+        EntryImageResponse.from(image).toString() shouldNotContain "X-Amz-Signature"
+        EntryResponse.of(revealed.readBy(author), date, favourited = false, reaction = null, image = image).toString() shouldNotContain
+            "X-Amz-Signature"
     }
 
     @Test
@@ -162,6 +258,7 @@ internal class EntryRenderingTest {
                 date,
                 favourited = false,
                 reaction = null,
+                image = null,
             ) as EntryResponse
 
         rendered.text.shouldBeNull()
@@ -179,6 +276,7 @@ internal class EntryRenderingTest {
                 date,
                 favourited = false,
                 reaction = null,
+                image = null,
             ) as EntryResponse
 
         rendered.text.shouldBeNull()
@@ -197,8 +295,8 @@ internal class EntryRenderingTest {
         // that rule, and is refused rather than given the old `REMOVED`.
         val unseen = entry.copy(deletedAt = now).readBy(partner)
 
-        shouldThrow<IllegalStateException> { PartnerEntryResponse.of(unseen, date, favourited = false, reaction = null) }
-        EntryResponse.of(unseen, date, favourited = false, reaction = null).shouldBeNull()
+        shouldThrow<IllegalStateException> { PartnerEntryResponse.of(unseen, date, favourited = false, reaction = null, image = null) }
+        EntryResponse.of(unseen, date, favourited = false, reaction = null, image = null).shouldBeNull()
         // And no partner shape is left that could carry it: the narrow one is BR-8's lock alone.
         PartnerEntryResponse::class.java.permittedSubclasses
             .map { it.simpleName }
@@ -214,15 +312,24 @@ internal class EntryRenderingTest {
         val partnerNow = Reader(partner.memberId, bondId, withdrawn)
         val revealed = entry.copy(status = EntryStatus.REVEALED, revealedAt = now)
 
-        val own = EntryResponse.of(entry.readBy(authorNow), date, favourited = false, reaction = null).shouldNotBeNull()
+        val own = EntryResponse.of(entry.readBy(authorNow), date, favourited = false, reaction = null, image = null).shouldNotBeNull()
         own.text.shouldBeNull()
         own.status shouldBe EntryStatus.DELETED
-        val read = PartnerEntryResponse.of(revealed.readBy(partnerNow), date, favourited = false, reaction = null) as EntryResponse
+        val read =
+            PartnerEntryResponse.of(
+                revealed.readBy(partnerNow),
+                date,
+                favourited = false,
+                reaction = null,
+                image = null,
+            ) as EntryResponse
         read.text.shouldBeNull()
         read.status shouldBe EntryStatus.DELETED
         // Never revealed to her: no shape at all, as for a delete (the day leaves it out, `ShownDayTest`).
-        shouldThrow<IllegalStateException> { PartnerEntryResponse.of(entry.readBy(partnerNow), date, favourited = false, reaction = null) }
-        EntryResponse.of(entry.readBy(partnerNow), date, favourited = false, reaction = null).shouldBeNull()
+        shouldThrow<IllegalStateException> {
+            PartnerEntryResponse.of(entry.readBy(partnerNow), date, favourited = false, reaction = null, image = null)
+        }
+        EntryResponse.of(entry.readBy(partnerNow), date, favourited = false, reaction = null, image = null).shouldBeNull()
         entry.text.shouldNotBeNull()
     }
 
@@ -244,6 +351,7 @@ internal class EntryRenderingTest {
                     date,
                     favourited = false,
                     reaction = null,
+                    image = null,
                 ).shouldNotBeNull()
         val printed = listOf(request, request.toDraft(), response).map { it.toString() }
 
@@ -272,7 +380,14 @@ internal class EntryRenderingTest {
         printed[2] shouldContain "id=${entry.id.value}"
         printed[2] shouldContain "text=(redacted)"
         // A tombstone has no words, and says so rather than claiming to hide some.
-        EntryResponse.of(entry.copy(deletedAt = now).readBy(author), date, favourited = false, reaction = null).toString() shouldContain
+        EntryResponse
+            .of(
+                entry.copy(deletedAt = now).readBy(author),
+                date,
+                favourited = false,
+                reaction = null,
+                image = null,
+            ).toString() shouldContain
             "text=null"
     }
 }

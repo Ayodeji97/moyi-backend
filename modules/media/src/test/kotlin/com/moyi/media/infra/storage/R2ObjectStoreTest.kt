@@ -14,8 +14,13 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.file.Files
 import java.security.MessageDigest
 import java.time.Duration
+import java.time.Instant
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import java.time.temporal.ChronoUnit
 import java.util.Base64
 import java.util.UUID
 
@@ -108,11 +113,7 @@ internal class R2ObjectStoreTest {
         val key = StorageKey.forUpload(UUID.randomUUID())
         put(presign(key, photo), photo) shouldBe OK
 
-        val download =
-            http.send(
-                HttpRequest.newBuilder(store.presignDownload(key, Duration.ofMinutes(5))).GET().build(),
-                HttpResponse.BodyHandlers.ofByteArray(),
-            )
+        val download = get(store.presignDownload(key, Instant.now(), Duration.ofMinutes(5)))
         download.statusCode() shouldBe OK
         download.body().toList() shouldBe photo.toList()
         store.open(key)!!.use { it.readAllBytes().toList() } shouldBe photo.toList()
@@ -122,6 +123,54 @@ internal class R2ObjectStoreTest {
         store.open(key).shouldBeNull()
         store.delete(key) // removing what is not there is not an error
     }
+
+    @Test
+    fun `a download URL is signed as of the instant given, so the same instant gives the same URL, and it works`() {
+        val key = StorageKey.forUpload(UUID.randomUUID())
+        put(presign(key, photo), photo) shouldBe OK
+        val hour = Instant.now().truncatedTo(ChronoUnit.HOURS)
+
+        val first = store.presignDownload(key, hour, Duration.ofHours(25))
+        Thread.sleep(1100) // a signer that read the wall clock would now sign another second
+        val again = store.presignDownload(key, hour, Duration.ofHours(25))
+        val nextHour = store.presignDownload(key, hour.plus(Duration.ofHours(1)), Duration.ofHours(25))
+
+        again shouldBe first
+        (nextHour == first) shouldBe false
+        first.query shouldContain "X-Amz-Date=${DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC).format(hour)}"
+        first.query shouldContain "X-Amz-Expires=90000"
+        // Signed up to an hour ago and still valid: MinIO serves it.
+        get(first).statusCode() shouldBe OK
+        get(first).body().toList() shouldBe photo.toList()
+    }
+
+    @Test
+    fun `a download URL whose time has passed is refused`() {
+        val key = StorageKey.forUpload(UUID.randomUUID())
+        put(presign(key, photo), photo) shouldBe OK
+
+        get(store.presignDownload(key, Instant.now().minus(Duration.ofHours(2)), Duration.ofHours(1))).statusCode() shouldBe FORBIDDEN
+    }
+
+    @Test
+    fun `a variant is stored from a file, with its content type`() {
+        val key = StorageKey("v/${UUID.randomUUID()}/full.webp")
+        val file = Files.createTempFile("variant-", ".webp").also { Files.write(it, photo) }
+        try {
+            store.put(key, file, "image/webp")
+
+            store.head(key) shouldBe StoredObject(photo.size.toLong(), null)
+            val download = get(store.presignDownload(key, Instant.now(), Duration.ofMinutes(5)))
+            download.headers().firstValue("Content-Type").orElse(null) shouldBe "image/webp"
+            download.body().toList() shouldBe photo.toList()
+        } finally {
+            Files.deleteIfExists(file)
+            store.delete(key)
+        }
+    }
+
+    private fun get(url: URI): HttpResponse<ByteArray> =
+        http.send(HttpRequest.newBuilder(url).GET().build(), HttpResponse.BodyHandlers.ofByteArray())
 
     @Test
     fun `a storage that cannot be reached is unavailable, and the failure names no key`() {
@@ -166,6 +215,7 @@ internal class R2ObjectStoreTest {
 
     private companion object {
         const val OK = 200
+        const val FORBIDDEN = 403
         val REFUSED = setOf(400, 403)
     }
 }

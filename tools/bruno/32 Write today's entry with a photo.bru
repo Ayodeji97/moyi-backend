@@ -1,0 +1,37 @@
+meta {
+  name: Write today's entry with a photo
+  type: http
+  seq: 32
+}
+
+post {
+  url: {{api}}/bonds/{{bondId}}/entries
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "text": "Look at the light on the wall this morning.",
+    "imageMediaId": "{{mediaId}}"
+  }
+}
+
+script:pre-request {
+  // A new key on every send, as Write today's entry makes one.
+  req.setHeader("Idempotency-Key", require("uuid").v4());
+}
+
+script:post-response {
+  bru.setVar("entryId", res.body.id);
+}
+
+docs {
+  An entry with a photo (ADR-0048): the photo Media upload intent named, once Media says it is READY. Its owner only, READY, and on no other entry: anything else is 422 VALIDATION_FAILED on imageMediaId, one answer whatever the reason, and no entry is written. The 201 carries `image` with its status READY, a signed URL and its size; the partner, once the day reveals, sees the same photo as PROCESSING, with no URL, until it has passed moderation (D4). A locked entry says nothing of a photo.
+
+  Bruno's Media upload sends twenty bytes of text, which the pipeline refuses (FAILED): to try this request, upload a real JPEG, PNG, HEIC or WebP (`scripts/smoke.sh`'s photos section shows how with curl), then set mediaId to its id. A voice note (voiceMediaId) is 422 MEDIA_NOT_YET_SUPPORTED until D3.
+}

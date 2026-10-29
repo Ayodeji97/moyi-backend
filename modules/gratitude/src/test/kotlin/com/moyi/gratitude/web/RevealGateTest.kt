@@ -6,6 +6,7 @@ import com.moyi.common.testing.MutableClock
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
+import com.moyi.gratitude.infra.ProcessedPhotos
 import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.withClue
 import io.kotest.matchers.nulls.shouldBeNull
@@ -109,6 +110,26 @@ internal class RevealGateTest(
         // The text itself, body-wide: it must never appear anywhere in the
         // response, not only be absent from partnerEntry's own shape.
         today.contentAsString shouldNotContain "a secret kindness"
+    }
+
+    /**
+     * Phase 4 D2: a photo is one more thing a locked entry could betray, by a
+     * key, a flag, an id or a URL. It betrays none: the shape is the same two
+     * fields, and nothing of the photo is anywhere in the body.
+     */
+    @Test
+    fun `a locked entry that has a photo is exactly an author and a status too, and says nothing of the photo`() {
+        val photo = ProcessedPhotos(jdbc).ready(owner = bea)
+        val beaSubmitted = submit(bea, bondId, """{"text":"a secret kindness","imageMediaId":"$photo"}""")
+        beaSubmitted.status shouldBe 201
+        val beaMemberId = authorMemberIdOf(beaSubmitted)
+
+        val today = getToday(ada, bondId)
+
+        partnerEntryJson(today.contentAsString) shouldBe """{"authorMemberId":"$beaMemberId","status":"LOCKED"}"""
+        today.contentAsString shouldNotContain photo.toString()
+        today.contentAsString shouldNotContain "image"
+        today.contentAsString shouldNotContain "X-Amz"
     }
 
     @Test

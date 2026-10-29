@@ -4851,6 +4851,32 @@
           }
         }
       },
+      "EntryImageResponse" : {
+        "type" : "object",
+        "description" : "An entry's photo as the caller is shown it. url, width and height are present exactly when status is READY: to its author once it is ready, to the other member only once it has also passed moderation; until then it is PROCESSING to them, whatever the reason. The url is a signed GET, valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the photo.",
+        "properties" : {
+          "height" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "READY", "PROCESSING" ]
+          },
+          "url" : {
+            "type" : [ "string", "null" ]
+          },
+          "width" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          }
+        },
+        "required" : [ "height", "id", "status", "url", "width" ]
+      },
       "EntryResponse" : {
         "allOf" : [ {
           "$ref" : "#/components/schemas/PartnerEntryResponse"
@@ -4880,6 +4906,14 @@
               "type" : "string",
               "format" : "uuid"
             },
+            "image" : {
+              "description" : "The entry's photo, or null when it has none. Always null on an erased entry; a locked entry has no such field.",
+              "oneOf" : [ {
+                "$ref" : "#/components/schemas/EntryImageResponse"
+              }, {
+                "type" : "null"
+              } ]
+            },
             "intendedAt" : {
               "type" : "string",
               "format" : "date-time"
@@ -4897,7 +4931,7 @@
               "type" : [ "string", "null" ]
             }
           },
-          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "intendedAt", "reaction", "status", "text" ]
+          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "image", "intendedAt", "reaction", "status", "text" ]
         } ]
       },
       "FieldViolation" : {
@@ -5070,6 +5104,10 @@
           "contentType" : {
             "type" : "string"
           },
+          "height" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
           "id" : {
             "type" : "string",
             "format" : "uuid"
@@ -5085,6 +5123,13 @@
           "status" : {
             "type" : "string",
             "enum" : [ "PENDING_UPLOAD", "UPLOADED", "PROCESSING", "READY", "QUARANTINED", "FAILED", "DELETED" ]
+          },
+          "url" : {
+            "type" : [ "string", "null" ]
+          },
+          "width" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
           }
         }
       },
@@ -5356,7 +5401,7 @@
         "properties" : {
           "code" : {
             "type" : "string",
-            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "REACTION_ON_OWN_ENTRY", "REACTION_BUSY", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "MEDIA_QUOTA_EXCEEDED", "MEDIA_TYPE_UNSUPPORTED", "MEDIA_NOT_UPLOADED", "MEDIA_STORAGE_UNAVAILABLE", "MEDIA_BUSY", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "REACTION_ON_OWN_ENTRY", "REACTION_BUSY", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "MEDIA_QUOTA_EXCEEDED", "MEDIA_TYPE_UNSUPPORTED", "MEDIA_NOT_UPLOADED", "MEDIA_STORAGE_UNAVAILABLE", "MEDIA_BUSY", "MEDIA_ATTACHED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"

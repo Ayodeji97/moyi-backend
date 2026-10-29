@@ -52,6 +52,14 @@ moyi:
         bucket: moyi-media
         access-key-id: moyi_dev_only
         secret-access-key: moyi_dev_only_secret
+    processing:
+      # libvips' command-line tools from PATH (`brew install vips`), which turn an
+      # uploaded photo into its two WebP variants (ADR-0048). VIPS, the default,
+      # refuses to start without them; set `provider: off` to run without. macOS
+      # cannot enforce the memory limit, so it is waived here, and only here.
+      provider: vips
+      vips:
+        allow-unlimited-memory: true
   security:
     jwt:
       # Generated at startup: every token dies with the process, which is fine

@@ -8,7 +8,14 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
 import software.amazon.awssdk.core.checksums.RequestChecksumCalculation
 import software.amazon.awssdk.core.checksums.ResponseChecksumValidation
 import software.amazon.awssdk.core.exception.SdkException
+import software.amazon.awssdk.core.sync.RequestBody
+import software.amazon.awssdk.http.SdkHttpMethod
+import software.amazon.awssdk.http.SdkHttpRequest
+import software.amazon.awssdk.http.auth.aws.signer.AwsV4FamilyHttpSigner
+import software.amazon.awssdk.http.auth.aws.signer.AwsV4HttpSigner
+import software.amazon.awssdk.http.auth.spi.signer.HttpSigner
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient
+import software.amazon.awssdk.identity.spi.AwsCredentialsIdentity
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.S3Configuration
@@ -20,11 +27,14 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import software.amazon.awssdk.services.s3.model.S3Exception
 import software.amazon.awssdk.services.s3.presigner.S3Presigner
-import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest
 import java.io.InputStream
 import java.net.URI
+import java.nio.file.Path
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import java.time.ZoneOffset
 
 /**
  * The S3 API, for Cloudflare R2 (spec §4 D1, ADR-0047): the one class in the
@@ -52,13 +62,18 @@ import java.time.Duration
  * whose message carries no key and no URL; the log line carries the SDK's
  * exception class and the HTTP status, nothing else.
  */
+@Suppress("LongParameterList") // the two SDK clients, and what the GET signer needs that they keep to themselves
 internal class R2ObjectStore(
     private val client: S3Client,
     private val presigner: S3Presigner,
     private val bucket: String,
+    private val endpoint: URI,
+    private val region: String,
+    private val identity: AwsCredentialsIdentity,
 ) : ObjectStore,
     AutoCloseable {
     private val log = LoggerFactory.getLogger(javaClass)
+    private val downloadSigner: AwsV4HttpSigner = AwsV4HttpSigner.create()
 
     override fun presignUpload(
         key: StorageKey,
@@ -97,26 +112,61 @@ internal class R2ObjectStore(
         return PresignedUpload(presigned.url().toURI(), headers)
     }
 
+    /**
+     * A query-signed GET, made with the SDK's SigV4 signer directly rather than
+     * the presigner, because the presigner signs as of the moment it is called
+     * and offers no way to say otherwise. Signed as of [signedAt] instead, the
+     * URL is the same for every request that passes the same instant, which is
+     * what makes it cacheable by URL (doc 05:169, ADR-0048). Path-style, as the
+     * client is; the payload is `UNSIGNED-PAYLOAD`, as an S3 presigned GET's is.
+     * Signing needs no network.
+     */
     override fun presignDownload(
         key: StorageKey,
+        signedAt: Instant,
         expiresIn: Duration,
     ): URI {
-        val get =
-            GetObjectRequest
+        val request =
+            SdkHttpRequest
                 .builder()
-                .bucket(bucket)
-                .key(key.value)
+                .method(SdkHttpMethod.GET)
+                .uri(endpoint)
+                .encodedPath("${endpoint.rawPath.trimEnd('/')}/$bucket/${key.value}")
                 .build()
         return reaching("presign a download") {
-            presigner
-                .presignGetObject(
-                    GetObjectPresignRequest
-                        .builder()
-                        .signatureDuration(expiresIn)
-                        .getObjectRequest(get)
-                        .build(),
-                ).url()
-                .toURI()
+            downloadSigner
+                .sign { signing ->
+                    signing
+                        .request(request)
+                        .identity(identity)
+                        .putProperty(AwsV4HttpSigner.SERVICE_SIGNING_NAME, S3_SIGNING_NAME)
+                        .putProperty(AwsV4HttpSigner.REGION_NAME, region)
+                        .putProperty(AwsV4HttpSigner.AUTH_LOCATION, AwsV4FamilyHttpSigner.AuthLocation.QUERY_STRING)
+                        .putProperty(AwsV4HttpSigner.EXPIRATION_DURATION, expiresIn)
+                        .putProperty(AwsV4HttpSigner.PAYLOAD_SIGNING_ENABLED, false)
+                        .putProperty(AwsV4HttpSigner.DOUBLE_URL_ENCODE, false)
+                        .putProperty(AwsV4HttpSigner.NORMALIZE_PATH, false)
+                        .putProperty(HttpSigner.SIGNING_CLOCK, Clock.fixed(signedAt, ZoneOffset.UTC))
+                }.request()
+                .getUri()
+        }
+    }
+
+    override fun put(
+        key: StorageKey,
+        file: Path,
+        contentType: String,
+    ) {
+        reaching("store an object") {
+            client.putObject(
+                PutObjectRequest
+                    .builder()
+                    .bucket(bucket)
+                    .key(key.value)
+                    .contentType(contentType)
+                    .build(),
+                RequestBody.fromFile(file),
+            )
         }
     }
 
@@ -192,6 +242,7 @@ internal class R2ObjectStore(
     internal companion object {
         private const val HOST = "host"
         private const val NOT_FOUND = 404
+        private const val S3_SIGNING_NAME = "s3"
 
         /**
          * Builds the store from configuration, or refuses to: the default
@@ -249,7 +300,7 @@ internal class R2ObjectStore(
                     .credentialsProvider(credentials)
                     .serviceConfiguration(s3Configuration)
                     .build()
-            return R2ObjectStore(client, presigner, bucket)
+            return R2ObjectStore(client, presigner, bucket, uri, r2.region, AwsBasicCredentials.create(accessKeyId, secret))
         }
     }
 }

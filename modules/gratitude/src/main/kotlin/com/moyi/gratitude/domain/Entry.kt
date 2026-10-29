@@ -35,20 +35,20 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  * render it: `GET /today` shows it, and an `Idempotency-Key` replay
  * re-reads the entry from its current state (spec §5.4), where a row erased
  * since has no words to hand back, by design. Every entry [submit] produces
- * has words — `entries.text` is also nullable for the media-only entry a
- * later Phase 4 slice adds, which is refused for now
- * (`422 MEDIA_NOT_YET_SUPPORTED`) — so the `init` below admits a missing
- * text only where the status or `deletedAt` says why. Loosening it for
- * media-only entries is that later slice's change to make.
+ * has words — `entries.text` is also nullable for a media-only entry, which
+ * no slice has built (text is the required part, FR-041) — so the `init`
+ * below admits a missing text only where the status or `deletedAt` says why.
  *
  * [promptId] is the prompt the author said this entry answers (ADR-0038),
  * never sent back to anybody; [erase] takes it with the words, on a withdrawal
  * (BR-10a) and on the author's own delete (FR-046) alike: what an erased entry
  * was answering goes with what it said.
  *
- * [imageMediaId], [voiceMediaId] and [voiceDurationMs] are
- * carried anyway, always `null` for now, so a row [submit] builds already
- * has a value for every column V12 declared — the same reason
+ * [imageMediaId] is the entry's photo, `media`'s asset, claimed for this
+ * entry in the transaction that set it (FR-044a, ADR-0048); [erase] nulls it
+ * with the words (BR-10). [voiceMediaId] and [voiceDurationMs] are carried
+ * anyway, always `null` until D3, so a row [submit] builds already has a value
+ * for every column V12 declared — the same reason
  * [com.moyi.bond.domain.Bond] carries `timezoneChangedAt` and
  * `deletionRequestedAt` long before the slices that ever set them exist.
  * `entries.text_search` is deliberately **not** one of them: it is the search projection
@@ -256,6 +256,19 @@ internal data class Entry(
         return if (text == replacement) this else copy(text = replacement, updatedAt = now)
     }
 
+    /**
+     * Gives the entry [image] as its photo, before anyone else has been entitled
+     * to read it (BR-7, as [edit]). Whether the photo may be attached is
+     * `media`'s rule (FR-044a), asked by the caller before this.
+     */
+    fun withImage(
+        image: UUID,
+        now: Instant,
+    ): Entry {
+        check(isEditable) { "a revealed or erased entry is immutable" }
+        return if (imageMediaId == image) this else copy(imageMediaId = image, updatedAt = now)
+    }
+
     /** Erasure is idempotent, frees BR-2's slot, and never clears the reveal stamp. */
     fun erase(now: Instant): Entry =
         if (isErased) {
@@ -321,6 +334,7 @@ internal data class Entry(
             promptId: PromptId?,
             intendedAt: Instant,
             now: Instant,
+            imageMediaId: UUID? = null,
         ): Entry =
             Entry(
                 id = id,
@@ -328,7 +342,7 @@ internal data class Entry(
                 bondId = bondId,
                 authorMemberId = authorMemberId,
                 text = text,
-                imageMediaId = null,
+                imageMediaId = imageMediaId,
                 voiceMediaId = null,
                 voiceDurationMs = null,
                 promptId = promptId,

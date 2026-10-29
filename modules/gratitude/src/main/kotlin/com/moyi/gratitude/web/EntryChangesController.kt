@@ -7,6 +7,7 @@ import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryText
 import com.moyi.gratitude.service.ChangeEntry
 import com.moyi.gratitude.service.EntryNotFoundException
+import com.moyi.gratitude.service.MediaChange
 import com.moyi.gratitude.service.PatchEntry
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.validation.Valid
@@ -48,7 +49,7 @@ internal class EntryChangesController(
                 caller.id,
                 entryIdOrNotFound(entryId),
                 EntryText.of(checkNotNull(request.text)),
-                request.imageMediaId != null || request.voiceMediaId != null,
+                MediaChange(image = request.imageMediaId, voice = request.voiceMediaId != null),
                 IdempotencyInterceptor.requestOrNull(http),
             )
         val response = ResponseEntity.ok()
@@ -81,11 +82,16 @@ internal class EntryChangesController(
 internal fun entryIdOrNotFound(raw: String): EntryId =
     runCatching { EntryId(UUID.fromString(raw)) }.getOrElse { throw EntryNotFoundException() }
 
-/** Text is the only editable content in C2; validation delegates to the same domain factory as submission. */
+/**
+ * The words, which are required and replace the entry's, and since D2 a photo:
+ * [imageMediaId] attaches one (FR-044a), in place of any the entry has; absent,
+ * the entry's photo is left as it is. [voiceMediaId] is refused until D3.
+ * Validation delegates to the same domain factory as submission.
+ */
 internal data class PatchEntryRequest(
     @field:NotNull @field:ValidEntryText val text: String? = null,
     val imageMediaId: UUID? = null,
     val voiceMediaId: UUID? = null,
 ) {
-    override fun toString(): String = "PatchEntryRequest(text=(redacted))"
+    override fun toString(): String = "PatchEntryRequest(text=(redacted), imageMediaId=$imageMediaId, voiceMediaId=$voiceMediaId)"
 }

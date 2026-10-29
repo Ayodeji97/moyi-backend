@@ -51,13 +51,87 @@ internal class MediaAssetTest {
         pending().toString() shouldNotContain "in/"
     }
 
+    @Test
+    fun `a variant is kept under v, with the upload key's random part and never the asset's id`() {
+        val random = UUID.randomUUID()
+        val upload = StorageKey.forUpload(random)
+        StorageKey.forVariant(upload, ImageVariant.FULL).value shouldBe "v/$random/full.webp"
+        StorageKey.forVariant(upload, ImageVariant.DISPLAY).value shouldBe "v/$random/display.webp"
+    }
+
+    @Test
+    fun `media-process works on an uploaded photo, or one whose last attempt did not finish, and on nothing else`() {
+        pending(MediaStatus.UPLOADED).processing shouldBe MediaAsset.Processing.PROCESS
+        pending(MediaStatus.PROCESSING).processing shouldBe MediaAsset.Processing.PROCESS
+        // ADR-0047's debt: an asset deleted after its MediaUploaded was published is skipped.
+        for (status in MediaStatus.entries - MediaStatus.UPLOADED - MediaStatus.PROCESSING) {
+            pending(status).processing shouldBe MediaAsset.Processing.NOTHING_TO_DO
+        }
+        pending(MediaStatus.UPLOADED, kind = MediaKind.VOICE).processing shouldBe MediaAsset.Processing.NOT_THIS_KIND
+    }
+
+    @Test
+    fun `a photo on which five attempts began and none finished is given up, and one with four is tried again`() {
+        pending(MediaStatus.PROCESSING, attempts = 4).processing shouldBe MediaAsset.Processing.PROCESS
+        pending(MediaStatus.PROCESSING, attempts = 5).processing shouldBe MediaAsset.Processing.GIVE_UP
+        pending(MediaStatus.UPLOADED, attempts = 5).processing shouldBe MediaAsset.Processing.GIVE_UP
+        // Given up only while there is something to give up.
+        pending(MediaStatus.READY, attempts = 5).processing shouldBe MediaAsset.Processing.NOTHING_TO_DO
+        pending(MediaStatus.DELETED, attempts = 9).processing shouldBe MediaAsset.Processing.NOTHING_TO_DO
+    }
+
+    @Test
+    fun `a photo's object keys are its upload and both variants', recorded or not, and a voice note's its upload`() {
+        val photo = pending(MediaStatus.PROCESSING)
+        photo.objectKeys shouldBe listOf(photo.storageKey) + ImageVariant.entries.map { StorageKey.forVariant(photo.storageKey, it) }
+        val voice = pending(MediaStatus.UPLOADED, kind = MediaKind.VOICE)
+        voice.objectKeys shouldBe listOf(voice.storageKey)
+    }
+
+    @Test
+    fun `its owner sees a ready photo, the full image while there is one`() {
+        val full = variant(ImageVariant.FULL)
+        val display = variant(ImageVariant.DISPLAY)
+        pending(MediaStatus.READY, variants = listOf(display, full)).shownTo(owner = true) shouldBe MediaAsset.Shown.Ready(full)
+        pending(MediaStatus.READY, variants = listOf(display)).shownTo(owner = true) shouldBe MediaAsset.Shown.Ready(display)
+    }
+
+    @Test
+    fun `anyone else sees processing until the photo is ready and has passed moderation (FR-101)`() {
+        val full = variant(ImageVariant.FULL)
+        pending(MediaStatus.READY, variants = listOf(full)).shownTo(owner = false) shouldBe MediaAsset.Shown.Processing
+        pending(MediaStatus.READY, variants = listOf(full), verdict = "QUARANTINED").shownTo(owner = false) shouldBe
+            MediaAsset.Shown.Processing
+        pending(MediaStatus.READY, variants = listOf(full), verdict = MediaAsset.PASSED).shownTo(owner = false) shouldBe
+            MediaAsset.Shown.Ready(full)
+    }
+
+    @Test
+    fun `a photo that is not ready is processing to everyone, its owner included`() {
+        for (status in MediaStatus.entries - MediaStatus.READY) {
+            pending(status, variants = listOf(variant(ImageVariant.FULL)), verdict = MediaAsset.PASSED).shownTo(owner = true) shouldBe
+                MediaAsset.Shown.Processing
+        }
+    }
+
+    private fun variant(which: ImageVariant) =
+        StoredVariant(which, StorageKey.forVariant(StorageKey.forUpload(UUID.randomUUID()), which), 20, 10, 100)
+
+    @Suppress("LongParameterList") // A fixture: every parameter defaults, and each test names the one it varies.
     private fun pending(
         status: MediaStatus = MediaStatus.PENDING_UPLOAD,
         attached: UUID? = null,
+        kind: MediaKind = MediaKind.IMAGE,
+        variants: List<StoredVariant> = emptyList(),
+        verdict: String? = null,
+        attempts: Int = 0,
     ) = MediaAsset(
+        processingAttempts = attempts,
         id = UUID.randomUUID(),
         ownerUserId = UUID.randomUUID(),
-        kind = MediaKind.IMAGE,
+        kind = kind,
+        variants = variants,
+        moderationVerdict = verdict,
         storageKey = StorageKey.forUpload(UUID.randomUUID()),
         contentType = "image/png",
         sizeBytes = 1234,

@@ -59,10 +59,10 @@
       {
         "status": 422,
         "code": "MEDIA_NOT_YET_SUPPORTED",
-        "reason": "The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. It is refused, not quietly dropped.",
+        "reason": "The request named a voice note (voiceMediaId), which nothing can store until Phase 4 slice D3. It is refused, not quietly dropped. A photo is attached since D2.",
         "evidence": "smoke",
-        "evidenceRef": "an entry carrying a media id is 422 MEDIA_NOT_YET_SUPPORTED",
-        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (draft.imageMediaId != null || draft.voiceMediaId != null) throw MediaNotYetSupportedException()"
+        "evidenceRef": "an entry carrying a voice note is 422 MEDIA_NOT_YET_SUPPORTED",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (draft.voiceMediaId != null) throw MediaNotYetSupportedException()"
       },
       {
         "status": 422,
@@ -145,10 +145,18 @@
       {
         "status": 422,
         "code": "MEDIA_NOT_YET_SUPPORTED",
-        "reason": "The request named a photo or a voice note (imageMediaId or voiceMediaId), which nothing can store until Phase 4. (a test asserts the status, not the code)",
+        "reason": "The request named a voice note (voiceMediaId), which nothing can store until Phase 4 slice D3. (a test asserts the status, not the code)",
         "evidence": "never-run",
         "evidenceRef": "",
-        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (unsupportedMedia) throw MediaNotYetSupportedException()"
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (media.voice) throw MediaNotYetSupportedException()"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "imageMediaId names no photo media will attach to this entry: not yours, not READY, or on another entry. Asked under the entry's lock, after ENTRY_IMMUTABLE; nothing changes. A new photo in place of the entry's lets the old one go; an absent imageMediaId leaves the photo as it is.",
+        "evidence": "test",
+        "evidenceRef": "EntryPhotoTest#PATCH with another user's photo is refused on imageMediaId, and the entry is unchanged",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ChangeEntry.kt#if (!attachments.claim(userId, image, AttachableKind.IMAGE, entryId.value)) throw MediaNotAttachableException()"
       }
     ],
     "curl": "curl -X PATCH \"$API/entries/$ENTRY\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"text\": \"...\"}'"

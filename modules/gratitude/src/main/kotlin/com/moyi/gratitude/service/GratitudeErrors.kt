@@ -36,15 +36,34 @@ internal class BondArchivedException :
 
 /**
  * `POST /bonds/{bondId}/entries` or `PATCH /entries/{entryId}` naming
- * `imageMediaId` or `voiceMediaId` (spec §1): refused rather than stored and silently ignored — Phase 4 has
- * not built anywhere for either to go yet, and accepting the field only to
- * drop it on the floor would be a promise this response cannot keep.
+ * `voiceMediaId` (spec §1): refused rather than stored and silently ignored —
+ * voice notes have nowhere to go until Phase 4 slice D3, and accepting the
+ * field only to drop it on the floor would be a promise this response cannot
+ * keep. A photo is attached since D2 (ADR-0048).
  */
 internal class MediaNotYetSupportedException :
     ApiException(
         HttpStatus.UNPROCESSABLE_ENTITY,
         ErrorCode.MEDIA_NOT_YET_SUPPORTED,
-        "Photos and voice notes are not supported yet. Write a few words instead.",
+        "Voice notes are not supported yet. Write a few words instead.",
+    )
+
+/**
+ * 422: `imageMediaId` names no photo `media` will attach to this entry (FR-044a, spec §4
+ * D2): not the caller's, not `READY`, attached to another entry already, a voice note, or
+ * nothing at all. One answer for every cause, naming the field and never the value: told
+ * apart, they would tell a caller whether somebody else's photo exists. The entry is not
+ * created with the photo dropped; text is kept by the client and sent again.
+ */
+internal class MediaNotAttachableException :
+    ApiException(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        ErrorCode.VALIDATION_FAILED,
+        "One or more fields are not valid.",
+        errors =
+            listOf(
+                FieldViolation("imageMediaId", "MEDIA_NOT_ATTACHABLE", "must be a photo of yours that is ready and on no other entry"),
+            ),
     )
 
 /**

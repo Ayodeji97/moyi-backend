@@ -789,10 +789,33 @@ class OpenApiContractTest(
         full.required shouldContain "reaction"
         // The whole of what an entry says: a field added for a reaction's time, or its maker, fails here.
         full.properties.keys shouldBe
-            setOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
+            setOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction", "image")
         // No schema of a reaction beyond its type exists to carry more.
         api.components.schemas.keys
             .filter { "eaction" in it } shouldBe listOf("ReactionRequest")
+    }
+
+    /** Phase 4 D2, ADR-0048: `{id, status, url?, width?, height?}`, and nowhere on a locked entry (BR-8). */
+    @Test
+    fun `an entry's photo is an id, a status and, once shown, a URL and a size, every field always sent`() {
+        val image = api.components.schemas["EntryImageResponse"]!!
+        image.properties.keys shouldBe setOf("id", "status", "url", "width", "height")
+        image.required.toSet() shouldBe image.properties.keys
+        image.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING")
+        listOf("url", "width", "height").forEach { image.properties[it]!!.types shouldContain "null" }
+
+        val full =
+            api.components.schemas["EntryResponse"]!!
+                .allOf
+                .last()
+        full.required shouldContain "image"
+        full.properties["image"]!!.oneOf.map { it.`$ref` ?: it.types.single() } shouldBe
+            listOf("#/components/schemas/EntryImageResponse", "null")
+        // BR-8: the locked shape has no field a photo could hide in.
+        api.components.schemas["LockedEntryResponse"]!!
+            .allOf
+            .last()
+            .properties.keys shouldBe setOf("authorMemberId", "status")
     }
 
     @Test

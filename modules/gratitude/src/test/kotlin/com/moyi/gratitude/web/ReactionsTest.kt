@@ -1254,7 +1254,7 @@ internal class ReactionsTest(
         val TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO")
         const val ME_TOO = "ME_TOO"
         val FULL_KEYS =
-            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction")
+            listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt", "favourited", "reaction", "image")
 
         // Markers no UUID, date or hexadecimal digest can contain.
         const val ADAS_WORDS = "zq-ada-thanks-for-the-walk-home"

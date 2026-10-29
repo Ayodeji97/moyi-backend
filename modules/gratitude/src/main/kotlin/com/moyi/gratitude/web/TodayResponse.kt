@@ -4,6 +4,7 @@ import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
+import com.moyi.gratitude.service.EntryImage
 import com.moyi.gratitude.service.PromptView
 import com.moyi.gratitude.service.TodayView
 import java.time.LocalDate
@@ -83,11 +84,13 @@ internal data class TodayResponse(
                             view.date,
                             it.disclosed?.id in view.marked,
                             view.reactions[it.disclosed?.id],
+                            view.images[it.disclosed?.id],
                         )
                     },
                 partnerEntry =
                     view.partnerEntry?.let {
-                        PartnerEntryResponse.of(it, view.date, it.disclosed?.id in view.marked, view.reactions[it.disclosed?.id])
+                        val id = it.disclosed?.id
+                        PartnerEntryResponse.of(it, view.date, id in view.marked, view.reactions[id], view.images[id])
                     },
                 streak = TodayStreakResponse.from(view.streak),
                 prompt = view.prompt?.let(TodayPromptResponse::from),
@@ -154,20 +157,22 @@ internal sealed interface PartnerEntryResponse {
          * loudly rather than choose a shape the ruling took away, or a
          * `null` that would hide the fault and be a second copy of the rule.
          *
-         * [favourited], the caller's own bookmark, and [reaction], the one
-         * on the entry, go to the one branch that has fields for them. The
-         * locked shape is not given either and could not carry one: an entry
-         * the caller was never shown has nothing of the caller's on it, and
-         * they cannot have reacted to it.
+         * [favourited], the caller's own bookmark, [reaction], the one on the
+         * entry, and [image], its photo, go to the one branch that has fields
+         * for them. The locked shape is not given any and could not carry
+         * one: an entry the caller was never shown has nothing of the
+         * caller's on it, they cannot have reacted to it, and whether it has
+         * a photo is exactly what BR-8 withholds.
          */
         fun of(
             reading: EntryReading,
             date: LocalDate,
             favourited: Boolean,
             reaction: ReactionType?,
+            image: EntryImage?,
         ): PartnerEntryResponse? =
             when (reading.readability) {
-                Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date, favourited, reaction)
+                Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date, favourited, reaction, image)
                 Readability.LOCKED -> reading.authorMemberId?.let { LockedEntryResponse(it) }
                 Readability.TOMBSTONE_UNSEEN -> error("a day renders an entry erased before it was shown as no entry (service.shownTo)")
                 Readability.NOT_A_MEMBER -> null

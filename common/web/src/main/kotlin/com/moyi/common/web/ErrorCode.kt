@@ -283,11 +283,12 @@ enum class ErrorCode {
     DAY_CLOSED,
 
     /**
-     * `POST /bonds/{bondId}/entries` naming `imageMediaId` or
+     * `POST /bonds/{bondId}/entries` or `PATCH /entries/{entryId}` naming
      * `voiceMediaId` (spec §1): refused outright rather than stored and
-     * silently ignored, because Phase 4 has not built anywhere for either
-     * to go yet. 422 — the request is well-formed, the media reference is
-     * simply not one this deployment can honour today.
+     * silently ignored, because voice notes have nowhere to go until Phase 4
+     * slice D3. 422 — the request is well-formed, the media reference is
+     * simply not one this deployment can honour today. A photo
+     * (`imageMediaId`) is attached since D2 (ADR-0048).
      */
     MEDIA_NOT_YET_SUPPORTED,
 
@@ -333,6 +334,13 @@ enum class ErrorCode {
      * lock (ADR-0047), so this means the database is struggling, and is rare.
      */
     MEDIA_BUSY,
+
+    /**
+     * `DELETE /media/{id}` of an asset attached to an entry (doc 06:184: "Owner
+     * only, and only if unattached"; ADR-0048). 409: nothing changed. The asset
+     * is the entry's now and leaves with it (D5's erasure).
+     */
+    MEDIA_ATTACHED,
 
     /**
      * `GET /bonds/{bondId}/days/{date}` for a date that is not in the

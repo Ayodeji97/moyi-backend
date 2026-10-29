@@ -4,11 +4,14 @@ import com.moyi.media.domain.StorageKey
 import com.moyi.media.domain.StoredObject
 import java.io.InputStream
 import java.net.URI
+import java.nio.file.Path
 import java.time.Duration
+import java.time.Instant
 
 /**
- * The object storage, as this module needs it (spec §4 D1): presign a PUT and a
- * GET, read an object's length, read its bytes, delete it. Internal: nothing
+ * The object storage, as this module needs it (spec §4 D1, D2): presign a PUT
+ * and a GET, read an object's length, read its bytes, write a variant, delete
+ * an object. Internal: nothing
  * storage-shaped leaves `media` (`media.api` exposes none of it), so the
  * vendor is replaceable inside one module.
  *
@@ -17,9 +20,8 @@ import java.time.Duration
  * runs until the bucket exists (ADR-0047). Every failure to reach the storage is
  * an [ObjectStoreUnavailableException]; nothing vendor-typed escapes.
  *
- * D1 uses the PUT presign, the HEAD and the DELETE. The GET presign and the
- * stream are D2's (rendering and the pipeline), built and tested here because
- * the port is this slice's.
+ * D1 uses the PUT presign, the HEAD and the DELETE; D2 the GET presign
+ * (rendering), the stream and the PUT of a variant (the pipeline).
  */
 internal interface ObjectStore {
     /**
@@ -36,9 +38,14 @@ internal interface ObjectStore {
         expiresIn: Duration,
     ): PresignedUpload
 
-    /** A URL that reads the object under [key] until [expiresIn] has passed. */
+    /**
+     * A URL that reads the object under [key], signed as of [signedAt] and
+     * valid for [expiresIn] from then. The same three values give the same URL,
+     * which is what lets a client cache by it (doc 05:169, ADR-0048).
+     */
     fun presignDownload(
         key: StorageKey,
+        signedAt: Instant,
         expiresIn: Duration,
     ): URI
 
@@ -47,6 +54,13 @@ internal interface ObjectStore {
 
     /** The bytes under [key]; the caller closes the stream. Null when nothing is stored there. */
     fun open(key: StorageKey): InputStream?
+
+    /** Stores the file at [file] under [key] as [contentType], replacing whatever was there. */
+    fun put(
+        key: StorageKey,
+        file: Path,
+        contentType: String,
+    )
 
     /** Removes the object under [key]. Removing what is not there is not an error. */
     fun delete(key: StorageKey)
