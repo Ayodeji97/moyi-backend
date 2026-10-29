@@ -255,6 +255,13 @@ earlier than `limit` would have put it.
   real value as its default, and a test passes 1. That is a test hook in a production
   signature, noted by the reviewer and kept.
 - A tombstone and a locked entry send no text and count for nothing.
+- *Noted 2026-10-28 (ADR-0015, amended).* Identity now refuses a display name holding a
+  control character or a format character other than ZWNJ and ZWJ. The worst name it accepts
+  escapes to at most 3 octets a UTF-16 unit (a BMP character's UTF-8, or 2 for `"` and `\`),
+  against 6 before, so `DaysFeedTest`'s largest page, built from U+001F through a fake
+  directory, now over-counts and still bounds the page. Neither that test nor
+  `ArchivePageBudget` is changed, because #105 rewrites the test. **Re-measuring the page with
+  the new worst name is owed once #105 has merged.**
 - *Rejected:* a maximum `limit` below 16, which gives up page size for every ordinary
   archive to bound a pathological one; and shortening text in the list on the server, which
   `states.md` §6 puts on the client and which would make the list and the day view two

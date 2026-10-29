@@ -94,7 +94,24 @@
 # (409 before the PUT, a replay under the same key, 422 without one), reads it as
 # its owner and is told 404 as another user, refuses a GIF (415) and 11 MB (413),
 # deletes it and sees the object gone from MinIO, and finds the URL in no log
-# line. Last run on 2026-10-29, for the entry-text rulings (ADR-0031 rulings 1 and 2), after
+# line. Since the display-name rule (ADR-0015, amended 2026-10-28) it sends a name holding
+# U+202E and is told 422 VALID_DISPLAY_NAME on displayName. Last run on 2026-10-29, for
+# feat/display-name-controls after main (d9c2de4, #105) was merged in, from a jar of
+# 7e421b3's code, on a fresh database that applied V1 to V27 and V29 to V33, against its own
+# compose project (moyi-0f: Postgres 55443, Valkey 56390, MinIO 59273) and --attach: 1064
+# passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the race),
+# 28 sections. Before it, on 2026-10-28, for
+# feat/display-name-controls at b52ee87 (the review's fixes: a lone surrogate refused, a
+# name of only no-break spaces a 422), from a jar of that commit, on a fresh database that
+# applied V1 to V27 and V29 to V33 in that order, against its own compose project (moyi-0f:
+# Postgres 55443, Valkey 56390, MinIO 59100) and --attach: 1046 passed, 0 failed,
+# 1 skipped (the tag across the erasure, the poller having won the race), 28 sections.
+# Before it, on 2026-10-28, for that branch on main at 7656192, from a jar of the branch, on a fresh
+# database that applied V1 to V27 and V29 to V33 in that order, against its own compose
+# project (moyi-0f: Postgres 55443, Valkey 56390, MinIO 59100) and --attach: 1046 passed,
+# 0 failed, 1 skipped (the tag across the erasure, the poller having won the race),
+# 28 sections. Before them,
+# on 2026-10-29, for the entry-text rulings (ADR-0031 rulings 1 and 2), after
 # main (51df716, #103) was merged in, from a jar of b534158's code, on a fresh database that
 # applied V1 to V27 and V29 to V33, against its own compose project (moyi-0f: Postgres 55443,
 # Valkey 56390, MinIO 59273) and --attach: 1062 passed, 0 failed, 1 skipped (the tag across
@@ -421,6 +438,11 @@ expect "same address again (different case) is still 201" 201 "" -- -X POST "$AP
 expect "7-character password is 422 VALID_PASSWORD" 422 '"code":"VALID_PASSWORD"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.3' -d '{"email":"x@example.com","password":"short12","displayName":"S","acceptedTermsVersion":"1","over18":true}'
 expect "breached password is 422 NOT_BREACHED" 422 '"code":"NOT_BREACHED"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.4' -d '{"email":"x@example.com","password":"password","displayName":"S","acceptedTermsVersion":"1","over18":true}'
 expect "over18=false is 422 on field over18" 422 '"field":"over18"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.5' -d '{"email":"x@example.com","password":"correct horse battery","displayName":"S","acceptedTermsVersion":"1","over18":false}'
+# A display name holds no control or format character but ZWNJ and ZWJ (ADR-0015,
+# amended 2026-10-28). U+202E travels as the JSON escape, so this file holds no
+# literal of it, and the answer names the rule, never the name.
+expect "a display name with U+202E is 422 VALID_DISPLAY_NAME" 422 '"code":"VALID_DISPLAY_NAME"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.8' -d "$(register_body "x@example.com" en 'Ad\u202Ea')"
+[[ "$LAST_BODY" == *'"field":"displayName"'* ]] && pass "…on the field displayName" || fail "display name field" "got: ${LAST_BODY:0:200}"
 expect "malformed JSON is 400 MALFORMED_REQUEST" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.6' -d '{"email": '
 expect "wrong content type is 415" 415 '"code":"UNSUPPORTED_MEDIA_TYPE"' -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.7' -H 'Content-Type: text/plain' -d 'x'
 # Since E1 (ADR-0019) the resource server answers before routing does: anything

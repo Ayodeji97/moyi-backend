@@ -173,6 +173,7 @@ class OpenApiConfiguration {
             documentEntryTextLimits(api)
             documentEndingDefaults(api)
             documentBondNamePattern(api)
+            documentDisplayName(api)
             discriminatePartnerEntry(api)
             admitAbsentPartnerEntry(api)
             requireDiscriminatorProperty(api)

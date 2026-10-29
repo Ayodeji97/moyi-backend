@@ -5,6 +5,7 @@ import com.moyi.common.security.ClientContext
 import com.moyi.identity.domain.ConsentDocument
 import com.moyi.identity.domain.ConsentRecord
 import com.moyi.identity.domain.Credentials
+import com.moyi.identity.domain.DisplayNames
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
 import com.moyi.identity.domain.PasswordHasher
@@ -62,6 +63,12 @@ internal class RegisterUser(
     private val log = LoggerFactory.getLogger(javaClass)
 
     fun register(command: RegistrationCommand) {
+        // The write path's own check (ADR-0015, amended 2026-10-28), before the
+        // hash is paid for. The edge already asked the same question
+        // (`ValidDisplayName`), so through HTTP this never throws; it is here so
+        // that no other caller can store a control or format character either.
+        // Not in `User`'s constructor, which also runs on every read.
+        DisplayNames.check(command.displayName)
         val passwordHash = hasher.hash(command.password)
         val now = clock.instant()
 
