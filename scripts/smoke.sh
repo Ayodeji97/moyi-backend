@@ -94,10 +94,12 @@
 # (409 before the PUT, a replay under the same key, 422 without one), reads it as
 # its owner and is told 404 as another user, refuses a GIF (415) and 11 MB (413),
 # deletes it and sees the object gone from MinIO, and finds the URL in no log
-# line. Last run on 2026-10-28, for the entry-text rulings (ADR-0031 rulings 1 and 2), after main (35119af, #106) was
-# merged in, from a jar of 091bfa2's code, on a fresh database that applied V1 to V27
-# and V29 to V33, against its own compose project (moyi-0f: Postgres 55443, Valkey
-# 56390, MinIO 59100) and --attach: 1051 passed, 0 failed, 0 skipped, 28 sections. Before it,
+# line. Last run on 2026-10-29, for the entry-text rulings (ADR-0031 rulings 1 and 2), after
+# main (51df716, #103) was merged in, from a jar of b534158's code, on a fresh database that
+# applied V1 to V27 and V29 to V33, against its own compose project (moyi-0f: Postgres 55443,
+# Valkey 56390, MinIO 59273) and --attach: 1062 passed, 0 failed, 1 skipped (the tag across
+# the erasure, the poller having won the race), 28 sections; on 2026-10-28 the same branch
+# after #106, from 091bfa2, 1051, 0 and 0 in 28. Before it,
 # on 2026-10-29, for no reaction taken back after an ending (ADR-0037
 # q11), after main (df153d3, #102) was merged in, from a jar of f7e0654's code, on a fresh
 # database that applied V1 to V27 and V29 to V33, against its own compose project (moyi-0f:
