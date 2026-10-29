@@ -1,6 +1,7 @@
 package com.moyi.media.service
 
 import com.moyi.common.core.IdGenerator
+import com.moyi.common.security.VerifiedEmails
 import com.moyi.media.domain.MediaAsset
 import com.moyi.media.domain.MediaKind
 import com.moyi.media.domain.MediaStatus
@@ -34,7 +35,8 @@ internal class UploadIntent(
  * `PENDING_UPLOAD` and a URL that accepts exactly the declared bytes, straight
  * into the storage. The API never sees the bytes (FR-044, NFR-009).
  *
- * In order: the declaration is checked (FR-042, FR-043, [UploadDeclaration]);
+ * In order: the caller's address is verified (the owner's ruling, 2026-10-29,
+ * ADR-0049); the declaration is checked (FR-042, FR-043, [UploadDeclaration]);
  * the URL is signed; only then is the asset recorded. Signing needs no network,
  * but a storage that is not configured refuses here, and then nothing is
  * written: no asset waits on a URL that was never issued.
@@ -53,7 +55,9 @@ internal class CreateUploadIntent(
     private val ids: IdGenerator,
     private val clock: Clock,
     private val transactions: TransactionTemplate,
+    private val verifiedEmails: VerifiedEmails,
 ) {
+    /** @throws EmailNotVerifiedException the owner has not confirmed their address (ADR-0049), checked first */
     fun create(
         owner: UUID,
         kind: String?,
@@ -61,6 +65,7 @@ internal class CreateUploadIntent(
         sizeBytes: Long?,
         checksum: String?,
     ): UploadIntent {
+        verifiedEmails.requireVerified(owner)
         val declaration =
             when (val outcome = UploadDeclaration.of(kind, contentType, sizeBytes, checksum)) {
                 is UploadDeclaration.Outcome.Accepted -> outcome.declaration

@@ -15,5 +15,5 @@ auth:bearer {
 }
 
 docs {
-  Deletes one of your own photos or voice notes: 204, then 404. Its upload and, for a processed photo, its two variants are removed from the storage after the commit. A photo on an entry is 409 MEDIA_ATTACHED and stays: it leaves with the entry (ADR-0048). Anyone else's, or an id that names nothing, is 404.
+  Deletes one of your own photos or voice notes: 204, then 404. Its upload and, for a processed photo, its two variants are removed from the storage after the commit. A photo on an entry is 409 MEDIA_ATTACHED and stays: it leaves with the entry (ADR-0048). Anyone else's, or an id that names nothing, is 404. Not refused to an unverified account: what is yours, you can always delete (ADR-0049).
 }

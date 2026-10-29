@@ -34,6 +34,15 @@ internal class FakeUserDirectory : UserDirectory {
         users.computeIfPresent(id) { _, user -> user.copy(displayName = displayName) }
     }
 
+    /**
+     * [id] is unverified from now on. No route does this (FR-002 lets only a
+     * verified account into a bond, and nothing un-verifies one); a test uses
+     * it to reach `media`'s claim with an unverified member (ADR-0049).
+     */
+    fun unverify(id: UUID) {
+        users.computeIfPresent(id) { _, user -> user.copy(emailVerified = false) }
+    }
+
     /** The directory no longer knows [id]: an account deleted under a bond that still names it. */
     fun forget(id: UUID) {
         users.remove(id)

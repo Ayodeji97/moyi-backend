@@ -113,7 +113,13 @@
 # compose project (moyi-d3: Postgres 55443, Valkey 63803, MinIO 59006), the jar
 # booted by hand on libvips 8.18.7 and ffmpeg 9.0.2, and --attach: 1151 passed, 0
 # failed, 2 skipped (the tag across the erasure, the poller having won the race),
-# 31 sections. Since Phase 4
+# 31 sections. Since the owner's ruling of 2026-10-29 (ADR-0049) an account that
+# never verified is refused an upload intent and a completion with 403
+# EMAIL_NOT_VERIFIED, and is not refused a read or a delete. Last run on
+# 2026-10-29 on main f3f4338 with that change, from a jar of that tree, on a
+# fresh database that applied 34 migrations to V35, against its own compose
+# project (moyi-vemail: Postgres 55448, Valkey 63808, MinIO 59016), the jar booted
+# by hand, and --attach: 1160 passed, 0 failed, 0 skipped. Since Phase 4
 # D5 the photographer then deletes the entry the photo is on: the owner's GET of
 # it is 404, the row DELETED with one MediaReleased, media.purge stamps it within
 # seconds, the URL handed out before answers 404 and MinIO holds nothing of it.
@@ -2456,6 +2462,18 @@ expect "media: another user's DELETE is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' 
 expect "media: a GIF is 415 MEDIA_TYPE_UNSUPPORTED" 415 '"code":"MEDIA_TYPE_UNSUPPORTED"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d "$(media_intent IMAGE image/gif 100)"
 expect "media: a photo over 10 MB is 413 MEDIA_QUOTA_EXCEEDED" 413 '"code":"MEDIA_QUOTA_EXCEEDED"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d "$(media_intent IMAGE image/png 10485761)"
 expect "media: an intent with no checksum is 422 on checksum" 422 '"field":"checksum"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d '{"kind":"VOICE","contentType":"audio/ogg","sizeBytes":100}'
+# Media requires a verified email (the owner's ruling of 2026-10-29, ADR-0049): an
+# account registered and signed in but never verified is refused the two routes
+# that make media, with bond's FR-002 answer, and not the two that read and delete.
+MEDIA_UNVERIFIED="media-unverified-$(date +%s)-$RANDOM@example.com"
+expect "media: register an account that will not verify" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.122' -d "$(register_body "$MEDIA_UNVERIFIED")"
+expect "media: …it signs in, unverified" 200 '"emailVerified":false' -- -X POST "$API/auth/login" -d "$(login_body "$MEDIA_UNVERIFIED" "$PASSWORD")"
+UNVERIFIED_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+expect "media: an unverified account's intent is 403 EMAIL_NOT_VERIFIED" 403 '"code":"EMAIL_NOT_VERIFIED"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $UNVERIFIED_ACCESS" -d "$(media_intent VOICE audio/ogg "$MEDIA_SIZE")"
+db_is "media: …and no asset is recorded for it" "$(sql "SELECT count(*) FROM media_assets a JOIN users u ON u.id = a.owner_user_id WHERE u.email = '$MEDIA_UNVERIFIED'")" "0"
+expect "media: an unverified account's completion is 403 EMAIL_NOT_VERIFIED, whatever the id" 403 '"code":"EMAIL_NOT_VERIFIED"' -- -X POST "$API/media/$(uuidgen | tr 'A-Z' 'a-z')/complete" -H "Authorization: Bearer $UNVERIFIED_ACCESS" -H "Idempotency-Key: $(uuidgen)"
+expect "media: an unverified account's read is not refused for it: an unknown id is 404" 404 '"code":"NOT_FOUND"' -- "$API/media/$(uuidgen | tr 'A-Z' 'a-z')" -H "Authorization: Bearer $UNVERIFIED_ACCESS"
+expect "media: …nor its delete: 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/media/$(uuidgen | tr 'A-Z' 'a-z')" -H "Authorization: Bearer $UNVERIFIED_ACCESS"
 expect "media: the owner deletes it, 204" 204 "" -- -X DELETE "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
 if [ "$MINIO_OK" = 0 ]; then skip "media: …and the object is gone from MinIO"
 elif minio_has "$MEDIA_OBJECT" || minio_has "v/${MEDIA_OBJECT#in/}/voice.ogg"; then fail "media: object after delete" "MinIO still holds an object of the deleted asset"; else pass "media: …and the object is gone from MinIO"; fi
