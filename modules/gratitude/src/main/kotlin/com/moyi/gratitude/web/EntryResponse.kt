@@ -7,6 +7,9 @@ import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.service.EntryImage
 import com.moyi.gratitude.service.EntryImageStatus
 import com.moyi.gratitude.service.EntryView
+import com.moyi.gratitude.service.EntryVoice
+import com.moyi.gratitude.service.EntryVoiceStatus
+import com.moyi.gratitude.service.ShownMedia
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -89,6 +92,15 @@ internal data class EntryResponse private constructor(
      * has no photo or sign of one (BR-8).
      */
     val image: EntryImageResponse?,
+    /**
+     * The entry's voice note (spec §4 D3), or `null` when it has none. Its
+     * author and the partner are both given a URL and its length once it is
+     * transcoded (voice is not moderated, ADR-0049); until then it is
+     * `PROCESSING`, with neither. Only ever on an entry read in full; a
+     * tombstone says `null`. A locked entry is not this shape, and has no
+     * voice note or sign of one (BR-8).
+     */
+    val voice: EntryVoiceResponse?,
 ) : PartnerEntryResponse {
     /**
      * Never the words (doc 18 §5/§9): this is the one object in the module
@@ -100,11 +112,11 @@ internal data class EntryResponse private constructor(
     override fun toString(): String =
         "EntryResponse(id=$id, bondId=$bondId, date=$date, authorMemberId=$authorMemberId, " +
             "text=${if (text == null) "null" else "(redacted)"}, status=$status, createdAt=$createdAt, intendedAt=$intendedAt, " +
-            "favourited=$favourited, reaction=$reaction, image=$image)"
+            "favourited=$favourited, reaction=$reaction, image=$image, voice=$voice)"
 
     companion object {
         /** `null` exactly when [of] is: BR-1 did not grant the caller this shape. */
-        fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date, view.favourited, view.reaction, view.image)
+        fun from(view: EntryView): EntryResponse? = of(view.entry, view.day.date, view.favourited, view.reaction, view.media)
 
         /**
          * **The only way to build this response** — the constructor is
@@ -135,13 +147,16 @@ internal data class EntryResponse private constructor(
          * a tombstone from the withdrawal's commit and its reaction is
          * removed only with the erasure. Rendered in between, it would also
          * make the reader's response change a second time when the row went.
+         *
+         * [media], the photo and the voice note, is forced away unless the
+         * reading is `FULL` in the same way.
          */
         fun of(
             reading: EntryReading,
             date: LocalDate,
             favourited: Boolean,
             reaction: ReactionType?,
-            image: EntryImage?,
+            media: ShownMedia?,
         ): EntryResponse? =
             reading.disclosed?.let { entry ->
                 EntryResponse(
@@ -156,7 +171,8 @@ internal data class EntryResponse private constructor(
                     favourited = favourited && reading.readability == Readability.FULL,
                     reaction = reaction.takeIf { reading.readability == Readability.FULL },
                     // Forced here as the reaction is, so that no route has to remember: never on a tombstone.
-                    image = image?.takeIf { reading.readability == Readability.FULL }?.let(EntryImageResponse::from),
+                    image = media?.image?.takeIf { reading.readability == Readability.FULL }?.let(EntryImageResponse::from),
+                    voice = media?.voice?.takeIf { reading.readability == Readability.FULL }?.let(EntryVoiceResponse::from),
                 )
             }
     }
@@ -184,5 +200,30 @@ internal data class EntryImageResponse(
     companion object {
         fun from(image: EntryImage): EntryImageResponse =
             EntryImageResponse(image.id, image.status, image.url?.toString(), image.width, image.height)
+    }
+}
+
+/**
+ * A voice note on an entry, as the caller is played it (spec §4 D3):
+ * `{id, status, url?, durationMs?}`. [url] and [durationMs] are present exactly
+ * when [status] is `READY`. [url] is a signed GET of an Ogg Opus file (mono,
+ * 24 kbps), valid for at least 24 hours, ending on the hour and the same all
+ * hour, as a photo's is; it is a bearer credential for the voice note, so it is
+ * never logged and [toString] leaves it out. [durationMs] is the length of what
+ * was transcoded, at most 61,000.
+ *
+ * @property url keep it out of logs and analytics; fetch it again after it expires
+ */
+internal data class EntryVoiceResponse(
+    val id: UUID,
+    val status: EntryVoiceStatus,
+    val url: String?,
+    val durationMs: Int?,
+) {
+    override fun toString(): String = "EntryVoiceResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs)"
+
+    companion object {
+        fun from(voice: EntryVoice): EntryVoiceResponse =
+            EntryVoiceResponse(voice.id, voice.status, voice.url?.toString(), voice.durationMs)
     }
 }

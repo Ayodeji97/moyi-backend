@@ -180,13 +180,6 @@ internal class EntryPhotoTest(
     }
 
     @Test
-    fun `a voice note is still not supported`() {
-        val refused = submit(ada, bondId, """{"text":"listen","voiceMediaId":"${UUID.randomUUID()}"}""")
-        refused.status shouldBe 422
-        refused.contentAsString shouldContain "\"code\":\"MEDIA_NOT_YET_SUPPORTED\""
-    }
-
-    @Test
     fun `PATCH attaches a photo before the reveal, and a second one lets the first go`() {
         val entry = body(submit(ada, bondId, """{"text":"words"}"""))["id"].asString()
         val first = photos.ready(owner = ada)

@@ -118,10 +118,11 @@ internal enum class Reacting {
  * Everything of an entry a reader who can — or once could — read it may
  * have: [Readability.FULL] or [Readability.TOMBSTONE]. [text] is `null`
  * exactly on the tombstone, and [status] is then [EntryStatus.DELETED]
- * whichever mark the row's erasure had reached. [imageMediaId] is the
- * entry's photo, and is `null` on the tombstone too: a withdrawal hides the
- * photo with the words from its commit, before the row is erased (ADR-0048).
- * Which of the photo the reader is then shown is `media`'s to say (FR-101).
+ * whichever mark the row's erasure had reached. [imageMediaId] and
+ * [voiceMediaId] are the entry's photo and voice note, and are `null` on the
+ * tombstone too: a withdrawal hides them with the words from its commit,
+ * before the row is erased (ADR-0048, ADR-0049). Which of them the reader is
+ * then shown is `media`'s to say (FR-101).
  *
  * Only [EntryReading] builds one, and only for those two answers. A `data
  * class` for its value semantics; its `toString` prints [EntryText]'s own
@@ -137,6 +138,7 @@ internal data class DisclosedEntry(
     val status: EntryStatus,
     val text: EntryText?,
     val imageMediaId: UUID?,
+    val voiceMediaId: UUID?,
 )
 
 /**
@@ -165,8 +167,8 @@ internal class EntryReading private constructor(
     val disclosed: DisclosedEntry?
         get() =
             when (readability) {
-                Readability.FULL -> disclose(entry.status, entry.text, entry.imageMediaId)
-                Readability.TOMBSTONE -> disclose(EntryStatus.DELETED, null, null)
+                Readability.FULL -> disclose(entry.status, entry.text, entry.imageMediaId, entry.voiceMediaId)
+                Readability.TOMBSTONE -> disclose(EntryStatus.DELETED, null, null, null)
                 Readability.TOMBSTONE_UNSEEN, Readability.LOCKED, Readability.NOT_A_MEMBER -> null
             }
 
@@ -174,6 +176,7 @@ internal class EntryReading private constructor(
         status: EntryStatus,
         text: EntryText?,
         imageMediaId: UUID?,
+        voiceMediaId: UUID?,
     ) = DisclosedEntry(
         id = entry.id,
         bondId = entry.bondId,
@@ -184,6 +187,7 @@ internal class EntryReading private constructor(
         status = status,
         text = text,
         imageMediaId = imageMediaId,
+        voiceMediaId = voiceMediaId,
     )
 
     /** Never the entry, nor anything of it: only what the gate answered. */

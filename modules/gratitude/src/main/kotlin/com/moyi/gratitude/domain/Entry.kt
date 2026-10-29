@@ -46,9 +46,10 @@ internal enum class EntryStatus { SUBMITTED, REVEALED, DELETED }
  *
  * [imageMediaId] is the entry's photo, `media`'s asset, claimed for this
  * entry in the transaction that set it (FR-044a, ADR-0048); [erase] nulls it
- * with the words (BR-10). [voiceMediaId] and [voiceDurationMs] are carried
- * anyway, always `null` until D3, so a row [submit] builds already has a value
- * for every column V12 declared — the same reason
+ * with the words (BR-10). [voiceMediaId] is its voice note, claimed and erased
+ * the same way (ADR-0049). [voiceDurationMs] is carried anyway, always `null`:
+ * a voice note's length is on the asset only (spec D-10), so a row [submit]
+ * builds still has a value for every column V12 declared — the same reason
  * [com.moyi.bond.domain.Bond] carries `timezoneChangedAt` and
  * `deletionRequestedAt` long before the slices that ever set them exist.
  * `entries.text_search` is deliberately **not** one of them: it is the search projection
@@ -269,6 +270,19 @@ internal data class Entry(
         return if (imageMediaId == image) this else copy(imageMediaId = image, updatedAt = now)
     }
 
+    /**
+     * Gives the entry [voice] as its voice note, as [withImage] gives it a
+     * photo: before anyone else has been entitled to read it (BR-7), and only
+     * once `media` has let the caller claim it (FR-044a).
+     */
+    fun withVoice(
+        voice: UUID,
+        now: Instant,
+    ): Entry {
+        check(isEditable) { "a revealed or erased entry is immutable" }
+        return if (voiceMediaId == voice) this else copy(voiceMediaId = voice, updatedAt = now)
+    }
+
     /** Erasure is idempotent, frees BR-2's slot, and never clears the reveal stamp. */
     fun erase(now: Instant): Entry =
         if (isErased) {
@@ -335,6 +349,7 @@ internal data class Entry(
             intendedAt: Instant,
             now: Instant,
             imageMediaId: UUID? = null,
+            voiceMediaId: UUID? = null,
         ): Entry =
             Entry(
                 id = id,
@@ -343,7 +358,7 @@ internal data class Entry(
                 authorMemberId = authorMemberId,
                 text = text,
                 imageMediaId = imageMediaId,
-                voiceMediaId = null,
+                voiceMediaId = voiceMediaId,
                 voiceDurationMs = null,
                 promptId = promptId,
                 status = EntryStatus.SUBMITTED,

@@ -37,8 +37,11 @@ internal data class DayView(
     val marked: Set<EntryId>,
     /** The reaction on each of this day's entries that has one, which both members are shown. Only ever of entries read in full. */
     val reactions: Map<EntryId, ReactionType>,
-    /** The photo of each of this day's entries that has one, as the caller is shown it. Only ever of entries read in full (BR-8). */
-    val images: Map<EntryId, EntryImage>,
+    /**
+     * The photo and voice note of each of this day's entries that has either, as the caller is
+     * shown them. Only ever of entries read in full (BR-8).
+     */
+    val media: Map<EntryId, ShownMedia>,
 )
 
 /**
@@ -129,7 +132,7 @@ internal class GetDays(
     private val favourites: Favourites,
     private val reactions: Reactions,
     private val clock: Clock,
-    private val images: EntryImages,
+    private val media: EntryMedia,
 ) {
     /**
      * At most [limit] days, newest first, strictly before [before] and on or
@@ -280,7 +283,7 @@ internal class GetDays(
         val read = read(membership, candidates).filter { it.readInFull.isNotEmpty() }
         val marked = marksOf(membership, read)
         val reacted = reactionsOn(read)
-        val shown = imagesOn(membership, read)
+        val shown = mediaOn(membership, read)
         val memories = Filling(ArchiveDays.ON_THIS_DAY_YEARS, textOctets)
         read.forEach { memories.offer(it, it.keptOf(marked), reacted, shown) }
         return memories.days
@@ -315,7 +318,7 @@ internal class GetDays(
             val read = read(membership, candidates)
             val marked = marksOf(membership, read)
             val reacted = reactionsOn(read)
-            val shown = imagesOn(membership, read)
+            val shown = mediaOn(membership, read)
             for (day in read) {
                 val kept = day.keptOf(marked)
                 if (shows(day, kept)) page.offer(day, kept, reacted, shown)
@@ -387,7 +390,7 @@ internal class GetDays(
         val day = archive.on(membership.bondId, membership.memberId, date) ?: return null
         val read = read(membership, listOf(day))
         val marked = marksOf(membership, read)
-        return read.single().let { it.shown(it.keptOf(marked), reactionsOn(read), imagesOn(membership, read)) }
+        return read.single().let { it.shown(it.keptOf(marked), reactionsOn(read), mediaOn(membership, read)) }
     }
 
     /**
@@ -416,11 +419,14 @@ internal class GetDays(
     /** The reactions on the entries of [read]: asked after the gate, of what it answered in full, and of no member. */
     private fun reactionsOn(read: List<Read>): Map<EntryId, ReactionType> = reactions.on(read.flatMap { it.readInFull })
 
-    /** The photos on the entries of [read], as the caller is shown them: asked after the gate, of what it answered in full. */
-    private fun imagesOn(
+    /**
+     * The photos and voice notes on the entries of [read], as the caller is shown them: asked
+     * after the gate, of what it answered in full.
+     */
+    private fun mediaOn(
         membership: BondMembership,
         read: List<Read>,
-    ): Map<EntryId, EntryImage> = images.of(membership.userId, read.flatMap { listOfNotNull(it.mine, it.partners) })
+    ): Map<EntryId, ShownMedia> = media.of(membership.userId, read.flatMap { listOfNotNull(it.mine, it.partners) })
 
     /**
      * A page being filled: days that will be shown are offered in order,
@@ -448,7 +454,7 @@ internal class GetDays(
             day: Read,
             kept: Set<EntryId>,
             reacted: Map<EntryId, ReactionType>,
-            shown: Map<EntryId, EntryImage>,
+            shown: Map<EntryId, ShownMedia>,
         ) {
             more = more || taken.size == limit || (taken.isNotEmpty() && octets + day.octets > textOctets)
             if (!more) {
@@ -485,7 +491,7 @@ internal class GetDays(
         fun shown(
             kept: Set<EntryId>,
             reacted: Map<EntryId, ReactionType>,
-            shown: Map<EntryId, EntryImage>,
+            shown: Map<EntryId, ShownMedia>,
         ): DayView =
             DayView(
                 day.date,

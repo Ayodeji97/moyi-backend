@@ -7,6 +7,7 @@ import com.moyi.common.web.idempotency.IdempotencyInterceptor
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.gratitude.infra.ProcessedPhotos
+import com.moyi.gratitude.infra.ProcessedVoices
 import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.withClue
 import io.kotest.matchers.nulls.shouldBeNull
@@ -129,6 +130,26 @@ internal class RevealGateTest(
         partnerEntryJson(today.contentAsString) shouldBe """{"authorMemberId":"$beaMemberId","status":"LOCKED"}"""
         today.contentAsString shouldNotContain photo.toString()
         today.contentAsString shouldNotContain "image"
+        today.contentAsString shouldNotContain "X-Amz"
+    }
+
+    /**
+     * Phase 4 D3: a voice note, which unlike a photo waits on no moderation,
+     * is no more visible on a locked entry: no key, no id, no length, no URL.
+     */
+    @Test
+    fun `a locked entry that has a voice note is exactly an author and a status too, and says nothing of it`() {
+        val voice = ProcessedVoices(jdbc).ready(owner = bea)
+        val beaSubmitted = submit(bea, bondId, """{"text":"a secret kindness","voiceMediaId":"$voice"}""")
+        beaSubmitted.status shouldBe 201
+        val beaMemberId = authorMemberIdOf(beaSubmitted)
+
+        val today = getToday(ada, bondId)
+
+        partnerEntryJson(today.contentAsString) shouldBe """{"authorMemberId":"$beaMemberId","status":"LOCKED"}"""
+        today.contentAsString shouldNotContain voice.toString()
+        today.contentAsString shouldNotContain "voice"
+        today.contentAsString shouldNotContain "durationMs"
         today.contentAsString shouldNotContain "X-Amz"
     }
 

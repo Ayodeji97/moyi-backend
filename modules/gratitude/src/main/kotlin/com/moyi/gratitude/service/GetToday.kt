@@ -49,11 +49,11 @@ internal data class TodayView(
      */
     val reactions: Map<EntryId, ReactionType>,
     /**
-     * The photo of each of the two entries that has one, as the caller is shown
-     * it ([EntryImages]). Only ever of entries read in full: a locked entry has
-     * no photo, nor any sign of one (BR-8).
+     * The photo and voice note of each of the two entries that has either, as
+     * the caller is shown them ([EntryMedia]). Only ever of entries read in
+     * full: a locked entry has neither, nor any sign of one (BR-8).
      */
-    val images: Map<EntryId, EntryImage>,
+    val media: Map<EntryId, ShownMedia>,
     /**
      * The bond's prompt of the day as the caller is shown it, or null when the bond takes
      * no writes from them or the library has nothing for it ([DailyPrompt]). The same id
@@ -156,7 +156,7 @@ internal class GetToday(
     private val favourites: Favourites,
     private val reactions: Reactions,
     private val prompts: DailyPrompt,
-    private val images: EntryImages,
+    private val media: EntryMedia,
 ) {
     @Transactional(readOnly = true)
     fun today(membership: BondMembership): TodayView {
@@ -182,7 +182,7 @@ internal class GetToday(
                 streak = unwritten,
                 marked = emptySet(),
                 reactions = emptyMap(),
-                images = emptyMap(),
+                media = emptyMap(),
                 prompt = prompt,
             )
         }
@@ -203,7 +203,7 @@ internal class GetToday(
             streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),
             marked = favourites.markedBy(membership.memberId, readInFull),
             reactions = reactions.on(readInFull),
-            images = images.of(membership.userId, listOfNotNull(mine, partners)),
+            media = media.of(membership.userId, listOfNotNull(mine, partners)),
             prompt = prompt,
         )
     }

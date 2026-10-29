@@ -4,8 +4,8 @@ import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
-import com.moyi.gratitude.service.EntryImage
 import com.moyi.gratitude.service.PromptView
+import com.moyi.gratitude.service.ShownMedia
 import com.moyi.gratitude.service.TodayView
 import java.time.LocalDate
 import java.util.UUID
@@ -83,13 +83,13 @@ internal data class TodayResponse(
                             view.date,
                             it.disclosed?.id in view.marked,
                             view.reactions[it.disclosed?.id],
-                            view.images[it.disclosed?.id],
+                            view.media[it.disclosed?.id],
                         )
                     },
                 partnerEntry =
                     view.partnerEntry?.let {
                         val id = it.disclosed?.id
-                        PartnerEntryResponse.of(it, view.date, id in view.marked, view.reactions[id], view.images[id])
+                        PartnerEntryResponse.of(it, view.date, id in view.marked, view.reactions[id], view.media[id])
                     },
                 streak = TodayStreakResponse.from(view.streak),
                 prompt = view.prompt?.let(TodayPromptResponse::from),
@@ -150,21 +150,22 @@ internal sealed interface PartnerEntryResponse {
          * else to give them. A non-member: nothing.
          *
          * [favourited], the caller's own bookmark, [reaction], the one on the
-         * entry, and [image], its photo, go to the one branch that has fields
-         * for them. The two narrow shapes are not given any and could not
-         * carry one: an entry the caller was never shown has nothing of the
-         * caller's on it, they cannot have reacted to it, and whether it has
-         * a photo is exactly what BR-8 withholds.
+         * entry, and [media], its photo and voice note, go to the one branch
+         * that has fields for them. The two narrow shapes are not given any
+         * and could not carry one: an entry the caller was never shown has
+         * nothing of the caller's on it, they cannot have reacted to it, and
+         * whether it has a photo or a voice note is exactly what BR-8
+         * withholds.
          */
         fun of(
             reading: EntryReading,
             date: LocalDate,
             favourited: Boolean,
             reaction: ReactionType?,
-            image: EntryImage?,
+            media: ShownMedia?,
         ): PartnerEntryResponse? =
             when (reading.readability) {
-                Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date, favourited, reaction, image)
+                Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date, favourited, reaction, media)
                 Readability.LOCKED -> reading.authorMemberId?.let { LockedEntryResponse(it) }
                 Readability.TOMBSTONE_UNSEEN -> reading.authorMemberId?.let { ErasedEntryResponse(it) }
                 Readability.NOT_A_MEMBER -> null
