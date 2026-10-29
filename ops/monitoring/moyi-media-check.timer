@@ -1,0 +1,11 @@
+# Every quarter-hour at eleven past and so on: a photo stuck for 30 minutes is
+# seen within 45, and the check stays clear of the close job's minute past.
+[Unit]
+Description=Moyi media check, every quarter-hour
+
+[Timer]
+OnCalendar=*-*-* *:11/15:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

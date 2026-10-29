@@ -1,0 +1,25 @@
+# The nightly media mirror (ops/media-mirror/mirror.sh; spec Phase 4 Q15).
+# Started by moyi-media-mirror.timer; run it by hand with
+# `systemctl start moyi-media-mirror` and read it with
+# `journalctl -u moyi-media-mirror`.
+[Unit]
+Description=Moyi nightly media mirror: moyi-media v/ to the locked mirror bucket
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+StartLimitIntervalSec=2h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/moyi-media-mirror
+# A night copies what is new plus the copies that expired that day, about a
+# thirtieth of the bucket; the first run copies all of it. Three hours is
+# generous for both at today's size: past it, something is stuck.
+TimeoutStartSec=3h
+# A failed night is tried again, as the backup is: R2 or the network may be
+# back. Three tries, 15 min apart. Each failure pings /fail, so a night that
+# recovers on its retry sends a "down" and then an "up".
+Restart=on-failure
+RestartSec=15min
+Nice=10
+IOSchedulingClass=idle

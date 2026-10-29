@@ -1,0 +1,15 @@
+# 04:30 UTC: clear of the database backup (03:00), the app's nightly demotion
+# job (03:40), and the window in which unattended-upgrades may reboot the box
+# (04:00). Running after the demotion job means a full variant it deleted
+# that night is not copied. Persistent runs a night that was missed while the
+# box was down as soon as it is up.
+[Unit]
+Description=Moyi nightly media mirror at 04:30 UTC
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 UTC
+Persistent=true
+RandomizedDelaySec=5m
+
+[Install]
+WantedBy=timers.target

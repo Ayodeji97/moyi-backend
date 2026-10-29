@@ -1,0 +1,10 @@
+# The media pipeline's alarm (ops/monitoring/media-check.sh, ADR-0050).
+[Unit]
+Description=Moyi media check: heartbeat when nothing is stuck and the media jobs run
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/moyi-media-check
+TimeoutStartSec=5min

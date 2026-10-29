@@ -1,6 +1,6 @@
 # Monitoring
 
-Four checks, each of which emails the owner when it fails. None needs anything
+Five checks, each of which emails the owner when it fails. None needs anything
 installed on the server beyond what is there.
 
 | Check | Where | Alerts when |
@@ -9,8 +9,9 @@ installed on the server beyond what is there.
 | `https://getmoyi.app/` answers | UptimeRobot, every 5 min | the link pages are down |
 | the nightly backup checked in | Healthchecks.io, period 1 day, grace 2 h | a night passes with no successful backup (`backup.sh` pings `PING_URL`) |
 | the close job is running | Healthchecks.io, period 1 hour, grace 30 min | `close-check.sh` reports a problem (at once, through `/fail`), or stops reporting at all |
+| the media pipeline is moving | Healthchecks.io, period 15 min, grace 30 min | `media-check.sh` finds a photo PROCESSING for 30 minutes (doc 11:97, P2), a deleted asset unpurged after a day, or a media job that stopped running; or stops reporting. What to do: [media-pipeline-stuck.md](media-pipeline-stuck.md) |
 
-The last two are heartbeats: the server reports in, and **silence is the
+The last three are heartbeats: the server reports in, and **silence is the
 alarm**. That catches what an outside probe cannot see: a backup that quietly
 did not happen, a job that stopped while the API still answers.
 
@@ -47,3 +48,23 @@ ssh moyi 'systemctl enable --now moyi-close-check.timer'
 A check nobody has seen fire is not known to work. Once, after installing:
 pause the close-check heartbeat's schedule in Healthchecks.io, or stop the
 timer for an hour and a half, and confirm the email arrives; then put it back.
+
+## Installing the media check
+
+As the close-job check, with its own Healthchecks.io check (period 15 minutes, grace 30)
+and its ping URL in Bitwarden as `HC_MEDIA_URL`:
+
+```
+scp ops/monitoring/media-check.sh moyi:/usr/local/sbin/moyi-media-check
+scp ops/monitoring/moyi-media-check.service ops/monitoring/moyi-media-check.timer moyi:/etc/systemd/system/
+ssh moyi 'chmod 700 /usr/local/sbin/moyi-media-check && systemctl daemon-reload'
+export BW_SESSION="$(bw unlock --raw)"; bw sync >/dev/null
+printf 'MEDIA_PING_URL="%s"\n' "$(f HC_MEDIA_URL)" | ssh moyi 'sed -i "/^MEDIA_PING_URL=/d" /etc/moyi-monitoring/heartbeats.env && cat >> /etc/moyi-monitoring/heartbeats.env'
+bw lock; unset BW_SESSION
+ssh moyi 'systemctl start moyi-media-check; journalctl -u moyi-media-check -n 3 --no-pager'
+ssh moyi 'systemctl enable --now moyi-media-check.timer'
+```
+
+(`f` is the helper defined above.) It needs the media tables (V32, V36) on the server, so it
+is installed after the deploy that carries them. With the storage `unavailable`, as
+production runs today, no asset exists and the check reports ok as long as both jobs run.
