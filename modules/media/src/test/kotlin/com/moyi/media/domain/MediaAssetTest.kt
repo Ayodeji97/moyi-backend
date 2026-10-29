@@ -93,46 +93,38 @@ internal class MediaAssetTest {
             "v/0b6e6a37-1b1e-4c55-9d4e-8a1c7b0e2f11/voice.ogg"
     }
 
-    /** Spec §4 D3: a voice note waits on no moderation verdict (ADR-0049). */
+    /** Spec §4 D3, review of #111: its owner hears a ready voice note, with its length. */
     @Test
-    fun `a ready voice note is played to its owner and to anyone else alike, with its length`() {
+    fun `its owner hears a ready voice note, with its length`() {
         val voice = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200)
-        voice.heard shouldBe MediaAsset.Heard.Ready(StorageKey.forVoice(voice.storageKey), 4_200)
+        voice.heardBy(owner = true) shouldBe MediaAsset.Heard.Ready(StorageKey.forVoice(voice.storageKey), 4_200)
         // A photo's rule is not a voice note's, nor the other way about.
         voice.shownTo(owner = true) shouldBe MediaAsset.Shown.Processing
-        pending(MediaStatus.READY, variants = listOf(variant(ImageVariant.FULL))).heard shouldBe MediaAsset.Heard.Processing
+        pending(MediaStatus.READY, variants = listOf(variant(ImageVariant.FULL))).heardBy(owner = true) shouldBe MediaAsset.Heard.Processing
+    }
+
+    /**
+     * Fail closed until the owner rules on FR-061 (ADR-0049 decision 7): the
+     * partner hears a ready voice note as still processing, unless it carries
+     * a verdict that lets them, which nothing gives a voice note yet.
+     */
+    @Test
+    fun `anyone else hears a ready voice note as processing until a ruling lets them`() {
+        val voice = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200)
+        voice.heardBy(owner = false) shouldBe MediaAsset.Heard.Processing
+        pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, verdict = "QUARANTINED").heardBy(owner = false) shouldBe
+            MediaAsset.Heard.Processing
+        val passed = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, verdict = MediaAsset.PASSED)
+        passed.heardBy(owner = false) shouldBe MediaAsset.Heard.Ready(StorageKey.forVoice(passed.storageKey), 4_200)
     }
 
     @Test
     fun `a voice note that is not ready is processing to everyone`() {
         for (status in MediaStatus.entries - MediaStatus.READY) {
-            pending(status, kind = MediaKind.VOICE, durationMs = 4_200).heard shouldBe MediaAsset.Heard.Processing
-        }
-    }
-
-    @Test
-    fun `its owner sees a ready photo, the full image while there is one`() {
-        val full = variant(ImageVariant.FULL)
-        val display = variant(ImageVariant.DISPLAY)
-        pending(MediaStatus.READY, variants = listOf(display, full)).shownTo(owner = true) shouldBe MediaAsset.Shown.Ready(full)
-        pending(MediaStatus.READY, variants = listOf(display)).shownTo(owner = true) shouldBe MediaAsset.Shown.Ready(display)
-    }
-
-    @Test
-    fun `anyone else sees processing until the photo is ready and has passed moderation (FR-101)`() {
-        val full = variant(ImageVariant.FULL)
-        pending(MediaStatus.READY, variants = listOf(full)).shownTo(owner = false) shouldBe MediaAsset.Shown.Processing
-        pending(MediaStatus.READY, variants = listOf(full), verdict = "QUARANTINED").shownTo(owner = false) shouldBe
-            MediaAsset.Shown.Processing
-        pending(MediaStatus.READY, variants = listOf(full), verdict = MediaAsset.PASSED).shownTo(owner = false) shouldBe
-            MediaAsset.Shown.Ready(full)
-    }
-
-    @Test
-    fun `a photo that is not ready is processing to everyone, its owner included`() {
-        for (status in MediaStatus.entries - MediaStatus.READY) {
-            pending(status, variants = listOf(variant(ImageVariant.FULL)), verdict = MediaAsset.PASSED).shownTo(owner = true) shouldBe
-                MediaAsset.Shown.Processing
+            for (owner in listOf(true, false)) {
+                pending(status, kind = MediaKind.VOICE, durationMs = 4_200, verdict = MediaAsset.PASSED).heardBy(owner) shouldBe
+                    MediaAsset.Heard.Processing
+            }
         }
     }
 

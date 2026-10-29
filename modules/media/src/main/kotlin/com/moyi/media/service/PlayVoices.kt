@@ -11,7 +11,8 @@ import java.util.UUID
 
 /**
  * [VoiceViews], and what the owner's own `GET /media/{id}` shows of a voice
- * note: the rule is [MediaAsset.heard]'s (no moderation, spec §4 D3), the URL
+ * note: the rule is [MediaAsset.heardBy]'s (its owner once ready; anyone else
+ * only once a ruling lets them, ADR-0049), the URL
  * is signed by [HourlyUrls], as a photo's is.
  */
 @Service
@@ -28,17 +29,18 @@ internal class PlayVoices(
         return assets
             .findAll(voiceIds.toSet())
             .filterNot { it.isGone }
-            .associate { it.id to view(it, signedAt) }
+            .associate { it.id to view(it, owner = it.ownerUserId == viewer, signedAt) }
     }
 
     /** The owner's own view of their voice note, for `GET /media/{id}`. */
-    fun toOwner(asset: MediaAsset): VoiceView = view(asset, urls.signingInstant())
+    fun toOwner(asset: MediaAsset): VoiceView = view(asset, owner = true, urls.signingInstant())
 
     private fun view(
         asset: MediaAsset,
+        owner: Boolean,
         signedAt: Instant,
     ): VoiceView =
-        when (val heard = asset.heard) {
+        when (val heard = asset.heardBy(owner)) {
             MediaAsset.Heard.Processing -> {
                 processing(asset)
             }

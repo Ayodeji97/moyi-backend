@@ -39,8 +39,9 @@ import javax.sql.DataSource
 
 /**
  * A voice note on an entry (spec §4 D3): attached in the entry's own
- * transaction by `media`'s claim (FR-044a), as a photo is, and played to both
- * members once it is ready, since voice is not moderated (ADR-0049). The
+ * transaction by `media`'s claim (FR-044a), as a photo is, and played to its
+ * author once it is ready; to the partner not until the owner rules on FR-061
+ * (ADR-0049). The
  * FR-044a category of doc 12:56 is here for voice notes as the API answers it.
  * The voice notes are put in place by hand, as `media.process` leaves them
  * ([ProcessedVoices]).
@@ -121,18 +122,25 @@ internal class EntryVoiceTest(
         voices.attachedTo(voice) shouldBe UUID.fromString(entry["id"].asString())
     }
 
+    /** Review of #111: fail closed until the owner rules on FR-061 (ADR-0049 decision 7). */
     @Test
-    fun `once revealed the partner can play the voice note too, with no moderation to wait on`() {
+    fun `once revealed the partner sees the voice note as processing, with no URL and no length, while its author plays it`() {
         val voice = voices.ready(owner = bea)
         submit(bea, bondId, """{"text":"a secret kindness","voiceMediaId":"$voice"}""").status shouldBe 201
         submit(ada, bondId, """{"text":"and mine"}""").status shouldBe 201
 
         val partners = body(getToday(ada, bondId))["partnerEntry"]["voice"]
-        partners["status"].asString() shouldBe "READY"
-        partners["durationMs"].asInt() shouldBe ProcessedVoices.DURATION_MS
-        partners["url"].asString() shouldContain "X-Amz-Signature="
-        // The archive says the same, with the same URL all hour.
-        body(day(ada, bondId, "2026-09-15"))["partnerEntry"]["voice"]["url"].asString() shouldBe partners["url"].asString()
+        partners["id"].asString() shouldBe voice.toString()
+        partners["status"].asString() shouldBe "PROCESSING"
+        partners["url"].isNull shouldBe true
+        partners["durationMs"].isNull shouldBe true
+        getToday(ada, bondId).contentAsString shouldNotContain "voice.ogg"
+        // The archive says the same.
+        body(day(ada, bondId, "2026-09-15"))["partnerEntry"]["voice"]["status"].asString() shouldBe "PROCESSING"
+        // Its author plays it all the while.
+        val own = body(getToday(bea, bondId))["myEntry"]["voice"]
+        own["status"].asString() shouldBe "READY"
+        own["url"].asString() shouldContain "X-Amz-Signature="
     }
 
     @Test

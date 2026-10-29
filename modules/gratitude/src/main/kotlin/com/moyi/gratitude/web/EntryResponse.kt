@@ -94,9 +94,9 @@ internal data class EntryResponse private constructor(
     val image: EntryImageResponse?,
     /**
      * The entry's voice note (spec §4 D3), or `null` when it has none. Its
-     * author and the partner are both given a URL and its length once it is
-     * transcoded (voice is not moderated, ADR-0049); until then it is
-     * `PROCESSING`, with neither. Only ever on an entry read in full; a
+     * author is given a URL and its length once it is transcoded; the partner
+     * only once the owner's ruling on FR-061 lets them (ADR-0049), and until
+     * then sees it as `PROCESSING`, with neither. Only ever on an entry read in full; a
      * tombstone says `null`. A locked entry is not this shape, and has no
      * voice note or sign of one (BR-8).
      */

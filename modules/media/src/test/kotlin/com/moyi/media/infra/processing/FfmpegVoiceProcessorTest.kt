@@ -111,6 +111,44 @@ internal class FfmpegVoiceProcessorTest {
         transcode(understated, VoiceFormat.MP4) shouldBe Transcoding.Refused(MediaRefusal.TOO_LONG)
     }
 
+    /**
+     * Review of #111: the transcode of a container that says less than it
+     * holds stops a second past the limit (`-t`), rather than decoding all of
+     * it. What it wrote, read by the test's own ffprobe, is about 62 seconds,
+     * not the 90 the file holds.
+     */
+    @Test
+    fun `the transcode of a container that says less than it holds stops a second past the limit`() {
+        transcode(TestVoices.understatedM4a(dir, seconds = 90.0, claimedSeconds = 10), VoiceFormat.MP4) shouldBe
+            Transcoding.Refused(MediaRefusal.TOO_LONG)
+
+        val written = Ffmpegs.probe(work.resolve(FfmpegVoiceProcessor.OUTPUT), "format=duration")["format.duration"]!!.toDouble()
+        withClue("$written s written") { (written in 61.5..62.5) shouldBe true }
+    }
+
+    /**
+     * Review of #111: an AAC recording of exactly 61 seconds, the limit and
+     * its grace, is kept. AAC's priming makes its Opus 62.5 ms longer on
+     * ffmpeg 6.1.1 (the worker's), which [VoiceRules.ENCODER_SLACK_MS] allows.
+     */
+    @Test
+    fun `an M4A of exactly 61 seconds is kept`() {
+        val m4a = TestVoices.m4a(dir, seconds = 61.0)
+        Ffmpegs.probe(Files.write(dir.resolve("limit.m4a"), m4a), "format=duration")["format.duration"] shouldBe "61.000000"
+
+        transcode(m4a, VoiceFormat.MP4).shouldBeInstanceOf<Transcoding.Transcoded>().durationMs shouldBeInRange 61_000..61_100
+    }
+
+    /** Review of #111: what is kept names no version of this server's ffmpeg. */
+    @Test
+    fun `the kept file carries no fingerprint of the build that made it`() {
+        val transcoded = transcode(TestVoices.wav(2.0), VoiceFormat.WAV).shouldBeInstanceOf<Transcoding.Transcoded>()
+
+        val bytes = String(Files.readAllBytes(transcoded.file), Charsets.ISO_8859_1)
+        withClue(bytes.take(200)) { Regex("Lav[fc][0-9]").containsMatchIn(bytes) shouldBe false }
+        Ffmpegs.probe(transcoded.file, "stream_tags=encoder")["streams.stream.0.tags.encoder"] shouldBe "Lavc libopus"
+    }
+
     @Test
     fun `no title, comment or chapter of the upload is kept`() {
         val tagged = TestVoices.m4aWithTagsAndChapters(dir)

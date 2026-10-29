@@ -157,13 +157,18 @@ internal object VoiceRules {
     const val KEPT_CONTENT_TYPE = "audio/ogg"
 
     /**
-     * What the transcode adds to a note's length as its Ogg reports it:
-     * Opus's pre-skip, 6.5 ms at 48 kHz (measured on ffmpeg 6.1 and 9.0: a
-     * 2.000 s note comes out 2.0065 s), with room to spare. Far less than the
-     * second a transcode may run on past [LIMIT_MS], so a note longer than
-     * its container said is still seen to be.
+     * What the transcode adds to a note's length as its Ogg reports it: Opus's
+     * pre-skip and what the decoder of the upload pads. Measured on a tone of
+     * exactly 61.000 s (review of #111): from WAV, 6.5 ms on ffmpeg 6.1.1 and
+     * 9.0.2; from AAC in an M4A, MP4 or 3GP, 62.5 ms on 6.1.1 (the worker's)
+     * and 6.5 ms on 9.0.2; from ADTS, 126.5 ms, but an ADTS note's container
+     * length is an estimate that already overstates it (61.04 to 61.09 s), so
+     * it is refused before the transcode either way. 100 ms keeps every
+     * container but ADTS at the full 61 seconds, and is still a tenth of the
+     * second a transcode may run on past [LIMIT_MS], so a note longer than its
+     * container said is still seen to be.
      */
-    const val ENCODER_SLACK_MS: Long = 20
+    const val ENCODER_SLACK_MS: Long = 100
 
     /** Whether a voice note this long, in milliseconds, by what its container says, may be kept. Zero or less is no recording. */
     fun mayKeep(durationMs: Long): Boolean = durationMs in 1..LIMIT_MS

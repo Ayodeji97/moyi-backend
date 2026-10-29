@@ -73,7 +73,9 @@ internal class VoiceFormatTest {
         VoiceRules.mayKeep(61_001) shouldBe false
         VoiceRules.mayKeep(0) shouldBe false
         // What the transcode makes of it may carry Opus's few milliseconds more, and no second more.
-        VoiceRules.mayKeepTranscoded(61_007) shouldBe true
+        VoiceRules.mayKeepTranscoded(61_063) shouldBe true
+        VoiceRules.mayKeepTranscoded(61_100) shouldBe true
+        VoiceRules.mayKeepTranscoded(61_101) shouldBe false
         VoiceRules.mayKeepTranscoded(62_000) shouldBe false
     }
 

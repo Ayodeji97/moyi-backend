@@ -43,7 +43,7 @@ internal enum class EntryVoiceStatus {
     /** Playable: [EntryVoice.url] reaches it. */
     READY,
 
-    /** Not playable yet. Never says why: not transcoded, or failed. */
+    /** Not playable yet, to this reader. Never says why: not transcoded, failed, or not yet for them. */
     PROCESSING,
 }
 
@@ -78,8 +78,9 @@ internal data class ShownMedia(
  * reading in full, so nothing else can be asked about. Which of each the
  * reader then gets is `media`'s rule: a photo to its owner, the entry's
  * author, once it is ready, and to the partner only once it has also passed
- * moderation (FR-101), which until D4 is never; a voice note to both once it
- * is ready, since voice is not moderated (ADR-0049).
+ * moderation (FR-101), which until D4 is never; a voice note likewise to its
+ * author once it is ready, and to the partner only once the owner's ruling on
+ * FR-061 lets them, which until then is never (ADR-0049).
  */
 @Service
 internal class EntryMedia(

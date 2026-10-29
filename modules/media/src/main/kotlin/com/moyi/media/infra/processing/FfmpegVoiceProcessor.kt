@@ -40,7 +40,10 @@ import java.time.Duration
  *   writing and is refused.
  * - **Nothing of the upload but its first audio stream is kept**: `-map
  *   0:a:0`, `-map_metadata -1` (titles, comments, dates, the recorder's own
- *   tags) and `-map_chapters -1`.
+ *   tags) and `-map_chapters -1`. And no fingerprint of this server's build:
+ *   `-fflags +bitexact -flags:a +bitexact`, so the Ogg's vendor string is
+ *   `ffmpeg` and its encoder tag `Lavc libopus`, with no library versions
+ *   (review of #111; without them, `Lavf60.16.100` and `Lavc60.31.102`).
  * - **What is kept is Opus**, mono, at [VoiceRules.BITS_PER_SECOND] (Q4), in
  *   Ogg, and is checked to be after it is written: a file whose stream is not
  *   one Opus channel is never kept. The bitrate is constrained VBR, so a
@@ -114,6 +117,7 @@ internal class FfmpegVoiceProcessor(
     ): List<String> =
         QUIET + listOf("-nostdin") + reading.arguments + listOf("-threads", "1", "-i", input) +
             listOf("-map", "0:a:0", "-map_metadata", "-1", "-map_chapters", "-1") +
+            listOf("-fflags", "+bitexact", "-flags:a", "+bitexact") +
             listOf("-c:a", "libopus", "-b:a", VoiceRules.BITS_PER_SECOND.toString(), "-ac", VoiceRules.CHANNELS.toString()) +
             listOf("-vbr", "constrained", "-application", "voip", "-threads", "1") +
             listOf("-t", seconds(VoiceRules.LIMIT_MS + RUN_ON_MS), "-fs", (maxKeptBytes + 1).toString()) +

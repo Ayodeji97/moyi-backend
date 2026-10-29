@@ -5,10 +5,10 @@ import java.util.UUID
 
 /**
  * How a voice note on an entry is played to one person (spec §4 D3): to its
- * owner and to anyone else who may read the entry alike, once it is ready;
- * until then it is still processing. Unlike a photo it waits on no moderation
- * verdict: FR-101 and the owner's ruling Q1 name images, and the corpus asks
- * no automated check of voice (ADR-0049).
+ * owner once it is ready; to anybody else only once the owner's ruling on
+ * FR-061 lets them (ADR-0049 decision 7), and until then it is still
+ * processing to them, with no URL and no length. Fail closed, as a photo is
+ * before its moderation verdict.
  *
  * `gratitude` asks only about entries the reader may already read (BR-1 has
  * answered before this is reached); a locked entry is never rendered with a

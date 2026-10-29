@@ -205,20 +205,32 @@ internal class MediaAsset(
     }
 
     /**
-     * What anyone who may read its entry is played of this voice note (spec
-     * §4 D3): its owner and the partner alike, once it is
-     * [MediaStatus.READY]; until then it is still processing to everyone.
-     * **A voice note is not moderated**: FR-101 and the owner's ruling Q1 name
-     * images, and the corpus asks no automated check of voice (spec §4 D3's
-     * [inferred], checked in ADR-0049). Should a ruling add one, this is the
-     * one place that changes, as [shownTo]'s verdict is for photos.
+     * What a person is played of this voice note (spec §4 D3). **Its owner**
+     * (on an entry, its author) hears it once it is [MediaStatus.READY].
+     * **Anyone else** hears it only once it is ready and
+     * [partnersMayHearIt]; until then it is still processing to them, with no
+     * URL and no length. Fail closed until the owner rules on FR-061
+     * (ADR-0049 decision 7, review of #111).
      */
-    val heard: Heard
-        get() =
-            when {
-                kind != MediaKind.VOICE || status != MediaStatus.READY || durationMs == null -> Heard.Processing
-                else -> Heard.Ready(StorageKey.forVoice(storageKey), durationMs)
-            }
+    fun heardBy(owner: Boolean): Heard =
+        when {
+            kind != MediaKind.VOICE || status != MediaStatus.READY || durationMs == null -> Heard.Processing
+            !owner && !partnersMayHearIt -> Heard.Processing
+            else -> Heard.Ready(StorageKey.forVoice(storageKey), durationMs)
+        }
+
+    /**
+     * **The one switch-point for who besides its owner hears a voice note.**
+     * FR-101 and Q1 name images, but FR-061 (03:68) says "media" becomes
+     * visible to the non-author only once it "passes moderation", R-25 (17:47)
+     * speaks of "harmful or illegal media", and doc 26:206 routes a reported
+     * voice note to "the FR-101 moderation path". Until the owner rules which
+     * reading holds, a voice note reaches a partner only with a verdict of
+     * [PASSED], which nothing gives a voice note yet: so, never. If the ruling
+     * is "images only", this becomes `true`; if it is "voice too", a
+     * moderator must give voice notes their verdict.
+     */
+    private val partnersMayHearIt: Boolean get() = moderationVerdict == PASSED
 
     override fun toString(): String = "MediaAsset(id=$id, kind=$kind, status=$status)"
 

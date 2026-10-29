@@ -174,21 +174,26 @@ internal class MediaAttachmentsTest(
         claim(ada, voice, kind = AttachableKind.VOICE, entryId = UUID.randomUUID()) shouldBe false
     }
 
-    /** Spec §4 D3: a voice note waits on no moderation verdict, so its owner and anybody else are played it alike. */
+    /**
+     * Review of #111: fail closed until the owner rules on FR-061. Its owner
+     * hears a ready voice note with a signed URL and its length; anybody else
+     * hears it still processing, with neither.
+     */
     @Test
-    fun `a ready voice note is played to its owner and to anybody else alike, with its length and a signed URL`() {
+    fun `its owner is played a ready voice note with a signed URL and its length, and anybody else is told it is processing`() {
         val voice = voiceNote(ada)
 
-        for (viewer in listOf(ada, bea)) {
-            val heard = voices.heardBy(viewer, listOf(voice)).getValue(voice)
-            heard.status shouldBe VoiceViewStatus.READY
-            heard.durationMs shouldBe 4_200
-            heard.url.toString() shouldContain "/voice.ogg?"
-            heard.url.toString() shouldContain "X-Amz-Signature="
-            heard.toString() shouldNotContain heard.url.toString()
-        }
-        // Signed as of the hour, so both are handed the same URL (doc 05:169).
-        voices.heardBy(ada, listOf(voice)).getValue(voice).url shouldBe voices.heardBy(bea, listOf(voice)).getValue(voice).url
+        val toAda = voices.heardBy(ada, listOf(voice)).getValue(voice)
+        toAda.status shouldBe VoiceViewStatus.READY
+        toAda.durationMs shouldBe 4_200
+        toAda.url.toString() shouldContain "/voice.ogg?"
+        toAda.url.toString() shouldContain "X-Amz-Signature="
+        toAda.toString() shouldNotContain toAda.url.toString()
+
+        val toBea = voices.heardBy(bea, listOf(voice)).getValue(voice)
+        toBea.status shouldBe VoiceViewStatus.PROCESSING
+        toBea.url.shouldBeNull()
+        toBea.durationMs.shouldBeNull()
     }
 
     @Test

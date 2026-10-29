@@ -6,12 +6,17 @@ import com.moyi.common.testing.MutableClock
 import com.moyi.media.domain.ImageFormat
 import com.moyi.media.domain.MediaAsset
 import com.moyi.media.domain.StorageKey
+import com.moyi.media.domain.VoiceFormat
 import com.moyi.media.infra.MediaIntegrationTest
 import com.moyi.media.infra.MediaTestApplication
 import com.moyi.media.infra.processing.Encoding
+import com.moyi.media.infra.processing.Ffmpegs
 import com.moyi.media.infra.processing.ImageProcessor
 import com.moyi.media.infra.processing.TestImages
+import com.moyi.media.infra.processing.TestVoices
+import com.moyi.media.infra.processing.Transcoding
 import com.moyi.media.infra.processing.Vipses
+import com.moyi.media.infra.processing.VoiceProcessor
 import com.moyi.media.infra.storage.MediaStorageProperties
 import com.moyi.media.infra.storage.ObjectStore
 import com.moyi.media.infra.storage.ObjectStoreUnavailableException
@@ -58,6 +63,7 @@ internal class ProcessingInterleavingTest(
     @Autowired private val dispatcher: OutboxDispatcher,
     @Autowired private val clock: MutableClock,
     @Autowired private val gate: GatedProcessor,
+    @Autowired private val voiceGate: GatedVoiceProcessor,
     @Autowired private val storage: SwitchableStore,
 ) : MediaIntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
@@ -67,6 +73,7 @@ internal class ProcessingInterleavingTest(
     @AfterEach
     fun clear() {
         gate.reset()
+        voiceGate.reset()
         storage.puts = true
         storage.gets = true
         storage.putsLeft = Int.MAX_VALUE
@@ -161,6 +168,24 @@ internal class ProcessingInterleavingTest(
         stored(upload) shouldBe false
     }
 
+    /** Review of #111: the voice twin of the first test here; what the transcode wrote must not outlive the deletion. */
+    @Test
+    fun `a voice note deleted while it is transcoded is not made ready, and the Opus it made is removed`() {
+        val mediaId = client.upload(ada, TestVoices.wav(2.0), declaredType = "audio/wav", kind = "VOICE")
+        val upload = storageKeyOf(mediaId)
+        voiceGate.close()
+
+        val worker = CompletableFuture.runAsync { dispatcher.dispatchDue(clock.instant(), BUDGET) }
+        voiceGate.awaitEntered()
+        client.delete(ada, mediaId).status shouldBe 204
+        voiceGate.open()
+        worker.get(30, TimeUnit.SECONDS)
+
+        statusOf(mediaId) shouldBe "DELETED"
+        stored("v/${upload.removePrefix("in/")}/voice.ogg") shouldBe false
+        stored(upload) shouldBe false
+    }
+
     private fun statusOf(mediaId: String): String =
         jdbc.queryForObject("SELECT status FROM media_assets WHERE id = ?::uuid", String::class.java, mediaId)!!
 
@@ -208,6 +233,42 @@ internal class ProcessingInterleavingTest(
         }
     }
 
+    /** The real ffmpeg, behind a gate, as [GatedProcessor] is for photos. */
+    internal class GatedVoiceProcessor(
+        private val real: VoiceProcessor,
+    ) : VoiceProcessor {
+        @Volatile private var entered = CountDownLatch(1)
+
+        @Volatile private var release = CountDownLatch(0)
+
+        override val processesHere: Boolean = true
+
+        fun close() {
+            release = CountDownLatch(1)
+        }
+
+        fun open() = release.countDown()
+
+        fun awaitEntered() {
+            check(entered.await(30, TimeUnit.SECONDS)) { "the voice processor was never entered" }
+        }
+
+        fun reset() {
+            release.countDown()
+            entered = CountDownLatch(1)
+        }
+
+        override fun transcode(
+            source: Path,
+            format: VoiceFormat,
+            workDir: Path,
+        ): Transcoding {
+            entered.countDown()
+            check(release.await(30, TimeUnit.SECONDS)) { "the test never opened the gate" }
+            return real.transcode(source, format, workDir)
+        }
+    }
+
     /** The real store, whose GETs and PUTs the test can make fail as an unreachable storage does. */
     internal class SwitchableStore(
         private val real: ObjectStore,
@@ -241,6 +302,10 @@ internal class ProcessingInterleavingTest(
         @Bean
         @Primary
         fun gatedProcessor(): GatedProcessor = GatedProcessor(Vipses.onPath())
+
+        @Bean
+        @Primary
+        fun gatedVoiceProcessor(): GatedVoiceProcessor = GatedVoiceProcessor(Ffmpegs.onPath())
 
         @Bean
         @Primary

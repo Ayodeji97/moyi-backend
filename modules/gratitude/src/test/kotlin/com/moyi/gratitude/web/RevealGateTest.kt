@@ -134,7 +134,7 @@ internal class RevealGateTest(
     }
 
     /**
-     * Phase 4 D3: a voice note, which unlike a photo waits on no moderation,
+     * Phase 4 D3: a voice note, which its author hears as soon as it is ready,
      * is no more visible on a locked entry: no key, no id, no length, no URL.
      */
     @Test
