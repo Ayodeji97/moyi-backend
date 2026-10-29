@@ -105,7 +105,11 @@
 # D5 the photographer then deletes the entry the photo is on: the owner's GET of
 # it is 404, the row DELETED with one MediaReleased, media.purge stamps it within
 # seconds, the URL handed out before answers 404 and MinIO holds nothing of it.
-# D5 last run on @@D5RUN@@
+# D5 last run on 2026-10-29, after D2 (0e73c8a, with main df44dcc) was merged in, from a
+# jar of that merge, on a fresh database that applied 33 migrations to V36, against
+# its own compose project (moyi-d5: Postgres 55445, Valkey 63805, MinIO 59010), the
+# jar booted by hand on libvips from PATH, and --attach: 1110 passed, 0 failed, 0
+# skipped, 30 sections.
 # D2's: last run on
 # 2026-10-29, after main (df44dcc: #101, #102, #103, #105, #109) was merged in, from a jar of
 # that merge, on the moyi-d2 database (32 migrations to V33; Postgres 55441, Valkey 63801,
