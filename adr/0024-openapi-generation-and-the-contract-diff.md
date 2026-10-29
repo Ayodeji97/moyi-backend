@@ -101,9 +101,20 @@ What it changes, measured with v1.34.1 over every merge on `main` that changed
 
 Both PRs it changes carried `breaking-api-change` anyway (#104's applied by hand for this
 reason), so no merge would have been gated differently. The flag closes the hole for the
-next one. One merge reads as non-breaking under both settings and is right to: #101 removed
-`ErasedEntryResponse` from a response `oneOf`. A client that can parse one shape fewer is
-not broken by the server never sending it.
+next one. One merge reads as non-breaking under both settings, and the tool is only half right
+about it. #101 removed `ErasedEntryResponse` from a response `oneOf`. oasdiff reports it at
+INFO (`response-property-one-of-removed`, `api-schema-removed`): on the wire nothing breaks,
+since a client that parses one shape more than the server now sends still reads every
+response. For the regenerated client it does break: the sealed subclass disappears and a
+`when` branch naming it stops compiling, which is this ADR's 2026-09-24 meaning of the
+label. So #101 was labelled by hand, as it should be, and a removed `oneOf` variant still
+needs that until a `.oasdiff.yaml` raises those two checks to `err`. That changes counts, so
+it is its own pull request.
+
+**Decision: a comparison that fails is not a break.** With the flag, an `allOf` whose
+branches cannot be merged (two incompatible enums for one property) makes oasdiff exit with
+an error instead of a verdict. The step failed either way, and the label step accepted
+both. Now a failed step with no `breaking` output fails the job whatever the labels say.
 
 **Decision: `review: false`.** v0.1.20 of the action uploads both documents to
 oasdiff.com by default and links a side-by-side review page. The repository is public, so
@@ -112,6 +123,6 @@ leaving CI is a decision rather than a default. The verdict and the step summary
 unaffected.
 
 *Revisit if* oasdiff changes how it treats composed schemas (the flag may become the
-default, or be removed), or if `oneOf`/`anyOf` schemas show the same blind spot. Neither has
-been tested here.
+default, or be removed), or when the client generator is chosen: flattening intersects
+an `allOf`'s enums, and a generator that does not would see a value the diff does not.
 
