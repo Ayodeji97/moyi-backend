@@ -89,6 +89,11 @@ internal data class TodayView(
  * would watch it become `SUSPENDED` on their own write rather than staying
  * put — fix round 1, C1.
  *
+ * **The day is shown by [shownTo], as every day of the archive is**: which
+ * entry is whose, what the gate lets the caller have of each, an entry erased
+ * before the caller was ever shown it left out, and the status as the day's
+ * erasures will leave it. Its KDoc has the ruling.
+ *
  * **BR-1 is asked, never restated, for *both* entries — including the
  * caller's own.** `authorMemberId` selects *which* entry is "mine" (a routing
  * decision, not a security one); [Entry.readBy] alone decides what of either
@@ -179,19 +184,18 @@ internal class GetToday(
             )
         }
 
-        val written = entries.findForDay(day.id).onEachSideOf(membership.memberId)
+        val written = entries.findForDay(day.id)
         // After the entries, never before: the marker is read last.
-        val reader = access.readerNow(membership)
-        val mine = written.mine?.readBy(reader)
-        val partners = written.partners?.readBy(reader)
+        val shown = written.shownTo(access.readerNow(membership), day.status, day.closedAt, day.entryCount)
         // After the gate, and only for what it answered in full: a tombstone says `false` whatever rows
         // there are, and an entry the caller was never shown has no id here to ask about.
-        val readInFull = listOfNotNull(mine, partners).filter { it.readability == Readability.FULL }.mapNotNull { it.disclosed?.id }
+        val readInFull =
+            listOfNotNull(shown.mine, shown.partners).filter { it.readability == Readability.FULL }.mapNotNull { it.disclosed?.id }
         return TodayView(
             date = date,
-            status = day.status,
-            myEntry = mine,
-            partnerEntry = partners,
+            status = shown.status,
+            myEntry = shown.mine,
+            partnerEntry = shown.partners,
             streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),
             marked = favourites.markedBy(membership.memberId, readInFull),
             reactions = reactions.on(readInFull),

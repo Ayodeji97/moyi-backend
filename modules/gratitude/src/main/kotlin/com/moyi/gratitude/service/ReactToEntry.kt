@@ -30,10 +30,10 @@ import java.util.UUID
  * BOND_ARCHIVED`.** This is where a reaction parts from a bookmark, which is
  * allowed there. A bookmark is the member's own and the other person never
  * sees it; a reaction is made to be seen, and after an ending that is
- * contact. Taking one's own back is always allowed, as deleting one's own
- * entry is. The ending is told last of the refusals, to a caller who could
- * otherwise have reacted, so a withdrawn author's entry answers as any
- * other tombstone does.
+ * contact. So is taking one back, which the other person sees go: refused
+ * too, from the partner's entry (ADR-0037 question 11). The ending is told
+ * last of the refusals, to a caller who could otherwise have reacted, so a
+ * withdrawn author's entry answers as any other tombstone does.
  *
  * **The marker is read last, and the bond's state with it**
  * ([entryAndMembershipNow]): the entry is loaded, and only then is the membership
@@ -71,6 +71,12 @@ import java.util.UUID
  * tombstone, which says `null`) and `EraseEntry` removes it. If it did not,
  * the author sees a reaction that was sent before the ending and landed
  * just after it (ADR-0037 decision 5 and question 4: the owner's to turn).
+ *
+ * [unreact] has the same window. An ending that commits after the
+ * membership is read lets the removal land, and the answer is `204`: a
+ * reaction taken back a moment after an ending that refuses the next one
+ * (ADR-0037 question 11). Closing it would take the bond's lock, for the
+ * reason above.
  */
 @Service
 internal class ReactToEntry(
@@ -110,8 +116,8 @@ internal class ReactToEntry(
 
                 Reacting.ALLOWED -> {
                     when {
-                        // Both are checked, as on every write (`BondArchivedException` has why).
-                        membership.hasLeft || !membership.isOpen -> BondArchivedException()
+                        // Both the bond's state and the caller's leaving, as on every write (`BondArchivedException` has why).
+                        !membership.takesWrites -> BondArchivedException()
 
                         // The statement is the second line: nothing written means the entry was erased since the gate answered.
                         reactions.set(entryId, membership.memberId, type) -> null
@@ -126,8 +132,19 @@ internal class ReactToEntry(
     /**
      * Takes the caller's reaction back. **Absent is success**: whether there
      * was one, whether the entry is the caller's own (which can hold none of
-     * theirs), whether it has since been erased and whether the bond has
-     * ended make no difference to a caller the entry was shown to.
+     * theirs) and whether it has since been erased make no difference to a
+     * caller the entry was shown to.
+     *
+     * **Not from a partner's entry read in full once the bond has ended, nor
+     * by a member who has left: `409 BOND_ARCHIVED`, as [react] is**, by the
+     * same [com.moyi.bond.api.BondMembership.takesWrites] (ADR-0037 question
+     * 11, the owner's ruling of 2026-10-21). A removal the other person sees
+     * is contact as a new reaction is, and the reaction that cannot be taken
+     * back stays shown to both. It is asked before the row is touched, so
+     * nothing is removed and no held row is waited on or answered busy. On
+     * one's own entry and on a tombstone an ended bond is still `204`: the
+     * tombstone's branch is not asked, so a withdrawal and its twin deleted
+     * by hand answer alike.
      *
      * **One refusal of its own, and it comes last:** a row another
      * transaction holds, on a partner's entry the caller reads **in full**,
@@ -144,6 +161,7 @@ internal class ReactToEntry(
      * for as long as the delivery runs.
      *
      * @throws EntryNotFoundException as [react]: this must not be a way to ask whether an id exists.
+     * @throws BondArchivedException a partner's entry read in full, and the bond has ended or the caller has left it; nothing is removed.
      * @throws ReactionBusyException another transaction holds the reaction on an entry read in full; no removal is promised.
      */
     fun unreact(
@@ -152,10 +170,21 @@ internal class ReactToEntry(
     ) {
         val (entry, membership) = entryAndMembershipNow(access, entries, joining, userId, entryId)
         val answer = entry.canBeReactedToBy(membership.asReader())
-        if (answer == Reacting.NEVER_SHOWN) throw EntryNotFoundException()
-        val removed = reactions.remove(entryId, membership.memberId)
-        // Only where a rollback could bring it back into view: the caller's own entry can hold no row of theirs.
-        if (!removed && answer == Reacting.ALLOWED) throw ReactionBusyException()
+        val refusal =
+            when {
+                answer == Reacting.NEVER_SHOWN -> EntryNotFoundException()
+
+                // Before anything is removed or waited on: on an ended bond a removal the other person sees is contact too.
+                answer == Reacting.ALLOWED && !membership.takesWrites -> BondArchivedException()
+
+                reactions.remove(entryId, membership.memberId) -> null
+
+                // Only where a rollback could bring it back into view: the caller's own entry can hold no row of theirs.
+                answer == Reacting.ALLOWED -> ReactionBusyException()
+
+                else -> null
+            }
+        if (refusal != null) throw refusal
     }
 }
 

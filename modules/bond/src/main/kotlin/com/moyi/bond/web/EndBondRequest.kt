@@ -17,18 +17,21 @@ import tools.jackson.databind.annotation.JsonDeserialize
  * silently wrong for the other. No body, `{}` and an explicit `null` are all
  * "absent".
  *
- * **Absent means the opposite on the two routes, and a client must know
- * it.** On `/block` an absent flag withdraws; on `/leave` it keeps. That is
- * FR-029a's own wording, not an accident of two handlers: withdrawal is
- * "given by default" on blocking, where the person leaving is the one who
- * may need their words out of the other's reach and should not have to ask,
- * and only "offered" on leaving, where an ordinary parting should not erase
- * a shared record by omission. A client that wants one behaviour on both
- * sends the flag on both.
+ * **Absent is a different answer on the two routes, and a client must know
+ * it.** On `/leave` an absent flag keeps; on `/block` it is refused, with the
+ * `400` an unreadable body gets (ADR-0035 questions 1 and 11). Block's absent
+ * flag withdrew until the owner's ruling of 2026-10-21: FR-029a "gives"
+ * withdrawal on blocking, and a default was how it gave it, but a default
+ * that destroys turns an omission into an erasure, so the caller now says
+ * which. On leaving withdrawal is only "offered", where an ordinary parting
+ * should not erase a shared record by omission. A client that wants one
+ * behaviour on both sends the flag on both.
  *
  * **Read by [EndBondRequestReader], which refuses what it is not sure of.**
- * Because block's default withdraws, anything that turns a caller's "no"
- * into an absence withdraws against their word, and for good.
+ * It was written while block's default withdrew, when anything that turned a
+ * caller's "no" into an absence withdrew against their word, and for good.
+ * An absence is now refused there, but a misspelt key read as one would
+ * still decide a leave for the caller; the reader stays strict.
  */
 @JsonDeserialize(using = EndBondRequestReader::class)
 internal data class EndBondRequest(
@@ -45,7 +48,7 @@ internal data class EndBondRequest(
  *
  * - **A key it does not know is ignored.** `{"withdrawEntry": false}`,
  *   `{"withdraw_entries": false}` and `{"WithdrawEntries": false}` were each
- *   an absent flag, and on a block an absent flag withdraws: the caller
+ *   an absent flag, and on a block an absent flag then withdrew: the caller
  *   declined, in so many words, and was withdrawn from (ADR-0035
  *   decision 11; the review of Task 4, C5a). Forward compatibility is the usual reason to ignore a
  *   key, and it is not worth an erasure nobody asked for.

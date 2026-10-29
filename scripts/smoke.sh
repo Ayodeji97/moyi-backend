@@ -26,14 +26,15 @@
 # lock, failed on nothing and left no ended day unclosed. Since slice C4 it
 # reads the streak: one on the first day both have written, and on today's
 # payload, and zero while a day waits on its reveal time. Since slice C5a it
-# ends bonds with the outbox poller running: a block with no body and a leave
-# that asks for it have their author's entries erased within ten seconds, a
+# ends bonds with the outbox poller running: a block and a leave that ask for
+# it have their author's entries erased within ten seconds, a
 # block told to keep them leaves them readable, an author deletes on an ended
 # bond, and a misspelt flag ends nothing; and the poller announces no delivery
 # in the log. Since slice C5b it reads the archive: the feed and one day of it
 # for each member, the 422 of each unreadable parameter, the two 404s, a day
-# only one has written, the two shapes of an entry the caller was never shown
-# (an author and a status, no other key) and no time of erasure on any shape,
+# only one has written, the shape of an entry the caller was never shown (an
+# author and a status, no other key), nothing at all once such an entry is
+# erased (on the feed, the day and today), and no time of erasure on any shape,
 # a bookmark set and taken off and never shown to the other, what may not be
 # marked and by whom, If-None-Match answered 304 on a tag that moves with the
 # caller's own mark and not with the partner's, the archive as JSON whatever
@@ -45,12 +46,12 @@
 # and with nothing else the partner does; one's own entry refused, the one 404
 # on both verbs for everything the caller was never shown, and each body that
 # is not one known type; after an ending that withdraws nothing, no new
-# reaction and the old one still removable; and after a withdrawal, the
+# reaction and the old one not removable either; and after a withdrawal, the
 # reaction on the withdrawn entry gone with its words under a tag that does
-# not move twice, the withdrawer's own left where it was, and both verbs
-# answering as they do for an entry deleted by hand. It holds no row: 409
-# REACTION_BUSY and FAVOURITE_BUSY, and the 204 a held row gets on a
-# tombstone, are the integration tests' alone.
+# not move twice, the withdrawer's own left where it was and no longer theirs
+# to take back, and both verbs answering as they do for an entry deleted by
+# hand. It holds no row: 409 REACTION_BUSY and FAVOURITE_BUSY, and the 204 a
+# held row gets on a tombstone, are the integration tests' alone.
 # Since slice C6a it reads the day's prompt: one for the bond before the
 # second member arrives, the same id for both members and each one's own
 # language, the same bytes after the partner opens, writes and reveals, an
@@ -96,7 +97,26 @@
 # line. Last run on 2026-10-28, for the entry-text rulings (ADR-0031 rulings 1 and 2), after main (35119af, #106) was
 # merged in, from a jar of 091bfa2's code, on a fresh database that applied V1 to V27
 # and V29 to V33, against its own compose project (moyi-0f: Postgres 55443, Valkey
-# 56390, MinIO 59100) and --attach: 1051 passed, 0 failed, 0 skipped, 28 sections. Before it, on 2026-10-28,
+# 56390, MinIO 59100) and --attach: 1051 passed, 0 failed, 0 skipped, 28 sections. Before it,
+# on 2026-10-29, for no reaction taken back after an ending (ADR-0037
+# q11), after main (df153d3, #102) was merged in, from a jar of f7e0654's code, on a fresh
+# database that applied V1 to V27 and V29 to V33, against its own compose project (moyi-0f:
+# Postgres 55443, Valkey 56390, MinIO 59273) and --attach: 1057 passed, 0 failed, 0 skipped,
+# 28 sections; on 2026-10-28 the same branch after #106, from 61510be, 1046, 0 and 0 in 28.
+# Before them, on 2026-10-29, for withdrawEntries required on /block, after main (e85ba1d,
+# #101) was merged in, from a jar of 6c6c3cd's code, on a fresh database that applied V1
+# to V27 and V29 to V33, against its own compose project (moyi-0f: Postgres 55443, Valkey
+# 56390, MinIO 59273) and --attach: 1056 passed, 0 failed, 0 skipped, 28 sections. Two runs
+# before it on the same jar stopped in the media section with 503: another project's MinIO
+# held this project's port. Before them, on 2026-10-28, for withdrawEntries required on
+# /block (ADR-0035 q1, q11), after main (35119af, #106) was
+# merged in, from a jar of 11d1e68's code, on a fresh database that applied V1 to V27
+# and V29 to V33, against its own compose project (moyi-0f: Postgres 55443, Valkey
+# 56390, MinIO 59100) and --attach: 1053 passed, 0 failed, 0 skipped, 28 sections. Before it, on 2026-10-28,
+# for an unseen erasure shown as nothing (ADR-0032 q2), after main (35119af, #106) was
+# merged in, from a jar of 28157c5's code, on a fresh database that applied V1 to V27
+# and V29 to V33, against its own compose project (moyi-0f: Postgres 55443, Valkey
+# 56390, MinIO 59100) and --attach: 1048 passed, 0 failed, 0 skipped, 28 sections. Before it, on 2026-10-28,
 # after main (b2da5a7, the squash of #100, V31) was merged
 # into D1, from a jar of that merge, on a fresh database that applied V1 to V27 and V29
 # to V33 in that order, against its own compose project (moyi-d1: Postgres 55440, Valkey
@@ -736,7 +756,20 @@ expect "a bond to block in is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$
 BLOCK_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
 BLOCK_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
 expect "the other member joins that one too" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$BLOCK_CODE/accept" -H "Authorization: Bearer $BLOCKED_ACCESS"
-expect "blocking is 204 — the same 204" 204 "" -- -X POST "$API/bonds/$BLOCK_BOND/block" -H "Authorization: Bearer $BLOCKER_ACCESS"
+# On this route the flag is required (ADR-0035 questions 1 and 11): a block that
+# does not say what becomes of the entries is the 400 an unreadable body gets,
+# and ends nothing. It is asked for after the guard, so a stranger who sends no
+# body is still the one 404.
+expect "a block with no body is 400 MALFORMED_REQUEST" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/bonds/$BLOCK_BOND/block" -H "Authorization: Bearer $BLOCKER_ACCESS"
+BARE_REFUSAL="$LAST_BODY"
+expect "…and with no Content-Type either" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/bonds/$BLOCK_BOND/block" -H "Content-Type:" -H "Authorization: Bearer $BLOCKER_ACCESS"
+expect "…and so is {}" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/bonds/$BLOCK_BOND/block" -H "Authorization: Bearer $BLOCKER_ACCESS" -d '{}'
+expect "…and a flag that is null" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/bonds/$BLOCK_BOND/block" -H "Authorization: Bearer $BLOCKER_ACCESS" -d '{"withdrawEntries": null}'
+expect "…the same bytes as a body that cannot be read" 400 '"code":"MALFORMED_REQUEST"' -- -X POST "$API/bonds/$BLOCK_BOND/block" -H "Authorization: Bearer $BLOCKER_ACCESS" -d '{"withdrawEntries": '
+[ "$LAST_BODY" = "$BARE_REFUSAL" ] && pass "…byte for byte" || fail "absent-flag refusal" "absent: ${BARE_REFUSAL:0:160} unreadable: ${LAST_BODY:0:160}"
+expect "…and the bond is still open" 200 '"status":"ACTIVE"' -- "$API/bonds/$BLOCK_BOND" -H "Authorization: Bearer $BLOCKED_ACCESS"
+expect "a stranger's block with no body is the one 404, not that 400" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$BLOCK_BOND/block" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "blocking is 204 — the same 204" 204 "" -- -X POST "$API/bonds/$BLOCK_BOND/block" -H "Authorization: Bearer $BLOCKER_ACCESS" -d '{"withdrawEntries": true}'
 
 # The archive stays readable for both, including whoever left (states.md §9).
 expect "the member who left still reads the bond" 200 '"status":"ARCHIVED"' -- "$API/bonds/$LEFT_BOND" -H "Authorization: Bearer $LEAVER_ACCESS"
@@ -780,14 +813,14 @@ expect "revoking its invite is 409 too" 409 '"code":"BOND_ARCHIVED"' -- -X DELET
 expect "the code it carried is dead" 404 '"code":"INVITE_NOT_USABLE"' -- "$API/invites/$LEFT_CODE" -H "Authorization: Bearer $STAYER_ACCESS"
 
 # Block is the one write an archived bond accepts, and it repeats (FR-029).
-expect "blocking an archived bond is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
-expect "blocking again is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS"
+expect "blocking an archived bond is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS" -d '{"withdrawEntries": true}'
+expect "blocking again is 204" 204 "" -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STAYER_ACCESS" -d '{"withdrawEntries": true}'
 BLOCK_ROWS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM blocks WHERE bond_id='$LEFT_BOND'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
 case "$BLOCK_ROWS" in psql-unavailable) skip "block row count";; 1) pass "…and one row, not two";; *) fail "block rows" "expected 1, got '$BLOCK_ROWS'";; esac
 
 # A non-member is refused before the bond's state is even looked at (T-02).
 expect "a stranger cannot leave someone else's bond" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$LEFT_BOND/leave" -H "Authorization: Bearer $STRANGER_ACCESS"
-expect "…nor block in it" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STRANGER_ACCESS"
+expect "…nor block in it" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$LEFT_BOND/block" -H "Authorization: Bearer $STRANGER_ACCESS" -d '{"withdrawEntries": true}'
 
 # FR-029: the pair cannot be put back in touch, whichever of them holds the code.
 expect "the blocker starts a new bond" 201 '"code"' -- -X POST "$API/bonds" -H "Authorization: Bearer $BLOCKER_ACCESS" -d "$(bond_body "Again")"
@@ -944,7 +977,7 @@ expect "a bond to block in" 201 '"code"' -- -X POST "$API/bonds" -H "Authorizati
 BLOCK_CONSENT="$(printf '%s' "$LAST_BODY" | jget id)"
 BLOCK_CONSENT_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
 expect "…joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$BLOCK_CONSENT_CODE/accept" -H "Authorization: Bearer $BLOCKED2_ACCESS"
-expect "…and blocked" 204 "" -- -X POST "$API/bonds/$BLOCK_CONSENT/block" -H "Authorization: Bearer $BLOCKER2_ACCESS"
+expect "…and blocked" 204 "" -- -X POST "$API/bonds/$BLOCK_CONSENT/block" -H "Authorization: Bearer $BLOCKER2_ACCESS" -d '{"withdrawEntries": true}'
 expect "the blocked member's deletion request is 409 too" 409 '"code":"BOND_ARCHIVED"' -- -X POST "$API/bonds/$BLOCK_CONSENT/deletion-request" -H "Authorization: Bearer $BLOCKED2_ACCESS"
 BLOCK_REFUSAL="$(printf '%s' "$LAST_BODY" | sed 's/"instance":"[^"]*"/"instance":"-"/')"
 [ "$LEFT_REFUSAL" = "$BLOCK_REFUSAL" ] && pass "…byte-identical to the left bond's refusal (doc 26 §2.1, ADR-0030)" || fail "deletion oracle" "the two refusals differ"
@@ -1291,8 +1324,8 @@ case "$REFUSED_ROWS" in psql-unavailable) skip "the refused-ending row check";; 
 expect "a block that says to keep the entries is 204" 204 "" -- -X POST "$API/bonds/$KEPT_BOND/block" -H "Authorization: Bearer $KEEPER_ACCESS" -d '{"withdrawEntries": false}'
 KEPT_SINCE="$(date +%s)"
 
-# The default. No body: a block withdraws unless it is told not to (FR-029a).
-expect "a block with no body is 204" 204 "" -- -X POST "$API/bonds/$TAKEN_BOND/block" -H "Authorization: Bearer $TAKER_ACCESS"
+# A block that says to take the entries (FR-029a). It must say: the flag is required here.
+expect "a block that takes the entries is 204" 204 "" -- -X POST "$API/bonds/$TAKEN_BOND/block" -H "Authorization: Bearer $TAKER_ACCESS" -d '{"withdrawEntries": true}'
 # At once, and before any poller has run: the read is gated on the record `bond` wrote in that request.
 expect "the partner's very next read no longer carries the words" 200 '"status":"DELETED"' -- "$API/bonds/$TAKEN_BOND/today" -H "Authorization: Bearer $READER_ACCESS"
 [[ "$LAST_BODY" != *"$TAKEN_TEXT"* ]] && pass "…not anywhere in the body" || fail "withdrawn text read" "${LAST_BODY:0:300}"
@@ -1469,11 +1502,13 @@ ARC_HIDDEN_DAY="$(no_instance)"
 expect "…as a date nobody wrote on is" 404 '"code":"DAY_NOT_FOUND"' -- "$API/bonds/$ARC_BOND2/days/1999-01-01" -H "Authorization: Bearer $ARC_O"
 is "…the same body, so the route does not say whether the partner wrote" "$(no_instance)" "$ARC_HIDDEN_DAY"
 
-# A third bond, for the two shapes of a partner's entry the caller was never
-# shown, as the jar's own serializer writes them: an author and a status, and
-# no other key (BR-8). The archive lists such a day only for a member with an
-# entry of their own on it, so one member writes and deletes, which leaves
-# their tombstone, and then the other writes alone.
+# A third bond, for what a partner's entry the caller was never shown is, as
+# the jar's own serializer writes it: an author and a status, and no other key
+# (BR-8), while it is live; and nothing at all once it is erased, the null of
+# an entry never written (the owner's ruling of 2026-10-21, ADR-0032 q2). The
+# archive lists such a day only for a member with an entry of their own on it,
+# so one member writes and deletes, which leaves their tombstone, and then the
+# other writes alone.
 flush_buckets
 ARC_GONE_TEXT="thank you for waiting up for me"
 ARC_LOCKED_TEXT="thank you for the lift to the station"
@@ -1496,13 +1531,16 @@ expect "…and the day alone" 200 '"status":"LOCKED"' -- "$API/bonds/$ARC_BOND3/
 is "…is that same item" "$(at "")" "$ARC_LOCKED_ITEM"
 no_times "…with no such key either"
 expect "the other deletes theirs too, before anybody read it" 204 "" -- -X DELETE "$API/entries/$ARC_LOCKED_ENTRY" -H "Authorization: Bearer $ARC_M"
-expect "the first member's archive now" 200 '"status":"REMOVED"' -- "$API/bonds/$ARC_BOND3/days" -H "Authorization: Bearer $ARC_O"
-is "…carries the partner's entry as exactly an author and REMOVED, no other key" "$(at items.0.partnerEntry)" "{\"authorMemberId\": \"$ARC_LOCKED_AUTHOR\", \"status\": \"REMOVED\"}"
-[[ "$LAST_BODY" != *"$ARC_LOCKED_ENTRY"* ]] && pass "…and still not its id" || fail "removed entry read" "${LAST_BODY:0:300}"
+expect "the first member's archive still lists the day, through their own tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$ARC_BOND3/days" -H "Authorization: Bearer $ARC_O"
+is "…and the partner's entry is not there: null, as for a partner who never wrote" "$(raw items.0.myEntry.id)|$(at items.0.partnerEntry)|$(at items.1)" "$ARC_GONE_ENTRY|null|absent"
+[[ "$LAST_BODY" != *"$ARC_LOCKED_ENTRY"* && "$LAST_BODY" != *"$ARC_LOCKED_AUTHOR"* && "$LAST_BODY" != *REMOVED* ]] && pass "…not its id, not its author, and no REMOVED" || fail "unseen erasure shown" "${LAST_BODY:0:300}"
 no_times "…and no key says when it was removed"
 ARC_REMOVED_ITEM="$(at items.0)"
-expect "…and the day alone" 200 '"status":"REMOVED"' -- "$API/bonds/$ARC_BOND3/days/$ARC_DATE" -H "Authorization: Bearer $ARC_O"
+expect "…and the day alone" 200 '"partnerEntry":null' -- "$API/bonds/$ARC_BOND3/days/$ARC_DATE" -H "Authorization: Bearer $ARC_O"
 is "…is that same item" "$(at "")" "$ARC_REMOVED_ITEM"
+expect "…and today shows the same nothing" 200 '"partnerEntry":null' -- "$API/bonds/$ARC_BOND3/today" -H "Authorization: Bearer $ARC_O"
+is "…beside the same tombstone of their own, on a day that reads OPEN" "$(raw myEntry.id)|$(raw myEntry.status)|$(raw bondDay.status)" "$ARC_GONE_ENTRY|DELETED|OPEN"
+[[ "$LAST_BODY" != *"$ARC_LOCKED_ENTRY"* && "$LAST_BODY" != *"$ARC_LOCKED_AUTHOR"* && "$LAST_BODY" != *REMOVED* ]] && pass "…not its id, not its author, and no REMOVED" || fail "unseen erasure shown on today" "${LAST_BODY:0:300}"
 
 # A bookmark is the caller's own. The marker marks the writer's entry; the
 # writer, reading the same entry as their own, is told nothing about it.
@@ -1864,7 +1902,9 @@ rows_are "…and one on the reactor's" "$RX_B_ENTRY" "1|THANK_YOU"
 
 # An ending that withdraws nothing. A reaction is seen by the other person, so
 # none may be left once the bond has ended, by either of them: after an ending
-# that would be contact. One left before it stays, and can still be taken back.
+# that would be contact. One left before it stays, and cannot be taken back from
+# the partner's entry either: a removal the other person sees is contact too
+# (ADR-0037 question 11). One's own entry is still 204.
 flush_buckets
 revealed_bond "a bond to be left with a reaction on it" "$RX_C" "$RX_B" "$RX_C_TEXT" "$RX_B2_TEXT"
 RX_BOND3="$RB_BOND"; RX_C_ENTRY="$RB_A_ENTRY"; RX_B2_ENTRY="$RB_B_ENTRY"
@@ -1877,10 +1917,11 @@ rows_are "the refused replacement changed nothing: the reaction from before the 
 rows_are "…and nothing was left on the other entry" "$RX_B2_ENTRY" "0|"
 is "…and both are still shown it: the one who left" "$(rx_views "$RX_C" "$RX_BOND3" myEntry)" '"MOVED" "MOVED" "MOVED"'
 is "…and the one who stayed" "$(rx_views "$RX_B" "$RX_BOND3" partnerEntry)" '"MOVED" "MOVED" "MOVED"'
-expect "DELETE …/reaction on the ended bond is 204" 204 "" -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
-rows_are "…and it is gone" "$RX_C_ENTRY" "0|"
-is "…for both of them" "$(rx_views "$RX_C" "$RX_BOND3" myEntry)|$(rx_views "$RX_B" "$RX_BOND3" partnerEntry)" 'null null null|null null null'
-expect "…and 204 again" 204 "" -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
+expect "DELETE …/reaction on the ended bond is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_B"
+expect "…and DELETE by the one who left, on the other's entry" 409 '"code":"BOND_ARCHIVED"' -- -X DELETE "$API/entries/$RX_B2_ENTRY/reaction" -H "Authorization: Bearer $RX_C"
+expect "…while DELETE on one's own entry is still 204" 204 "" -- -X DELETE "$API/entries/$RX_C_ENTRY/reaction" -H "Authorization: Bearer $RX_C"
+rows_are "…and the reaction is still there" "$RX_C_ENTRY" "1|MOVED"
+is "…still shown to both of them" "$(rx_views "$RX_C" "$RX_BOND3" myEntry)|$(rx_views "$RX_B" "$RX_BOND3" partnerEntry)" '"MOVED" "MOVED" "MOVED"|"MOVED" "MOVED" "MOVED"'
 
 # The twin, deleted by hand: the author deletes their entry and then leaves.
 # What its reactor is answered is kept, to be compared below with what the
@@ -1902,12 +1943,12 @@ RX_HAND_DELETE="$(whole_response)"
 # The withdrawal. Each has a reaction on the other's entry (set above). The
 # author blocks, which takes their entries back: the reaction ON the withdrawn
 # entry stops being shown at once and its row goes with the words; the
-# reaction the withdrawer LEFT on the partner's entry stays, and is theirs to
-# take back (ADR-0037 decision 9).
+# reaction the withdrawer LEFT on the partner's entry stays, and can no longer
+# be changed or taken back (ADR-0037 decision 9, and question 11 as ruled).
 flush_buckets
 expect "the reactor's feed before the ending" 200 '"reaction":"HEART"' -- "$API/bonds/$RX_BOND/days" -H "Authorization: Bearer $RX_B"
 RX_B_FEED_TAG="$(tag)"
-expect "the author blocks, with no body: 204" 204 "" -- -X POST "$API/bonds/$RX_BOND/block" -H "Authorization: Bearer $RX_A"
+expect "the author blocks, taking the entries: 204" 204 "" -- -X POST "$API/bonds/$RX_BOND/block" -H "Authorization: Bearer $RX_A" -d '{"withdrawEntries": true}'
 # At once, whether or not the poller has run: the read is gated on the record the ending wrote.
 expect "the reactor's very next read of the feed carries a tombstone" 200 '"status":"DELETED"' -- "$API/bonds/$RX_BOND/days" -H "Authorization: Bearer $RX_B"
 is "…text null, DELETED, and no reaction on it" "$(raw items.0.partnerEntry.id)|$(at items.0.partnerEntry.text)|$(raw items.0.partnerEntry.status)|$(at items.0.partnerEntry.reaction)" "$RX_A_ENTRY|null|DELETED|null"
@@ -1947,9 +1988,9 @@ is "…the twin's response: with nothing held, a withdrawal and a deletion by ha
 is "the one who withdrew is still shown the reaction they left" "$(rx_views "$RX_A" "$RX_BOND" partnerEntry)" '"THANK_YOU" "THANK_YOU" "THANK_YOU"'
 is "…and none on their own tombstone" "$(rx_views "$RX_A" "$RX_BOND" myEntry)" 'null null null'
 expect "they cannot change it: 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X PUT "$API/entries/$RX_B_ENTRY/reaction" -H "Authorization: Bearer $RX_A" -d '{"type":"HEART"}'
-expect "…and can take it back: 204" 204 "" -- -X DELETE "$API/entries/$RX_B_ENTRY/reaction" -H "Authorization: Bearer $RX_A"
-rows_are "…which removes it" "$RX_B_ENTRY" "0|"
-is "…for the partner too" "$(rx_views "$RX_B" "$RX_BOND" myEntry)" 'null null null'
+expect "…nor take it back: 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X DELETE "$API/entries/$RX_B_ENTRY/reaction" -H "Authorization: Bearer $RX_A"
+rows_are "…which leaves it there" "$RX_B_ENTRY" "1|THANK_YOU"
+is "…still shown to the partner" "$(rx_views "$RX_B" "$RX_BOND" myEntry)" '"THANK_YOU" "THANK_YOU" "THANK_YOU"'
 
 RX_LEAKED=""
 for words in "$RX_A_TEXT" "$RX_B_TEXT" "$RX_SOLO_TEXT" "$RX_C_TEXT" "$RX_B2_TEXT" "$RX_HAND_TEXT" "$RX_O_TEXT"; do grep -qF "$words" "$MOYI_LOG" && RX_LEAKED="$RX_LEAKED [$words]"; done

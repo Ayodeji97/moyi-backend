@@ -8,6 +8,8 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementSetter
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Component
+import java.sql.ResultSet
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -16,6 +18,10 @@ internal data class ArchiveDay(
     val id: BondDayId,
     val date: LocalDate,
     val status: BondDayStatus,
+    /** When the close settled it, or `null`: with [status], whether an erasure may still step it back (`BondDayStatus.afterErasure`). */
+    val closedAt: Instant?,
+    /** How many live entries the row counts: with [status], what the day said when it was read. */
+    val entryCount: Int,
     /** For a search ([ArchiveDays.matching]), which of this day's entries matched it. Empty for every other listing. */
     val matched: Set<EntryId> = emptySet(),
 )
@@ -225,7 +231,7 @@ internal class ArchiveDays(
     }
 
     internal companion object {
-        private const val SELECT = "SELECT d.id, d.date, d.status FROM bond_days d"
+        private const val SELECT = "SELECT d.id, d.date, d.status, d.closed_at, d.entry_count FROM bond_days d"
 
         private val ROW =
             RowMapper { row, _ ->
@@ -233,8 +239,12 @@ internal class ArchiveDays(
                     BondDayId(row.getObject("id", UUID::class.java)),
                     row.getObject("date", LocalDate::class.java),
                     BondDayStatus.valueOf(row.getString("status")),
+                    closedAtOf(row),
+                    row.getInt("entry_count"),
                 )
             }
+
+        private fun closedAtOf(row: ResultSet): Instant? = row.getTimestamp("closed_at")?.toInstant()
 
         /**
          * BR-1's "ever readable" asked of one entry row `e`: the caller wrote it, or it has been
@@ -300,7 +310,7 @@ internal class ArchiveDays(
         ): Pair<String, List<Any>> {
             val sql =
                 listOfNotNull(
-                    "SELECT d.id, d.date, d.status, array_agg(e.id) AS matched",
+                    "SELECT d.id, d.date, d.status, d.closed_at, d.entry_count, array_agg(e.id) AS matched",
                     "FROM entries e JOIN bond_days d ON d.id = e.bond_day_id AND d.bond_id = e.bond_id",
                     "WHERE e.bond_id = ?",
                     before?.let { "AND d.date < ?" },
@@ -310,7 +320,7 @@ internal class ArchiveDays(
                     withdrawnMemberIds
                         .takeIf { it.isNotEmpty() }
                         ?.let { ids -> "AND e.author_member_id NOT IN (${ids.joinToString { "?" }})" },
-                    "GROUP BY d.id, d.date, d.status",
+                    "GROUP BY d.id, d.date, d.status, d.closed_at, d.entry_count",
                     "ORDER BY d.date DESC",
                     "LIMIT ?",
                 ).joinToString("\n")
@@ -354,6 +364,8 @@ internal class ArchiveDays(
                     BondDayId(row.getObject("id", UUID::class.java)),
                     row.getObject("date", LocalDate::class.java),
                     BondDayStatus.valueOf(row.getString("status")),
+                    closedAtOf(row),
+                    row.getInt("entry_count"),
                     (row.getArray("matched").array as Array<*>).map { EntryId(it as UUID) }.toSet(),
                 )
             }

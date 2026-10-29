@@ -26,13 +26,14 @@ import java.util.UUID
  * KDoc), so an entry the caller withdrew is its tombstone here too.
  *
  * [partnerEntry] is [PartnerEntryResponse]`?` — [EntryResponse] (in full once
- * the entry has been revealed, or its tombstone if withdrawn after that),
- * [LockedEntryResponse] (not yet revealed), [ErasedEntryResponse] (withdrawn
- * without ever having been revealed), or `null` when there is no partner
- * entry to report at all. **All four are reachable through the API**: a
- * partner's entry is locked until it is revealed, in full after that, and
- * one tombstone or the other once its author deletes it, depending on which
- * side of the reveal the delete fell. None of that is decided here —
+ * the entry has been revealed, or its tombstone if erased after that),
+ * [LockedEntryResponse] (not yet revealed), or `null` when there is no partner
+ * entry to report: none was written, **or one was erased before it was ever
+ * revealed**, which is the same `null` (the owner's ruling of 2026-10-21,
+ * `service.shownTo`). **All three are reachable through the API**: a
+ * partner's entry is locked until it is revealed, in full after that, its
+ * tombstone if its author erases it then, and nothing if they erase it
+ * before. None of that is decided here —
  * [PartnerEntryResponse.of] renders whatever
  * [com.moyi.gratitude.domain.Entry.canBeReadBy] answered rather than
  * choosing a shape from the day or the entry itself. Doc 12's
@@ -109,17 +110,19 @@ internal data class TodayPromptResponse(
  * plain [EntryResponse]`?` because BR-1's first clause makes the locked
  * shape unreachable for a caller's own entry (fix round 1, M1: an earlier
  * version of this KDoc said "shared" between the two fields, which was
- * never true of the code). One of three: [EntryResponse] (BR-1 granted the
- * read, or the reader could read it before it was erased),
- * [LockedEntryResponse] (not yet revealed) or [ErasedEntryResponse] (erased
- * without ever having been revealed).
+ * never true of the code). One of two: [EntryResponse] (BR-1 granted the
+ * read, or the reader could read it before it was erased) or
+ * [LockedEntryResponse] (not yet revealed). An entry erased before it was
+ * ever revealed is no shape at all: the day leaves it out (`service.shownTo`).
+ * Until 2026-10-28 it was a third, `ErasedEntryResponse`
+ * (`{authorMemberId, status: REMOVED}`), and the owner's ruling removed it.
  *
  * **`sealed`, not merely an interface, and that is load-bearing.** A plain
  * `interface` could be implemented from outside this module by anything —
  * some future type nobody here reviewed, rendered into this exact field
  * with no compiler check on its shape. `sealed` confines every
  * implementation to this module (in fact, this file), so "either revealed
- * in full, locked or erased to exactly BR-8's shape, nothing else" is a closed set
+ * in full or locked to exactly BR-8's shape, nothing else" is a closed set
  * the compiler enforces, not a convention a reviewer has to keep re-checking
  * (fix round 1).
  *
@@ -127,13 +130,12 @@ internal data class TodayPromptResponse(
  * needing `@JsonTypeInfo` here — this type is only ever written to the
  * wire, never read back off it.
  *
- * **In the generated OpenAPI document this is a `oneOf` of the three,
+ * **In the generated OpenAPI document this is a `oneOf` of the two,
  * discriminated on `status`.** springdoc resolves a sealed interface to its
  * branches by itself; `contracts.OpenApiConfiguration` adds the
  * discriminator. Each wire value names exactly one branch: `LOCKED` is
- * [LockedEntryResponse], `REMOVED` is [ErasedEntryResponse], and the entry's
- * own statuses — `DELETED` included, the wide tombstone — are
- * [EntryResponse]. That is why [ErasedEntryStatus] is not `DELETED`.
+ * [LockedEntryResponse], and the entry's own statuses — `DELETED` included,
+ * the wide tombstone — are [EntryResponse].
  */
 internal sealed interface PartnerEntryResponse {
     companion object {
@@ -141,16 +143,22 @@ internal sealed interface PartnerEntryResponse {
          * BR-1's answer, as a wire shape — exhaustive over [Readability], so
          * another answer is a compile error here rather than a default nobody
          * chose. Full, or a tombstone the reader could once read:
-         * [EntryResponse]. Locked: BR-8's [LockedEntryResponse]. Erased
-         * before it was ever revealed: [ErasedEntryResponse]. Both of those
-         * are given the author and nothing else — the reading has nothing
-         * else to give them. A non-member: nothing.
+         * [EntryResponse]. Locked: BR-8's [LockedEntryResponse], given the
+         * author and nothing else — the reading has nothing else to give it.
+         * A non-member: nothing.
+         *
+         * **Erased before it was ever revealed is not answered here**: the
+         * day was rendered without it (`service.shownTo`, the one place that
+         * rule lives), so no reading of that answer reaches a response. One
+         * that did would be a renderer that skipped the rule, and fails
+         * loudly rather than choose a shape the ruling took away, or a
+         * `null` that would hide the fault and be a second copy of the rule.
          *
          * [favourited], the caller's own bookmark, and [reaction], the one
          * on the entry, go to the one branch that has fields for them. The
-         * two narrow shapes are not given either and could not carry one: an
-         * entry the caller was never shown has nothing of the caller's on it,
-         * and they cannot have reacted to it.
+         * locked shape is not given either and could not carry one: an entry
+         * the caller was never shown has nothing of the caller's on it, and
+         * they cannot have reacted to it.
          */
         fun of(
             reading: EntryReading,
@@ -161,7 +169,7 @@ internal sealed interface PartnerEntryResponse {
             when (reading.readability) {
                 Readability.FULL, Readability.TOMBSTONE -> EntryResponse.of(reading, date, favourited, reaction)
                 Readability.LOCKED -> reading.authorMemberId?.let { LockedEntryResponse(it) }
-                Readability.TOMBSTONE_UNSEEN -> reading.authorMemberId?.let { ErasedEntryResponse(it) }
+                Readability.TOMBSTONE_UNSEEN -> error("a day renders an entry erased before it was shown as no entry (service.shownTo)")
                 Readability.NOT_A_MEMBER -> null
             }
     }
