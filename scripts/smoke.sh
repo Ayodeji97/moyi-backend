@@ -107,8 +107,13 @@
 # no title, its length on the asset; a 62-second WAV and a WAV declared as an M4A
 # FAILED; and, with a photo, M4's first half: an entry with both, the voice note
 # locked away from the partner until the reveal and then PROCESSING to them, as
-# the photo is, until D4 moderates it (the owner's ruling on FR-061). D3_RUN_NOTE
-# Since Phase 4
+# the photo is, until D4 moderates it (the owner's ruling on FR-061). D3 last run
+# on 2026-10-29, after main (d2429fc D2, 66032c0 D5) was merged in, from a jar of
+# that merge, on a fresh database that applied 34 migrations to V35, against its own
+# compose project (moyi-d3: Postgres 55443, Valkey 63803, MinIO 59006), the jar
+# booted by hand on libvips 8.18.7 and ffmpeg 9.0.2, and --attach: 1151 passed, 0
+# failed, 2 skipped (the tag across the erasure, the poller having won the race),
+# 31 sections. Since Phase 4
 # D5 the photographer then deletes the entry the photo is on: the owner's GET of
 # it is 404, the row DELETED with one MediaReleased, media.purge stamps it within
 # seconds, the URL handed out before answers 404 and MinIO holds nothing of it.
