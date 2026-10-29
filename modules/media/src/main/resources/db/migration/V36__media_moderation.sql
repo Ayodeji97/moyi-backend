@@ -42,9 +42,16 @@ ALTER TABLE media_assets
 -- can take the verdict off, or make a blocked asset anything but QUARANTINED
 -- (held as evidence) or DELETED (by the operator, after the report the
 -- takedown runbook requires). A CHECK sees only the new row; this sees both.
+-- And a verdict that becomes BLOCKED holds the evidence, whoever sets it: the
+-- application does, but so does the runbook's own statement for a reported
+-- asset, and a hold forgotten there would let an erasure purge the evidence
+-- (review of #113).
 CREATE FUNCTION media_assets_blocked_is_final() RETURNS trigger
     LANGUAGE plpgsql AS $$
 BEGIN
+    IF NEW.moderation_verdict = 'BLOCKED' AND OLD.moderation_verdict IS DISTINCT FROM 'BLOCKED' THEN
+        NEW.evidence_held := true;
+    END IF;
     IF OLD.moderation_verdict = 'BLOCKED'
        AND (NEW.moderation_verdict IS DISTINCT FROM 'BLOCKED' OR NEW.status NOT IN ('QUARANTINED', 'DELETED')) THEN
         RAISE EXCEPTION 'media asset % is blocked: its verdict is final, and it is never released', OLD.id

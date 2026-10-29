@@ -240,6 +240,31 @@ internal class MediaQuarantineCommandsTest(
         purgedAt(blocked) shouldBe false
     }
 
+    /**
+     * The runbook's own statement for a reported asset sets BLOCKED by hand. The
+     * evidence must be held whatever that statement says of the hold: the
+     * database sets it (review of #113), so the owner's later delete leaves the
+     * objects where they are.
+     */
+    @Test
+    fun `an asset blocked by hand, as the runbook does for a report, is held as evidence`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val reported = rows.insert(owner = ada, createdAt = clock.instant(), upload = upload)
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'PASSED', moderated_at = now() WHERE id = ?", reported)
+        putBehindTheApi(display(upload), byteArrayOf(1, 2, 3))
+
+        jdbc.update(
+            "UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = 'BLOCKED', moderated_at = now() WHERE id = ?",
+            reported,
+        )
+        jdbc.queryForObject("SELECT evidence_held FROM media_assets WHERE id = ?", Boolean::class.java, reported) shouldBe true
+        ownMedia.delete(ada, reported)
+        purge()
+
+        stored(display(upload)) shouldBe true
+        purgedAt(reported) shouldBe false
+    }
+
     /** FR-044a: only a READY asset is claimed, so what was held back before it was attached is refused with the one refusal. */
     @Test
     fun `a held-back asset is not attached to an entry`() {

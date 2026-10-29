@@ -112,8 +112,10 @@ does:
    then `moyi media quarantine delete <id> "report: NCII, <date>"`). Tell the reporter it is gone,
    and nothing else. The author's own withdraw/erase (D5) remains open to them.
 3. Child sexual abuse material: as section 2, from step 1; set it `BLOCKED` first
-   (`UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = 'BLOCKED', moderated_at = now() WHERE id = '<id>';`)
-   so that nothing can release it.
+   (`UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = 'BLOCKED', evidence_held = true, moderated_at = now() WHERE id = '<id>';`)
+   so that nothing can release it and nothing purges it. (The database sets `evidence_held` with
+   `BLOCKED` even if the statement leaves it out; it is written here so the statement says what it
+   does.) The media check then fails, as it should, until the report is made.
 4. Anything else: decide as section 1.
 
 ## 4. A law-enforcement request
