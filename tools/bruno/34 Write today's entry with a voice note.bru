@@ -1,0 +1,37 @@
+meta {
+  name: Write today's entry with a voice note
+  type: http
+  seq: 34
+}
+
+post {
+  url: {{api}}/bonds/{{bondId}}/entries
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "text": "Listen to the rain on the roof.",
+    "voiceMediaId": "{{mediaId}}"
+  }
+}
+
+script:pre-request {
+  // A new key on every send, as Write today's entry makes one.
+  req.setHeader("Idempotency-Key", require("uuid").v4());
+}
+
+script:post-response {
+  bru.setVar("entryId", res.body.id);
+}
+
+docs {
+  An entry with a voice note (ADR-0049): the voice note Media upload intent named with kind VOICE, once Media says it is READY. Its owner only, READY, and on no other entry: anything else is 422 VALIDATION_FAILED on voiceMediaId, one answer whatever the reason, and no entry is written. The 201 carries `voice` with its status READY, a signed URL of an Ogg Opus file and its durationMs; the partner, once the day reveals, is given the same, since a voice note waits on no moderation. A locked entry says nothing of a voice note. An entry may carry a photo (imageMediaId) and a voice note together.
+
+  Bruno's Media upload sends twenty bytes of text, which the pipeline refuses (FAILED): to try this request, upload a real recording of at most 61 seconds (M4A, 3GP, Ogg, WebM, AMR, AAC or WAV; `scripts/smoke.sh`'s voice notes section shows how with curl) as kind VOICE, then set mediaId to its id.
+}

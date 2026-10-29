@@ -2447,7 +2447,7 @@
     "rule": "BR-10a",
     "evidence": "smoke",
     "evidenceRef": "the partner sees the tombstone",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/EntryReading.kt#Readability.TOMBSTONE -> disclose(EntryStatus.DELETED, null, null)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/EntryReading.kt#Readability.TOMBSTONE -> disclose(EntryStatus.DELETED, null, null, null)"
   },
   {
     "id": "entry-none-edit",

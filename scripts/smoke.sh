@@ -1012,9 +1012,9 @@ expect "an entry with no Idempotency-Key is 422 VALIDATION_FAILED" 422 '"code":"
 LONG_KEY="$(python3 -c 'print("k" * 256)')"
 expect "a key of 256 characters is 422 on the header" 422 '"field":"Idempotency-Key","code":"SIZE"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $LONG_KEY" -d '{"text":"the key is too long"}'
 
-# Spec §1: a voice note is refused, never stored and quietly ignored, until D3.
-# (A photo is attached since D2: the photos section near the end.)
-expect "an entry carrying a voice note is 422 MEDIA_NOT_YET_SUPPORTED" 422 '"code":"MEDIA_NOT_YET_SUPPORTED"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"listen to this\",\"voiceMediaId\":\"$(python3 -c 'import uuid; print(uuid.uuid4())')\"}"
+# Since D3 a voice note is attached as a photo is (the voice notes section near the
+# end): an id that names none of the caller's is refused on its field, never ignored.
+expect "an entry naming a voice note nobody has is 422 on voiceMediaId" 422 '"field":"voiceMediaId"' -- -X POST "$API/bonds/$GRAT_BOND/entries" -H "Authorization: Bearer $PARTNER_ACCESS" -H "Idempotency-Key: $(python3 -c 'import uuid; print(uuid.uuid4())')" -d "{\"text\":\"listen to this\",\"voiceMediaId\":\"$(python3 -c 'import uuid; print(uuid.uuid4())')\"}"
 
 # BR-1/BR-8: the partner's own read of the day sees PARTIAL and a locked
 # entry — the author and the status, nothing else, on the wire and in the log.
@@ -2288,9 +2288,12 @@ echo; echo "media — an upload straight to the storage, and the four /media rou
 # never through this server (FR-044). The local profile points the app at
 # docker-compose.yml's MinIO and its moyi-media bucket; with --attach, start the
 # server against a MinIO that has that bucket. The file is a few bytes that
-# start like an Ogg voice note: a voice note, so that D2's pipeline, which
-# processes photos and leaves voice notes to D3, does not move it out of
-# UPLOADED while these probes read it. The photos section below has the pipeline.
+# start like an Ogg voice note. Since D3 the pipeline takes voice notes up too
+# (it fails these bytes, which are no Ogg), so every probe here that reads the
+# asset after its completion holds whatever the pipeline has made of it by then:
+# the object is looked for in MinIO before the completion, and after the delete
+# under every key the asset may have. The photos and voice notes sections below
+# have the pipeline.
 verified_account "uploader" "203.0.113.120"; MEDIA_ACCESS="$ACCOUNT_ACCESS"
 verified_account "onlooker" "203.0.113.121"; ONLOOKER_ACCESS="$ACCOUNT_ACCESS"
 MEDIA_FILE="$(mktemp)"
@@ -2312,6 +2315,11 @@ PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Con
 case "$PUT_STATUS" in 400|403) pass "media: the storage refuses a body other than the one declared ($PUT_STATUS)";; *) fail "media: forged body" "expected 400 or 403 from the storage, got $PUT_STATUS";; esac
 PUT_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$MEDIA_URL" -H 'Content-Type: audio/ogg' -H "x-amz-checksum-sha256: $MEDIA_CHECKSUM_HEADER" --data-binary "@$MEDIA_FILE")"
 [ "$PUT_STATUS" = 200 ] && pass "media: the storage takes the declared bytes (200)" || fail "media: PUT" "expected 200 from the storage, got $PUT_STATUS"
+MEDIA_OBJECT="$(sql "SELECT storage_key FROM media_assets WHERE id='$MEDIA_ID'")"
+minio_has() { docker compose exec -T minio sh -c "mc alias set smoke http://localhost:9000 \"\$MINIO_ROOT_USER\" \"\$MINIO_ROOT_PASSWORD\" >/dev/null && mc stat smoke/moyi-media/$1" >/dev/null 2>&1; }
+if [ "$PSQL_OK" = 1 ] && docker compose exec -T minio true >/dev/null 2>&1; then MINIO_OK=1; else MINIO_OK=0; fi
+if [ "$MINIO_OK" = 0 ]; then skip "media: the object is in MinIO before the delete (MinIO or psql not reachable through docker compose)"
+elif minio_has "$MEDIA_OBJECT"; then pass "media: the object is in MinIO before the delete"; else fail "media: object before delete" "MinIO has nothing under the asset's key"; fi
 # No public bucket (NFR-047): while the object exists, its address without a
 # signature is refused. 403 only: a 200 is a public bucket, a 404 a wrong key.
 UNSIGNED_STATUS="$(curl -s -o /dev/null -w '%{http_code}' "${MEDIA_URL%%\?*}")"
@@ -2322,7 +2330,7 @@ db_is "media: …and one MediaUploaded event was recorded" "$(sql "SELECT count(
 expect "media: the same key again is a replay" 200 '"status":"UPLOADED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS" -H "Idempotency-Key: $MEDIA_KEY"
 header_is "media: …marked as one" Idempotency-Replayed true
 expect "media: completion without an Idempotency-Key is 422" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/media/$MEDIA_ID/complete" -H "Authorization: Bearer $MEDIA_ACCESS"
-expect "media: the owner reads it" 200 '"status":"UPLOADED"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
+expect "media: the owner reads it" 200 '"kind":"VOICE"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
 expect "media: another user's GET is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $ONLOOKER_ACCESS"
 STRANGER_MEDIA="$LAST_BODY"
 expect "media: an id that names nothing is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- "$API/media/$(uuidgen | tr 'A-Z' 'a-z')" -H "Authorization: Bearer $MEDIA_ACCESS"
@@ -2333,14 +2341,9 @@ expect "media: another user's DELETE is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' 
 expect "media: a GIF is 415 MEDIA_TYPE_UNSUPPORTED" 415 '"code":"MEDIA_TYPE_UNSUPPORTED"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d "$(media_intent IMAGE image/gif 100)"
 expect "media: a photo over 10 MB is 413 MEDIA_QUOTA_EXCEEDED" 413 '"code":"MEDIA_QUOTA_EXCEEDED"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d "$(media_intent IMAGE image/png 10485761)"
 expect "media: an intent with no checksum is 422 on checksum" 422 '"field":"checksum"' -- -X POST "$API/media/upload-intent" -H "Authorization: Bearer $MEDIA_ACCESS" -d '{"kind":"VOICE","contentType":"audio/ogg","sizeBytes":100}'
-MEDIA_OBJECT="$(sql "SELECT storage_key FROM media_assets WHERE id='$MEDIA_ID'")"
-minio_has() { docker compose exec -T minio sh -c "mc alias set smoke http://localhost:9000 \"\$MINIO_ROOT_USER\" \"\$MINIO_ROOT_PASSWORD\" >/dev/null && mc stat smoke/moyi-media/$1" >/dev/null 2>&1; }
-if [ "$PSQL_OK" = 1 ] && docker compose exec -T minio true >/dev/null 2>&1; then MINIO_OK=1; else MINIO_OK=0; fi
-if [ "$MINIO_OK" = 0 ]; then skip "media: the object is in MinIO before the delete (MinIO or psql not reachable through docker compose)"
-elif minio_has "$MEDIA_OBJECT"; then pass "media: the object is in MinIO before the delete"; else fail "media: object before delete" "MinIO has nothing under the asset's key"; fi
 expect "media: the owner deletes it, 204" 204 "" -- -X DELETE "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
 if [ "$MINIO_OK" = 0 ]; then skip "media: …and the object is gone from MinIO"
-elif minio_has "$MEDIA_OBJECT"; then fail "media: object after delete" "MinIO still holds the deleted asset's object"; else pass "media: …and the object is gone from MinIO"; fi
+elif minio_has "$MEDIA_OBJECT" || minio_has "v/${MEDIA_OBJECT#in/}/voice.ogg"; then fail "media: object after delete" "MinIO still holds an object of the deleted asset"; else pass "media: …and the object is gone from MinIO"; fi
 db_is "media: …the row says DELETED" "$(sql "SELECT status FROM media_assets WHERE id='$MEDIA_ID'")" "DELETED"
 expect "media: a deleted asset is 404 to its owner" 404 '"code":"NOT_FOUND"' -- "$API/media/$MEDIA_ID" -H "Authorization: Bearer $MEDIA_ACCESS"
 if grep -q "X-Amz-Signature=$(printf '%s' "$MEDIA_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
@@ -2351,8 +2354,8 @@ flush_buckets
 
 echo; echo "photos — processed by libvips, attached to an entry, shown to each member (Phase 4 D2, ADR-0048)"
 # The booted jar's outbox poller runs media.process (the local profile turns on
-# VIPS, so libvips' command-line tools must be on PATH; with --attach, start the
-# server with them). The photo is made here: a JPEG from libvips, with an EXIF
+# NATIVE, so libvips' command-line tools and ffmpeg must be on PATH; with
+# --attach, start the server with them). The photo is made here: a JPEG from libvips, with an EXIF
 # block written in by hand that says where it was taken (51° 30′ 12.34″ N, made
 # up). What comes back at the URL must carry none of it.
 PHOTO_DIR="$(mktemp -d)"
@@ -2373,14 +2376,17 @@ vips black "$PHOTO_DIR/plain.png" 32 32 --bands 3
 LATITUDE_HEX="$(python3 -c 'import struct; print(struct.pack(">6I", 51, 1, 30, 1, 1234, 100).hex())')"
 # has_bytes <file> <hex> — whether the file holds those bytes anywhere.
 has_bytes() { python3 -c "import sys; sys.exit(0 if bytes.fromhex(sys.argv[2]) in open(sys.argv[1], 'rb').read() else 1)" "$1" "$2"; }
-# upload_photo <access> <file> <declared type> — intent, PUT straight to MinIO, completion; leaves the id in PHOTO_ID.
+# upload_photo <access> <file> <declared type> [kind] — intent, PUT straight to MinIO, completion; leaves the id in
+# PHOTO_ID. The kind is IMAGE unless named (the voice notes section names VOICE).
 upload_photo() {
-  local access="$1" file="$2" type="$3" size sum url header
+  local access="$1" file="$2" type="$3" kind="${4:-IMAGE}" size sum url header intent
+  intent="$(mktemp)"
   size="$(wc -c < "$file" | tr -d '[:space:]')"; sum="$(openssl dgst -sha256 -binary "$file" | base64)"
   curl -s -X POST "$API/media/upload-intent" -H "Authorization: Bearer $access" -H 'Content-Type: application/json' \
-    -d "{\"kind\":\"IMAGE\",\"contentType\":\"$type\",\"sizeBytes\":$size,\"checksum\":\"$sum\"}" > "$PHOTO_DIR/intent.json"
-  PHOTO_ID="$(jget mediaId < "$PHOTO_DIR/intent.json")"; url="$(jget uploadUrl < "$PHOTO_DIR/intent.json")"
-  header="$(python3 -c "import json,sys; print(json.load(sys.stdin)['requiredHeaders']['x-amz-checksum-sha256'])" < "$PHOTO_DIR/intent.json")"
+    -d "{\"kind\":\"$kind\",\"contentType\":\"$type\",\"sizeBytes\":$size,\"checksum\":\"$sum\"}" > "$intent"
+  PHOTO_ID="$(jget mediaId < "$intent")"; url="$(jget uploadUrl < "$intent")"
+  header="$(python3 -c "import json,sys; print(json.load(sys.stdin)['requiredHeaders']['x-amz-checksum-sha256'])" < "$intent")"
+  rm -f "$intent"
   curl -s -o /dev/null -X PUT "$url" -H "Content-Type: $type" -H "x-amz-checksum-sha256: $header" --data-binary "@$file"
   curl -s -o /dev/null -X POST "$API/media/$PHOTO_ID/complete" -H "Authorization: Bearer $access" -H "Idempotency-Key: $(uuidgen)"
 }
@@ -2442,6 +2448,94 @@ if grep -q "$(printf '%s' "$PH_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/
   fail "photos: the photo's URL is in no log line" "its signature is in $MOYI_LOG"
 else pass "photos: the photo's URL is in no log line"; fi
 rm -rf "$PHOTO_DIR"
+flush_buckets
+
+echo; echo "voice notes — transcoded by ffmpeg, attached to an entry, played to each member (Phase 4 D3, ADR-0049)"
+# The booted jar's outbox poller runs media.process for voice notes too (the
+# local profile's NATIVE needs ffmpeg with libopus on PATH as well as libvips;
+# with --attach, start the server with both). The recordings are made here: an
+# M4A from ffmpeg carrying a made-up title, and WAVs of a tone written by hand.
+# What comes back at the URL must be Ogg Opus with none of the title. With the
+# photo, the first half of M4 (15:110): an entry with a photo and a voice note.
+VOICE_DIR="$(mktemp -d)"
+VOICE_TAG="FAKE-SMOKE-TITLE-QZX"
+ffmpeg -hide_banner -v error -y -f lavfi -i "sine=frequency=440:sample_rate=16000:duration=2" -ac 1 -c:a aac \
+  -metadata "title=$VOICE_TAG" -f ipod "$VOICE_DIR/note.m4a"
+# wav_tone <file> <seconds> — a 440 Hz tone, 16-bit mono PCM at 8 kHz, in a RIFF WAVE.
+wav_tone() {
+  python3 - "$1" "$2" <<'PY'
+import math, struct, sys
+rate, seconds = 8000, float(sys.argv[2])
+samples = int(rate * seconds)
+pcm = b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 440 * i / rate))) for i in range(samples))
+header = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+open(sys.argv[1], "wb").write(header + b"data" + struct.pack("<I", len(pcm)) + pcm)
+PY
+}
+wav_tone "$VOICE_DIR/short.wav" 2
+wav_tone "$VOICE_DIR/long.wav" 62
+vips black "$VOICE_DIR/photo.jpg" 64 48 --bands 3
+verified_account "speaker" "203.0.113.160"; VO_A="$ACCOUNT_ACCESS"
+verified_account "listener" "203.0.113.161"; VO_B="$ACCOUNT_ACCESS"
+verified_account "outsider-v" "203.0.113.162"; VO_O="$ACCOUNT_ACCESS"
+
+has_bytes "$VOICE_DIR/note.m4a" "$(printf '%s' "$VOICE_TAG" | xxd -p | tr -d '\n')" && pass "voice: the M4A uploaded carries a title" || fail "voice: fixture" "the made-up title is not in the M4A"
+upload_photo "$VO_A" "$VOICE_DIR/note.m4a" audio/x-m4a VOICE; VO_NOTE="$PHOTO_ID"
+VO_UPLOAD_KEY="$(sql "SELECT storage_key FROM media_assets WHERE id='$VO_NOTE'")"
+is "voice: an uploaded voice note becomes READY" "$(await_photo "$VO_A" "$VO_NOTE")" "READY"
+expect "voice: …and its owner is given a URL and its length" 200 '"durationMs":' -- "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_A"
+VO_URL="$(printf '%s' "$LAST_BODY" | jget url)"
+VO_MS="$(printf '%s' "$LAST_BODY" | jget durationMs)"
+[ "$VO_MS" -ge 1900 ] && [ "$VO_MS" -le 2200 ] && pass "voice: …two seconds long ($VO_MS ms)" || fail "voice: length" "durationMs is $VO_MS"
+VO_TYPE="$(curl -s -o "$VOICE_DIR/served.ogg" -w '%{content_type}' "$VO_URL")"
+[ "$VO_TYPE" = "audio/ogg" ] && pass "voice: the file at its URL is served as audio/ogg" || fail "voice: served type" "got $VO_TYPE"
+[ "$(head -c 4 "$VOICE_DIR/served.ogg")" = "OggS" ] && has_bytes "$VOICE_DIR/served.ogg" "$(printf 'OpusHead' | xxd -p)" \
+  && pass "voice: …and is Ogg Opus" || fail "voice: served format" "the bytes at the URL are not Ogg Opus"
+VO_PROBE="$(ffprobe -v error -show_entries stream=codec_name,channels -of csv=p=0 "$VOICE_DIR/served.ogg")"
+is "voice: …one channel of Opus, by ffprobe" "$VO_PROBE" "opus,1"
+if has_bytes "$VOICE_DIR/served.ogg" "$(printf '%s' "$VOICE_TAG" | xxd -p | tr -d '\n')"; then
+  fail "voice: …with nothing of the upload's title in it" "the served file still holds the title"
+else pass "voice: …with nothing of the upload's title in it"; fi
+if [ "$MINIO_OK" = 0 ]; then skip "voice: the upload itself is gone from MinIO once the voice note is ready"
+elif minio_has "$VO_UPLOAD_KEY"; then fail "voice: the upload itself is gone from MinIO once the voice note is ready" "MinIO still holds the original bytes"
+else pass "voice: the upload itself is gone from MinIO once the voice note is ready"; fi
+
+upload_photo "$VO_A" "$VOICE_DIR/long.wav" audio/wav VOICE; VO_LONG="$PHOTO_ID"
+is "voice: a voice note of 62 seconds becomes FAILED" "$(await_photo "$VO_A" "$VO_LONG")" "FAILED"
+if grep -q "Media $VO_LONG failed: TOO_LONG" "$MOYI_LOG"; then pass "voice: …and the log says why, by id and rule"; else fail "voice: too long logged" "no line names $VO_LONG and TOO_LONG"; fi
+upload_photo "$VO_A" "$VOICE_DIR/short.wav" audio/mp4 VOICE; VO_FAKED="$PHOTO_ID"
+is "voice: a WAV declared as an M4A becomes FAILED" "$(await_photo "$VO_A" "$VO_FAKED")" "FAILED"
+if grep -q "Media $VO_FAKED failed: NOT_THE_DECLARED_FORMAT" "$MOYI_LOG"; then pass "voice: …NOT_THE_DECLARED_FORMAT in the log"; else fail "voice: mislabelled logged" "no line names $VO_FAKED"; fi
+
+upload_photo "$VO_A" "$VOICE_DIR/photo.jpg" image/jpeg; VO_PHOTO="$PHOTO_ID"
+is "voice: a photo to go with it becomes READY" "$(await_photo "$VO_A" "$VO_PHOTO")" "READY"
+expect "voice: a bond for the speaker and the listener is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $VO_A" -d "$(bond_body "Us")"
+VO_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+VO_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "voice: …which the listener joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$VO_CODE/accept" -H "Authorization: Bearer $VO_B"
+expect "voice: another user's voice note on an entry is 422 on voiceMediaId" 422 '"field":"voiceMediaId"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_B" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"not mine to play\",\"voiceMediaId\":\"$VO_NOTE\"}"
+expect "voice: a photo named as a voice note is 422 on voiceMediaId" 422 '"field":"voiceMediaId"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"wrong kind\",\"voiceMediaId\":\"$VO_PHOTO\"}"
+expect "voice: M4 - an entry with a photo and a voice note is 201, both READY to the author" 201 '"durationMs":' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"hear the rain\",\"imageMediaId\":\"$VO_PHOTO\",\"voiceMediaId\":\"$VO_NOTE\"}"
+VO_ENTRY="$(printf '%s' "$LAST_BODY")"
+is "voice: …the photo READY to its author" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_ENTRY")" "READY"
+is "voice: …the voice note READY to its author" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['status'])" <<<"$VO_ENTRY")" "READY"
+db_is "voice: …the voice note is attached to that entry" "$(sql "SELECT (m.attached_entry_id = e.id) FROM media_assets m JOIN entries e ON e.voice_media_id = m.id WHERE m.id='$VO_NOTE'")" "t"
+db_is "voice: …and its length is the asset's, not the entry's (spec D-10)" "$(sql "SELECT voice_duration_ms IS NULL FROM entries WHERE voice_media_id='$VO_NOTE'")" "t"
+expect "voice: the listener's locked entry says nothing of the voice note" 200 '"status":"LOCKED"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
+if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no URL"; fi
+expect "voice: deleting a voice note on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_A"
+expect "voice: the listener writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, in words"}'
+expect "voice: once revealed the listener can play the voice note, with no moderation to wait on" 200 '"durationMs":' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
+VO_PARTNER="$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['partnerEntry']))" <<<"$LAST_BODY")"
+is "voice: …the voice note READY to the listener" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['status'])" <<<"$VO_PARTNER")" "READY"
+is "voice: …and the photo still PROCESSING to the listener (FR-101)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_PARTNER")" "PROCESSING"
+VO_PARTNER_URL="$(python3 -c "import json,sys; print(json.load(sys.stdin)['voice']['url'])" <<<"$VO_PARTNER")"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$VO_PARTNER_URL")" = 200 ] && pass "voice: …and the listener's URL plays (200)" || fail "voice: listener URL" "the URL the listener was given does not answer 200"
+expect "voice: an outsider reaches neither the voice note nor the day" 404 '"code":"NOT_FOUND"' -- "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_O"
+if grep -q "$(printf '%s' "$VO_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
+  fail "voice: the voice note's URL is in no log line" "its signature is in $MOYI_LOG"
+else pass "voice: the voice note's URL is in no log line"; fi
+rm -rf "$VOICE_DIR"
 flush_buckets
 
 echo; echo "database state"

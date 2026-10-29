@@ -29,7 +29,7 @@
     "to": "NONE",
     "status": 415,
     "code": "MEDIA_TYPE_UNSUPPORTED",
-    "reason": "An image is JPEG, PNG, HEIC or WebP; a voice note is MPEG-4 audio, Ogg, AMR, WebM or WAV. A type with parameters is refused too, because the value is signed and must be sent back exactly. Nothing is recorded.",
+    "reason": "An image is JPEG, PNG, HEIC or WebP; a voice note is MPEG-4 audio, 3GPP, Ogg, WebM, AMR, AAC (ADTS) or WAV. A type with parameters is refused too, because the value is signed and must be sent back exactly. Nothing is recorded.",
     "rule": "FR-042, ADR-0047 §1",
     "evidence": "smoke",
     "evidenceRef": "media: a GIF is 415 MEDIA_TYPE_UNSUPPORTED",
@@ -281,7 +281,7 @@
     "to": "UPLOADED",
     "status": 200,
     "code": null,
-    "reason": "Its kind, status, type and size. url, width and height are null until the photo is READY.",
+    "reason": "Its kind, status, type and size. url, width and height (a photo's) and durationMs (a voice note's) are null until it is READY.",
     "rule": "doc 06:183",
     "evidence": "smoke",
     "evidenceRef": "media: the owner reads it",
@@ -389,11 +389,11 @@
     "to": "PROCESSING",
     "status": null,
     "code": null,
-    "reason": "media.process takes the photo up: PROCESSING, committed in a transaction of its own, so a photo being worked on is seen to be; processing_attempts counts only decodes, once the bytes are fetched and verified. A voice note is left UPLOADED, for D3; a deleted upload is skipped. At most five decodes begin (MediaAsset.MAX_ATTEMPTS).",
-    "rule": "spec §4 D2, ADR-0048 §2",
+    "reason": "media.process takes the photo or voice note up: PROCESSING, committed in a transaction of its own, so an upload being worked on is seen to be; processing_attempts counts only decodes (a voice note's transcode is its decode), once the bytes are fetched and verified. A deleted upload is skipped. At most five decodes begin (MediaAsset.MAX_ATTEMPTS).",
+    "rule": "spec §4 D2, D3, ADR-0048 §2, ADR-0049",
     "evidence": "test",
     "evidenceRef": "ProcessUploadsTest#an uploaded photo becomes ready, two WebP variants without metadata, the upload deleted and a URL for its owner",
-    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/infra/database/MediaAssetStore.kt#\"WHERE id = ? AND kind = 'IMAGE' AND status IN ('UPLOADED', 'PROCESSING') AND processing_attempts < ?\","
+    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/infra/database/MediaAssetStore.kt#\"WHERE id = ? AND status IN ('UPLOADED', 'PROCESSING') AND processing_attempts < ?\","
   },
   {
     "id": "media-processing-made",
@@ -407,8 +407,8 @@
     "to": "READY",
     "status": null,
     "code": null,
-    "reason": "The bytes are the declared ones (length, SHA-256) and one of the four allowed formats, the one declared; the header is within the pixel ceiling; libvips, in a sandbox with a time and a memory limit, makes a full and a display WebP with no metadata, within 350 and 150 KiB. READY under the row lock; the upload itself is deleted after the commit.",
-    "rule": "spec §4 D2, T-07, Q2, ADR-0048 §2-3",
+    "reason": "The bytes are the declared ones (length, SHA-256) and one of the four allowed formats, the one declared; the header is within the pixel ceiling; libvips, in a sandbox with a time and a memory limit, makes a full and a display WebP with no metadata, within 350 and 150 KiB. READY under the row lock; the upload itself is deleted after the commit. A voice note: its bytes are one of the seven recorder containers, the one declared; ffmpeg, in the same sandbox, reads it through that container's demuxer and allowed decoders only, from a file only; its length is at most 61 s, by its container and by what it transcodes to; it is kept as one Ogg Opus file, mono, 24 kbit/s, with no tags or chapters, at most 500 KiB, under v/{uuid}/voice.ogg, and READY with durationMs. The upload is deleted after the commit.",
+    "rule": "spec §4 D2, T-07, Q2, ADR-0048 §2-3, spec §4 D3, ADR-0049",
     "evidence": "smoke",
     "evidenceRef": "photos: …and its owner is given a URL and its size",
     "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/ProcessUploads.kt#check(assets.markReady(asset.id, result.variants, now))"
@@ -425,8 +425,8 @@
     "to": "FAILED",
     "status": null,
     "code": null,
-    "reason": "The bytes are not the declared ones, not an allowed format, not the declared format (a HEIC must list HEVC images only), over the pixel or the decoded-bytes ceiling, unreadable (a truncated file included), too slow or impossible to fit: FAILED, final, and the upload is deleted. A storage that cannot be reached is not a refusal: the outbox retries, and the photo stays PROCESSING; an outage before the decode never counts against it. Once five decodes have begun and none finished, the next delivery fails it (TOO_MANY_ATTEMPTS) and succeeds.",
-    "rule": "spec §4 D2, T-07, ADR-0048 §2-3",
+    "reason": "The bytes are not the declared ones, not an allowed format, not the declared format (a HEIC must list HEVC images only), over the pixel or the decoded-bytes ceiling, unreadable (a truncated file included), too slow or impossible to fit: FAILED, final, and the upload is deleted. A storage that cannot be reached is not a refusal: the outbox retries, and the photo stays PROCESSING; an outage before the decode never counts against it. Once five decodes have begun and none finished, the next delivery fails it (TOO_MANY_ATTEMPTS) and succeeds. A voice note fails the same way for the same causes, and also when it is longer than 61 s (by its container, or by what it transcodes to), carries a stream no allowed decoder reads (a picture, another codec), or would be kept over 500 KiB.",
+    "rule": "spec §4 D2, T-07, ADR-0048 §2-3, spec §4 D3, ADR-0049",
     "evidence": "smoke",
     "evidenceRef": "photos: …which its owner reads as FAILED, with no URL",
     "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/ProcessUploads.kt#check(assets.markFailed(asset.id))"
@@ -605,8 +605,8 @@
     "to": "READY",
     "status": 200,
     "code": null,
-    "reason": "Its kind, status, type and size, and a signed GET of the largest image kept with that image's width and height. The URL is signed as of the start of the hour for 25 hours: at least 24 hours from now, ending on the hour, the same all hour.",
-    "rule": "doc 06:183, doc 05:169, ADR-0048 §5",
+    "reason": "Its kind, status, type and size, and a signed GET of the largest image kept with that image's width and height. The URL is signed as of the start of the hour for 25 hours: at least 24 hours from now, ending on the hour, the same all hour. A voice note: a signed GET of its Ogg Opus, signed the same way, and its durationMs; width and height are null.",
+    "rule": "doc 06:183, doc 05:169, ADR-0048 §5, ADR-0049",
     "evidence": "smoke",
     "evidenceRef": "photos: …and its owner is given a URL and its size",
     "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/OwnMedia.kt#val shown = images.toOwner(asset).takeIf { it.status == ImageViewStatus.READY }"
@@ -659,11 +659,11 @@
     "to": "DELETED",
     "status": 204,
     "code": null,
-    "reason": "Deleted at once: the pipeline holds no lock while it works. It finds the photo deleted under the row lock when it is done, and removes what it made.",
-    "rule": "doc 06:184, ADR-0048 §2",
+    "reason": "Deleted at once: the pipeline holds no lock while it works. It finds the upload deleted under the row lock when it is done, and removes what it made: a photo's variants, a voice note's Opus.",
+    "rule": "doc 06:184, ADR-0048 §2, ADR-0049",
     "evidence": "test",
     "evidenceRef": "ProcessingInterleavingTest#a photo deleted while it is processed is not made ready, and what was made of it is removed",
-    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/ProcessUploads.kt#if (result is Result.Ready) result.variants.forEach { bestEffortDelete(it.key, asset) }"
+    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/ProcessUploads.kt#is Result.VoiceReady -> bestEffortDelete(StorageKey.forVoice(asset.storageKey), asset)"
   },
   {
     "id": "media-ready-delete",
@@ -677,10 +677,10 @@
     "to": "DELETED",
     "status": 204,
     "code": null,
-    "reason": "Deleted, and after the commit its variants and any upload left are removed from the storage, on a best-effort basis (D5's media.purge is where an erasure that must not be given up on lives).",
+    "reason": "Deleted, and after the commit what was kept of it (a photo's variants, a voice note's Opus) and any upload left are removed from the storage, on a best-effort basis (D5's media.purge is where an erasure that must not be given up on lives).",
     "rule": "doc 06:184, ADR-0048 §4",
-    "evidence": "never-run",
-    "evidenceRef": "",
+    "evidence": "test",
+    "evidenceRef": "ProcessUploadsTest#a ready voice note its owner deletes leaves nothing in the storage",
     "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/OwnMedia.kt#storage.delete(key)"
   },
   {
@@ -731,11 +731,11 @@
     "to": "NONE",
     "status": 422,
     "code": "VALIDATION_FAILED",
-    "reason": "No photo of yours has this id: another user's, a v7 id, or nothing at all. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free.",
-    "rule": "FR-044a, spec §4 D2, ADR-0048 §4",
+    "reason": "No photo or voice note of yours has this id: another user's, a v7 id, or nothing at all. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free.",
+    "rule": "FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3",
     "evidence": "smoke",
     "evidenceRef": "photos: another user's photo on an entry is 422 on imageMediaId",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, image, AttachableKind.IMAGE, entry.value)) throw MediaNotAttachableException()"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, mediaId, kind, entry.value)) throw MediaNotAttachableException(kind)"
   },
   {
     "id": "media-pending-attach",
@@ -749,11 +749,11 @@
     "to": "PENDING_UPLOAD",
     "status": 422,
     "code": "VALIDATION_FAILED",
-    "reason": "Not READY. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free.",
-    "rule": "FR-044a, spec §4 D2, ADR-0048 §4",
+    "reason": "Not READY. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free.",
+    "rule": "FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, image, AttachableKind.IMAGE, entry.value)) throw MediaNotAttachableException()"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, mediaId, kind, entry.value)) throw MediaNotAttachableException(kind)"
   },
   {
     "id": "media-uploaded-attach",
@@ -767,11 +767,11 @@
     "to": "UPLOADED",
     "status": 422,
     "code": "VALIDATION_FAILED",
-    "reason": "Not READY: still to be processed. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free.",
-    "rule": "FR-044a, spec §4 D2, ADR-0048 §4",
+    "reason": "Not READY: still to be processed. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free.",
+    "rule": "FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, image, AttachableKind.IMAGE, entry.value)) throw MediaNotAttachableException()"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, mediaId, kind, entry.value)) throw MediaNotAttachableException(kind)"
   },
   {
     "id": "media-processing-attach",
@@ -785,11 +785,11 @@
     "to": "PROCESSING",
     "status": 422,
     "code": "VALIDATION_FAILED",
-    "reason": "Not READY yet. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free.",
-    "rule": "FR-044a, spec §4 D2, ADR-0048 §4",
+    "reason": "Not READY yet. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free.",
+    "rule": "FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3",
     "evidence": "test",
     "evidenceRef": "EntryPhotoTest#FR-044a - a v7 id, a photo not ready, and a voice note named as a photo are each refused",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, image, AttachableKind.IMAGE, entry.value)) throw MediaNotAttachableException()"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, mediaId, kind, entry.value)) throw MediaNotAttachableException(kind)"
   },
   {
     "id": "media-ready-attach",
@@ -803,8 +803,8 @@
     "to": "READY_ATTACHED",
     "status": 201,
     "code": null,
-    "reason": "The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4).",
-    "rule": "FR-044a, FR-101, spec §4 D2, ADR-0048 §4-5",
+    "reason": "The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4). A voice note is claimed the same way, on voiceMediaId, after the photo.",
+    "rule": "FR-044a, FR-101, spec §4 D2, ADR-0048 §4-5, spec §4 D3",
     "evidence": "smoke",
     "evidenceRef": "photos: an entry with the author's ready photo is 201, and the author sees it READY",
     "codeRef": "modules/media/src/main/kotlin/com/moyi/media/infra/database/MediaAssetStore.kt#\"WHERE id = ? AND owner_user_id = ? AND kind = ? AND status = 'READY' AND attached_entry_id IS NULL\","
@@ -821,11 +821,11 @@
     "to": "READY_ATTACHED",
     "status": 422,
     "code": "VALIDATION_FAILED",
-    "reason": "Already on another entry. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free.",
-    "rule": "FR-044a, spec §4 D2, ADR-0048 §4",
+    "reason": "Already on another entry. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free.",
+    "rule": "FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3",
     "evidence": "test",
     "evidenceRef": "EntryPhotoTest#FR-044a - a photo on one entry is refused for a second, in another bond",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, image, AttachableKind.IMAGE, entry.value)) throw MediaNotAttachableException()"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, mediaId, kind, entry.value)) throw MediaNotAttachableException(kind)"
   },
   {
     "id": "media-failed-attach",
@@ -839,11 +839,11 @@
     "to": "FAILED",
     "status": 422,
     "code": "VALIDATION_FAILED",
-    "reason": "Not READY: the pipeline refused it. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free.",
-    "rule": "FR-044a, spec §4 D2, ADR-0048 §4",
+    "reason": "Not READY: the pipeline refused it. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free.",
+    "rule": "FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3",
     "evidence": "smoke",
     "evidenceRef": "photos: a failed photo on an entry is 422 on imageMediaId",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, image, AttachableKind.IMAGE, entry.value)) throw MediaNotAttachableException()"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, mediaId, kind, entry.value)) throw MediaNotAttachableException(kind)"
   },
   {
     "id": "media-deleted-attach",
@@ -857,10 +857,10 @@
     "to": "DELETED",
     "status": 422,
     "code": "VALIDATION_FAILED",
-    "reason": "Deleted. media will not attach it: an entry may carry only a photo of yours that is READY and on no other entry. One answer for every cause, on the field imageMediaId; no entry is written and the Idempotency-Key stays free.",
-    "rule": "FR-044a, spec §4 D2, ADR-0048 §4",
+    "reason": "Deleted. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free.",
+    "rule": "FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, image, AttachableKind.IMAGE, entry.value)) throw MediaNotAttachableException()"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/SubmitEntry.kt#if (!attachments.claim(owner, mediaId, kind, entry.value)) throw MediaNotAttachableException(kind)"
   }
 ]

@@ -4931,10 +4931,40 @@
             },
             "text" : {
               "type" : [ "string", "null" ]
+            },
+            "voice" : {
+              "description" : "The entry's voice note, or null when it has none. Always null on an erased entry; a locked entry has no such field.",
+              "oneOf" : [ {
+                "$ref" : "#/components/schemas/EntryVoiceResponse"
+              }, {
+                "type" : "null"
+              } ]
             }
           },
-          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "image", "intendedAt", "reaction", "status", "text" ]
+          "required" : [ "authorMemberId", "bondId", "createdAt", "date", "favourited", "id", "image", "intendedAt", "reaction", "status", "text", "voice" ]
         } ]
+      },
+      "EntryVoiceResponse" : {
+        "type" : "object",
+        "description" : "An entry's voice note as the caller is played it. url and durationMs are present exactly when status is READY, to its author and to the other member alike: a voice note waits on no moderation. Until then it is PROCESSING, whatever the reason. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a credential for the voice note. durationMs is the length of what was transcoded, at most 61 seconds and a few milliseconds.",
+        "properties" : {
+          "durationMs" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "READY", "PROCESSING" ]
+          },
+          "url" : {
+            "type" : [ "string", "null" ]
+          }
+        },
+        "required" : [ "durationMs", "id", "status", "url" ]
       },
       "ErasedEntryResponse" : {
         "allOf" : [ {
@@ -5123,6 +5153,10 @@
         "properties" : {
           "contentType" : {
             "type" : "string"
+          },
+          "durationMs" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32"
           },
           "height" : {
             "type" : [ "integer", "null" ],
@@ -5421,7 +5455,7 @@
         "properties" : {
           "code" : {
             "type" : "string",
-            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "REACTION_ON_OWN_ENTRY", "REACTION_BUSY", "DAY_CLOSED", "MEDIA_NOT_YET_SUPPORTED", "MEDIA_QUOTA_EXCEEDED", "MEDIA_TYPE_UNSUPPORTED", "MEDIA_NOT_UPLOADED", "MEDIA_STORAGE_UNAVAILABLE", "MEDIA_BUSY", "MEDIA_ATTACHED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
+            "enum" : [ "FAVOURITE_BUSY", "MALFORMED_REQUEST", "VALIDATION_FAILED", "HASHING_CAPACITY_EXCEEDED", "VERIFICATION_TOKEN_INVALID", "VERIFICATION_TOKEN_EXPIRED", "INVALID_CREDENTIALS", "REFRESH_TOKEN_INVALID", "TOKEN_REUSE_DETECTED", "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "EMAIL_NOT_VERIFIED", "BOND_LIMIT_REACHED", "UNAUTHENTICATED", "FORBIDDEN", "RATE_LIMITED", "BOND_FULL", "BOND_ARCHIVED", "ALREADY_MEMBER", "INVITE_NOT_USABLE", "PRECONDITION_REQUIRED", "PRECONDITION_FAILED", "PROPOSAL_PENDING", "PROPOSAL_NEEDS_OTHER_MEMBER", "TIMEZONE_CHANGE_TOO_SOON", "IDEMPOTENCY_KEY_REUSED", "IDEMPOTENCY_KEY_IN_FLIGHT", "ENTRY_ALREADY_EXISTS", "ENTRY_IMMUTABLE", "ENTRY_NOT_REVEALED", "REACTION_ON_OWN_ENTRY", "REACTION_BUSY", "DAY_CLOSED", "MEDIA_QUOTA_EXCEEDED", "MEDIA_TYPE_UNSUPPORTED", "MEDIA_NOT_UPLOADED", "MEDIA_STORAGE_UNAVAILABLE", "MEDIA_BUSY", "MEDIA_ATTACHED", "DAY_NOT_FOUND", "NOT_FOUND", "METHOD_NOT_ALLOWED", "UNSUPPORTED_MEDIA_TYPE", "INTERNAL_ERROR" ]
           },
           "detail" : {
             "type" : "string"
