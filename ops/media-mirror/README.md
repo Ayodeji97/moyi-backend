@@ -43,11 +43,13 @@ designs reach the same end; this one is chosen because of the lock:
   night; a copy of an erased photo expires on day 31 and is not, because it is no longer in the
   source.
 
-An erased photo therefore leaves the mirror at most **31 days** after its last copy (plus the
-provider's lifecycle lag: R2 removes expired objects within about a day). That is the same
-window as the database: the backups are kept 30 days and a deletion request is re-applied on
-restore (doc 07 §7), so an erased photo cannot outlive its erasure longer in the mirror than its
-row does in a backup.
+An erased photo therefore leaves the mirror at most **31 days** after its last copy, plus the
+provider's lifecycle lag (R2 removes expired objects within about a day): **erased media can
+survive in the mirror for up to about 32 days.** That is the order of the database's window (the
+backups are kept 30 days, doc 07 §7), and it carries the same duty: **a deletion request is
+re-applied on restore** (doc 07:357). Restoring from the mirror without that step would bring
+erased photos back; the procedure is below. The owner owes doc 07 §7's retention table and the
+Privacy Policy a line saying so (ADR-0050, Owed).
 
 For a day or so each month, a live photo is in the source but not yet back in the mirror: the
 night between its copy expiring and being copied again. A disaster in that window loses that
@@ -198,6 +200,37 @@ lifecycle rule behave together. Once, after the first run: confirm a delete of a
 with the write token is refused; and about 32 days later, confirm an object's copy expired and
 was copied again (its creation date in the mirror is recent), and that a photo deleted in the app
 since then is gone from the mirror.
+
+## Restoring from the mirror, and re-applying the erasures
+
+Only when `moyi-media` itself is lost or damaged. The mirror holds `v/` objects only, so it
+restores photos that were made, never raw uploads.
+
+1. **Restore the database first** (ADR-0043's restore drill, then the real restore), so the
+   restored `media_assets` says which assets exist and which are erased. A restore of objects
+   without the rows that say what is erased cannot re-apply anything.
+2. **Copy the mirror back** into a fresh `moyi-media` (the same `mc mirror` the other way:
+   `dst/<mirror bucket>/v/` to `src/moyi-media/v/`), with a write token on the new bucket.
+3. **Re-apply the erasures (doc 07:357), before the app serves a single photo.** Every asset that
+   is `DELETED` in the restored database, whether or not `purged_at` is set, has every object
+   deleted again. List the keys in `psql` on the server, never pasting them anywhere else:
+
+   ```sql
+   -- One line per key the asset may have had: its variants under v/ (the mirror holds nothing else).
+   SELECT 'v/' || substr(storage_key, 4) || '/' || v || '.webp'
+   FROM media_assets, unnest(ARRAY['full', 'display']) AS v
+   WHERE status = 'DELETED';
+   ```
+
+   and delete each from the new bucket (`mc rm` from a file of those lines, with the bucket's
+   write token). Do the same for the **full** variant of every photo at `tier = 2` (demoted: only
+   its display variant is to be kept).
+4. **Then, and only then, start the app.** `media.purge` would delete the same keys again for any
+   release still owed, which changes nothing.
+5. Write the run down in the learning log: the counts, never a key.
+
+A restore of an older mirror copy than the database is fine for the same reason: the database
+says what is erased, and step 3 deletes it, whatever the mirror held.
 
 ## The test
 

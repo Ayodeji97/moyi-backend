@@ -39,12 +39,20 @@ nothing backfills one.
   attaches one, is released with no change in `gratitude`).
 - **Not the same as `MediaAttachments.release`**, which a `PATCH` uses to let a replaced photo go:
   that photo stays `READY`, its owner's, and is the reaper's a day later (decision 3).
+- **Indexed** (review of #110). A withdrawal asks it once per entry, all in one delivery with a
+  60-second limit, so an unindexed `attached_entry_id` would make each call a scan of the table.
+  V34 adds a partial index (`WHERE attached_entry_id IS NOT NULL`). Measured on a laptop's Postgres
+  18 with 1,000,000 assets (900,000 attached), the release statement for one entry: **before**, a
+  `Seq Scan on media_assets`, "Rows Removed by Filter: 999999", 23,276 buffers read, **48.8 ms**;
+  **after**, `Index Scan using media_assets_attached_entry_idx`, 3 buffers read, **0.091 ms**. The
+  reviewer measured 90-95 ms a call without it, which for a member with a year of daily entries
+  (365 calls) is past the delivery's limit, so that withdrawal could never finish.
 
 **2. `media.purge` deletes the objects, and never gives up.** A consumer of `MediaReleased` and
 `MediaDemoted` on the outbox (ADR-0035), in the delivery's transaction. For `MediaReleased` it
 deletes every key the asset may have: the upload and, for a photo, each variant's key **derived**
 from the upload's (`StorageKey.forVariant`), whether or not the row records it, so a variant an
-interrupted attempt left behind goes too; then it stamps `purged_at` (V36). For `MediaDemoted` it
+interrupted attempt left behind goes too; then it stamps `purged_at` (V34). For `MediaDemoted` it
 deletes the full variant. A storage that cannot be reached throws, the delivery is rolled back and
 backed off (2 s doubling to 15 minutes) and offered again, with no last attempt, as the withdrawal
 is: an object left in the bucket is a photo its author took back. Deleting what is not there
@@ -54,7 +62,10 @@ succeeds, so a purge delivered twice, or after a best-effort delete, changes not
   owner's own `DELETE /media/{id}`, which still deletes at once on a best-effort basis (D1's
   behaviour, and the smoke run's check) but now has the purge behind it, because the variants
   under `v/` had no lifecycle rule; and `media.process` finding the photo it just made deleted under
-  it, since the owner's purge may have run before those variants were written. ADR-0048's
+  it, since the owner's purge may have run before those variants were written; and `media.process`
+  meeting a deleted photo on which an attempt had begun (`processing_attempts > 0`), because that
+  attempt may have written a variant after the purge and then failed, and its retry is the last
+  thing that will ever look at the photo (review of #110). ADR-0048's
   "best-effort, the lifecycle rule is the fallback" now has a guarantee behind it for `v/` too.
 - **Promptly.** The outbox polls every 2 s, so an erased photo's objects go seconds after the
   erasure commits, and the URL a partner (from D4) or the owner was handed reaches nothing from
@@ -73,10 +84,12 @@ succeeds, so a purge delivered twice, or after a best-effort delete, changes not
 under the row locks, up to a batch of
 assets **attached to nothing** that are either `PENDING_UPLOAD` an hour past their URL's expiry, or
 `READY`/`FAILED` for a day counted from the **latest of their creation, their readiness and the
-moment an entry let them go** (`detached_at`, V36, stamped by `MediaAttachments.release`). The
+moment an entry let them go** (`detached_at`, V34, stamped by `MediaAttachments.release`). The
 readiness counts because processing can take hours in an outage and the owner must still have a
 day to attach; the detachment counts because a photo taken off an entry is its owner's for a day,
-as one never attached is. `UPLOADED` and `PROCESSING` are not the reaper's: an asset stuck there is
+as one never attached is. `detached_at` is not backfilled: no asset exists in production (its
+storage has always been `unavailable`), and for one that did, a missing value only means its day
+is counted from its readiness. `UPLOADED` and `PROCESSING` are not the reaper's: an asset stuck there is
 the alarm's (decision 6). Each deleted asset publishes `MediaReleased`.
 
 - **An attached asset is never reaped.** `attached_entry_id IS NULL` is in the statement that
@@ -111,10 +124,13 @@ consumer, and that is what it is: the outbox's poller is its timer, and its retr
 **6. The P2 alarm and its runbook.** `ops/monitoring/media-check.sh`, a Healthchecks.io heartbeat
 every quarter-hour as the close-job check is: it fails at once on a photo `PROCESSING` for 30
 minutes (doc 11:97), a `DELETED` asset not purged after a day (an erasure that keeps failing is a
-privacy matter someone must hear about), or either job's ShedLock row not taken on time; and
-silence alarms too. The ShedLock row says a job started, not that it finished: a job that throws on
-every run is seen only in the application's log (and, for the reaper, a day later as nothing
-reaped); exporting the jobs' last-success gauges is owed with the rest of doc 11's metrics. `ops/monitoring/media-pipeline-stuck.md` is doc 11:111's runbook.
+privacy matter someone must hear about), or either job not having **finished** a run on time; and
+silence alarms too. ShedLock's `locked_at` says only that a run began, so a job that throws on every
+run would look alive to it (review of #110): each job instead records the end of a run that did not
+throw in `job_runs` (V35, `scheduling`'s own table), and the alarm reads that. A job that has begun
+and never finished counts as late; one that has never begun does not. `ops/monitoring/media-pipeline-stuck.md`
+is doc 11:111's runbook, including what happens when a storage that was configured is made
+`unavailable` again (the purge's deliveries wait, and the alarm says so after a day).
 
 **7. The media mirror (Q15).** `ops/media-mirror/`: a nightly systemd timer (04:30 UTC) runs the
 MinIO client `mc`, from the image `docker-compose.yml` already pins, so nothing is installed on the
@@ -127,9 +143,11 @@ lifecycle rule**.
   anyway. Every copy expires 31 days after it was written; the next night, a live object is copied
   again (it is in the source and missing from the target), and an erased one is not (the purge
   deleted it from the source). So an erased object leaves the mirror at most 31 days after its last
-  copy (plus the provider's lifecycle lag), which matches the database's 30-day rolling backups
-  (doc 07 §7: deletion requests are re-applied on a restore). Demoted full variants leave the same
-  way. The price is that each live object is written again about once a month: at the spec's
+  copy (plus the provider's lifecycle lag, about a day on R2): **erased media can survive in the
+  mirror for up to about 32 days.** That is the order of the database's 30-day rolling backups (doc
+  07 §7), and it carries the same duty: **a restore from the mirror must re-apply the erasures** (doc
+  07:357), deleting again every object of an asset that is `DELETED` in the database restored beside
+  it; `ops/media-mirror/README.md` has the procedure. Demoted full variants leave the same way. The price is that each live object is written again about once a month: at the spec's
   steady state (~1 M objects, ~150 GB) about $7.40 a month on R2, writes ~$4.50 of it; today,
   within the free tier.
 - **mc exits 0 when it cannot reach the target**, reporting the error only as a JSON line; the
@@ -154,8 +172,20 @@ lifecycle rule**.
 - A storage outage holds erasures back for as long as it lasts, and loses none: the purge's
   delivery stays due, the alarm says so after a day.
 - Unattached uploads and photos cost a day of storage at most; full variants 90 days.
-- `media_assets` gains `detached_at` and `purged_at` (V36); `MediaAsset` gains `tier`. Two partial
-  indexes keep the jobs' scans to their candidates.
+- `media_assets` gains `detached_at` and `purged_at` (V34); `MediaAsset` gains `tier`. Three
+  partial indexes: the erasure's lookup by entry, and the two jobs' candidates. `job_runs` (V35).
+- **Known limit: one outbox worker.** The outbox delivers one delivery at a time per process, on
+  the poller's one thread (ADR-0035 decision 7). A bulk purge (a large reaping, or a withdrawal of a
+  long history) while R2 hangs costs each purge delivery up to its storage client's bound for each
+  key (3 s a call, three keys for a photo) before it fails and backs off, and in
+  that time the same worker delivers nothing else: withdrawals and pushes wait behind it. Bounded
+  (each failure backs off, so a run moves on), and accepted at this scale; a worker per consumer
+  is the cure if it is ever seen.
+- **Ordering gate for the owner: configure R2 storage only with or after D5 deployed.** Storage
+  configured before D5 would let photos be attached to entries that are then erased with no release
+  (their assets stay `READY` and their objects stay for good, since V34 backfills nothing), and let
+  assets be deleted before V34 with no `MediaReleased` ever published for them. ADR-0047's set-up
+  list says so too.
 - Shared with D3, built beside this: `ProcessUploads` (one more collaborator) and the
   `SwitchableStore` test double (a delete switch). Whichever merges second merges both.
 
@@ -182,13 +212,20 @@ lifecycle rule**.
   (or call `MediaErasure.releaseAllOf` for each entry they remove), or an account's photos outlive
   it. Neither exists yet.
 - **D3:** `AttachableKind.VOICE`, and nothing else here: a voice note attached to an erased entry is
-  released by decision 1 as it stands, and purged by decision 2 (its `objectKeys` is its upload).
+  released by decision 1 as it stands, and purged by decision 2 once D3 lands: D3 adds the voice
+  note's `voice.ogg` to `MediaAsset.objectKeys`, so with both merged the purge deletes it too. D3
+  keeps the `MediaReleased` call in its own version of `media.process`'s decision.
 - **D4:** moderate photos already at tier 2 (decision 4); a `QUARANTINED` photo on no entry is not
   reaped by this slice's rule (only `READY` and `FAILED` are): D4 says what becomes of it.
 - **The owner, before the mirror runs:** choose the target's provider and jurisdiction; make the
   bucket with its lock and lifecycle rule; the two tokens; the Bitwarden fields and the install
   steps in `ops/media-mirror/README.md`; then one run by hand, the first time `mc` meets the real
   providers.
+- **The owner, for the documents this changes (not edited here; the corpus is read-only to a
+  slice):** doc 07 §7's retention table gains the mirror (erased media kept up to about 32 days in
+  the mirror, re-applied on a restore) and the purge (an erased photo's objects deleted within
+  seconds, retried until the storage answers); the Privacy Policy says the same, beside the
+  database backups' 30 days and D-16's demotion.
 - **The owner, once the media tables are deployed:** install the media check
   (`ops/monitoring/README.md`) and prove its alert reaches him.
 
