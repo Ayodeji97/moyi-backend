@@ -26,9 +26,9 @@ interface VoiceViews {
 }
 
 /**
- * A voice note as one person is played it: `{id, status, url?, durationMs?}`.
- * [url] and [durationMs] are present exactly when [status] is
- * [VoiceViewStatus.READY].
+ * A voice note as one person is played it: `{id, status, url?, durationMs?, sensitive}`.
+ * [url] and [durationMs] are present when [status] is [VoiceViewStatus.READY],
+ * and on [VoiceViewStatus.NOT_SHARED] unless it was blocked.
  *
  * [url] is a signed GET of an Ogg Opus file, valid for at least 24 hours,
  * ending on the hour and the same for every request in that hour, as a
@@ -40,14 +40,20 @@ class VoiceView(
     val status: VoiceViewStatus,
     val url: URI?,
     val durationMs: Int?,
+    /** Passed moderation with something found that the client blurs (Q16); false otherwise. */
+    val sensitive: Boolean = false,
 ) {
-    override fun toString(): String = "VoiceView(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs)"
+    override fun toString(): String =
+        "VoiceView(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, sensitive=$sensitive)"
 }
 
 enum class VoiceViewStatus {
     /** Playable: [VoiceView.url] reaches it. */
     READY,
 
-    /** Not playable yet: not transcoded, or failed. Never says which. */
+    /** Not playable yet: not transcoded, failed, not yet moderated, or held back. Never says which. */
     PROCESSING,
+
+    /** Its owner's only: held back from the partner by moderation (Q10). Playable to them unless blocked. */
+    NOT_SHARED,
 }

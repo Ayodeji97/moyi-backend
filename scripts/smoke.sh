@@ -107,7 +107,20 @@
 # no title, its length on the asset; a 62-second WAV and a WAV declared as an M4A
 # FAILED; and, with a photo, M4's first half: an entry with both, the voice note
 # locked away from the partner until the reveal and then PROCESSING to them, as
-# the photo is, until D4 moderates it (the owner's ruling on FR-061). D3 last run
+# the photo is, until D4 moderates it (the owner's ruling on FR-061; since D4, READY to the listener
+# once the local stand-in has passed it). Since Phase 4 D4 it reaches every verdict through the
+# stand-in moderators, which decide by colour: a red square QUARANTINED (its author reads it
+# QUARANTINED with its URL, it cannot be put on an entry), a magenta one PASSED and sensitive (the
+# partner is shown it READY, sensitive true), a blue one BLOCKED (no URL even for its author, held as
+# evidence); the operator's moyi media quarantine lists them, refuses to release the blocked one,
+# releases the red one and deletes the blue one, whose objects media.purge then removes; the audit
+# log has every look and decision, the metric is scraped, the log names verdicts by id only. D4
+# last run on 2026-10-29, on feat/media-d4-moderation (main f3f4338), from a jar of that tree, on a
+# fresh database that applied 35 migrations to V36, against its own compose project (moyi-d4:
+# Postgres 55449, Valkey 63809, MinIO 59018), the jar booted by hand (local profile, the stand-in
+# moderators) on libvips 8.18.7 and ffmpeg 9.0.2, and --attach: 1194 passed, 0 failed, 0 skipped,
+# 32 sections (an earlier run had one failure, the reveal push's log-line count, a timing flake that
+# passed in the runs before and after it). D3 last run
 # on 2026-10-29, after main (d2429fc D2, 66032c0 D5) was merged in, from a jar of
 # that merge, on a fresh database that applied 34 migrations to V35, against its own
 # compose project (moyi-d3: Postgres 55443, Valkey 63803, MinIO 59006), the jar
@@ -2505,6 +2518,16 @@ upload_photo() {
   curl -s -o /dev/null -X PUT "$url" -H "Content-Type: $type" -H "x-amz-checksum-sha256: $header" --data-binary "@$file"
   curl -s -o /dev/null -X POST "$API/media/$PHOTO_ID/complete" -H "Authorization: Bearer $access" -H "Idempotency-Key: $(uuidgen)"
 }
+# await_verdict <id> — until moderation has given it a verdict (at most 20 s); prints it, or none (D4).
+await_verdict() {
+  local verdict=""
+  for _ in $(seq 1 40); do
+    verdict="$(sql "SELECT coalesce(moderation_verdict, 'none') FROM media_assets WHERE id='$1'")"
+    [ "$verdict" = "none" ] || break
+    sleep 0.5
+  done
+  printf '%s' "$verdict"
+}
 # await_photo <access> <id> — until its status is no longer UPLOADED or PROCESSING (at most 40 s); prints it.
 await_photo() {
   local status=""
@@ -2555,8 +2578,11 @@ if printf '%s' "$LAST_BODY" | grep -q -e "$PH_PHOTO" -e '"image"' -e 'X-Amz'; th
 expect "photos: deleting a photo on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_A"
 expect "photos: its owner still reads it, READY" 200 '"status":"READY"' -- "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_A"
 expect "photos: the viewer writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$PH_BOND/entries" -H "Authorization: Bearer $PH_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, no photo"}'
-expect "photos: once revealed the viewer sees the photo PROCESSING, with no URL" 200 '"status":"PROCESSING","url":null' -- "$API/bonds/$PH_BOND/today" -H "Authorization: Bearer $PH_B"
-if printf '%s' "$LAST_BODY" | grep -q 'X-Amz'; then fail "photos: …and no signed URL anywhere in the viewer's day" "found one"; else pass "photos: …and no signed URL anywhere in the viewer's day"; fi
+# Until moderation passes it the viewer is shown it PROCESSING (FR-101); the local profile's stand-in
+# moderator passes this black square within seconds of its being made (D4, ADR-0051), so by now it has.
+is "photos: the photo has passed moderation (D4, the stand-in)" "$(await_verdict "$PH_PHOTO")" "PASSED"
+expect "photos: once revealed, the viewer sees the passed photo READY with its URL, not blurred" 200 '"status":"READY","url":"http' -- "$API/bonds/$PH_BOND/today" -H "Authorization: Bearer $PH_B"
+case "$LAST_BODY" in *'"sensitive":false'*) pass "photos: …sensitive false";; *) fail "photos: …sensitive false" "${LAST_BODY:0:300}";; esac
 expect "photos: the photographer sees it READY on the revealed day" 200 '"status":"READY","url":"http' -- "$API/bonds/$PH_BOND/today" -H "Authorization: Bearer $PH_A"
 expect "photos: an outsider reaches neither the photo nor the day" 404 '"code":"NOT_FOUND"' -- "$API/media/$PH_PHOTO" -H "Authorization: Bearer $PH_O"
 if grep -q "$(printf '%s' "$PH_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
@@ -2664,17 +2690,114 @@ expect "voice: the listener's locked entry says nothing of the voice note" 200 '
 if printf '%s' "$LAST_BODY" | grep -q -e "$VO_NOTE" -e '"voice"' -e 'durationMs' -e 'X-Amz'; then fail "voice: …no id, no voice field, no length, no URL" "the locked day carries something of the voice note"; else pass "voice: …no id, no voice field, no length, no URL"; fi
 expect "voice: deleting a voice note on an entry is 409 MEDIA_ATTACHED" 409 '"code":"MEDIA_ATTACHED"' -- -X DELETE "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_A"
 expect "voice: the listener writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$VO_BOND/entries" -H "Authorization: Bearer $VO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine, in words"}'
-expect "voice: once revealed the listener sees the voice note PROCESSING, until it has passed moderation (FR-061)" 200 '"partnerEntry"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
+# The listener hears it only once it has passed moderation (FR-061, ADR-0049 decision 7); the local
+# profile's stand-in passes every voice note, and this photo, within seconds (D4, ADR-0051).
+is "voice: the voice note has passed moderation (D4, the stand-in)" "$(await_verdict "$VO_NOTE")" "PASSED"
+is "voice: …and the photo too" "$(await_verdict "$VO_PHOTO")" "PASSED"
+expect "voice: once revealed and passed, the listener is played the voice note" 200 '"partnerEntry"' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_B"
 VO_PARTNER="$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['partnerEntry']))" <<<"$LAST_BODY")"
-is "voice: …PROCESSING to the listener, with no URL and no length" "$(python3 -c "import json,sys; v=json.load(sys.stdin)['voice']; print(v['status'], v['url'], v['durationMs'])" <<<"$VO_PARTNER")" "PROCESSING None None"
-is "voice: …and the photo still PROCESSING to the listener (FR-101)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_PARTNER")" "PROCESSING"
-if printf '%s' "$LAST_BODY" | grep -q 'X-Amz'; then fail "voice: …no signed URL anywhere in the listener's day" "found one"; else pass "voice: …no signed URL anywhere in the listener's day"; fi
+is "voice: …READY to the listener, with a URL and its length" "$(python3 -c "import json,sys; v=json.load(sys.stdin)['voice']; print(v['status'], v['url'] is not None, v['durationMs'] is not None)" <<<"$VO_PARTNER")" "READY True True"
+is "voice: …and the photo READY to the listener (FR-101)" "$(python3 -c "import json,sys; print(json.load(sys.stdin)['image']['status'])" <<<"$VO_PARTNER")" "READY"
 expect "voice: the speaker still plays it READY on the revealed day" 200 '"durationMs":' -- "$API/bonds/$VO_BOND/today" -H "Authorization: Bearer $VO_A"
 expect "voice: an outsider reaches neither the voice note nor the day" 404 '"code":"NOT_FOUND"' -- "$API/media/$VO_NOTE" -H "Authorization: Bearer $VO_O"
 if grep -q "$(printf '%s' "$VO_URL" | sed -E 's/.*X-Amz-Signature=([0-9a-f]+).*/\1/')" "$MOYI_LOG"; then
   fail "voice: the voice note's URL is in no log line" "its signature is in $MOYI_LOG"
 else pass "voice: the voice note's URL is in no log line"; fi
 rm -rf "$VOICE_DIR"
+flush_buckets
+
+echo; echo "moderation — each verdict, what each member is shown, and the operator's queue (Phase 4 D4, ADR-0051)"
+# The local profile names the stand-in moderators, which decide by colour so
+# that every verdict is reached without AWS: a photo almost all red is held
+# back (extreme violence), almost all magenta passes blurred (adult nudity),
+# almost all blue is "known" and blocked; every voice note passes. The booted
+# jar's outbox poller runs media.moderate-image and -voice once media.process
+# has made each one READY. The operator's queue is scripts/moyi media
+# quarantine, reaching this run's database through docker compose.
+MOD_DIR="$(mktemp -d)"
+vips black "$MOD_DIR/black.v" 64 48 --bands 3
+vips linear "$MOD_DIR/black.v" "$MOD_DIR/red.jpg" "1 1 1" "220 20 20" --uchar
+vips linear "$MOD_DIR/black.v" "$MOD_DIR/magenta.jpg" "1 1 1" "220 20 220" --uchar
+vips linear "$MOD_DIR/black.v" "$MOD_DIR/blue.jpg" "1 1 1" "20 20 220" --uchar
+python3 - "$MOD_DIR/note.wav" <<'PY'
+import math, struct, sys
+rate, samples = 8000, 16000
+pcm = b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 440 * i / rate))) for i in range(samples))
+header = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+open(sys.argv[1], "wb").write(header + b"data" + struct.pack("<I", len(pcm)) + pcm)
+PY
+MO_START="$(sql "SELECT extract(epoch FROM now())")"
+verified_account "moderated" "203.0.113.170"; MO_A="$ACCOUNT_ACCESS"
+verified_account "partner-m" "203.0.113.171"; MO_B="$ACCOUNT_ACCESS"
+# quarantine <args…> — the operator's command, as the operator runs it, against this run's database.
+quarantine() {
+  MOYI_OPERATOR=smoke-operator MOYI_OPS_PSQL="docker compose exec -T postgres psql -U moyi -d $MOYI_DB" \
+    scripts/moyi media quarantine "$@"
+}
+
+upload_photo "$MO_A" "$MOD_DIR/red.jpg" image/jpeg; MO_RED="$PHOTO_ID"
+upload_photo "$MO_A" "$MOD_DIR/magenta.jpg" image/jpeg; MO_NUDE="$PHOTO_ID"
+upload_photo "$MO_A" "$MOD_DIR/blue.jpg" image/jpeg; MO_KNOWN="$PHOTO_ID"
+upload_photo "$MO_A" "$MOD_DIR/note.wav" audio/wav VOICE; MO_VOICE="$PHOTO_ID"
+for id in "$MO_RED" "$MO_NUDE" "$MO_KNOWN" "$MO_VOICE"; do await_photo "$MO_A" "$id" >/dev/null; done
+is "moderation: extreme violence is QUARANTINED" "$(await_verdict "$MO_RED")" "QUARANTINED"
+is "moderation: adult nudity PASSES" "$(await_verdict "$MO_NUDE")" "PASSED"
+is "moderation: a known image is BLOCKED" "$(await_verdict "$MO_KNOWN")" "BLOCKED"
+is "moderation: a voice note PASSES (the stand-in passes every one)" "$(await_verdict "$MO_VOICE")" "PASSED"
+expect "moderation: the author reads the quarantined photo QUARANTINED, still with its URL (Q10)" 200 '"status":"QUARANTINED"' -- "$API/media/$MO_RED" -H "Authorization: Bearer $MO_A"
+case "$LAST_BODY" in *'"url":"http'*) pass "moderation: …the URL is there";; *) fail "moderation: …the URL is there" "${LAST_BODY:0:200}";; esac
+expect "moderation: the author reads the blocked photo QUARANTINED" 200 '"status":"QUARANTINED"' -- "$API/media/$MO_KNOWN" -H "Authorization: Bearer $MO_A"
+case "$LAST_BODY" in *'"url":null'*) pass "moderation: …with no URL, not even its author's (Q16)";; *) fail "moderation: …with no URL" "${LAST_BODY:0:200}";; esac
+db_is "moderation: …and it is held as evidence" "$(sql "SELECT evidence_held FROM media_assets WHERE id='$MO_KNOWN'")" "t"
+expect "moderation: the nude photo is READY and sensitive to its author" 200 '"sensitive":true' -- "$API/media/$MO_NUDE" -H "Authorization: Bearer $MO_A"
+db_is "moderation: every verdict is in the audit log, by the moderator" \
+  "$(sql "SELECT count(*) FROM media_moderation_log WHERE actor = 'moderation:stand-in' AND media_id IN ('$MO_RED','$MO_NUDE','$MO_KNOWN')")" "3"
+
+expect "moderation: a bond for the two is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $MO_A" -d "$(bond_body "Us")"
+MO_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+MO_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "moderation: …which the partner joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$MO_CODE/accept" -H "Authorization: Bearer $MO_B"
+expect "moderation: a held-back photo cannot be put on an entry: 422 on imageMediaId" 422 '"field":"imageMediaId"' -- -X POST "$API/bonds/$MO_BOND/entries" -H "Authorization: Bearer $MO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"not this one\",\"imageMediaId\":\"$MO_RED\"}"
+expect "moderation: an entry with the nude photo and the voice note is 201" 201 '"sensitive":true' -- -X POST "$API/bonds/$MO_BOND/entries" -H "Authorization: Bearer $MO_A" -H "Idempotency-Key: $(uuidgen)" -d "{\"text\":\"for you\",\"imageMediaId\":\"$MO_NUDE\",\"voiceMediaId\":\"$MO_VOICE\"}"
+expect "moderation: the partner writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$MO_BOND/entries" -H "Authorization: Bearer $MO_B" -H "Idempotency-Key: $(uuidgen)" -d '{"text":"and mine"}'
+expect "moderation: the partner is shown the passed photo" 200 '"partnerEntry"' -- "$API/bonds/$MO_BOND/today" -H "Authorization: Bearer $MO_B"
+MO_PARTNER="$(python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)['partnerEntry']))" <<<"$LAST_BODY")"
+is "moderation: …READY with a URL, and sensitive, to blur it (Q16)" "$(python3 -c "import json,sys; i=json.load(sys.stdin)['image']; print(i['status'], i['url'] is not None, i['sensitive'])" <<<"$MO_PARTNER")" "READY True True"
+is "moderation: …and the passed voice note READY, with its length" "$(python3 -c "import json,sys; v=json.load(sys.stdin)['voice']; print(v['status'], v['durationMs'] is not None, v['sensitive'])" <<<"$MO_PARTNER")" "READY True False"
+
+if [ "$PSQL_OK" = 1 ]; then
+  MO_LIST="$(quarantine list 2>&1)"
+  case "$MO_LIST" in *"$MO_RED"*EXTREME_VIOLENCE*) pass "moderation: the operator's list shows the quarantined photo and why";; *) fail "moderation: quarantine list" "${MO_LIST:0:300}";; esac
+  case "$MO_LIST" in *"$MO_KNOWN"*BLOCKED*KNOWN_IMAGE*) pass "moderation: …and the blocked one";; *) fail "moderation: quarantine list, blocked" "${MO_LIST:0:300}";; esac
+  case "$MO_LIST" in *"$MO_NUDE"*) fail "moderation: …and nothing that passed" "the nude photo is listed";; *) pass "moderation: …and nothing that passed";; esac
+  if MO_OUT="$(quarantine release "$MO_KNOWN" "smoke: trying" 2>&1)"; then fail "moderation: releasing a blocked asset is refused" "it was released: $MO_OUT"
+  else case "$MO_OUT" in *"never released"*) pass "moderation: releasing a blocked asset is refused, never released (Q16)";; *) fail "moderation: release refused" "$MO_OUT";; esac; fi
+  db_is "moderation: …it is still blocked" "$(sql "SELECT status || '|' || moderation_verdict FROM media_assets WHERE id='$MO_KNOWN'")" "QUARANTINED|BLOCKED"
+  MO_OUT="$(quarantine release "$MO_RED" "smoke: a made-up red square, not violence" 2>&1)" \
+    && pass "moderation: the operator releases the quarantined photo" || fail "moderation: release" "$MO_OUT"
+  expect "moderation: …which its author now reads READY" 200 '"status":"READY"' -- "$API/media/$MO_RED" -H "Authorization: Bearer $MO_A"
+  MO_KNOWN_KEY="$(sql "SELECT storage_key FROM media_assets WHERE id='$MO_KNOWN'")"
+  MO_OUT="$(quarantine delete "$MO_KNOWN" "smoke: reported, ref FAKE-SMOKE-0001" 2>&1)" \
+    && pass "moderation: the operator deletes the blocked asset after the report" || fail "moderation: delete" "$MO_OUT"
+  MO_PURGED="f"
+  for _ in $(seq 1 40); do
+    MO_PURGED="$(sql "SELECT purged_at IS NOT NULL FROM media_assets WHERE id='$MO_KNOWN'")"
+    [ "$MO_PURGED" = "t" ] && break
+    sleep 0.5
+  done
+  db_is "moderation: …media.purge deletes its objects within seconds" "$MO_PURGED" "t"
+  if [ "$MINIO_OK" = 0 ]; then skip "moderation: …nothing of it is left in MinIO"
+  elif minio_has "v/${MO_KNOWN_KEY#in/}/display.webp"; then fail "moderation: …nothing of it is left in MinIO" "MinIO still holds its display variant"
+  else pass "moderation: …nothing of it is left in MinIO"; fi
+  db_is "moderation: every look and decision is in the audit log, by the operator" \
+    "$(sql "SELECT string_agg(action, ',' ORDER BY at, id) FROM media_moderation_log WHERE actor = 'smoke-operator' AND at >= to_timestamp($MO_START)")" "LISTED,RELEASE_REFUSED,RELEASED,DELETED"
+else
+  skip "moderation: the operator's queue (psql not reachable through docker compose)"
+fi
+expect "moderation: gratitude_media_quarantined_total is scraped" 200 'gratitude_media_quarantined_total{kind="IMAGE",verdict="QUARANTINED"' -- "$MGMT_BASE/actuator/prometheus"
+if grep -q "Media $MO_RED moderated: QUARANTINED (EXTREME_VIOLENCE)" "$MOYI_LOG"; then pass "moderation: the log names the verdict and the reason, by id"; else fail "moderation: verdict logged" "no line names $MO_RED"; fi
+if grep -q "${MO_KNOWN_KEY:-in/none}" "$MOYI_LOG"; then fail "moderation: no object key in any log line" "the blocked asset's key is in $MOYI_LOG"; else pass "moderation: no object key in any log line"; fi
+rm -rf "$MOD_DIR"
 flush_buckets
 
 echo; echo "database state"

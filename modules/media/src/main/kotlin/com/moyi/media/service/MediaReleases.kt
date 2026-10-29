@@ -17,6 +17,12 @@ import java.util.UUID
  *   deleted under it ([ProcessUploads]).
  * - **`MediaDemoted`**: the photo is tier 2 and its full variant is to go.
  *
+ * And one that hands a made asset to moderation (D4, ADR-0051), published by
+ * `media.process` in the transaction that makes it `READY`:
+ *
+ * - **`MediaReady`**: the photo's display variant, or the voice note's Opus, is
+ *   written, and moderation may read it.
+ *
  * Each carries the asset's id and nothing else (ADR-0035: payloads name, never
  * hold); the keys are derived again from the row, which outlives the objects.
  */
@@ -28,6 +34,11 @@ internal class MediaReleases(
         mediaId: UUID,
         at: Instant,
     ) = publish(mediaId, MEDIA_RELEASED, at)
+
+    fun ready(
+        mediaId: UUID,
+        at: Instant,
+    ) = publish(mediaId, MEDIA_READY, at)
 
     fun demoted(
         mediaId: UUID,
@@ -45,5 +56,6 @@ internal class MediaReleases(
     internal companion object {
         const val MEDIA_RELEASED = "MediaReleased"
         const val MEDIA_DEMOTED = "MediaDemoted"
+        const val MEDIA_READY = "MediaReady"
     }
 }

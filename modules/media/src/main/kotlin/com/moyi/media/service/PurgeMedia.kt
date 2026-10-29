@@ -24,6 +24,11 @@ import java.time.temporal.ChronoUnit
  *   attempt left behind goes too. Then `purged_at` is stamped.
  * - **`MediaDemoted`**: the photo is tier 2, and its full variant is deleted.
  *
+ * **Except what is held as evidence** ([MediaAsset.evidenceHeld], D4,
+ * ADR-0051): a blocked asset's objects stay, whoever deleted it, until the
+ * operator has made the report and deletes it; that delete publishes
+ * `MediaReleased` again, with the hold cleared.
+ *
  * **It never gives up.** A storage that cannot be reached throws, the delivery
  * is rolled back and backed off (2 s doubling to 15 minutes) and offered again,
  * with no last attempt (ADR-0035): an erasure is a privacy rule, and an
@@ -70,6 +75,12 @@ internal class PurgeMedia(
         when (event.eventType) {
             MediaReleases.MEDIA_RELEASED -> {
                 check(asset.isGone) { "A MediaReleased event names an asset that is not deleted." }
+                if (asset.evidenceHeld) {
+                    // Q16: evidence for the report the takedown runbook makes. The operator's delete clears the hold and
+                    // publishes MediaReleased again; then this purges it. Not stamped: media-check counts it as held.
+                    log.info("Media {} is held as evidence; its objects stay until the operator deletes it", asset.id)
+                    return
+                }
                 // Each delete throws ObjectStoreUnavailableException when the storage cannot be reached: the
                 // delivery then fails, and is retried for ever.
                 asset.objectKeys.forEach(storage::delete)

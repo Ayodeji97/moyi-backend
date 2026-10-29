@@ -100,14 +100,22 @@ internal class MediaAsset(
     val expiresAt: Instant?,
     /** The images kept of a photo once it is [MediaStatus.READY] (D2); none before. */
     val variants: List<StoredVariant> = emptyList(),
-    /** D4's verdict on a photo, [PASSED] or `QUARANTINED`; none until D4 exists. */
-    val moderationVerdict: String? = null,
+    /** Moderation's verdict (D4, ADR-0051); none until it is given. */
+    val moderationVerdict: ModerationVerdict? = null,
     /** How many attempts of `media.process` have begun on it, counted whatever became of them. */
     val processingAttempts: Int = 0,
     /** A ready voice note's length in milliseconds (D3); on the asset only, never on the entry (spec D-10). */
     val durationMs: Int? = null,
     /** 1 while a photo keeps its full-resolution variant, 2 once only the display variant is kept (D-16, D5). */
     val tier: Int = 1,
+    /** Moderation found adult nudity (Q16): passed, and blurred until tapped. Kept whatever the verdict. */
+    val sensitive: Boolean = false,
+    /**
+     * Child sexual abuse material kept as evidence (Q16, ADR-0051): whoever
+     * deletes the asset, its objects stay until the operator has reported it
+     * and deletes it. No best-effort delete and no purge touches them.
+     */
+    val evidenceHeld: Boolean = false,
 ) {
     /** A deleted asset is gone to its owner too: every route answers it as one that never existed. */
     val isGone: Boolean get() = status == MediaStatus.DELETED
@@ -197,51 +205,85 @@ internal class MediaAsset(
             }
 
     /**
-     * What a person is shown of this photo (spec §4 D2, FR-101). **Its owner**
-     * (on an entry, its author: only an owner can attach) sees it once it is
-     * [MediaStatus.READY]. **Anyone else** sees it only once it is ready and
-     * has passed moderation; until then it is still processing to them,
-     * whatever the reason. D4 brings the verdict, so until then a partner is
-     * shown "processing": safe by construction. The image shown is the largest
-     * kept: [ImageVariant.FULL] while there is one, then [ImageVariant.DISPLAY]
-     * (tier 2, D5).
+     * What a person is shown of this photo (spec §4 D2, D4; FR-101, Q10, Q16).
+     *
+     * - **Its owner** (on an entry, its author: only an owner can attach) sees
+     *   it once it is [MediaStatus.READY], and a [MediaStatus.QUARANTINED] one
+     *   marked "not shared" ([Shown.NotShared], Q10: no reason given), still
+     *   with the image, **unless it is [ModerationVerdict.BLOCKED]**: then not
+     *   even its owner is given the image (Q16, ADR-0051 decision 4).
+     * - **Anyone else** sees it only once it is ready and has
+     *   [ModerationVerdict.PASSED]; before that, and for ever if it is held
+     *   back, it is still processing to them (Q10: never "removed").
+     *
+     * The image shown is the largest kept: [ImageVariant.FULL] while there is
+     * one, then [ImageVariant.DISPLAY] (tier 2, D5). It is sensitive only
+     * once it has passed with nudity found.
      */
     fun shownTo(owner: Boolean): Shown {
         val best =
             variants.firstOrNull { it.variant == ImageVariant.FULL }
                 ?: variants.firstOrNull { it.variant == ImageVariant.DISPLAY }
         return when {
-            kind != MediaKind.IMAGE || status != MediaStatus.READY || best == null -> Shown.Processing
-            !owner && moderationVerdict != PASSED -> Shown.Processing
-            else -> Shown.Ready(best)
+            kind != MediaKind.IMAGE || best == null -> Shown.Processing
+            status == MediaStatus.READY && (owner || partnersMaySeeIt) -> Shown.Ready(best, sensitive = passedSensitive)
+            status == MediaStatus.QUARANTINED && owner -> Shown.NotShared(best.takeUnless { isBlocked })
+            else -> Shown.Processing
         }
     }
 
     /**
-     * What a person is played of this voice note (spec §4 D3). **Its owner**
-     * (on an entry, its author) hears it once it is [MediaStatus.READY].
-     * **Anyone else** hears it only once it is ready and
-     * [partnersMayHearIt]; until then it is still processing to them, with no
-     * URL and no length (ADR-0049 decision 7).
+     * What a person is played of this voice note (spec §4 D3, D4), by the rule
+     * of [shownTo]: **its owner** hears it once it is [MediaStatus.READY], and
+     * is told a held-back one is "not shared" (with the note, unless it is
+     * [ModerationVerdict.BLOCKED]); **anyone else** hears it only once it is
+     * ready and [partnersMaySeeIt], and until then it is still processing to
+     * them, with no URL and no length (ADR-0049 decision 7).
      */
-    fun heardBy(owner: Boolean): Heard =
-        when {
-            kind != MediaKind.VOICE || status != MediaStatus.READY || durationMs == null -> Heard.Processing
-            !owner && !partnersMayHearIt -> Heard.Processing
-            else -> Heard.Ready(StorageKey.forVoice(storageKey), durationMs)
+    fun heardBy(owner: Boolean): Heard {
+        val key = StorageKey.forVoice(storageKey)
+        return when {
+            kind != MediaKind.VOICE || durationMs == null -> Heard.Processing
+            status == MediaStatus.READY && (owner || partnersMaySeeIt) -> Heard.Ready(key, durationMs, sensitive = passedSensitive)
+            status == MediaStatus.QUARANTINED && owner -> if (isBlocked) Heard.NotShared(null, null) else Heard.NotShared(key, durationMs)
+            else -> Heard.Processing
         }
+    }
 
     /**
-     * **Who besides its owner hears a voice note: only once it has passed
-     * moderation**, as a photo is shown (the owner's ruling on FR-061,
-     * 2026-10-29: "media" includes voice notes). FR-061 (03:68) makes media
-     * visible to the non-author once it "passes moderation", R-25 (17:47)
-     * speaks of "harmful or illegal media", and doc 26:206 routes a reported
-     * voice note to the FR-101 path; FR-101, T-08 and Q1, which name images,
-     * are read as including voice. D4 gives voice notes their verdict; until
-     * then nothing does, and a partner never hears one.
+     * **Who besides its owner sees a photo or hears a voice note: only once it
+     * has passed moderation** (FR-101; the owner's ruling on FR-061,
+     * 2026-10-29: "media" includes voice notes). The one place the rule is
+     * written, for both kinds (ADR-0049 decision 7, ADR-0051).
      */
-    private val partnersMayHearIt: Boolean get() = moderationVerdict == PASSED
+    private val partnersMaySeeIt: Boolean get() = moderationVerdict == ModerationVerdict.PASSED
+
+    /** Blurred for whoever is shown it: passed, with adult nudity found (Q16). */
+    private val passedSensitive: Boolean get() = sensitive && moderationVerdict == ModerationVerdict.PASSED
+
+    /** Child sexual abuse material (Q16): served to nobody, its owner included, and never released. */
+    val isBlocked: Boolean get() = moderationVerdict == ModerationVerdict.BLOCKED
+
+    /**
+     * Whether `media.moderate` has anything to do with this asset (spec §4 D4):
+     * only a [MediaStatus.READY] asset with no verdict yet. Asked of the row as
+     * it is now, never of the event: one deleted, already moderated, or
+     * released by the operator is left alone.
+     */
+    val needsModeration: Boolean get() = status == MediaStatus.READY && moderationVerdict == null
+
+    /**
+     * The one object moderation reads (spec §4 D4): a photo's display variant
+     * ("never ships the original, never the full variant, fewer bytes leave
+     * the box"), which a tier-2 photo still has (ADR-0050); a voice note's
+     * Opus. Derived, as [objectKeys] are.
+     */
+    val moderatedKey: StorageKey
+        get() =
+            when (kind) {
+                MediaKind.IMAGE -> StorageKey.forVariant(storageKey, ImageVariant.DISPLAY)
+                MediaKind.VOICE -> StorageKey.forVoice(storageKey)
+            }
 
     override fun toString(): String = "MediaAsset(id=$id, kind=$kind, status=$status, tier=$tier)"
 
@@ -253,6 +295,13 @@ internal class MediaAsset(
         data class Ready(
             val key: StorageKey,
             val durationMs: Int,
+            val sensitive: Boolean = false,
+        ) : Heard
+
+        /** To its owner only: held back from the partner (Q10). Without the note itself when it is blocked. */
+        data class NotShared(
+            val key: StorageKey?,
+            val durationMs: Int?,
         ) : Heard
     }
 
@@ -261,6 +310,12 @@ internal class MediaAsset(
 
         data class Ready(
             val variant: StoredVariant,
+            val sensitive: Boolean = false,
+        ) : Shown
+
+        /** To its owner only: held back from the partner (Q10). Without the image when it is blocked. */
+        data class NotShared(
+            val variant: StoredVariant?,
         ) : Shown
     }
 
@@ -273,9 +328,6 @@ internal class MediaAsset(
     }
 
     internal companion object {
-        /** D4's verdict that lets a photo reach someone other than its owner (FR-101). */
-        const val PASSED = "PASSED"
-
         /**
          * Decodes `media.process` may begin on one photo
          * (`processing_attempts`, counted just before libvips runs). A storage

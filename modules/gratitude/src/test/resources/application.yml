@@ -45,6 +45,11 @@ moyi:
     processing:
       # Quoted: a bare off is YAML's boolean false.
       provider: "off"
+    moderation:
+      # Rekognition, the default, refuses to start without AWS credentials (ADR-0051).
+      # Nothing is moderated here; a verdict is written straight into the row.
+      image:
+        provider: none
   notification:
     # The daily reminder's real ledger is in this context (Phase 4 N2). Nothing
     # here sends: both providers log, and FCM and Resend would refuse to start

@@ -32,6 +32,13 @@ dependencies {
         exclude(group = "software.amazon.awssdk", module = "netty-nio-client")
     }
     implementation("software.amazon.awssdk:url-connection-client")
+    // Photo moderation (the owner's ruling Q1, ADR-0051): Rekognition's
+    // DetectModerationLabels, in one internal class, `RekognitionImageModerator`,
+    // over the same URLConnection transport.
+    implementation("software.amazon.awssdk:rekognition") {
+        exclude(group = "software.amazon.awssdk", module = "apache-client")
+        exclude(group = "software.amazon.awssdk", module = "netty-nio-client")
+    }
 
     testImplementation(projects.common.testing)
     testImplementation("org.springframework.boot:spring-boot-starter-test")

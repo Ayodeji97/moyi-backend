@@ -112,17 +112,23 @@ internal class MediaAssetTest {
     fun `anyone else hears a ready voice note as processing until it has passed moderation`() {
         val voice = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200)
         voice.heardBy(owner = false) shouldBe MediaAsset.Heard.Processing
-        pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, verdict = "QUARANTINED").heardBy(owner = false) shouldBe
+        pending(
+            MediaStatus.READY,
+            kind = MediaKind.VOICE,
+            durationMs = 4_200,
+            verdict = ModerationVerdict.QUARANTINED,
+        ).heardBy(owner = false) shouldBe
             MediaAsset.Heard.Processing
-        val passed = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, verdict = MediaAsset.PASSED)
+        val passed = pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, verdict = ModerationVerdict.PASSED)
         passed.heardBy(owner = false) shouldBe MediaAsset.Heard.Ready(StorageKey.forVoice(passed.storageKey), 4_200)
     }
 
     @Test
     fun `a voice note that is not ready is processing to everyone`() {
-        for (status in MediaStatus.entries - MediaStatus.READY) {
+        // QUARANTINED is the owner's "not shared" (D4), held below.
+        for (status in MediaStatus.entries - MediaStatus.READY - MediaStatus.QUARANTINED) {
             for (owner in listOf(true, false)) {
-                pending(status, kind = MediaKind.VOICE, durationMs = 4_200, verdict = MediaAsset.PASSED).heardBy(owner) shouldBe
+                pending(status, kind = MediaKind.VOICE, durationMs = 4_200, verdict = ModerationVerdict.PASSED).heardBy(owner) shouldBe
                     MediaAsset.Heard.Processing
             }
         }
@@ -140,18 +146,85 @@ internal class MediaAssetTest {
     fun `anyone else sees processing until the photo is ready and has passed moderation (FR-101)`() {
         val full = variant(ImageVariant.FULL)
         pending(MediaStatus.READY, variants = listOf(full)).shownTo(owner = false) shouldBe MediaAsset.Shown.Processing
-        pending(MediaStatus.READY, variants = listOf(full), verdict = "QUARANTINED").shownTo(owner = false) shouldBe
+        pending(MediaStatus.READY, variants = listOf(full), verdict = ModerationVerdict.QUARANTINED).shownTo(owner = false) shouldBe
             MediaAsset.Shown.Processing
-        pending(MediaStatus.READY, variants = listOf(full), verdict = MediaAsset.PASSED).shownTo(owner = false) shouldBe
+        pending(MediaStatus.READY, variants = listOf(full), verdict = ModerationVerdict.PASSED).shownTo(owner = false) shouldBe
             MediaAsset.Shown.Ready(full)
     }
 
     @Test
     fun `a photo that is not ready is processing to everyone, its owner included`() {
-        for (status in MediaStatus.entries - MediaStatus.READY) {
-            pending(status, variants = listOf(variant(ImageVariant.FULL)), verdict = MediaAsset.PASSED).shownTo(owner = true) shouldBe
+        for (status in MediaStatus.entries - MediaStatus.READY - MediaStatus.QUARANTINED) {
+            pending(
+                status,
+                variants = listOf(variant(ImageVariant.FULL)),
+                verdict = ModerationVerdict.PASSED,
+            ).shownTo(owner = true) shouldBe
                 MediaAsset.Shown.Processing
         }
+    }
+
+    /** Q10 (ADR-0051): a photo held back is "not shared" to its owner, with the image; the partner sees processing. */
+    @Test
+    fun `a quarantined photo is not shared to its owner, with the image, and still processing to anyone else`() {
+        val full = variant(ImageVariant.FULL)
+        val held = pending(MediaStatus.QUARANTINED, variants = listOf(full), verdict = ModerationVerdict.QUARANTINED)
+        held.shownTo(owner = true) shouldBe MediaAsset.Shown.NotShared(full)
+        held.shownTo(owner = false) shouldBe MediaAsset.Shown.Processing
+    }
+
+    /** Q16: child sexual abuse material reaches nobody, its owner included. */
+    @Test
+    fun `a blocked photo is not shared to its owner without the image, and processing to anyone else`() {
+        val blocked = pending(MediaStatus.QUARANTINED, variants = listOf(variant(ImageVariant.FULL)), verdict = ModerationVerdict.BLOCKED)
+        blocked.shownTo(owner = true) shouldBe MediaAsset.Shown.NotShared(null)
+        blocked.shownTo(owner = false) shouldBe MediaAsset.Shown.Processing
+        blocked.isBlocked shouldBe true
+    }
+
+    @Test
+    fun `a voice note held back is not shared to its owner, without the note when blocked, and processing to anyone else`() {
+        val held = pending(MediaStatus.QUARANTINED, kind = MediaKind.VOICE, durationMs = 4_200, verdict = ModerationVerdict.QUARANTINED)
+        held.heardBy(owner = true) shouldBe MediaAsset.Heard.NotShared(StorageKey.forVoice(held.storageKey), 4_200)
+        held.heardBy(owner = false) shouldBe MediaAsset.Heard.Processing
+        val blocked = pending(MediaStatus.QUARANTINED, kind = MediaKind.VOICE, durationMs = 4_200, verdict = ModerationVerdict.BLOCKED)
+        blocked.heardBy(owner = true) shouldBe MediaAsset.Heard.NotShared(null, null)
+        blocked.heardBy(owner = false) shouldBe MediaAsset.Heard.Processing
+    }
+
+    /** Q16: adult nudity passes, sensitive, so the client blurs it; nothing is sensitive before it has passed. */
+    @Test
+    fun `a photo passed with nudity found is sensitive to both, and nothing is sensitive before it has passed`() {
+        val full = variant(ImageVariant.FULL)
+        val nude = pending(MediaStatus.READY, variants = listOf(full), verdict = ModerationVerdict.PASSED, sensitive = true)
+        nude.shownTo(owner = false) shouldBe MediaAsset.Shown.Ready(full, sensitive = true)
+        nude.shownTo(owner = true) shouldBe MediaAsset.Shown.Ready(full, sensitive = true)
+        pending(MediaStatus.READY, variants = listOf(full), verdict = ModerationVerdict.PASSED).shownTo(owner = false) shouldBe
+            MediaAsset.Shown.Ready(full, sensitive = false)
+        pending(MediaStatus.READY, variants = listOf(full), sensitive = true).shownTo(owner = true) shouldBe
+            MediaAsset.Shown.Ready(full, sensitive = false)
+        val voice =
+            pending(MediaStatus.READY, kind = MediaKind.VOICE, durationMs = 4_200, verdict = ModerationVerdict.PASSED, sensitive = true)
+        voice.heardBy(owner = false) shouldBe MediaAsset.Heard.Ready(StorageKey.forVoice(voice.storageKey), 4_200, sensitive = true)
+    }
+
+    @Test
+    fun `only a ready asset without a verdict needs moderation`() {
+        for (status in MediaStatus.entries) {
+            pending(status).needsModeration shouldBe (status == MediaStatus.READY)
+            for (verdict in ModerationVerdict.entries) {
+                pending(status, verdict = verdict).needsModeration shouldBe false
+            }
+        }
+    }
+
+    /** Spec §4 D4: the display variant is what is moderated, never the full one; a voice note's Opus. */
+    @Test
+    fun `moderation reads the display variant of a photo and the Opus of a voice note`() {
+        val photo = pending(MediaStatus.READY)
+        photo.moderatedKey shouldBe StorageKey.forVariant(photo.storageKey, ImageVariant.DISPLAY)
+        val voice = pending(MediaStatus.READY, kind = MediaKind.VOICE)
+        voice.moderatedKey shouldBe StorageKey.forVoice(voice.storageKey)
     }
 
     private fun variant(which: ImageVariant) =
@@ -163,7 +236,8 @@ internal class MediaAssetTest {
         attached: UUID? = null,
         kind: MediaKind = MediaKind.IMAGE,
         variants: List<StoredVariant> = emptyList(),
-        verdict: String? = null,
+        verdict: ModerationVerdict? = null,
+        sensitive: Boolean = false,
         attempts: Int = 0,
         durationMs: Int? = null,
     ) = MediaAsset(
@@ -174,6 +248,7 @@ internal class MediaAssetTest {
         kind = kind,
         variants = variants,
         moderationVerdict = verdict,
+        sensitive = sensitive,
         storageKey = StorageKey.forUpload(UUID.randomUUID()),
         contentType = "image/png",
         sizeBytes = 1234,

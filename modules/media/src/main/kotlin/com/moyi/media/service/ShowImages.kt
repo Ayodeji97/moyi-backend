@@ -48,7 +48,22 @@ internal class ShowImages(
                 // No storage configured: there is nothing a URL could reach. Shown as still
                 // processing rather than failing the whole response it is part of.
                 val url = urls.sign(shown.variant.key, signedAt) ?: return processing(asset)
-                ImageView(asset.id, ImageViewStatus.READY, url, shown.variant.width, shown.variant.height)
+                ImageView(asset.id, ImageViewStatus.READY, url, shown.variant.width, shown.variant.height, shown.sensitive)
+            }
+
+            is MediaAsset.Shown.NotShared -> {
+                val variant = shown.variant
+                val url = variant?.let { urls.sign(it.key, signedAt) }
+                ImageView(
+                    asset.id,
+                    ImageViewStatus.NOT_SHARED,
+                    url,
+                    variant?.width?.takeIf { url != null },
+                    variant?.height?.takeIf {
+                        url !=
+                            null
+                    },
+                )
             }
         }
 

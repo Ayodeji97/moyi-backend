@@ -35,6 +35,17 @@ internal interface ImageProcessor {
         format: ImageFormat,
         workDir: Path,
     ): Encoding
+
+    /**
+     * The display variant at [webp] (ours, made by [encode]) as a JPEG in
+     * [workDir], for the moderator, which reads JPEG and PNG and not WebP
+     * (ADR-0051). Null when it cannot be made: a refusal the same file would
+     * meet again, which moderation answers by holding the photo back.
+     */
+    fun jpegForModeration(
+        webp: Path,
+        workDir: Path,
+    ): Path?
 }
 
 /** What [ImageProcessor.encode] made of a photo. */
@@ -75,4 +86,9 @@ internal class ProcessingOff : ImageProcessor {
         format: ImageFormat,
         workDir: Path,
     ): Encoding = error("No image is processed in this process (moyi.media.processing.provider: off).")
+
+    override fun jpegForModeration(
+        webp: Path,
+        workDir: Path,
+    ): Path? = error("No image is processed in this process (moyi.media.processing.provider: off).")
 }

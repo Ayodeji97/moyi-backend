@@ -4,6 +4,7 @@ import com.moyi.media.domain.ImageVariant
 import com.moyi.media.domain.MediaAsset
 import com.moyi.media.domain.MediaKind
 import com.moyi.media.domain.MediaStatus
+import com.moyi.media.domain.ModerationVerdict
 import com.moyi.media.domain.Retention
 import com.moyi.media.domain.StorageKey
 import com.moyi.media.domain.StoredVariant
@@ -253,7 +254,7 @@ internal class MediaAssetStore(
                 SELECT id FROM media_assets
                 WHERE attached_entry_id IS NULL
                   AND ((status = 'PENDING_UPLOAD' AND expires_at < ?)
-                       OR (status IN ('READY', 'FAILED') AND GREATEST(created_at, ready_at, detached_at) < ?))
+                       OR (status IN ('READY', 'FAILED', 'QUARANTINED') AND GREATEST(created_at, ready_at, detached_at) < ?))
                 ORDER BY created_at
                 LIMIT ?
                 FOR UPDATE SKIP LOCKED
@@ -313,6 +314,36 @@ internal class MediaAssetStore(
             limit,
         )
 
+    /**
+     * Moderation's verdict (D4, ADR-0051), under the caller's row lock: only
+     * on a READY asset with no verdict yet, which a [ModerationVerdict.PASSED]
+     * leaves READY and anything else makes QUARANTINED (held back from the
+     * partner, Q10), and a [ModerationVerdict.BLOCKED] one held as evidence
+     * (`evidence_held`). [scores] is what was found, as JSON: categories,
+     * confidences and who looked, never a vendor's label or anything of the
+     * asset. Returns whether it was recorded.
+     */
+    @Suppress("LongParameterList") // The verdict's every part, each its own column.
+    fun recordVerdict(
+        id: UUID,
+        verdict: ModerationVerdict,
+        sensitive: Boolean,
+        scores: String,
+        at: Instant,
+    ): Boolean =
+        jdbc.update(
+            "UPDATE media_assets SET moderation_verdict = ?, sensitive = ?, moderation_scores = ?::jsonb, moderated_at = ?, " +
+                "status = CASE WHEN ? = 'PASSED' THEN status ELSE 'QUARANTINED' END, evidence_held = (? = 'BLOCKED') " +
+                "WHERE id = ? AND status = 'READY' AND moderation_verdict IS NULL",
+            verdict.name,
+            sensitive,
+            scores,
+            Timestamp.from(at),
+            verdict.name,
+            verdict.name,
+            id,
+        ) == 1
+
     /** `media.purge` deleted a released asset's objects at [at]. Only the first time counts. */
     fun markPurged(
         id: UUID,
@@ -344,7 +375,7 @@ internal class MediaAssetStore(
         const val SELECT =
             "SELECT id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, " +
                 "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict, processing_attempts, tier, " +
-                "duration_ms " +
+                "duration_ms, sensitive, evidence_held " +
                 "FROM media_assets"
 
         val JSON: JsonMapper = JsonMapper.builder().build()
@@ -367,10 +398,12 @@ internal class MediaAssetStore(
                     createdAt = rs.getTimestamp("created_at").toInstant(),
                     expiresAt = rs.getTimestamp("expires_at")?.toInstant(),
                     variants = variantsOf(rs.getString("variants")),
-                    moderationVerdict = rs.getString("moderation_verdict"),
+                    moderationVerdict = rs.getString("moderation_verdict")?.let(ModerationVerdict::valueOf),
                     processingAttempts = rs.getInt("processing_attempts"),
                     tier = rs.getInt("tier"),
                     durationMs = rs.getInt("duration_ms").takeUnless { rs.wasNull() },
+                    sensitive = rs.getBoolean("sensitive"),
+                    evidenceHeld = rs.getBoolean("evidence_held"),
                 )
             }
 

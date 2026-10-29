@@ -257,8 +257,8 @@ internal class MediaAttachmentsTest(
         jdbc.update(
             """
             INSERT INTO media_assets (id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, variants,
-                                      moderation_verdict, created_at, deleted_at)
-            VALUES (?, ?, ?, ?, 'image/jpeg', 1000, 'Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMDA=', ?, ?::jsonb, ?, now(),
+                                      moderation_verdict, moderated_at, created_at, deleted_at)
+            VALUES (?, ?, ?, ?, 'image/jpeg', 1000, 'Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyMDA=', ?, ?::jsonb, ?, CASE WHEN ?::text IS NOT NULL THEN now() END, now(),
                     CASE WHEN ? = 'DELETED' THEN now() END)
             """.trimIndent(),
             id,
@@ -267,6 +267,7 @@ internal class MediaAttachmentsTest(
             "in/$random",
             status,
             variants,
+            verdict,
             verdict,
             status,
         )

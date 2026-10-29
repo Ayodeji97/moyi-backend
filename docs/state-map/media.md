@@ -18,7 +18,7 @@ stateDiagram-v2
     state "PROCESSING, a photo being made into its variants" as media__PROCESSING
     state "READY, a photo with its variants, attached to no entry" as media__READY
     state "READY, attached to an entry" as media__READY_ATTACHED
-    state "QUARANTINED" as media__QUARANTINED
+    state "QUARANTINED held back from the partner by moderation (extreme violence, unreadable, or blocked)" as media__QUARANTINED
     state "FAILED, a photo the pipeline refused" as media__FAILED
     state "DELETED by you, with the entry it was on, or by the reaper" as media__DELETED
     media__NONE --> media__PENDING_UPLOAD: you - ask for a URL to upload a photo or a voice note to
@@ -33,19 +33,20 @@ stateDiagram-v2
     media__FAILED --> media__DELETED: you - delete one of your own photos or voice notes, system - hourly reaper finds it past its keeping, on no entry
     media__READY --> media__READY_ATTACHED: you - write today's entry
     media__READY_ATTACHED --> media__DELETED: system - entry it is on is erased deleted by its author, or taken back by a withdrawal
-    classDef unbuilt fill:#eeeeee,stroke:#aaaaaa,color:#888888
-    class media__QUARANTINED unbuilt
+    media__READY --> media__QUARANTINED: system - media.moderate gives a photo or voice note its verdict
+    media__QUARANTINED --> media__DELETED: you - delete one of your own photos or voice notes, system - 3 actions
+    media__QUARANTINED --> media__READY: system - operator releases it (moyi media quarantine release)
 ```
 
 ### Every action in every state
 
-| Action | `NONE` | `PENDING_UPLOAD` | `UPLOADED` | `PROCESSING` | `READY` | `READY_ATTACHED` | `FAILED` | `DELETED` |
-|---|---|---|---|---|---|---|---|---|
-| ask for a URL to upload a photo or a voice note to<br>`POST /media/upload-intent` | 201 → `PENDING_UPLOAD` (the declaration is accepted and a storage is configured)<br>415 `MEDIA_TYPE_UNSUPPORTED` (the content type is not one its kind takes)<br>413 `MEDIA_QUOTA_EXCEEDED` (the declared size is over its kind's limit)<br>503 `MEDIA_STORAGE_UNAVAILABLE` (no storage is configured) | not reachable | not reachable | not reachable | not reachable | not reachable | not reachable | not reachable |
-| say the upload is done<br>`POST /media/{mediaId}/complete` | 404 `NOT_FOUND` | 200 → `UPLOADED` (the storage holds the declared bytes under the asset's key)<br>409 `MEDIA_NOT_UPLOADED` (the storage holds nothing under the asset's key, or not the declared length and digest)<br>503 `MEDIA_STORAGE_UNAVAILABLE` (the storage cannot be reached) | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 404 `NOT_FOUND` |
-| read one of your own photos or voice notes<br>`GET /media/{mediaId}` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 404 `NOT_FOUND` |
-| delete one of your own photos or voice notes<br>`DELETE /media/{mediaId}` | 404 `NOT_FOUND` | 204 → `DELETED` | 204 → `DELETED` | 204 → `DELETED` | 204 → `DELETED` | 409 `MEDIA_ATTACHED` | 204 → `DELETED` | 404 `NOT_FOUND` |
-| write today's entry<br>`POST /bonds/{bondId}/entries` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 201 → `READY_ATTACHED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` |
+| Action | `NONE` | `PENDING_UPLOAD` | `UPLOADED` | `PROCESSING` | `READY` | `READY_ATTACHED` | `QUARANTINED` | `FAILED` | `DELETED` |
+|---|---|---|---|---|---|---|---|---|---|
+| ask for a URL to upload a photo or a voice note to<br>`POST /media/upload-intent` | 201 → `PENDING_UPLOAD` (the declaration is accepted and a storage is configured)<br>415 `MEDIA_TYPE_UNSUPPORTED` (the content type is not one its kind takes)<br>413 `MEDIA_QUOTA_EXCEEDED` (the declared size is over its kind's limit)<br>503 `MEDIA_STORAGE_UNAVAILABLE` (no storage is configured) | not reachable | not reachable | not reachable | not reachable | not reachable | not reachable | not reachable | not reachable |
+| say the upload is done<br>`POST /media/{mediaId}/complete` | 404 `NOT_FOUND` | 200 → `UPLOADED` (the storage holds the declared bytes under the asset's key)<br>409 `MEDIA_NOT_UPLOADED` (the storage holds nothing under the asset's key, or not the declared length and digest)<br>503 `MEDIA_STORAGE_UNAVAILABLE` (the storage cannot be reached) | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 404 `NOT_FOUND` |
+| read one of your own photos or voice notes<br>`GET /media/{mediaId}` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 404 `NOT_FOUND` |
+| delete one of your own photos or voice notes<br>`DELETE /media/{mediaId}` | 404 `NOT_FOUND` | 204 → `DELETED` | 204 → `DELETED` | 204 → `DELETED` | 204 → `DELETED` | 409 `MEDIA_ATTACHED` | 204 → `DELETED` (it is on no entry) | 204 → `DELETED` | 404 `NOT_FOUND` |
+| write today's entry<br>`POST /bonds/{bondId}/entries` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 201 → `READY_ATTACHED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` | 422 `VALIDATION_FAILED` |
 
 ### You can
 
@@ -70,6 +71,9 @@ stateDiagram-v2
 | `READY` | delete one of your own photos or voice notes |  | `DELETED` | Deleted, and after the commit what was kept of it (a photo's variants, a voice note's Opus) and any upload left are removed from the storage at once, on a best-effort basis; media.purge deletes the same keys again, retrying until the storage answers (D5), so nothing is left behind for good. | test |
 | `FAILED` | delete one of your own photos or voice notes |  | `DELETED` | Deleted; there is nothing left in the storage to remove but an upload the pipeline could not delete. | never-run |
 | `READY` | write today's entry |  | `READY_ATTACHED` | The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4). A voice note is claimed the same way, on voiceMediaId, after the photo, and shown the same way: READY to its author, PROCESSING to the partner until it has passed moderation (FR-061, ADR-0049). | smoke |
+| `QUARANTINED` | read one of your own photos or voice notes |  | stays | Status QUARANTINED, and still its URL and size, or its length (Q10: its author sees their own photo); no URL when it is blocked. On an entry its author is shown it NOT_SHARED. | test |
+| `QUARANTINED` | delete one of your own photos or voice notes | it is on no entry | `DELETED` | Deleted, and gone to you as any deleted asset is. Its objects go as any deleted asset's do, unless it is blocked: then they are held as evidence until the operator deletes it. | test |
+| `QUARANTINED` | say the upload is done |  | stays | It is already complete. Completing again changes nothing and records no second event. | test |
 
 ### Refused here
 
@@ -94,6 +98,7 @@ stateDiagram-v2
 | `READY_ATTACHED` | write today's entry |  | 422 `VALIDATION_FAILED` | Already on another entry. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | test |
 | `FAILED` | write today's entry |  | 422 `VALIDATION_FAILED` | Not READY: the pipeline refused it. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | smoke |
 | `DELETED` | write today's entry |  | 422 `VALIDATION_FAILED` | Deleted. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | never-run |
+| `QUARANTINED` | write today's entry |  | 422 `VALIDATION_FAILED` | Only a READY asset is claimed (FR-044a), so one moderation held back before it was attached is refused on imageMediaId or voiceMediaId, with the same one refusal as every other cause; the entry is not written. Its GET /media/{id} says QUARANTINED, so a client can say it will not be shared before it is sent. | FR-044a, ADR-0048 §4, ADR-0051 | test |
 
 ### Happens without you
 
@@ -108,3 +113,12 @@ stateDiagram-v2
 | `READY_ATTACHED` | the hourly reaper finds it past its keeping, on no entry | system |  | `READY_ATTACHED` | Never reaped, however old: the reaper's one statement takes only an asset attached to nothing, and passes over a row a claim is changing at that moment rather than wait for it. | test |
 | `READY_ATTACHED` | the entry it is on is erased: deleted by its author, or taken back by a withdrawal | system |  | `DELETED` | Released with its entry, in the erasure's own transaction (the author's DELETE, the withdrawal, or the close job or a read reaching a withdrawn author's day first): DELETED, so its owner's GET is 404 and no entry shows it; media.purge deletes its objects seconds later, retrying for ever, so a URL handed out before reaches nothing. | test |
 | `READY_ATTACHED` | the nightly demotion finds it ninety days ready | system |  | `READY_ATTACHED` | Ninety days after it was made, the photo keeps only its display variant (tier 2) and is shown at that size from then on; media.purge deletes the full variant. Irreversible. | test |
+| `READY` | media.moderate gives a photo or voice note its verdict | system | nothing is found that holds it back | `READY` | media.moderate-image reads the photo's display variant (never the full one, never the upload), as a JPEG: the known-image list first, then the classifier (Rekognition in eu-central-1). Nothing held back: PASSED, and from then on the partner is shown it on an entry. Adult nudity is not held back (Q16): PASSED with sensitive true, which tells the client to blur it behind a tap. A voice note: media.moderate-voice, on its Opus. Attached to an entry or not, the same. Production names no moderator yet (none): nothing gets a verdict there, and no partner is shown anything. | test |
+| `READY` | media.moderate gives a photo or voice note its verdict | system | extreme violence is found, or the moderator cannot read it | `QUARANTINED` | Real violence or gore at 80% or more (Q16), or bytes the moderator refuses: QUARANTINED for the operator's review. Its author is shown it NOT_SHARED, with the photo (Q10, no reason); the partner is shown PROCESSING, for ever, and never told it was removed. Counted in gratitude_media_quarantined_total, recorded in media_moderation_log. | test |
+| `READY` | media.moderate gives a photo or voice note its verdict | system | a known-CSAM list matches it, or a classifier finds CSAM | `QUARANTINED` | BLOCKED: served to nobody, its author included (NOT_SHARED with no URL), never releasable by any command or statement, and held as evidence: whoever deletes it later, its objects stay until the operator has reported it and deletes it (ops/moderation/takedown.md). The media check alarms at once while any is held. No list is wired yet and Rekognition has no CSAM classifier, so in production nothing reaches this today (ADR-0051, open question 1). | test |
+| `READY` | media.moderate gives a photo or voice note its verdict | system | the moderator, the list or the storage cannot be reached | `READY` | Nothing is recorded and nothing is spent: the delivery is rolled back and the outbox retries it, 2 s doubling to 15 minutes, for as long as the outage lasts. Its author is shown it READY all the while; the partner PROCESSING (fail closed for delivery, open for the author). An outage never fails or holds back an asset. | test |
+| `QUARANTINED` | the operator releases it (moyi media quarantine release) | system | it is not blocked | `READY` | The operator's moyi media quarantine release, with a note: PASSED and READY (READY_ATTACHED if it is on an entry), so the partner is shown it from their next read. Recorded in media_moderation_log with who and why. | test |
+| `QUARANTINED` | the operator releases it (moyi media quarantine release) | system | it is blocked | `QUARANTINED` | Never released (Q16): the command refuses, the refusal is recorded, and a trigger refuses any statement that would take the verdict off. | test |
+| `QUARANTINED` | the operator deletes it (moyi media quarantine delete) | system |  | `DELETED` | The operator's moyi media quarantine delete, with a note (for a blocked one, the report's reference): DELETED, the evidence hold cleared, and MediaReleased published in the same transaction, so media.purge deletes its objects within seconds. | test |
+| `QUARANTINED` | the hourly reaper finds it past its keeping, on no entry | system | on no entry for a day | `DELETED` | As a ready asset on no entry: deleted a day after the latest of its creation, readiness and detachment. A blocked one's objects stay, held, until the operator deletes it. | test |
+| `QUARANTINED` | the entry it is on is erased: deleted by its author, or taken back by a withdrawal | system |  | `DELETED` | Released with its entry, as any asset is. A blocked one's objects stay, held as evidence, until the operator deletes it. | test |

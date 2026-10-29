@@ -123,7 +123,7 @@ internal class EntryPhotoTest(
         submit(ada, bondId, """{"text":"and mine"}""").status shouldBe 201
 
         val partners = body(getToday(ada, bondId))["partnerEntry"]["image"]
-        partners.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "width", "height")
+        partners.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "width", "height", "sensitive")
         partners["status"].asString() shouldBe "PROCESSING"
         listOf("url", "width", "height").forEach { partners[it].isNull shouldBe true }
         getToday(ada, bondId).contentAsString shouldNotContain "X-Amz"
@@ -132,9 +132,44 @@ internal class EntryPhotoTest(
         // Its author is shown it all the while.
         body(getToday(bea, bondId))["myEntry"]["image"]["status"].asString() shouldBe "READY"
 
-        jdbc.update("UPDATE media_assets SET moderation_verdict = 'PASSED' WHERE id = ?", photo)
+        jdbc.update("UPDATE media_assets SET moderation_verdict = 'PASSED', moderated_at = now() WHERE id = ?", photo)
 
         body(getToday(ada, bondId))["partnerEntry"]["image"]["status"].asString() shouldBe "READY"
+    }
+
+    /**
+     * D4 on the wire (ADR-0051; the owner's rulings Q10 and Q16): a photo held
+     * back is NOT_SHARED to its author, with the photo, and PROCESSING to the
+     * partner, never "removed"; one passed with nudity found is sensitive to
+     * both, so the client blurs it.
+     */
+    @Test
+    fun `a held-back photo is not shared to its author and processing to the partner, and a sensitive one says so to both`() {
+        val photo = photos.ready(owner = bea)
+        submit(bea, bondId, """{"text":"a secret kindness","imageMediaId":"$photo"}""").status shouldBe 201
+        submit(ada, bondId, """{"text":"and mine"}""").status shouldBe 201
+        jdbc.update(
+            "UPDATE media_assets SET status = 'QUARANTINED', moderation_verdict = 'QUARANTINED', moderated_at = now() WHERE id = ?",
+            photo,
+        )
+
+        val authors = body(getToday(bea, bondId))["myEntry"]["image"]
+        authors["status"].asString() shouldBe "NOT_SHARED"
+        authors["url"].asString() shouldContain "X-Amz-Signature="
+        authors["sensitive"].asBoolean() shouldBe false
+        val partners = body(getToday(ada, bondId))["partnerEntry"]["image"]
+        partners["status"].asString() shouldBe "PROCESSING"
+        partners["url"].isNull shouldBe true
+        getToday(ada, bondId).contentAsString shouldNotContain "NOT_SHARED"
+
+        jdbc.update(
+            "UPDATE media_assets SET status = 'READY', moderation_verdict = 'PASSED', sensitive = true WHERE id = ?",
+            photo,
+        )
+
+        body(getToday(ada, bondId))["partnerEntry"]["image"]["sensitive"].asBoolean() shouldBe true
+        body(getToday(ada, bondId))["partnerEntry"]["image"]["status"].asString() shouldBe "READY"
+        body(getToday(bea, bondId))["myEntry"]["image"]["sensitive"].asBoolean() shouldBe true
     }
 
     @Test

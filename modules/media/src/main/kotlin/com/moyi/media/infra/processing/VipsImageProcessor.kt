@@ -89,6 +89,25 @@ internal class VipsImageProcessor(
     }
 
     /**
+     * `vips copy display.webp moderation.jpg`: our own WebP, so read without
+     * `VIPS_BLOCK_UNTRUSTED` (as every step after the decode is), in the
+     * sandbox, under the same time limit as a photo, and written with no
+     * metadata (there is none to write). What comes back must be a JPEG.
+     */
+    override fun jpegForModeration(
+        webp: Path,
+        workDir: Path,
+    ): Path? {
+        val out = workDir.resolve(MODERATION_JPEG)
+        val command = listOf(vips.toString(), "copy", webp.toString(), "$out[Q=$MODERATION_QUALITY,keep=none]")
+        val failed = run(command, workDir, Sandbox.Deadline.after(timeout), TRUSTED)
+        val isJpeg =
+            Files.isRegularFile(out) &&
+                Files.newInputStream(out).use { ImageFormat.of(it.readNBytes(ImageFormat.SNIFF_BYTES)) } == ImageFormat.JPEG
+        return out.takeIf { failed == null && isJpeg }
+    }
+
+    /**
      * [variant] of the image in [decoded] (ours, already upright and within
      * 2048 px): each edge of [ImageRules.SHRINK_STEPS] in turn, each quality of
      * [ImageRules.QUALITIES] in turn, until a save fits the cap.
@@ -210,6 +229,11 @@ internal class VipsImageProcessor(
         const val DECODED = "decoded.v"
 
         private const val HEVC = "hevc"
+
+        private const val MODERATION_JPEG = "moderation.jpg"
+
+        /** Enough for a classifier; the file never leaves the work directory but to the moderator. */
+        private const val MODERATION_QUALITY = 85
 
         /**
          * Pixels converted to sRGB from whatever profile the photo carries (a

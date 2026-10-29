@@ -62,6 +62,11 @@ moyi:
       # pipeline is tested in modules/media; here only the composition starts.
       # Quoted: a bare off is YAML's boolean false.
       provider: "off"
+    moderation:
+      # Rekognition, the default, refuses to start without AWS credentials
+      # (ADR-0051). Moderation is tested in modules/media.
+      image:
+        provider: none
   security:
     jwt:
       key-source: ephemeral

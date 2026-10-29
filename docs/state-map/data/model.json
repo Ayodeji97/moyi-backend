@@ -313,8 +313,7 @@
             },
             {
               "id": "QUARANTINED",
-              "label": "QUARANTINED",
-              "built": false
+              "label": "QUARANTINED: held back from the partner by moderation (extreme violence, unreadable, or blocked)"
             },
             {
               "id": "FAILED",
@@ -448,6 +447,21 @@
     {
       "id": "event:media-demoted",
       "label": "the nightly demotion finds it ninety days ready",
+      "actor": "system"
+    },
+    {
+      "id": "event:media-moderated",
+      "label": "media.moderate gives a photo or voice note its verdict",
+      "actor": "system"
+    },
+    {
+      "id": "event:operator-releases",
+      "label": "the operator releases it (moyi media quarantine release)",
+      "actor": "system"
+    },
+    {
+      "id": "event:operator-deletes",
+      "label": "the operator deletes it (moyi media quarantine delete)",
       "actor": "system"
     }
   ],

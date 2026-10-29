@@ -80,6 +80,8 @@ import java.util.Base64
  *    means the owner deleted it meanwhile, and what was just written is
  *    deleted again. A deletion therefore never waits on an upload being
  *    processed, and nothing processed outlives its deletion.
+ *    A ready one is handed to moderation (`MediaReady`, D4) in the same
+ *    transaction, so nothing made escapes it.
  * 5. **After the commit, the upload itself is deleted** (spec §4 D2: "delete
  *    in/…"), ready or failed: the original bytes, metadata and all, are never
  *    kept. If the storage cannot be reached then, the bucket's lifecycle rule
@@ -320,6 +322,7 @@ internal class ProcessUploads(
                 is Result.Ready -> {
                     check(assets.markReady(asset.id, result.variants, now)) { "a photo under its row lock, PROCESSING, becomes READY" }
                     log.info("Media {} is ready ({} variants)", asset.id, result.variants.size)
+                    releases.ready(asset.id, now)
                     OUTCOME_READY
                 }
 
@@ -328,6 +331,7 @@ internal class ProcessUploads(
                         "a voice note under its row lock, PROCESSING, becomes READY"
                     }
                     log.info("Media {} is ready ({} ms)", asset.id, result.durationMs)
+                    releases.ready(asset.id, now)
                     OUTCOME_READY
                 }
 
