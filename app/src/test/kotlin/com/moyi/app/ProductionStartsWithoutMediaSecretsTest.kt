@@ -203,7 +203,7 @@ internal class ProductionStartsWithoutMediaSecretsTest {
 
     /**
      * ADR-0052 and the owner's Q5: the worker runs its own profile (no web
-     * server, its consumers alone), behind no proxy, in a container of 768 MB
+     * server, its consumers alone), behind no proxy, in a container of 1 GB (Q5 said 768 MB; ADR-0052 measured it too tight)
      * and 1.5 CPUs, read-only with a tmpfs, with no capability, with a health
      * check Kamal waits on, and its JVM capped.
      */
@@ -216,12 +216,68 @@ internal class ProductionStartsWithoutMediaSecretsTest {
         env["SPRING_PROFILES_ACTIVE"] shouldBe "media-worker"
         env["JAVA_TOOL_OPTIONS"].toString().split(' ').any { it.startsWith("-Xmx") } shouldBe true
         worker["proxy"] shouldBe null
-        options["memory"] shouldBe "768m"
+        options["memory"] shouldBe "1g"
+        env["MALLOC_ARENA_MAX"].toString() shouldBe "2"
         options["cpus"] shouldBe 1.5
         options["read-only"] shouldBe true
         options["tmpfs"].toString().startsWith("/tmp:") shouldBe true
         options["cap-drop"] shouldBe "ALL"
         options["security-opt"] shouldBe "no-new-privileges"
         options["health-cmd"] shouldBe "test -f /tmp/moyi-ready"
+    }
+
+    /**
+     * Review of #116 (ADR-0052 decision 1): the API's metaspace cap was copied
+     * from an older image's calculator (160 MiB) while the API was measured using
+     * 155 MB of it and still loading classes. A JVM at its metaspace cap throws
+     * OutOfMemoryError, and `-XX:+ExitOnOutOfMemoryError` ends it. Every role's
+     * JVM names a cap, and the API's is at least 256 MiB; and the API's heap,
+     * metaspace, code cache, direct memory and 250 thread stacks fit its container.
+     */
+    @Test
+    fun `every role caps metaspace, the API at 256 MiB or more, and the API's JVM fits its container`() {
+        val options =
+            roles.mapValues { (_, env) ->
+                env.clear["JAVA_TOOL_OPTIONS"]
+                    ?.toString()
+                    .orEmpty()
+                    .split(Regex("\\s+"))
+            }
+
+        fun size(
+            role: String,
+            flag: String,
+        ): Long {
+            val value = options.getValue(role).firstOrNull { it.startsWith(flag) }?.removePrefix(flag)
+            withClue("$role's JAVA_TOOL_OPTIONS name no $flag") { (value != null) shouldBe true }
+            return bytes(value!!)
+        }
+
+        roles.keys.forEach { size(it, "-XX:MaxMetaspaceSize=") }
+        val metaspace = size("web", "-XX:MaxMetaspaceSize=")
+        withClue("the API's MaxMetaspaceSize is ${metaspace / MIB} MiB") { (metaspace >= 256 * MIB) shouldBe true }
+
+        val threads = 250 * size("web", "-Xss")
+        val jvm =
+            size("web", "-Xmx") + metaspace + size("web", "-XX:ReservedCodeCacheSize=") + size("web", "-XX:MaxDirectMemorySize=") + threads
+        val container = bytes((servers.getValue("web")["options"] as Map<*, *>)["memory"].toString())
+        withClue("the API's JVM budgets ${jvm / MIB} MiB in a ${container / MIB} MiB container") { (jvm <= container) shouldBe true }
+    }
+
+    /** `512m`, `1421240K`, `2g`, or a number of bytes, as the JVM and Docker read them. */
+    private fun bytes(value: String): Long {
+        val number = value.dropLastWhile { it.isLetter() }.toLong()
+        return when (value.last().lowercaseChar()) {
+            'k' -> number * KIB
+            'm' -> number * MIB
+            'g' -> number * GIB
+            else -> number
+        }
+    }
+
+    private companion object {
+        const val KIB = 1024L
+        const val MIB = 1024L * KIB
+        const val GIB = 1024L * MIB
     }
 }

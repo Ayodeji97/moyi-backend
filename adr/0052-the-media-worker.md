@@ -49,11 +49,30 @@ Java 25, `heifload`, a HEIC from the media module's tests decoded, and ffmpeg's 
   2026-10-29 that tag was still 25.0.4.1, one security update behind the 25.0.5 the buildpack image
   ran, and Ubuntu's own `openjdk-25-jre-headless` was 25.0.4.1 too. A newer JRE is a reviewed change
   to four lines.
-- **The API's JVM is sized as before**: the buildpack's memory calculator set
-  `-Xmx1421240K -XX:MaxMetaspaceSize=163911K -XX:ReservedCodeCacheSize=240M -Xss1M
-  -XX:MaxDirectMemorySize=10M` for 2 GB (read from the image production runs: 26,525 classes, 250
-  threads), with `-XX:+ExitOnOutOfMemoryError`; the `web` role's `JAVA_TOOL_OPTIONS` now says exactly
-  that. The image's own default (`-XX:MaxRAMPercentage=50`) only applies to a `docker run` by hand.
+- **The API's JVM is sized by the buildpack calculator's formula, with more metaspace.** The
+  calculator gives the heap what is left of the container's memory once the rest is budgeted:
+  `Xmx = total − MaxDirectMemorySize − MaxMetaspaceSize − ReservedCodeCacheSize − threads × Xss`,
+  with metaspace estimated as `classes × 5,800 bytes + 14,000,000` and no headroom. For
+  production's image (`ce41f22`, read from it on 2026-10-29: 29,533 classes, 250 threads) that is
+  metaspace 180,948K and `-Xmx1404203K` (2,097,152K − 10,240K − 180,948K − 245,760K − 256,000K).
+  **Corrected (review of #116):** the first version of this ADR copied the calculator's numbers
+  from an older local image (26,525 classes: `-XX:MaxMetaspaceSize=163911K`, `-Xmx1421240K`) and
+  called them production's. Under them the reviewer measured this image's API using 155 MB of a
+  168 MB cap and still rising; a JVM at its metaspace cap throws `OutOfMemoryError`, and
+  `-XX:+ExitOnOutOfMemoryError` ends it. Now: **`-XX:MaxMetaspaceSize=256m` and `-Xmx1292m`**,
+  the heap lowered by exactly what metaspace gained, so the total is the calculator's 2 GB:
+  2,097,152K − 10,240K − 262,144K − 245,760K − 256,000K = 1,323,008K = 1,292 MiB. The other flags
+  (`-XX:MaxDirectMemorySize=10M -XX:ReservedCodeCacheSize=240M -Xss1M -XX:+ExitOnOutOfMemoryError`)
+  are the calculator's. **Measured** (this image as the `web` role, deploy.yml's JVM flags plus NMT,
+  driven by the whole of `scripts/smoke.sh` with the 5-second close, reminder and held-push crons,
+  then stopped): **33,897 classes loaded; metaspace used 158.7 MiB (metadata 136.9 + class space
+  21.8), committed 160.4 MiB, against the cap of 256 MiB (63%)**. Against the old cap of 163,911K
+  (160.1 MiB) that is already at the limit; against production's present 180,948K, 91%. Not
+  exercised in that run: the hourly reaper, the nightly demotion and the quarter-hourly on-this-day
+  job, which did not fall due. `ProductionStartsWithoutMediaSecretsTest` now holds every role to a
+  metaspace cap, the API's to at least 256 MiB, and the API's whole JVM budget to its container
+  (seen red with 163911K, and with the heap left at 1,404,203K: 2,127 MiB in 2,048). The image's
+  own default (`-XX:MaxRAMPercentage=50`) only applies to a `docker run` by hand.
 - **The API container now carries libvips and ffmpeg it never runs**, and "the image has neither"
   no longer backs up the `"off"` line: NATIVE, the default, would start in the API and decode on its
   outbox thread. The line therefore moved under one guard more: it is in the top-level `env`, which
@@ -65,8 +84,14 @@ Measured: **image size**, linux/arm64, 397 MB compressed (the registry's size, w
 1.36 GB unpacked, against 105 MB and 552 MB for the buildpack image production runs. By layer: the
 apt packages 524 MB (libvips pulls ImageMagick, Poppler, OpenEXR and more as dependencies, which
 `VIPS_BLOCK_UNTRUSTED` keeps from ever reading an upload), the JRE 199 MB, the jar's dependencies
-107 MB, the application 21 MB. A release that changes only the application's classes moves the last
-layer. **Build time**, the `docker build` from the jar, no cache: on CI's native runners (#116's first
+107 MB, the application 21 MB. **Layer reuse needs the build cache** (corrected, review of #116):
+the first version said a release that changes only the application's classes moves only the last
+layer, but every fresh CI runner ran the apt install again and wrote it with new file times, so a new
+digest, and the server would have pulled all ~400 MB at every release. CI now builds with buildx and
+GitHub's cache (`type=gha`, one scope per architecture, `mode=max`): an unchanged step is taken from
+the cache with its layer and digest. What was verified is in the pull request (the layer digests
+printed by two runs of the same branch); main's cache is main's own, so the first release after
+merge builds cold once. **Build time**, the `docker build` from the jar, no cache: on CI's native runners (#116's first
 run) **29 s for linux/amd64 and 36 s for linux/arm64**, the whole `image` job 2 min 11 s and 2 min 16 s
 with `bootJar` (about 80 s) and the checks; 219 s for linux/arm64 on an Apple Silicon Mac through
 Docker Desktop's VM.
@@ -104,34 +129,51 @@ upload `UPLOADED` for 30 minutes (nothing took it up), beside its `PROCESSING` c
 restarts an unhealthy container by itself; a JVM that dies is restarted by the role's
 `unless-stopped` policy, and its delivery retried.
 
-**4. The memory, measured** (linux/arm64, the image, under the role's limits; a 24-megapixel JPEG of
-8.1 MiB, a 24-megapixel HEIC of 8.8 MiB and a 20-second AAC voice note uploaded through the API with
-processing off, then the worker started):
+**4. The memory, measured, and the container raised to 1 GB** (linux/arm64, the image, under the
+role's limits, on Docker Desktop's VM of 2 CPUs; a 24-megapixel JPEG of 8.1 MiB, a 24-megapixel HEIC
+of 8.8 MiB and a 20-second AAC voice note uploaded through the API with processing off, then the
+worker started):
 
-| Run | JVM cap | JVM resident (VmHWM) | Container peak (`memory.peak`) | Page cache at the end |
-|---|---|---|---|---|
-| 1 | `-Xmx256m` | 454 MiB | 686 MiB | 90 MiB |
-| 2 | `-Xmx192m` | 458 MiB | 751 MiB | 114 MiB |
-| 3 | `-Xmx256m`, with NMT | 441 MiB | 696 MiB | 98 MiB |
+| Run | Container | JVM cap | JVM resident (VmHWM) | Container peak (`memory.peak`) | Page cache at the end |
+|---|---|---|---|---|---|
+| 1 | 768m | `-Xmx256m` | 454 MiB | 686 MiB | 90 MiB |
+| 2 | 768m | `-Xmx192m` | 458 MiB | 751 MiB | 114 MiB |
+| 3 | 768m | `-Xmx256m`, with NMT | 441 MiB | 696 MiB | 98 MiB |
+| 4 | 768m | `-Xmx192m`, + the ceiling HEIC | 437 MiB | 748 MiB | 99 MiB; the ceiling HEIC `FAILED` |
+| 5 | 768m | `-Xmx256m`, + the ceiling HEIC | 434 MiB | 768 MiB (at the limit, reclaiming) | 97 MiB; the ceiling HEIC `FAILED` |
+| 6 | **1g** | `-Xmx192m`, `MALLOC_ARENA_MAX=2`, + the ceiling HEIC | 439 MiB | **799 MiB** | 94 MiB; **all four `READY`** |
 
 NMT at the end of run 3: heap 155 MiB committed, metaspace 108 MiB, code 34 MiB, symbols 28 MiB,
 class space and the rest ~40 MiB: 375 MiB committed, about 430 MiB resident. So **the JVM is ~440
 MiB resident, not the ~400 ADR-0048 estimated, and the cap barely moves it**: the heap stays near
-160 MiB committed under either cap. The decode alone, in the same image without a container limit:
-the 24-megapixel HEIC peaks at 256 MiB. `-Xmx192m` is chosen over the proposed 256m: the same
-resident memory as measured, and 64 MiB less the heap can ever grow beside a decode. The page cache
-is the image's own files, read once, and the kernel reclaims it first.
+160 MiB committed under either cap. `-Xmx192m` is chosen over the proposed 256m: the same resident
+memory as measured, and 64 MiB less the heap can ever grow beside a decode. The page cache is the
+image's own files, read once, and the kernel reclaims it first.
 
-**At the decoded-bytes ceiling the arithmetic does not hold.** A HEIC of 5900 × 5900 (99.6 MiB
-decoded, just under `MAX_DECODED_BYTES`) took the container to its 768 MiB limit (`memory.events`:
-`max` 173, `oom_kill` 0) and was refused `UNREADABLE` in both runs (192m and 256m). The cause is
-not the container: decoded alone in the image, `vips thumbnail` **segfaults under the sandbox's
-640 MiB address-space limit** (exit 139) on linux/arm64, and decodes under 768 MiB, at 306 MiB
-resident. ADR-0048 measured the ceiling HEIC decoding whole at 283 MiB under 640 MiB; that
-measurement did not hold for this file on this architecture. Had it decoded, 440 + 306 + the
-tmpfs's work files is about 760 MiB of 768. Not changed here (decision 3 of ADR-0048 is the owner's
-ruling, and the client's downscale to 2048 px, owed in moyi-app, keeps real uploads near 12 MiB
-decoded): see Owed.
+**The ceiling HEIC, and why it failed.** A HEIC of 5900 × 5900 (99.6 MiB decoded, just under
+`MAX_DECODED_BYTES`) of fine texture at a high bitrate was refused `UNREADABLE` in runs 4 and 5:
+`vips thumbnail` **segfaulted under the sandbox's 640 MiB address-space limit** (exit 139) with
+~300-400 MiB resident. `ulimit -v` counts address space reserved, not memory used, and glibc's
+malloc reserves 64 MiB of it for each arena it makes, one per thread that allocates while others
+hold the lock: libheif's and libde265's decoding threads, and the arenas' count is bounded only by
+eight per CPU. With **`MALLOC_ARENA_MAX=2`** (now in both of `VipsImageProcessor`'s environments,
+since the sandbox clears the environment, and in the worker role's own) the same file decodes under
+the same 640 MiB limit, at 345 MiB resident. The 640 MiB limit and `MAX_DECODED_BYTES` are
+unchanged. `VipsImageProcessorTest` makes such a HEIC and decodes it through the processor under
+640 MiB: green with the cap, red without it (`UNREADABLE`), on linux/arm64; a gentler file (fine
+noise at sigma 6, quality 60) decoded either way, so the test's file is made harder on purpose. It
+runs on Linux only (elsewhere nothing is limited) and needs libheif's x265 plugin to write the
+HEIC, which CI installs for the tests and the image does not carry. Run 6 is the end-to-end proof:
+all four uploads `READY` in a 1 GB container, peak 799 MiB, `memory.events` `max` 0.
+
+**1 GB, not Q5's 768 MB** (the review of #116's ruling). The arithmetic at 768 MB did not hold: the
+JVM's ~440 MiB, a decode at the ceiling of up to ~350 MiB, and the tmpfs's work files (the upload
+and the decoded intermediate, ~30 MiB) is ~820 MiB. At 1 GB the measured peak with the ceiling HEIC
+was 799 MiB including ~94 MiB of reclaimable page cache. The box has room: 2 GB for the API (4 GB
+for the moment of a deploy), 2 GB for Postgres, 384 MB for Valkey and 1 GB (2 GB during a deploy)
+for the worker, limits not usage, on 8 GB. **Trimming the worker's JVM is owed** (below): it loads
+much it never uses (the breach-corpus filter, ~17 MB of heap; the identity, bond and gratitude
+modules' beans).
 
 **5. The network limit is put in from the host, because Kamal and Docker cannot express it.**
 What was checked, in Kamal 2.12's source and on Docker 29:
@@ -153,10 +195,15 @@ iptables): loopback (Docker's DNS), TCP 5432 to the `kamal` network's subnet (Po
 not an address, because the accessory's address changes when it is rebooted), TCP 443 to
 Cloudflare's published IPv4 ranges (R2's EU endpoint resolved into 141.101.64.0/18), and
 `EXTRA_HTTPS_CIDRS`; everything else, and all IPv6 but loopback, rejected. The container has no
-capability, so nothing in it can undo them, and they die with it. `media-check.sh` runs its
+capability, so nothing in it can undo them, and they die with it. The rules go in with one
+`iptables-restore --noflush`: the chain is declared, filled and jumped to in one commit, so a rule
+that fails applies nothing and the apply exits non-zero instead of saying "limited"; and a container
+that shares the host's network namespace is refused, never touched (review of #116). The service is
+wanted by `docker.service` as well, so a Docker started later starts it. `media-check.sh` runs its
 `check` and alarms on a worker running without the limit. `ops/media-worker/test-egress-limit.sh`
-proves it in Docker-in-Docker (a Linux kernel and a Docker daemon of its own): ten checks passed,
-and with the two `REJECT` rules removed five went red.
+proves it in Docker-in-Docker (a Linux kernel and a Docker daemon of its own): thirteen checks pass;
+with the two `REJECT` rules removed five went red; with a failed restore ignored, with the jump added
+unconditionally, and with the host-namespace refusal removed, the check for each went red.
 
 **What it is not**: R2 has no range of its own, so the limit admits HTTPS to every site behind
 Cloudflare, which a subverted decoder could use to send what it read; it stops the rest of the
@@ -165,7 +212,7 @@ it is not installed or the service is down, which is why the alarm exists. It is
 server by this pull request; installing it is an owner's step (`ops/media-worker/README.md`).
 
 **6. `config/deploy.yml` deploys the worker now, harmlessly.** The `media-worker` role is present:
-768m, 1.5 CPUs, `read-only`, `tmpfs /tmp` (128 MB, `noexec,nosuid,nodev`), `cap-drop ALL`,
+1g, 1.5 CPUs, `read-only`, `tmpfs /tmp` (128 MB, `noexec,nosuid,nodev`), `cap-drop ALL`,
 `no-new-privileges`, the health check, the profile, `native`, the JVM's cap. With storage
 `unavailable` no upload can exist, so it starts, passes its checks and has nothing to do; seen, with
 the deploy file's environment as Ruby's YAML reads it and throwaway secrets: healthy in 11 s,
@@ -179,6 +226,18 @@ there, since it names the Cloudflare account and this repository is public;
 `ProductionStartsWithoutMediaSecretsTest` accepts it as one (seen: the follow-up's diff applied, green;
 its bucket line removed, red).
 
+**Rolling back across this release** (review of #116). Kamal 2.12's `rollback` first checks that a
+container of the target version exists for every role it acts on (`Kamal::Cli::Main#container_available?`
+iterates `KAMAL.roles_on(host)`, and `roles` is narrowed by `--roles`, `Kamal::Commander::Specifics`);
+no `media-worker` container exists for a version before this one, so `kamal rollback <older sha>`
+refuses. The rollback past it is `kamal rollback <sha> --roles=web`: the API goes back, and the worker
+stays on the newer image, harmless while storage is `unavailable`. Written in `config/deploy.yml`'s
+header and the README.
+
+**`builder.context` in `config/deploy.yml`** is the jar's directory. It is unused (every deploy is
+`--skip-push`), and it would break a Kamal build from a clean clone of the commit, which is Kamal's
+default without a context and holds no jar; with it Kamal builds from the working tree. Said there.
+
 ## Consequences
 
 **Positive.** Uploads are decoded in a container that can neither write its own file system nor
@@ -189,7 +248,7 @@ the same JRE vendor and native programs on the server as CI's tests do on Ubuntu
 
 **Negative.** The image is about four times larger, for both roles. The API's container carries
 programs it must never start; one line and one test stand between it and decoding in the API. The
-worker's memory has little headroom (decision 4), none at the ceiling. The worker has no metrics
+worker's memory has ~225 MiB of headroom at the ceiling (decision 4: 799 of 1,024 MiB). The worker has no metrics
 endpoint: the pipeline's meters (`gratitude.media.processing.duration`, the outbox gauges for its
 consumers) are kept in a process nothing can scrape; its health is the ready file and
 `media-check.sh`'s database queries. The worker's container receives the same secrets as the API's
@@ -197,12 +256,20 @@ consumers) are kept in a process nothing can scrape; its health is the ready fil
 email key it never uses. A subverted decoder runs as the same uid as the JVM and could read its
 environment; it already reaches the database, which is worth more. The network limit is outside
 Kamal's configuration and fails open. During a deploy, both roles' old and new containers can
-overlap: 2 × 2 GB + 2 × 768 MB of limits beside Postgres's 2 GB and Valkey's 384 MB on an 8 GB box,
-limits not usage (the API's resident memory is far below its limit). The switch from Liberica (the
-buildpack's JRE) to Temurin may move Argon2's timing a little: rerun `scripts/argon2-bench` on the
-server after the first deploy and compare it with the measurements beside `MOYI_SECURITY_ARGON2_ITERATIONS` in `config/deploy.yml`.
+overlap: 2 × 2 GB + 2 × 1 GB of limits beside Postgres's 2 GB and Valkey's 384 MB on an 8 GB box,
+limits not usage, 8.4 GB of them for the minute both overlap (the API's resident memory is far below its limit). The switch from Liberica (the
+buildpack's JRE) to Temurin moves Argon2's timing a little: the reviewer of #116 measured t=6
+medians of 43.9 and 45.0 ms on Liberica and 45.9 and 47.5 ms on Temurin, same machine, 2 GB, two
+runs each: a few percent, inside the spread the deploy file records, so no retune
+(`scripts/argon2-bench` now names this image's paths; re-run here on 2 CPUs: 45.4 ms). The number
+that decides is the server's, after the first deploy. The smoke script reads the processing log
+lines and meters from the process it is attached to, so against the two roles split (the API from
+the image, the worker beside it) five of its probes fail by design (seen: 1197 passed, 5 failed, the
+five being those log and scrape probes); it is run against one process with processing on.
 
-**Neutral.** `bootBuildImage` and its pinned Paketo builder are gone from the build. `common.events`
+**Neutral.** `bootBuildImage` and its pinned Paketo builder are gone from the build. The API logs
+"subscriptions this build does not declare" for `media.process` on every start: the worker's, kept
+by design (runbook). `common.events`
 gains `moyi.events.registration.only` and `OutboxDispatcher.consumerIds()` (this process's
 consumers; the backlog reads every consumer the database knows); scheduling gains `moyi.scheduling.idempotency-keys.cron`. No
 migration, no API change, no state-map row.
@@ -220,7 +287,7 @@ migration, no API change, no state-map row.
   Ubuntu's OpenJDK package the same.
 - **A web server in the worker bound to loopback, for `/actuator/health` and metrics.** Every API
   route would be live inside the decoding container, and Tomcat and the MVC beans would cost heap
-  the 768 MB cannot spare. The ready file answers what Kamal needs.
+  the container cannot spare. The ready file answers what Kamal needs.
 - **Turning consumers off by a property on each consumer.** Seven properties, and the next consumer
   added would run in the worker by default. One allow-list in the worker's profile names what it runs.
 - **The network limit by `DOCKER-USER` rules on the host, by address** (decision 5), **or by an HTTP
@@ -232,12 +299,12 @@ migration, no API change, no state-map row.
 
 - **The owner, before switching storage on:** install the egress limit and see `check` pass
   (`ops/media-worker/README.md`); then the follow-up pull request as written there.
-- **The owner's ruling on the ceiling** (decision 4): on linux/arm64 a HEIC just under the 100 MiB
-  decoded ceiling segfaults under the 640 MiB address-space limit and is refused `UNREADABLE`, and the
-  container reaches its 768 MiB limit while trying. Either raise the sandbox's `memory-limit` for
-  vips (768 MiB decoded this file) and the container to 1 GiB, or lower `MAX_DECODED_BYTES`, or accept
-  it while the client downscales to 2048 px (moyi-app, owed). To be re-measured on the server
-  itself, which this pull request could not do.
+- **Trimming the worker's JVM** (review of #116, owed, not this pull request): it starts every
+  module's beans and loads the breach-corpus filter it never consults; ~440 MiB resident is most of
+  its 1 GB. A profile that leaves them out, measured.
+- **The ceiling on the server itself**: the at-ceiling HEIC decoded under 640 MiB with the arenas
+  capped on this Mac's VM (2 CPUs) and on CI; the CAX21 has 4. Re-run the upload of run 6 there when
+  storage is on.
 - **After the first deploy of this image:** `scripts/argon2-bench` on the server (JRE vendor change);
   the worker's resident memory read with `docker stats` there.
 - **When Rekognition is switched on:** AWS's eu-central-1 ranges in the egress limit's

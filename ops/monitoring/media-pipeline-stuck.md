@@ -29,6 +29,12 @@ never deployed, or its outbox poller is stuck. The API never processes (`"off"`)
 3. **Restarting it** is `kamal app boot -r media-worker` (the same version); the uploads wait,
    nothing is lost.
 
+Not a fault: the API logs `Event consumer has subscriptions this build does not declare, and
+they are kept: consumer=media.process undeclared=[MediaUploaded]` (and the same for the
+moderation consumers once they subscribe) on every start. The worker registered those
+subscriptions; the API, with processing off, declares none and leaves them alone
+(`ConsumerRegistry`, by design).
+
 ## "a media worker container runs without its egress limit"
 
 `moyi-media-worker-egress check` found a worker container whose network namespace lacks the

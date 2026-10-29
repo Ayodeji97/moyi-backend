@@ -21,6 +21,13 @@
 # and it must be a commit from after the `service` label was added to the
 # image build (now app/Dockerfile): Kamal refuses an image without it.
 #
+# Rolling back past #116 (the first release with the media-worker role) is
+# `kamal rollback <sha> --roles=web`: Kamal 2.12 refuses a rollback unless a
+# container of that version exists for every role it is asked about, and no
+# media-worker container exists for an older version. The worker then stays
+# on the newer image, which is harmless while storage is `unavailable`
+# (ADR-0052; README, "How do I deploy it").
+#
 # The explicit --version matters. Without it Kamal tags the deploy with the
 # local HEAD, and appends "_uncommitted_<random>" when the working tree has
 # any change, even an untracked file; no such tag exists in GHCR.
@@ -51,13 +58,18 @@ servers:
       memory: 2g
     env:
       clear:
-        # The JVM sized to the 2 GB above, as the buildpack image's memory
-        # calculator sized it until ADR-0052 replaced that image: these are
-        # its numbers for 2 GB, read from that image on 2026-10-29 (26,525
-        # classes, 250 threads), so the API's memory is what it was.
+        # The JVM sized to the 2 GB above by the buildpack memory calculator's
+        # own formula (ADR-0052 shows the arithmetic): 2 GB less 10M direct
+        # memory, the metaspace cap, 240M of code cache and 250 threads at 1M
+        # is the heap. Production's image (ce41f22, 29,533 classes) was given
+        # 180948K of metaspace and -Xmx1404203K. The metaspace cap is raised to
+        # 256m, because this image's API was measured using 155 MB of a 168 MB
+        # cap and rising (review of #116), and the heap lowered by the same
+        # 79 MiB, so the total is what the calculator budgeted.
+        # ProductionStartsWithoutMediaSecretsTest holds MaxMetaspaceSize >= 256m.
         JAVA_TOOL_OPTIONS: >-
-          -XX:+ExitOnOutOfMemoryError -XX:MaxDirectMemorySize=10M -Xmx1421240K
-          -XX:MaxMetaspaceSize=163911K -XX:ReservedCodeCacheSize=240M -Xss1M
+          -XX:+ExitOnOutOfMemoryError -XX:MaxDirectMemorySize=10M -Xmx1292m
+          -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=240M -Xss1M
 
   # The media worker (the owner's Q5 and his ruling of 2026-10-29: a role, not
   # an accessory, so it is redeployed with the application). The same image,
@@ -74,13 +86,15 @@ servers:
     # unless asked for): it has no port. Kamal instead waits for Docker's
     # health check below to say `healthy` before it calls the deploy done.
     options:
-      # Q5's container. The decode's measured peak (ADR-0048 §3, ADR-0052)
-      # plus the capped JVM below must stay inside it.
-      memory: 768m
+      # Q5's 768 MB proved too tight (ADR-0052 decision 4): the JVM is ~440
+      # MiB resident and a decode at the ceiling up to ~350 MiB more, with
+      # the tmpfs's work files beside them. 1 GB, on the review of #116's
+      # ruling; the box has room for it.
+      memory: 1g
       cpus: 1.5
       # Nothing in the image may be written: a decoder that is subverted
       # cannot leave anything behind. The one writable place is /tmp, in
-      # memory (it counts against the 768m), where the JVM and each photo's
+      # memory (it counts against the 1g), where the JVM and each photo's
       # work directory live and die with the container.
       read-only: true
       tmpfs: /tmp:rw,noexec,nosuid,nodev,size=128m
@@ -105,7 +119,13 @@ servers:
         # other container gets "off" from the env below; only this role
         # overrides it.
         MOYI_MEDIA_PROCESSING_PROVIDER: native
-        # The JVM capped, so that it and one decode fit in 768m (ADR-0048 §3's
+        # glibc's malloc reserves an arena of address space per thread, and
+        # the JVM has dozens. The sandbox sets the same for every program it
+        # starts, which is where it matters (ulimit -v counts reservations, not
+        # resident memory; ADR-0052 decision 4); here it keeps the JVM's own
+        # reservations down too.
+        MALLOC_ARENA_MAX: 2
+        # The JVM capped, so that it and one decode fit in the container (ADR-0048 §3's
         # arithmetic, measured in ADR-0052: about 430 MiB resident, of which
         # the heap is ~160 MiB committed; the rest is metaspace, code and the
         # JVM's own). 192m rather than the 256m first proposed: the measured
@@ -133,7 +153,11 @@ registry:
 # Never used: every deploy is --skip-push. Stated so that a deploy run
 # without that flag builds for the server's architecture only, not Kamal's
 # default of both, from the Dockerfile CI builds from (ADR-0052), whose
-# context is the boot jar's directory: `./gradlew :app:bootJar` first.
+# context is the boot jar's directory: `./gradlew :app:bootJar` first. A
+# context also means Kamal builds from the working tree rather than from a
+# clean clone of the commit (its default when no context is set), and a clone
+# would hold no jar: such a build would fail. Unused while every deploy is
+# --skip-push.
 builder:
   arch: arm64
   dockerfile: app/Dockerfile

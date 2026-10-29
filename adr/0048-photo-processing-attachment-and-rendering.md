@@ -324,8 +324,10 @@ there the asset's state decides it. CI installs `libvips-tools` and `libheif-plu
   moderated; with no verdict for them until D4, a partner is never given one, which needs no gate.)
   **Built: ADR-0052.** One image from `app/Dockerfile` for both roles, the `media-worker` role and
   profile, the network limit from the host. Measured there: the worker's JVM is ~440 MiB resident,
-  not ~400, and a HEIC just under the decoded-bytes ceiling did not decode under this decision's
-  640 MiB limit on linux/arm64 (ADR-0052 decision 4 and Owed: the owner's ruling).
+  not ~400, and a HEIC just under the decoded-bytes ceiling segfaulted under this decision's
+  640 MiB limit on linux/arm64 until glibc's malloc arenas were capped (`MALLOC_ARENA_MAX=2` in
+  the sandbox's environment; the limit and the ceiling unchanged); the worker's container is 1 GB,
+  not 768 MB (ADR-0052 decision 4).
 - **R2, not run:** one GET of a photo URL signed up to an hour earlier, against the real bucket,
   when uploads are switched on (MinIO serves it; R2's SigV4 is expected to, as S3's does).
 - **D3:** voice notes, still `UPLOADED` after `media.process` has passed them; D3 processes them,

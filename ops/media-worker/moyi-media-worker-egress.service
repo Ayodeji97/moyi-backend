@@ -12,4 +12,7 @@ Restart=always
 RestartSec=2
 
 [Install]
-WantedBy=multi-user.target
+# docker.service too: Docker started (or restarted) later starts this with it,
+# and PartOf above stops it with Docker, so the watch never outlives the daemon
+# whose events it reads.
+WantedBy=multi-user.target docker.service

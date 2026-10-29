@@ -1,4 +1,6 @@
-# syntax=docker/dockerfile:1
+# No `# syntax=` line: nothing here needs more than the Dockerfile frontend
+# built into BuildKit, and a syntax line pulls a frontend image by tag at
+# every build (review of #116).
 #
 # The one image Moyi runs (ADR-0052). Both Kamal roles start it: `web`, the API,
 # with media processing off, and `media-worker`, which decodes uploads with
@@ -95,7 +97,7 @@ USER moyi:moyi
 EXPOSE 8080 8081
 
 # How much memory the JVM takes is the role's to say (JAVA_TOOL_OPTIONS in
-# config/deploy.yml), since one image runs in a 2 GB container and a 768 MB
+# config/deploy.yml), since one image runs in a 2 GB container and a 1 GB
 # one. This default only applies where nothing is said, e.g. a `docker run` by hand.
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=50 -XX:+ExitOnOutOfMemoryError"
 

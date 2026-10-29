@@ -12,8 +12,8 @@ job, and processing `off`.
 | | |
 |---|---|
 | Container | `moyi-media-worker-<version>` on `kamal`, no port, no proxy |
-| Limits | 768 MB, 1.5 CPUs, JVM `-Xmx192m` |
-| File system | read-only; `/tmp` a 128 MB tmpfs (in memory, counted in the 768 MB) |
+| Limits | 1 GB, 1.5 CPUs, JVM `-Xmx192m`, `MALLOC_ARENA_MAX=2` |
+| File system | read-only; `/tmp` a 128 MB tmpfs (in memory, counted in the 1 GB) |
 | User | `moyi` (uid 10001), no capability, `no-new-privileges` |
 | Healthy when | `/tmp/moyi-ready` exists: written once the application has started (after libvips' and ffmpeg's start-up checks), removed as it stops. Kamal waits for `healthy` before calling a deploy done |
 | Working when | `ops/monitoring/media-check.sh` finds no upload waiting `UPLOADED`, and nothing `PROCESSING`, for 30 minutes |
@@ -160,6 +160,8 @@ table): the JVM resident at about 430-455 MiB whatever its heap cap (192m or
 256m; NMT: heap ~160 MiB committed, metaspace ~110, code ~35, symbols ~30), and
 the container's peak 686-751 MiB processing a 24-megapixel JPEG, a
 24-megapixel HEIC and a voice note, of which ~100-120 MiB was reclaimable page
-cache. A HEIC just under the 100 MiB decoded ceiling took the container to its
-768 MiB limit (reclaiming, not killed) and was refused `UNREADABLE`: see
-ADR-0052, Owed.
+cache. A HEIC just under the 100 MiB decoded ceiling segfaulted under the
+sandbox's 640 MiB address-space limit until glibc's malloc arenas were capped
+(`MALLOC_ARENA_MAX=2`); with the cap, in a 1 GB container, it was `READY` and
+the container peaked at 799 MiB. Hence 1 GB, not Q5's 768 MB (ADR-0052
+decision 4).

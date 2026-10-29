@@ -2875,4 +2875,9 @@ Wrong about: ADR-0048's ceiling holding everywhere. A HEIC just under 100 MiB de
          that ADR measured decoding under its 640 MiB address-space limit, segfaulted under
          it on linux/arm64 and decoded under 768 MiB; the container reached its limit trying.
          Measured, written down, left to the owner: a parameter another ADR decided is not
-         this slice's to move.
+         this slice's to move. The review found the cause: `ulimit -v` counts the 64 MiB each
+         glibc malloc arena reserves, not memory used; two arenas, and it decodes.
+Wrong about: "read from the image production runs". The API's JVM flags came from an older
+         image left on this Mac, 3,000 classes fewer, and its metaspace cap sat at the API's
+         measured use. A number copied from a machine must name the machine it was read on,
+         and a test now holds the cap.

@@ -17,7 +17,12 @@
 #      80 are refused; R2's address on 443 is not refused by the limit;
 #   c. `watch` limits a worker started after it, by itself;
 #   d. inside the worker the rules cannot be removed (no capability);
-#   e. `check` passes while every worker is limited, and fails for one that is not.
+#   e. `check` passes while every worker is limited, and fails for one that is not;
+#   f. an apply that fails part-way (a range iptables refuses) applies nothing,
+#      exits non-zero and never says "limited";
+#   g. applying twice leaves one jump and one set of rules, not two;
+#   h. a worker container on the host's network is refused, and the host's own
+#      rules are left as they were.
 # Prints PASS or FAIL for each and exits non-zero if any failed.
 set -euo pipefail
 
@@ -102,5 +107,38 @@ in_host pkill -f "moyi-media-worker-egress watch" || true
 in_host pkill -f "docker events" || true
 worker moyi-media-worker-unlimited
 if in_host moyi-media-worker-egress check >/dev/null 2>&1; then fail "e. check passed with a worker unlimited"; else pass "e. check fails for a worker that is not limited"; fi
+
+# f. 300.0.0.0/8 passes the script's own shape check and is refused by iptables.
+pid=$(in_host docker inspect --format '{{.State.Pid}}' moyi-media-worker-unlimited)
+out=$(in_host env EXTRA_HTTPS_CIDRS=300.0.0.0/8 moyi-media-worker-egress apply moyi-media-worker-unlimited 2>&1) && status=0 || status=$?
+rules=$(in_host nsenter --target "$pid" --net -- iptables -S | grep -c MOYI-EGRESS || true)
+if [ "$status" != 0 ] && ! grep -q "limited moyi" <<<"$out" && [ "$rules" = 0 ] && reach moyi-media-worker-unlimited moyi-valkey 6379; then
+  pass "f. a failed apply applies nothing, exits $status and does not say limited"
+else
+  fail "f. failed apply: status=$status, MOYI-EGRESS lines=$rules, said: $out"
+fi
+
+# g.
+in_host moyi-media-worker-egress apply moyi-media-worker-unlimited >/dev/null 2>&1
+in_host moyi-media-worker-egress apply moyi-media-worker-unlimited >/dev/null 2>&1
+jumps=$(in_host nsenter --target "$pid" --net -- iptables -S OUTPUT | grep -c -- "-j MOYI-EGRESS" || true)
+rejects=$(in_host nsenter --target "$pid" --net -- iptables -S MOYI-EGRESS | grep -c -- "-j REJECT" || true)
+if [ "$jumps" = 1 ] && [ "$rejects" = 2 ] && refused moyi-media-worker-unlimited moyi-valkey 6379; then
+  pass "g. applied twice: one jump, one set of rules, still limited"
+else
+  fail "g. applied twice: $jumps jumps, $rejects REJECT rules"
+fi
+
+# h.
+in_host docker run -d --name moyi-media-worker-hostnet --network host --label service=moyi --label role=media-worker \
+  busybox:1.37 sleep 3600 >/dev/null
+before=$(in_host iptables -S | md5sum)
+if in_host moyi-media-worker-egress apply moyi-media-worker-hostnet >/dev/null 2>&1; then
+  fail "h. apply acted on a container in the host's network namespace"
+elif [ "$(in_host iptables -S | md5sum)" = "$before" ]; then
+  pass "h. a container on the host's network is refused, the host's rules untouched"
+else
+  fail "h. the host's rules changed"
+fi
 
 exit "$failed"

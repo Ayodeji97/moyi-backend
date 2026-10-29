@@ -68,8 +68,10 @@ jobs:
       # make, on Linux under the memory limits production uses. The libde265
       # plugin is what lets libheif decode a HEIC. Ubuntu 24.04 ships libvips
       # 8.15 and ffmpeg 6.1 (with libopus and the AMR codecs); the pipelines'
-      # options were checked against both.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools libheif-plugin-libde265 ffmpeg
+      # options were checked against both. The x265 plugin is for the tests
+      # alone: it lets libvips WRITE a HEIC, so a test can make one at the
+      # decoded-bytes ceiling (ADR-0052); the image has no encoder.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools libheif-plugin-libde265 libheif-plugin-x265 ffmpeg
 
       - run: ./gradlew build
 
@@ -187,10 +189,32 @@ jobs:
       # directory holding the boot jar and nothing else.
       - run: ./gradlew :app:bootJar
 
-      - run: |
-          docker build --file app/Dockerfile \
-            --tag ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }} \
-            app/build/libs
+      # Built with buildx and GitHub's cache, one scope per architecture
+      # (review of #116). Without it every fresh runner ran the apt install
+      # again and wrote layers with new digests, so a release that changed
+      # one class made the server pull the whole ~400 MB again. With it, an
+      # unchanged step is taken from the cache, its layer keeps its digest, and
+      # a pull moves only what changed. A cache written on a pull request is
+      # that pull request's (GitHub scopes caches by branch); main reads only
+      # main's. `load` puts the image in the runner's Docker for the checks
+      # and the push below, which are unchanged.
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: app/build/libs
+          file: app/Dockerfile
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }}
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          push: false
+          provenance: false
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
+
+      # The layers, by digest, so that two runs can be compared: the apt
+      # layer's digest should repeat from one run to the next.
+      - run: docker image inspect --format '{{json .RootFS.Layers}}' ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }} | jq -r '.[]'
 
       # The tag claims an architecture; this makes the image prove it. If a
       # runner label ever maps to a different machine than its name says,
@@ -221,7 +245,8 @@ jobs:
             vips --version | grep -q "^vips-8\."
             vips -l | grep -q heifload
             ffmpeg -hide_banner -h encoder=libopus | grep -q "Encoder libopus"
-            command -v ffprobe vipsheader
+            command -v ffprobe
+            command -v vipsheader
           '
           docker run --rm -i --entrypoint /bin/sh "$IMAGE" -c \
             'cd /tmp && cat > in.heic && vips thumbnail in.heic out.webp 64 --fail-on error && vipsheader out.webp' \

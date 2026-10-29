@@ -61,39 +61,50 @@ in_netns() { # pid, then the command to run in that process's network namespace
 }
 
 apply() {
-  local container=$1 pid subnet cidr
-  pid=$(docker inspect --format '{{.State.Pid}}' "$container")
+  local container=$1 pid subnet cidr ns jump rules
+  pid=$(docker inspect --format '{{.State.Pid}}' "$container") || { say "cannot inspect $container"; return 1; }
   [ "${pid:-0}" -gt 0 ] || { say "$container is not running"; return 1; }
+  # A container on the host's network (--network host) shares the host's
+  # namespace: rules put "in" it would be the host's own, and would cut the
+  # server off. Never.
+  ns=$(readlink "/proc/$pid/ns/net") || { say "cannot read $container's network namespace"; return 1; }
+  [ "$ns" != "$(readlink /proc/1/ns/net)" ] || { say "$container shares the host's network namespace; refusing to touch it"; return 1; }
   subnet=$(docker network inspect --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}' "$NETWORK" | tr ' ' '\n' | grep -m1 -E '^[0-9.]+/[0-9]+$')
   cidr_ok "$subnet" || { say "cannot read the $NETWORK network's IPv4 subnet"; return 1; }
-
-  # Built in a fresh chain, then swapped in, so the container is never without
-  # its rules while they are rewritten.
-  in_netns "$pid" iptables -w -N "$CHAIN-NEW" 2>/dev/null || in_netns "$pid" iptables -w -F "$CHAIN-NEW"
-  in_netns "$pid" iptables -w -A "$CHAIN-NEW" -o lo -j ACCEPT
-  in_netns "$pid" iptables -w -A "$CHAIN-NEW" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  in_netns "$pid" iptables -w -A "$CHAIN-NEW" -d "$subnet" -p tcp --dport 5432 -j ACCEPT
   for cidr in $CLOUDFLARE_V4 $EXTRA_HTTPS_CIDRS; do
     cidr_ok "$cidr" || { say "not an IPv4 range: $cidr"; return 1; }
-    in_netns "$pid" iptables -w -A "$CHAIN-NEW" -d "$cidr" -p tcp --dport 443 -j ACCEPT
   done
-  in_netns "$pid" iptables -w -A "$CHAIN-NEW" -p tcp -j REJECT --reject-with tcp-reset
-  in_netns "$pid" iptables -w -A "$CHAIN-NEW" -j REJECT
 
-  in_netns "$pid" iptables -w -I OUTPUT 1 -j "$CHAIN-NEW"
-  if in_netns "$pid" iptables -w -n -L "$CHAIN" >/dev/null 2>&1; then
-    while in_netns "$pid" iptables -w -D OUTPUT -j "$CHAIN" 2>/dev/null; do :; done
-    in_netns "$pid" iptables -w -F "$CHAIN"
-    in_netns "$pid" iptables -w -X "$CHAIN"
-  fi
-  in_netns "$pid" iptables -w -E "$CHAIN-NEW" "$CHAIN"
+  # One iptables-restore, one commit: the chain is declared (so emptied, with
+  # --noflush leaving every other chain alone), filled, and jumped to, all
+  # at once or not at all. A rule that fails fails the whole of it, nothing is
+  # half applied, and the caller is told, never "limited". The jump is added
+  # only where it is missing, so a re-apply does not stack them.
+  jump=""
+  in_netns "$pid" iptables -w -C OUTPUT -j "$CHAIN" 2>/dev/null || jump="-I OUTPUT 1 -j $CHAIN"
+  rules="*filter
+:$CHAIN - [0:0]
+-A $CHAIN -o lo -j ACCEPT
+-A $CHAIN -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A $CHAIN -d $subnet -p tcp --dport 5432 -j ACCEPT"
+  for cidr in $CLOUDFLARE_V4 $EXTRA_HTTPS_CIDRS; do
+    rules="$rules
+-A $CHAIN -d $cidr -p tcp --dport 443 -j ACCEPT"
+  done
+  rules="$rules
+-A $CHAIN -p tcp -j REJECT --reject-with tcp-reset
+-A $CHAIN -j REJECT${jump:+
+$jump}
+COMMIT"
+  printf '%s\n' "$rules" | in_netns "$pid" iptables-restore -w --noflush || { say "could not limit $container: iptables-restore failed, nothing applied"; return 1; }
 
   # IPv6: nothing but loopback. The kamal network has no IPv6 today; this
-  # keeps it so should that change.
+  # keeps it so should that change. The same way, all or nothing.
   if in_netns "$pid" ip6tables -w -n -L OUTPUT >/dev/null 2>&1; then
-    in_netns "$pid" ip6tables -w -F OUTPUT
-    in_netns "$pid" ip6tables -w -A OUTPUT -o lo -j ACCEPT
-    in_netns "$pid" ip6tables -w -A OUTPUT -j REJECT
+    jump=""
+    in_netns "$pid" ip6tables -w -C OUTPUT -j "$CHAIN" 2>/dev/null || jump="-I OUTPUT 1 -j $CHAIN"
+    printf '%s\n' "*filter" ":$CHAIN - [0:0]" "-A $CHAIN -o lo -j ACCEPT" "-A $CHAIN -j REJECT" ${jump:+"$jump"} "COMMIT" |
+      in_netns "$pid" ip6tables-restore -w --noflush || { say "could not limit $container's IPv6: ip6tables-restore failed"; return 1; }
   fi
   say "limited $container (pid $pid): Postgres on $subnet, HTTPS to Cloudflare${EXTRA_HTTPS_CIDRS:+ and $EXTRA_HTTPS_CIDRS}"
 }
