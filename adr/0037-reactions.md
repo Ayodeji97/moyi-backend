@@ -428,6 +428,8 @@ carries the ones left on their entries is not decided anywhere.
 - **A CI pull request: `breaking` with `--flatten-allof`**, so that a new value of a
   response enum inside an `allOf` schema fails without the label. Its error counts differ
   from today's, so it is not this pull request's.
+  *(Done 2026-10-29: `flatten-allof: true` in `api-contract.yml`, ADR-0024's amendment of
+  that date.)*
 - **A small pull request: `Reactions.on` skips a stored type it does not know**, with a
   `WARN` line carrying the entry's id and the type only, so that a sixth value is an expand
   step that a rollback survives. It does not help a rollback past V27.
