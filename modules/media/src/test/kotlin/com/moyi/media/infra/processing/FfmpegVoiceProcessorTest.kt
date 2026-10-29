@@ -76,6 +76,17 @@ internal class FfmpegVoiceProcessorTest {
         withClue("$bitsPerSecond bit/s") { (bitsPerSecond in 16_000..32_000) shouldBe true }
     }
 
+    /** Owner's ruling Q4: mono, whatever the recorder wrote. */
+    @Test
+    fun `a stereo recording is kept as one channel`() {
+        val stereo = TestVoices.encoded(dir, "wav", "pcm_s16le", 2.0, "-ac", "2")
+        Ffmpegs.probe(Files.write(dir.resolve("stereo.wav"), stereo), "stream=channels")["streams.stream.0.channels"] shouldBe "2"
+
+        val transcoded = transcode(stereo, VoiceFormat.WAV).shouldBeInstanceOf<Transcoding.Transcoded>()
+
+        Ffmpegs.probe(transcoded.file, "stream=channels")["streams.stream.0.channels"] shouldBe "1"
+    }
+
     @Test
     fun `a note over 61 seconds is refused by the length its container says, before anything is transcoded`() {
         transcode(TestVoices.wav(62.0), VoiceFormat.WAV) shouldBe Transcoding.Refused(MediaRefusal.TOO_LONG)
