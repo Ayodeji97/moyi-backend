@@ -66,9 +66,10 @@ Measured: **image size**, linux/arm64, 397 MB compressed (the registry's size, w
 apt packages 524 MB (libvips pulls ImageMagick, Poppler, OpenEXR and more as dependencies, which
 `VIPS_BLOCK_UNTRUSTED` keeps from ever reading an upload), the JRE 199 MB, the jar's dependencies
 107 MB, the application 21 MB. A release that changes only the application's classes moves the last
-layer. **Build time**, from the jar, no cache: 219 s for linux/arm64 on an Apple Silicon Mac; on CI's
-native runners, see the pull request's `image (amd64)` and `image (arm64)` jobs (recorded there, and
-below under Consequences, once run).
+layer. **Build time**, the `docker build` from the jar, no cache: on CI's native runners (#116's first
+run) **29 s for linux/amd64 and 36 s for linux/arm64**, the whole `image` job 2 min 11 s and 2 min 16 s
+with `bootJar` (about 80 s) and the checks; 219 s for linux/arm64 on an Apple Silicon Mac through
+Docker Desktop's VM.
 
 **2. The `media-worker` profile makes the jar the worker** (`application-media-worker.yml`, held by
 `MediaWorkerProfileTest`, each line seen red when removed or changed):
@@ -238,8 +239,7 @@ migration, no API change, no state-map row.
   it while the client downscales to 2048 px (moyi-app, owed). To be re-measured on the server
   itself, which this pull request could not do.
 - **After the first deploy of this image:** `scripts/argon2-bench` on the server (JRE vendor change);
-  the worker's resident memory read with `docker stats` there; and CI's per-architecture build times
-  recorded here.
+  the worker's resident memory read with `docker stats` there.
 - **When Rekognition is switched on:** AWS's eu-central-1 ranges in the egress limit's
   `EXTRA_HTTPS_CIDRS` (ADR-0051, Owed).
 - **A metrics path for the worker** if Prometheus is ever deployed: a scrape over a unix socket or a
