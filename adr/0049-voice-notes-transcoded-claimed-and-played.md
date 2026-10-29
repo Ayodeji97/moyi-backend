@@ -221,6 +221,12 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
 - **Media requires a verified email** (the owner's ruling, 2026-10-29): the `/media` routes are
   refused to an account whose address is not verified. Owed as a separate small pull request, not
   this one; it closes the open question D1 and D2 carried in their pull requests (#106, #108).
+  **Done (#112)**: an upload intent, its completion and `media`'s claim by an entry refuse an
+  unverified owner with bond's FR-002 answer, `403 EMAIL_NOT_VERIFIED`, checked first; reading and
+  deleting one's own media, and an entry with no media, are not refused. `media` asks through
+  `common.security.VerifiedEmails`, which `identity` answers (as it does `TokenRevocations`), so it
+  stays a leaf (ADR-0047). The claim's refusal is not reachable through the API today: FR-002 keeps
+  an unverified account out of every bond, and nothing un-verifies one.
 - **The media worker** (ADR-0048 Owed), **a Kamal role** running the application's own image with its
   own command (the owner's ruling, 2026-10-29), not an accessory: its image needs `ffmpeg` with `libopus` (Ubuntu 24.04's
   `ffmpeg` package has it, and the AMR decoders), `MOYI_MEDIA_PROCESSING_PROVIDER=native`, and its
