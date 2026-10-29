@@ -128,6 +128,32 @@ internal class MediaAssetTest {
         }
     }
 
+    @Test
+    fun `its owner sees a ready photo, the full image while there is one`() {
+        val full = variant(ImageVariant.FULL)
+        val display = variant(ImageVariant.DISPLAY)
+        pending(MediaStatus.READY, variants = listOf(display, full)).shownTo(owner = true) shouldBe MediaAsset.Shown.Ready(full)
+        pending(MediaStatus.READY, variants = listOf(display)).shownTo(owner = true) shouldBe MediaAsset.Shown.Ready(display)
+    }
+
+    @Test
+    fun `anyone else sees processing until the photo is ready and has passed moderation (FR-101)`() {
+        val full = variant(ImageVariant.FULL)
+        pending(MediaStatus.READY, variants = listOf(full)).shownTo(owner = false) shouldBe MediaAsset.Shown.Processing
+        pending(MediaStatus.READY, variants = listOf(full), verdict = "QUARANTINED").shownTo(owner = false) shouldBe
+            MediaAsset.Shown.Processing
+        pending(MediaStatus.READY, variants = listOf(full), verdict = MediaAsset.PASSED).shownTo(owner = false) shouldBe
+            MediaAsset.Shown.Ready(full)
+    }
+
+    @Test
+    fun `a photo that is not ready is processing to everyone, its owner included`() {
+        for (status in MediaStatus.entries - MediaStatus.READY) {
+            pending(status, variants = listOf(variant(ImageVariant.FULL)), verdict = MediaAsset.PASSED).shownTo(owner = true) shouldBe
+                MediaAsset.Shown.Processing
+        }
+    }
+
     private fun variant(which: ImageVariant) =
         StoredVariant(which, StorageKey.forVariant(StorageKey.forUpload(UUID.randomUUID()), which), 20, 10, 100)
 
