@@ -2,6 +2,7 @@ package com.moyi.scheduling.service
 
 import com.moyi.media.api.LifecycleRun
 import com.moyi.media.api.MediaLifecycle
+import com.moyi.scheduling.infra.JobRuns
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.AtomicLong
 internal class MediaReaperJob(
     private val media: MediaLifecycle,
     private val clock: Clock,
+    private val runs: JobRuns,
     meters: MeterRegistry,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
@@ -62,6 +64,8 @@ internal class MediaReaperJob(
         val total = inBatches(now) { at, limit -> media.reap(at, limit) }
         reaped.increment(total.changed.toDouble())
         lastSuccess.set(now.epochSecond)
+        // Only a run that finished: what the media alarm reads (ADR-0050), where ShedLock's row says only that it began.
+        runs.succeeded(LOCK, now)
         if (total.more) log.warn("media reaper: deleted {}, and more are waiting", total.changed)
         return total.changed
     }

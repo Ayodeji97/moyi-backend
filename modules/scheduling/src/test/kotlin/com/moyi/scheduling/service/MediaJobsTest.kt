@@ -3,8 +3,10 @@ package com.moyi.scheduling.service
 import com.moyi.common.testing.MutableClock
 import com.moyi.common.testing.PostgresIntegrationTest
 import com.moyi.media.api.LifecycleRun
+import com.moyi.scheduling.infra.JobRuns
 import com.moyi.scheduling.infra.RecordingMediaLifecycle
 import com.moyi.scheduling.infra.SchedulingTestApplication
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.MeterRegistry
@@ -24,6 +26,7 @@ import java.time.Instant
  * records what it was asked, on the clock the test moves.
  */
 @SpringBootTest(classes = [SchedulingTestApplication::class])
+@Suppress("LongParameterList") // A test's collaborators, each injected by Spring.
 internal class MediaJobsTest(
     @Autowired private val reaper: MediaReaperJob,
     @Autowired private val demotion: MediaDemotionJob,
@@ -31,10 +34,12 @@ internal class MediaJobsTest(
     @Autowired private val clock: MutableClock,
     @Autowired private val meters: MeterRegistry,
     @Autowired private val jdbc: JdbcTemplate,
+    @Autowired private val runs: JobRuns,
 ) : PostgresIntegrationTest() {
     @AfterEach
     fun clear() {
         jdbc.update("UPDATE shedlock SET lock_until = $UTC_NOW - interval '1 second'")
+        jdbc.update("DELETE FROM job_runs")
         media.reset()
     }
 
@@ -121,6 +126,29 @@ internal class MediaJobsTest(
             MediaReaperJob.LOCK,
             MediaDemotionJob.LOCK,
         ) shouldBe 2
+    }
+
+    /**
+     * What the media alarm reads (ADR-0050, review of #110): a run that
+     * finished moves each job's mark to its time; a run that throws, on every
+     * run, leaves it where it was, so the alarm sees the job stopped although
+     * it takes its lock every hour.
+     */
+    @Test
+    fun `a job's finished run is marked, and a run that throws does not move the mark`() {
+        clock.set(NOW)
+        reaper.reapOnce()
+        demotion.demoteOnce()
+        runs.lastSuccess(MediaReaperJob.LOCK) shouldBe NOW
+        runs.lastSuccess(MediaDemotionJob.LOCK) shouldBe NOW
+
+        media.failing = true
+        clock.set(NOW.plusSeconds(3_600))
+        shouldThrow<IllegalStateException> { reaper.reapOnce() }
+        shouldThrow<IllegalStateException> { demotion.demoteOnce() }
+
+        runs.lastSuccess(MediaReaperJob.LOCK) shouldBe NOW
+        runs.lastSuccess(MediaDemotionJob.LOCK) shouldBe NOW
     }
 
     private companion object {

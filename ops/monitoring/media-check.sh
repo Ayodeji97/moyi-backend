@@ -16,10 +16,14 @@
 #     having deleted its objects (purged_at). An erasure is a privacy rule: a
 #     purge that keeps failing is retried for ever, and this is how somebody
 #     hears that it is failing;
-#   - the reaper's ShedLock row was taken within the last two hours (it runs
-#     hourly), and the demotion's within the last 26 (it runs nightly). A job
-#     whose row does not exist yet (a fresh database) is not counted as late.
-# ShedLock's timestamps are zoneless UTC, hence `now() AT TIME ZONE 'UTC'`.
+#   - the reaper last FINISHED a run within the last two hours (it runs
+#     hourly), and the demotion within the last 26 (it runs nightly), as the
+#     jobs themselves record in `job_runs` (V35) once a run has ended without
+#     throwing. Not ShedLock's `locked_at`: that is taken as a run begins, so a
+#     job that throws on every run would look alive. A job that has begun
+#     (ShedLock has its row) and never finished counts as late; one that has
+#     never begun (a fresh database, the demotion before its first 03:40) does
+#     not.
 #
 # All well: it pings the heartbeat. Anything wrong: it pings the heartbeat's
 # /fail URL with the reason, which alerts at once. If the box, Docker or
@@ -44,16 +48,18 @@ read -r stuck unpurged reaper_late demotion_late < <(docker exec moyi-postgres p
   SELECT
     (SELECT count(*) FROM media_assets WHERE status = 'PROCESSING' AND created_at < now() - interval '30 minutes'),
     (SELECT count(*) FROM media_assets WHERE status = 'DELETED' AND purged_at IS NULL AND deleted_at < now() - interval '1 day'),
-    (SELECT count(*) FROM shedlock WHERE name = 'media-reaper' AND locked_at < (now() AT TIME ZONE 'UTC') - interval '2 hours'),
-    (SELECT count(*) FROM shedlock WHERE name = 'media-demotion' AND locked_at < (now() AT TIME ZONE 'UTC') - interval '26 hours')
+    (SELECT count(*) FROM shedlock s LEFT JOIN job_runs r ON r.name = s.name
+       WHERE s.name = 'media-reaper' AND (r.last_success_at IS NULL OR r.last_success_at < now() - interval '2 hours')),
+    (SELECT count(*) FROM shedlock s LEFT JOIN job_runs r ON r.name = s.name
+       WHERE s.name = 'media-demotion' AND (r.last_success_at IS NULL OR r.last_success_at < now() - interval '26 hours'))
 ") || true
 [ -n "$demotion_late" ] || die "could not read the database"
 
 problem=""
 [ "$stuck" -eq 0 ] || problem="$stuck photos PROCESSING for more than 30 minutes"
 [ "$unpurged" -eq 0 ] || problem="${problem:+$problem; }$unpurged deleted assets not purged after a day"
-[ "$reaper_late" -eq 0 ] || problem="${problem:+$problem; }the media reaper has not run for two hours"
-[ "$demotion_late" -eq 0 ] || problem="${problem:+$problem; }the media demotion has not run for 26 hours"
+[ "$reaper_late" -eq 0 ] || problem="${problem:+$problem; }the media reaper has not finished a run for two hours"
+[ "$demotion_late" -eq 0 ] || problem="${problem:+$problem; }the media demotion has not finished a run for 26 hours"
 
 if [ -z "$problem" ]; then
   curl --fail --silent --max-time 10 --retry 3 "$MEDIA_PING_URL" >/dev/null

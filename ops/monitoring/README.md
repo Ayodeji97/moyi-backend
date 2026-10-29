@@ -65,6 +65,6 @@ ssh moyi 'systemctl start moyi-media-check; journalctl -u moyi-media-check -n 3 
 ssh moyi 'systemctl enable --now moyi-media-check.timer'
 ```
 
-(`f` is the helper defined above.) It needs the media tables (V32, V36) on the server, so it
+(`f` is the helper defined above.) It needs the media tables (V32, V34) and `job_runs` (V35) on the server, so it
 is installed after the deploy that carries them. With the storage `unavailable`, as
 production runs today, no asset exists and the check reports ok as long as both jobs run.

@@ -87,11 +87,16 @@ internal class RecordingMediaLifecycle : MediaLifecycle {
     /** The answers the next calls give, in order; once used up, nothing changed. */
     val answers = java.util.concurrent.ConcurrentLinkedQueue<LifecycleRun>()
 
+    /** On: every call throws, as a run whose statement fails every time does. */
+    @Volatile
+    var failing = false
+
     override fun reap(
         now: Instant,
         limit: Int,
     ): LifecycleRun {
         reaps += now to limit
+        check(!failing) { "the reaper's statement failed (made to by the test)" }
         return answers.poll() ?: LifecycleRun(changed = 0, more = false)
     }
 
@@ -100,6 +105,7 @@ internal class RecordingMediaLifecycle : MediaLifecycle {
         limit: Int,
     ): LifecycleRun {
         demotions += now to limit
+        check(!failing) { "the demotion's statement failed (made to by the test)" }
         return answers.poll() ?: LifecycleRun(changed = 0, more = false)
     }
 
@@ -107,6 +113,7 @@ internal class RecordingMediaLifecycle : MediaLifecycle {
         reaps.clear()
         demotions.clear()
         answers.clear()
+        failing = false
     }
 }
 
