@@ -1,6 +1,7 @@
 package com.moyi.identity.web
 
 import com.moyi.identity.domain.BreachedPasswordCorpus
+import com.moyi.identity.domain.DisplayNames
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
 import com.moyi.notification.api.PushToken
@@ -82,6 +83,37 @@ internal class PasswordConstraintValidator : ConstraintValidator<ValidPassword, 
         // Not trimmed: ADR-0012 accepts spaces in a password, and silently
         // removing them would make the password the user typed unenterable.
         return validate(context) { Password.of(value) }
+    }
+}
+
+/**
+ * Asks `DisplayNames` whether the name holds a control or format character (ADR-0015,
+ * amended 2026-10-28), and reports its answer as `VALID_DISPLAY_NAME`.
+ */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [DisplayNameConstraintValidator::class])
+internal annotation class ValidDisplayName(
+    val message: String = "is not a valid display name",
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+internal class DisplayNameConstraintValidator : ConstraintValidator<ValidDisplayName, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean {
+        // Null is `@NotBlank`'s alone. Blank is not skipped: `@NotBlank` judges
+        // with Java's whitespace and misses U+00A0, U+2007 and U+202F, which
+        // then trimmed to "" and threw in `User` (a 500). So the domain's own
+        // blank check speaks too, and an all-space name carries both codes.
+        // Too long is `@Size`'s, which publishes `maxLength`.
+        if (value == null) return true
+        // Trimmed, because the trimmed value is what `toCommand` stores. So a
+        // trailing newline, which `trim()` removes as whitespace, is accepted,
+        // and a newline inside the name is refused.
+        return validate(context) { DisplayNames.check(value.trim()) }
     }
 }
 

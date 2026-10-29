@@ -24,6 +24,16 @@ internal class UserTest {
     }
 
     @Test
+    fun `a stored name with a control or format character still reads back`() {
+        // The character rule is the write path's (`DisplayNames`, ADR-0015 as
+        // amended 2026-10-28), never this constructor's: `toDomain` runs it on
+        // every row read, so a rule here would make an existing account with
+        // such a name unreadable, and every sign-in and `/me` of it a 500.
+        user(displayName = "Ad\u202Ea").displayName shouldBe "Ad\u202Ea"
+        user(displayName = "Ad\u0000a").displayName shouldBe "Ad\u0000a"
+    }
+
+    @Test
     fun `a deleted user must carry the time it was deleted`() {
         shouldThrow<IllegalArgumentException> { user(status = UserStatus.DELETED, deletedAt = null) }
         user(status = UserStatus.DELETED, deletedAt = NOW).status shouldBe UserStatus.DELETED
