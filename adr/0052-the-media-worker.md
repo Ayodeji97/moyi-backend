@@ -89,9 +89,12 @@ the first version said a release that changes only the application's classes mov
 layer, but every fresh CI runner ran the apt install again and wrote it with new file times, so a new
 digest, and the server would have pulled all ~400 MB at every release. CI now builds with buildx and
 GitHub's cache (`type=gha`, one scope per architecture, `mode=max`): an unchanged step is taken from
-the cache with its layer and digest. What was verified is in the pull request (the layer digests
-printed by two runs of the same branch); main's cache is main's own, so the first release after
-merge builds cold once. **Build time**, the `docker build` from the jar, no cache: on CI's native runners (#116's first
+the cache with its layer and digest. **Verified**: the image job of `8446af1` and its re-run, each on a
+fresh runner, printed the same eleven layer digests on linux/arm64 and the same eleven on
+linux/amd64, the apt layer's among them. **Not verified**: that a build
+without the cache gives different ones (the review's observation, not re-run here), and main's
+scope: main's cache is main's own, so the first release after merge builds cold once, and only
+the release after it shows reuse on the server. **Build time**, the `docker build` from the jar, no cache: on CI's native runners (#116's first
 run) **29 s for linux/amd64 and 36 s for linux/arm64**, the whole `image` job 2 min 11 s and 2 min 16 s
 with `bootJar` (about 80 s) and the checks; 219 s for linux/arm64 on an Apple Silicon Mac through
 Docker Desktop's VM.
