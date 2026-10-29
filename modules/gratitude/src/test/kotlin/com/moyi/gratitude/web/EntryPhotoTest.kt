@@ -259,6 +259,45 @@ internal class EntryPhotoTest(
     }
 
     @Test
+    fun `ADR-0049 - an unverified member's photo or voice note is refused 403, and no entry is created`() {
+        val photo = photos.ready(owner = ada)
+        val voice = photos.ready(owner = ada, kind = "VOICE")
+        users.unverify(ada)
+
+        for (media in listOf(""""imageMediaId":"$photo"""", """"voiceMediaId":"$voice"""")) {
+            val refused = submit(ada, bondId, """{"text":"look",$media}""")
+            refused.status shouldBe 403
+            refused.contentAsString shouldContain "\"code\":\"EMAIL_NOT_VERIFIED\""
+        }
+        photos.attachedTo(photo).shouldBeNull()
+        photos.attachedTo(voice).shouldBeNull()
+        jdbc.queryForObject("SELECT count(*) FROM entries", Int::class.java) shouldBe 0
+    }
+
+    @Test
+    fun `ADR-0049 - PATCH with an unverified member's photo is refused 403, and the entry is unchanged`() {
+        val entry = body(submit(ada, bondId, """{"text":"words"}"""))["id"].asString()
+        val photo = photos.ready(owner = ada)
+        users.unverify(ada)
+
+        val refused = patch(ada, entry, """{"text":"changed","imageMediaId":"$photo"}""")
+
+        refused.status shouldBe 403
+        refused.contentAsString shouldContain "\"code\":\"EMAIL_NOT_VERIFIED\""
+        photos.attachedTo(photo).shouldBeNull()
+        jdbc.queryForObject("SELECT image_media_id FROM entries WHERE id = ?::uuid", UUID::class.java, entry).shouldBeNull()
+    }
+
+    @Test
+    fun `ADR-0049 - only media is gated - an unverified member's text-only entry is created and changed`() {
+        users.unverify(ada)
+
+        val created = submit(ada, bondId, """{"text":"just words"}""")
+        created.status shouldBe 201
+        patch(ada, body(created)["id"].asString(), """{"text":"other words"}""").status shouldBe 200
+    }
+
+    @Test
     fun `a deleted entry shows no photo`() {
         val entry = body(submit(ada, bondId, """{"text":"words","imageMediaId":"${photos.ready(owner = ada)}"}"""))["id"].asString()
 

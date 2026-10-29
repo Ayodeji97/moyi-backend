@@ -1,5 +1,6 @@
 package com.moyi.identity.service
 
+import com.moyi.common.security.VerifiedEmails
 import com.moyi.identity.api.UserDirectory
 import com.moyi.identity.api.UserSummary
 import com.moyi.identity.domain.User
@@ -10,7 +11,8 @@ import org.springframework.transaction.annotation.Transactional
 import java.util.UUID
 
 /**
- * The `api` port, over the account store.
+ * The `api` port, over the account store; and `common:security`'s
+ * [VerifiedEmails], for `media`, from the same read and the same rule.
  *
  * `internal`, like everything else here: another module gets the interface
  * from `identity.api` and this class is invisible to it. `readOnly = true`
@@ -19,9 +21,13 @@ import java.util.UUID
 @Service
 internal class AccountDirectory(
     private val accounts: AccountStore,
-) : UserDirectory {
+) : UserDirectory,
+    VerifiedEmails {
     @Transactional(readOnly = true)
     override fun find(id: UUID): UserSummary? = accounts.findById(UserId(id))?.toSummary()
+
+    @Transactional(readOnly = true)
+    override fun isVerified(userId: UUID): Boolean = accounts.findById(UserId(userId))?.isEmailVerified == true
 
     @Transactional(readOnly = true)
     override fun findAll(ids: Collection<UUID>): Map<UUID, UserSummary> {

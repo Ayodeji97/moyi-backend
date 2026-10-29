@@ -20,5 +20,5 @@ script:pre-request {
 }
 
 docs {
-  Says the upload is done. 200 with the asset, now UPLOADED. Before the upload has arrived it is 409 MEDIA_NOT_UPLOADED and nothing changes; send Upload, then this again. Another person's asset, a deleted one or an id that names nothing is 404.
+  Says the upload is done. 200 with the asset, now UPLOADED. Before the upload has arrived it is 409 MEDIA_NOT_UPLOADED and nothing changes; send Upload, then this again. Another person's asset, a deleted one or an id that names nothing is 404. An account whose address is not verified is 403 EMAIL_NOT_VERIFIED, before the asset is read, and the key is not spent (ADR-0049).
 }
