@@ -10,9 +10,9 @@ private const val VOICE_PROPERTY = "voice"
 
 /**
  * An entry's photo (Phase 4 D2, ADR-0048), `{id, status, url?, width?,
- * height?}`, and its voice note (D3, ADR-0049), `{id, status, url?,
- * durationMs?}`: every field always sent, as an entry's are, so that a client
- * can tell "not shown yet" (`"url": null`, `"status": "PROCESSING"`) from a
+ * height?, sensitive}`, and its voice note (D3, ADR-0049), `{id, status, url?,
+ * durationMs?, sensitive}` (D4, ADR-0051, added `NOT_SHARED` and `sensitive`):
+ * every field always sent, as an entry's are, so that a client can tell "not shown yet" (`"url": null`, `"status": "PROCESSING"`) from a
  * field the server left out. And the entry's own `image` and `voice` say what
  * `null` means there. `OpenApiContractTest` holds both.
  */
@@ -44,15 +44,21 @@ private fun allRequired(
 }
 
 private const val ENTRY_IMAGE_DESCRIPTION =
-    "An entry's photo as the caller is shown it. url, width and height are present exactly when status is READY: " +
-        "to its author once it is ready, to the other member only once it has also passed moderation; until then it is " +
-        "PROCESSING to them, whatever the reason. The url is a signed GET, valid for at least 24 hours, ending on the hour " +
-        "and the same all hour, so it may be cached by; it is a credential for the photo."
+    "An entry's photo as the caller is shown it. url, width and height are present when status is READY: to its " +
+        "author once it is ready, to the other member only once it has also passed moderation; until then it is " +
+        "PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone: moderation held the photo back " +
+        "from the other member, who is shown PROCESSING and never told it was removed; url, width and height are " +
+        "still given, unless it was blocked outright, when they are null. sensitive is true when the photo passed " +
+        "moderation with adult nudity found: show it blurred, behind a tap to view; it is false otherwise, and " +
+        "always false unless status is READY. The url is a signed GET, valid for at least 24 hours, ending on the " +
+        "hour and the same all hour, so it may be cached by; it is a credential for the photo."
 
 private const val ENTRY_VOICE_DESCRIPTION =
-    "An entry's voice note as the caller is played it. url and durationMs are present exactly when status is READY, " +
+    "An entry's voice note as the caller is played it. url and durationMs are present when status is READY, " +
         "to its author once it is transcoded, to the other member only once it has passed moderation; until then it is " +
-        "PROCESSING to them, whatever the reason. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), " +
+        "PROCESSING to them, whatever the reason. NOT_SHARED is its author's alone, as a photo's: held back from the " +
+        "other member by moderation; url and durationMs are still given unless it was blocked outright. sensitive " +
+        "as a photo's. The url is a signed GET of an Ogg Opus file (mono, 24 kbit/s), " +
         "valid for at least 24 hours, ending on the hour and the same all hour, so it may be cached by; it is a " +
         "credential for the voice note. durationMs is the length of what was transcoded, at most 61.1 seconds."
 

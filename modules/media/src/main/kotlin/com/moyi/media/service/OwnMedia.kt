@@ -1,7 +1,5 @@
 package com.moyi.media.service
 
-import com.moyi.media.api.ImageViewStatus
-import com.moyi.media.api.VoiceViewStatus
 import com.moyi.media.domain.MediaAsset
 import com.moyi.media.domain.MediaKind
 import com.moyi.media.infra.database.MediaAssetStore
@@ -27,9 +25,11 @@ internal class OwnAsset(
     val width: Int? = null,
     val height: Int? = null,
     val durationMs: Int? = null,
+    val sensitive: Boolean = false,
 ) {
     override fun toString(): String =
-        "OwnAsset(asset=$asset, url=${url?.let { "<redacted>" }}, width=$width, height=$height, durationMs=$durationMs)"
+        "OwnAsset(asset=$asset, url=${url?.let { "<redacted>" }}, width=$width, height=$height, durationMs=$durationMs, " +
+            "sensitive=$sensitive)"
 }
 
 /**
@@ -65,13 +65,14 @@ internal class OwnMedia(
     fun viewOf(asset: MediaAsset): OwnAsset =
         when (asset.kind) {
             MediaKind.IMAGE -> {
-                val shown = images.toOwner(asset).takeIf { it.status == ImageViewStatus.READY }
-                OwnAsset(asset, shown?.url, width = shown?.width, height = shown?.height)
+                // Ready, or held back from the partner and still the owner's to see (Q10): either has a URL.
+                val shown = images.toOwner(asset).takeIf { it.url != null }
+                OwnAsset(asset, shown?.url, width = shown?.width, height = shown?.height, sensitive = shown?.sensitive ?: false)
             }
 
             MediaKind.VOICE -> {
-                val heard = voices.toOwner(asset).takeIf { it.status == VoiceViewStatus.READY }
-                OwnAsset(asset, heard?.url, durationMs = heard?.durationMs)
+                val heard = voices.toOwner(asset).takeIf { it.url != null }
+                OwnAsset(asset, heard?.url, durationMs = heard?.durationMs, sensitive = heard?.sensitive ?: false)
             }
         }
 
@@ -111,6 +112,8 @@ internal class OwnMedia(
                 }
             }
         val asset = checkNotNull(deleted) { "delete's transaction produces the asset unless it threw" }
+        // Held as evidence (Q16, ADR-0051): gone to its owner, its objects kept for the operator's report.
+        if (asset.evidenceHeld) return
         for (key in asset.objectKeys) {
             try {
                 storage.delete(key)

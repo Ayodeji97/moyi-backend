@@ -51,6 +51,70 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     }
 
     /**
+     * ADR-0051: photo moderation defaults to Rekognition, which refuses to
+     * start without its key pair, so the file names `none` (which moderates
+     * nothing and shows no partner any photo) or gives Rekognition both halves
+     * of its key, as secrets. The jar was started with this environment and no
+     * AWS credentials when this landed (the pull request records the run).
+     */
+    @Test
+    fun `deploy-yml names photo moderation none, or gives Rekognition both halves of its key`() {
+        val provider = clear["MOYI_MEDIA_MODERATION_IMAGE_PROVIDER"]?.toString()?.trim()?.lowercase()
+        val rekognitionComplete =
+            listOf(
+                "MOYI_MEDIA_MODERATION_REKOGNITION_ACCESS_KEY_ID",
+                "MOYI_MEDIA_MODERATION_REKOGNITION_SECRET_ACCESS_KEY",
+            ).all { it in secret }
+        val found = provider ?: "<default Rekognition>"
+
+        withClue("config/deploy.yml would start a release whose photo moderation refuses to start (provider: $found)") {
+            (provider == "none" || ((provider == null || provider == "rekognition") && rekognitionComplete)) shouldBe true
+        }
+    }
+
+    /**
+     * ADR-0051 (review of #113): photos go to Rekognition in eu-central-1 and
+     * nowhere else. The application refuses another region and an endpoint
+     * other than a loopback test stand-in at start; the deployed file does not
+     * try either, as a plain value or as a secret.
+     */
+    @Test
+    fun `deploy-yml names no Rekognition region or endpoint, so eu-central-1 and AWS's own endpoint are what run`() {
+        val overrides = listOf("MOYI_MEDIA_MODERATION_REKOGNITION_REGION", "MOYI_MEDIA_MODERATION_REKOGNITION_ENDPOINT")
+        val named = overrides.filter { it in clear || it in secret }
+
+        withClue("config/deploy.yml overrides Rekognition's region or endpoint: $named") {
+            named shouldBe emptyList()
+        }
+    }
+
+    /**
+     * ADR-0051: the stand-ins decide by colour (a photo that is not red passes)
+     * and pass every voice note. A partner is shown what passes, so a stand-in
+     * in production would show partners unmoderated media. None of the three
+     * may name it; `none`, which fails closed, is what stands in there.
+     */
+    @Test
+    fun `deploy-yml never names a moderation stand-in`() {
+        val named =
+            listOf(
+                "MOYI_MEDIA_MODERATION_IMAGE_PROVIDER",
+                "MOYI_MEDIA_MODERATION_KNOWNIMAGES_PROVIDER",
+                "MOYI_MEDIA_MODERATION_VOICE_PROVIDER",
+            ).associateWith {
+                clear[it]
+                    ?.toString()
+                    ?.trim()
+                    ?.lowercase()
+                    ?.filter(Char::isLetter)
+            }
+
+        withClue("config/deploy.yml names a moderation stand-in: $named") {
+            named.values.none { it == "standin" } shouldBe true
+        }
+    }
+
+    /**
      * ADR-0048, ADR-0049: the application's image is the buildpack's and has
      * neither libvips nor ffmpeg, so this container must name processing OFF,
      * which turns off photos and voice notes alike, or NATIVE, the default,

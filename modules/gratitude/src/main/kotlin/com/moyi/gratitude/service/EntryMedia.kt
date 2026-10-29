@@ -20,13 +20,24 @@ internal enum class EntryImageStatus {
 
     /** Not shown to this reader yet. Never says why: not ready, not moderated, or kept from them. */
     PROCESSING,
+
+    /**
+     * To the author alone: moderation held the photo back from the partner,
+     * who is shown [PROCESSING] (the owner's ruling Q10: "not shared", no
+     * reason, and the partner never told "removed"). The author is still
+     * given the photo, unless it was blocked outright (ADR-0051).
+     */
+    NOT_SHARED,
 }
 
 /**
  * A photo on an entry as one reader is shown it: `{id, status, url?, width?,
- * height?}` (spec §4 D2, doc 06:138). [url] and the size are present exactly
- * when [status] is [EntryImageStatus.READY]. The URL is a bearer credential for
- * the photo, so [toString] leaves it out.
+ * height?, sensitive}` (spec §4 D2, D4, doc 06:138). [url] and the size are
+ * present when [status] is [EntryImageStatus.READY], and on
+ * [EntryImageStatus.NOT_SHARED] unless it was blocked. [sensitive]: passed
+ * moderation with adult nudity found, so the client blurs it behind "tap to
+ * view" (Q16). The URL is a bearer credential for the photo, so [toString]
+ * leaves it out.
  */
 internal data class EntryImage(
     val id: UUID,
@@ -34,8 +45,10 @@ internal data class EntryImage(
     val url: URI?,
     val width: Int?,
     val height: Int?,
+    val sensitive: Boolean,
 ) {
-    override fun toString(): String = "EntryImage(id=$id, status=$status, url=${url?.let { "<redacted>" }}, width=$width, height=$height)"
+    override fun toString(): String =
+        "EntryImage(id=$id, status=$status, url=${url?.let { "<redacted>" }}, width=$width, height=$height, sensitive=$sensitive)"
 }
 
 /** Whether a voice note on an entry is playable yet (spec §4 D3). */
@@ -45,6 +58,9 @@ internal enum class EntryVoiceStatus {
 
     /** Not playable yet, to this reader. Never says why: not transcoded, failed, or not yet for them. */
     PROCESSING,
+
+    /** To the author alone: held back from the partner by moderation (Q10), as [EntryImageStatus.NOT_SHARED]. */
+    NOT_SHARED,
 }
 
 /**
@@ -58,8 +74,10 @@ internal data class EntryVoice(
     val status: EntryVoiceStatus,
     val url: URI?,
     val durationMs: Int?,
+    val sensitive: Boolean,
 ) {
-    override fun toString(): String = "EntryVoice(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs)"
+    override fun toString(): String =
+        "EntryVoice(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, sensitive=$sensitive)"
 }
 
 /** An entry's photo and voice note as one reader is shown them; either may be absent. */
@@ -78,9 +96,10 @@ internal data class ShownMedia(
  * reading in full, so nothing else can be asked about. Which of each the
  * reader then gets is `media`'s rule: a photo to its owner, the entry's
  * author, once it is ready, and to the partner only once it has also passed
- * moderation (FR-101), which until D4 is never; a voice note likewise to its
- * author once it is ready, and to the partner only once it has also passed
- * moderation (FR-061, the owner's ruling; ADR-0049), which until D4 is never.
+ * moderation (FR-101, D4); a voice note likewise to its author once it is
+ * ready, and to the partner only once it has also passed moderation (FR-061,
+ * the owner's ruling; ADR-0049, ADR-0051). What moderation holds back the
+ * author is told is not shared, and the partner sees still processing (Q10).
  */
 @Service
 internal class EntryMedia(
@@ -117,17 +136,29 @@ internal class EntryMedia(
     private fun image(view: ImageView) =
         EntryImage(
             id = view.id,
-            status = if (view.status == ImageViewStatus.READY) EntryImageStatus.READY else EntryImageStatus.PROCESSING,
+            status =
+                when (view.status) {
+                    ImageViewStatus.READY -> EntryImageStatus.READY
+                    ImageViewStatus.PROCESSING -> EntryImageStatus.PROCESSING
+                    ImageViewStatus.NOT_SHARED -> EntryImageStatus.NOT_SHARED
+                },
             url = view.url,
             width = view.width,
             height = view.height,
+            sensitive = view.sensitive,
         )
 
     private fun voice(view: VoiceView) =
         EntryVoice(
             id = view.id,
-            status = if (view.status == VoiceViewStatus.READY) EntryVoiceStatus.READY else EntryVoiceStatus.PROCESSING,
+            status =
+                when (view.status) {
+                    VoiceViewStatus.READY -> EntryVoiceStatus.READY
+                    VoiceViewStatus.PROCESSING -> EntryVoiceStatus.PROCESSING
+                    VoiceViewStatus.NOT_SHARED -> EntryVoiceStatus.NOT_SHARED
+                },
             url = view.url,
             durationMs = view.durationMs,
+            sensitive = view.sensitive,
         )
 }

@@ -300,8 +300,9 @@ internal class MediaEndpointTest(
         val mediaId = uploaded(ada)
         val response = json.readTree(get(ada, mediaId).contentAsString)
         response.propertyNames().asSequence().toList() shouldContainExactly
-            listOf("id", "kind", "status", "contentType", "sizeBytes", "url", "width", "height", "durationMs")
+            listOf("id", "kind", "status", "contentType", "sizeBytes", "url", "width", "height", "durationMs", "sensitive")
         listOf("url", "width", "height", "durationMs").forEach { response[it].isNull shouldBe true }
+        response["sensitive"].asBoolean() shouldBe false
     }
 
     @Test

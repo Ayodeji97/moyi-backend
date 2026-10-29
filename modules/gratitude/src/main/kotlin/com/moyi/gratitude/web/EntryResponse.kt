@@ -179,9 +179,14 @@ internal data class EntryResponse private constructor(
 }
 
 /**
- * A photo on an entry, as the caller is shown it (spec §4 D2):
- * `{id, status, url?, width?, height?}`. [url], [width] and [height] are
- * present exactly when [status] is `READY`. [url] is a signed GET, valid for
+ * A photo on an entry, as the caller is shown it (spec §4 D2, D4):
+ * `{id, status, url?, width?, height?, sensitive}`. [url], [width] and [height]
+ * are present when [status] is `READY`, and when it is `NOT_SHARED` (shown to
+ * the entry's author alone: moderation held the photo back from the partner,
+ * who is shown `PROCESSING`, Q10) unless it was blocked outright, when they
+ * are null. [sensitive] is true when the photo passed moderation with adult
+ * nudity found: show it blurred, behind "tap to view" (Q16); false otherwise,
+ * and always false unless `READY`. [url] is a signed GET, valid for
  * at least 24 hours, ending on the hour and the same all hour so it can be
  * cached by (doc 05:169); it is a bearer credential for the photo, so it is
  * never logged and [toString] leaves it out.
@@ -194,19 +199,22 @@ internal data class EntryImageResponse(
     val url: String?,
     val width: Int?,
     val height: Int?,
+    val sensitive: Boolean,
 ) {
-    override fun toString(): String = "EntryImageResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }})"
+    override fun toString(): String = "EntryImageResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }}, sensitive=$sensitive)"
 
     companion object {
         fun from(image: EntryImage): EntryImageResponse =
-            EntryImageResponse(image.id, image.status, image.url?.toString(), image.width, image.height)
+            EntryImageResponse(image.id, image.status, image.url?.toString(), image.width, image.height, image.sensitive)
     }
 }
 
 /**
  * A voice note on an entry, as the caller is played it (spec §4 D3):
- * `{id, status, url?, durationMs?}`. [url] and [durationMs] are present exactly
- * when [status] is `READY`. [url] is a signed GET of an Ogg Opus file (mono,
+ * `{id, status, url?, durationMs?, sensitive}`. [url] and [durationMs] are
+ * present when [status] is `READY`, and when it is `NOT_SHARED` (the author's
+ * alone, as a photo's, D4) unless it was blocked. [sensitive] as a photo's.
+ * [url] is a signed GET of an Ogg Opus file (mono,
  * 24 kbps), valid for at least 24 hours, ending on the hour and the same all
  * hour, as a photo's is; it is a bearer credential for the voice note, so it is
  * never logged and [toString] leaves it out. [durationMs] is the length of what
@@ -219,11 +227,13 @@ internal data class EntryVoiceResponse(
     val status: EntryVoiceStatus,
     val url: String?,
     val durationMs: Int?,
+    val sensitive: Boolean,
 ) {
-    override fun toString(): String = "EntryVoiceResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs)"
+    override fun toString(): String =
+        "EntryVoiceResponse(id=$id, status=$status, url=${url?.let { "<redacted>" }}, durationMs=$durationMs, sensitive=$sensitive)"
 
     companion object {
         fun from(voice: EntryVoice): EntryVoiceResponse =
-            EntryVoiceResponse(voice.id, voice.status, voice.url?.toString(), voice.durationMs)
+            EntryVoiceResponse(voice.id, voice.status, voice.url?.toString(), voice.durationMs, voice.sensitive)
     }
 }

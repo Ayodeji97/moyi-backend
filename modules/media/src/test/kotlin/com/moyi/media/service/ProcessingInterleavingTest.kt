@@ -271,6 +271,11 @@ internal class ProcessingInterleavingTest(
             check(release.await(30, TimeUnit.SECONDS)) { "the test never opened the gate" }
             return real.encode(source, format, workDir)
         }
+
+        override fun jpegForModeration(
+            webp: Path,
+            workDir: Path,
+        ): Path? = real.jpegForModeration(webp, workDir)
     }
 
     /** The real ffmpeg, behind a gate, as [GatedProcessor] is for photos. */

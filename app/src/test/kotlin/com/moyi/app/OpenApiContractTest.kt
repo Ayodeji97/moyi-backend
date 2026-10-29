@@ -808,13 +808,15 @@ class OpenApiContractTest(
             .filter { "eaction" in it } shouldBe listOf("ReactionRequest")
     }
 
-    /** Phase 4 D2, ADR-0048: `{id, status, url?, width?, height?}`, and nowhere on a locked entry (BR-8). */
+    /** Phase 4 D2, ADR-0048, D4, ADR-0051: `{id, status, url?, width?, height?, sensitive}`, and nowhere on a locked entry (BR-8). */
     @Test
     fun `an entry's photo is an id, a status and, once shown, a URL and a size, every field always sent`() {
         val image = api.components.schemas["EntryImageResponse"]!!
-        image.properties.keys shouldBe setOf("id", "status", "url", "width", "height")
+        image.properties.keys shouldBe setOf("id", "status", "url", "width", "height", "sensitive")
         image.required.toSet() shouldBe image.properties.keys
-        image.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING")
+        image.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING", "NOT_SHARED")
+        image.properties["sensitive"]!!.types shouldBe setOf("boolean")
+        image.description.shouldNotBeNull() shouldContain "show it blurred"
         listOf("url", "width", "height").forEach { image.properties[it]!!.types shouldContain "null" }
 
         val full =
@@ -831,13 +833,13 @@ class OpenApiContractTest(
             .properties.keys shouldBe setOf("authorMemberId", "status")
     }
 
-    /** Phase 4 D3, ADR-0049: `{id, status, url?, durationMs?}`, and nowhere on a locked entry (BR-8). */
+    /** Phase 4 D3, ADR-0049, D4, ADR-0051: `{id, status, url?, durationMs?, sensitive}`, and nowhere on a locked entry (BR-8). */
     @Test
     fun `an entry's voice note is an id, a status and, once playable, a URL and a length, every field always sent`() {
         val voice = api.components.schemas["EntryVoiceResponse"]!!
-        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs")
+        voice.properties.keys shouldBe setOf("id", "status", "url", "durationMs", "sensitive")
         voice.required.toSet() shouldBe voice.properties.keys
-        voice.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING")
+        voice.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("READY", "PROCESSING", "NOT_SHARED")
         listOf("url", "durationMs").forEach { voice.properties[it]!!.types shouldContain "null" }
         voice.description.shouldNotBeNull() shouldContain "to the other member only once it has passed moderation"
 

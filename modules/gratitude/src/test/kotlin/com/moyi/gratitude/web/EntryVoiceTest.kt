@@ -92,7 +92,7 @@ internal class EntryVoiceTest(
         val entry = body(created)
         voices.attachedTo(voice) shouldBe UUID.fromString(entry["id"].asString())
         val played = entry["voice"]
-        played.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "durationMs")
+        played.propertyNames().asSequence().toList() shouldBe listOf("id", "status", "url", "durationMs", "sensitive")
         played["id"].asString() shouldBe voice.toString()
         played["status"].asString() shouldBe "READY"
         played["durationMs"].asInt() shouldBe ProcessedVoices.DURATION_MS

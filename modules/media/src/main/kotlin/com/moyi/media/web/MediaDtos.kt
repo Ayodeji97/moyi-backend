@@ -55,6 +55,10 @@ internal data class UploadIntentResponse(
  * and [height] are that image's; once a voice note is `READY`, [url] is a
  * signed GET of its Ogg Opus, the same way (ADR-0049), and [durationMs] its
  * length. Before, all are null, and each is null on the other kind.
+ * `QUARANTINED` is one moderation held back from the partner (ADR-0051; the
+ * entry shows it to its author as `NOT_SHARED`, Q10): its URL is still given
+ * here, unless it was blocked outright. [sensitive] is true once a photo has
+ * passed moderation with adult nudity found: blurred until tapped (Q16).
  * [contentType] and [sizeBytes] are what was declared for the upload, not
  * what is kept.
  *
@@ -70,10 +74,11 @@ internal data class MediaResponse(
     val width: Int?,
     val height: Int?,
     val durationMs: Int?,
+    val sensitive: Boolean,
 ) {
     override fun toString(): String =
         "MediaResponse(id=$id, kind=$kind, status=$status, url=${url?.let { "<redacted>" }}, width=$width, height=$height, " +
-            "durationMs=$durationMs)"
+            "durationMs=$durationMs, sensitive=$sensitive)"
 
     companion object {
         fun from(own: OwnAsset): MediaResponse =
@@ -87,6 +92,7 @@ internal data class MediaResponse(
                 own.width,
                 own.height,
                 own.durationMs,
+                own.sensitive,
             )
     }
 }

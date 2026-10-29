@@ -60,6 +60,18 @@ moyi:
       # cannot enforce the memory limits, so they are waived here, and only here.
       provider: native
       allow-unlimited-memory: true
+    moderation:
+      # The stand-ins (ADR-0051), which decide by colour so that every verdict
+      # can be reached without AWS: a photo almost all red is held back (extreme
+      # violence), almost all magenta passes blurred (adult nudity), almost all
+      # blue is "known" and blocked; anything else passes. Every voice note
+      # passes. Never in production, where config/deploy.yml names none.
+      image:
+        provider: stand-in
+      known-images:
+        provider: stand-in
+      voice:
+        provider: stand-in
   security:
     jwt:
       # Generated at startup: every token dies with the process, which is fine

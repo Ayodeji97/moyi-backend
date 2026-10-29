@@ -229,7 +229,14 @@ internal class EntryRenderingTest {
     fun `the photo is rendered on a full reading, whatever the caller of the renderer passes on anything else`() {
         val photo = UUID.randomUUID()
         val image =
-            EntryImage(photo, EntryImageStatus.READY, URI.create("https://storage.example.test/v/x/full.webp?X-Amz-Signature=fake"), 4, 3)
+            EntryImage(
+                photo,
+                EntryImageStatus.READY,
+                URI.create("https://storage.example.test/v/x/full.webp?X-Amz-Signature=fake"),
+                4,
+                3,
+                true,
+            )
         val revealed = entry.withImage(photo, now).copy(status = EntryStatus.REVEALED, revealedAt = now)
 
         EntryResponse
@@ -241,7 +248,7 @@ internal class EntryRenderingTest {
                 media = ShownMedia(image, null),
             ).shouldNotBeNull()
             .image shouldBe
-            EntryImageResponse(photo, EntryImageStatus.READY, image.url.toString(), 4, 3)
+            EntryImageResponse(photo, EntryImageStatus.READY, image.url.toString(), 4, 3, sensitive = true)
         // A tombstone has no photo, even one its caller passes.
         EntryResponse
             .of(revealed.copy(deletedAt = now).readBy(partner), date, favourited = false, reaction = null, media = ShownMedia(image, null))
@@ -265,7 +272,13 @@ internal class EntryRenderingTest {
     fun `the voice note is rendered on a full reading, whatever the caller of the renderer passes on anything else`() {
         val id = UUID.randomUUID()
         val voice =
-            EntryVoice(id, EntryVoiceStatus.READY, URI.create("https://storage.example.test/v/x/voice.ogg?X-Amz-Signature=fake"), 4_200)
+            EntryVoice(
+                id,
+                EntryVoiceStatus.READY,
+                URI.create("https://storage.example.test/v/x/voice.ogg?X-Amz-Signature=fake"),
+                4_200,
+                false,
+            )
         val revealed = entry.withVoice(id, now).copy(status = EntryStatus.REVEALED, revealedAt = now)
         val media = ShownMedia(null, voice)
 
@@ -278,7 +291,7 @@ internal class EntryRenderingTest {
                 media = media,
             ).shouldNotBeNull()
             .voice shouldBe
-            EntryVoiceResponse(id, EntryVoiceStatus.READY, voice.url.toString(), 4_200)
+            EntryVoiceResponse(id, EntryVoiceStatus.READY, voice.url.toString(), 4_200, sensitive = false)
         // A tombstone has no voice note, even one its caller passes.
         EntryResponse
             .of(revealed.copy(deletedAt = now).readBy(partner), date, favourited = false, reaction = null, media = media)

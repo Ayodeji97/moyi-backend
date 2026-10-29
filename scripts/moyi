@@ -61,6 +61,26 @@
 #                                            partnerJoined, reveal, milestone, onThisDay, proposal
 #   moyi whoami
 #
+# And one command for the operator, not a member (spec Phase 4 §4 D4, ADR-0051), which talks to the
+# database, not the API, until the Phase 5 console exists. MOYI_OPERATOR names who is acting; every
+# look and every decision is recorded under it in media_moderation_log. MOYI_OPS_PSQL is how psql is
+# reached (on the server, the default: docker exec -i moyi-postgres psql -U moyi -d moyi):
+#
+#   moyi media quarantine list               what moderation held back: verdict, id, kind, status, reason,
+#                                            attached, when; a BLOCKED row is marked DO NOT VIEW
+#   moyi media quarantine release <mediaId> "<note>"
+#                                            lets it reach the partner after all. Never a BLOCKED one
+#                                            (child sexual abuse material): that is refused, and recorded
+#   moyi media quarantine delete <mediaId> "<note>"
+#                                            deletes it and its objects. For a BLOCKED one, only after the
+#                                            report ops/moderation/takedown.md requires; the note carries
+#                                            its reference
+#   moyi media quarantine hold <mediaId> "<note>"
+#                                            a member reported it: hold it back from the partner (§3)
+#   moyi media quarantine block <mediaId> "<note>"
+#                                            a member reported child sexual abuse material: block it, held
+#                                            as evidence, never released (§3, then §2)
+#
 # The session (two tokens and the bond in use) is kept in
 # ~/.config/moyi/<profile>.json, readable by you alone. The password is asked
 # for and never stored. An access token lasts fifteen minutes; when one has
@@ -475,5 +495,70 @@ print(json.dumps({"categories": {k: v == "on" for k, v in (x.split("=") for x in
     echo "Deleted."
     ;;
   help|-h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//' ;;
+  media)
+    # The operator's quarantine queue (spec §4 D4, ADR-0051): not a member's command, and the one
+    # that talks to the database rather than the API. There is no admin console before Phase 5.
+    [ "${1:-}" = quarantine ] || die "usage: moyi media quarantine list | release|delete|hold|block <mediaId> \"<note>\""
+    shift
+    action="${1:-}"; shift || true
+    OPERATOR="${MOYI_OPERATOR:-}"
+    [[ "$OPERATOR" =~ ^[A-Za-z0-9._@-]{1,64}$ ]] ||
+      die "set MOYI_OPERATOR to your name (letters, digits, . _ @ -): every look at the queue and every decision is recorded under it"
+    # How to reach psql: on the server, the Postgres accessory (the default); elsewhere, any psql command line,
+    # e.g. MOYI_OPS_PSQL="psql -h localhost -p 55449 -U moyi -d moyi" with the password in PGPASSWORD or ~/.pgpass.
+    read -r -a OPS_PSQL <<< "${MOYI_OPS_PSQL:-docker exec -i moyi-postgres psql -U moyi -d moyi}"
+    # ops_sql <sql> [name=value …] — runs one statement; values reach it as psql variables (:'name'), quoted by psql,
+    # never spliced into the SQL here. Every rule (what may be released, what deleting publishes) is the database's:
+    # the functions of V36. This script only names which one to run.
+    ops_sql() {
+      local statement="$1"; shift
+      local -a vars=()
+      for pair in "$@"; do vars+=(-v "$pair"); done
+      printf '%s\n' "$statement" | "${OPS_PSQL[@]}" -X -q -At -F $'\t' -v ON_ERROR_STOP=1 "${vars[@]}"
+    }
+    case "$action" in
+      list)
+        [ $# -eq 0 ] || die "usage: moyi media quarantine list"
+        out="$(ops_sql "SELECT * FROM media_quarantine_list(:'actor');" "actor=$OPERATOR")" || die "the database refused (see above)"
+        if [ -z "$out" ]; then echo "Nothing is held back."; exit 0; fi
+        # The function's seven columns, in its order, verdict first: what may be looked at depends on it. A BLOCKED
+        # row is child sexual abuse material, which is never viewed (ops/moderation/takedown.md §2), and says so.
+        printf 'verdict\tmediaId\tkind\tstatus\treason\tattached\tmoderatedAt\n'
+        printf '%s\n' "$out" | awk -F '\t' 'BEGIN { OFS = "\t" } $1 == "BLOCKED" { print $0, "DO NOT VIEW — runbook §2"; next } { print }'
+        ;;
+      hold|block)
+        # A member's report (ops/moderation/takedown.md §3): hold a photo or voice note back from the partner, or
+        # block it as child sexual abuse material (held as evidence, never released).
+        [ $# -eq 2 ] || die "usage: moyi media quarantine $action <mediaId> \"<note>\""
+        need_uuid mediaId "$1"
+        [ -n "$2" ] && [ "${#2}" -le 500 ] || die "a note is required (at most 500 characters): the report, and when it came"
+        result="$(ops_sql "SELECT media_quarantine_$action(:'media'::uuid, :'actor', :'note');" "media=$1" "actor=$OPERATOR" "note=$2")" ||
+          die "the database refused (see above)"
+        case "$result" in
+          HELD)            echo "Held back: the partner is shown it as processing until you release or delete it." ;;
+          BLOCKED)         echo "Blocked and held as evidence: never released. Follow ops/moderation/takedown.md §2 now." ;;
+          ALREADY_BLOCKED) echo "Already blocked and held as evidence. Follow ops/moderation/takedown.md §2." ;;
+          NOT_READY)       die "that id names nothing ready to hold back (already held back, never made, or deleted)" ;;
+          GONE)            die "that id names nothing left to hold: never made, or deleted and its objects already purged" ;;
+          *)               die "unexpected answer from the database: $result" ;;
+        esac
+        ;;
+      release|delete)
+        [ $# -eq 2 ] || die "usage: moyi media quarantine $action <mediaId> \"<note>\""
+        need_uuid mediaId "$1"
+        [ -n "$2" ] && [ "${#2}" -le 500 ] || die "a note is required (at most 500 characters): why, and for a deletion after a report, its reference"
+        result="$(ops_sql "SELECT media_quarantine_$action(:'media'::uuid, :'actor', :'note');" "media=$1" "actor=$OPERATOR" "note=$2")" ||
+          die "the database refused (see above)"
+        case "$result" in
+          RELEASED)        echo "Released: the partner is shown it from now on." ;;
+          DELETED)         echo "Deleted: its objects leave the storage within seconds (media.purge)." ;;
+          NEVER_RELEASED)  die "it is blocked (child sexual abuse material): it is never released. The refusal is recorded. See ops/moderation/takedown.md." ;;
+          NOT_QUARANTINED) die "that id names nothing held back" ;;
+          *)               die "unexpected answer from the database: $result" ;;
+        esac
+        ;;
+      *) die "usage: moyi media quarantine list | release|delete|hold|block <mediaId> \"<note>\"" ;;
+    esac
+    ;;
   *) die "unknown command: $cmd (try: moyi help)" ;;
 esac

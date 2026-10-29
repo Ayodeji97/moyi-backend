@@ -29,3 +29,14 @@ moyi:
       # macOS cannot enforce the memory limits; on Linux (CI) this changes nothing
       # and the limits are applied (ADR-0048, ADR-0049).
       allow-unlimited-memory: true
+    moderation:
+      # Rekognition, the default, refuses to start without AWS credentials
+      # (ADR-0051). Here nothing is moderated unless a test brings its own
+      # moderator (ModerateMediaTest's fakes), so every other test sees media as
+      # D2 and D3 left it: no verdict, and no partner shown it.
+      image:
+        provider: none
+      known-images:
+        provider: none
+      voice:
+        provider: none

@@ -68,3 +68,13 @@ ssh moyi 'systemctl enable --now moyi-media-check.timer'
 (`f` is the helper defined above.) It needs the media tables (V32, V34) and `job_runs` (V35) on the server, so it
 is installed after the deploy that carries them. With the storage `unavailable`, as
 production runs today, no asset exists and the check reports ok as long as both jobs run.
+
+Since D4 (ADR-0051) it needs V36 too, and it also fails while anything is held as evidence (child
+abuse material awaiting the takedown runbook), while anything moderation held back has waited more
+than `QUARANTINE_REVIEW_DAYS` (3 by default) for review, and, once moderation is switched on,
+while anything has been READY for 30 minutes without a verdict. That last alarm is off until the
+media worker runs a moderator; then add it:
+
+```
+ssh moyi 'echo MEDIA_MODERATION_ON=1 >> /etc/moyi-monitoring/heartbeats.env'
+```

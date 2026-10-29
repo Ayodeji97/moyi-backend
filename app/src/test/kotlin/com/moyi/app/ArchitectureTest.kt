@@ -515,16 +515,25 @@ class ArchitectureTest {
     }
 
     @Test
-    fun `the AWS SDK is named in one class only`() {
-        // Doc 25:118, ADR-0047: the vendor appears in one internal class, so
-        // replacing R2 is one class. MediaIntegrationTest (test code) is the
-        // other user, for what a test arranges behind the application's back.
+    fun `each AWS service is named in one class only`() {
+        // Doc 25:118, ADR-0047, ADR-0051: each vendor appears in one internal
+        // class, so replacing R2 or Rekognition is one class. The SDK's shared
+        // parts (credentials, the HTTP client) are those two classes' alone too.
+        // MediaIntegrationTest (test code) is the other user, for what a test
+        // arranges behind the application's back.
         val users =
             project.files
                 .filter { it.normalisedProjectPath.contains("/src/main/") }
                 .filter { file -> file.imports.any { it.name.startsWith("software.amazon.awssdk.") } }
-                .map { it.name }
-        assertEquals(listOf("R2ObjectStore"), users, "only R2ObjectStore may import the AWS SDK (doc 25:118)")
+                .associate { file ->
+                    file.name to file.imports.map { it.name }.filter { it.startsWith("software.amazon.awssdk.services.") }
+                }
+        assertEquals(setOf("R2ObjectStore", "RekognitionImageModerator"), users.keys, "only the two vendor classes may import the AWS SDK")
+        assertTrue(users.getValue("R2ObjectStore").all { it.startsWith("software.amazon.awssdk.services.s3.") }, "R2ObjectStore: S3 only")
+        assertTrue(
+            users.getValue("RekognitionImageModerator").all { it.startsWith("software.amazon.awssdk.services.rekognition.") },
+            "RekognitionImageModerator: Rekognition only",
+        )
     }
 
     @Test

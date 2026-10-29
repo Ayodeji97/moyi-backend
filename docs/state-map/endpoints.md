@@ -1420,6 +1420,7 @@ curl -X POST "$API/bonds/$BOND/entries" -H "Authorization: Bearer $TOKEN" -H "Id
 | `media` | `READY` | your email is verified | 201 → `READY_ATTACHED` | The entry is written with the photo, which is claimed for it in the entry's own transaction by one conditional update: two entries racing for one photo have one winner. The author sees it READY with its URL; the partner, once the day reveals, sees it PROCESSING until it has passed moderation (D4). A voice note is claimed the same way, on voiceMediaId, after the photo, and shown the same way: READY to its author, PROCESSING to the partner until it has passed moderation (FR-061, ADR-0049). | FR-044a, FR-101, spec §4 D2, ADR-0048 §4-5, spec §4 D3 | smoke |
 | `media` | `READY` | your email is not verified | 403 `EMAIL_NOT_VERIFIED` | media's claim refuses an unverified owner, and the entry is not written; an entry with no photo or voice note is not refused. No route reaches this today: FR-002 lets only a verified account into a bond, nothing un-verifies one, and an unverified account cannot make an asset to attach. The claim holds the rule anyway, so that whatever later lets one in meets it. PATCH /entries/{entryId} claims the same way. | the owner's ruling of 2026-10-29, ADR-0049 | test |
 | `media` | `READY_ATTACHED` |  | 422 `VALIDATION_FAILED` | Already on another entry. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | test |
+| `media` | `QUARANTINED` |  | 422 `VALIDATION_FAILED` | Only a READY asset is claimed (FR-044a), so one moderation held back before it was attached is refused on imageMediaId or voiceMediaId, with the same one refusal as every other cause; the entry is not written. Its GET /media/{id} says QUARANTINED, so a client can say it will not be shared before it is sent. | FR-044a, ADR-0048 §4, ADR-0051 | test |
 | `media` | `FAILED` |  | 422 `VALIDATION_FAILED` | Not READY: the pipeline refused it. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | smoke |
 | `media` | `DELETED` |  | 422 `VALIDATION_FAILED` | Deleted. media will not attach it: an entry may carry only a photo and a voice note of yours, each READY and on no other entry. One answer for every cause, on the field imageMediaId or voiceMediaId; no entry is written and the Idempotency-Key stays free. | FR-044a, spec §4 D2, ADR-0048 §4, spec §4 D3 | never-run |
 
@@ -1913,6 +1914,7 @@ curl -X POST "$API/media/upload-intent" -H "Authorization: Bearer $TOKEN" -H 'Co
 | `media` | `PROCESSING` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
 | `media` | `READY` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
 | `media` | `READY_ATTACHED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
+| `media` | `QUARANTINED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
 | `media` | `FAILED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
 | `media` | `DELETED` |  | not reachable | An intent names no asset: it always makes a new one, which starts from none. |  | never-run |
 
@@ -1951,6 +1953,7 @@ curl -X POST "$API/media/$MEDIA/complete" -H "Authorization: Bearer $TOKEN" -H "
 | `media` | `PROCESSING` |  | 200 stays | It is already complete. Completing again changes nothing and records no second event. | doc 06:182, ADR-0047 §2 | test |
 | `media` | `READY` |  | 200 stays | It is already complete. Completing again changes nothing and records no second event. | doc 06:182, ADR-0047 §2 | test |
 | `media` | `READY_ATTACHED` |  | 200 stays | It is already complete. Completing again changes nothing and records no second event. | doc 06:182, ADR-0047 §2 | test |
+| `media` | `QUARANTINED` |  | 200 stays | It is already complete. Completing again changes nothing and records no second event. | doc 06:182, ADR-0047 §2 | test |
 | `media` | `FAILED` |  | 200 stays | It is already complete. Completing again changes nothing and records no second event. | doc 06:182, ADR-0047 §2 | test |
 | `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184, ADR-0047 §3 | test |
 
@@ -1988,6 +1991,7 @@ curl "$API/media/$MEDIA" -H "Authorization: Bearer $TOKEN"
 | `media` | `PROCESSING` |  | 200 stays | Its kind, status PROCESSING, type and size; no URL yet. | doc 06:183, ADR-0048 §5 | never-run |
 | `media` | `READY` |  | 200 stays | Its kind, status, type and size, and a signed GET of the largest image kept with that image's width and height. The URL is signed as of the start of the hour for 25 hours: at least 24 hours from now, ending on the hour, the same all hour. A voice note: a signed GET of its Ogg Opus, signed the same way, and its durationMs; width and height are null. | doc 06:183, doc 05:169, ADR-0048 §5, ADR-0049 | smoke |
 | `media` | `READY_ATTACHED` |  | 200 stays | As when it was attached to nothing: its owner is given the URL and the size. | doc 06:183, ADR-0048 §5 | smoke |
+| `media` | `QUARANTINED` |  | 200 stays | Status QUARANTINED, and still its URL and size, or its length (Q10: its author sees their own photo); no URL when it is blocked. On an entry its author is shown it NOT_SHARED. | doc 06:183, Q10, ADR-0051 | test |
 | `media` | `FAILED` |  | 200 stays | Its kind, status FAILED, type and size; no URL. Why it failed is not said (the log has it, by id and rule). | doc 06:183, ADR-0048 §2 | never-run |
 | `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | smoke |
 
@@ -2015,6 +2019,7 @@ curl -X DELETE "$API/media/$MEDIA" -H "Authorization: Bearer $TOKEN"
 | `media` | `PROCESSING` |  | 204 → `DELETED` | Deleted at once: the pipeline holds no lock while it works. It finds the upload deleted under the row lock when it is done, and removes what it made: a photo's variants, a voice note's Opus. | doc 06:184, ADR-0048 §2, ADR-0049 | test |
 | `media` | `READY` |  | 204 → `DELETED` | Deleted, and after the commit what was kept of it (a photo's variants, a voice note's Opus) and any upload left are removed from the storage at once, on a best-effort basis; media.purge deletes the same keys again, retrying until the storage answers (D5), so nothing is left behind for good. | doc 06:184, ADR-0048 §4, ADR-0050 §2 | test |
 | `media` | `READY_ATTACHED` |  | 409 `MEDIA_ATTACHED` | It is part of an entry now and stays with it; nothing changes. It leaves with the entry, when the entry is erased. | doc 06:184, ADR-0048 §4 | smoke |
+| `media` | `QUARANTINED` | it is on no entry | 204 → `DELETED` | Deleted, and gone to you as any deleted asset is. Its objects go as any deleted asset's do, unless it is blocked: then they are held as evidence until the operator deletes it. | doc 06:184, Q16, ADR-0051 | test |
 | `media` | `FAILED` |  | 204 → `DELETED` | Deleted; there is nothing left in the storage to remove but an upload the pipeline could not delete. | doc 06:184 | never-run |
 | `media` | `DELETED` |  | 404 `NOT_FOUND` | You deleted it. A deleted asset is gone to its owner too, and answers as one that never existed. | doc 06:184 | test |
 
