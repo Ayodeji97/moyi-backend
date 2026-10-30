@@ -282,7 +282,11 @@ Kamal's top-level secrets reach every role anyway.
   fetched 48 minutes after its signing date, the voice note `audio/ogg`, both objects gone after
   the delete), no URL or key in its output, both assets `DELETED` and purged, MinIO empty, the
   session revoked. With the worker stopped it failed as it should (`READY` not reached), and still
-  deleted what it made; terminated while it waited, it deleted at once.
+  deleted what it made; terminated while it waited, it deleted at once. (Review of the switch-on:
+  an access token lives 15 minutes, and a wait for the URL's age can be longer; the script now
+  refreshes the session after the wait and before its cleanup. Seen with a 20-second token: the
+  first version failed with 401 after a two-minute wait and left the photo behind, this one
+  passed 21 of 21, and cleaned up after a token had expired.)
 - **Not run against R2, nor on the server.** The network limit's installation, the deploy, and
   the check against the real bucket are the owner's (`ops/media-worker/README.md`, steps 1 to 7).
   The gate in Owed below is a runbook step, not something the deploy enforces: a deploy run before

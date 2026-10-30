@@ -87,16 +87,40 @@ storage() {
 }
 forget() { local id="$1" kept=() m; for m in "${CREATED[@]+"${CREATED[@]}"}"; do [ "$m" = "$id" ] || kept+=("$m"); done; CREATED=("${kept[@]+"${kept[@]}"}"); }
 
+# refresh_token_body — {"refreshToken": …} in $WORK/refresh.json, so the token is never on a command line.
+refresh_token_body() {
+  python3 -c 'import json,sys; print(json.dumps({"refreshToken": sys.argv[1]}))' "$REFRESH" > "$WORK/refresh.json"
+}
+# refresh — a new token pair (refresh rotates). An access token lives 15 minutes and a run can
+# wait longer than that for its URL to age, so this runs after the wait and before the cleanup.
+refresh() {
+  [ -n "$REFRESH" ] || return 1
+  local status
+  refresh_token_body
+  status="$(curl -s -o "$WORK/session" -w '%{http_code}' --max-time 30 -X POST "$API/auth/refresh" \
+    -H 'Content-Type: application/json' --data-binary "@$WORK/refresh.json")"
+  rm -f "$WORK/refresh.json"
+  if [ "$status" = 200 ]; then
+    ACCESS="$(json "$WORK/session" accessToken)"; REFRESH="$(json "$WORK/session" refreshToken)"
+  else
+    echo "  (the session could not be refreshed: $status $(json "$WORK/session" code))"
+  fi
+  rm -f "$WORK/session"
+  [ "$status" = 200 ]
+}
+
 cleanup() {
   local m status
   [ -z "$SLEEPER" ] || kill "$SLEEPER" 2>/dev/null
+  if [ "${#CREATED[@]}" -gt 0 ]; then refresh || true; fi
   for m in "${CREATED[@]+"${CREATED[@]}"}"; do
     status="$(api "$WORK/cleanup" DELETE "/media/$m")"
     echo "  cleanup: DELETE /media/$m → $status"
   done
   if [ -n "$REFRESH" ]; then
+    refresh_token_body
     curl -s -o /dev/null --max-time 30 -X POST "$API/auth/logout" -H 'Content-Type: application/json' \
-      -d "$(python3 -c 'import json,sys; print(json.dumps({"refreshToken": sys.argv[1]}))' "$REFRESH")" || true
+      --data-binary "@$WORK/refresh.json" || true
   fi
   rm -rf "$WORK"
 }
@@ -235,6 +259,7 @@ print(int((d.datetime.now(d.timezone.utc) - signed).total_seconds() // 60))' "$W
       # In the background, waited for: an interrupt then runs the cleanup at once, not after the sleep.
       sleep $(((MIN_AGE - AGE) * 60 + 5)) &
       SLEEPER=$!; wait "$SLEEPER"; SLEEPER=""; AGE="$(age)"
+      refresh || fail "the session is refreshed after the wait" "the rest of the run would be refused 401"
     fi
     S="$(storage "$WORK/served.webp" "$WORK/photo.url")"
     if [ "${S%%|*}" = 200 ]; then
