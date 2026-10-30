@@ -220,7 +220,8 @@ lifecycle rule**.
 - **The owner, before the mirror runs:** choose the target's provider and jurisdiction; make the
   bucket with its lock and lifecycle rule; the two tokens; the Bitwarden fields and the install
   steps in `ops/media-mirror/README.md`; then one run by hand, the first time `mc` meets the real
-  providers.
+  providers. **Storage was switched on before it** (ADR-0052, "Switched on"): until the mirror
+  runs, the photos and voice notes in `moyi-media` have no second copy (risk R-D).
 - **The owner, for the documents this changes (not edited here; the corpus is read-only to a
   slice):** doc 07 §7's retention table gains the mirror (erased media kept up to about 32 days in
   the mirror, re-applied on a restore) and the purge (an erased photo's objects deleted within

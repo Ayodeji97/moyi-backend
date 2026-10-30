@@ -22,135 +22,248 @@ job, and processing `off`.
 Useful: `kamal app logs -r media-worker -f`, `kamal app details -r media-worker`,
 and on the server `docker inspect --format '{{.State.Health.Status}}' $(docker ps -q --filter label=role=media-worker)`.
 
-## What it does while storage is `unavailable` (today)
+## What it does
 
-It starts, passes its start-up checks, registers `media.process` for
-`MediaUploaded`, and has nothing to do: the API refuses every upload intent with
-`503 MEDIA_STORAGE_UNAVAILABLE`, so no upload exists. The moderation consumers
-subscribe to nothing while moderation is `none`.
+Since storage was switched on (ADR-0052, "Switched on"): the API accepts an
+upload intent, signs the PUT straight to R2's `moyi-media`, and on the
+completion publishes `MediaUploaded`; the worker claims it, reads the upload
+from `in/`, writes what it makes of it under `v/` (a photo's two WebP variants,
+a voice note's Ogg Opus) and deletes the upload. The moderation consumers
+subscribe to nothing while moderation is `none`, so **no photo or voice note
+gets a verdict, and no partner is ever shown one**: an author sees their own
+media, their partner sees none of it, until the owner decides moderation
+(ADR-0051).
 
-## Installing the network limit (once, before switch-on)
+Before that, with storage `unavailable`, it started, passed its start-up
+checks and had nothing to do: the API refused every upload intent with
+`503 MEDIA_STORAGE_UNAVAILABLE`.
+
+## Switching storage on: the owner's runbook
+
+Every step is the owner's, in this order, and each says what it should show.
+None is run by the pull request that wrote it. `ssh moyi` is the server
+(`root@91.98.71.136`, key `~/.ssh/moyi_hetzner`); everything else runs on the
+Mac, in `moyi-backend`.
+
+Already done: the `moyi-media` bucket in R2's EU jurisdiction, its lifecycle
+rule deleting `in/` after 2 days, no public URL, no CORS; the token
+`moyi-media-prod` (Object Read & Write, `moyi-media` only); D5 live in
+production (since `ce41f22`); the worker deployed and healthy (`e88944b`).
+
+### Step 1. Bitwarden: nothing to add, three fields to check
+
+The deploy reads three fields of the secure note `moyi-prod`
+(`.kamal/secrets`):
+
+| Field | Holds | Becomes |
+|---|---|---|
+| `MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID` | the token's access key id (saved) | `MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID` |
+| `MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY` | the token's secret access key (saved) | `MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY` |
+| `R2_ENDPOINT` | `https://<account id>.eu.r2.cloudflarestorage.com`, **already there**: the backups read it (`ops/backup/README.md`) | `MOYI_MEDIA_STORAGE_R2_ENDPOINT` |
+
+The endpoint is a secret because it names the Cloudflare account, which this
+public repository does not. It is the backups' field rather than a new one:
+one account, one jurisdiction, one value, kept in one place. **No new field is
+needed.** (Had one been added as `MOYI_MEDIA_STORAGE_R2_ENDPOINT`, as an
+earlier draft of this runbook said, nothing would read it.)
+
+Check the three without printing any, and that the token reaches the bucket
+(`200`; `403` is a wrong key or secret, `404` a wrong endpoint or jurisdiction):
+
+```
+export BW_SESSION="$(bw unlock --raw)"; bw sync >/dev/null
+f() { bw get item moyi-prod | python3 -c 'import json,sys; print(next(x["value"] for x in json.load(sys.stdin)["fields"] if x["name"]==sys.argv[1]))' "$1"; }
+f R2_ENDPOINT | grep -qE '^https://[0-9a-f]{32}\.eu\.r2\.cloudflarestorage\.com$' && echo "endpoint: EU, well formed"
+[ -n "$(f MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID)" ] && [ -n "$(f MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY)" ] && echo "token: both halves"
+printf 'user = "%s:%s"\n' "$(f MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID)" "$(f MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY)" |
+  curl -s -o /dev/null -w 'bucket: %{http_code}\n' -K - --aws-sigv4 "aws:amz:auto:s3" "$(f R2_ENDPOINT)/moyi-media?list-type=2&max-keys=1"
+bw lock; unset BW_SESSION
+```
+
+(The `curl` takes the token on its standard input, never its command line.
+Seen answering 200, 403 and 404 as described against MinIO; not yet run
+against R2.)
+
+### Step 2. The worker's network limit (ADR-0052's gate: before storage is on)
 
 Kamal starts the role on its `kamal` network, which reaches the internet, and
 neither Kamal nor Docker can narrow that (ADR-0052 decision 5). A systemd
-service on the server does it instead, for every worker container as it starts,
-from inside the container's network namespace: Postgres (TCP 5432 on the
-`kamal` network) and HTTPS to Cloudflare's published ranges, where R2 is;
-nothing else.
-
-From the Mac, in `moyi-backend`:
+service on the server does it instead, for every worker container as it
+starts, from inside the container's network namespace: Postgres (TCP 5432 on
+the `kamal` network) and HTTPS to Cloudflare's published ranges, where R2 is;
+nothing else. What it was seen to do is `test-egress-limit.sh`'s to show
+(Docker-in-Docker on the Mac). **Storage must not be switched on before this
+step has printed `limited`**: a worker that decodes uploads with the whole
+internet in reach is what ADR-0052 decision 5 exists to prevent.
 
 ```
+# 2a. what it needs is on the server (Ubuntu 24.04 has all three)
+ssh moyi 'command -v nsenter iptables-restore ip6tables-restore'
+
+# 2b. install, and start it now and with Docker from now on
 scp ops/media-worker/egress-limit.sh moyi:/usr/local/sbin/moyi-media-worker-egress
 scp ops/media-worker/moyi-media-worker-egress.service moyi:/etc/systemd/system/
 ssh moyi 'chmod 700 /usr/local/sbin/moyi-media-worker-egress && systemctl daemon-reload && systemctl enable --now moyi-media-worker-egress'
-ssh moyi 'journalctl -u moyi-media-worker-egress -n 5 --no-pager; /usr/local/sbin/moyi-media-worker-egress check && echo limited'
+
+# 2c. it is running, and it limited the worker that is running now
+ssh moyi 'systemctl is-active moyi-media-worker-egress; journalctl -u moyi-media-worker-egress -n 5 --no-pager'
+ssh moyi 'docker ps --filter label=role=media-worker --format "{{.Names}} {{.Status}}"'
+ssh moyi '/usr/local/sbin/moyi-media-worker-egress check && echo limited'
 ```
 
-`media-check.sh` runs `check` on every run once the script is installed, and
-alarms if a worker container runs without the limit (a worker started while the
-service was down). What it was seen to do is `test-egress-limit.sh`'s to show
-(Docker-in-Docker on the Mac; ten checks).
+2c should show `active`, a journal line `limited moyi-media-worker-<version>
+(pid …): Postgres on 172.18.0.0/16, HTTPS to Cloudflare`, one worker
+container `Up … (healthy)`, and `limited`. `check` passes when no worker runs
+at all, so the `docker ps` line must show one. The worker stays healthy: its
+open connection to Postgres is kept, and new ones are allowed.
 
-When Rekognition is switched on (ADR-0051, Owed), the worker must also reach
-`rekognition.eu-central-1.amazonaws.com`: put AWS's `eu-central-1` ranges for
-the `AMAZON` service (https://ip-ranges.amazonaws.com/ip-ranges.json) in
-`/etc/moyi-media-worker/egress.env` as `EXTRA_HTTPS_CIDRS="…"` and
-`systemctl restart moyi-media-worker-egress` (which re-limits running
-containers). Without it every moderation call is refused, retried as an
-outage, and `media-check.sh` alarms on unmoderated assets after 30 minutes.
+### Step 3. The media check, as of #116
 
-## Switching storage on (the follow-up pull request)
+`ops/monitoring/media-check.sh` gained two checks in #116 (an upload waiting
+`UPLOADED` for 30 minutes; a worker running without its limit), so the copy on
+the server is older than the one that watches the worker. Copy it, with its
+units, again:
 
-Prerequisites, all the owner's (ADR-0047, Owed): the `moyi-media` bucket in R2's
-EU jurisdiction (done), its lifecycle rule expiring `in/` after 2 days, an API
-token scoped to that bucket with Object Read & Write (done), and D5 live in
-production (it is: production runs `ce41f22`). The network limit installed and
-seen limiting (above).
-
-**1. Bitwarden**, secure note `moyi-prod`, three hidden fields. The two key
-fields exist; the endpoint is added because it names the Cloudflare account,
-which this public repository does not:
-
-| Field | Value |
-|---|---|
-| `MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID` | the token's access key id |
-| `MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY` | the token's secret access key |
-| `MOYI_MEDIA_STORAGE_R2_ENDPOINT` | `https://<account id>.eu.r2.cloudflarestorage.com` |
-
-**2. `.kamal/secrets`**: add the three names to the `kamal secrets fetch` line,
-and three lines below it:
-
-```diff
--SECRETS=$(kamal secrets fetch --adapter bitwarden --account $BITWARDEN_ACCOUNT --from moyi-prod POSTGRES_PASSWORD HASHING_SECRET JWT_PRIVATE_KEY_PEM JWT_PUBLIC_KEY_PEM RESEND_API_KEY GHCR_TOKEN)
-+SECRETS=$(kamal secrets fetch --adapter bitwarden --account $BITWARDEN_ACCOUNT --from moyi-prod POSTGRES_PASSWORD HASHING_SECRET JWT_PRIVATE_KEY_PEM JWT_PUBLIC_KEY_PEM RESEND_API_KEY GHCR_TOKEN MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY MOYI_MEDIA_STORAGE_R2_ENDPOINT)
-+
-+# The R2 token scoped to the `moyi-media` bucket, Object Read & Write, and the
-+# account's EU endpoint (ADR-0047, ADR-0052). Both roles use them: the API signs
-+# the uploads, the worker reads and writes the objects.
-+MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID=$(kamal secrets extract MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID $SECRETS)
-+MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY=$(kamal secrets extract MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY $SECRETS)
-+MOYI_MEDIA_STORAGE_R2_ENDPOINT=$(kamal secrets extract MOYI_MEDIA_STORAGE_R2_ENDPOINT $SECRETS)
+```
+scp ops/monitoring/media-check.sh moyi:/usr/local/sbin/moyi-media-check
+scp ops/monitoring/moyi-media-check.service ops/monitoring/moyi-media-check.timer moyi:/etc/systemd/system/
+ssh moyi 'chmod 700 /usr/local/sbin/moyi-media-check && systemctl daemon-reload'
+ssh moyi 'grep -q "^MEDIA_PING_URL=" /etc/moyi-monitoring/heartbeats.env && echo "heartbeat: set"'
 ```
 
-**3. `config/deploy.yml`**, in the top-level `env` (both roles read it):
+If the last line prints nothing, the check was never installed: do
+`ops/monitoring/README.md`, "Installing the media check", from its
+`export BW_SESSION` line on (the Healthchecks.io check and `HC_MEDIA_URL`
+first). Then:
 
-```diff
-     # No media storage until …
--    MOYI_MEDIA_STORAGE_PROVIDER: unavailable
-+    MOYI_MEDIA_STORAGE_R2_BUCKET: moyi-media
-   secret:
-     - SPRING_DATASOURCE_PASSWORD:POSTGRES_PASSWORD
-     - MOYI_SECURITY_JWT_PRIVATE_KEY_PEM
-     - MOYI_SECURITY_JWT_PUBLIC_KEY_PEM
-     - MOYI_SECURITY_HASHING_SECRET
-     - MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY
-+    - MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID
-+    - MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY
-+    - MOYI_MEDIA_STORAGE_R2_ENDPOINT
+```
+ssh moyi 'systemctl enable --now moyi-media-check.timer && systemctl start moyi-media-check; journalctl -u moyi-media-check -n 3 --no-pager'
 ```
 
-(and the comment above the removed line rewritten to say storage is R2.)
-`MOYI_MEDIA_PROCESSING_PROVIDER` stays `"off"` at the top and `native` in the
-worker's role; moderation stays `none`. `ProductionStartsWithoutMediaSecretsTest`
-accepts exactly this shape (seen: the diff above applied, the test green; the
-bucket line removed, red).
+which should end `moyi-media-check: ok (…)`. Leave `MEDIA_MODERATION_ON`
+unset: moderation is `none`.
 
-**4. Deploy** as always, after the PR merges and its CI run has published the
-image: `git switch main && git pull --ff-only && kamal deploy --skip-push --version=$(git rev-parse HEAD)`.
+### Step 4. Merge, wait for the image, deploy
 
-**5. Verify**, in this order:
+Merge the switch-on pull request, wait for its CI run on `main` to finish
+(the `manifest` job publishes the image), then, as always:
+
+```
+git switch main && git pull --ff-only
+kamal deploy --skip-push --version=$(git rev-parse HEAD)
+```
+
+Kamal asks Bitwarden for the three fields of step 1; a field it cannot find
+fails the deploy before anything is touched. A container given an empty one
+refuses to start, naming it (`missing: moyi.media.storage.r2.endpoint
+(MOYI_MEDIA_STORAGE_R2_ENDPOINT)`), and Kamal keeps the old one serving.
+
+### Step 5. The logs and the limit
 
 ```
 # both roles running, the worker healthy
 kamal app details
 ssh moyi 'docker ps --filter label=service=moyi --format "{{.Names}} {{.Status}}"'
 
-# the worker started NATIVE, with storage, its three consumers, and nothing else
-kamal app logs -r media-worker --since 10m | grep -E 'Media processing: NATIVE|Voice processing: NATIVE|Media storage: R2|limited to|Event consumer registered|Ready'
+# the worker: NATIVE, R2, its three consumers, and nothing else
+kamal app logs -r media-worker --since 10m | grep -E 'Media processing: NATIVE|Voice processing: NATIVE|Media storage: R2|Event consumer registered|Ready'
 
-# the API kept processing off and has storage
+# the API: processing off, R2
 kamal app logs -r web --since 10m | grep -E 'Media processing: OFF|Media storage: R2'
 
-# the worker is network-limited
-ssh moyi /usr/local/sbin/moyi-media-worker-egress check && echo limited
+# the new worker container was limited as it started
+ssh moyi 'journalctl -u moyi-media-worker-egress --since "15 min ago" --no-pager | grep limited; /usr/local/sbin/moyi-media-worker-egress check && echo limited'
 ```
 
-Then, from a verified test account (the app, or `scripts/moyi`): upload one
-photo and one voice note and read `GET /api/v1/media/{id}` until `status` is
-`READY` (seconds); fetch the photo's `url` once (ADR-0048, Owed: R2 serving a
-GET signed up to an hour earlier); PUT altered bytes to a fresh intent's URL
-and see R2 refuse them (ADR-0047 decision 1). On the server:
+`Media storage: R2 (bucket: moyi-media)` in both roles; no
+`Media storage: UNAVAILABLE` anywhere.
+
+### Step 6. One upload of each kind, against R2: `scripts/r2-switch-on-check.sh`
+
+From a verified test account of yours (one that is in no bond with a real
+person), on the Mac:
 
 ```
-ssh moyi "docker exec moyi-postgres psql -U moyi -d moyi -c \"SELECT kind, status, count(*) FROM media_assets GROUP BY 1, 2\""
+MOYI_CHECK_API=https://api.getmoyi.app/api/v1 MOYI_CHECK_EMAIL=<the test account> \
+  MOYI_CHECK_URL_MIN_AGE=40 scripts/r2-switch-on-check.sh
+```
+
+It asks for the password. It covers what ADR-0047, ADR-0048 and ADR-0049 left
+as "R2, not run", in the order the header of the script gives: a photo's
+upload, with three PUTs R2 must refuse first (a body one byte longer, a body
+of the signed length with one byte changed, another `Content-Type`); the
+worker turning it `READY`; a GET of its URL once that URL is at least 40
+minutes old (a URL is signed as of the start of the hour,
+ADR-0048 decision 6; with `MOYI_CHECK_URL_MIN_AGE=40` it waits until then,
+so run it after twenty to the hour to wait least); a voice note made `READY`
+and served as `audio/ogg`; each deleted, and its URL then answered `404` by R2.
+It prints statuses and media ids, never a URL or a key, deletes what it made
+even when it fails, and signs out. It ends `N passed, 0 failed`.
+
+What a failure means:
+
+| Fails | Means | Do |
+|---|---|---|
+| the upload intent | `503`: storage not configured, or not reached at all | step 5's logs |
+| "one byte changed" (then the completion's line says what happened next) | R2 does not check the signed SHA-256 (ADR-0047 decision 1's open item). The length and type are still signed | if the completion then refused the bytes (`409`), the server's own check holds; record it in ADR-0047. If it did not, switch off and tell whoever builds the next slice |
+| `READY` | the worker did not take it up | `kamal app logs -r media-worker`; `ops/monitoring/media-pipeline-stuck.md` |
+| the GET of the URL | R2 refused a signature dated earlier in the hour | switch off (below): no URL handed out would work |
+| `audio/ogg` | R2 served the voice note with another type | record it; a phone may still play it, test before deciding |
+| the URL after the delete | the objects outlived the delete | `media.purge` retries; `media-pipeline-stuck.md` |
+
+### Step 7. On the server, afterwards
+
+```
+# the test assets are DELETED and purged; nothing waits
+ssh moyi "docker exec moyi-postgres psql -U moyi -d moyi -c \"SELECT kind, status, (purged_at IS NOT NULL) AS purged, count(*) FROM media_assets GROUP BY 1, 2, 3\""
+# the worker's memory after real decodes (ADR-0052 owes this number from the server)
 ssh moyi 'docker stats --no-stream $(docker ps -q --filter label=role=media-worker)'
-ssh moyi /usr/local/sbin/moyi-media-check
+# the alarm is quiet
+ssh moyi 'systemctl start moyi-media-check; journalctl -u moyi-media-check -n 2 --no-pager'
 ```
 
-**To switch off again**: put `MOYI_MEDIA_STORAGE_PROVIDER: unavailable` back and
-deploy. Uploads are refused again; what was uploaded stays in the bucket, and
-`media.purge`'s deliveries wait (ops/monitoring/media-pipeline-stuck.md).
+and, with step 1's `f` and `BW_SESSION`, that no upload is left under `in/`
+(it prints a count, never a key):
+
+```
+printf 'user = "%s:%s"\n' "$(f MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID)" "$(f MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY)" |
+  curl -s -K - --aws-sigv4 "aws:amz:auto:s3" "$(f R2_ENDPOINT)/moyi-media?list-type=2&prefix=in/" | grep -o '<KeyCount>[0-9]*</KeyCount>'
+```
+
+### Not covered by the runbook
+
+- **The reaper** (ADR-0050: a pending upload past its expiry, a photo
+  unattached for 24 hours). It deletes through the same storage call, on the
+  same role, as the delete in step 6, which proves the token may delete; its
+  schedule is `media-check.sh`'s to watch (`job_runs`).
+- **The ceiling HEIC on the CAX21** (ADR-0052, Owed) and **the iPhone's
+  playback of the Ogg Opus** (ADR-0049, Q4): each needs a file the script does
+  not carry, or a phone.
+- **The media mirror** (ADR-0050, Q15) is not running: until it is, the
+  photos in `moyi-media` have no second copy.
+
+### To switch off again
+
+Put `MOYI_MEDIA_STORAGE_PROVIDER: unavailable` back in `config/deploy.yml`'s
+top-level `env`, change `ProductionStartsWithoutMediaSecretsTest`'s
+"stores media in R2" test in the same pull request (it holds storage on, on
+purpose), merge and deploy. Uploads are refused again; what was uploaded stays
+in the bucket, and `media.purge`'s deliveries wait
+(`ops/monitoring/media-pipeline-stuck.md`). For an emergency faster than a
+pull request, `kamal rollback <the previous release's sha>`: every release
+before the switch-on ran with storage `unavailable`, so it leaves what
+"The storage was configured, and is now `unavailable` again" in
+`ops/monitoring/media-pipeline-stuck.md` describes.
+
+### When Rekognition is switched on
+
+The worker must also reach `rekognition.eu-central-1.amazonaws.com`: put AWS's
+`eu-central-1` ranges for the `AMAZON` service
+(https://ip-ranges.amazonaws.com/ip-ranges.json) in
+`/etc/moyi-media-worker/egress.env` as `EXTRA_HTTPS_CIDRS="…"` and
+`systemctl restart moyi-media-worker-egress` (which re-limits running
+containers). Without it every moderation call is refused, retried as an
+outage, and `media-check.sh` alarms on unmoderated assets after 30 minutes.
 
 ## Memory
 

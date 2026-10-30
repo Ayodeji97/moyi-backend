@@ -238,6 +238,10 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
 - **A recording from each platform through the pipeline once** (an iPhone's Voice Memos M4A, an
   Android `MediaRecorder` MPEG_4 and THREE_GPP file): the brands in decision 2 are read, not seen.
 - **R2, not run:** that a GET of `voice.ogg` is served with `audio/ogg`, as MinIO serves it.
+  **Moved to the owner's verification of the switch-on** (ADR-0052, "Switched on"):
+  `scripts/r2-switch-on-check.sh` uploads a WAV as a voice note, waits for `READY` and checks the
+  URL's answer is `audio/ogg` and Ogg Opus. Seen against MinIO; owed against R2 until the owner has
+  run it. The iPhone playback test above is not part of it.
 - **D5:** erasure purges `voice.ogg` as it purges a photo's variants (`MediaAsset.objectKeys`
   names it; `MediaPurgeTest` holds it, red with `voice.ogg` dropped from the keys); the reaper
   takes an unattached voice note after 24 hours like a photo. **Done**: D5 merged first (#110),

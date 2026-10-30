@@ -254,12 +254,18 @@ internal class R2ObjectStore(
             val bucket = r2.bucket
             val accessKeyId = r2.accessKeyId
             val secret = r2.secretAccessKey
-            check(!endpoint.isNullOrBlank() && !bucket.isNullOrBlank() && !accessKeyId.isNullOrBlank() && !secret.isNullOrBlank()) {
-                "moyi.media.storage.provider is R2 (the default) but moyi.media.storage.r2.endpoint, " +
-                    "moyi.media.storage.r2.bucket, moyi.media.storage.r2.access-key-id and " +
-                    "moyi.media.storage.r2.secret-access-key are not all set. Supply the bucket's token through the " +
-                    "environment, or set the provider to UNAVAILABLE where no media may be stored. Refusing to start " +
-                    "rather than run without anywhere to put an upload."
+            // Each by name, and by the variable production sets it with: a deploy that lost one
+            // secret says which in its first lines. Names only, never a value.
+            val missing =
+                mapOf("endpoint" to endpoint, "bucket" to bucket, "access-key-id" to accessKeyId, "secret-access-key" to secret)
+                    .filterValues { it.isNullOrBlank() }
+                    .keys
+                    .map { "moyi.media.storage.r2.$it (MOYI_MEDIA_STORAGE_R2_${it.uppercase().replace('-', '_')})" }
+            check(missing.isEmpty() && endpoint != null && bucket != null && accessKeyId != null && secret != null) {
+                "moyi.media.storage.provider is R2 (the default) but not every value it needs is set; missing: " +
+                    "${missing.joinToString()}. Supply the bucket's token through the environment, or set the provider " +
+                    "to UNAVAILABLE where no media may be stored. Refusing to start rather than run without anywhere " +
+                    "to put an upload."
             }
             val uri = URI.create(endpoint)
             val region = Region.of(r2.region)

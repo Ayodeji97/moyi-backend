@@ -478,8 +478,10 @@ is `kamal rollback <sha> --roles=web`. Kamal 2.12 refuses a rollback unless a
 container of that version exists for every role it is asked about
 (`container_available?`, which iterates the `--roles` it was given), and no
 `media-worker` container exists for an older version. With `--roles=web` only
-the API goes back; the worker stays on the newer image, which is harmless while
-storage is `unavailable` (ADR-0052). The `pre-deploy` hook runs for it as for
+the API goes back; the worker stays on the newer image, which is harmless: every
+release before #116 ran with storage `unavailable`, so the API it goes back to accepts no
+upload for the worker to take (ADR-0052). Rolling back past the storage switch-on turns
+uploads off (ops/media-worker/README.md, "To switch off again"). The `pre-deploy` hook runs for it as for
 any rollback.
 
 One accepted exception (ADR-0037, its amendment of 2026-10-28): once anyone

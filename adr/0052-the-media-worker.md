@@ -241,6 +241,54 @@ header and the README.
 `--skip-push`), and it would break a Kamal build from a clean clone of the commit, which is Kamal's
 default without a context and holds no jar; with it Kamal builds from the working tree. Said there.
 
+**Switched on (2026-10-30, the follow-up pull request).** `config/deploy.yml` no longer names
+`unavailable`. Its top-level `env`, which both roles inherit, names `MOYI_MEDIA_STORAGE_R2_BUCKET:
+moyi-media` and lists `MOYI_MEDIA_STORAGE_R2_ENDPOINT`, `_ACCESS_KEY_ID` and `_SECRET_ACCESS_KEY` as
+secrets. **Both roles need all four**: the API signs every upload and download URL, `HEAD`s each
+completion, deletes and purges (`media.purge` is the API's); the worker `GET`s each upload, `PUT`s
+what it makes of it and deletes the upload. Nothing in either can do its part with less, and
+Kamal's top-level secrets reach every role anyway.
+
+- **The endpoint is Bitwarden's `R2_ENDPOINT`**, the field the backups have read since ADR-0043:
+  `.kamal/secrets` extracts it into `MOYI_MEDIA_STORAGE_R2_ENDPOINT`. Corrected: the runbook
+  first written for this step (and the brief for this pull request) asked the owner to add a new
+  field, `MOYI_MEDIA_STORAGE_R2_ENDPOINT`, holding the same value; `ops/backup/README.md` and
+  `ops/media-mirror/README.md` already said `R2_ENDPOINT` is `https://<account id>.eu.r2.cloudflarestorage.com`
+  and that `moyi-media` is served by it. One account, one jurisdiction, one value in one place: no
+  new field. It stays a secret because it names the Cloudflare account.
+- **Processing** stays `"off"` in the top-level `env` and `native` in the worker's role alone.
+- **Moderation stays `none`** in every role. That is the product as switched on: **an author sees
+  their own photos and voice notes, and no partner is shown any of them, until the owner decides
+  moderation** (ADR-0051). Nothing here changes that.
+- **A missing value is named.** `R2ObjectStore.create` refused with one sentence listing all four
+  properties whatever was missing; it now names each missing one with the variable production sets
+  it by (`missing: moyi.media.storage.r2.endpoint (MOYI_MEDIA_STORAGE_R2_ENDPOINT).`), and no value
+  (`MediaStorageConfigurationTest`, seen red with the old message).
+- **The deploy file's test holds the new truth.** `ProductionStartsWithoutMediaSecretsTest` now
+  holds that every role stores in R2's `moyi-media` with the three as secrets (red against
+  `e88944b`'s file), that the endpoint is never a plain value (red with it moved to `clear`), and
+  that every secret `deploy.yml` names is set by `.kamal/secrets` from a field its fetch line
+  fetches (red with the three extract lines missing, and with `R2_ENDPOINT` taken out of the fetch
+  line). `.kamal/secrets` is an input of `:app:test`, as `deploy.yml` is: without it the suite
+  reported the last change up to date.
+- **Seen, on the Mac** (the jar of this branch; `deploy.yml`'s environment for each role as Ruby's
+  YAML reads it; only the database's and Valkey's addresses changed; every secret made up): `web`
+  without the endpoint refused to start, naming it and only it; `media-worker` without the secret
+  access key the same; both with three plainly fake values started (`/healthz` UP, `Media storage:
+  R2 (bucket: moyi-media)`, the web role's processing OFF, the worker's NATIVE and its ready file
+  written), the endpoint in no log line. Then both pointed at MinIO, and
+  `scripts/r2-switch-on-check.sh` run against the `web` role with the worker beside it and
+  moderation `none`: 21 passed, 0 failed (each refusal, `READY` in about 3 s, the photo's URL
+  fetched 48 minutes after its signing date, the voice note `audio/ogg`, both objects gone after
+  the delete), no URL or key in its output, both assets `DELETED` and purged, MinIO empty, the
+  session revoked. With the worker stopped it failed as it should (`READY` not reached), and still
+  deleted what it made; terminated while it waited, it deleted at once.
+- **Not run against R2, nor on the server.** The network limit's installation, the deploy, and
+  the check against the real bucket are the owner's (`ops/media-worker/README.md`, steps 1 to 7).
+  The gate in Owed below is a runbook step, not something the deploy enforces: a deploy run before
+  step 2 would start a worker that reaches the whole internet, and `media-check.sh`'s egress check
+  only alarms once the limiter is installed.
+
 ## Consequences
 
 **Positive.** Uploads are decoded in a container that can neither write its own file system nor
@@ -300,8 +348,11 @@ migration, no API change, no state-map row.
 
 ## Owed
 
-- **The owner, before switching storage on:** install the egress limit and see `check` pass
-  (`ops/media-worker/README.md`); then the follow-up pull request as written there.
+- **The owner, before deploying the switch-on:** `ops/media-worker/README.md` steps 1 to 3 (the
+  three Bitwarden fields checked, the egress limit installed and printing `limited`, the media
+  check copied again); after it, steps 5 to 7, `scripts/r2-switch-on-check.sh` among them, which
+  settles ADR-0047's, ADR-0048's and ADR-0049's "R2, not run". The switch-on pull request itself:
+  done ("Switched on", above).
 - **Trimming the worker's JVM** (review of #116, owed, not this pull request): it starts every
   module's beans and loads the breach-corpus filter it never consults; ~440 MiB resident is most of
   its 1 GB. A profile that leaves them out, measured.

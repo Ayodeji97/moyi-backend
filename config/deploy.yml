@@ -25,8 +25,9 @@
 # `kamal rollback <sha> --roles=web`: Kamal 2.12 refuses a rollback unless a
 # container of that version exists for every role it is asked about, and no
 # media-worker container exists for an older version. The worker then stays
-# on the newer image, which is harmless while storage is `unavailable`
-# (ADR-0052; README, "How do I deploy it").
+# on the newer image, which is harmless: every release before #116 ran with
+# storage `unavailable`, so the API it goes back to accepts no upload for the
+# worker to take (ADR-0052; README, "How do I deploy it").
 #
 # The explicit --version matters. Without it Kamal tags the deploy with the
 # local HEAD, and appends "_uncommitted_<random>" when the working tree has
@@ -76,9 +77,10 @@ servers:
   # with the `media-worker` profile: no web server, only the media pipeline's
   # consumers, no timed job but the outbox poller (application-media-worker.yml).
   #
-  # Until storage is switched on (MOYI_MEDIA_STORAGE_PROVIDER below) it starts,
-  # passes the start-up checks of libvips and ffmpeg, and has nothing to do: no
-  # upload can exist without a bucket. ops/media-worker/README.md has the switch-on.
+  # It takes up each upload the API has accepted into R2 (MOYI_MEDIA_STORAGE_R2_*
+  # below), from the bucket, through a network limited to Postgres and
+  # Cloudflare by a service on the host that must be installed first
+  # (ops/media-worker/README.md, which has the switch-on runbook).
   media-worker:
     hosts:
       - 91.98.71.136
@@ -220,16 +222,17 @@ env:
     # here and _CLIENT_EMAIL and _PRIVATE_KEY_PEM as secrets; without them the
     # default provider, FCM, refuses to start.
     MOYI_NOTIFICATION_PUSH_PROVIDER: log
-    # No media storage until the owner has made the `moyi-media` R2 bucket and
-    # its token (ADR-0047): every upload is refused with 503
-    # MEDIA_STORAGE_UNAVAILABLE and the rest of the API is untouched. To store:
-    # remove this line, add MOYI_MEDIA_STORAGE_R2_ENDPOINT and
-    # MOYI_MEDIA_STORAGE_R2_BUCKET here and _ACCESS_KEY_ID and
-    # _SECRET_ACCESS_KEY as secrets; without them the default provider, R2,
-    # refuses to start. Both roles read it: the API signs uploads, the worker
-    # reads and writes the objects. The exact switch-on, with the worker, is
-    # in ops/media-worker/README.md.
-    MOYI_MEDIA_STORAGE_PROVIDER: unavailable
+    # Media is stored in R2 (ADR-0047), the default provider: the bucket
+    # `moyi-media`, in Cloudflare's EU jurisdiction, with a token scoped to it
+    # alone (Object Read & Write). The endpoint and both halves of the token
+    # are secrets below; the endpoint too, because it names the Cloudflare
+    # account, which this public repository does not (ADR-0052). Both roles
+    # need all four: the API signs upload and download URLs, checks each
+    # completion against the stored object, and deletes and purges; the worker
+    # reads each upload and writes what it makes of it. Without any one of
+    # them R2 refuses to start, naming it. To switch storage off again, the
+    # line is MOYI_MEDIA_STORAGE_PROVIDER: unavailable (ops/media-worker/README.md).
+    MOYI_MEDIA_STORAGE_R2_BUCKET: moyi-media
     # No photo or voice note is processed by the API (ADR-0048, ADR-0049): the
     # owner ruled that uploads are decoded in a media worker of their own
     # (Q5), the `media-worker` role above, which alone overrides this with
@@ -244,8 +247,10 @@ env:
     # No photo is moderated until the owner has made the AWS account, the IAM
     # user with rekognition:DetectModerationLabels alone, and its key
     # (ADR-0051). `none` fails closed: no photo gets a verdict, so no partner
-    # is ever shown one; it passes nothing. Never `stand-in`, which decides by
-    # colour for local runs. To moderate: remove this line and add
+    # is ever shown one; it passes nothing. With storage on, that is the
+    # product as it stands: an author sees their own photos and voice notes,
+    # and their partner sees none of them, until the owner decides moderation.
+    # Never `stand-in`, which decides by colour for local runs. To moderate: remove this line and add
     # MOYI_MEDIA_MODERATION_REKOGNITION_ACCESS_KEY_ID and
     # _SECRET_ACCESS_KEY as secrets; without them the default provider,
     # Rekognition, refuses to start. (The API processes nothing, so
@@ -294,6 +299,9 @@ env:
     - MOYI_SECURITY_JWT_PUBLIC_KEY_PEM
     - MOYI_SECURITY_HASHING_SECRET
     - MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY
+    - MOYI_MEDIA_STORAGE_R2_ENDPOINT
+    - MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID
+    - MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY
 
 accessories:
   # Neither accessory publishes a port: they are reachable only on Kamal's

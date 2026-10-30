@@ -26,13 +26,42 @@ internal class MediaStorageConfigurationTest {
     }
 
     @Test
-    fun `R2 named with only some of its values refuses to start too`() {
+    fun `R2 named with only some of its values refuses to start, naming exactly the ones missing`() {
         runner
             .withPropertyValues(
                 "moyi.media.storage.provider=r2",
                 "moyi.media.storage.r2.endpoint=https://example.eu.r2.cloudflarestorage.com",
                 "moyi.media.storage.r2.bucket=moyi-media",
-            ).run { context -> context.startupFailure.shouldBeInstanceOf<Throwable>() }
+                "moyi.media.storage.r2.access-key-id=fake-access-key-id",
+            ).run { context ->
+                context.startupFailure.shouldBeInstanceOf<Throwable>()
+                val messages = generateSequence(context.startupFailure) { it.cause }.joinToString { it.message.orEmpty() }
+                // The property, and the environment variable production sets it by (config/deploy.yml).
+                messages shouldContain "missing: moyi.media.storage.r2.secret-access-key (MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY)."
+                messages shouldNotContain "fake-access-key-id"
+            }
+    }
+
+    /**
+     * Production's switch-on (ADR-0052): the endpoint arrives as a secret, and a
+     * deploy that lost it must say so by name in its first lines, not as a list
+     * of everything R2 could need. A value that is only blank counts as missing.
+     */
+    @Test
+    fun `a blank endpoint is named as the one value missing, and no value that is set is`() {
+        runner
+            .withPropertyValues(
+                "moyi.media.storage.r2.endpoint= ",
+                "moyi.media.storage.r2.bucket=moyi-media",
+                "moyi.media.storage.r2.access-key-id=fake-access-key-id",
+                "moyi.media.storage.r2.secret-access-key=fake~secret~access~key",
+            ).run { context ->
+                context.startupFailure.shouldBeInstanceOf<Throwable>()
+                val messages = generateSequence(context.startupFailure) { it.cause }.joinToString { it.message.orEmpty() }
+                messages shouldContain "missing: moyi.media.storage.r2.endpoint (MOYI_MEDIA_STORAGE_R2_ENDPOINT)."
+                messages shouldNotContain "r2.bucket ("
+                messages shouldNotContain "fake~secret~access~key"
+            }
     }
 
     @Test
