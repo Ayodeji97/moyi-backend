@@ -120,6 +120,22 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     }
 
     /**
+     * Review of #117: the worker decodes what strangers upload, so it holds
+     * only what it needs, the database's password and the bucket's three
+     * values; the session-signing pair, the HMAC key and the email key are the
+     * API's alone. A secret added to the top-level `env` later reaches the
+     * worker too, and fails this until it is put where it belongs. (When
+     * moderation is switched on, its key is the worker's, and is added here.)
+     */
+    @Test
+    fun `the media worker holds only the database's and the bucket's secrets, the API its own as well`() {
+        roles.getValue("media-worker").secret shouldContainExactlyInAnyOrder
+            listOf("SPRING_DATASOURCE_PASSWORD") + STORAGE_SECRETS
+        roles.getValue("web").secret shouldContainExactlyInAnyOrder
+            listOf("SPRING_DATASOURCE_PASSWORD") + STORAGE_SECRETS + API_SECRETS
+    }
+
+    /**
      * Every secret `config/deploy.yml` names (the application's, each
      * accessory's, the registry's) is set by `.kamal/secrets`, from a field its
      * `kamal secrets fetch` line fetches from Bitwarden. A name listed in
@@ -350,6 +366,15 @@ internal class ProductionStartsWithoutMediaSecretsTest {
                 "MOYI_MEDIA_STORAGE_R2_ENDPOINT",
                 "MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID",
                 "MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY",
+            )
+
+        /** What the API alone needs: the session-signing pair, the HMAC key, the email key. */
+        val API_SECRETS =
+            setOf(
+                "MOYI_SECURITY_JWT_PRIVATE_KEY_PEM",
+                "MOYI_SECURITY_JWT_PUBLIC_KEY_PEM",
+                "MOYI_SECURITY_HASHING_SECRET",
+                "MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY",
             )
         const val KIB = 1024L
         const val MIB = 1024L * KIB

@@ -69,6 +69,24 @@ class MediaWorkerProfileTest(
         yaml.firstNotNullOf { it.getProperty("spring.main.keep-alive") }.toString() shouldBe "true"
     }
 
+    /**
+     * Review of #117: config/deploy.yml gives the API's secrets to the `web`
+     * role alone, so the worker starts without them. The beans that would need
+     * them are built anyway (one jar), so the profile gives them what needs no
+     * secret. Read from the file, as above: the test profile already sets the
+     * first two, so a started context could not tell. The production-like boot
+     * in the pull request is what shows the worker starting without them.
+     */
+    @Test
+    fun `the worker profile needs none of the API's secrets`() {
+        val yaml = YamlPropertySourceLoader().load("worker", ClassPathResource("application-media-worker.yml"))
+
+        fun value(name: String) = yaml.firstNotNullOfOrNull { it.getProperty(name) }?.toString()
+        value("moyi.security.jwt.key-source") shouldBe "ephemeral"
+        value("moyi.security.hashing.secret-source") shouldBe "ephemeral"
+        value("moyi.notification.email.provider") shouldBe "log"
+    }
+
     @Test
     fun `the worker registers the media pipeline's consumers and no other`() {
         // This process's consumers, not the database's: the backlog reads every consumer any context in

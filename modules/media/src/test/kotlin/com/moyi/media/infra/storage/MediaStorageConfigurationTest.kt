@@ -64,6 +64,44 @@ internal class MediaStorageConfigurationTest {
             }
     }
 
+    /**
+     * Review of #117: the endpoint names the Cloudflare account, so a value
+     * that is not a URL is refused by the property's name alone; `URI.create`
+     * would have put the value, account id and all, in the exception's message.
+     */
+    @Test
+    fun `an endpoint that is not an http(s) URL is refused by name, and its value is never printed`() {
+        listOf(
+            "https://fake-account-id-0123.eu.r2.cloudflarestorage.com/a path with spaces",
+            "fake-account-id-0123.eu.r2.cloudflarestorage.com",
+            "ftp://fake-account-id-0123.eu.r2.cloudflarestorage.com",
+        ).forEach { endpoint ->
+            runner
+                .withPropertyValues(
+                    "moyi.media.storage.r2.endpoint=$endpoint",
+                    "moyi.media.storage.r2.bucket=moyi-media",
+                    "moyi.media.storage.r2.access-key-id=fake-access-key-id",
+                    "moyi.media.storage.r2.secret-access-key=fake~secret~access~key",
+                ).run { context ->
+                    context.startupFailure.shouldBeInstanceOf<Throwable>()
+                    val messages = generateSequence(context.startupFailure) { it.cause }.joinToString { it.message.orEmpty() }
+                    messages shouldContain "moyi.media.storage.r2.endpoint (MOYI_MEDIA_STORAGE_R2_ENDPOINT) is not an http(s) URL"
+                    messages shouldNotContain "fake-account-id-0123"
+                }
+        }
+    }
+
+    @Test
+    fun `an endpoint with spaces around it is trimmed, and starts`() {
+        runner
+            .withPropertyValues(
+                "moyi.media.storage.r2.endpoint=  https://example.eu.r2.cloudflarestorage.com  ",
+                "moyi.media.storage.r2.bucket=moyi-media",
+                "moyi.media.storage.r2.access-key-id=fake-access-key-id",
+                "moyi.media.storage.r2.secret-access-key=fake~secret~access~key",
+            ).run { context -> context.getBean(ObjectStore::class.java).shouldBeInstanceOf<R2ObjectStore>() }
+    }
+
     @Test
     fun `with a bucket and its token, R2 is wired, and the secret is never printed`() {
         runner

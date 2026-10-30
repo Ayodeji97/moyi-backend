@@ -71,6 +71,14 @@ servers:
         JAVA_TOOL_OPTIONS: >-
           -XX:+ExitOnOutOfMemoryError -XX:MaxDirectMemorySize=10M -Xmx1292m
           -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=240M -Xss1M
+      # The API's secrets, merged over the top-level ones (Kamal 2.12,
+      # Role#env): the session-signing pair, the HMAC key behind ip_hash and
+      # the rate limits, and the email key. The media worker gets none of them.
+      secret:
+        - MOYI_SECURITY_JWT_PRIVATE_KEY_PEM
+        - MOYI_SECURITY_JWT_PUBLIC_KEY_PEM
+        - MOYI_SECURITY_HASHING_SECRET
+        - MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY
 
   # The media worker (the owner's Q5 and his ruling of 2026-10-29: a role, not
   # an accessory, so it is redeployed with the application). The same image,
@@ -293,12 +301,13 @@ env:
     # whatever t the stored hash carries; rehashing on login alone leaves
     # accounts that never log in distinguishable (review of #83).
     MOYI_SECURITY_ARGON2_ITERATIONS: 6
+  # Only what both roles need: the database and the bucket. The API's own
+  # secrets are in servers.web.env.secret, so the worker, which decodes what
+  # strangers upload, never holds the key that signs sessions, the HMAC key or
+  # the email key (review of #117; ADR-0052, "Switched on").
+  # ProductionStartsWithoutMediaSecretsTest holds the split.
   secret:
     - SPRING_DATASOURCE_PASSWORD:POSTGRES_PASSWORD
-    - MOYI_SECURITY_JWT_PRIVATE_KEY_PEM
-    - MOYI_SECURITY_JWT_PUBLIC_KEY_PEM
-    - MOYI_SECURITY_HASHING_SECRET
-    - MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY
     - MOYI_MEDIA_STORAGE_R2_ENDPOINT
     - MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID
     - MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY
