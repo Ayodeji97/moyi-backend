@@ -2857,3 +2857,27 @@ Wrong about: the guards' independence. With the decoder list in place, `-map 0:a
          demuxers nothing opens a second resource, so the protocol list had to be tested by
          handing the processor a URL. Each guard was still broken and seen red on its own
          test; the ones that sit behind another are named as such in ADR-0049.
+
+## 2026-10-29 · Feature · The media worker — one image for two roles, a JVM that exited when it had started, and a ceiling that did not decode
+
+Expected: the worker to be configuration: a second Kamal role, a profile that turns the web
+         server off, a cap on the heap; the image to be the hard part; `-Xmx` to decide the
+         JVM's memory; and the network limit to be a Docker setting.
+Reality: the image was the easy part (a Dockerfile on Ubuntu 24.04, the JRE pinned by checksum).
+         The profile was not: with no web server every thread left was a daemon, and the
+         worker exited 0 a second after "Started", taking its first deliveries down with it.
+         No test saw it; running the image did (`spring.main.keep-alive`). The JVM sat at
+         ~440 MiB resident under a 192m or a 256m heap alike: metaspace and code, not heap.
+         Kamal puts every role on its `kamal` bridge and Docker cannot narrow a bridge, so the
+         network limit went inside the container's namespace, from the host, and was tested
+         in Docker-in-Docker.
+Wrong about: ADR-0048's ceiling holding everywhere. A HEIC just under 100 MiB decoded, which
+         that ADR measured decoding under its 640 MiB address-space limit, segfaulted under
+         it on linux/arm64 and decoded under 768 MiB; the container reached its limit trying.
+         Measured, written down, left to the owner: a parameter another ADR decided is not
+         this slice's to move. The review found the cause: `ulimit -v` counts the 64 MiB each
+         glibc malloc arena reserves, not memory used; two arenas, and it decodes.
+Wrong about: "read from the image production runs". The API's JVM flags came from an older
+         image left on this Mac, 3,000 classes fewer, and its metaspace cap sat at the API's
+         measured use. A number copied from a machine must name the machine it was read on,
+         and a test now holds the cap.

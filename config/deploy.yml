@@ -1,7 +1,8 @@
 # Kamal 2: how Moyi runs in production (M3 Deploy Plan; doc 10 §2, §4).
 #
-# One server runs everything: the app, Postgres, Valkey and kamal-proxy, each
-# in a container (ADR-0007). kamal-proxy owns TLS and the cutover between the
+# One server runs everything: the app (as two roles, the API and the media
+# worker), Postgres, Valkey and kamal-proxy, each in a container (ADR-0007,
+# ADR-0052). kamal-proxy owns TLS and the cutover between the
 # old and the new container (ADR-0011).
 #
 # The image is never built here. CI builds it for linux/arm64 and linux/amd64
@@ -18,7 +19,14 @@
 #
 # That commit's CI run must have finished (its `manifest` job writes the tag),
 # and it must be a commit from after the `service` label was added to the
-# image build (app/build.gradle.kts): Kamal refuses an image without it.
+# image build (now app/Dockerfile): Kamal refuses an image without it.
+#
+# Rolling back past #116 (the first release with the media-worker role) is
+# `kamal rollback <sha> --roles=web`: Kamal 2.12 refuses a rollback unless a
+# container of that version exists for every role it is asked about, and no
+# media-worker container exists for an older version. The worker then stays
+# on the newer image, which is harmless while storage is `unavailable`
+# (ADR-0052; README, "How do I deploy it").
 #
 # The explicit --version matters. Without it Kamal tags the deploy with the
 # local HEAD, and appends "_uncommitted_<random>" when the working tree has
@@ -36,16 +44,97 @@ image: ayodeji97/moyi-backend
 
 minimum_version: 2.12.0
 
+# Two roles run the one image (app/Dockerfile; ADR-0052): `web`, the API
+# behind kamal-proxy, and `media-worker`, which decodes what users upload. The
+# env below applies to both; each role's own env is merged over it.
 servers:
   web:
     hosts:
       - 91.98.71.136 # moyi-prod-1, Hetzner CAX21 (Arm64), Nuremberg
     options:
-      # The app's share of the 8 GB box (doc 10 §2.1). The buildpack's memory
-      # calculator sizes the JVM to this limit. During a deploy a second
-      # container runs beside the first for up to drain_timeout, so twice this
-      # is briefly in use.
+      # The app's share of the 8 GB box (doc 10 §2.1). During a deploy a
+      # second container runs beside the first for up to drain_timeout, so
+      # twice this is briefly in use.
       memory: 2g
+    env:
+      clear:
+        # The JVM sized to the 2 GB above by the buildpack memory calculator's
+        # own formula (ADR-0052 shows the arithmetic): 2 GB less 10M direct
+        # memory, the metaspace cap, 240M of code cache and 250 threads at 1M
+        # is the heap. Production's image (ce41f22, 29,533 classes) was given
+        # 180948K of metaspace and -Xmx1404203K. The metaspace cap is raised to
+        # 256m, because this image's API was measured using 155 MB of a 168 MB
+        # cap and rising (review of #116), and the heap lowered by the same
+        # 79 MiB, so the total is what the calculator budgeted.
+        # ProductionStartsWithoutMediaSecretsTest holds MaxMetaspaceSize >= 256m.
+        JAVA_TOOL_OPTIONS: >-
+          -XX:+ExitOnOutOfMemoryError -XX:MaxDirectMemorySize=10M -Xmx1292m
+          -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=240M -Xss1M
+
+  # The media worker (the owner's Q5 and his ruling of 2026-10-29: a role, not
+  # an accessory, so it is redeployed with the application). The same image,
+  # with the `media-worker` profile: no web server, only the media pipeline's
+  # consumers, no timed job but the outbox poller (application-media-worker.yml).
+  #
+  # Until storage is switched on (MOYI_MEDIA_STORAGE_PROVIDER below) it starts,
+  # passes the start-up checks of libvips and ffmpeg, and has nothing to do: no
+  # upload can exist without a bucket. ops/media-worker/README.md has the switch-on.
+  media-worker:
+    hosts:
+      - 91.98.71.136
+    # Not behind kamal-proxy (`proxy` is off for any role but the primary
+    # unless asked for): it has no port. Kamal instead waits for Docker's
+    # health check below to say `healthy` before it calls the deploy done.
+    options:
+      # Q5's 768 MB proved too tight (ADR-0052 decision 4): the JVM is ~440
+      # MiB resident and a decode at the ceiling up to ~350 MiB more, with
+      # the tmpfs's work files beside them. 1 GB, on the review of #116's
+      # ruling; the box has room for it.
+      memory: 1g
+      cpus: 1.5
+      # Nothing in the image may be written: a decoder that is subverted
+      # cannot leave anything behind. The one writable place is /tmp, in
+      # memory (it counts against the 1g), where the JVM and each photo's
+      # work directory live and die with the container.
+      read-only: true
+      tmpfs: /tmp:rw,noexec,nosuid,nodev,size=128m
+      # The image runs as `moyi` (uid 10001), never root; with no capability
+      # and no privilege to gain, a decoder that is subverted stays that user.
+      cap-drop: ALL
+      security-opt: no-new-privileges
+      # The ready file (ReadyFile): written once the application has started,
+      # so after the start-up checks of libvips and ffmpeg in the sandbox and
+      # the registration of the worker's consumers. Kamal waits for `healthy`
+      # up to deploy_timeout.
+      health-cmd: test -f /tmp/moyi-ready
+      health-interval: 30s
+      health-start-period: 120s
+      health-start-interval: 2s
+      health-timeout: 3s
+      health-retries: 3
+    env:
+      clear:
+        SPRING_PROFILES_ACTIVE: media-worker
+        # The one container that decodes uploads (ADR-0048, ADR-0049). Every
+        # other container gets "off" from the env below; only this role
+        # overrides it.
+        MOYI_MEDIA_PROCESSING_PROVIDER: native
+        # glibc's malloc reserves an arena of address space per thread, and
+        # the JVM has dozens. The sandbox sets the same for every program it
+        # starts, which is where it matters (ulimit -v counts reservations, not
+        # resident memory; ADR-0052 decision 4); here it keeps the JVM's own
+        # reservations down too.
+        MALLOC_ARENA_MAX: 2
+        # The JVM capped, so that it and one decode fit in the container (ADR-0048 §3's
+        # arithmetic, measured in ADR-0052: about 430 MiB resident, of which
+        # the heap is ~160 MiB committed; the rest is metaspace, code and the
+        # JVM's own). 192m rather than the 256m first proposed: the measured
+        # resident memory was the same under both, and a lower cap bounds how
+        # far the heap can grow beside a decode. Serial GC: one thread does
+        # the work here, and it is the collector with the least overhead.
+        JAVA_TOOL_OPTIONS: >-
+          -XX:+ExitOnOutOfMemoryError -XX:+UseSerialGC -Xmx192m -Xss512k
+          -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m -XX:MaxDirectMemorySize=16m
 
 ssh:
   user: root
@@ -63,9 +152,16 @@ registry:
 
 # Never used: every deploy is --skip-push. Stated so that a deploy run
 # without that flag builds for the server's architecture only, not Kamal's
-# default of both.
+# default of both, from the Dockerfile CI builds from (ADR-0052), whose
+# context is the boot jar's directory: `./gradlew :app:bootJar` first. A
+# context also means Kamal builds from the working tree rather than from a
+# clean clone of the commit (its default when no context is set), and a clone
+# would hold no jar: such a build would fail. Unused while every deploy is
+# --skip-push.
 builder:
   arch: arm64
+  dockerfile: app/Dockerfile
+  context: app/build/libs
 
 proxy:
   host: api.getmoyi.app
@@ -130,15 +226,18 @@ env:
     # remove this line, add MOYI_MEDIA_STORAGE_R2_ENDPOINT and
     # MOYI_MEDIA_STORAGE_R2_BUCKET here and _ACCESS_KEY_ID and
     # _SECRET_ACCESS_KEY as secrets; without them the default provider, R2,
-    # refuses to start.
+    # refuses to start. Both roles read it: the API signs uploads, the worker
+    # reads and writes the objects. The exact switch-on, with the worker, is
+    # in ops/media-worker/README.md.
     MOYI_MEDIA_STORAGE_PROVIDER: unavailable
-    # No photo or voice note is processed in this container (ADR-0048,
-    # ADR-0049): its image is the buildpack's, with neither libvips nor ffmpeg,
-    # and the owner ruled that uploads are decoded in a media worker of their
-    # own (Q5), which is not deployed yet. With this line an upload waits,
-    # UPLOADED, for that worker; nothing is lost. Never remove it from this
-    # container: NATIVE, the default, refuses to start without libvips and
-    # ffmpeg. The worker will set MOYI_MEDIA_PROCESSING_PROVIDER: native.
+    # No photo or voice note is processed by the API (ADR-0048, ADR-0049): the
+    # owner ruled that uploads are decoded in a media worker of their own
+    # (Q5), the `media-worker` role above, which alone overrides this with
+    # `native`. Never remove it from here. Since ADR-0052 the image carries
+    # libvips and ffmpeg for the worker, so NATIVE, the default, would no
+    # longer refuse to start in the API: it would decode uploads on the API's
+    # outbox thread. ProductionStartsWithoutMediaSecretsTest holds this line,
+    # and that only the worker overrides it.
     # Quoted: YAML 1.1, which Kamal reads, takes a bare off for the boolean false.
     # Spring Boot would read "false" as OFF anyway (seen), but the file says what it means.
     MOYI_MEDIA_PROCESSING_PROVIDER: "off"
@@ -149,9 +248,10 @@ env:
     # colour for local runs. To moderate: remove this line and add
     # MOYI_MEDIA_MODERATION_REKOGNITION_ACCESS_KEY_ID and
     # _SECRET_ACCESS_KEY as secrets; without them the default provider,
-    # Rekognition, refuses to start. (This container processes nothing, so
+    # Rekognition, refuses to start. (The API processes nothing, so
     # moderates nothing either way: the line keeps it starting. The media
-    # worker, when it exists, is where moderation runs.)
+    # worker is where moderation runs; ops/media-worker/README.md has the
+    # network limit Rekognition's addresses must be added to.)
     MOYI_MEDIA_MODERATION_IMAGE_PROVIDER: none
     # No known-CSAM hash list is consulted and no voice note is moderated:
     # neither has a vendor yet (ADR-0051 decisions 3 and 5, the owner's to

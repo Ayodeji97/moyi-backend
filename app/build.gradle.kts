@@ -88,28 +88,10 @@ springBoot {
     mainClass.set("com.moyi.app.MoyiApplicationKt")
 }
 
-// The image builder, pinned by digest rather than Boot's default of
-// `builder-noble-java-tiny:latest`. On 2026-10-24 Paketo republished that tag
-// as a single arm64 image instead of a multi-arch index: an amd64 runner
-// pulled it, Boot followed the builder to an arm64 run image, and the
-// lifecycle failed with "exec format error" (PR #79, image (amd64), twice).
-// This digest is the last multi-arch index both CI legs built with (main
-// 145b6e5): linux/amd64 and linux/arm64. A newer builder arrives as a
-// reviewed change to this line, checked with
-// `docker buildx imagetools inspect <ref>` for both platforms.
-tasks.named<org.springframework.boot.gradle.tasks.bundling.BootBuildImage>("bootBuildImage") {
-    builder.set(
-        "paketobuildpacks/builder-noble-java-tiny" +
-            "@sha256:07b5e2d02f2e7dd26b6c7bf175c3381d496a4418e1bc8a8297e258e0c75ac696",
-    )
-    // Kamal deploys an image CI already built (`kamal deploy --skip-push`),
-    // and before it starts one it checks the image's `service` label against
-    // `service:` in config/deploy.yml, refusing an image without it ("missing
-    // the 'service' label"). Kamal adds that label when it builds; this image
-    // is built by Paketo, whose image-labels buildpack applies the line below.
-    // Rename the service and this must change with it.
-    environment.put("BP_IMAGE_LABELS", "service=moyi")
-}
+// The image is built from app/Dockerfile, not by bootBuildImage (ADR-0052): one
+// image runs the API and the media worker, and the worker needs libvips and
+// ffmpeg, which the buildpack image had no way to carry. The Dockerfile sets
+// the `service` label Kamal checks for.
 
 // ArchitectureTest uses Konsist, which reads Kotlin source straight off
 // disk across the whole repo rather than through the compile classpath.

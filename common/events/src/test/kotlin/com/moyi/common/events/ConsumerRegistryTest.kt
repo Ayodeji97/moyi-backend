@@ -493,6 +493,54 @@ internal class ConsumerRegistryTest(
             .toInstant() shouldBe truncated
     }
 
+    /**
+     * ADR-0052: the media worker names the consumers it runs. One left out is
+     * not registered, holds no subscription written by this process, and is
+     * not among those the dispatcher claims for.
+     */
+    @Test
+    fun `only the consumers named in only are registered and offered to the dispatcher`() {
+        val other = named("$consumerId.other", setOf(typeB))
+        val registry =
+            ConsumerRegistry(
+                listOf(consumer(setOf(typeA)), other),
+                jdbc,
+                manager,
+                clock,
+                bound.copy(only = setOf(consumerId)),
+            )
+
+        registry.afterSingletonsInstantiated()
+
+        registry.consumers().map { it.id } shouldContainExactly listOf(consumerId)
+        registry.consumer(other.id).shouldBeNull()
+        subscriptions() shouldContainExactly listOf(typeA to clock.instant())
+        jdbc.queryForObject("SELECT count(*) FROM outbox_consumers WHERE consumer_id = ?", Int::class.java, other.id) shouldBe 0
+    }
+
+    @Test
+    fun `an id in only that names no consumer refuses the start, naming it`() {
+        val refused =
+            shouldThrow<IllegalStateException> {
+                ConsumerRegistry(listOf(consumer(setOf(typeA))), jdbc, manager, clock, bound.copy(only = setOf("media.proces")))
+            }
+
+        refused.message shouldContain "media.proces"
+        refused.message shouldContain consumerId
+    }
+
+    private fun named(
+        id: String,
+        eventTypes: Set<String>,
+    ): EventConsumer =
+        object : EventConsumer {
+            override val id = id
+            override val eventTypes = eventTypes
+            override val startFrom = StartFrom.BEGINNING
+
+            override fun handle(event: ReceivedEvent) = error("registration never delivers")
+        }
+
     /** What `ConsumerRegistry` logged during [action]. */
     private fun registryLines(action: () -> Unit): List<ILoggingEvent> {
         val logger = LoggerFactory.getLogger(ConsumerRegistry::class.java) as Logger

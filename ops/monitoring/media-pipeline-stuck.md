@@ -2,7 +2,7 @@
 
 Doc 11:111 asks for this page; doc 11:97 for the alarm that sends you here (P2). The alarm
 is `media-check.sh`, a Healthchecks.io heartbeat every quarter-hour (ADR-0050). Its email
-says which of four things is wrong. Each section below starts from one of them.
+says which of the things it checks is wrong. Each section below starts from one of them.
 
 Nothing here needs an id in a chat, an issue or a log: read them in `psql` on the server,
 act, and write down the counts. A storage key is never pasted anywhere: with the bucket's
@@ -13,6 +13,36 @@ ssh moyi
 docker exec -it moyi-postgres psql -U moyi -d moyi
 ```
 
+## "N uploads waiting UPLOADED for more than 30 minutes"
+
+Nothing took the upload up: the media worker (the `media-worker` role, ADR-0052) is down, was
+never deployed, or its outbox poller is stuck. The API never processes (`"off"`).
+
+1. **Is it running and healthy?** `ssh moyi 'docker ps --filter label=role=media-worker'`:
+   `Up … (healthy)`. Not there, or `Restarting`: `kamal app logs -r media-worker --since 1h`
+   says why (a start-up check of libvips or ffmpeg that failed, the database, or the JVM out of
+   memory: `-XX:+ExitOnOutOfMemoryError` ends it and Docker starts it again).
+2. **Running but idle?** Its log should say `Event consumer registered: consumer=media.process
+   subscribed=[MediaUploaded]` on its first start (later starts say `subscribed=[]`, the row
+   already exists). The query in step 2 of the next section shows whether `media.process`'s
+   deliveries are being attempted.
+3. **Restarting it** is `kamal app boot -r media-worker` (the same version); the uploads wait,
+   nothing is lost.
+
+Not a fault: the API logs `Event consumer has subscriptions this build does not declare, and
+they are kept: consumer=media.process undeclared=[MediaUploaded]` (and the same for the
+moderation consumers once they subscribe) on every start. The worker registered those
+subscriptions; the API, with processing off, declares none and leaves them alone
+(`ConsumerRegistry`, by design).
+
+## "a media worker container runs without its egress limit"
+
+`moyi-media-worker-egress check` found a worker container whose network namespace lacks the
+limit (ADR-0052 decision 5): it was started while the service was down. `systemctl status
+moyi-media-worker-egress`; start it (`systemctl restart moyi-media-worker-egress`), which limits
+every running worker at once; `check` again. Then find why it was down (`journalctl -u
+moyi-media-worker-egress`).
+
 ## "N photos PROCESSING for more than 30 minutes"
 
 `media.process` marks a photo `PROCESSING` as an attempt begins, in a transaction of its
@@ -20,8 +50,8 @@ own, and leaves it there only while the attempt runs or while the outbox is retr
 that failed for a reason that is not the photo's (the storage, the database).
 
 1. **Is a worker running at all?** Photos are processed only where
-   `MOYI_MEDIA_PROCESSING_PROVIDER` is `vips` (the media worker, ADR-0048). With none
-   deployed, a photo stays `UPLOADED`, never `PROCESSING`, so this alarm means a worker
+   `MOYI_MEDIA_PROCESSING_PROVIDER` is `native` (the media worker, ADR-0052). With none
+   running, a photo stays `UPLOADED`, never `PROCESSING`, so this alarm means a worker
    began and did not finish.
 2. **What does the outbox say?**
 

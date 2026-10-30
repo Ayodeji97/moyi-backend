@@ -8,14 +8,17 @@ import java.util.Arrays;
  * `matches`, which is what a login pays.
  *
  * The number that matters is the production server's, so it runs there, in
- * the production image: same JVM, same libraries, same CPU. The image has no
- * shell and no compiler, so compile here (JDK 25) and copy the class over:
+ * the production image: same JVM, same libraries, same CPU. The image has a
+ * JRE and no compiler, so compile here (JDK 25) and copy the class over. Since
+ * ADR-0052 the image is app/Dockerfile's: `java` is on PATH and the jar's
+ * libraries are under /app/BOOT-INF/lib (before it, the buildpack's Liberica
+ * under /layers and /workspace):
  *
  *   javac --release 25 -cp <spring-security-crypto jar> -d out scripts/argon2-bench/Bench.java
  *   scp -r out moyi:/root/argon2bench
  *   ssh moyi 'docker run --rm --memory 2g -v /root/argon2bench:/bench:ro \
- *     --entrypoint /layers/paketo-buildpacks_bellsoft-liberica/jre/bin/java <image> \
- *     -cp "/bench:/workspace/BOOT-INF/lib/*" Bench 4 5 6 7 8'
+ *     --entrypoint java <image> \
+ *     -cp "/bench:/app/BOOT-INF/lib/*" Bench 4 5 6 7 8'
  *
  * Re-run it on a new server, a new instance type, or after a JDK or Bouncy
  * Castle upgrade, then set MOYI_SECURITY_ARGON2_ITERATIONS in

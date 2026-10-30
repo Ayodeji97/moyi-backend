@@ -615,6 +615,8 @@ internal class OutboxJobTest(
             backlogsAsked++
             return backlog()
         }
+
+        override fun consumerIds(): Set<String> = emptySet()
     }
 
     private companion object {

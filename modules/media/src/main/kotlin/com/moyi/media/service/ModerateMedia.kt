@@ -55,7 +55,7 @@ import java.time.temporal.ChronoUnit
  * lock and its pooled connection *are* held throughout, as every consumer's
  * are (ADR-0035): the fetch (3 s at most), the conversion (10 s) and the
  * vendor's call (15 s) are bounded to 28 s of the delivery's 60, and
- * `ModerationBudgetTest` holds the sum (review of #113).
+ * `ModerationCopyTest` holds the sum (review of #113).
  *
  * Logs the asset's id, the verdict and the reason; never a key, a URL, a
  * byte, or what a vendor named.

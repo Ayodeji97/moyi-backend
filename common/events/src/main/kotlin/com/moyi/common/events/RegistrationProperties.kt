@@ -24,11 +24,25 @@ import java.time.Duration
 @ConfigurationProperties(prefix = "moyi.events.registration")
 data class RegistrationProperties(
     val lockTimeout: Duration = Duration.ofSeconds(DEFAULT_LOCK_TIMEOUT_SECONDS),
+    /**
+     * The ids of the consumers this process runs, or empty for every consumer
+     * it has a bean for (the API's case). The media worker names its own
+     * (ADR-0052): it registers and claims nothing else, so a withdrawal or a
+     * push is never handled in the process that decodes uploads, and the API
+     * keeps them. A consumer left out is simply not this process's: its
+     * subscriptions and deliveries are untouched, and whichever process does
+     * run it claims them.
+     *
+     * An id that names no consumer here refuses the start ([ConsumerRegistry]):
+     * a misspelt id would otherwise leave the worker running and claiming nothing.
+     */
+    val only: Set<String> = emptySet(),
 ) {
     init {
         require(lockTimeout.toMillis() >= 1) {
             "moyi.events.registration.lock-timeout must be at least one millisecond; zero would mean waiting for ever."
         }
+        require(only.none { it.isBlank() }) { "moyi.events.registration.only names a blank consumer id." }
     }
 
     private companion object {

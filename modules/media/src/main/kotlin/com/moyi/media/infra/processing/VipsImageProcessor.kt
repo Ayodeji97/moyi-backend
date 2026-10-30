@@ -252,10 +252,21 @@ internal class VipsImageProcessor(
         private val TO_SRGB = listOf("--export-profile", "srgb")
 
         /**
+         * glibc's malloc reserves address space for an arena per thread that
+         * allocates (64 MiB each on 64-bit), and libheif's decoder threads each
+         * get one. `ulimit -v` counts those reservations, not resident memory:
+         * a HEIC just under the decoded-bytes ceiling segfaulted under the
+         * 640 MiB limit on linux/arm64 with ~300 MiB resident, and decoded
+         * with the arenas capped at two (review of #116, ADR-0052). The sandbox
+         * clears the environment, so it is set here, for every vips program.
+         */
+        private val ARENAS = "MALLOC_ARENA_MAX" to "2"
+
+        /**
          * For a program reading what a user sent. One thread, so memory and CPU
          * are one decode's; untrusted loaders refused.
          */
-        private val UNTRUSTED = mapOf("VIPS_CONCURRENCY" to "1", "VIPS_BLOCK_UNTRUSTED" to "1")
+        private val UNTRUSTED = mapOf("VIPS_CONCURRENCY" to "1", "VIPS_BLOCK_UNTRUSTED" to "1", ARENAS)
 
         /**
          * For a program reading our own decoded file. libvips counts its own
@@ -263,6 +274,6 @@ internal class VipsImageProcessor(
          * read with that set; nothing of the user's file reaches these programs
          * but its pixels.
          */
-        private val TRUSTED = mapOf("VIPS_CONCURRENCY" to "1")
+        private val TRUSTED = mapOf("VIPS_CONCURRENCY" to "1", ARENAS)
     }
 }

@@ -68,8 +68,10 @@ jobs:
       # make, on Linux under the memory limits production uses. The libde265
       # plugin is what lets libheif decode a HEIC. Ubuntu 24.04 ships libvips
       # 8.15 and ffmpeg 6.1 (with libopus and the AMR codecs); the pipelines'
-      # options were checked against both.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools libheif-plugin-libde265 ffmpeg
+      # options were checked against both. The x265 plugin is for the tests
+      # alone: it lets libvips WRITE a HEIC, so a test can make one at the
+      # decoded-bytes ceiling (ADR-0052); the image has no encoder.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools libheif-plugin-libde265 libheif-plugin-x265 ffmpeg
 
       - run: ./gradlew build
 
@@ -94,36 +96,25 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Builds the deployable image (Spring Boot's own Cloud Native Buildpacks
-  # support — no hand-maintained Dockerfile) once per CPU architecture, and
-  # on a real merge to main publishes it to GHCR. No deploy stage: deploys
-  # are run by hand with Kamal, which pulls this image by its commit SHA
-  # (`kamal deploy --skip-push`, config/deploy.yml; ADR-0042). So this job's
-  # output is what production runs, and Kamal refuses it without the
-  # `service` label app/build.gradle.kts adds.
+  # Builds the deployable image (app/Dockerfile, ADR-0052: Ubuntu 24.04,
+  # Temurin's JRE 25, libvips and ffmpeg, the boot jar in Spring Boot's
+  # layers) once per CPU architecture, and on a real merge to main publishes
+  # it to GHCR. No deploy stage: deploys are run by hand with Kamal, which
+  # pulls this image by its commit SHA (`kamal deploy --skip-push`,
+  # config/deploy.yml; ADR-0042). So this job's output is what production
+  # runs, in both of its roles (the API and the media worker), and Kamal
+  # refuses it without the `service` label the Dockerfile sets.
   #
-  # Two architectures because the planned host is a Hetzner CAX server,
-  # which is ARM (linux/arm64); amd64 stays so the same tag still runs on
-  # an x86 machine. Each is built NATIVELY on a runner of its own
-  # architecture (ubuntu-24.04-arm is GitHub's hosted ARM runner, free for
-  # public repositories) rather than under QEMU emulation on one runner:
-  # emulating a whole buildpack build is several times slower, and
-  # bootBuildImage drives the Docker daemon directly, so there is no
-  # buildx --platform to hand it anyway.
-  #
-  # No imagePlatform is set in app/build.gradle.kts: Boot (4.1.1 here)
-  # asks the daemon for its own platform and pulls the builder and run
-  # image for it. The builder is pinned there by digest, to a multi-arch
-  # index of paketobuildpacks/builder-noble-java-tiny (linux/amd64 and
-  # linux/arm64): on 2026-10-24 Paketo republished `latest` as arm64 only,
-  # and this job's amd64 leg failed with "exec format error" (#80). The run
-  # image is not pinned here: the builder names it by a versioned tag
-  # (ubuntu-noble-run-tiny:0.0.149), itself an index of both platforms,
-  # checked 2026-10-24. A builder change is the moment to check both again,
-  # with `docker buildx imagetools inspect`. Checked 2026-10-22 on an Apple
-  # Silicon Mac: Boot logged "Pulling run image ... for platform
-  # 'linux/arm64'", the image's Architecture was arm64, and it started on
-  # Java 25.
+  # Two architectures because the host is a Hetzner CAX server, which is ARM
+  # (linux/arm64); amd64 stays so the same tag still runs on an x86 machine.
+  # Each is built NATIVELY on a runner of its own architecture
+  # (ubuntu-24.04-arm is GitHub's hosted ARM runner, free for public
+  # repositories) rather than under QEMU emulation on one runner: the apt
+  # install of libvips and ffmpeg and the JRE's own start under emulation are
+  # several times slower. Until ADR-0052 the image was Spring Boot's
+  # buildpack image (bootBuildImage, a Paketo builder pinned by digest),
+  # which had no shell, no libvips and no ffmpeg, and could not be given them
+  # short of an image extension.
   #
   # Runs on pull requests too, without pushing, so a PR proves both
   # architectures still build. It waits for quality and gitleaks, as the
@@ -163,7 +154,7 @@ jobs:
       packages: write
     steps:
       # persist-credentials: false, because this job then runs the PR's own
-      # Gradle code (bootBuildImage), and a token left in .git/config would
+      # Gradle code (bootJar) and Dockerfile, and a token left in .git/config would
       # be readable by it, with packages: write on a same-repo PR.
       - uses: actions/checkout@v7
         with:
@@ -194,21 +185,72 @@ jobs:
 
       # The per-architecture tag (<sha>-amd64, <sha>-arm64) is a staging
       # name: the manifest job below gathers both under <sha> and latest,
-      # which are the tags anything should pull.
-      - run: |
-          ./gradlew :app:bootBuildImage \
-            --imageName=${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }}
+      # which are the tags anything should pull. The build context is the
+      # directory holding the boot jar and nothing else.
+      - run: ./gradlew :app:bootJar
+
+      # Built with buildx and GitHub's cache, one scope per architecture
+      # (review of #116). Without it every fresh runner ran the apt install
+      # again and wrote layers with new digests, so a release that changed
+      # one class made the server pull the whole ~400 MB again. With it, an
+      # unchanged step is taken from the cache, its layer keeps its digest, and
+      # a pull moves only what changed. A cache written on a pull request is
+      # that pull request's (GitHub scopes caches by branch); main reads only
+      # main's. `load` puts the image in the runner's Docker for the checks
+      # and the push below, which are unchanged.
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/build-push-action@v7
+        with:
+          context: app/build/libs
+          file: app/Dockerfile
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }}
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          push: false
+          provenance: false
+          cache-from: type=gha,scope=image-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.arch }}
+
+      # The layers, by digest, so that two runs can be compared: the apt
+      # layer's digest should repeat from one run to the next.
+      - run: docker image inspect --format '{{json .RootFS.Layers}}' ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }} | jq -r '.[]'
 
       # The tag claims an architecture; this makes the image prove it. If a
       # runner label ever maps to a different machine than its name says,
-      # or Boot stops following the daemon's platform, the manifest below
-      # would list the wrong platform under the right name, and nothing
-      # else here would notice until an ARM server failed to start it.
+      # the manifest below would list the wrong platform under the right
+      # name, and nothing else here would notice until an ARM server failed
+      # to start it.
       - run: |
           built=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' \
             ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }})
           echo "built $built"
           test "$built" = "linux/${{ matrix.arch }}"
+
+      # What the media worker needs from the image, on each architecture,
+      # checked as the worker's own start-up checks will check it (ADR-0048,
+      # ADR-0049): libvips with its HEIC loader, ffmpeg with the libopus
+      # encoder, Java 25, a user who is not root, and Kamal's label. A HEIC
+      # is decoded, not just looked for: the loader can be listed and still
+      # lack the libde265 plugin that decodes HEVC (Ubuntu's packages cannot
+      # write a HEIC, so the media module's test sample is handed in).
+      - env:
+          IMAGE: ${{ steps.image.outputs.name }}:${{ github.sha }}-${{ matrix.arch }}
+        run: |
+          test "$(docker image inspect --format '{{index .Config.Labels "service"}}' "$IMAGE")" = moyi
+          docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
+            set -eux
+            test "$(id -u)" != 0
+            java -version 2>&1 | grep -q "version \"25"
+            vips --version | grep -q "^vips-8\."
+            vips -l | grep -q heifload
+            ffmpeg -hide_banner -h encoder=libopus | grep -q "Encoder libopus"
+            command -v ffprobe
+            command -v vipsheader
+          '
+          docker run --rm -i --entrypoint /bin/sh "$IMAGE" -c \
+            'cd /tmp && cat > in.heic && vips thumbnail in.heic out.webp 64 --fail-on error && vipsheader out.webp' \
+            < modules/media/src/test/resources/images/sample.heic
 
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v4

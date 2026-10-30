@@ -14,6 +14,8 @@ import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout
+import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.condition.OS
 import org.junit.jupiter.api.io.TempDir
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -120,6 +122,56 @@ internal class VipsImageProcessorTest {
             val work = Files.createDirectory(dir.resolve("work-$name"))
             processor.encode(file(name, input.first), input.second, work).shouldBeInstanceOf<Encoding.Encoded>()
         }
+    }
+
+    /**
+     * Review of #116 (ADR-0052 decision 4): a HEIC just under the decoded-bytes
+     * ceiling, 5900 × 5900 × 3 bytes = 99.6 MiB, of fine texture at a high
+     * bitrate (the decoder's memory grows with it), must decode under the
+     * production limit of 640 MiB of address space. Without glibc's arenas
+     * capped (`MALLOC_ARENA_MAX`, which the sandbox's cleared environment
+     * would otherwise leave at glibc's default) `vips` segfaulted at the limit
+     * with ~300 MiB resident, and the photo was `UNREADABLE`: seen, this test
+     * red on linux/arm64 (Ubuntu 24.04, libvips 8.15.1) with the cap removed,
+     * green with it. A gentler file (fine noise at sigma 6, Q 60, made by
+     * Ubuntu's x265) decoded either way, so it would not have shown it.
+     *
+     * Linux only: elsewhere the sandbox enforces no limit, and this would
+     * prove nothing. The file is made here, because Ubuntu's libvips writes
+     * HEIC only with libheif's x265 plugin, which CI installs for this test;
+     * on Linux without it the test fails rather than skips.
+     */
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
+    fun `a HEIC just under the decoded-bytes ceiling decodes within the 640 MiB address-space limit`() {
+        // Coarse noise, enlarged and then fine noise added: texture that x265 keeps at a high bitrate.
+        // Every intermediate in 8 bits, so the scratch files stay a few hundred megabytes.
+        // Each step, then the intermediates no later step reads.
+        val steps =
+            listOf(
+                listOf("gaussnoise", "coarse.v", "590", "590", "--sigma", "60", "--mean", "128") to emptyList(),
+                listOf("cast", "coarse.v", "coarse8.v", "uchar") to listOf("coarse.v"),
+                listOf("bandjoin", "coarse8.v coarse8.v coarse8.v", "coarse3.v") to listOf("coarse8.v"),
+                listOf("resize", "coarse3.v", "large.v", "10") to listOf("coarse3.v"),
+                listOf("gaussnoise", "noise.v", "5900", "5900", "--sigma", "12", "--mean", "0") to emptyList(),
+                listOf("cast", "noise.v", "fine.v", "char") to listOf("noise.v"),
+                listOf("add", "large.v", "fine.v", "sum.v") to listOf("large.v", "fine.v"),
+                listOf("cast", "sum.v", "photo.v", "uchar") to listOf("sum.v"),
+                listOf("copy", "photo.v", "ceiling.heic[Q=75]") to listOf("photo.v"),
+            )
+        for ((step, done) in steps) {
+            Vipses.tool(dir, *step.toTypedArray())
+            done.forEach { Files.delete(dir.resolve(it)) }
+        }
+        Vipses.tool(dir, "ceiling.heic", program = "vipsheader") shouldContain "5900x5900 uchar, 3 bands"
+        val work = Files.createDirectory(dir.resolve("work"))
+
+        Vipses
+            .onPath(
+                Duration.ofMinutes(2),
+            ).encode(dir.resolve("ceiling.heic"), ImageFormat.HEIC, work)
+            .shouldBeInstanceOf<Encoding.Encoded>()
     }
 
     /**

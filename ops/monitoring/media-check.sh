@@ -5,7 +5,13 @@
 # /usr/local/sbin/moyi-media-check. What to do when it fires:
 # ops/monitoring/media-pipeline-stuck.md.
 #
-# Seven things, all read from the database:
+# Nine things, the first eight read from the database:
+#   - no upload has waited UPLOADED for more than 30 minutes: nothing has
+#     taken it up, which since ADR-0052 means the media worker is down or
+#     not deployed, or its outbox poller is stuck. Docker's health check
+#     only says the worker started; this says it is working. Measured from
+#     created_at, as the next check is: the row keeps no time of the
+#     completion, and a running worker takes an upload up within seconds;
 #   - no photo has been PROCESSING for more than 30 minutes. `media.process`
 #     marks a photo PROCESSING in a transaction of its own as an attempt
 #     begins, and nothing leaves it there for long but a worker that is dead,
@@ -37,7 +43,12 @@
 #     the operator's review for more than QUARANTINE_REVIEW_DAYS (3 unless
 #     set): the runbook's section 1 asks for a look once a day.
 #     Fails at once, every run, until that is done: it is the one thing in
-#     this check that a person must act on the same day.
+#     this check that a person must act on the same day;
+#   - where the worker's egress limit is installed
+#     (/usr/local/sbin/moyi-media-worker-egress, ops/media-worker/README.md),
+#     every running worker container is limited by it (ADR-0052): a worker
+#     started while the limiter was down reaches the whole internet, and this
+#     is how somebody hears.
 #
 # All well: it pings the heartbeat. Anything wrong: it pings the heartbeat's
 # /fail URL with the reason, which alerts at once. If the box, Docker or
@@ -62,9 +73,10 @@ QUARANTINE_REVIEW_DAYS="${QUARANTINE_REVIEW_DAYS:-3}"
 [[ "$MEDIA_MODERATION_ON" =~ ^[01]$ ]] || die "MEDIA_MODERATION_ON must be 0 or 1"
 [[ "$QUARANTINE_REVIEW_DAYS" =~ ^[0-9]+$ ]] || die "QUARANTINE_REVIEW_DAYS must be a whole number of days"
 
-stuck="" unpurged="" reaper_late="" demotion_late="" blocked="" unmoderated="" unreviewed=""
-read -r stuck unpurged reaper_late demotion_late blocked unmoderated unreviewed < <(docker exec moyi-postgres psql -U moyi -d moyi -AtF ' ' -c "
+waiting="" stuck="" unpurged="" reaper_late="" demotion_late="" blocked="" unmoderated="" unreviewed=""
+read -r waiting stuck unpurged reaper_late demotion_late blocked unmoderated unreviewed < <(docker exec moyi-postgres psql -U moyi -d moyi -AtF ' ' -c "
   SELECT
+    (SELECT count(*) FROM media_assets WHERE status = 'UPLOADED' AND created_at < now() - interval '30 minutes'),
     (SELECT count(*) FROM media_assets WHERE status = 'PROCESSING' AND created_at < now() - interval '30 minutes'),
     (SELECT count(*) FROM media_assets WHERE status = 'DELETED' AND purged_at IS NULL AND NOT evidence_held
        AND deleted_at < now() - interval '1 day'),
@@ -81,13 +93,18 @@ read -r stuck unpurged reaper_late demotion_late blocked unmoderated unreviewed 
 [ -n "$unreviewed" ] || die "could not read the database"
 
 problem=""
-[ "$stuck" -eq 0 ] || problem="$stuck photos PROCESSING for more than 30 minutes"
+[ "$waiting" -eq 0 ] || problem="$waiting uploads waiting UPLOADED for more than 30 minutes (is the media worker running?)"
+[ "$stuck" -eq 0 ] || problem="${problem:+$problem; }$stuck photos PROCESSING for more than 30 minutes"
 [ "$unpurged" -eq 0 ] || problem="${problem:+$problem; }$unpurged deleted assets not purged after a day"
 [ "$reaper_late" -eq 0 ] || problem="${problem:+$problem; }the media reaper has not finished a run for two hours"
 [ "$demotion_late" -eq 0 ] || problem="${problem:+$problem; }the media demotion has not finished a run for 26 hours"
 [ "$blocked" -eq 0 ] || problem="${problem:+$problem; }$blocked blocked assets await the takedown runbook (ops/moderation/takedown.md)"
 [ "$unmoderated" -eq 0 ] || problem="${problem:+$problem; }$unmoderated ready assets without a verdict for more than 30 minutes"
 [ "$unreviewed" -eq 0 ] || problem="${problem:+$problem; }$unreviewed held-back assets unreviewed for more than $QUARANTINE_REVIEW_DAYS days"
+EGRESS=/usr/local/sbin/moyi-media-worker-egress
+if [ -x "$EGRESS" ] && ! "$EGRESS" check 2>/dev/null; then
+  problem="${problem:+$problem; }a media worker container runs without its egress limit"
+fi
 
 if [ -z "$problem" ]; then
   curl --fail --silent --max-time 10 --retry 3 "$MEDIA_PING_URL" >/dev/null
