@@ -374,7 +374,7 @@ stateDiagram-v2
 | `VISIBLE` | read today: the day, both entries, the streak and the bond's prompt of the day |  | stays | The entry has been revealed, so you read it in full. What decides this is the entry's own reveal stamp, never the day's status. | smoke |
 | `DELETED` | read today: the day, both entries, the streak and the bond's prompt of the day |  | stays | Your partner deleted or withdrew an entry you had already been able to read. You are shown the same entry without its words: its id and times, text null, status DELETED. | smoke |
 | `VISIBLE` | report your partner's entry to a person |  | stays | Filed for a person to review, and from this moment its photo and voice note are held back from you: you are shown them PROCESSING, the author NOT_SHARED (ADR-0051's view of anything held back), and the author is told nothing else. The words stay. On a bond that has ended too: a report is never contact. | smoke |
-| `DELETED` | report your partner's entry to a person |  | stays | A tombstone you were shown can still be reported: what you saw before it was erased may be what you report. Its media is already gone, so nothing is held. | test |
+| `DELETED` | report your partner's entry to a person |  | stays | A tombstone you were shown can still be reported: what you saw before it was erased may be what you report. Its photo and voice note are already deleted to everyone; what of them is not yet purged is held, its objects kept until the report is decided (ADR-0053 decision 8a). You are shown the tombstone as before. | test |
 
 ### Refused here
 

@@ -1,5 +1,6 @@
 package com.moyi.gratitude.web
 
+import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
@@ -55,6 +56,7 @@ internal class ReportsTest(
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
     @Autowired private val clock: MutableClock,
+    @Autowired private val dispatcher: OutboxDispatcher,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -263,15 +265,82 @@ internal class ReportsTest(
     }
 
     @Test
-    fun `an erased entry can still be reported, with nothing left to hold`() {
+    fun `an erased entry can still be reported, and what it showed is held until purged`() {
         val (entry, photo) = revealedWithMedia()
         delete(bea, entry).status shouldBe 204
 
         val reported = report(ada, entry, """{"reason":"NON_CONSENSUAL"}""")
 
         reported.status shouldBe 201
-        holds(UUID.fromString(body(reported)["id"].asString())) shouldBe emptyList()
+        // Deleted to everyone, its objects not yet purged (this context's storage answers nothing): held for the decision.
+        holds(UUID.fromString(body(reported)["id"].asString())).size shouldBe 2
         assetStatus(photo).substringBefore('|') shouldBe "DELETED"
+    }
+
+    /**
+     * T-09 (doc 09 §2): the member who blocked their partner, and kept their
+     * own entries, reports what the partner showed them. Blocking is the
+     * remedy a frightened person reaches for first; it must not take away the
+     * report.
+     */
+    @Test
+    fun `the member who blocked their partner can still report what they were shown`() {
+        val (entry, photo) = revealedWithMedia()
+        end(ada, "block", """{"withdrawEntries":false}""")
+
+        report(ada, entry, """{"reason":"HARASSMENT"}""").status shouldBe 201
+
+        assetStatus(photo) shouldBe "QUARANTINED|QUARANTINED|REPORTED"
+    }
+
+    /**
+     * Review of #118, P1: deletion stays the author's right, and the reported
+     * media's objects stay until a person has decided. After the author's
+     * delete the hold is still there, and the operator can still block what
+     * was reported, rather than find it GONE.
+     */
+    @Test
+    fun `the author's delete after a report keeps the media held, and it can still be blocked`() {
+        val (entry, photo, voice) = revealedWithMedia()
+        val reportId = UUID.fromString(body(report(ada, entry, """{"reason":"MINOR_SEXUAL_CONTENT"}"""))["id"].asString())
+
+        delete(bea, entry).status shouldBe 204
+
+        assetStatus(photo).substringBefore('|') shouldBe "DELETED"
+        holds(reportId) shouldContainExactly listOf(photo, voice).sorted()
+        jdbc.queryForList(
+            "SELECT outcome FROM entry_report_uphold(?, 'BLOCK', 'op-fake-ada', 'reported: FAKE-0003')",
+            String::class.java,
+            reportId,
+        ) shouldBe listOf("BLOCKED", "BLOCKED")
+        jdbc.queryForObject("SELECT evidence_held FROM media_assets WHERE id = ?::uuid", Boolean::class.java, photo) shouldBe true
+    }
+
+    /** Review of #118, P1: a withdrawal at the bond's end erases the author's entries; a report open on one keeps its media. */
+    @Test
+    fun `a withdrawal after a report keeps the media held`() {
+        val (entry, photo) = revealedWithMedia()
+        val reportId = UUID.fromString(body(report(ada, entry, """{"reason":"NON_CONSENSUAL"}"""))["id"].asString())
+
+        end(bea, "block", """{"withdrawEntries":true}""")
+        dispatcher.dispatchDue(clock.instant(), DISPATCH_BUDGET)
+
+        assetStatus(photo).substringBefore('|') shouldBe "DELETED"
+        holds(reportId).size shouldBe 2
+    }
+
+    /** Review of #118, P1: a report of a tombstone still finds what it showed, through the entry it was last on. */
+    @Test
+    fun `a report after a withdrawal holds the media its tombstone showed`() {
+        val (entry, photo, voice) = revealedWithMedia()
+        end(bea, "block", """{"withdrawEntries":true}""")
+        dispatcher.dispatchDue(clock.instant(), DISPATCH_BUDGET)
+        assetStatus(photo).substringBefore('|') shouldBe "DELETED"
+
+        val reported = report(ada, entry, """{"reason":"NON_CONSENSUAL"}""")
+
+        reported.status shouldBe 201
+        holds(UUID.fromString(body(reported)["id"].asString())) shouldContainExactly listOf(photo, voice).sorted()
     }
 
     /** A report is never contact (doc 26 §2.2): a member who has left, or blocked, can still report what they were shown. */
@@ -400,6 +469,20 @@ internal class ReportsTest(
             }.andReturn()
             .response
 
+    private fun end(
+        caller: UUID,
+        how: String,
+        body: String,
+    ) {
+        mockMvc
+            .post("/api/v1/bonds/$bondId/$how") {
+                header(HttpHeaders.AUTHORIZATION, bearer(caller))
+                contentType = MediaType.APPLICATION_JSON
+                content = body
+            }.andReturn()
+            .response.status shouldBe 204
+    }
+
     private fun delete(
         caller: UUID,
         entryId: String,
@@ -428,6 +511,8 @@ internal class ReportsTest(
 
     private companion object {
         val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
+
+        const val DISPATCH_BUDGET = 20
 
         /** The reporter's words: plainly a test's, and looked for in the log. */
         const val DETAIL = "fake-report-detail-never-logged"

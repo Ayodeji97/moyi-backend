@@ -2811,8 +2811,8 @@ is "moderation: …and the passed voice note READY, with its length" "$(python3 
 if [ "$PSQL_OK" = 1 ]; then
   MO_LIST="$(quarantine list 2>&1)"
   case "$MO_LIST" in *"$MO_RED"*EXTREME_VIOLENCE*) pass "moderation: the operator's list shows the quarantined photo and why";; *) fail "moderation: quarantine list" "${MO_LIST:0:300}";; esac
-  is "moderation: the list's header names its seven columns, verdict first" \
-    "$(printf '%s\n' "$MO_LIST" | head -1)" "$(printf 'verdict\tmediaId\tkind\tstatus\treason\tattached\tmoderatedAt')"
+  is "moderation: the list's header names its eight columns, verdict first" \
+    "$(printf '%s\n' "$MO_LIST" | head -1)" "$(printf 'verdict\tmediaId\tkind\tstatus\treason\tattached\tmoderatedAt\treports')"
   if printf '%s\n' "$MO_LIST" | grep "$MO_KNOWN" | grep -q "^BLOCKED.*KNOWN_IMAGE.*DO NOT VIEW — runbook §2$"; then
     pass "moderation: …and the blocked one, marked DO NOT VIEW"
   else fail "moderation: quarantine list, blocked" "${MO_LIST:0:400}"; fi
@@ -2938,6 +2938,8 @@ if [ "$PSQL_OK" = 1 ]; then
   if printf '%s\n' "$RP_LIST" | sed -n 2p | grep -q "^$RP_MINOR"$'\t'"MINOR_SEXUAL_CONTENT.*DO NOT VIEW — runbook §2$"; then
     pass "reports: …and it is first in the operator's list, marked DO NOT VIEW"
   else fail "reports: priority list" "${RP_LIST:0:400}"; fi
+  if RP_OUT="$(reports uphold "$RP_MINOR" delete "smoke: trying" 2>&1)"; then fail "upholding a minor report by delete is refused" "it was upheld: $RP_OUT"
+  else case "$RP_OUT" in *"never upheld by delete"*) pass "upholding a minor report by delete is refused";; *) fail "upholding a minor report by delete is refused" "$RP_OUT";; esac; fi
   RP_OUT="$(reports uphold "$RP_MINOR" block "smoke: FAKE-SMOKE-0002" 2>&1)" \
     && pass "the operator upholds it by blocking" || fail "the operator upholds it by blocking" "$RP_OUT"
   db_is "reports: …the photo is BLOCKED and held as evidence" \
@@ -2947,6 +2949,44 @@ if [ "$PSQL_OK" = 1 ]; then
   for id in "$RP_PHOTO" "$RP_VOICE"; do quarantine delete "$id" "smoke: reported, ref FAKE-SMOKE-0002" >/dev/null 2>&1 || true; done
   db_is "reports: every look and decision is in the report log, by the operator" \
     "$(sql "SELECT string_agg(action, ',' ORDER BY at, id) FROM entry_report_log WHERE actor = 'smoke-operator' AND (report_id IN ('$RP_REPORT', '$RP_MINOR') OR report_id IS NULL) AND at >= to_timestamp($MO_START)")" "LISTED,READ,DISMISSED,LISTED,UPHELD"
+
+  # ADR-0053 decision 8a: the author erases a reported entry; to everyone it is gone, but its photo's
+  # objects stay until the report is decided, and then the purge runs. A pair of its own: the first
+  # pair has written today.
+  verified_account "erasing" "203.0.113.183"; RE_A="$ACCOUNT_ACCESS"
+  verified_account "erased-reporter" "203.0.113.184"; RE_B="$ACCOUNT_ACCESS"
+  upload_photo "$RE_A" "$RP_DIR/black.jpg" image/jpeg; RE_PHOTO="$PHOTO_ID"
+  await_photo "$RE_A" "$RE_PHOTO" >/dev/null
+  is "reports: the second pair's photo has passed moderation" "$(await_verdict "$RE_PHOTO")" "PASSED"
+  RE_KEY="$(sql "SELECT storage_key FROM media_assets WHERE id='$RE_PHOTO'")"
+  expect "reports: a bond for the second pair" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $RE_A" -d "$(bond_body "Us")"
+  RE_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+  RE_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+  expect "reports: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$RE_CODE/accept" -H "Authorization: Bearer $RE_B"
+  expect "reports: the author writes with the photo" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$RE_BOND/entries" -H "Authorization: Bearer $RE_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"a photo\",\"imageMediaId\":\"$RE_PHOTO\"}"
+  RE_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+  expect "reports: the reporter writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$RE_BOND/entries" -H "Authorization: Bearer $RE_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"and mine"}'
+  expect "reports: the reporter reports it" 201 '"reason":"NON_CONSENSUAL"' -- -X POST "$API/entries/$RE_ENTRY/report" -H "Authorization: Bearer $RE_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"NON_CONSENSUAL"}'
+  RE_REPORT="$(printf '%s' "$LAST_BODY" | jget id)"
+  expect "the author deletes the reported entry: 204" 204 '' -- -X DELETE "$API/entries/$RE_ENTRY" -H "Authorization: Bearer $RE_A"
+  sleep 3 # media.purge's poller has had its chance; what is checked is that it did not purge
+  db_is "reports: …the photo is deleted to everyone, still held, and not purged" \
+    "$(sql "SELECT status || '|' || (purged_at IS NULL) || '|' || (SELECT count(*) FROM media_report_holds WHERE media_id = '$RE_PHOTO') FROM media_assets WHERE id = '$RE_PHOTO'")" "DELETED|true|1"
+  if [ "$MINIO_OK" = 0 ]; then skip "reports: …its objects are kept in MinIO while the report is open"
+  elif minio_has "v/${RE_KEY#in/}/display.webp"; then pass "reports: …its objects are kept in MinIO while the report is open"
+  else fail "reports: …its objects are kept in MinIO while the report is open" "the display variant is gone"; fi
+  RP_OUT="$(reports dismiss "$RE_REPORT" "smoke: dismissed, so the purge runs" 2>&1)" \
+    && pass "the operator dismisses the report on the erased entry" || fail "the operator dismisses the report on the erased entry" "$RP_OUT"
+  RE_PURGED="f"
+  for _ in $(seq 1 40); do
+    RE_PURGED="$(sql "SELECT purged_at IS NOT NULL FROM media_assets WHERE id='$RE_PHOTO'")"
+    [ "$RE_PURGED" = "t" ] && break
+    sleep 0.5
+  done
+  db_is "reports: …and media.purge then deletes its objects within seconds" "$RE_PURGED" "t"
+  if [ "$MINIO_OK" = 0 ]; then skip "reports: …nothing of it is left in MinIO"
+  elif minio_has "v/${RE_KEY#in/}/display.webp"; then fail "reports: …nothing of it is left in MinIO" "MinIO still holds its display variant"
+  else pass "reports: …nothing of it is left in MinIO"; fi
 else
   skip "reports: the operator's queue (psql not reachable through docker compose)"
 fi

@@ -1149,7 +1149,7 @@
     "rule": "doc 06:184, Q16, ADR-0051",
     "evidence": "test",
     "evidenceRef": "MediaQuarantineCommandsTest#its owner's DELETE of a blocked asset makes it gone to them, and leaves its objects held",
-    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/OwnMedia.kt#if (asset.evidenceHeld) return"
+    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/OwnMedia.kt#if (asset.keepsObjects) return"
   },
   {
     "id": "media-quarantined-released",
@@ -1401,7 +1401,7 @@
     "rule": "FR-100, ADR-0053",
     "evidence": "test",
     "evidenceRef": "ReportsTest#a report holds the entry's photo and voice note back - processing to the reporter, not shared to the author",
-    "codeRef": "modules/media/src/main/resources/db/migration/V38__media_report_holds.sql#PERFORM media_quarantine_hold(r.id, p_actor, 'report ' || p_report);"
+    "codeRef": "modules/media/src/main/resources/db/migration/V38__media_report_holds.sql#PERFORM media_hold_back(r.id, p_actor, 'report ' || p_report, p_report);"
   },
   {
     "id": "media-quarantined-reported",
@@ -1455,7 +1455,7 @@
     "rule": "FR-100, ADR-0053",
     "evidence": "test",
     "evidenceRef": "ReportCommandsTest#dismissing one of two reports of an entry gives nothing back while the other is open",
-    "codeRef": "modules/media/src/main/resources/db/migration/V38__media_report_holds.sql#CONTINUE WHEN EXISTS (SELECT 1 FROM media_report_holds WHERE media_id = r.id);"
+    "codeRef": "modules/media/src/main/resources/db/migration/V38__media_report_holds.sql#IF EXISTS (SELECT 1 FROM media_report_holds WHERE media_id = p_media) THEN"
   },
   {
     "id": "media-quarantined-report-upheld-deleted",
@@ -1492,5 +1492,59 @@
     "evidence": "test",
     "evidenceRef": "ReportCommandsTest#uphold block blocks the photo and holds it as evidence, and the author loses its URL",
     "codeRef": "modules/media/src/main/resources/db/migration/V38__media_report_holds.sql#v_outcome := media_quarantine_block(r.id, p_actor, p_note);"
+  },
+  {
+    "id": "media-quarantined-erased-while-reported",
+    "region": "media",
+    "from": "QUARANTINED",
+    "action": "event:entry-erased",
+    "actor": "system",
+    "when": "an open report holds it",
+    "guards": [],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": null,
+    "code": null,
+    "reason": "Deleted to everyone, as any erased asset is, but its objects are kept: media.purge spares it while the report is open (a legal hold, ADR-0053 decision 8a). The same for its owner's DELETE once an edit has let it go, and for the reaper, which does not take it at all.",
+    "rule": "FR-100, ADR-0053",
+    "evidence": "test",
+    "evidenceRef": "MediaReportHoldsTest#an asset erased while a report holds it keeps its objects until the report is dismissed, then is purged",
+    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/PurgeMedia.kt#if (asset.reportHeld) {"
+  },
+  {
+    "id": "media-deleted-reported",
+    "region": "media",
+    "from": "DELETED",
+    "action": "event:partner-reports",
+    "actor": "partner",
+    "when": "its objects not yet purged",
+    "guards": [],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": null,
+    "code": null,
+    "reason": "A report made after the entry was erased still finds it, by the entry it was last on (last_entry_id), and holds it: its objects stay until the report is decided. One already purged is gone, and nothing is held.",
+    "rule": "FR-100, ADR-0053",
+    "evidence": "test",
+    "evidenceRef": "MediaReportHoldsTest#a report after the entry was erased holds what is not yet purged, through the entry it was last on",
+    "codeRef": "modules/media/src/main/resources/db/migration/V38__media_report_holds.sql#WHERE coalesce(attached_entry_id, last_entry_id) = p_entry"
+  },
+  {
+    "id": "media-deleted-report-decided",
+    "region": "media",
+    "from": "DELETED",
+    "action": "event:operator-dismisses-report",
+    "actor": "system",
+    "when": "deleted while held, and nothing else holds it",
+    "guards": [],
+    "outcome": "ok",
+    "to": "DELETED",
+    "status": null,
+    "code": null,
+    "reason": "The purge the hold kept waiting runs: MediaReleased, and its objects leave the storage within seconds. An upheld delete does the same.",
+    "rule": "FR-100, ADR-0053",
+    "evidence": "test",
+    "evidenceRef": "MediaReportHoldsTest#an asset erased while a report holds it keeps its objects until the report is dismissed, then is purged",
+    "codeRef": "modules/media/src/main/resources/db/migration/V38__media_report_holds.sql#PERFORM media_publish(p_media, 'MediaReleased');"
   }
 ]

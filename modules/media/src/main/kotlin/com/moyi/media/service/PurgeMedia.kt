@@ -27,7 +27,9 @@ import java.time.temporal.ChronoUnit
  * **Except what is held as evidence** ([MediaAsset.evidenceHeld], D4,
  * ADR-0051): a blocked asset's objects stay, whoever deleted it, until the
  * operator has made the report and deletes it; that delete publishes
- * `MediaReleased` again, with the hold cleared.
+ * `MediaReleased` again, with the hold cleared. **And what an open member's
+ * report holds** ([MediaAsset.reportHeld], ADR-0053): kept until the report
+ * is decided, whose decision publishes `MediaReleased` again.
  *
  * **It never gives up.** A storage that cannot be reached throws, the delivery
  * is rolled back and backed off (2 s doubling to 15 minutes) and offered again,
@@ -75,10 +77,15 @@ internal class PurgeMedia(
         when (event.eventType) {
             MediaReleases.MEDIA_RELEASED -> {
                 check(asset.isGone) { "A MediaReleased event names an asset that is not deleted." }
-                if (asset.evidenceHeld) {
-                    // Q16: evidence for the report the takedown runbook makes. The operator's delete clears the hold and
-                    // publishes MediaReleased again; then this purges it. Not stamped: media-check counts it as held.
-                    log.info("Media {} is held as evidence; its objects stay until the operator deletes it", asset.id)
+                if (asset.keepsObjects) {
+                    // Q16: evidence for the report the takedown runbook makes; the operator's delete clears the hold and
+                    // publishes MediaReleased again. ADR-0053: a member's report is open on it; its decision publishes
+                    // MediaReleased again (V38's media_report_let_go). Either way, not stamped: the purge is still owed.
+                    log.info(
+                        "Media {} is held ({}); its objects stay until the operator has decided",
+                        asset.id,
+                        if (asset.evidenceHeld) "as evidence" else "by an open report",
+                    )
                     return
                 }
                 // Each delete throws ObjectStoreUnavailableException when the storage cannot be reached: the
@@ -95,8 +102,8 @@ internal class PurgeMedia(
                 check(tierTwoPhoto) { "A MediaDemoted event names an asset that is not a tier-2 photo." }
                 // Demotion takes only what has passed moderation, but a photo blocked after its demotion was
                 // published (a report, by hand) keeps its full variant as evidence too (review of #113).
-                if (asset.evidenceHeld) {
-                    log.info("Media {} is held as evidence; its full variant stays until the operator deletes it", asset.id)
+                if (asset.keepsObjects) {
+                    log.info("Media {} is held as evidence or by a report; its full variant stays", asset.id)
                 } else {
                     storage.delete(asset.demotedKey)
                 }

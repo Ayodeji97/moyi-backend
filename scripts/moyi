@@ -96,6 +96,11 @@
 #                                            (the look is recorded)
 #   moyi reports dismiss <reportId> "<note>" not what was reported: its photo and voice note are given back
 #                                            as they were, unless another report or moderation holds them
+#   moyi reports reclassify <reportId> <reason> "<note>"
+#                                            the reporter chose the wrong reason, and their detail shows it:
+#                                            change it, recorded with the old and new reasons and why. The
+#                                            only way a MINOR_SEXUAL_CONTENT report is upheld by anything
+#                                            but a block
 #   moyi reports uphold <reportId> delete|block "<note>"
 #                                            what was reported: delete what it holds back, or block it as
 #                                            child sexual abuse material (held as evidence; runbook §2)
@@ -526,7 +531,7 @@ case "$cmd" in
     ;;
   reports)
     # The queue of members' reports (FR-100, ADR-0053): the operator's, through the database, as the quarantine is.
-    usage="usage: moyi reports list | show <reportId> | dismiss <reportId> \"<note>\" | uphold <reportId> delete|block \"<note>\""
+    usage="usage: moyi reports list | show <reportId> | dismiss <reportId> \"<note>\" | reclassify <reportId> <reason> \"<note>\" | uphold <reportId> delete|block \"<note>\""
     action="${1:-}"; shift || true
     ops_init
     case "$action" in
@@ -569,6 +574,21 @@ case "$cmd" in
           *)         die "unexpected answer from the database: $result" ;;
         esac
         ;;
+      reclassify)
+        [ $# -eq 3 ] || die "$usage"
+        need_uuid reportId "$1"
+        [[ "$2" =~ ^[A-Z_]{1,40}$ ]] || die "$usage"
+        [ -n "$3" ] && [ "${#3}" -le 400 ] || die "a note is required (at most 400 characters): what in the report shows the reason was wrong"
+        # Which names are reasons is the database's CHECK; a name that is not one is refused there.
+        result="$(ops_sql "SELECT entry_report_reclassify(:'report'::uuid, :'reason', :'actor', :'note');" "report=$1" "reason=$2" "actor=$OPERATOR" "note=$3")" ||
+          die "the database refused (see above)"
+        case "$result" in
+          RECLASSIFIED) echo "Reclassified as $2, and recorded. Decide it as runbook §3 says for that reason." ;;
+          SAME_REASON)  die "it already has that reason" ;;
+          NOT_OPEN)     die "that id names no open report (never made, or already decided)" ;;
+          *)            die "unexpected answer from the database: $result" ;;
+        esac
+        ;;
       uphold)
         [ $# -eq 3 ] || die "$usage"
         need_uuid reportId "$1"
@@ -577,11 +597,13 @@ case "$cmd" in
         out="$(ops_sql "SELECT media_id, outcome FROM entry_report_uphold(:'report'::uuid, :'takedown', :'actor', :'note');" \
                  "report=$1" "takedown=$takedown" "actor=$OPERATOR" "note=$3")" || die "the database refused (see above)"
         [ "$out" != $'\tNOT_OPEN' ] || die "that id names no open report (never made, or already decided)"
+        [ "$out" != $'\tRECLASSIFY_FIRST' ] ||
+          die "a MINOR_SEXUAL_CONTENT report is never upheld by delete: block it (runbook §3, then §2), or, if the reporter's own detail shows the reason was wrong, reclassify it first"
         echo "Upheld."
         [ -n "$out" ] || { echo "It held nothing back: there was nothing to take down."; exit 0; }
         printf '%s\n' "$out" | while IFS=$'\t' read -r media outcome; do
           case "$outcome" in
-            DELETED)         echo "  $media: deleted; its objects leave the storage within seconds." ;;
+            DELETED)         echo "  $media: deleted; its objects leave the storage within seconds, unless another open report holds it." ;;
             BLOCKED)         echo "  $media: blocked and held as evidence. Follow ops/moderation/takedown.md §2 now." ;;
             ALREADY_BLOCKED) echo "  $media: already blocked and held as evidence. Follow ops/moderation/takedown.md §2." ;;
             BLOCKED_KEPT)    echo "  $media: blocked, so kept as evidence, not deleted. Follow ops/moderation/takedown.md §2." ;;
@@ -631,10 +653,14 @@ print(json.dumps({"categories": {k: v == "on" for k, v in (x.split("=") for x in
         [ $# -eq 0 ] || die "usage: moyi media quarantine list"
         out="$(ops_sql "SELECT * FROM media_quarantine_list(:'actor');" "actor=$OPERATOR")" || die "the database refused (see above)"
         if [ -z "$out" ]; then echo "Nothing is held back."; exit 0; fi
-        # The function's seven columns, in its order, verdict first: what may be looked at depends on it. A BLOCKED
-        # row is child sexual abuse material, which is never viewed (ops/moderation/takedown.md §2), and says so.
-        printf 'verdict\tmediaId\tkind\tstatus\treason\tattached\tmoderatedAt\n'
-        printf '%s\n' "$out" | awk -F '\t' 'BEGIN { OFS = "\t" } $1 == "BLOCKED" { print $0, "DO NOT VIEW — runbook §2"; next } { print }'
+        # The function's eight columns, in its order, verdict first: what may be looked at depends on it. A BLOCKED
+        # row is child sexual abuse material, which is never viewed (ops/moderation/takedown.md §2), and says so. A row
+        # an open member's report holds (reports > 0) is decided in the reports queue (runbook §3), not here.
+        printf 'verdict\tmediaId\tkind\tstatus\treason\tattached\tmoderatedAt\treports\n'
+        printf '%s\n' "$out" | awk -F '\t' 'BEGIN { OFS = "\t" }
+          $1 == "BLOCKED" { print $0, "DO NOT VIEW — runbook §2"; next }
+          $8 > 0 { print $0, "held by a report: moyi reports — runbook §3"; next }
+          { print }'
         ;;
       hold|block)
         # A member's report (ops/moderation/takedown.md §3): hold a photo or voice note back from the partner, or
@@ -661,6 +687,8 @@ print(json.dumps({"categories": {k: v == "on" for k, v in (x.split("=") for x in
           die "the database refused (see above)"
         case "$result" in
           RELEASED)        echo "Released: the partner is shown it from now on." ;;
+          REMODERATED)     echo "Handed back to moderation: it was held before moderation saw it, so it is never passed unseen." ;;
+          REPORT_HELD)     die "an open member's report holds it: decide the report (moyi reports list, then dismiss or uphold; runbook §3). The refusal is recorded." ;;
           DELETED)         echo "Deleted: its objects leave the storage within seconds (media.purge)." ;;
           NEVER_RELEASED)  die "it is blocked (child sexual abuse material): it is never released. The refusal is recorded. See ops/moderation/takedown.md." ;;
           NOT_QUARANTINED) die "that id names nothing held back" ;;

@@ -3692,10 +3692,10 @@
     "to": "DELETED",
     "status": 201,
     "code": null,
-    "reason": "A tombstone you were shown can still be reported: what you saw before it was erased may be what you report. Its media is already gone, so nothing is held.",
+    "reason": "A tombstone you were shown can still be reported: what you saw before it was erased may be what you report. Its photo and voice note are already deleted to everyone; what of them is not yet purged is held, its objects kept until the report is decided (ADR-0053 decision 8a). You are shown the tombstone as before.",
     "rule": "FR-100, ADR-0053",
     "evidence": "test",
-    "evidenceRef": "ReportsTest#an erased entry can still be reported, with nothing left to hold",
+    "evidenceRef": "ReportsTest#an erased entry can still be reported, and what it showed is held until purged",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/ReportEntry.kt#media.holdFor(entryId.value, report.id)"
   },
   {

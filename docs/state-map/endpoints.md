@@ -1910,7 +1910,7 @@ curl -X POST "$API/entries/$ENTRY/report" -H "Authorization: Bearer $TOKEN" -H "
 | `day.partnerEntry` | `NONE` |  | 404 `NOT_FOUND` | There is no entry to name: an id nobody was issued is the one 404 every entry you were never shown gets. | FR-100, ADR-0053 | smoke |
 | `day.partnerEntry` | `LOCKED` |  | 404 `NOT_FOUND` | You have not been shown it: a locked entry is answered exactly as an id that does not exist, byte for byte, never 403. Nothing is filed or held. | FR-100, ADR-0053 | smoke |
 | `day.partnerEntry` | `VISIBLE` |  | 201 stays | Filed for a person to review, and from this moment its photo and voice note are held back from you: you are shown them PROCESSING, the author NOT_SHARED (ADR-0051's view of anything held back), and the author is told nothing else. The words stay. On a bond that has ended too: a report is never contact. | FR-100, ADR-0053 | smoke |
-| `day.partnerEntry` | `DELETED` |  | 201 stays | A tombstone you were shown can still be reported: what you saw before it was erased may be what you report. Its media is already gone, so nothing is held. | FR-100, ADR-0053 | test |
+| `day.partnerEntry` | `DELETED` |  | 201 stays | A tombstone you were shown can still be reported: what you saw before it was erased may be what you report. Its photo and voice note are already deleted to everyone; what of them is not yet purged is held, its objects kept until the report is decided (ADR-0053 decision 8a). You are shown the tombstone as before. | FR-100, ADR-0053 | test |
 
 #### Whatever the state
 

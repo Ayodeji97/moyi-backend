@@ -17,19 +17,15 @@ import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 
 /**
  * `reports:create:user` (ADR-0053 decision 9): ten reports a day, refused ones included, each user their own.
  *
- * A context of its own (the application name only tells it apart): sharing `EntryRateLimitTest`'s cached one, the
- * full build found the limiter's Redis connection closed by the time this class ran ("Connection is closed", every
- * attempt for twenty seconds), so every request was let through. Run alone, the shared one passed.
+ * It shares `EntryRateLimitTest`'s cached context. In the full build that context had been paused and started again
+ * by the time this class ran, and the limiter, holding a connection from the stopped factory, let every request through
+ * (review of #118, P2-d). The limiter now makes its connection again; `RedisRateLimiterTest` holds that.
  */
-@SpringBootTest(
-    classes = [GratitudeTestApplication::class],
-    properties = ["moyi.security.rate-limit.enabled=true", "spring.application.name=report-rate-limit"],
-)
+@SpringBootTest(classes = [GratitudeTestApplication::class], properties = ["moyi.security.rate-limit.enabled=true"])
 @AutoConfigureMockMvc
 internal class ReportRateLimitTest(
     @Autowired private val mvc: MockMvc,
@@ -46,10 +42,9 @@ internal class ReportRateLimitTest(
 
     @Test
     fun `ten reports consume the daily allowance and another user keeps theirs`() {
+        redis.execInContainer("valkey-cli", "FLUSHALL")
         val ada = users.verified("Ada")
         val bea = users.verified("Bea")
-        awaitLimiter(users.verified("Cara"))
-        redis.execInContainer("valkey-cli", "FLUSHALL")
         repeat(10) { attempt(ada).status shouldBe 404 }
         val limited = attempt(ada)
         limited.status shouldBe 429
@@ -57,19 +52,7 @@ internal class ReportRateLimitTest(
         limited.getHeader("X-RateLimit-Remaining") shouldBe "0"
         (limited.getHeader("Retry-After") != null) shouldBe true
         attempt(bea).status shouldBe 404
-    }
-
-    /**
-     * Until the limiter answers: it fails open for five seconds after Redis
-     * does not (ADR-0023), and a first request in a fresh context may meet
-     * that. What is waited on is the limiter's own answer (its header).
-     */
-    private fun awaitLimiter(user: UUID) {
-        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(LIMITER_WAIT_SECONDS)
-        while (attempt(user).getHeader("X-RateLimit-Limit") == null) {
-            check(System.nanoTime() < deadline) { "the rate limiter never answered" }
-            Thread.sleep(POLL_MILLIS)
-        }
+        attempt(bea).getHeader("X-RateLimit-Remaining") shouldBe "8"
     }
 
     private fun attempt(user: UUID) =
@@ -81,9 +64,4 @@ internal class ReportRateLimitTest(
                 content = """{"reason":"OTHER"}"""
             }.andReturn()
             .response
-
-    private companion object {
-        const val LIMITER_WAIT_SECONDS = 20L
-        const val POLL_MILLIS = 250L
-    }
 }

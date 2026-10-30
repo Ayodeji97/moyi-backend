@@ -1,7 +1,9 @@
 # ADR-0053 — The report route: an entry reported to a person, its media held back from the reporter at once, and the operator's queue in the database
 
 **Status:** Accepted · **Date:** 2026-10-30 · **Deciders:** Daniel, for the rulings it builds on
-(Q16 of 2026-10-29); decision 4 was made without him and is his to revisit.
+(Q16 of 2026-10-29); decision 4 was made without him and is his to revisit. · **Amended:**
+2026-10-30, by the independent review of #118 (the coordinating agent's rulings P1, P2-a to P2-d,
+P3): decisions 8a, 8b, 8c and 13 added, 7, 8, 10 and 11 qualified.
 
 ## Context
 
@@ -99,12 +101,15 @@ was decided. The client's acknowledgement says a person will read it and the oth
 told (doc 26 §2.2). The reporter is not shown "reported" on the entry; they are shown its media as
 processing.
 
-**7. The detail is the operator's and nobody else's, and it does not outlive the decision.** It is
-written by the application and never read back by it: no response, log line or exception can carry
-it (`ReportsTest` captures the output and looks for it). The operator reads it through
-`entry_report_read`, which logs the look. Dismissing or upholding empties it (V39:
+**7. The detail is the operator's and nobody else's, and it does not outlive the decision in the
+live database.** It is written by the application and never read back by it: no response, log line
+or exception can carry it (`ReportsTest` captures the output and looks for it). The operator reads
+it through `entry_report_read`, which logs the look. Dismissing or upholding empties it (V39:
 `entry_reports_detail_kept_check`); the operator's note records what was decided and why. The
-request type redacts it from `toString`.
+request type redacts it from `toString`. **Emptied is not yet gone everywhere** (review of #118,
+P3): the old row version stays in the table's pages as a dead tuple until autovacuum reclaims it
+(minutes to hours, readable only with the database's files), and the nightly encrypted backups
+keep it for their 30 days (ADR-0043), re-applied by a restore. The Privacy Policy says so (Owed).
 
 **8. A report is dismissed, or upheld.** Dismissed: the report closes and every asset it held that
 nothing else holds is **given back exactly as it was** (`media_report_release`): V38's hold now
@@ -112,11 +117,37 @@ records what it held the asset back from (`heldFrom`: the verdict, its time, wha
 so a photo that had `PASSED` is `READY` and `PASSED` again with its `sensitive` flag, and one that had
 no verdict yet (moderation not configured, or not yet reached) is `READY` with none and handed back
 to moderation with a new `MediaReady`, never passed unseen. What moderation itself held back stays
-held. Upheld: `delete` (V36's `media_quarantine_delete`, objects purged; a photo the operator
-released meanwhile is held first so the delete takes it) or `block` (V36's `media_quarantine_block`,
-held as evidence). **An upheld delete never takes a `BLOCKED` asset** (`BLOCKED_KEPT`): its evidence
-goes only by the runbook's §2, after the report to the authority. A report of words is upheld with
-nothing to take down.
+what moderation decided. Upheld: `delete` (V36's `media_quarantine_delete`, objects purged) or
+`block` (V36's `media_quarantine_block`, held as evidence). **An upheld delete never takes a `BLOCKED`
+asset** (`BLOCKED_KEPT`): its evidence goes only by the runbook's §2, after the report to the
+authority. A report of words is upheld with nothing to take down.
+
+**8a. What an open report holds is kept, whoever deletes it: a legal hold** (review of #118, P1).
+Deletion stays the author's right in the API: their `DELETE` of the entry, a withdrawal at the
+bond's end, an edit that lets a photo go and then their `DELETE` of it, the reaper. Each makes the
+asset `DELETED` to everyone, as before. But while any open report holds it (`media_report_holds`),
+`media.purge`, the owner's best-effort delete, the reaper and the demotion spare its objects, as they
+spare `evidence_held`. The decision hands them to the purge: a dismissal, or an upheld delete,
+publishes `MediaReleased` once nothing else holds it (`media_report_let_go`). Without this an author
+could make a reported photo, child abuse material included, unrecoverable within seconds of being
+told nothing, and `uphold … block` would answer `GONE`. A report on an entry already erased finds its
+media by **`last_entry_id`** (kept by a trigger whenever `attached_entry_id` is cleared) and holds what
+is not yet purged; what is purged is gone. **Bounded** by the review alarms (decision 11): a report
+open two days alarms, a priority one at once, so erased media is not kept for longer than the
+operator takes to decide. One window is left: a purge that read the asset before a report's hold
+committed deletes its objects (it holds no lock while it reaches the storage, ADR-0047 decision 2);
+that is a report made within the seconds after an erasure. **The Privacy Policy says that erased
+media under an open report is kept until a person decides** (Owed).
+
+**8b. A dismissal gives back only what a report held back** (P2-a). The hold records which report
+took it (`heldFrom.report`); the operator's own hold (`moyi media quarantine hold`, for a report that
+came by email) records none, and no dismissal ever gives it back.
+
+**8c. The operator's release respects both** (P2-b; V38 replaces V36's `media_quarantine_release`).
+It is refused while an open report holds the asset (`REPORT_HELD`, logged `RELEASE_REFUSED`): the
+report is decided with `moyi reports`. And an asset held before moderation reached it is never made
+`PASSED` by a release: it goes back to moderation (`REMODERATED`). The operator's list gains a column,
+the open reports holding each row, and such a row says to decide it in the reports queue.
 
 **9. Idempotent and rate-limited.** `Idempotency-Key` required (doc 06:16; `ResultKind.REPORT`,
 V37): the key, the report and the hold commit together, a replay is `201` with
@@ -125,7 +156,10 @@ V37): the key, the report and the hold commit together, a replay is `201` with
 applies): a report puts a row in a person's queue and holds media back, and ten leaves room for
 someone reporting several days of one partner's entries.
 
-**10. The operator's queue is database functions, as ADR-0051's is.** V39: `entry_report_list`,
+**10. The operator's queue is database functions, as ADR-0051's is.** A
+`MINOR_SEXUAL_CONTENT` report is never upheld by `delete` (P2-c): it is blocked, or first
+**reclassified** (`moyi reports reclassify`, logged `RECLASSIFIED` with the old and new reasons and
+why) when the reporter's own detail shows the reason was wrong. V39: `entry_report_list`,
 `_read`, `_dismiss`, `_uphold`, each writing its own row in **`entry_report_log`** (who looked at the
 queue, who read a report, who decided what, with their note), the sibling of `media_moderation_log`,
 which keeps what became of the media. `scripts/moyi reports list|show|dismiss|uphold` names which to
@@ -137,12 +171,21 @@ first in both (`MediaReportHoldsTest`, synchronised on the dismissal waiting for
 
 **11. The alarm.** `ops/monitoring/media-check.sh` fails while a report has been open more than
 `REPORT_REVIEW_DAYS` (2 by default), and at once while a `MINOR_SEXUAL_CONTENT` report is open (as it
-does for a blocked asset). What a report holds is counted there and no longer as "held back for
+does for a blocked asset). What a report holds is no longer counted as "deleted, not purged after a
+day" either: decision 8a keeps it on purpose, and this alarm bounds how long. What a report holds is counted there and no longer as "held back for
 review": V36's hold keeps the verdict's old time, so a photo passed a week ago and reported today
 would have raised that alarm at once.
 
 **12. The runbook** (`ops/moderation/takedown.md` §3) now starts from the queue: priority first and
 never viewed; non-consensual imagery deleted on the reporter's word; the rest looked at and decided.
+
+**13. The rate limiter makes its connection again when the factory restarts** (P2-d, found by this
+slice's rate-limit test). `RedisRateLimiter` built its Lettuce connection once, in a `lazy`; a
+`LettuceConnectionFactory` stop and start (a `SmartLifecycle`; Spring 7's test framework pauses
+cached contexts, and production may stop a lifecycle) shuts the old client down, and the limiter kept
+a closed connection and failed open for the rest of the process, loud only in its WARN. It now checks
+the connection before each use and rebuilds it when it is closed or the factory's client has changed
+(`RedisRateLimiterTest`). ADR-0023's fail-open policy is unchanged.
 
 ## Consequences
 
@@ -180,7 +223,8 @@ error code. No event: nothing outside the report's transaction needs to know.
 
 1. **Hidden from the reporter at once** (decision 4)? Built: yes, every report, every reason. The
    alternative is shown until a person decides, perhaps for some reasons only.
-2. **The author's view of a report hold** (decision 5, T-09): `NOT_SHARED` (built, ADR-0051's one
+2. **The author's view of a report hold** (decision 5, T-09; still open after the review of #118,
+   which recommended `READY` to the author until decided): `NOT_SHARED` (built, ADR-0051's one
    view) or `READY`, so the author cannot infer a report while moderation is off? Beside ADR-0051
    question 2, which asks the same of a block.
 3. **The words.** Should a report hide the entry's text from the reporter too, and should a person be
@@ -198,6 +242,12 @@ error code. No event: nothing outside the report's transaction needs to know.
   this" by the client that sent it.
 - **Account deletion** (not built): a deleted reporter's details in open reports, and their reports'
   `reporter_member_id`, are that change's to erase.
+- **The owner, for the documents this changes (the corpus is read-only to a slice):** the Privacy
+  Policy and doc 07 §7's retention table say that (a) a photo or voice note under an open report is
+  kept, whoever deletes it, until a person decides, which the review alarms bound to days (decision
+  8a); (b) the reporter's detail is deleted when the report is decided, and survives in the 30-day
+  backups and briefly as a dead tuple (decision 7); (c) a report's reason, its entry and who made it
+  are kept as the record of what was decided.
 - **The Phase 5 console** reads `entry_reports` and `entry_report_log` and calls the same functions.
 
 ## Revisit when

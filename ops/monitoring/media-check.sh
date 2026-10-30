@@ -33,7 +33,8 @@
 #   - nothing is held as evidence (ADR-0051, Q16): child sexual abuse
 #     material that moderation blocked waits, served to nobody, kept whoever
 #     deleted it, for the operator to report it and then delete it
-#     (ops/moderation/takedown.md). A held asset is not "unpurged" above;
+#     (ops/moderation/takedown.md). A held asset is not "unpurged" above,
+#     and nor is one an open member's report holds (counted below);
 #   - while a moderator is configured (MEDIA_MODERATION_ON=1 in the env file:
 #     the media worker runs one), nothing has been READY for 30 minutes
 #     without a verdict (FR-101: a partner sees nothing until moderation has
@@ -87,8 +88,9 @@ read -r waiting stuck unpurged reaper_late demotion_late blocked unmoderated unr
   SELECT
     (SELECT count(*) FROM media_assets WHERE status = 'UPLOADED' AND created_at < now() - interval '30 minutes'),
     (SELECT count(*) FROM media_assets WHERE status = 'PROCESSING' AND created_at < now() - interval '30 minutes'),
-    (SELECT count(*) FROM media_assets WHERE status = 'DELETED' AND purged_at IS NULL AND NOT evidence_held
-       AND deleted_at < now() - interval '1 day'),
+    (SELECT count(*) FROM media_assets a WHERE a.status = 'DELETED' AND a.purged_at IS NULL AND NOT a.evidence_held
+       AND a.deleted_at < now() - interval '1 day'
+       AND NOT EXISTS (SELECT 1 FROM media_report_holds h WHERE h.media_id = a.id)),
     (SELECT count(*) FROM shedlock s LEFT JOIN job_runs r ON r.name = s.name
        WHERE s.name = 'media-reaper' AND (r.last_success_at IS NULL OR r.last_success_at < now() - interval '2 hours')),
     (SELECT count(*) FROM shedlock s LEFT JOIN job_runs r ON r.name = s.name

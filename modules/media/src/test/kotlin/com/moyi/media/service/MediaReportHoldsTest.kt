@@ -1,8 +1,11 @@
 package com.moyi.media.service
 
+import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.testing.MutableClock
 import com.moyi.media.api.ImageViewStatus
 import com.moyi.media.api.ImageViews
+import com.moyi.media.api.MediaErasure
+import com.moyi.media.api.MediaLifecycle
 import com.moyi.media.api.MediaReports
 import com.moyi.media.infra.AssetRows
 import com.moyi.media.infra.MediaIntegrationTest
@@ -18,6 +21,8 @@ import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.support.TransactionTemplate
+import java.time.Duration
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -38,6 +43,10 @@ internal class MediaReportHoldsTest(
     @Autowired private val images: ImageViews,
     @Autowired private val reports: MediaReports,
     @Autowired private val transactions: TransactionTemplate,
+    @Autowired private val erasure: MediaErasure,
+    @Autowired private val lifecycle: MediaLifecycle,
+    @Autowired private val ownMedia: OwnMedia,
+    @Autowired private val dispatcher: OutboxDispatcher,
 ) : MediaIntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
     private val rows = AssetRows(jdbc)
@@ -155,12 +164,35 @@ internal class MediaReportHoldsTest(
         audit(violent) shouldBe emptyList()
     }
 
+    /**
+     * Review of #118, P1: a report made after its entry was erased (a
+     * withdrawal, the author's delete) still finds what it showed, through
+     * `last_entry_id`, and holds what has not yet been purged, so the objects
+     * stay for the decision. What is purged already holds nothing.
+     */
     @Test
-    fun `a deleted asset is not held`() {
-        val gone = rows.insert(owner = ada, status = "DELETED", createdAt = clock.instant(), attachedTo = entry)
+    fun `a report after the entry was erased holds what is not yet purged, through the entry it was last on`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val photo = passed(upload = upload)
+        putBehindTheApi(display(upload), byteArrayOf(1, 2, 3))
+        val purgedAlready = passed()
+        transactions.execute { erasure.releaseAllOf(entry) } shouldBe 2
+        jdbc.update("UPDATE media_assets SET purged_at = now() WHERE id = ?", purgedAlready)
 
-        hold(REPORT) shouldBe 0
-        holdsOf(gone) shouldBe 0
+        hold(REPORT) shouldBe 1
+
+        holdsOf(photo) shouldBe 1
+        holdsOf(purgedAlready) shouldBe 0
+        jdbc.queryForObject(
+            "SELECT attached_entry_id IS NULL AND last_entry_id = ? FROM media_assets WHERE id = ?",
+            Boolean::class.java,
+            entry,
+            photo,
+        ) shouldBe
+            true
+        purge()
+        stored(display(upload)) shouldBe true
+        purgedAt(photo) shouldBe false
     }
 
     @Test
@@ -179,14 +211,160 @@ internal class MediaReportHoldsTest(
         holdsOf(photo) shouldBe 0
     }
 
-    /** A photo the operator released meanwhile is held again and deleted all the same. */
+    /** Review of #118, P2-b: the operator's release never undoes an open report's hold; the report is decided instead. */
     @Test
-    fun `an upheld delete takes a photo that was released meanwhile`() {
+    fun `the operator's release is refused while a report holds it, and the refusal is recorded`() {
         val photo = passed()
         hold(REPORT)
-        jdbc.queryForObject("SELECT media_quarantine_release(?, 'op-fake-ada', 'looked')", String::class.java, photo)
+
+        jdbc.queryForObject("SELECT media_quarantine_release(?, 'op-fake-ada', 'looked')", String::class.java, photo) shouldBe "REPORT_HELD"
+
+        status(photo) shouldBe "QUARANTINED|QUARANTINED|REPORTED"
+        audit(photo).last() shouldBe "RELEASE_REFUSED|op-fake-ada|looked"
+        takedown(REPORT, "DELETE") shouldContainExactly listOf("$photo|DELETED")
+    }
+
+    /** Review of #118, P2-b: an asset held before moderation saw it is never passed by a release, by anyone. */
+    @Test
+    fun `the operator's release of an asset held before moderation saw it hands it back to moderation, never passes it`() {
+        val photo = rows.insert(owner = ada, createdAt = clock.instant(), attachedTo = entry, verdict = null)
+        jdbc.queryForObject("SELECT media_quarantine_hold(?, 'op-fake-ada', 'by hand')", String::class.java, photo) shouldBe "HELD"
+
+        jdbc.queryForObject("SELECT media_quarantine_release(?, 'op-fake-ada', 'looked')", String::class.java, photo) shouldBe "REMODERATED"
+
+        status(photo) shouldBe "READY||"
+        jdbc.queryForObject(
+            "SELECT count(*) FROM outbox_events WHERE aggregate_id = ? AND event_type = 'MediaReady'",
+            Int::class.java,
+            photo,
+        ) shouldBe
+            1
+    }
+
+    /** Review of #118, P2-a: what the operator held back for something else is not a report's to give back. */
+    @Test
+    fun `a dismissal never gives back the operator's own hold`() {
+        val photo = passed()
+        jdbc.queryForObject(
+            "SELECT media_quarantine_hold(?, 'op-fake-ada', 'by hand: a support email')",
+            String::class.java,
+            photo,
+        ) shouldBe
+            "HELD"
+        hold(REPORT) shouldBe 1
+
+        release(REPORT) shouldBe 0
+
+        status(photo) shouldBe "QUARANTINED|QUARANTINED|REPORTED"
+        holdsOf(photo) shouldBe 0
+    }
+
+    /**
+     * Review of #118, P1, the four ways an asset is deleted while a report is
+     * open: its entry erased (an author's DELETE or a withdrawal, both
+     * `MediaErasure`), its owner's DELETE once an edit has let it go, and the
+     * reaper. Each makes it gone to its owner, and none of them takes its
+     * objects: `media.purge` and the best-effort delete spare it. The
+     * dismissal hands them to the purge then.
+     */
+    @Test
+    fun `an asset erased while a report holds it keeps its objects until the report is dismissed, then is purged`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val photo = passed(upload = upload)
+        putBehindTheApi(display(upload), byteArrayOf(1, 2, 3))
+        hold(REPORT)
+
+        transactions.execute { erasure.releaseAllOf(entry) } shouldBe 1
+        purge()
+
+        status(photo).substringBefore('|') shouldBe "DELETED"
+        stored(display(upload)) shouldBe true
+        purgedAt(photo) shouldBe false
+
+        release(REPORT) shouldBe 1
+        purge()
+
+        stored(display(upload)) shouldBe false
+        purgedAt(photo) shouldBe true
+    }
+
+    @Test
+    fun `an edit that lets a held asset go, then its owner's DELETE, then the reaper - none takes its objects`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val photo = passed(upload = upload)
+        putBehindTheApi(display(upload), byteArrayOf(1, 2, 3))
+        hold(REPORT)
+        // What `AttachMedia` does when an entry's edit replaces its photo: detached, the entry remembered.
+        jdbc.update("UPDATE media_assets SET attached_entry_id = NULL, detached_at = now() WHERE id = ?", photo)
+
+        lifecycle.reap(clock.instant().plus(Duration.ofDays(2)), BUDGET).changed shouldBe 0
+        ownMedia.delete(ada, photo)
+        purge()
+
+        status(photo).substringBefore('|') shouldBe "DELETED"
+        stored(display(upload)) shouldBe true
+        purgedAt(photo) shouldBe false
+    }
+
+    @Test
+    fun `the reaper takes an unattached held asset only once no report holds it`() {
+        val photo = passed()
+        hold(REPORT)
+        jdbc.update(
+            "UPDATE media_assets SET attached_entry_id = NULL, detached_at = ? WHERE id = ?",
+            java.sql.Timestamp.from(clock.instant()),
+            photo,
+        )
+
+        lifecycle.reap(clock.instant().plus(Duration.ofDays(2)), BUDGET).changed shouldBe 0
+        release(REPORT)
+        lifecycle.reap(clock.instant().plus(Duration.ofDays(2)), BUDGET).changed shouldBe 1
+    }
+
+    /** A demotion published before the report keeps the full variant once the report holds the photo. */
+    @Test
+    fun `a demotion delivered while a report holds the photo leaves its full variant`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val photo = passed(upload = upload)
+        putBehindTheApi(full(upload), byteArrayOf(1, 2, 3))
+        jdbc.update("UPDATE media_assets SET tier = 2 WHERE id = ?", photo)
+        jdbc.update(
+            "INSERT INTO outbox_consumers (consumer_id, registered_at) VALUES ('media.purge', now()) ON CONFLICT DO NOTHING",
+        )
+        hold(REPORT)
+        jdbc.update(
+            "INSERT INTO outbox_events (id, aggregate_type, aggregate_id, event_type, payload, occurred_at) " +
+                "VALUES (uuidv7(), 'Media', ?, 'MediaDemoted', jsonb_build_object('mediaId', ?::text), now())",
+            photo,
+            photo.toString(),
+        )
+        jdbc.update(
+            "INSERT INTO outbox_deliveries (event_id, consumer_id, next_attempt_at) " +
+                "SELECT id, 'media.purge', now() FROM outbox_events WHERE aggregate_id = ? AND event_type = 'MediaDemoted'",
+            photo,
+        )
+
+        purge()
+
+        stored(full(upload)) shouldBe true
+    }
+
+    /** Review of #118, P1: an upheld delete of an asset its author deleted meanwhile lets the waiting purge run. */
+    @Test
+    fun `an upheld delete of an asset its author erased meanwhile lets the purge run`() {
+        val upload = "in/${UUID.randomUUID()}"
+        val photo = passed(upload = upload)
+        putBehindTheApi(display(upload), byteArrayOf(1, 2, 3))
+        hold(REPORT)
+        transactions.execute { erasure.releaseAllOf(entry) }
+        purge()
+        stored(display(upload)) shouldBe true
 
         takedown(REPORT, "DELETE") shouldContainExactly listOf("$photo|DELETED")
+        purge()
+
+        stored(display(upload)) shouldBe false
+        purgedAt(photo) shouldBe true
     }
 
     @Test
@@ -239,8 +417,9 @@ internal class MediaReportHoldsTest(
     private fun passed(
         sensitive: Boolean = false,
         attachedTo: UUID = entry,
+        upload: String = "in/${UUID.randomUUID()}",
     ): UUID {
-        val id = rows.insert(owner = ada, createdAt = clock.instant(), attachedTo = attachedTo)
+        val id = rows.insert(owner = ada, createdAt = clock.instant(), attachedTo = attachedTo, upload = upload)
         jdbc.update(
             "UPDATE media_assets SET sensitive = ?, " +
                 "moderation_scores = jsonb_build_object('reason', 'NONE', 'moderator', 'fake') WHERE id = ?",
@@ -251,6 +430,17 @@ internal class MediaReportHoldsTest(
     }
 
     private fun hold(report: UUID): Int = transactions.execute { reports.holdFor(entry, report) }!!
+
+    private fun purge() {
+        dispatcher.dispatchDue(Instant.now().plus(Duration.ofDays(2)), BUDGET)
+    }
+
+    private fun display(upload: String) = "v/${upload.removePrefix("in/")}/display.webp"
+
+    private fun full(upload: String) = "v/${upload.removePrefix("in/")}/full.webp"
+
+    private fun purgedAt(id: UUID): Boolean =
+        jdbc.queryForObject("SELECT purged_at IS NOT NULL FROM media_assets WHERE id = ?", Boolean::class.java, id)!!
 
     private fun release(report: UUID): Int =
         jdbc.queryForObject("SELECT media_report_release(?, 'op-fake-ada', 'dismissed')", Int::class.java, report)!!
@@ -313,6 +503,8 @@ internal class MediaReportHoldsTest(
     private companion object {
         val REPORT: UUID = UUID.fromString("0f0f0f0f-0000-4000-8000-00000000fa01")
         val OTHER_REPORT: UUID = UUID.fromString("0f0f0f0f-0000-4000-8000-00000000fa02")
+
+        const val BUDGET = 20
 
         /** A consumer of this test's own, subscribed to MediaReady for one test and removed after it. */
         const val READY_CONSUMER = "test.report-ready"

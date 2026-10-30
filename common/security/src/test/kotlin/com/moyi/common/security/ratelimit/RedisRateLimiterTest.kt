@@ -17,6 +17,7 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.context.annotation.Primary
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.StringRedisTemplate
 import java.time.Duration
 import java.util.concurrent.TimeUnit
@@ -33,6 +34,7 @@ class RedisRateLimiterTest(
     @Autowired private val limiter: RateLimiter,
     @Autowired private val clock: MutableClock,
     @Autowired private val redis: StringRedisTemplate,
+    @Autowired private val factory: LettuceConnectionFactory,
 ) : RedisIntegrationTest() {
     @AfterEach
     fun flush() {
@@ -64,6 +66,24 @@ class RedisRateLimiterTest(
 
         val afterOneRefill = limiter.tryConsume(RateLimitBucket.AUTH_LOGIN_EMAIL, "ada@example.com")
         afterOneRefill.shouldBeInstanceOf<RateLimitDecision.Allowed>().remaining shouldBe 0
+    }
+
+    /**
+     * Review of #118, P2-d: the factory is a `SmartLifecycle`, and a stop
+     * destroys its client and every connection made from it; the limiter kept
+     * the one it had made in a `lazy`, closed, and failed open for good. Found
+     * because a test class sharing a paused and restarted context saw ten
+     * reports let through. The sixth attempt must still be refused.
+     */
+    @Test
+    fun `a factory stopped and started again still limits - the connection is made again`() {
+        repeat(5) { limiter.tryConsume(RateLimitBucket.AUTH_LOGIN_EMAIL, "ada@example.com") }
+
+        factory.stop()
+        factory.start()
+
+        limiter.tryConsume(RateLimitBucket.AUTH_LOGIN_EMAIL, "ada@example.com").shouldBeInstanceOf<RateLimitDecision.Rejected>()
+        limiter.tryConsume(RateLimitBucket.AUTH_LOGIN_EMAIL, "grace@example.com").shouldBeInstanceOf<RateLimitDecision.Allowed>()
     }
 
     @Test

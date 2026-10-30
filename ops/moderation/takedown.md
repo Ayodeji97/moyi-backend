@@ -40,13 +40,16 @@ question for the owner, with legal advice (ADR-0051, open question 2), and the A
 until it is answered.
 
 **In the list, the verdict comes first, and a `BLOCKED` row ends `DO NOT VIEW — runbook §2`.** Look
-only at `QUARANTINED` rows (section 1). Never open a `BLOCKED` one.
+only at `QUARANTINED` rows (section 1). Never open a `BLOCKED` one. A row whose last column
+(`reports`) is above 0 ends `held by a report: moyi reports — runbook §3`: an open member's report
+holds it, and it is decided there, never here.
 
 ## 1. Something is QUARANTINED (extreme violence, or nothing could moderate it)
 
 Not urgent: nobody but its author can see it. Look at the queue once a day while it is not empty.
 
-1. `moyi media quarantine list`.
+1. `moyi media quarantine list`. Skip every row marked `held by a report`: section 3 decides it, and
+   `release` refuses it (`REPORT_HELD`, recorded) while the report is open.
 2. To decide, you have to see it, **if its verdict is `QUARANTINED`** (never a `BLOCKED` row: section
    2). The photo is its author's and private; look only at the one you are deciding on. Get its display variant's key from the row
    (`SELECT storage_key FROM media_assets WHERE id = '<id>'`, then `v/<the part after in/>/display.webp`)
@@ -54,7 +57,8 @@ Not urgent: nobody but its author can see it. Look at the queue once a day while
 3. Decide:
    - **A false positive** (a film still, a cooking video, a costume, a painting):
      `moyi media quarantine release <id> "<why, in a few words>"`. The partner sees it at their next
-     read.
+     read. One you held by hand before moderation had looked at it is not passed by your release: it
+     goes back to moderation (`REMODERATED`).
    - **Real violence or gore:** `moyi media quarantine delete <id> "<why>"`. Its objects leave the
      storage within seconds. If it shows a crime against a person (not a film), treat it as section 3.
    - An unattached quarantined asset is deleted by the hourly reaper a day after it was made, as any
@@ -126,20 +130,28 @@ moyi reports show <reportId>           # the reporter's detail and what the repo
 
 A `MINOR_SEXUAL_CONTENT` row ends `DO NOT VIEW — runbook §2`, and so does `show`'s reason line.
 
-1. **Sexual content involving a minor** (`MINOR_SEXUAL_CONTENT`): do not open its photo or voice
-   note. **[legal: confirm** whether the report alone is ground enough to block and report, or a
-   review is required, in your jurisdiction**]**. Then:
-   - `moyi reports uphold <reportId> block "report <date>"`: everything the report holds is made
-     `BLOCKED` and held as evidence (`media_quarantine_block`), never released; then section 2 from
-     step 1.
-   - Or, if it is plainly not that (the detail says it is a mistake, the reporter wrote the wrong
-     reason): decide it as the next step does, under its real reason.
+1. **Sexual content involving a minor** (`MINOR_SEXUAL_CONTENT`, marked DO NOT VIEW). **You never
+   open its photo or voice note, at any step.** What you do:
+   1. `moyi reports show <reportId>` and read only the reporter's detail.
+   2. Unless the detail itself plainly says the reason was chosen by mistake (for example "this is me,
+      an adult, I did not want it shared"), block without viewing:
+      `moyi reports uphold <reportId> block "report <date>"`. Everything the report holds is made
+      `BLOCKED` and held as evidence, never released, even if its author deleted it meanwhile.
+   3. Then section 2 from step 1: note what the system holds (no image), report to the authorities,
+      preserve, and delete only as section 2 step 4 says.
+   4. If the detail does show the reason was wrong: `moyi reports reclassify <reportId> <reason> "<what
+      in the detail shows it>"` (recorded with the old and new reasons), then decide it under that
+      reason, from step 2 or 3 below. **`uphold … delete` refuses a minor report** until it is
+      reclassified: deleting would destroy what may be evidence.
+
+   **[legal: confirm** whether a member's report alone is ground enough to block and report without
+   anyone viewing it, or a review by someone qualified is required, in your jurisdiction**]**.
 2. **Non-consensual intimate imagery** (`NON_CONSENSUAL`; Q16: no classifier can judge consent):
    take the reporter's word. `moyi reports uphold <reportId> delete "NCII, <date>"`. The photo and
    voice note are deleted and purged within seconds. The author's own withdraw and erase (D5) remain
    theirs. Do not tell the author.
-3. **Violence or self-harm, harassment, anything else**: look at the photo as section 1 says (only a
-   row that is not marked DO NOT VIEW), read the detail, and decide:
+3. **Violence or self-harm, harassment, anything else** (never a DO NOT VIEW report: that is step 1):
+   look at the photo as section 1 says, read the detail, and decide:
    - not what was reported: `moyi reports dismiss <reportId> "<why>"`. What the report held back is
      given back exactly as it was: shown to the reporter again if it had passed moderation, or handed
      back to moderation if it had not been moderated yet. Unless another open report, or moderation
@@ -154,7 +166,12 @@ A `MINOR_SEXUAL_CONTENT` row ends `DO NOT VIEW — runbook §2`, and so does `sh
    recorded with your name and note in `entry_report_log`; what became of the media is in
    `media_moderation_log`. `uphold … delete` never deletes a `BLOCKED` asset: it says so
    (`BLOCKED_KEPT`), and that evidence goes only by section 2.
-5. The reporter is not told the decision (the route says a person will read it). The author is never
+5. **What a report holds is kept while it is open, whoever deletes it** (ADR-0053 decision 8a). The
+   author may delete or withdraw the entry, or edit the photo out and delete it; to them it is gone,
+   but its objects stay until you decide, and a report made after such an erasure still finds them.
+   Dismissing, or upholding with `delete`, lets the purge run; `block` keeps them as evidence. That
+   is a legal hold on a member's erased media: decide within the alarm's two days.
+6. The reporter is not told the decision (the route says a person will read it). The author is never
    contacted about a report.
 
 The functions are the database's (V38, V39: `entry_report_list`, `_read`, `_dismiss`, `_uphold`,

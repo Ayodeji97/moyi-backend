@@ -66,7 +66,7 @@ CREATE TABLE entry_report_log (
     note      text,
     at        timestamptz NOT NULL,
 
-    CONSTRAINT entry_report_log_action_check CHECK (action IN ('LISTED', 'READ', 'DISMISSED', 'UPHELD')),
+    CONSTRAINT entry_report_log_action_check CHECK (action IN ('LISTED', 'READ', 'RECLASSIFIED', 'DISMISSED', 'UPHELD')),
     CONSTRAINT entry_report_log_actor_check CHECK (char_length(actor) BETWEEN 1 AND 100),
     CONSTRAINT entry_report_log_note_check CHECK (note IS NULL OR char_length(note) <= 500),
     CONSTRAINT entry_report_log_report_check CHECK ((report_id IS NULL) = (action = 'LISTED'))
@@ -141,27 +141,66 @@ BEGIN
 END;
 $$;
 
+-- An open report's reason, changed by the operator, with the old and new
+-- reasons and why in the log (RECLASSIFIED). The one way a report of sexual
+-- content involving a minor can be upheld by anything but a block (review of
+-- #118, P2-c): the reporter chose the wrong reason, and their detail says so.
+-- Returns RECLASSIFIED, SAME_REASON or NOT_OPEN.
+CREATE FUNCTION entry_report_reclassify(p_report uuid, p_reason text, p_actor text, p_note text) RETURNS text
+    LANGUAGE plpgsql AS $$
+DECLARE
+    v_old text;
+BEGIN
+    SELECT reason INTO v_old FROM entry_reports WHERE id = p_report AND status = 'OPEN' FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN 'NOT_OPEN';
+    END IF;
+    IF v_old = p_reason THEN
+        RETURN 'SAME_REASON';
+    END IF;
+    -- The CHECK on `reason` refuses a name that is not one of the five.
+    UPDATE entry_reports SET reason = p_reason WHERE id = p_report;
+    INSERT INTO entry_report_log (id, report_id, action, actor, note, at)
+    VALUES (uuidv7(), p_report, 'RECLASSIFIED', p_actor, left(v_old || ' -> ' || p_reason || ': ' || p_note, 500), now());
+    RETURN 'RECLASSIFIED';
+END;
+$$;
+
 -- What was reported: closed, its detail emptied, and what it held back taken
 -- down (`media_report_takedown`): DELETE, or BLOCK for child sexual abuse
 -- material (held as evidence, then runbook §2). A report of words alone holds
 -- nothing, and its upholding takes nothing down (ADR-0053 decision 8). Returns
 -- each asset with what became of it; a report that is not open, nothing at
 -- all, and nothing is written.
+--
+-- **A MINOR_SEXUAL_CONTENT report is never upheld by DELETE** (review of
+-- #118, P2-c): deleting would destroy what may be evidence the law requires
+-- to be kept and reported (runbook §2). It is blocked, or first reclassified
+-- (above, logged) when the reporter's own detail shows the reason was wrong.
+-- Refused with the outcome RECLASSIFY_FIRST, and nothing is written.
 CREATE FUNCTION entry_report_uphold(p_report uuid, p_action text, p_actor text, p_note text)
     RETURNS TABLE (media_id uuid, outcome text)
     LANGUAGE plpgsql AS $$
+DECLARE
+    v_reason text;
 BEGIN
     IF p_action NOT IN ('DELETE', 'BLOCK') THEN
         RAISE EXCEPTION 'a report is upheld by DELETE or BLOCK, not %', p_action;
     END IF;
-    UPDATE entry_reports SET status = 'UPHELD', resolved_at = now(), detail = NULL
-    WHERE id = p_report AND status = 'OPEN';
+    SELECT r.reason INTO v_reason FROM entry_reports r WHERE r.id = p_report AND r.status = 'OPEN' FOR UPDATE;
     IF NOT FOUND THEN
         media_id := NULL;
         outcome := 'NOT_OPEN';
         RETURN NEXT;
         RETURN;
     END IF;
+    IF v_reason = 'MINOR_SEXUAL_CONTENT' AND p_action = 'DELETE' THEN
+        media_id := NULL;
+        outcome := 'RECLASSIFY_FIRST';
+        RETURN NEXT;
+        RETURN;
+    END IF;
+    UPDATE entry_reports SET status = 'UPHELD', resolved_at = now(), detail = NULL WHERE id = p_report;
     INSERT INTO entry_report_log (id, report_id, action, actor, note, at)
     VALUES (uuidv7(), p_report, 'UPHELD', p_actor, left(p_action || ': ' || p_note, 500), now());
     RETURN QUERY SELECT t.media_id, t.outcome FROM media_report_takedown(p_report, p_action, p_actor, p_note) t;

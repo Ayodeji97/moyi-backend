@@ -195,6 +195,39 @@ internal class ReportCommandsTest(
         }
     }
 
+    /** Review of #118, P2-c: a minor report is never upheld by delete; reclassified first, recorded, it may be. */
+    @Test
+    fun `a minor report is never upheld by delete until it is reclassified, and the reclassifying is recorded`() {
+        val (entry, photo) = revealedWithPhoto()
+        val report = report(entry, "MINOR_SEXUAL_CONTENT")
+
+        moyi("uphold", report.toString(), "delete", "trying").let {
+            it.code shouldBe 1
+            it.err shouldContain "never upheld by delete"
+        }
+        reportRow(report) shouldBe "OPEN|false|null"
+        assetStatus(photo) shouldBe "QUARANTINED"
+
+        moyi("reclassify", report.toString(), "NON_CONSENSUAL", "the detail says it is of the reporter, an adult").code shouldBe 0
+        moyi("uphold", report.toString(), "delete", "NCII").code shouldBe 0
+
+        assetStatus(photo) shouldBe "DELETED"
+        log(report) shouldContainExactly
+            listOf(
+                "RECLASSIFIED|op-fake-ada|MINOR_SEXUAL_CONTENT -> NON_CONSENSUAL: the detail says it is of the reporter, an adult",
+                "UPHELD|op-fake-ada|DELETE: NCII",
+            )
+        moyi("reclassify", report.toString(), "OTHER", "too late").code shouldBe 1
+    }
+
+    @Test
+    fun `show marks a priority report DO NOT VIEW`() {
+        val (entry) = revealedWithPhoto()
+        val report = report(entry, "MINOR_SEXUAL_CONTENT")
+
+        moyi("show", report.toString()).out shouldContain "reason:     MINOR_SEXUAL_CONTENT   DO NOT VIEW its media — runbook §2"
+    }
+
     @Test
     fun `a report of words alone is upheld with nothing to take down`() {
         val words = body(submit(bea, """{"text":"only words"}"""))["id"].asString()
