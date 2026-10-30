@@ -127,10 +127,12 @@
 # section (FR-100, ADR-0053): the reporter's 404s (unknown, locked, an outsider), 409 on their own
 # entry, 422s, the report and its replay, what each member is shown before and after, the
 # operator's list, show, dismiss and a priority report upheld by blocking, 429 on the eleventh, and
-# the detail in no log line. Last run on 2026-10-30, on feat/report-route (main e88944b), from a
-# jar of 3e8a78a, on a fresh database that applied 38 migrations to V39, against its own compose
-# project (moyi-report: Postgres 55454, Valkey 63814, MinIO 59028), the jar booted by hand (local
-# profile) and --attach: 1254 passed, 0 failed, 0 skipped, 33 sections. D3 last run
+# the detail in no log line; since the review of #118, delete refused on a minor report, and a
+# reported entry erased by its author whose photo stays in MinIO until the dismissal, then is purged.
+# Last run on 2026-10-30, after that review, on feat/report-route (main e88944b), from a jar of
+# 2c0e3bf, on a fresh database that applied 38 migrations to V39, against its own compose project
+# (moyi-report: Postgres 55454, Valkey 63814, MinIO 59028), the jar booted by hand (local profile)
+# and --attach: 1273 passed, 0 failed, 0 skipped, 33 sections. Before it, from 3e8a78a: 1254, 0, 0. D3 last run
 # on 2026-10-29, after main (d2429fc D2, 66032c0 D5) was merged in, from a jar of
 # that merge, on a fresh database that applied 34 migrations to V35, against its own
 # compose project (moyi-d3: Postgres 55443, Valkey 63803, MinIO 59006), the jar
