@@ -2881,3 +2881,43 @@ Wrong about: "read from the image production runs". The API's JVM flags came fro
          image left on this Mac, 3,000 classes fewer, and its metaspace cap sat at the API's
          measured use. A number copied from a machine must name the machine it was read on,
          and a test now holds the cap.
+
+## 2026-10-30 · Feature · The report route — what a hold takes away has to be given back exactly, and a foreign key that broke forty tests
+
+Expected: the route to be the work: a gate copied from the reaction's, an insert, and ADR-0051's
+         `hold` called for each photo; the operator's side a few `UPDATE`s; and the decision the
+         owner left open (hidden from the reporter at once, or not) to be the hard question.
+Reality: the hard question was the opposite one, what a dismissal gives back. V36's hold
+         overwrote the verdict, so a dismissed report would have passed unseen a photo
+         moderation had never reached; the hold now remembers what it took (`heldFrom`), and a
+         dismissal restores it or hands the asset back to moderation. Two reports of one entry
+         needed a hold each, and a report filed while another is dismissed needed both functions
+         to lock the asset first: written as a test that waits for the lock, red without it. The
+         owner's question answered itself once written down: in a bond of two the only person a
+         hold hides anything from is the reporter, who asked.
+Wrong about: a same-module foreign key being free. `media_report_holds → media_assets` broke
+         every test that truncates `media_assets` (forty, in two modules); the log tables have
+         none for this reason, and now neither has this one. And about a green rate-limit test:
+         run alone it passed; in the full build it shared a cached context whose Redis connection
+         was closed, the limiter failed open, and ten reports went through. It has its own context
+         now. And two of the mutation checks stayed green: one because its test compared zero
+         deliveries with zero subscriptions (now a subscription of its own), one because Gradle
+         reused a cached result for a script that is no input of the test task (`--rerun`).
+
+## 2026-10-30 · Review · The report route's review — a hold that did not hold, and a limiter that had stopped limiting
+
+Expected: the review to be about wording: the runbook's two answers for a minor report, the
+         state map's tombstone row. The design had a hold, a release, and tests red without each.
+Reality: the hold held nothing that mattered. It hid a photo from the reporter and left the
+         photo's author free to erase it, and the purge took its objects within seconds: the one
+         thing a report of child abuse material must keep was the easiest thing to lose. And a
+         report after a withdrawal found nothing, because the erasure had cleared the link it
+         searched by. Now an open report keeps the objects whoever deletes the asset (as evidence
+         is kept), a trigger remembers the entry an asset was last on, and the decision lets the
+         purge run. Two smaller holes were the same shape: a dismissal could give back the
+         operator's own hold, and the operator's release could undo a report's.
+Wrong about: what the full build's rate-limit failure meant. I gave the test a context of its own
+         and called it test isolation. It was a production defect: the limiter built its Redis
+         connection once, and a connection factory stopped and started (a lifecycle Spring's test
+         framework exercises, and production can) left it failing open for good. A green test
+         that needed a private context was the defect telling me where it was.

@@ -120,6 +120,21 @@ internal enum class Reacting {
     NEVER_SHOWN,
 }
 
+/** Whether a [Reader] may report one [Entry] to a person — [Entry.canBeReportedBy]'s answer, which has the reasons. */
+internal enum class Reporting {
+    /** The partner's entry, which the reader can read in full: reported, and its photo and voice note held back. */
+    IN_FULL,
+
+    /** The partner's entry, a tombstone to this reader: reported, with nothing left to hold back. */
+    ERASED,
+
+    /** The reader wrote it. */
+    OWN_ENTRY,
+
+    /** Nothing this reader was ever shown. To be answered exactly as an entry that does not exist. */
+    NEVER_SHOWN,
+}
+
 /**
  * Everything of an entry a reader who can — or once could — read it may
  * have: [Readability.FULL] or [Readability.TOMBSTONE]. [text] is `null`

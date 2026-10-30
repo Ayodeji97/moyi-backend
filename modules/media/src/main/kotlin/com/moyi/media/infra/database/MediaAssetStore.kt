@@ -208,6 +208,20 @@ internal class MediaAssetStore(
         ) == 1
 
     /**
+     * A member's report (ADR-0053): every asset attached to [entryId] that is
+     * ready or held back is held for [reportId], by V38's `media_report_hold`,
+     * which locks each row first and holds a ready one back as V36's
+     * `media_quarantine_hold` does, logged under [actor]. Returns how many the
+     * report holds. The function, so that the operator's release and takedown
+     * beside it agree with it on what a hold is.
+     */
+    fun holdForReport(
+        entryId: UUID,
+        reportId: UUID,
+        actor: String,
+    ): Int = checkNotNull(jdbc.queryForObject("SELECT media_report_hold(?, ?, ?)", Int::class.java, entryId, reportId, actor))
+
+    /**
      * An erasure (D5, spec D-9): every asset attached to [entryId] becomes
      * DELETED, detached, as of [at]. Keyed by the attachment, which is this
      * module's own record, and not by the ids the entry held: whatever is
@@ -253,6 +267,7 @@ internal class MediaAssetStore(
             WITH picked AS MATERIALIZED (
                 SELECT id FROM media_assets
                 WHERE attached_entry_id IS NULL
+                  AND NOT EXISTS (SELECT 1 FROM media_report_holds h WHERE h.media_id = media_assets.id)
                   AND ((status = 'PENDING_UPLOAD' AND expires_at < ?)
                        OR (status IN ('READY', 'FAILED', 'QUARANTINED') AND GREATEST(created_at, ready_at, detached_at) < ?))
                 ORDER BY created_at
@@ -298,6 +313,7 @@ internal class MediaAssetStore(
                   AND a.attached_entry_id IS NOT NULL
                   AND a.tier = 1
                   AND a.moderation_verdict = 'PASSED'
+                  AND NOT EXISTS (SELECT 1 FROM media_report_holds h WHERE h.media_id = a.id)
                   AND a.ready_at < ?
                 ORDER BY a.ready_at
                 LIMIT ?
@@ -378,7 +394,8 @@ internal class MediaAssetStore(
         const val SELECT =
             "SELECT id, owner_user_id, kind, storage_key, content_type, size_bytes, checksum, status, " +
                 "attached_entry_id, created_at, expires_at, variants::text AS variants, moderation_verdict, processing_attempts, tier, " +
-                "duration_ms, sensitive, evidence_held " +
+                "duration_ms, sensitive, evidence_held, " +
+                "EXISTS (SELECT 1 FROM media_report_holds h WHERE h.media_id = media_assets.id) AS report_held " +
                 "FROM media_assets"
 
         val JSON: JsonMapper = JsonMapper.builder().build()
@@ -407,6 +424,7 @@ internal class MediaAssetStore(
                     durationMs = rs.getInt("duration_ms").takeUnless { rs.wasNull() },
                     sensitive = rs.getBoolean("sensitive"),
                     evidenceHeld = rs.getBoolean("evidence_held"),
+                    reportHeld = rs.getBoolean("report_held"),
                 )
             }
 

@@ -775,6 +775,37 @@ class OpenApiContractTest(
         reaction.delete.parameters.map { it.name } shouldBe listOf("entryId")
     }
 
+    /** FR-100, ADR-0053. */
+    @Test
+    fun `a report is posted with a required key, one reason of the response's own set and an optional bounded detail`() {
+        val report = api.paths["/api/v1/entries/{entryId}/report"]!!
+        report.readOperationsMap().keys.map { it.name } shouldBe listOf("POST")
+        val post = report.post
+
+        // 409 is REPORT_ON_OWN_ENTRY and IDEMPOTENCY_KEY_IN_FLIGHT; 413 and 415 are the buffered idempotent body's.
+        post.operationId shouldBe "reportEntry"
+        post.responses.keys shouldContainExactlyInAnyOrder
+            listOf("201", "400", "401", "403", "404", "409", "413", "415", "422", "429", "500")
+        post.parameters.map { it.name } shouldBe listOf("entryId", IdempotencyInterceptor.HEADER)
+        post.parameters.first { it.name == IdempotencyInterceptor.HEADER }.required shouldBe true
+        post.responses["201"]!!.headers.keys shouldContain "Idempotency-Replayed"
+        post.description shouldContain "409 REPORT_ON_OWN_ENTRY"
+        post.description shouldContain "never told that a report was made"
+
+        // The request's reasons are the response's, which are the domain enum's: one set, read twice.
+        val told = api.components.schemas["ReportResponse"]!!
+        told.required shouldContainExactlyInAnyOrder listOf("id", "entryId", "reason")
+        val reasons = told.properties["reason"]!!.enum.map { it.toString() }
+        reasons shouldBe listOf("NON_CONSENSUAL", "MINOR_SEXUAL_CONTENT", "VIOLENCE_OR_SELF_HARM", "HARASSMENT", "OTHER")
+        val body = api.components.schemas["ReportRequest"]!!
+        body.properties.keys shouldBe setOf("reason", "detail")
+        body.required shouldBe listOf("reason")
+        val reason = body.properties["reason"]!!
+        (reason.types ?: setOf(reason.type)) shouldBe setOf("string")
+        reason.enum.map { it.toString() } shouldBe reasons
+        body.properties["detail"]!!.maxLength shouldBe 500
+    }
+
     @Test
     fun `an entry carries the reaction on it, one of the five or null and always sent, and nothing says when it was left`() {
         val full =

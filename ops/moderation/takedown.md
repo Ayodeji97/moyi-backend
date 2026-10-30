@@ -27,6 +27,7 @@ reaches the database through `docker exec -i moyi-postgres psql`; nothing else i
 | `QUARANTINED` | `EXTREME_VIOLENCE` | "processing", for ever | "not shared", with the photo | the operator: release or delete |
 | `QUARANTINED` | `UNMODERATABLE` (the moderator refused the bytes) | "processing" | "not shared", with the photo | the operator: release or delete |
 | `BLOCKED` | `KNOWN_IMAGE` (a hash list matched) or `CSAM_CLASSIFIER` | "processing" | "not shared", **without** the photo | nobody can release it. The operator deletes it, after reporting |
+| `QUARANTINED` | `REPORTED` (a member reported its entry, section 3) | "processing" | "not shared", with the photo | the operator: `moyi reports dismiss` or `uphold` |
 
 The partner is never told "removed" (Q10), and the author is never told why (Q10). Do not contact
 either member about a quarantine except as section 4 says.
@@ -39,13 +40,16 @@ question for the owner, with legal advice (ADR-0051, open question 2), and the A
 until it is answered.
 
 **In the list, the verdict comes first, and a `BLOCKED` row ends `DO NOT VIEW — runbook §2`.** Look
-only at `QUARANTINED` rows (section 1). Never open a `BLOCKED` one.
+only at `QUARANTINED` rows (section 1). Never open a `BLOCKED` one. A row whose last column
+(`reports`) is above 0 ends `held by a report: moyi reports — runbook §3`: an open member's report
+holds it, and it is decided there, never here.
 
 ## 1. Something is QUARANTINED (extreme violence, or nothing could moderate it)
 
 Not urgent: nobody but its author can see it. Look at the queue once a day while it is not empty.
 
-1. `moyi media quarantine list`.
+1. `moyi media quarantine list`. Skip every row marked `held by a report`: section 3 decides it, and
+   `release` refuses it (`REPORT_HELD`, recorded) while the report is open.
 2. To decide, you have to see it, **if its verdict is `QUARANTINED`** (never a `BLOCKED` row: section
    2). The photo is its author's and private; look only at the one you are deciding on. Get its display variant's key from the row
    (`SELECT storage_key FROM media_assets WHERE id = '<id>'`, then `v/<the part after in/>/display.webp`)
@@ -53,7 +57,8 @@ Not urgent: nobody but its author can see it. Look at the queue once a day while
 3. Decide:
    - **A false positive** (a film still, a cooking video, a costume, a painting):
      `moyi media quarantine release <id> "<why, in a few words>"`. The partner sees it at their next
-     read.
+     read. One you held by hand before moderation had looked at it is not passed by your release: it
+     goes back to moderation (`REMODERATED`).
    - **Real violence or gore:** `moyi media quarantine delete <id> "<why>"`. Its objects leave the
      storage within seconds. If it shows a crime against a person (not a film), treat it as section 3.
    - An unattached quarantined asset is deleted by the hourly reaper a day after it was made, as any
@@ -106,32 +111,73 @@ What you do:
    mirror's lock prevents deleting them early. Tell the authority that a copy exists in a locked
    backup and when it expires.
 
-## 3. A member reports a photo or voice note (doc 26:206)
+## 3. A member reports an entry, its photo or its voice note (FR-100, ADR-0053)
 
-**There is no report route yet** (FR-100; doc 26 §1, ADR-0036 question 5: "no report route exists
-yet — a later phase's"; owed, ADR-0051). Until there is, reports reach the support address. When one
-does:
+Members report through the app: `POST /entries/{entryId}/report`, one of five reasons, and an
+optional detail in their own words. The moment a report is made, the entry's photo and voice note are
+held back from the reporter (they see "processing"; the author sees "not shared", exactly as for
+anything moderation holds back, and is told nothing else). The entry's words stay visible. A report
+of sexual content involving a minor is held back the same way and marked for priority review; **the
+route never blocks**: you decide.
 
-1. Find the asset: the reporter names the day; the entry's `image_media_id` / `voice_media_id`
-   gives the id. Check the reporter is a member of that bond: a report about a bond you are not in
-   is not a report about this media.
-2. **Non-consensual or third-party intimate imagery** (Q16: no classifier can judge consent):
-   hold it back at once, then delete it:
-   `moyi media quarantine hold <id> "report: NCII, <date>"`, then
-   `moyi media quarantine delete <id> "report: NCII, <date>"`. `hold` takes a `READY` asset only
-   (one already held back needs none; go straight to `delete`), sets the verdict, its time and the
-   reason `REPORTED`, and records who and why. Tell the reporter it is gone, and nothing else. The
-   author's own withdraw/erase (D5) remains open to them.
-3. Child sexual abuse material: `moyi media quarantine block <id> "report: <date>"` first, then section
-   2 from step 1. `block` makes it `BLOCKED` and holds it as evidence, whether it is ready, held back,
-   or already deleted to its owner with its objects not yet purged; it says `GONE` if they are. From
-   then nothing can release it and nothing purges it (the database holds both, ADR-0051 decision 6),
-   and the media check fails, as it should, until the report is made and the operator deletes it.
+`ops/monitoring/media-check.sh` fails while a report has been open more than `REPORT_REVIEW_DAYS`
+(2 by default), and **at once** while a `MINOR_SEXUAL_CONTENT` report is open.
 
-   Do not write these as statements of your own: `hold` and `block` are the database's functions, so
-   they cannot drift from its constraints, and they are tested against a migrated database
-   (`MediaQuarantineCommandsTest`).
-4. Anything else: decide as section 1.
+```
+moyi reports list                      # open reports, priority first: id, reason, entry, held, detail?, when
+moyi reports show <reportId>           # the reporter's detail and what the report holds back (recorded)
+```
+
+A `MINOR_SEXUAL_CONTENT` row ends `DO NOT VIEW — runbook §2`, and so does `show`'s reason line.
+
+1. **Sexual content involving a minor** (`MINOR_SEXUAL_CONTENT`, marked DO NOT VIEW). **You never
+   open its photo or voice note, at any step.** What you do:
+   1. `moyi reports show <reportId>` and read only the reporter's detail.
+   2. Unless the detail itself plainly says the reason was chosen by mistake (for example "this is me,
+      an adult, I did not want it shared"), block without viewing:
+      `moyi reports uphold <reportId> block "report <date>"`. Everything the report holds is made
+      `BLOCKED` and held as evidence, never released, even if its author deleted it meanwhile.
+   3. Then section 2 from step 1: note what the system holds (no image), report to the authorities,
+      preserve, and delete only as section 2 step 4 says.
+   4. If the detail does show the reason was wrong: `moyi reports reclassify <reportId> <reason> "<what
+      in the detail shows it>"` (recorded with the old and new reasons), then decide it under that
+      reason, from step 2 or 3 below. **`uphold … delete` refuses a minor report** until it is
+      reclassified: deleting would destroy what may be evidence.
+
+   **[legal: confirm** whether a member's report alone is ground enough to block and report without
+   anyone viewing it, or a review by someone qualified is required, in your jurisdiction**]**.
+2. **Non-consensual intimate imagery** (`NON_CONSENSUAL`; Q16: no classifier can judge consent):
+   take the reporter's word. `moyi reports uphold <reportId> delete "NCII, <date>"`. The photo and
+   voice note are deleted and purged within seconds. The author's own withdraw and erase (D5) remain
+   theirs. Do not tell the author.
+3. **Violence or self-harm, harassment, anything else** (never a DO NOT VIEW report: that is step 1):
+   look at the photo as section 1 says, read the detail, and decide:
+   - not what was reported: `moyi reports dismiss <reportId> "<why>"`. What the report held back is
+     given back exactly as it was: shown to the reporter again if it had passed moderation, or handed
+     back to moderation if it had not been moderated yet. Unless another open report, or moderation
+     itself, holds it: then it stays held.
+   - what was reported: `moyi reports uphold <reportId> delete "<what was found>"`.
+   - a report about **words** (harassment, a threat): the report holds nothing back, and upholding it
+     deletes nothing; the words stay unless their author erases them. Reading an entry's words is
+     content access (doc 09: an admin's, with justification): read them only to decide a report that
+     names them, and say so in the note. There is no takedown of words in v1 (ADR-0053, question 3);
+     a threat to someone's safety is section 4's territory and the reporter's to take to the police.
+4. Every decision empties the detail the reporter wrote (it is needed only to decide) and is
+   recorded with your name and note in `entry_report_log`; what became of the media is in
+   `media_moderation_log`. `uphold … delete` never deletes a `BLOCKED` asset: it says so
+   (`BLOCKED_KEPT`), and that evidence goes only by section 2.
+5. **What a report holds is kept while it is open, whoever deletes it** (ADR-0053 decision 8a). The
+   author may delete or withdraw the entry, or edit the photo out and delete it; to them it is gone,
+   but its objects stay until you decide, and a report made after such an erasure still finds them.
+   Dismissing, or upholding with `delete`, lets the purge run; `block` keeps them as evidence. That
+   is a legal hold on a member's erased media: decide within the alarm's two days.
+6. The reporter is not told the decision (the route says a person will read it). The author is never
+   contacted about a report.
+
+The functions are the database's (V38, V39: `entry_report_list`, `_read`, `_dismiss`, `_uphold`,
+calling V36's `media_quarantine_*`), so the rules cannot drift from the constraints, and they are
+tested against a migrated database (`ReportCommandsTest`, `MediaReportHoldsTest`). `moyi media
+quarantine hold|block` remain for a report that reached you another way (the support address).
 
 ## 4. A law-enforcement request
 
@@ -157,6 +203,5 @@ does:
   number-independent interpersonal communication services on conditions: a DPIA, the least
   intrusive technology, reporting). See ADR-0051, open question 3.
 - BKA DSA-portal access, applied for before launch.
-- The report route (FR-100), so that section 3 starts from a queue rather than an email.
 - A known-CSAM hash list (ADR-0051 decision 3): until one is wired, `BLOCKED` can come only from a
   classifier, and Rekognition has none, so in practice nothing is blocked automatically.

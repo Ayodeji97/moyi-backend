@@ -186,6 +186,7 @@ class OpenApiConfiguration {
             documentSearch(api)
             documentOnThisDay(api)
             documentMilestones(api)
+            documentReports(api)
         }
 
     /**
@@ -505,6 +506,8 @@ class OpenApiConfiguration {
                 // and for both, 409 MEDIA_BUSY: the asset's row lock not had within lock_timeout.
                 "completeMediaUpload",
                 "deleteMedia",
+                // FR-100, ADR-0053: REPORT_ON_OWN_ENTRY, and IDEMPOTENCY_KEY_IN_FLIGHT.
+                "reportEntry",
             )
 
         /**
@@ -523,7 +526,7 @@ class OpenApiConfiguration {
          * [requireIdempotencyKey] exists at all: springdoc cannot read this
          * off the controller the way it reads an actual `@RequestHeader`.
          */
-        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry", "patchEntry", "completeMediaUpload")
+        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry", "patchEntry", "completeMediaUpload", "reportEntry")
 
         /**
          * The [IDEMPOTENT_OPERATIONS] declared `@Idempotent(required = false)`:
