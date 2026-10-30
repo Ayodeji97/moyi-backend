@@ -1509,7 +1509,7 @@
     "rule": "FR-100, ADR-0053",
     "evidence": "test",
     "evidenceRef": "MediaReportHoldsTest#an asset erased while a report holds it keeps its objects until the report is dismissed, then is purged",
-    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/PurgeMedia.kt#if (asset.reportHeld) {"
+    "codeRef": "modules/media/src/main/kotlin/com/moyi/media/service/PurgeMedia.kt#if (asset.keepsObjects) {"
   },
   {
     "id": "media-deleted-reported",

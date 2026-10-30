@@ -2903,3 +2903,21 @@ Wrong about: a same-module foreign key being free. `media_report_holds → media
          now. And two of the mutation checks stayed green: one because its test compared zero
          deliveries with zero subscriptions (now a subscription of its own), one because Gradle
          reused a cached result for a script that is no input of the test task (`--rerun`).
+
+## 2026-10-30 · Review · The report route's review — a hold that did not hold, and a limiter that had stopped limiting
+
+Expected: the review to be about wording: the runbook's two answers for a minor report, the
+         state map's tombstone row. The design had a hold, a release, and tests red without each.
+Reality: the hold held nothing that mattered. It hid a photo from the reporter and left the
+         photo's author free to erase it, and the purge took its objects within seconds: the one
+         thing a report of child abuse material must keep was the easiest thing to lose. And a
+         report after a withdrawal found nothing, because the erasure had cleared the link it
+         searched by. Now an open report keeps the objects whoever deletes the asset (as evidence
+         is kept), a trigger remembers the entry an asset was last on, and the decision lets the
+         purge run. Two smaller holes were the same shape: a dismissal could give back the
+         operator's own hold, and the operator's release could undo a report's.
+Wrong about: what the full build's rate-limit failure meant. I gave the test a context of its own
+         and called it test isolation. It was a production defect: the limiter built its Redis
+         connection once, and a connection factory stopped and started (a lifecycle Spring's test
+         framework exercises, and production can) left it failing open for good. A green test
+         that needed a private context was the defect telling me where it was.

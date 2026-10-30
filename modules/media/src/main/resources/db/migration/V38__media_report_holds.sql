@@ -35,8 +35,9 @@ CREATE INDEX media_report_holds_report_idx ON media_report_holds (report_id);
 -- an entry lets an asset go (an erasure, a withdrawal, an edit that replaces
 -- it), and a report of that entry must still find what it showed (review of
 -- #118, P1: a report after a withdrawal held nothing, and the operator could
--- not find the photo). Kept by a trigger, so no statement that attaches or
--- detaches can forget it; never cleared.
+-- not find the photo). Set by a trigger whenever an asset is attached, so no
+-- statement that attaches can forget it, and left alone when it is detached:
+-- never cleared. Assets attached before this migration are filled in here.
 ALTER TABLE media_assets ADD COLUMN last_entry_id uuid;
 UPDATE media_assets SET last_entry_id = attached_entry_id WHERE attached_entry_id IS NOT NULL;
 
@@ -45,8 +46,6 @@ CREATE FUNCTION media_assets_remember_entry() RETURNS trigger
 BEGIN
     IF NEW.attached_entry_id IS NOT NULL THEN
         NEW.last_entry_id := NEW.attached_entry_id;
-    ELSIF TG_OP = 'UPDATE' AND OLD.attached_entry_id IS NOT NULL THEN
-        NEW.last_entry_id := OLD.attached_entry_id;
     END IF;
     RETURN NEW;
 END;
