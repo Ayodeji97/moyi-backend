@@ -2881,3 +2881,25 @@ Wrong about: "read from the image production runs". The API's JVM flags came fro
          image left on this Mac, 3,000 classes fewer, and its metaspace cap sat at the API's
          measured use. A number copied from a machine must name the machine it was read on,
          and a test now holds the cap.
+
+## 2026-10-30 · Feature · The report route — what a hold takes away has to be given back exactly, and a foreign key that broke forty tests
+
+Expected: the route to be the work: a gate copied from the reaction's, an insert, and ADR-0051's
+         `hold` called for each photo; the operator's side a few `UPDATE`s; and the decision the
+         owner left open (hidden from the reporter at once, or not) to be the hard question.
+Reality: the hard question was the opposite one, what a dismissal gives back. V36's hold
+         overwrote the verdict, so a dismissed report would have passed unseen a photo
+         moderation had never reached; the hold now remembers what it took (`heldFrom`), and a
+         dismissal restores it or hands the asset back to moderation. Two reports of one entry
+         needed a hold each, and a report filed while another is dismissed needed both functions
+         to lock the asset first: written as a test that waits for the lock, red without it. The
+         owner's question answered itself once written down: in a bond of two the only person a
+         hold hides anything from is the reporter, who asked.
+Wrong about: a same-module foreign key being free. `media_report_holds → media_assets` broke
+         every test that truncates `media_assets` (forty, in two modules); the log tables have
+         none for this reason, and now neither has this one. And about a green rate-limit test:
+         run alone it passed; in the full build it shared a cached context whose Redis connection
+         was closed, the limiter failed open, and ten reports went through. It has its own context
+         now. And two of the mutation checks stayed green: one because its test compared zero
+         deliveries with zero subscriptions (now a subscription of its own), one because Gradle
+         reused a cached result for a script that is no input of the test task (`--rerun`).

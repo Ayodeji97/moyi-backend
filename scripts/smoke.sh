@@ -2920,13 +2920,13 @@ if [ "$PSQL_OK" = 1 ]; then
     && pass "the operator dismisses the report" || fail "the operator dismisses the report" "$RP_OUT"
   is "after the dismissal, the reporter is shown the photo and the voice note READY again" "$(rp_shown "$RP_B" partnerEntry)" "READY True READY True"
   is "reports: …and the author READY" "$(rp_shown "$RP_A" myEntry)" "READY True READY True"
-  db_is "reports: …the detail is gone with the decision" "$(sql "SELECT status || '|' || (detail IS NULL) FROM entry_reports WHERE id = '$RP_REPORT'")" "DISMISSED|t"
-  db_is "reports: …and the moderation verdict is the one the photo had" "$(sql "SELECT moderation_verdict || '|' || sensitive FROM media_assets WHERE id = '$RP_PHOTO'")" "PASSED|f"
+  db_is "reports: …the detail is gone with the decision" "$(sql "SELECT status || '|' || (detail IS NULL) FROM entry_reports WHERE id = '$RP_REPORT'")" "DISMISSED|true"
+  db_is "reports: …and the moderation verdict is the one the photo had" "$(sql "SELECT moderation_verdict || '|' || sensitive FROM media_assets WHERE id = '$RP_PHOTO'")" "PASSED|false"
 
   expect "a report of sexual content involving a minor is 201" 201 '"reason":"MINOR_SEXUAL_CONTENT"' -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"MINOR_SEXUAL_CONTENT"}'
   RP_MINOR="$(printf '%s' "$LAST_BODY" | jget id)"
   db_is "reports: …it holds the photo back and does not block it: a person decides (Q16)" \
-    "$(sql "SELECT status || '|' || moderation_verdict || '|' || evidence_held FROM media_assets WHERE id = '$RP_PHOTO'")" "QUARANTINED|QUARANTINED|f"
+    "$(sql "SELECT status || '|' || moderation_verdict || '|' || evidence_held FROM media_assets WHERE id = '$RP_PHOTO'")" "QUARANTINED|QUARANTINED|false"
   RP_LIST="$(reports list 2>&1)"
   if printf '%s\n' "$RP_LIST" | sed -n 2p | grep -q "^$RP_MINOR"$'\t'"MINOR_SEXUAL_CONTENT.*DO NOT VIEW — runbook §2$"; then
     pass "reports: …and it is first in the operator's list, marked DO NOT VIEW"
@@ -2934,7 +2934,7 @@ if [ "$PSQL_OK" = 1 ]; then
   RP_OUT="$(reports uphold "$RP_MINOR" block "smoke: FAKE-SMOKE-0002" 2>&1)" \
     && pass "the operator upholds it by blocking" || fail "the operator upholds it by blocking" "$RP_OUT"
   db_is "reports: …the photo is BLOCKED and held as evidence" \
-    "$(sql "SELECT status || '|' || moderation_verdict || '|' || evidence_held FROM media_assets WHERE id = '$RP_PHOTO'")" "QUARANTINED|BLOCKED|t"
+    "$(sql "SELECT status || '|' || moderation_verdict || '|' || evidence_held FROM media_assets WHERE id = '$RP_PHOTO'")" "QUARANTINED|BLOCKED|true"
   is "reports: …the author is shown both NOT_SHARED, with no URL: both are blocked" "$(rp_shown "$RP_A" myEntry)" "NOT_SHARED False NOT_SHARED False"
   # Not left for the next run's media check: both are let go as the runbook's §2 lets them go, after "the report".
   for id in "$RP_PHOTO" "$RP_VOICE"; do quarantine delete "$id" "smoke: reported, ref FAKE-SMOKE-0002" >/dev/null 2>&1 || true; done

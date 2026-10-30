@@ -48,6 +48,8 @@ internal class MediaReportHoldsTest(
     @AfterEach
     fun clear() {
         jdbc.execute("TRUNCATE TABLE media_report_holds, media_assets, media_moderation_log, outbox_deliveries, outbox_events")
+        jdbc.update("DELETE FROM outbox_subscriptions WHERE consumer_id = ?", READY_CONSUMER)
+        jdbc.update("DELETE FROM outbox_consumers WHERE consumer_id = ?", READY_CONSUMER)
     }
 
     @Test
@@ -95,6 +97,13 @@ internal class MediaReportHoldsTest(
     fun `a dismissal hands a photo that had no verdict back to moderation, not to the partner`() {
         val photo = rows.insert(owner = ada, createdAt = clock.instant(), attachedTo = entry, verdict = null)
         hold(REPORT)
+        // This context moderates nothing, so nothing subscribes to MediaReady: a consumer of the test's own does, and
+        // is removed again, so that the delivery the release must write has somebody to be written for.
+        jdbc.update("INSERT INTO outbox_consumers (consumer_id, registered_at) VALUES (?, now())", READY_CONSUMER)
+        jdbc.update(
+            "INSERT INTO outbox_subscriptions (consumer_id, event_type, subscribed_at) VALUES (?, 'MediaReady', now())",
+            READY_CONSUMER,
+        )
 
         release(REPORT) shouldBe 1
 
@@ -112,8 +121,8 @@ internal class MediaReportHoldsTest(
                 UUID::class.java,
                 photo,
             )
-        jdbc.queryForObject("SELECT count(*) FROM outbox_deliveries WHERE event_id = ?", Int::class.java, event) shouldBe
-            jdbc.queryForObject("SELECT count(*) FROM outbox_subscriptions WHERE event_type = 'MediaReady'", Int::class.java)
+        jdbc.queryForList("SELECT consumer_id FROM outbox_deliveries WHERE event_id = ?", String::class.java, event) shouldBe
+            listOf(READY_CONSUMER)
     }
 
     @Test
@@ -304,5 +313,8 @@ internal class MediaReportHoldsTest(
     private companion object {
         val REPORT: UUID = UUID.fromString("0f0f0f0f-0000-4000-8000-00000000fa01")
         val OTHER_REPORT: UUID = UUID.fromString("0f0f0f0f-0000-4000-8000-00000000fa02")
+
+        /** A consumer of this test's own, subscribed to MediaReady for one test and removed after it. */
+        const val READY_CONSUMER = "test.report-ready"
     }
 }
