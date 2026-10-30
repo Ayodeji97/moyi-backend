@@ -55,6 +55,12 @@
 #                                            Your partner IS shown it, on that entry. Not on your own
 #                                            entry, and not once the bond has ended
 #   moyi unreact <entryId>                   take it back; also after the bond has ended
+#   moyi report <entryId> <reason> [-]       report your partner's entry, with its photo and voice note, to a
+#                                            person: NON_CONSENSUAL, MINOR_SEXUAL_CONTENT, VIOLENCE_OR_SELF_HARM,
+#                                            HARASSMENT or OTHER. With -, what the reviewer should know is read
+#                                            from stdin (at most 500 characters). From then its photo and voice
+#                                            note are held back from you until a person decides. Your partner is
+#                                            not told
 #   moyi notifications [<kind>=on|off …]     which kinds of push you want in the bond in use: with nothing,
 #                                            shows them; with e.g. onThisDay=on reminder=off, sets those
 #                                            and leaves the rest. The kinds are the server's: reminder,
@@ -80,6 +86,19 @@
 #   moyi media quarantine block <mediaId> "<note>"
 #                                            a member reported child sexual abuse material: block it, held
 #                                            as evidence, never released (§3, then §2)
+#
+# And the queue of members' reports (FR-100, ADR-0053), the same way, recorded in entry_report_log:
+#
+#   moyi reports list                        the open reports, priority first: id, reason, entry, how many
+#                                            photos and voice notes each holds back, whether it has a
+#                                            detail, when. A MINOR_SEXUAL_CONTENT row is marked DO NOT VIEW
+#   moyi reports show <reportId>             one report: the reporter's detail and what it holds back
+#                                            (the look is recorded)
+#   moyi reports dismiss <reportId> "<note>" not what was reported: its photo and voice note are given back
+#                                            as they were, unless another report or moderation holds them
+#   moyi reports uphold <reportId> delete|block "<note>"
+#                                            what was reported: delete what it holds back, or block it as
+#                                            child sexual abuse material (held as evidence; runbook §2)
 #
 # The session (two tokens and the bond in use) is kept in
 # ~/.config/moyi/<profile>.json, readable by you alone. The password is asked
@@ -208,7 +227,7 @@ call() {
     [ -z "$token" ] || printf 'Authorization: Bearer %s\n' "$token"
     [ -z "$body" ] || printf 'Content-Type: application/json\n'
     # A write carries a key (doc 06 §1). A new one each time this sends: nothing here resends a write that may have landed.
-    if [ "$method" = POST ] && [[ "$path" == */entries ]]; then
+    if [ "$method" = POST ] && [[ "$path" == */entries || "$path" == */report ]]; then
       printf 'Idempotency-Key: %s\n' "$(python3 -c 'import uuid; print(uuid.uuid4())')"
     fi
   } > "$TMP/headers"
@@ -278,6 +297,27 @@ ask_new_password() {
   IFS= read -r -s -p "the same again: " q; echo >&2
   [ "$p" = "$q" ] || die "the two passwords differ; nothing was sent"
   printf '%s' "$p"
+}
+
+# The operator's way in (`moyi media quarantine`, `moyi reports`): not a member's, and the one that talks to the
+# database rather than the API. There is no admin console before Phase 5.
+ops_init() {
+  OPERATOR="${MOYI_OPERATOR:-}"
+  [[ "$OPERATOR" =~ ^[A-Za-z0-9._@-]{1,64}$ ]] ||
+    die "set MOYI_OPERATOR to your name (letters, digits, . _ @ -): every look at the queue and every decision is recorded under it"
+  # How to reach psql: on the server, the Postgres accessory (the default); elsewhere, any psql command line,
+  # e.g. MOYI_OPS_PSQL="psql -h localhost -p 55449 -U moyi -d moyi" with the password in PGPASSWORD or ~/.pgpass.
+  read -r -a OPS_PSQL <<< "${MOYI_OPS_PSQL:-docker exec -i moyi-postgres psql -U moyi -d moyi}"
+}
+
+# ops_sql <sql> [name=value …] — runs one statement; values reach it as psql variables (:'name'), quoted by psql,
+# never spliced into the SQL here. Every rule (what may be released, what deleting publishes, what a report holds)
+# is the database's: the functions of V36, V38 and V39. This script only names which one to run.
+ops_sql() {
+  local statement="$1"; shift
+  local -a vars=()
+  for pair in "$@"; do vars+=(-v "$pair"); done
+  printf '%s\n' "$statement" | "${OPS_PSQL[@]}" -X -q -At -F $'\t' -v ON_ERROR_STOP=1 "${vars[@]}"
 }
 
 cmd="${1:-help}"; shift || true
@@ -469,6 +509,90 @@ case "$cmd" in
     authed DELETE "/entries/$1/reaction"; show 204
     echo "Taken back."
     ;;
+  report)
+    usage="usage: moyi report <entryId> <reason> [-]   (NON_CONSENSUAL, MINOR_SEXUAL_CONTENT, VIOLENCE_OR_SELF_HARM, HARASSMENT or OTHER; - reads a detail from stdin)"
+    [ $# -eq 2 ] || { [ $# -eq 3 ] && [ "$3" = - ]; } || die "$usage"
+    need_uuid "$1" "$1"
+    # The reason is sent as it was typed: which names are reasons is the server's to say, and it says 422. The detail
+    # is read from stdin, never an argument: it is what you tell a person about your partner.
+    if [ $# -eq 3 ]; then
+      detail="$(cat)"
+      authed POST "/entries/$1/report" "$(json_of reason "$2" detail "$detail")"
+    else
+      authed POST "/entries/$1/report" "$(json_of reason "$2")"
+    fi
+    show 201
+    echo "Reported. A person will read it. Your partner is not told. Its photo and voice note are held back from you until then."
+    ;;
+  reports)
+    # The queue of members' reports (FR-100, ADR-0053): the operator's, through the database, as the quarantine is.
+    usage="usage: moyi reports list | show <reportId> | dismiss <reportId> \"<note>\" | uphold <reportId> delete|block \"<note>\""
+    action="${1:-}"; shift || true
+    ops_init
+    case "$action" in
+      list)
+        [ $# -eq 0 ] || die "$usage"
+        out="$(ops_sql "SELECT * FROM entry_report_list(:'actor');" "actor=$OPERATOR")" || die "the database refused (see above)"
+        if [ -z "$out" ]; then echo "No report is open."; exit 0; fi
+        # The function's columns after the first, in its order. A priority row (sexual content involving a minor) is
+        # never viewed (ops/moderation/takedown.md §2), and says so; it comes first.
+        printf 'reportId\treason\tentryId\theld\tdetail\treceivedAt\n'
+        printf '%s\n' "$out" | awk -F '\t' 'BEGIN { OFS = "\t" } { p = $1; $1 = ""; sub(/^\t/, ""); if (p == "t") print $0, "DO NOT VIEW — runbook §2"; else print $0 }'
+        ;;
+      show)
+        [ $# -eq 1 ] || die "$usage"
+        need_uuid reportId "$1"
+        # The detail as a JSON string, so that what the reporter typed (a tab, a new line) cannot break a row here.
+        out="$(ops_sql "SELECT report_id, reason, status, entry_id, bond_id, received_at, coalesce(to_json(detail)::text, '-'),
+                               media_id, media_kind, media_status, media_verdict
+                        FROM entry_report_read(:'report'::uuid, :'actor');" "report=$1" "actor=$OPERATOR")" ||
+          die "the database refused (see above)"
+        [ -n "$out" ] || die "that id names no report"
+        printf '%s\n' "$out" | awk -F '\t' '
+          NR == 1 {
+            print "report:     " $1; print "reason:     " $2 ($2 == "MINOR_SEXUAL_CONTENT" ? "   DO NOT VIEW its media — runbook §2" : "")
+            print "status:     " $3; print "entry:      " $4; print "bond:       " $5; print "received:   " $6
+            print "detail:     " $7; print "holds back:"
+          }
+          $8 != "" { held++; print "  " $9 "\t" $8 "\t" $10 "\t" $11 }
+          END { if (held == 0) print "  nothing" }'
+        ;;
+      dismiss)
+        [ $# -eq 2 ] || die "$usage"
+        need_uuid reportId "$1"
+        [ -n "$2" ] && [ "${#2}" -le 400 ] || die "a note is required (at most 400 characters): why it is not what was reported"
+        result="$(ops_sql "SELECT entry_report_dismiss(:'report'::uuid, :'actor', :'note');" "report=$1" "actor=$OPERATOR" "note=$2")" ||
+          die "the database refused (see above)"
+        case "$result" in
+          DISMISSED) echo "Dismissed: what it held back is shown again, unless another report or moderation holds it." ;;
+          NOT_OPEN)  die "that id names no open report (never made, or already decided)" ;;
+          *)         die "unexpected answer from the database: $result" ;;
+        esac
+        ;;
+      uphold)
+        [ $# -eq 3 ] || die "$usage"
+        need_uuid reportId "$1"
+        case "$2" in delete) takedown=DELETE ;; block) takedown=BLOCK ;; *) die "$usage" ;; esac
+        [ -n "$3" ] && [ "${#3}" -le 400 ] || die "a note is required (at most 400 characters): what was found, and for a block, the date"
+        out="$(ops_sql "SELECT media_id, outcome FROM entry_report_uphold(:'report'::uuid, :'takedown', :'actor', :'note');" \
+                 "report=$1" "takedown=$takedown" "actor=$OPERATOR" "note=$3")" || die "the database refused (see above)"
+        [ "$out" != $'\tNOT_OPEN' ] || die "that id names no open report (never made, or already decided)"
+        echo "Upheld."
+        [ -n "$out" ] || { echo "It held nothing back: there was nothing to take down."; exit 0; }
+        printf '%s\n' "$out" | while IFS=$'\t' read -r media outcome; do
+          case "$outcome" in
+            DELETED)         echo "  $media: deleted; its objects leave the storage within seconds." ;;
+            BLOCKED)         echo "  $media: blocked and held as evidence. Follow ops/moderation/takedown.md §2 now." ;;
+            ALREADY_BLOCKED) echo "  $media: already blocked and held as evidence. Follow ops/moderation/takedown.md §2." ;;
+            BLOCKED_KEPT)    echo "  $media: blocked, so kept as evidence, not deleted. Follow ops/moderation/takedown.md §2." ;;
+            GONE|NOT_QUARANTINED) echo "  $media: already gone." ;;
+            *)               echo "  $media: $outcome" ;;
+          esac
+        done
+        ;;
+      *) die "$usage" ;;
+    esac
+    ;;
   notifications)
     signed_in; BOND="$(bond)"
     if [ $# -eq 0 ]; then
@@ -501,21 +625,7 @@ print(json.dumps({"categories": {k: v == "on" for k, v in (x.split("=") for x in
     [ "${1:-}" = quarantine ] || die "usage: moyi media quarantine list | release|delete|hold|block <mediaId> \"<note>\""
     shift
     action="${1:-}"; shift || true
-    OPERATOR="${MOYI_OPERATOR:-}"
-    [[ "$OPERATOR" =~ ^[A-Za-z0-9._@-]{1,64}$ ]] ||
-      die "set MOYI_OPERATOR to your name (letters, digits, . _ @ -): every look at the queue and every decision is recorded under it"
-    # How to reach psql: on the server, the Postgres accessory (the default); elsewhere, any psql command line,
-    # e.g. MOYI_OPS_PSQL="psql -h localhost -p 55449 -U moyi -d moyi" with the password in PGPASSWORD or ~/.pgpass.
-    read -r -a OPS_PSQL <<< "${MOYI_OPS_PSQL:-docker exec -i moyi-postgres psql -U moyi -d moyi}"
-    # ops_sql <sql> [name=value …] — runs one statement; values reach it as psql variables (:'name'), quoted by psql,
-    # never spliced into the SQL here. Every rule (what may be released, what deleting publishes) is the database's:
-    # the functions of V36. This script only names which one to run.
-    ops_sql() {
-      local statement="$1"; shift
-      local -a vars=()
-      for pair in "$@"; do vars+=(-v "$pair"); done
-      printf '%s\n' "$statement" | "${OPS_PSQL[@]}" -X -q -At -F $'\t' -v ON_ERROR_STOP=1 "${vars[@]}"
-    }
+    ops_init
     case "$action" in
       list)
         [ $# -eq 0 ] || die "usage: moyi media quarantine list"

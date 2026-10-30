@@ -208,6 +208,20 @@ internal class MediaAssetStore(
         ) == 1
 
     /**
+     * A member's report (ADR-0053): every asset attached to [entryId] that is
+     * ready or held back is held for [reportId], by V38's `media_report_hold`,
+     * which locks each row first and holds a ready one back as V36's
+     * `media_quarantine_hold` does, logged under [actor]. Returns how many the
+     * report holds. The function, so that the operator's release and takedown
+     * beside it agree with it on what a hold is.
+     */
+    fun holdForReport(
+        entryId: UUID,
+        reportId: UUID,
+        actor: String,
+    ): Int = checkNotNull(jdbc.queryForObject("SELECT media_report_hold(?, ?, ?)", Int::class.java, entryId, reportId, actor))
+
+    /**
      * An erasure (D5, spec D-9): every asset attached to [entryId] becomes
      * DELETED, detached, as of [at]. Keyed by the attachment, which is this
      * module's own record, and not by the ids the entry held: whatever is

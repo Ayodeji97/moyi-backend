@@ -34,9 +34,10 @@ stateDiagram-v2
     media__READY --> media__READY_ATTACHED: you - write today's entry
     media__READY_ATTACHED --> media__DELETED: system - entry it is on is erased deleted by its author, or taken back by a withdrawal
     media__READY --> media__QUARANTINED: system - 3 actions
-    media__QUARANTINED --> media__DELETED: you - delete one of your own photos or voice notes, system - 3 actions
+    media__QUARANTINED --> media__DELETED: you - delete one of your own photos or voice notes, system - 4 actions
     media__QUARANTINED --> media__READY: system - operator releases it (moyi media quarantine release)
-    media__READY_ATTACHED --> media__QUARANTINED: system - 2 actions
+    media__READY_ATTACHED --> media__QUARANTINED: system - 2 actions, partner - reports the entry it is on (POST /entries/ entryId /report)
+    media__QUARANTINED --> media__READY_ATTACHED: system - operator dismisses the report (moyi reports dismiss)
 ```
 
 ### Every action in every state
@@ -132,3 +133,9 @@ stateDiagram-v2
 | `READY` | the operator blocks it on a member's report (moyi media quarantine block) | system | a member reported child sexual abuse material | `QUARANTINED` | A member reported child sexual abuse material. The operator's moyi media quarantine block: BLOCKED and held as evidence (never released, never purged until the operator's delete after the report), QUARANTINED; the media check alarms until that is done. | test |
 | `READY_ATTACHED` | the operator blocks it on a member's report (moyi media quarantine block) | system | a member reported child sexual abuse material | `QUARANTINED` | A member reported child sexual abuse material. The operator's moyi media quarantine block: BLOCKED and held as evidence (never released, never purged until the operator's delete after the report), QUARANTINED; the media check alarms until that is done. | test |
 | `QUARANTINED` | the operator blocks it on a member's report (moyi media quarantine block) | system | a member reported child sexual abuse material | `QUARANTINED` | A member reported child sexual abuse material. The operator's moyi media quarantine block: BLOCKED and held as evidence (never released, never purged until the operator's delete after the report), QUARANTINED; the media check alarms until that is done. | test |
+| `READY_ATTACHED` | your partner reports the entry it is on (POST /entries/{entryId}/report) | partner |  | `QUARANTINED` | Held back for the report, by ADR-0051's hold (reason REPORTED), remembering what it was held from: your partner is shown it PROCESSING, you NOT_SHARED with your URL, and nothing tells you a report was made. Never blocked by the report, whatever its reason: a person decides. | test |
+| `QUARANTINED` | your partner reports the entry it is on (POST /entries/{entryId}/report) | partner |  | `QUARANTINED` | Already held back (by moderation, the operator or another report): only recorded as held by this report too, so nothing another decision does lets it go while this one is open. | test |
+| `QUARANTINED` | the operator dismisses the report (moyi reports dismiss) | system | held back by this report alone, and it had passed moderation | `READY_ATTACHED` | Given back exactly as it was: READY, PASSED, its verdict's time and sensitive flag unchanged; your partner is shown it again. One that had no verdict yet goes back to moderation instead (READY with none, and a new MediaReady). | test |
+| `QUARANTINED` | the operator dismisses the report (moyi reports dismiss) | system | another open report, or moderation itself, holds it | `QUARANTINED` | Stays held back: a report never lets go of what another report or moderation holds. | test |
+| `QUARANTINED` | the operator upholds the report (moyi reports uphold delete\|block) | system | uphold delete, and it is not blocked | `DELETED` | Deleted by the operator's delete, and its objects purged within seconds; gone to both of you. | test |
+| `QUARANTINED` | the operator upholds the report (moyi reports uphold delete\|block) | system | uphold block; or uphold delete of an asset already blocked | `QUARANTINED` | BLOCKED and held as evidence, never released; you are shown it NOT_SHARED with no URL. An upheld delete never takes a blocked asset's evidence: that goes only by the takedown runbook's §2. | test |

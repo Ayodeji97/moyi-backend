@@ -86,7 +86,7 @@ internal class EntryTextConstraintValidator : ConstraintValidator<ValidEntryText
  * Validator interpolates both in a template, so a domain message that ever
  * contained one would otherwise become an expression.
  */
-private inline fun validate(
+internal inline fun validate(
     context: ConstraintValidatorContext,
     construct: () -> Unit,
 ): Boolean =

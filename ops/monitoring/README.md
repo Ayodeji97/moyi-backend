@@ -78,3 +78,9 @@ media worker runs a moderator; then add it:
 ```
 ssh moyi 'echo MEDIA_MODERATION_ON=1 >> /etc/moyi-monitoring/heartbeats.env'
 ```
+
+Since the report route (ADR-0053) it needs V38 and V39 too, and it also fails while a member's report
+has been open more than `REPORT_REVIEW_DAYS` (2 by default), and at once while a report of sexual
+content involving a minor is open (the priority review; `ops/moderation/takedown.md` §3). What a
+report holds back is counted there, not as held back for review above. Install it after the deploy
+that carries V39: before it, the check cannot read `entry_reports` and fails, loudly.

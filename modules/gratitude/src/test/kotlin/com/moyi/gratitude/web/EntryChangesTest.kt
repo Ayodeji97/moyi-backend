@@ -178,7 +178,8 @@ internal class EntryChangesTest(
                         info.methodsCondition.methods.map { "${it.name} $path" }
                     }
                 }.toSet()
-        // The two here, and the two each that `FavouritesTest` and `ReactionsTest` compare the same way (and against this one's delete).
+        // The two here, and the two each that `FavouritesTest` and `ReactionsTest` compare the same way (and against this one's delete),
+        // and the report, which `ReportsTest` compares for a locked entry, a stranger, an unknown id and a value that is not one.
         discovered shouldBe
             setOf(
                 "PATCH /api/v1/entries/{entryId}",
@@ -187,6 +188,7 @@ internal class EntryChangesTest(
                 "DELETE /api/v1/entries/{entryId}/favourite",
                 "PUT /api/v1/entries/{entryId}/reaction",
                 "DELETE /api/v1/entries/{entryId}/reaction",
+                "POST /api/v1/entries/{entryId}/report",
             )
     }
 

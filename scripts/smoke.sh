@@ -2840,6 +2840,120 @@ if grep -q "${MO_KNOWN_KEY:-in/none}" "$MOYI_LOG"; then fail "moderation: no obj
 rm -rf "$MOD_DIR"
 flush_buckets
 
+echo; echo "reports — a member reports the partner's entry to a person, and its media is held back from them (FR-100, ADR-0053)"
+# The author uploads a black square (the stand-in passes it) and a voice note, puts both on an entry, and the
+# reporter, once the day has revealed, reports it. What each of the two is then shown is ADR-0051's view of
+# anything held back; the operator's queue is scripts/moyi reports, against this run's database.
+RP_DIR="$(mktemp -d)"
+vips black "$RP_DIR/black.jpg" 64 48 --bands 3
+python3 - "$RP_DIR/note.wav" <<'PY'
+import math, struct, sys
+rate, samples = 8000, 16000
+pcm = b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 330 * i / rate))) for i in range(samples))
+header = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+open(sys.argv[1], "wb").write(header + b"data" + struct.pack("<I", len(pcm)) + pcm)
+PY
+# The reporter's words: plainly a test's, and looked for in the log at the end.
+RP_DETAIL="smoke-fake-report-detail-$RANDOM"
+# reports <args…> — the operator's command, as the operator runs it, against this run's database.
+reports() {
+  MOYI_OPERATOR=smoke-operator MOYI_OPS_PSQL="docker compose exec -T postgres psql -U moyi -d $MOYI_DB" \
+    scripts/moyi reports "$@"
+}
+# rp_shown <access> <myEntry|partnerEntry> — the entry's photo and voice note as that member is shown them today:
+# "<image status> <image url present> <voice status> <voice url present>".
+rp_shown() {
+  curl -s "$API/bonds/$RP_BOND/today" -H "Authorization: Bearer $1" | python3 -c "
+import json, sys
+e = json.load(sys.stdin)['$2']
+print(e['image']['status'], e['image']['url'] is not None, e['voice']['status'], e['voice']['url'] is not None)"
+}
+verified_account "reported" "203.0.113.180"; RP_A="$ACCOUNT_ACCESS"
+verified_account "reporter" "203.0.113.181"; RP_B="$ACCOUNT_ACCESS"
+verified_account "outsider-r" "203.0.113.182"; RP_O="$ACCOUNT_ACCESS"
+upload_photo "$RP_A" "$RP_DIR/black.jpg" image/jpeg; RP_PHOTO="$PHOTO_ID"
+upload_photo "$RP_A" "$RP_DIR/note.wav" audio/wav VOICE; RP_VOICE="$PHOTO_ID"
+for id in "$RP_PHOTO" "$RP_VOICE"; do await_photo "$RP_A" "$id" >/dev/null; done
+is "reports: the photo has passed moderation (the stand-in)" "$(await_verdict "$RP_PHOTO")" "PASSED"
+is "reports: …and the voice note" "$(await_verdict "$RP_VOICE")" "PASSED"
+expect "reports: a bond for the two is 201" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $RP_A" -d "$(bond_body "Us")"
+RP_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+RP_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "reports: …which the reporter joins" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$RP_CODE/accept" -H "Authorization: Bearer $RP_B"
+expect "reports: the author writes with the photo and the voice note" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$RP_BOND/entries" -H "Authorization: Bearer $RP_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"for you\",\"imageMediaId\":\"$RP_PHOTO\",\"voiceMediaId\":\"$RP_VOICE\"}"
+RP_ENTRY="$(printf '%s' "$LAST_BODY" | jget id)"
+expect "POST /entries/<an id nobody was issued>/report is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/entries/$(new_key)/report" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+RP_UNKNOWN="$(no_instance)"
+expect "reporting the partner's locked entry is 404, as an unknown id is" 404 '"code":"NOT_FOUND"' -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+is "reports: …the same bytes as the unknown id's" "$(no_instance)" "$RP_UNKNOWN"
+expect "reports: the reporter writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$RP_BOND/entries" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"and mine"}'
+RP_OWN="$(printf '%s' "$LAST_BODY" | jget id)"
+is "before the report, the reporter is shown the photo and the voice note READY" "$(rp_shown "$RP_B" partnerEntry)" "READY True READY True"
+expect "reporting one's own entry is 409 REPORT_ON_OWN_ENTRY" 409 '"code":"REPORT_ON_OWN_ENTRY"' -- -X POST "$API/entries/$RP_OWN/report" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+expect "an outsider reporting the entry is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_O" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+expect "a report with an unknown reason is 422 on reason" 422 '"field":"reason"' -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"SPAM"}'
+expect "a report with a detail over 500 characters is 422 on detail" 422 '"field":"detail"' -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $(new_key)" -d "{\"reason\":\"OTHER\",\"detail\":\"$(printf 'x%.0s' $(seq 1 501))\"}"
+expect "a report with no Idempotency-Key is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_B" -d '{"reason":"OTHER"}'
+is "reports: …and nothing of those was filed or held" "$(rp_shown "$RP_B" partnerEntry)" "READY True READY True"
+RP_KEY="$(new_key)"
+expect "the reporter reports the partner's revealed entry: 201" 201 '"reason":"NON_CONSENSUAL"' -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $RP_KEY" -d "{\"reason\":\"NON_CONSENSUAL\",\"detail\":\"$RP_DETAIL\"}"
+RP_REPORT="$(printf '%s' "$LAST_BODY" | jget id)"
+RP_FIRST="$LAST_BODY"
+expect "the same Idempotency-Key again is the same report, replayed" 201 "\"id\":\"$RP_REPORT\"" -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $RP_KEY" -d "{\"reason\":\"NON_CONSENSUAL\",\"detail\":\"$RP_DETAIL\"}"
+header_is "reports: …marked as a replay" "Idempotency-Replayed" "true"
+is "reports: …byte for byte the first answer" "$LAST_BODY" "$RP_FIRST"
+db_is "reports: …and one report is filed, open, holding the photo and the voice note" \
+  "$(sql "SELECT count(*) || '|' || min(status) || '|' || (SELECT count(*) FROM media_report_holds WHERE report_id = '$RP_REPORT') FROM entry_reports WHERE entry_id = '$RP_ENTRY'")" "1|OPEN|2"
+is "after the report, the reporter is shown the photo and the voice note PROCESSING, with no URL" "$(rp_shown "$RP_B" partnerEntry)" "PROCESSING False PROCESSING False"
+is "after the report, the author is shown both NOT_SHARED, still with their URLs" "$(rp_shown "$RP_A" myEntry)" "NOT_SHARED True NOT_SHARED True"
+RP_AUTHOR_VIEW="$(curl -s "$API/bonds/$RP_BOND/today" -H "Authorization: Bearer $RP_A")$(curl -s "$API/bonds/$RP_BOND/days" -H "Authorization: Bearer $RP_A")$(curl -s "$API/media/$RP_PHOTO" -H "Authorization: Bearer $RP_A")"
+case "$RP_AUTHOR_VIEW" in *"$RP_REPORT"*|*eport*|*NON_CONSENSUAL*) fail "reports: nothing the author reads names the report" "${RP_AUTHOR_VIEW:0:300}";; *) pass "reports: nothing the author reads names the report";; esac
+expect "reports: the reporter still reads the entry's words" 200 '"text":"for you"' -- "$API/bonds/$RP_BOND/today" -H "Authorization: Bearer $RP_B"
+
+if [ "$PSQL_OK" = 1 ]; then
+  RP_LIST="$(reports list 2>&1)"
+  case "$RP_LIST" in *"$RP_REPORT"$'\t'NON_CONSENSUAL$'\t'"$RP_ENTRY"$'\t'2$'\t't*) pass "reports: the operator's list shows the report, what it holds and that it has a detail";; *) fail "reports: list" "${RP_LIST:0:400}";; esac
+  case "$RP_LIST" in *"$RP_DETAIL"*) fail "reports: …and never the detail" "the detail is in the list";; *) pass "reports: …and never the detail";; esac
+  RP_SHOW="$(reports show "$RP_REPORT" 2>&1)"
+  case "$RP_SHOW" in *"\"$RP_DETAIL\""*"$RP_PHOTO"*) pass "reports: show gives the operator the detail and what is held";; *) fail "reports: show" "${RP_SHOW:0:400}";; esac
+  RP_OUT="$(reports dismiss "$RP_REPORT" "smoke: a made-up black square" 2>&1)" \
+    && pass "the operator dismisses the report" || fail "the operator dismisses the report" "$RP_OUT"
+  is "after the dismissal, the reporter is shown the photo and the voice note READY again" "$(rp_shown "$RP_B" partnerEntry)" "READY True READY True"
+  is "reports: …and the author READY" "$(rp_shown "$RP_A" myEntry)" "READY True READY True"
+  db_is "reports: …the detail is gone with the decision" "$(sql "SELECT status || '|' || (detail IS NULL) FROM entry_reports WHERE id = '$RP_REPORT'")" "DISMISSED|t"
+  db_is "reports: …and the moderation verdict is the one the photo had" "$(sql "SELECT moderation_verdict || '|' || sensitive FROM media_assets WHERE id = '$RP_PHOTO'")" "PASSED|f"
+
+  expect "a report of sexual content involving a minor is 201" 201 '"reason":"MINOR_SEXUAL_CONTENT"' -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"MINOR_SEXUAL_CONTENT"}'
+  RP_MINOR="$(printf '%s' "$LAST_BODY" | jget id)"
+  db_is "reports: …it holds the photo back and does not block it: a person decides (Q16)" \
+    "$(sql "SELECT status || '|' || moderation_verdict || '|' || evidence_held FROM media_assets WHERE id = '$RP_PHOTO'")" "QUARANTINED|QUARANTINED|f"
+  RP_LIST="$(reports list 2>&1)"
+  if printf '%s\n' "$RP_LIST" | sed -n 2p | grep -q "^$RP_MINOR"$'\t'"MINOR_SEXUAL_CONTENT.*DO NOT VIEW — runbook §2$"; then
+    pass "reports: …and it is first in the operator's list, marked DO NOT VIEW"
+  else fail "reports: priority list" "${RP_LIST:0:400}"; fi
+  RP_OUT="$(reports uphold "$RP_MINOR" block "smoke: FAKE-SMOKE-0002" 2>&1)" \
+    && pass "the operator upholds it by blocking" || fail "the operator upholds it by blocking" "$RP_OUT"
+  db_is "reports: …the photo is BLOCKED and held as evidence" \
+    "$(sql "SELECT status || '|' || moderation_verdict || '|' || evidence_held FROM media_assets WHERE id = '$RP_PHOTO'")" "QUARANTINED|BLOCKED|t"
+  is "reports: …the author is shown both NOT_SHARED, with no URL: both are blocked" "$(rp_shown "$RP_A" myEntry)" "NOT_SHARED False NOT_SHARED False"
+  # Not left for the next run's media check: both are let go as the runbook's §2 lets them go, after "the report".
+  for id in "$RP_PHOTO" "$RP_VOICE"; do quarantine delete "$id" "smoke: reported, ref FAKE-SMOKE-0002" >/dev/null 2>&1 || true; done
+  db_is "reports: every look and decision is in the report log, by the operator" \
+    "$(sql "SELECT string_agg(action, ',' ORDER BY at, id) FROM entry_report_log WHERE actor = 'smoke-operator' AND (report_id IN ('$RP_REPORT', '$RP_MINOR') OR report_id IS NULL) AND at >= to_timestamp($MO_START)")" "LISTED,READ,DISMISSED,LISTED,UPHELD"
+else
+  skip "reports: the operator's queue (psql not reachable through docker compose)"
+fi
+
+flush_buckets
+for _ in $(seq 1 10); do
+  curl -s -o /dev/null -X POST "$API/entries/$(new_key)/report" -H "Authorization: Bearer $RP_O" -H "Idempotency-Key: $(new_key)" -H 'Content-Type: application/json' -d '{"reason":"OTHER"}'
+done
+expect "the eleventh report in a day is 429 RATE_LIMITED" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/entries/$RP_ENTRY/report" -H "Authorization: Bearer $RP_O" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+header_is "reports: …ten a day" "X-RateLimit-Limit" "10"
+if grep -q "$RP_DETAIL" "$MOYI_LOG"; then fail "the report's detail is in no log line" "it is in $MOYI_LOG"; else pass "the report's detail is in no log line"; fi
+rm -rf "$RP_DIR"
+flush_buckets
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.

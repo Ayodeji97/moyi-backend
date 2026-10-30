@@ -79,6 +79,15 @@ enum class RateLimitBucket(
      */
     MEDIA_INTENT_USER("media:intent:user", Subject.USER, 30, Duration.ofHours(1)),
 
+    /**
+     * ADR-0053 addition (doc 26 OQ-26c asked whether reporting is limited like
+     * support's 5 a day; doc 06 §4 names no bucket for it): 10 reports a day
+     * per user. Each report holds media back for a person and puts a row in
+     * their queue, so this bounds what one account can make a person read; ten
+     * leaves room for someone reporting several days of one partner's entries.
+     */
+    REPORTS_CREATE_USER("reports:create:user", Subject.USER, 10, Duration.ofDays(1)),
+
     /** Doc 06 §4: "global authenticated 120 / min", per user, on every request that carries a valid token. */
     AUTHENTICATED("authenticated:user", Subject.USER, 120, Duration.ofMinutes(1)),
     ;

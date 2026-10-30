@@ -1884,6 +1884,44 @@ curl -X DELETE "$API/entries/$ENTRY/reaction" -H "Authorization: Bearer $TOKEN"
 | 409 | `BOND_ARCHIVED` | The bond has ended, or you have left it, and the entry is your partner's, read in full: a removal the other person sees is contact too (ADR-0037 question 11). Nothing is removed, and the reaction is still shown to both. Told before REACTION_BUSY, whoever holds the row. On your own entry, and on one shown to you as erased, it is 204. | smoke |
 | 409 | `REACTION_BUSY` | Another operation holds your reaction on a partner's entry you read in full: an erasure, which may roll back, or your own request still running (two DELETEs that overlap, or a DELETE over your own PUT). Nothing is removed; retry. Never given on an entry shown to you as erased, nor on your own entry: there it is 204. | test |
 
+### POST /entries/{entryId}/report
+
+report your partner's entry to a person
+
+**Needs:** an access token.
+
+- Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same report, and nothing filed twice)
+- Content-Type (application/json, {"reason": "NON_CONSENSUAL", "MINOR_SEXUAL_CONTENT", "VIOLENCE_OR_SELF_HARM", "HARASSMENT" or "OTHER", "detail": optional, at most 500 characters}. The body is checked before the entry is looked at)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/entries/$ENTRY/report" -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $(uuidgen)" -H 'Content-Type: application/json' -d '{"reason": "NON_CONSENSUAL"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day.entry` | `NONE` |  | 404 `NOT_FOUND` | You have written nothing to name; an id nobody was issued is the one 404. | FR-100, ADR-0053 | smoke |
+| `day.entry` | `SUBMITTED` |  | 409 `REPORT_ON_OWN_ENTRY` | A report is about what your partner shared. Your own entry is refused, revealed or not; to take it back, delete it. | FR-100, ADR-0053 | test |
+| `day.entry` | `REVEALED` |  | 409 `REPORT_ON_OWN_ENTRY` | A report is about what your partner shared. Your own entry is refused; nothing is held. | FR-100, ADR-0053 | smoke |
+| `day.entry` | `DELETED` |  | 409 `REPORT_ON_OWN_ENTRY` | Your own tombstone is still your own entry: refused as the whole entry was. | FR-100, ADR-0053 | test |
+| `day.partnerEntry` | `NONE` |  | 404 `NOT_FOUND` | There is no entry to name: an id nobody was issued is the one 404 every entry you were never shown gets. | FR-100, ADR-0053 | smoke |
+| `day.partnerEntry` | `LOCKED` |  | 404 `NOT_FOUND` | You have not been shown it: a locked entry is answered exactly as an id that does not exist, byte for byte, never 403. Nothing is filed or held. | FR-100, ADR-0053 | smoke |
+| `day.partnerEntry` | `VISIBLE` |  | 201 stays | Filed for a person to review, and from this moment its photo and voice note are held back from you: you are shown them PROCESSING, the author NOT_SHARED (ADR-0051's view of anything held back), and the author is told nothing else. The words stay. On a bond that has ended too: a report is never contact. | FR-100, ADR-0053 | smoke |
+| `day.partnerEntry` | `DELETED` |  | 201 stays | A tombstone you were shown can still be reported: what you saw before it was erased may be what you report. Its media is already gone, so nothing is held. | FR-100, ADR-0053 | test |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 422 | `VALIDATION_FAILED` | reason is missing, null, or not one of the five names exactly as written; or detail is blank, longer than 500 characters, or holds a NUL or an unpaired surrogate. Nothing is filed or held. | smoke |
+| 422 | `VALIDATION_FAILED` | The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. Nothing is filed or held. | smoke |
+| 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another entry. | test |
+| 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | never-run |
+| 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed. | never-run |
+
 ## Media
 
 ### POST /media/upload-intent
