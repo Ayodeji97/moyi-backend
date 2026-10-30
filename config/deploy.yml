@@ -25,9 +25,18 @@
 # `kamal rollback <sha> --roles=web`: Kamal 2.12 refuses a rollback unless a
 # container of that version exists for every role it is asked about, and no
 # media-worker container exists for an older version. The worker then stays
-# on the newer image, which is harmless: every release before #116 ran with
-# storage `unavailable`, so the API it goes back to accepts no upload for the
-# worker to take (ADR-0052; README, "How do I deploy it").
+# on the newer image (ADR-0052; README, "How do I deploy it").
+#
+# A rollback is not a way to switch anything off. Kamal 2.12's `rollback`
+# boots the older image with a fresh `docker run`, its environment taken from
+# THIS checkout's config/deploy.yml and .kamal/secrets (Cli::Main#rollback
+# invokes app boot; Cli::App::Boot#start_new_version uploads the role's
+# secrets and Commands::App#run passes the role's env), and the pre-deploy
+# hook holds this checkout to origin/main. So the image goes back and the
+# configuration does not: with storage on here, an older image starts with
+# R2 configured. Switching storage off is a pull request, ready-made on the
+# branch ops/media-storage-off (ops/media-worker/README.md, "To switch off
+# again"; review of #117).
 #
 # The explicit --version matters. Without it Kamal tags the deploy with the
 # local HEAD, and appends "_uncommitted_<random>" when the working tree has

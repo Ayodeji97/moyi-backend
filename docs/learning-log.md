@@ -2897,3 +2897,8 @@ Wrong about: "the brief says add a field, so add a field". The brief was written
          runbook, the runbook from memory; the vault's other runbooks were the evidence.
          And a test that reads a file the build does not know about is only as fresh as the
          last change to a file the build does know about.
+Wrong about (review of #117): "`kamal rollback` to the release before turns storage off". A
+         rollback re-runs the older image with today's deploy.yml and secrets; the image goes
+         back, the configuration does not. Read in the gem, not assumed: the way off is now a
+         pull request kept ready on a branch. And "the gate is a runbook step" was a gate
+         nothing enforced; the deploy hook now asks the server.

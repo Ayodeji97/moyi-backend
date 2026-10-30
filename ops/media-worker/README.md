@@ -73,8 +73,8 @@ Check the three without printing any, and that the token reaches the bucket
 ```
 export BW_SESSION="$(bw unlock --raw)"; bw sync >/dev/null
 f() { bw get item moyi-prod | python3 -c 'import json,sys; print(next(x["value"] for x in json.load(sys.stdin)["fields"] if x["name"]==sys.argv[1]))' "$1"; }
-f R2_ENDPOINT | grep -qE '^https://[0-9a-f]{32}\.eu\.r2\.cloudflarestorage\.com$' && echo "endpoint: EU, well formed"
-[ -n "$(f MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID)" ] && [ -n "$(f MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY)" ] && echo "token: both halves"
+f R2_ENDPOINT | grep -qE '^https://[0-9a-f]{32}\.eu\.r2\.cloudflarestorage\.com$' && echo "endpoint: EU, well formed" || echo "endpoint: NOT the EU form; stop here"
+[ -n "$(f MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID)" ] && [ -n "$(f MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY)" ] && echo "token: both halves" || echo "token: a half is MISSING; stop here"
 printf 'user = "%s:%s"\n' "$(f MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID)" "$(f MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY)" |
   curl -s -o /dev/null -w 'bucket: %{http_code}\n' -K - --aws-sigv4 "aws:amz:auto:s3" "$(f R2_ENDPOINT)/moyi-media?list-type=2&max-keys=1"
 bw lock; unset BW_SESSION
@@ -94,7 +94,11 @@ the `kamal` network) and HTTPS to Cloudflare's published ranges, where R2 is;
 nothing else. What it was seen to do is `test-egress-limit.sh`'s to show
 (Docker-in-Docker on the Mac). **Storage must not be switched on before this
 step has printed `limited`**: a worker that decodes uploads with the whole
-internet in reach is what ADR-0052 decision 5 exists to prevent.
+internet in reach is what ADR-0052 decision 5 exists to prevent. The deploy
+enforces it: `.kamal/hooks/pre-deploy` asks the worker's host (`ssh -o
+BatchMode=yes`, so the key must be unlocked in the agent) whether the
+service is active and `check` passes, and refuses the deploy, naming this
+step, when it is not or the server cannot be asked.
 
 ```
 # 2a. what it needs is on the server (Ubuntu 24.04 has all three)
@@ -153,7 +157,9 @@ git switch main && git pull --ff-only
 kamal deploy --skip-push --version=$(git rev-parse HEAD)
 ```
 
-Kamal asks Bitwarden for the three fields of step 1; a field it cannot find
+The `pre-deploy` hook asks the server whether step 2's limit is in place, and
+refuses before anything boots if not (it says so, naming step 2). Kamal asks Bitwarden for the
+three fields of step 1; a field it cannot find
 fails the deploy before anything is touched. A container given an empty one
 refuses to start, naming it (`missing: moyi.media.storage.r2.endpoint
 (MOYI_MEDIA_STORAGE_R2_ENDPOINT)`), and Kamal keeps the old one serving.
@@ -239,21 +245,53 @@ printf 'user = "%s:%s"\n' "$(f MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID)" "$(f MOYI_M
 - **The ceiling HEIC on the CAX21** (ADR-0052, Owed) and **the iPhone's
   playback of the Ogg Opus** (ADR-0049, Q4): each needs a file the script does
   not carry, or a phone.
-- **The media mirror** (ADR-0050, Q15) is not running: until it is, the
-  photos in `moyi-media` have no second copy.
+
+### Launch gate: no real users until the media mirror runs
+
+Storage on is for the owner's test accounts only. **No real user is invited
+while any of these holds** (ADR-0050 and ADR-0052, Owed):
+
+- **The media mirror (ADR-0050, Q15) is not running.** Every photo and voice
+  note has one copy, in `moyi-media`. And the worker holds the bucket's token,
+  which can delete as well as write (R2 has no write-only scope): a decoder
+  subverted by an upload could delete every object in the bucket, the only
+  copy. The mirror's locked bucket is what survives that.
+- **The known-image list is `none`** (ADR-0051 decision 3): uploads are stored
+  without being matched against any list of known abuse material.
+- **Moderation is `none`**: no partner sees any media. That is safe, but it is
+  not the product.
 
 ### To switch off again
 
-Put `MOYI_MEDIA_STORAGE_PROVIDER: unavailable` back in `config/deploy.yml`'s
-top-level `env`, change `ProductionStartsWithoutMediaSecretsTest`'s
-"stores media in R2" test in the same pull request (it holds storage on, on
-purpose), merge and deploy. Uploads are refused again; what was uploaded stays
-in the bucket, and `media.purge`'s deliveries wait
-(`ops/monitoring/media-pipeline-stuck.md`). For an emergency faster than a
-pull request, `kamal rollback <the previous release's sha>`: every release
-before the switch-on ran with storage `unavailable`, so it leaves what
-"The storage was configured, and is now `unavailable` again" in
-`ops/monitoring/media-pipeline-stuck.md` describes.
+**Not by `kamal rollback`.** Kamal 2.12's rollback boots the older image with
+a fresh `docker run` whose environment is read from *this* checkout's
+`config/deploy.yml` and `.kamal/secrets` (`Cli::Main#rollback` invokes the
+app boot; `Cli::App::Boot#start_new_version` uploads the role's secrets, and
+`Commands::App#run` passes the role's env), and the `pre-deploy` hook holds
+the checkout to `origin/main`. So a rollback brings back an older image with
+storage still configured. Switching off is a pull request, already made: the
+branch **`ops/media-storage-off`** puts `MOYI_MEDIA_STORAGE_PROVIDER:
+unavailable` back in the top-level `env` and turns
+`ProductionStartsWithoutMediaSecretsTest`'s storage-on test round to hold
+storage off; its build passed when it was made. To use it:
+
+```
+git fetch origin
+git switch ops/media-storage-off
+git merge --no-edit origin/main     # only if main has moved since; resolve any conflict, then
+./gradlew :app:test --tests 'com.moyi.app.ProductionStartsWithoutMediaSecretsTest'
+git push                             # only if the merge changed anything
+gh pr create --base main --head ops/media-storage-off \
+  --title "fix(media): switch media storage off in production" --body "Storage off (ops/media-worker/README.md)."
+```
+
+Then wait for CI, merge, and deploy as in step 4. With storage `unavailable`
+the hook does not ask about the network limit. Uploads are refused again
+with `503 MEDIA_STORAGE_UNAVAILABLE`; what was uploaded stays in the bucket,
+and `media.purge`'s deliveries wait until storage is back
+(`ops/monitoring/media-pipeline-stuck.md`, "The storage was configured, and
+is now `unavailable` again"). Afterwards make the branch again from the new
+`main`, for next time.
 
 ### When Rekognition is switched on
 
