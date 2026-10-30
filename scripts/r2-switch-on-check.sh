@@ -58,11 +58,18 @@ fi
 
 WORK="$(mktemp -d)" || die "cannot make a work directory"
 chmod 700 "$WORK"
+# Every file below is this user's alone: the session, the Authorization header, the signed URLs.
+umask 077
 PASSED=0 FAILED=0 ACCESS="" REFRESH="" SLEEPER=""
 CREATED=() # media ids made by this run and not yet deleted
 
 pass() { PASSED=$((PASSED + 1)); echo "  PASS  $1"; }
 fail() { FAILED=$((FAILED + 1)); echo "  FAIL  $1${2:+ — $2}"; }
+
+# No secret is ever an argument of a program (where `ps` shows it to anyone on the machine):
+# the password and the tokens reach python3 on its standard input, from printf, a shell
+# builtin, and reach curl in config files (-K). scripts/test-r2-switch-on-check-argv.sh, in
+# the pull request that added this, logged every argument of every program run and found none.
 
 # json <file> <field> — one top-level field of a JSON body, or empty.
 json() { python3 -c 'import json,sys
@@ -73,26 +80,52 @@ print("" if v is None else v)' "$1" "$2"; }
 header() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["requiredHeaders"][sys.argv[2]])' "$1" "$2"; }
 uuid() { python3 -c 'import uuid; print(uuid.uuid4())'; }
 # api <out> <method> <path> [curl args…] — the status; the body in <out>, which is never printed whole.
+# The access token goes in $WORK/auth.curl, a curl config file.
 api() {
   local out="$1" method="$2" path="$3"; shift 3
   curl -s -o "$out" -w '%{http_code}' --max-time 30 -X "$method" "$API$path" \
-    -H "Authorization: Bearer $ACCESS" -H 'Content-Type: application/json' "$@"
+    -K "$WORK/auth.curl" -H 'Content-Type: application/json' "$@"
 }
 # storage <out> <url-file> [curl args…] — a request to a signed URL read from a file, handed to curl in a config
-# file of its own, so that it is never on a command line (where ps shows it) nor printed.
+# file of its own, so that it is never on a command line nor printed.
 storage() {
   local out="$1" url="$2"; shift 2
-  printf 'url = "%s"\n' "$(cat "$url")" > "$WORK/url.curl"
+  printf 'url = "%s"\n' "$(< "$url")" > "$WORK/url.curl"
   curl -s -o "$out" -w '%{http_code}|%{content_type}' --max-time 60 "$@" -K "$WORK/url.curl"
 }
 forget() { local id="$1" kept=() m; for m in "${CREATED[@]+"${CREATED[@]}"}"; do [ "$m" = "$id" ] || kept+=("$m"); done; CREATED=("${kept[@]+"${kept[@]}"}"); }
 
-# refresh_token_body — {"refreshToken": …} in $WORK/refresh.json, so the token is never on a command line.
+# session <status> — takes the token pair from $WORK/session when the status is 200, and writes the
+# Authorization header's config file. Both tokens change together or not at all.
+session() {
+  local access refresh
+  if [ "$1" = 200 ]; then
+    access="$(json "$WORK/session" accessToken)"; refresh="$(json "$WORK/session" refreshToken)"
+  fi
+  rm -f "$WORK/session"
+  [ -n "${access:-}" ] && [ -n "${refresh:-}" ] || return 1
+  ACCESS="$access"; REFRESH="$refresh"
+  printf 'header = "Authorization: Bearer %s"\n' "$ACCESS" > "$WORK/auth.curl"
+}
+# login — signs in with the password given at the start; the status echoed on failure.
+login() {
+  local status
+  printf '%s\n%s' "$EMAIL" "$MOYI_CHECK_PASSWORD" | python3 -c 'import json,sys
+email, password = sys.stdin.read().split("\n", 1)
+print(json.dumps({"email": email, "password": password,
+  "device": {"platform": "ANDROID", "appVersion": "r2-switch-on-check", "osVersion": "0"}}))' > "$WORK/login.json"
+  status="$(curl -s -o "$WORK/session" -w '%{http_code}' --max-time 30 -X POST "$API/auth/login" \
+    -H 'Content-Type: application/json' --data-binary "@$WORK/login.json")"
+  rm -f "$WORK/login.json"
+  [ "$status" = 200 ] || echo "$status $(json "$WORK/session" code)"
+  session "$status"
+}
+# refresh_token_body — {"refreshToken": …} in $WORK/refresh.json.
 refresh_token_body() {
-  python3 -c 'import json,sys; print(json.dumps({"refreshToken": sys.argv[1]}))' "$REFRESH" > "$WORK/refresh.json"
+  printf '%s' "$REFRESH" | python3 -c 'import json,sys; print(json.dumps({"refreshToken": sys.stdin.read()}))' > "$WORK/refresh.json"
 }
 # refresh — a new token pair (refresh rotates). An access token lives 15 minutes and a run can
-# wait longer than that for its URL to age, so this runs after the wait and before the cleanup.
+# wait longer than that for its URL to age, so this runs after the wait.
 refresh() {
   [ -n "$REFRESH" ] || return 1
   local status
@@ -100,28 +133,33 @@ refresh() {
   status="$(curl -s -o "$WORK/session" -w '%{http_code}' --max-time 30 -X POST "$API/auth/refresh" \
     -H 'Content-Type: application/json' --data-binary "@$WORK/refresh.json")"
   rm -f "$WORK/refresh.json"
-  if [ "$status" = 200 ]; then
-    ACCESS="$(json "$WORK/session" accessToken)"; REFRESH="$(json "$WORK/session" refreshToken)"
-  else
-    echo "  (the session could not be refreshed: $status $(json "$WORK/session" code))"
-  fi
-  rm -f "$WORK/session"
-  [ "$status" = 200 ]
+  session "$status" || { echo "  (the session could not be refreshed: $status)"; return 1; }
+}
+
+# logout — ends the session in hand, if any (best effort: a stale token is simply refused).
+logout() {
+  [ -n "$REFRESH" ] || return 0
+  refresh_token_body
+  curl -s -o /dev/null --max-time 30 -X POST "$API/auth/logout" -H 'Content-Type: application/json' \
+    --data-binary "@$WORK/refresh.json" || true
+  rm -f "$WORK/refresh.json"; REFRESH=""
 }
 
 cleanup() {
   local m status
   [ -z "$SLEEPER" ] || kill "$SLEEPER" 2>/dev/null
-  if [ "${#CREATED[@]}" -gt 0 ]; then refresh || true; fi
+  if [ "${#CREATED[@]}" -gt 0 ]; then
+    # A fresh session for the deletes, by signing in again with the password this run was given:
+    # a refresh could present a token already rotated, if the run was interrupted inside refresh(),
+    # and the server would then revoke the whole session (reuse detection).
+    logout
+    login >/dev/null || echo "  cleanup: could not sign in again; what is left below is the reaper's (ADR-0050)"
+  fi
   for m in "${CREATED[@]+"${CREATED[@]}"}"; do
     status="$(api "$WORK/cleanup" DELETE "/media/$m")"
     echo "  cleanup: DELETE /media/$m → $status"
   done
-  if [ -n "$REFRESH" ]; then
-    refresh_token_body
-    curl -s -o /dev/null --max-time 30 -X POST "$API/auth/logout" -H 'Content-Type: application/json' \
-      --data-binary "@$WORK/refresh.json" || true
-  fi
+  logout
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -130,16 +168,7 @@ trap 'exit 130' INT TERM
 echo "r2-switch-on-check against $API"
 
 # --- sign in ---------------------------------------------------------------
-python3 -c 'import json,sys; print(json.dumps({"email": sys.argv[1], "password": sys.argv[2],
-  "device": {"platform": "ANDROID", "appVersion": "r2-switch-on-check", "osVersion": "0"}}))' \
-  "$EMAIL" "$MOYI_CHECK_PASSWORD" > "$WORK/login.json"
-STATUS="$(curl -s -o "$WORK/session" -w '%{http_code}' --max-time 30 -X POST "$API/auth/login" \
-  -H 'Content-Type: application/json' --data-binary "@$WORK/login.json")"
-rm -f "$WORK/login.json"
-[ "$STATUS" = 200 ] || die "sign-in answered $STATUS $(json "$WORK/session" code)"
-ACCESS="$(json "$WORK/session" accessToken)"; REFRESH="$(json "$WORK/session" refreshToken)"
-rm -f "$WORK/session"
-[ -n "$ACCESS" ] || die "sign-in gave no access token"
+login > "$WORK/login.out" || die "sign-in answered $(< "$WORK/login.out")"
 
 # --- the files -------------------------------------------------------------
 # A 64 × 48 black JPEG as libvips writes it, EXIF block included: what is served must carry none.
@@ -201,7 +230,6 @@ ready() {
   done
   printf '%s' "$status"
 }
-is_refused() { case "$1" in 400 | 403) return 0 ;; *) return 1 ;; esac; }
 
 # --- 1. a photo: the refusals, the upload, the completion -------------------
 echo; echo "1. a photo, uploaded straight to the storage (ADR-0047)"
@@ -215,24 +243,34 @@ import sys
 b = bytearray(open(sys.argv[1], "rb").read()); b[len(b) // 2] ^= 0x01
 open(sys.argv[2], "wb").write(bytes(b))
 PY
+  # Only 200 (taken), 400 or 403 (refused) decide; anything else (000: no answer, 5xx) says nothing about
+  # what the storage checks, and is reported as inconclusive.
+  refusal() { # <label> <status>
+    case "$2" in
+      400 | 403) pass "$1 ($2)" ;;
+      200) fail "$1" "it answered 200: the storage took them" ;;
+      *) fail "$1" "inconclusive: it answered $2, neither taken nor refused; run the check again" ;;
+    esac
+  }
   S="$(put photo "$WORK/longer.jpg" image/jpeg)"
-  is_refused "$S" && pass "photo: the storage refuses a body one byte longer than signed ($S)" ||
-    fail "photo: the storage refuses a body one byte longer than signed" "it answered $S"
+  refusal "photo: the storage refuses a body one byte longer than signed" "$S"
   S="$(put photo "$WORK/altered.jpg" image/jpeg)"
   ALTERED_TAKEN=0
-  if is_refused "$S"; then
-    pass "photo: the storage refuses a body of the signed length with one byte changed ($S): the storage checks the signed SHA-256"
-  else
-    ALTERED_TAKEN=1
-    fail "photo: the storage refuses a body of the signed length with one byte changed" \
-      "it answered $S: R2 does not check x-amz-checksum-sha256 (ADR-0047 decision 1's open item)"
-    S="$(complete photo "$PHOTO")"
-    [ "$S" = 409 ] && pass "photo: …but the completion refuses the altered bytes (409 $(json "$WORK/photo.complete" code))" ||
-      fail "photo: …and the completion refuses the altered bytes" "it answered $S $(json "$WORK/photo.complete" status): altered bytes were accepted end to end"
-  fi
+  case "$S" in
+    400 | 403) pass "photo: the storage refuses a body of the signed length with one byte changed ($S): it checks the signed SHA-256" ;;
+    200)
+      ALTERED_TAKEN=1
+      fail "photo: the storage refuses a body of the signed length with one byte changed" \
+        "it answered 200: R2 does not check x-amz-checksum-sha256 (ADR-0047 decision 1's open item)"
+      S="$(complete photo "$PHOTO")"
+      [ "$S" = 409 ] && pass "photo: …but the completion refuses the altered bytes (409 $(json "$WORK/photo.complete" code))" ||
+        fail "photo: …and the completion refuses the altered bytes" "it answered $S $(json "$WORK/photo.complete" status): altered bytes were accepted end to end"
+      ;;
+    *) fail "photo: the storage refuses a body of the signed length with one byte changed" \
+      "inconclusive: it answered $S, neither taken nor refused; whether R2 checks the SHA-256 is not known; run the check again" ;;
+  esac
   S="$(put photo "$WORK/photo.jpg" image/png)"
-  is_refused "$S" && pass "photo: the storage refuses another Content-Type than signed ($S)" ||
-    fail "photo: the storage refuses another Content-Type than signed" "it answered $S"
+  refusal "photo: the storage refuses another Content-Type than signed" "$S"
   S="$(put photo "$WORK/photo.jpg" image/jpeg)"
   [ "$S" = 200 ] && pass "photo: the storage takes the declared bytes (200)" || fail "photo: the storage takes the declared bytes" "it answered $S"
   S="$(complete photo "$PHOTO")"
