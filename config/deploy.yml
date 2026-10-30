@@ -250,6 +250,13 @@ env:
     # them R2 refuses to start, naming it. To switch storage off again, the
     # line is MOYI_MEDIA_STORAGE_PROVIDER: unavailable (ops/media-worker/README.md).
     MOYI_MEDIA_STORAGE_R2_BUCKET: moyi-media
+    # Switched OFF (ops/media-worker/README.md, "To switch off again"): every
+    # upload is refused with 503 MEDIA_STORAGE_UNAVAILABLE, what was stored
+    # stays in the bucket, and media.purge's deliveries wait until storage is
+    # back (ops/monitoring/media-pipeline-stuck.md). The bucket and its secrets
+    # stay listed so that switching on again is removing this one line (and
+    # turning ProductionStartsWithoutMediaSecretsTest's storage test back).
+    MOYI_MEDIA_STORAGE_PROVIDER: unavailable
     # No photo or voice note is processed by the API (ADR-0048, ADR-0049): the
     # owner ruled that uploads are decoded in a media worker of their own
     # (Q5), the `media-worker` role above, which alone overrides this with

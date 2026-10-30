@@ -95,27 +95,22 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     }
 
     /**
-     * The switch-on (ADR-0047, ADR-0052): production stores media. Both roles
-     * reach the bucket, the API to sign uploads and URLs, check completions and
-     * purge, the worker to read uploads and write what it makes of them; so
-     * each role's environment names R2, the bucket `moyi-media`, and the
-     * endpoint and the token as secrets. Switching storage off again
-     * (`ops/media-worker/README.md`) is a deliberate act, and changes this
-     * test in the same pull request.
+     * Storage switched off again (ops/media-worker/README.md, "To switch off
+     * again"): every role names the `unavailable` stand-in, so every upload is
+     * refused with 503 and nothing new is stored. A rollback cannot do this
+     * (Kamal boots an older image with the current deploy.yml), so it is this
+     * pull request. Switching storage on again is a deliberate act, and
+     * changes this test back in the same pull request.
      */
     @Test
-    fun `deploy-yml stores media in R2's moyi-media bucket in every role, its endpoint and token as secrets`() {
+    fun `deploy-yml switches media storage off in every role`() {
         roles.forEach { (role, env) ->
             withClue("$role's media storage provider") {
-                (
-                    env.clear["MOYI_MEDIA_STORAGE_PROVIDER"]
-                        ?.toString()
-                        ?.trim()
-                        ?.lowercase() ?: "r2"
-                ) shouldBe "r2"
+                env.clear["MOYI_MEDIA_STORAGE_PROVIDER"]
+                    ?.toString()
+                    ?.trim()
+                    ?.lowercase() shouldBe "unavailable"
             }
-            withClue("$role's bucket") { env.clear["MOYI_MEDIA_STORAGE_R2_BUCKET"] shouldBe "moyi-media" }
-            withClue("$role's storage secrets") { (STORAGE_SECRETS - env.secret) shouldBe emptySet() }
         }
     }
 
