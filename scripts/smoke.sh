@@ -123,7 +123,14 @@
 # same way: 1194 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the
 # race). The reveal push's log-line count that once found 0, and reminders left REQUESTED, were a
 # stray jar of the author's on the same database taking the deliveries (its jar file replaced under
-# it: NoClassDefFoundError), not the code; the probe now polls and says what it saw. D3 last run
+# it: NoClassDefFoundError), not the code; the probe now polls and says what it saw. The reports
+# section (FR-100, ADR-0053): the reporter's 404s (unknown, locked, an outsider), 409 on their own
+# entry, 422s, the report and its replay, what each member is shown before and after, the
+# operator's list, show, dismiss and a priority report upheld by blocking, 429 on the eleventh, and
+# the detail in no log line. Last run on 2026-10-30, on feat/report-route (main e88944b), from a
+# jar of 3e8a78a, on a fresh database that applied 38 migrations to V39, against its own compose
+# project (moyi-report: Postgres 55454, Valkey 63814, MinIO 59028), the jar booted by hand (local
+# profile) and --attach: 1254 passed, 0 failed, 0 skipped, 33 sections. D3 last run
 # on 2026-10-29, after main (d2429fc D2, 66032c0 D5) was merged in, from a jar of
 # that merge, on a fresh database that applied 34 migrations to V35, against its own
 # compose project (moyi-d3: Postgres 55443, Valkey 63803, MinIO 59006), the jar
