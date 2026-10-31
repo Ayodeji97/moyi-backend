@@ -1,6 +1,6 @@
 # Phase 10, slice S1 — semantic search
 
-**Status:** design approved in conversation 2026-10-30; for review · **Date:** 2026-10-30 · **Author:** Claude, for Daniel
+**Status:** design approved in conversation 2026-10-30; for review · **Amended:** 2026-10-31 (§3.1 provider default, §3.3 off, §3.4 write path) after the codebase map for the plan · **Date:** 2026-10-30 · **Author:** Claude, for Daniel
 **Covers:** FR-204 (`03-product-requirements.md:150`), the first item of doc 15's Phase 10
 "ML/AI layer" (`15-roadmap-and-milestones.md:145`), pulled forward under Option B
 (`15:21`). Also lays the shared `ai` module that FR-200, FR-201 and FR-205 will reuse.
@@ -62,10 +62,11 @@ never writes anything a user reads: every result is an entry a person wrote.
   line for Boot 4.0/4.1; 2.1 milestones target Boot 4.2, so they are not taken).
 - `infra/VoyageEmbeddingAdapter`: our own `EmbeddingModel` over Voyage's HTTP API
   (`RestClient`, timeout, retry with backoff on 429/5xx, typed errors).
-- `moyi.ai.embedding.provider = openai | voyage | none`. `none` is the default in tests and
-  whenever no key is set: the port reports itself unavailable and every caller degrades
-  (§3.5).
-- Keys come from env (`MOYI_OPENAI_API_KEY`, `MOYI_VOYAGE_API_KEY`), passed to Kamal as
+- `moyi.ai.embedding.provider = openai | voyage | none` (amended 2026-10-31). Following the
+  repo's provider convention (`PushProperties`), the real provider is the default and refuses to
+  start without its key. `none` must be named: in local, test, and `deploy.yml` until a key
+  exists. With `none`, the port reports no space and every caller degrades (§3.5).
+- Keys come from env (`MOYI_AI_EMBEDDING_OPENAI_API_KEY`, `MOYI_AI_EMBEDDING_VOYAGE_API_KEY`), passed to Kamal as
   secrets. Never logged, never in a response. Covered by the existing gitleaks rules [inferred].
 - Metrics (Micrometer): `moyi.ai.embedding.requests{provider,outcome}`,
   `moyi.ai.embedding.tokens{provider}`, `moyi.ai.embedding.latency{provider}`.
@@ -106,32 +107,41 @@ CREATE INDEX ON entry_embeddings_openai_1536 (bond_id);
 
 - `bonds.semantic_search_enabled boolean NOT NULL DEFAULT true`, beside the B4 settings,
   with the B4 `ETag`/412 behaviour.
-- **Off:** any member, one request. In the same transaction, set false, delete the bond's rows
-  from every embedding table, and append `SemanticSearchDisabled` to the outbox.
-- **On:** a consent request in the B5 pattern: one member proposes, the other accepts, it
-  expires like the others. On acceptance, set true and append `SemanticSearchEnabled`, which
-  starts the backfill (§3.4).
+- **Off** (amended 2026-10-31): any member, `PATCH /bonds/{id}` with
+  `semanticSearchEnabled: false`. `bond` cannot call `gratitude` (which depends on it), so the
+  transaction sets false and appends `SemanticSearchDisabled`, and the
+  `gratitude.semantic-search-off` consumer deletes the bond's rows from every table (SQL only).
+  **From the moment of the switch, no vector is read and none is written:** search and remember
+  check `BondMembership.semanticSearchEnabled`, and the sweep re-checks the setting under the
+  bond lock. `PATCH` with `true` is a 422 on the field.
+- **On:** `POST /bonds/{id}/semantic-search` proposes, or agrees when the other member
+  proposed (the deletion-request shape: no payload, so no `proposalId`). `DELETE` cancels. It
+  lapses after 7 days. A solo bond applies the change at once. Once on, the sweep backfills
+  (§3.4).
 - An ended bond keeps its setting; search on an ended bond reads as ADR-0039 default 3 allows.
 
-### 3.4 The write path
+### 3.4 The write path (amended 2026-10-31: a sweep, not outbox consumers)
 
-- Triggers: `EntrySubmitted` (exists), and a new **`EntryTextEdited`** appended in the same
-  transaction as the pre-reveal edit. Checked 2026-10-30: `EntryStore.kt:53` rewrites
-  `text_search` on an edit, and no event records it, so without this event an edited entry
-  would keep the vector of its old words. The `SemanticSearchEnabled` backfill also
-  triggers it.
-- `EmbedEntries` worker in `gratitude` (it owns the text; `ai` owns only the port) runs on
-  the outbox poller, under ShedLock. Embedding is batched. It skips a bond whose setting is
-  off and an entry whose `text_hash` is unchanged. It upserts the row for the **live**
-  provider only.
+- **Why not the outbox:** `OutboxJob` holds a database transaction for each delivery (60 s), and
+  there is no dead-letter queue (`Backoff.kt`). A provider call inside a consumer would hold a
+  transaction across the network and retry for ever.
+- **`EmbeddingJob`** (scheduling, ShedLock, every minute) asks `gratitude.api.EmbeddingSweep` to
+  embed up to 200 **eligible** entries with no row in the live model's table. Eligible means:
+  live, `text_search` not null, and the bond's setting on. Steps: read (short transaction),
+  call the provider (no transaction), write (short transaction under the bond row lock,
+  re-checking the setting, and writing only if `text_search` still hashes to what was
+  embedded).
+- This one mechanism covers new entries, edits, the backfill after re-enabling, catching up
+  after an outage and switching models. **No new entry event is needed.**
+- **An entry's vector dies with its words.** `EntryStore.update` (`EntryStore.kt:48-64`) is
+  the single place `text_search` changes: edit, author delete, withdrawal and the pre-close
+  sweep all pass through it. When the projection changes, it deletes the entry's rows from
+  every embedding table in the same transaction. `ON DELETE CASCADE` covers a deleted row.
+  A test asserts this for each erasure path ADR-0035 and ADR-0050 list.
 - **The user's request never waits on a provider.** Until the row exists, the entry is found
   by keywords only.
-- Erasure and withdrawal: `ON DELETE CASCADE` covers a deleted entry. Any path that empties
-  `text_search` also deletes the entry's embedding rows in the same transaction, which closes
-  ADR-0035's "every copy" for this new copy. A test asserts it for each erasure path ADR-0035
-  and ADR-0050 list.
-- `moyi.ai.embedding.lag` = age of the oldest un-embedded eligible entry, so the gap is
-  visible in metrics.
+- Metrics: requests, latency and outcome per provider, entries embedded or skipped, and the
+  job's last success. A lag gauge and token usage are deferred (ADR-0053).
 
 ### 3.5 The search box: `GET /api/v1/bonds/{bondId}/search` (unchanged contract)
 
@@ -186,9 +196,9 @@ CREATE INDEX ON entry_embeddings_openai_1536 (bond_id);
 ## 5. Testing
 
 - Unit: RRF merge, the threshold predicate builder, degradation (`none`, timeout, 5xx), the
-  Voyage adapter against WireMock (429 retry, malformed body, timeout).
+  Voyage and OpenAI adapters against a JDK `HttpServer` stub (429 retry, malformed body, timeout); no new test dependency.
 - Integration (Testcontainers, pgvector image): T-01 and cross-tenant fixtures with semantic
-  matching on; the setting off deletes rows in the same transaction; erasure leaves zero rows;
+  matching on; the setting off leaves zero rows after the outbox pass, and none is written by a racing sweep; erasure and edits leave zero rows;
   an `EXPLAIN` probe shows an index scan on `bond_id` and no seq scan across bonds.
 - Contract: the search endpoint's OpenAPI is unchanged (the contract diff in CI proves it);
   `/remember` and the setting are additions.
@@ -213,8 +223,7 @@ prompt ranking (FR-201); per-locale `text_search` (`07:230`); application-level 
 
 ## 8. Open for the plan
 
-- Whether `EntryTextEdited` needs a notification consumer (expected: none; the outbox
-  poller must skip it for push).
+- Whether `lockClosingViewOf` takes the same `bonds` row lock as `UpdateBond`, or the sweep needs a narrower lock method.
 - Whether the semantic predicate can run in the same SQL statement as the gate, or needs the
   query embedding bound as a parameter of the existing candidate query (expected: the
   latter).
