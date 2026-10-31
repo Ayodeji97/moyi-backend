@@ -13,7 +13,9 @@
 #   1. HEAD is the commit being deployed (KAMAL_VERSION, a full SHA, which is
 #      how CI tags the image);
 #   2. no tracked file differs from HEAD, staged or not;
-#   3. HEAD is origin/main after a fresh fetch.
+#   3. HEAD is origin/main after a fresh fetch;
+#   4. when that config gives the media worker a storage, the server says the
+#      worker's network limit is running and limiting (ADR-0052).
 # Any git failure refuses the deploy too.
 #
 # Kamal 2.12 runs this on the Mac, in the directory `kamal` was run from,
@@ -82,5 +84,49 @@ if [ "$HEAD_SHA" != "$MAIN_SHA" ]; then
     "HEAD:        $HEAD_SHA" \
     "origin/main: $MAIN_SHA"
 fi
+
+# 4. The media worker's network limit is in place, whenever the config being
+# deployed gives a media-worker role a storage (ADR-0052, review of #117). The
+# worker decodes what strangers upload; started without the limit it reaches
+# the whole internet. The limit is a systemd service on the server
+# (ops/media-worker/README.md, "Switching storage on", step 2), outside
+# Kamal's reach, so the deploy asks the server before anything boots. Kamal
+# reads this checkout's config/deploy.yml for a rollback too, so the same
+# question is asked then. The host, user and key are read from deploy.yml.
+# MOYI_DEPLOY_SSH replaces ssh for scripts/test-pre-deploy-hook.sh only.
+command -v ruby >/dev/null 2>&1 || refuse "ruby is not on PATH (Kamal's own language), so config/deploy.yml cannot be read."
+GATE="$(ruby -ryaml -e '
+  d = YAML.load(File.read(ARGV[0]))
+  worker = (d["servers"] || {})["media-worker"]
+  unless worker.is_a?(Hash)
+    puts "none"; exit
+  end
+  env = ((d["env"] || {})["clear"] || {}).merge((worker["env"] || {})["clear"] || {})
+  if env["MOYI_MEDIA_STORAGE_PROVIDER"].to_s.strip.downcase == "unavailable"
+    puts "off"; exit
+  end
+  host = Array(worker["hosts"]).first
+  host = host.keys.first if host.is_a?(Hash)
+  ssh = d["ssh"] || {}
+  key = Array(ssh["keys"]).first.to_s
+  puts ["on", ssh["user"] || "root", host, key.empty? ? "-" : File.expand_path(key)].join(" ")
+' "$ROOT/config/deploy.yml" 2>/dev/null)" || refuse "config/deploy.yml could not be read to see whether the media worker stores media."
+case "$GATE" in
+  none | off) ;;
+  "on "*)
+    read -r _ SSH_USER SSH_HOST SSH_KEY <<<"$GATE"
+    [ -n "$SSH_HOST" ] || refuse "config/deploy.yml names no host for the media-worker role."
+    SSH_ARGS=(-o BatchMode=yes -o ConnectTimeout=15)
+    [ "$SSH_KEY" = "-" ] || SSH_ARGS+=(-o IdentitiesOnly=yes -i "$SSH_KEY")
+    if ! "${MOYI_DEPLOY_SSH:-ssh}" "${SSH_ARGS[@]}" "$SSH_USER@$SSH_HOST" \
+      'systemctl is-active --quiet moyi-media-worker-egress && /usr/local/sbin/moyi-media-worker-egress check'; then
+      refuse "the media worker's network limit is not in place on $SSH_HOST, and this config gives the worker a storage." \
+        "Install it first: ops/media-worker/README.md, \"Switching storage on\", step 2." \
+        "Asked: systemctl is-active moyi-media-worker-egress, then moyi-media-worker-egress check." \
+        "(Or the server could not be reached: the same answer, since nothing was seen.)"
+    fi
+    ;;
+  *) refuse "config/deploy.yml was read as \"$GATE\", which this hook does not understand." ;;
+esac
 
 echo "pre-deploy: OK. $COMMAND of $VERSION from a clean checkout of origin/main."

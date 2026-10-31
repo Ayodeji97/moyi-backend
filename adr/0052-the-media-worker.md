@@ -207,6 +207,16 @@ wanted by `docker.service` as well, so a Docker started later starts it. `media-
 proves it in Docker-in-Docker (a Linux kernel and a Docker daemon of its own): thirteen checks pass;
 with the two `REJECT` rules removed five went red; with a failed restore ignored, with the jump added
 unconditionally, and with the host-namespace refusal removed, the check for each went red.
+**Corrected (the owner's install, 2026-10-31):** that Docker-in-Docker was Docker 28. On the
+server's Docker 29 `watch` limited the running worker and then ended at the first event, because
+it read events with `--format '{{.ID}}'`, a field Docker 29's API no longer has ("can't evaluate
+field ID in type *events.Message"), and systemd restart-looped it. It now reads `{{.Actor.ID}}`
+(the container's id in every API since Docker 1.10), probes the format against the daemon's last
+day of events before it limits anything, and exits loudly on any line that is not a container id.
+`ops/media-worker/test-egress-watch.sh` runs the watch on this Mac's own Docker 29 (colima's Ubuntu
+24.04, as the server), starts a worker after it, and checks it is limited and the watch still runs:
+red with the old script and with `{{.ID}}` forced, green now; `test-egress-limit.sh` passes on
+Docker 28 and, with `DIND_IMAGE=docker:29-dind`, on 29.
 
 **What it is not**: R2 has no range of its own, so the limit admits HTTPS to every site behind
 Cloudflare, which a subverted decoder could use to send what it read; it stops the rest of the
@@ -241,6 +251,91 @@ header and the README.
 `--skip-push`), and it would break a Kamal build from a clean clone of the commit, which is Kamal's
 default without a context and holds no jar; with it Kamal builds from the working tree. Said there.
 
+**Switched on (2026-10-30, the follow-up pull request).** `config/deploy.yml` no longer names
+`unavailable`. Its top-level `env`, which both roles inherit, names `MOYI_MEDIA_STORAGE_R2_BUCKET:
+moyi-media` and lists `MOYI_MEDIA_STORAGE_R2_ENDPOINT`, `_ACCESS_KEY_ID` and `_SECRET_ACCESS_KEY` as
+secrets. **Both roles need all four**: the API signs every upload and download URL, `HEAD`s each
+completion, deletes and purges (`media.purge` is the API's); the worker `GET`s each upload, `PUT`s
+what it makes of it and deletes the upload. Nothing in either can do its part with less.
+
+- **The worker holds no API secret** (review of #117). The top-level `env.secret` is now the
+  database's password and the bucket's three values alone; the session-signing pair, the HMAC key
+  and the email key are in `servers.web.env.secret`. The worker's profile gives the beans that
+  would want them what needs no secret (`moyi.security.jwt.key-source` and
+  `moyi.security.hashing.secret-source` `ephemeral`, `moyi.notification.email.provider` `log`):
+  it serves no request and runs only the media consumers, so it issues no token, hashes no address
+  and sends no email. Seen: the worker started with `deploy.yml`'s secrets for its role (the four)
+  and no other; without the profile's lines it refused (`moyi.security.hashing.secret … is not
+  set`). `ProductionStartsWithoutMediaSecretsTest` holds the split (red with the HMAC key moved back
+  to the top) and `MediaWorkerProfileTest` the three lines (red with one removed). When moderation
+  is switched on, its key is the worker's, in the worker's role.
+- **The gate is enforced by the deploy** (review of #117). `.kamal/hooks/pre-deploy` reads
+  `config/deploy.yml`; when it gives the media-worker role a storage, it asks the worker's host
+  (`ssh -o BatchMode=yes`, the host, user and key from `deploy.yml`) whether
+  `moyi-media-worker-egress` is active and its `check` passes, and refuses otherwise, naming the
+  runbook's step 2. `media-check.sh` now also alarms when a worker runs and the limiter is not
+  installed or not active (before, a missing limiter was silent). `scripts/test-pre-deploy-hook.sh`
+  and `ops/monitoring/test-media-check.sh` hold both with stubs (each red on the previous version)
+  and CI runs them.
+- **A rollback does not switch storage off.** Kamal 2.12's `rollback` (read in the gem:
+  `Cli::Main#rollback` invokes the app boot; `Cli::App::Boot#start_new_version` uploads the role's
+  secrets and `Commands::App#run` passes the role's env) boots the older image with a fresh `docker
+  run` configured from the current checkout, which the hook holds to `origin/main`. The first
+  version of this section and the runbook said otherwise. Switching off is a pull request, made
+  ready on the branch `ops/media-storage-off`.
+- **The endpoint is checked without being shown**: a value that is not an http(s) URL with a host
+  is refused naming the property only (`URI.create`'s message would carry the account id).
+
+- **The endpoint is Bitwarden's `R2_ENDPOINT`**, the field the backups have read since ADR-0043:
+  `.kamal/secrets` extracts it into `MOYI_MEDIA_STORAGE_R2_ENDPOINT`. Corrected: the runbook
+  first written for this step (and the brief for this pull request) asked the owner to add a new
+  field, `MOYI_MEDIA_STORAGE_R2_ENDPOINT`, holding the same value; `ops/backup/README.md` and
+  `ops/media-mirror/README.md` already said `R2_ENDPOINT` is `https://<account id>.eu.r2.cloudflarestorage.com`
+  and that `moyi-media` is served by it. One account, one jurisdiction, one value in one place: no
+  new field. It stays a secret because it names the Cloudflare account.
+- **Processing** stays `"off"` in the top-level `env` and `native` in the worker's role alone.
+- **Moderation stays `none`** in every role. That is the product as switched on: **an author sees
+  their own photos and voice notes, and no partner is shown any of them, until the owner decides
+  moderation** (ADR-0051). Nothing here changes that.
+- **A missing value is named.** `R2ObjectStore.create` refused with one sentence listing all four
+  properties whatever was missing; it now names each missing one with the variable production sets
+  it by (`missing: moyi.media.storage.r2.endpoint (MOYI_MEDIA_STORAGE_R2_ENDPOINT).`), and no value
+  (`MediaStorageConfigurationTest`, seen red with the old message).
+- **The deploy file's test holds the new truth.** `ProductionStartsWithoutMediaSecretsTest` now
+  holds that every role stores in R2's `moyi-media` with the three as secrets (red against
+  `e88944b`'s file), that the endpoint is never a plain value (red with it moved to `clear`), and
+  that every secret `deploy.yml` names is set by `.kamal/secrets` from a field its fetch line
+  fetches (red with the three extract lines missing, and with `R2_ENDPOINT` taken out of the fetch
+  line). `.kamal/secrets` is an input of `:app:test`, as `deploy.yml` is: without it the suite
+  reported the last change up to date.
+- **Seen, on the Mac** (the jar of this branch; `deploy.yml`'s environment for each role as Ruby's
+  YAML reads it; only the database's and Valkey's addresses changed; every secret made up): `web`
+  without the endpoint refused to start, naming it and only it; `media-worker` without the secret
+  access key the same; both with three plainly fake values started (`/healthz` UP, `Media storage:
+  R2 (bucket: moyi-media)`, the web role's processing OFF, the worker's NATIVE and its ready file
+  written), the endpoint in no log line. Then both pointed at MinIO, and
+  `scripts/r2-switch-on-check.sh` run against the `web` role with the worker beside it and
+  moderation `none`: 21 passed, 0 failed (each refusal, `READY` in about 3 s, the photo's URL
+  fetched 48 minutes after its signing date, the voice note `audio/ogg`, both objects gone after
+  the delete), no URL or key in its output, both assets `DELETED` and purged, MinIO empty, the
+  session revoked. With the worker stopped it failed as it should (`READY` not reached), and still
+  deleted what it made; terminated while it waited, it deleted at once. (Review of the switch-on:
+  an access token lives 15 minutes, and a wait for the URL's age can be longer; the script now
+  refreshes the session after the wait and before its cleanup. Seen with a 20-second token: the
+  first version failed with 401 after a two-minute wait and left the photo behind, this one
+  passed 21 of 21, and cleaned up after a token had expired.)
+- **Not run against R2, nor on the server.** The network limit's installation, the deploy, and
+  the check against the real bucket are the owner's (`ops/media-worker/README.md`, steps 1 to 7).
+  The hook's question was run against a stub of ssh, never the server.
+- **What this leaves open, for the owner to accept before any real user** (review of #117; the
+  runbook's launch gate):
+  - **One copy, and a token that can delete it.** Until the media mirror runs (ADR-0050, Q15), the
+    bucket is the only copy of every photo and voice note, and the worker holds a token that can
+    delete as well as write (R2 has no write-only scope). A decoder subverted by an upload could
+    delete everything in `moyi-media`; only the mirror's locked bucket would survive it.
+  - **Uploads are stored unscanned**: the known-image list is `none` (ADR-0051 decision 3).
+  - **No partner sees any media** while moderation is `none`.
+
 ## Consequences
 
 **Positive.** Uploads are decoded in a container that can neither write its own file system nor
@@ -254,10 +349,9 @@ programs it must never start; one line and one test stand between it and decodin
 worker's memory has ~225 MiB of headroom at the ceiling (decision 4: 799 of 1,024 MiB). The worker has no metrics
 endpoint: the pipeline's meters (`gratitude.media.processing.duration`, the outbox gauges for its
 consumers) are kept in a process nothing can scrape; its health is the ready file and
-`media-check.sh`'s database queries. The worker's container receives the same secrets as the API's
-(Kamal's top-level `env.secret` reaches every role, and a role cannot drop one): the JWT key and the
-email key it never uses. A subverted decoder runs as the same uid as the JVM and could read its
-environment; it already reaches the database, which is worth more. The network limit is outside
+`media-check.sh`'s database queries. A subverted decoder runs as the same uid as the JVM and could
+read its environment: since the switch-on that is the database's password and the bucket's token,
+no longer the API's keys ("Switched on"); it already reaches the database, which is worth more. The network limit is outside
 Kamal's configuration and fails open. During a deploy, both roles' old and new containers can
 overlap: 2 × 2 GB + 2 × 1 GB of limits beside Postgres's 2 GB and Valkey's 384 MB on an 8 GB box,
 limits not usage, 8.4 GB of them for the minute both overlap (the API's resident memory is far below its limit). The switch from Liberica (the
@@ -300,8 +394,15 @@ migration, no API change, no state-map row.
 
 ## Owed
 
-- **The owner, before switching storage on:** install the egress limit and see `check` pass
-  (`ops/media-worker/README.md`); then the follow-up pull request as written there.
+- **The owner, before deploying the switch-on:** `ops/media-worker/README.md` steps 1 to 3 (the
+  three Bitwarden fields checked, the egress limit installed and printing `limited`, the media
+  check copied again); after it, steps 5 to 7, `scripts/r2-switch-on-check.sh` among them, which
+  settles ADR-0047's, ADR-0048's and ADR-0049's "R2, not run". The switch-on pull request itself:
+  done ("Switched on", above).
+- **Launch gate: no real user before the media mirror runs** (review of #117). Until then the
+  bucket holds the only copy, which the worker's token can delete; uploads are stored unscanned
+  (known images `none`); no partner sees media (moderation `none`). The owner accepts these for
+  his test accounts only (`ops/media-worker/README.md`, "Launch gate").
 - **Trimming the worker's JVM** (review of #116, owed, not this pull request): it starts every
   module's beans and loads the breach-corpus filter it never consults; ~440 MiB resident is most of
   its 1 GB. A profile that leaves them out, measured.

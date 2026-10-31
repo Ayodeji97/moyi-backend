@@ -83,7 +83,7 @@
     "to": "NONE",
     "status": 503,
     "code": "MEDIA_STORAGE_UNAVAILABLE",
-    "reason": "No storage is configured: production, until the owner makes the bucket. Signing an upload URL needs no network, so a configured storage that is down does not refuse an intent; the completion does. Nothing is recorded; keep the entry's words and offer the photo again later.",
+    "reason": "No storage is configured: the provider is `unavailable`, as production was until its switch-on and is again if storage is switched off. Signing an upload URL needs no network, so a configured storage that is down does not refuse an intent; the completion does. Nothing is recorded; keep the entry's words and offer the photo again later.",
     "rule": "ADR-0047 §5",
     "evidence": "test",
     "evidenceRef": "MediaStorageUnavailableTest#an intent is 503 MEDIA_STORAGE_UNAVAILABLE and no asset is recorded",
