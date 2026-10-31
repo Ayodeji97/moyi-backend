@@ -92,7 +92,9 @@ service on the server does it instead, for every worker container as it
 starts, from inside the container's network namespace: Postgres (TCP 5432 on
 the `kamal` network) and HTTPS to Cloudflare's published ranges, where R2 is;
 nothing else. What it was seen to do is `test-egress-limit.sh`'s to show
-(Docker-in-Docker on the Mac). **Storage must not be switched on before this
+(Docker-in-Docker on the Mac, Docker 28 and 29), and `test-egress-watch.sh`'s
+on the Mac's own Docker 29 (colima's Ubuntu 24.04): a worker started after the
+watch began is limited by it. **Storage must not be switched on before this
 step has printed `limited`**: a worker that decodes uploads with the whole
 internet in reach is what ADR-0052 decision 5 exists to prevent. The deploy
 enforces it: `.kamal/hooks/pre-deploy` asks the worker's host (`ssh -o
@@ -108,15 +110,22 @@ ssh moyi 'command -v nsenter iptables-restore ip6tables-restore'
 scp ops/media-worker/egress-limit.sh moyi:/usr/local/sbin/moyi-media-worker-egress
 scp ops/media-worker/moyi-media-worker-egress.service moyi:/etc/systemd/system/
 ssh moyi 'chmod 700 /usr/local/sbin/moyi-media-worker-egress && systemctl daemon-reload && systemctl enable --now moyi-media-worker-egress'
+# If an earlier install crash-looped ("docker events ended" in its journal: the
+# script before this fix read the events with a format Docker 29 refuses),
+# restart it after copying the fixed script, so the running watch is the new one:
+ssh moyi 'systemctl restart moyi-media-worker-egress'
 
-# 2c. it is running, and it limited the worker that is running now
+# 2c. it is running, it stays running, and it limited the worker that is running now
 ssh moyi 'systemctl is-active moyi-media-worker-egress; journalctl -u moyi-media-worker-egress -n 5 --no-pager'
+sleep 30; ssh moyi 'systemctl show -p NRestarts --value moyi-media-worker-egress; systemctl is-active moyi-media-worker-egress'
 ssh moyi 'docker ps --filter label=role=media-worker --format "{{.Names}} {{.Status}}"'
 ssh moyi '/usr/local/sbin/moyi-media-worker-egress check && echo limited'
 ```
 
 2c should show `active`, a journal line `limited moyi-media-worker-<version>
-(pid …): Postgres on 172.18.0.0/16, HTTPS to Cloudflare`, one worker
+(pid …): Postgres on 172.18.0.0/16, HTTPS to Cloudflare` and no `docker
+events ended` or `cannot be read with --format` after it, the same restart
+count (0 on a fresh install) and still `active` thirty seconds later, one worker
 container `Up … (healthy)`, and `limited`. `check` passes when no worker runs
 at all, so the `docker ps` line must show one. The worker stays healthy: its
 open connection to Postgres is kept, and new ones are allowed.

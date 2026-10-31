@@ -44,6 +44,12 @@ NETWORK="${MOYI_EGRESS_NETWORK:-kamal}"
 CHAIN=MOYI-EGRESS
 # The labels Kamal puts on the role's containers (Kamal::Configuration::Role#default_labels).
 FILTERS=(--filter label=service=moyi --filter label=role=media-worker)
+# A container event's id. `.Actor.ID`, not `.ID`: Docker 29's API no longer has
+# the top-level field (watch, below). MOYI_EGRESS_EVENT_FORMAT is for
+# test-egress-watch.sh only, to show the old one failing.
+EVENT_FORMAT='{{.Actor.ID}}'
+[ -z "${MOYI_EGRESS_EVENT_FORMAT:-}" ] || EVENT_FORMAT="$MOYI_EGRESS_EVENT_FORMAT"
+id_ok() { [[ "$1" =~ ^[0-9a-f]{12,64}$ ]]; }
 
 # https://www.cloudflare.com/ips-v4, read 2026-10-29. Cloudflare changes it rarely
 # and announces it; re-read it when it does.
@@ -124,11 +130,27 @@ case "${1:-}" in
     apply "$2"
     ;;
   watch)
+    # The format first, against the daemon's recent history, so that a format
+    # this Docker cannot execute stops the watch at once, loudly, before it
+    # limits anything and seems to work. Seen on Docker 29 (review of #117):
+    # `{{.ID}}`, a field the API removed, failed only when the first event came,
+    # after the running worker had been limited, and the service restart-looped.
+    # `.Actor.ID` is the container's id in every API since Docker 1.10. With no
+    # container event in the last day the probe sees nothing, and the id check
+    # in the loop below is what fails loudly instead.
+    probe=$(docker events --since 24h --until 0s --filter type=container --format "$EVENT_FORMAT" 2>&1 | head -n 1) ||
+      true
+    if [ -n "$probe" ] && ! id_ok "$probe"; then
+      say "docker events cannot be read with --format '$EVENT_FORMAT' on this Docker: $probe"; exit 1
+    fi
     # Subscribe first, then limit what already runs, so a container started in
     # between is in the stream rather than missed.
-    exec 3< <(docker events --filter type=container --filter event=start "${FILTERS[@]}" --format '{{.ID}}')
+    exec 3< <(docker events --filter type=container --filter event=start "${FILTERS[@]}" --format "$EVENT_FORMAT" 2>&1)
     for c in $(workers); do apply "$c" || say "could not limit $c"; done
-    while read -r c <&3; do apply "$c" || say "could not limit $c"; done
+    while read -r c <&3; do
+      id_ok "$c" || { say "docker events gave something that is not a container id: $c"; exit 1; }
+      apply "$c" || say "could not limit $c"
+    done
     say "docker events ended"; exit 1
     ;;
   check)
