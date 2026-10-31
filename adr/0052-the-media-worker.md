@@ -207,6 +207,16 @@ wanted by `docker.service` as well, so a Docker started later starts it. `media-
 proves it in Docker-in-Docker (a Linux kernel and a Docker daemon of its own): thirteen checks pass;
 with the two `REJECT` rules removed five went red; with a failed restore ignored, with the jump added
 unconditionally, and with the host-namespace refusal removed, the check for each went red.
+**Corrected (the owner's install, 2026-10-31):** that Docker-in-Docker was Docker 28. On the
+server's Docker 29 `watch` limited the running worker and then ended at the first event, because
+it read events with `--format '{{.ID}}'`, a field Docker 29's API no longer has ("can't evaluate
+field ID in type *events.Message"), and systemd restart-looped it. It now reads `{{.Actor.ID}}`
+(the container's id in every API since Docker 1.10), probes the format against the daemon's last
+day of events before it limits anything, and exits loudly on any line that is not a container id.
+`ops/media-worker/test-egress-watch.sh` runs the watch on this Mac's own Docker 29 (colima's Ubuntu
+24.04, as the server), starts a worker after it, and checks it is limited and the watch still runs:
+red with the old script and with `{{.ID}}` forced, green now; `test-egress-limit.sh` passes on
+Docker 28 and, with `DIND_IMAGE=docker:29-dind`, on 29.
 
 **What it is not**: R2 has no range of its own, so the limit admits HTTPS to every site behind
 Cloudflare, which a subverted decoder could use to send what it read; it stops the rest of the

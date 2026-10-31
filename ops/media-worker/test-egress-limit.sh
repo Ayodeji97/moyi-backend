@@ -27,7 +27,9 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-DIND=docker:28-dind@sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac
+# Docker 28 by default: the oldest API the watch must still read. DIND_IMAGE=docker:29-dind runs it on
+# the server's major version (test-egress-watch.sh runs the watch on this machine's own Docker 29).
+DIND="${DIND_IMAGE:-docker:28-dind@sha256:2a232a42256f70d78e3cc5d2b5d6b3276710a0de0596c145f627ecfae90282ac}"
 NAME="moyi-egress-test-$RANDOM"
 docker info >/dev/null 2>&1 || { echo "docker is not running (colima start)" >&2; exit 1; }
 
