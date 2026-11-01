@@ -30,6 +30,7 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner
 import software.amazon.awssdk.services.s3.presigner.model.PutObjectPresignRequest
 import java.io.InputStream
 import java.net.URI
+import java.net.URISyntaxException
 import java.nio.file.Path
 import java.time.Clock
 import java.time.Duration
@@ -254,14 +255,20 @@ internal class R2ObjectStore(
             val bucket = r2.bucket
             val accessKeyId = r2.accessKeyId
             val secret = r2.secretAccessKey
-            check(!endpoint.isNullOrBlank() && !bucket.isNullOrBlank() && !accessKeyId.isNullOrBlank() && !secret.isNullOrBlank()) {
-                "moyi.media.storage.provider is R2 (the default) but moyi.media.storage.r2.endpoint, " +
-                    "moyi.media.storage.r2.bucket, moyi.media.storage.r2.access-key-id and " +
-                    "moyi.media.storage.r2.secret-access-key are not all set. Supply the bucket's token through the " +
-                    "environment, or set the provider to UNAVAILABLE where no media may be stored. Refusing to start " +
-                    "rather than run without anywhere to put an upload."
+            // Each by name, and by the variable production sets it with: a deploy that lost one
+            // secret says which in its first lines. Names only, never a value.
+            val missing =
+                mapOf("endpoint" to endpoint, "bucket" to bucket, "access-key-id" to accessKeyId, "secret-access-key" to secret)
+                    .filterValues { it.isNullOrBlank() }
+                    .keys
+                    .map { "moyi.media.storage.r2.$it (MOYI_MEDIA_STORAGE_R2_${it.uppercase().replace('-', '_')})" }
+            check(missing.isEmpty() && endpoint != null && bucket != null && accessKeyId != null && secret != null) {
+                "moyi.media.storage.provider is R2 (the default) but not every value it needs is set; missing: " +
+                    "${missing.joinToString()}. Supply the bucket's token through the environment, or set the provider " +
+                    "to UNAVAILABLE where no media may be stored. Refusing to start rather than run without anywhere " +
+                    "to put an upload."
             }
-            val uri = URI.create(endpoint)
+            val uri = endpointUri(endpoint)
             val region = Region.of(r2.region)
             val credentials = StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKeyId, secret))
             val s3Configuration =
@@ -301,6 +308,27 @@ internal class R2ObjectStore(
                     .serviceConfiguration(s3Configuration)
                     .build()
             return R2ObjectStore(client, presigner, bucket, uri, r2.region, AwsBasicCredentials.create(accessKeyId, secret))
+        }
+
+        /**
+         * The endpoint, trimmed, as an absolute http(s) URL with a host. It names the
+         * Cloudflare account (ADR-0052), so a value that is not one is refused by the
+         * property's name alone: `URI.create`'s own exception quotes the value, and is
+         * therefore never the cause either.
+         */
+        @Suppress("SwallowedException") // On purpose: its message holds the account id.
+        private fun endpointUri(endpoint: String): URI {
+            val uri =
+                try {
+                    URI(endpoint.trim())
+                } catch (malformed: URISyntaxException) {
+                    null
+                }
+            check(uri != null && uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank()) {
+                "moyi.media.storage.r2.endpoint (MOYI_MEDIA_STORAGE_R2_ENDPOINT) is not an http(s) URL with a host, " +
+                    "such as https://<account id>.eu.r2.cloudflarestorage.com. Its value is not shown: it names the account."
+            }
+            return uri
         }
     }
 }

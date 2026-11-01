@@ -127,4 +127,10 @@ tasks.named<Test>("test") {
         .file(rootProject.layout.projectDirectory.file("config/deploy.yml"))
         .withPropertyName("deployConfiguration")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    // And the secrets file it checks deploy.yml's secrets against, for the same reason
+    // (seen: R2_ENDPOINT taken out of its fetch line, and the suite reported up to date).
+    inputs
+        .file(rootProject.layout.projectDirectory.file(".kamal/secrets"))
+        .withPropertyName("deploySecrets")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }

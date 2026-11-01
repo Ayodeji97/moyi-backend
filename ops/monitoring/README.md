@@ -66,8 +66,10 @@ ssh moyi 'systemctl enable --now moyi-media-check.timer'
 ```
 
 (`f` is the helper defined above.) It needs the media tables (V32, V34) and `job_runs` (V35) on the server, so it
-is installed after the deploy that carries them. With the storage `unavailable`, as
-production runs today, no asset exists and the check reports ok as long as both jobs run.
+is installed after the deploy that carries them. While the storage was `unavailable` no
+asset existed and the check reported ok as long as both jobs ran; since storage was switched
+on (ops/media-worker/README.md) it watches real uploads, and #116's version also watches the
+worker, so a copy installed before #116 is copied again (that runbook's step 3).
 
 Since D4 (ADR-0051) it needs V36 too, and it also fails while anything is held as evidence (child
 abuse material awaiting the takedown runbook), while anything moderation held back has waited more
