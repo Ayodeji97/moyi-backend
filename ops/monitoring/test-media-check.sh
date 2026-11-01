@@ -15,12 +15,13 @@ pass() { PASSED=$((PASSED + 1)); echo "  PASS  $1"; }
 fail() { FAILED=$((FAILED + 1)); echo "  FAIL  $1${2:+ — $2}"; }
 
 mkdir -p "$TMP/bin"
-# docker: `ps` lists a worker when WORKER=1; `exec … psql` answers eight zeros (nothing wrong in the database).
+# docker: `ps` lists a worker when WORKER=1; `exec … psql` answers ten zeros, one per count media-check.sh reads
+# (nothing wrong in the database).
 cat > "$TMP/bin/docker" <<'EOF'
 #!/bin/bash
 case "$1" in
   ps) [ "${WORKER:-0}" = 1 ] && echo 0123456789ab ;;
-  exec) echo "0 0 0 0 0 0 0 0" ;;
+  exec) echo "0 0 0 0 0 0 0 0 0 0" ;;
 esac
 exit 0
 EOF
@@ -50,7 +51,10 @@ verdict() {
   : > "$TMP/pings"
   PATH="$TMP/bin:$PATH" PINGS="$TMP/pings" MOYI_MONITORING_ENV="$TMP/env" MOYI_EGRESS_BIN="$bin" \
     bash "$CHECK" > "$TMP/out" 2>&1
-  if grep -q '/fail$' "$TMP/pings"; then sed -n 's/^moyi-media-check: //p' "$TMP/out"; else echo ok; fi
+  # ok only when the heartbeat itself was pinged: a check that died before pinging is not ok.
+  if grep -q '/fail$' "$TMP/pings"; then sed -n 's/^moyi-media-check: //p' "$TMP/out"
+  elif grep -qx 'https://hc.example.invalid/ping' "$TMP/pings"; then echo ok
+  else echo "no ping: $(tr '\n' ' ' < "$TMP/out")"; fi
 }
 
 echo "media-check: $CHECK"
