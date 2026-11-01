@@ -2921,3 +2921,24 @@ Wrong about: what the full build's rate-limit failure meant. I gave the test a c
          connection once, and a connection factory stopped and started (a lifecycle Spring's test
          framework exercises, and production can) left it failing open for good. A green test
          that needed a private context was the defect telling me where it was.
+
+## 2026-10-30 · Feature · Media storage switched on — the field that already existed, and a test that did not rerun
+
+Expected: a mechanical pull request: the builder's diff applied, one new Bitwarden field for the
+         endpoint, the deploy-file test already shaped for it.
+Reality: the endpoint was already in Bitwarden as `R2_ENDPOINT`, the backups' field, and two
+         runbooks said so; the planned field would have been a second copy of the account id
+         that nothing else read. Checking every name in `deploy.yml` against `.kamal/secrets`
+         turned into a test, and its first red-green run lied: `:app:test` declared `deploy.yml`
+         as an input but not `.kamal/secrets`, so a mutation of the secrets file left the suite
+         "up to date" and green. The verification script's interrupt path was found by running
+         it: a `sleep` in the foreground held off the cleanup trap for twenty minutes.
+Wrong about: "the brief says add a field, so add a field". The brief was written from the
+         runbook, the runbook from memory; the vault's other runbooks were the evidence.
+         And a test that reads a file the build does not know about is only as fresh as the
+         last change to a file the build does know about.
+Wrong about (review of #117): "`kamal rollback` to the release before turns storage off". A
+         rollback re-runs the older image with today's deploy.yml and secrets; the image goes
+         back, the configuration does not. Read in the gem, not assumed: the way off is now a
+         pull request kept ready on a branch. And "the gate is a runbook step" was a gate
+         nothing enforced; the deploy hook now asks the server.

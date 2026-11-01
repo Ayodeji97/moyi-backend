@@ -52,11 +52,11 @@
 #   - no report of sexual content involving a minor is open at all: it is
 #     the priority review (Q16), and fails at once, as a blocked asset does,
 #     until the operator has decided it (takedown.md §3, then §2);
-#   - where the worker's egress limit is installed
+#   - while a media worker container runs, its egress limit is installed
 #     (/usr/local/sbin/moyi-media-worker-egress, ops/media-worker/README.md),
-#     every running worker container is limited by it (ADR-0052): a worker
-#     started while the limiter was down reaches the whole internet, and this
-#     is how somebody hears.
+#     its service is active, and every worker container is limited by it
+#     (ADR-0052): a worker started while the limiter was missing or down
+#     reaches the whole internet, and this is how somebody hears.
 #
 # All well: it pings the heartbeat. Anything wrong: it pings the heartbeat's
 # /fail URL with the reason, which alerts at once. If the box, Docker or
@@ -70,7 +70,7 @@
 # may set MEDIA_MODERATION_ON=1, QUARANTINE_REVIEW_DAYS and REPORT_REVIEW_DAYS.
 set -euo pipefail
 
-ENV_FILE=/etc/moyi-monitoring/heartbeats.env
+ENV_FILE="${MOYI_MONITORING_ENV:-/etc/moyi-monitoring/heartbeats.env}" # the variable for ops/monitoring/test-media-check.sh only
 die() { echo "moyi-media-check: $*" >&2; exit 1; }
 [ -r "$ENV_FILE" ] || die "$ENV_FILE is missing"
 # shellcheck source=/dev/null
@@ -118,9 +118,18 @@ problem=""
 [ "$unreviewed" -eq 0 ] || problem="${problem:+$problem; }$unreviewed held-back assets unreviewed for more than $QUARANTINE_REVIEW_DAYS days"
 [ "$reports_late" -eq 0 ] || problem="${problem:+$problem; }$reports_late member reports open for more than $REPORT_REVIEW_DAYS days (moyi reports list)"
 [ "$reports_priority" -eq 0 ] || problem="${problem:+$problem; }$reports_priority reports of sexual content involving a minor await the takedown runbook (§3, then §2)"
-EGRESS=/usr/local/sbin/moyi-media-worker-egress
-if [ -x "$EGRESS" ] && ! "$EGRESS" check 2>/dev/null; then
-  problem="${problem:+$problem; }a media worker container runs without its egress limit"
+# A running worker container must be limited (ADR-0052): the limiter
+# installed, its service active, and every worker container limited. Missing
+# or stopped is as bad as not limiting (review of #117): it was silent before.
+EGRESS="${MOYI_EGRESS_BIN:-/usr/local/sbin/moyi-media-worker-egress}"
+if [ -n "$(docker ps -q --filter label=service=moyi --filter label=role=media-worker)" ]; then
+  if [ ! -x "$EGRESS" ]; then
+    problem="${problem:+$problem; }a media worker runs and its egress limiter is not installed"
+  elif ! systemctl is-active --quiet moyi-media-worker-egress; then
+    problem="${problem:+$problem; }a media worker runs and the moyi-media-worker-egress service is not active"
+  elif ! "$EGRESS" check 2>/dev/null; then
+    problem="${problem:+$problem; }a media worker container runs without its egress limit"
+  fi
 fi
 
 if [ -z "$problem" ]; then

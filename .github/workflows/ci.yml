@@ -75,6 +75,13 @@ jobs:
 
       - run: ./gradlew build
 
+      # The pre-deploy hook refuses a deploy that gives the media worker a
+      # storage while its network limit is not in place (ADR-0052, review of
+      # #117). Throwaway git checkouts and a stub for ssh; no server.
+      - run: scripts/test-pre-deploy-hook.sh
+      # And the media check alarms on a worker whose limit is missing, stopped or not applied.
+      - run: ops/monitoring/test-media-check.sh
+
       - if: always()
         uses: actions/upload-artifact@v7
         with:

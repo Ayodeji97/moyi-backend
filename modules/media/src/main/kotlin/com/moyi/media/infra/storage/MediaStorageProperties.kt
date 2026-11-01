@@ -13,10 +13,11 @@ import java.time.Duration
  * is the real storage, and it refuses to start without its credentials.**
  *
  * [Provider.UNAVAILABLE] has to be asked for by name. Production's
- * `config/deploy.yml` asks, until the owner has made the `moyi-media` bucket and
- * its token, in a line that says so and how to switch; every upload is then
- * refused with `503 MEDIA_STORAGE_UNAVAILABLE`, and the rest of the API is
- * untouched. The `local` profile and the tests use [Provider.R2] against MinIO.
+ * `config/deploy.yml` asked until the switch-on (ADR-0052), and is the place to
+ * ask again to switch storage off; every upload is then refused with
+ * `503 MEDIA_STORAGE_UNAVAILABLE`, and the rest of the API is untouched.
+ * Production now names the bucket, and the endpoint and the token as secrets;
+ * a missing one refuses the start by name ([R2ObjectStore.create]). The `local` profile and the tests use [Provider.R2] against MinIO.
  *
  * Every value arrives from the environment, as `MOYI_MEDIA_STORAGE_…`.
  */
