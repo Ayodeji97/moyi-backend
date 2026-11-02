@@ -116,10 +116,11 @@ logging:
     # authenticator valve still prints it.
     #
     # SecretsNeverLoggedTest raises every level above these by property and
-    # fails if any one of the sixteen pins from here to the end of this block
-    # is removed: these six and the ten below. Each was removed in turn and
-    # seen failing on 2026-10-21 (slice C6b, task 2 review m3); the sixteenth,
-    # HttpURLConnection, on 2026-11-02 (ADR-0054).
+    # fails if any one of the seventeen pins from here to the end of this block
+    # is removed: these six and the eleven below. Each was removed in turn and
+    # seen failing on 2026-10-21 (slice C6b, task 2 review m3); the sixteenth
+    # and seventeenth, HttpURLConnection and org.springframework.ai, on
+    # 2026-11-02 (ADR-0054).
     org.hibernate.orm.core: INFO
     org.hibernate.orm.jdbc.bind: "OFF"
     org.hibernate.orm.jdbc.extract: "OFF"
@@ -200,6 +201,16 @@ logging:
     # outbound HTTP headers. SecretsNeverLoggedTest fails if this line is
     # removed.
     sun.net.www.protocol.http.HttpURLConnection: INFO
+    # ADR-0054: Spring AI, at TRACE. OpenAiEmbeddingModel logs "OpenAiEmbeddingModel
+    # call <model> with the following options : " and the OpenAI SDK's request,
+    # whose toString holds every input: the words of each entry the sweep
+    # embeds, and a search's or a "remember" question's `q` (seen 2026-11-02
+    # with everything at TRACE). Pinned as a package, not that one class: Spring
+    # AI exists to carry what people write to a model, and any of its classes
+    # (the next model this application uses among them) may print it below
+    # INFO. What is given up: Spring AI's DEBUG and TRACE, every class.
+    # SecretsNeverLoggedTest fails if this line is removed.
+    org.springframework.ai: INFO
 
 management:
   server:

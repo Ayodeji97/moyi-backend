@@ -213,9 +213,11 @@ snippet are unchanged, and so is the search operation in the contract.
 - **`x.bond_id = ?` binds the bond's id as a constant**, not `x.bond_id = e.bond_id`. The two mean
   the same, but Postgres planned the `EXISTS` inside the `OR` as a hashed SubPlan over a sequential
   scan of the whole vector table with the correlated form (`SearchCandidatesTest`'s `EXPLAIN` went
-  red on it); with the constant, it is a bitmap scan of `_bond_idx`. (In remember's join form the
-  planner derives the constant itself; without either condition it scans the table, and
-  `RankedCandidatesTest` fails.)
+  red on it); with the constant, it is a bitmap scan of `_bond_idx`. Remember's join binds the same
+  constant (`JOIN <table> x ON x.entry_id = e.id AND x.bond_id = ?`). In that join form the
+  correlated `x.bond_id = e.bond_id` would also be bond-bounded, the planner deriving the constant
+  through the equivalence; without either condition it scans the table, and `RankedCandidatesTest`
+  fails. Both statements bind the constant.
 - **The cost:** with a meaning match the `OR` takes the keyword half off `entries_search_idx`, and
   the plan starts from `entries_bond_recent_idx` and filters the bond's rows. It is bounded by the
   bond, and measured (decision D).
@@ -252,13 +254,22 @@ score calibration between `ts_rank` and a distance, and needs no threshold at al
 ### Safety and deployment
 
 **R. The words sent to a provider, and its key, held to the entry's standard in the log.**
-`SecretsNeverLoggedTest` now runs the real Voyage client against a stub of its API, with a watched
-fake key, at TRACE: the sweep embeds an entry, and remember embeds a question that matches no word.
-Its first run found two roads, now closed and each seen failing again when removed: `RestClient`
-printing the request body by its `toString` at DEBUG (Voyage's request type now redacts it), and
-the JDK's `HttpURLConnection` printing the `Authorization` header at DEBUG (pinned at INFO in
-`application.yml`, the sixteenth pin). The OpenAI SDK's own logging (off unless `OPENAI_LOG` is set)
-was not run under the scan.
+`SecretsNeverLoggedTest` now runs each provider's real client against a stub of its API, one
+context each (`SecretsNeverLoggedWithVoyageTest`, `SecretsNeverLoggedWithOpenAiTest`), with a
+watched fake key, at TRACE: the sweep embeds an entry, and remember embeds a question that matches
+no word, and the stub's count shows both really reached it. It found three roads, now closed and
+each seen failing when removed:
+
+- `RestClient` printing Voyage's request body by its `toString` at DEBUG (the request type now
+  redacts it);
+- the JDK's `HttpURLConnection`, under Voyage's client, printing the `Authorization` header at DEBUG
+  (pinned at INFO in `application.yml`, the sixteenth pin);
+- Spring AI's `OpenAiEmbeddingModel.call` printing "… with the following options : " and the
+  OpenAI SDK's `EmbeddingCreateParams`, whose `toString` holds every input, at TRACE: the entry's
+  words, and search's and remember's `q` (pinned as the package `org.springframework.ai` at INFO,
+  the seventeenth: Spring AI exists to carry what people write to a model, and any of its classes
+  may print it). Spring AI builds its own HTTP client over OkHttp, with no logging interceptor; the
+  SDK's `OPENAI_LOG` switch plays no part in this stack.
 
 **15. Production names `none` until a key exists** (`config/deploy.yml`, top-level `env.clear`,
 so both roles inherit it). Switching on is the API's role alone: the provider in
