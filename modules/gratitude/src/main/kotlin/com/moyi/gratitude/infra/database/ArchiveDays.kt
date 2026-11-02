@@ -4,6 +4,8 @@ import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.SearchTerms
+import com.moyi.gratitude.infra.database.EntryRows.LIVE_ROW
+import com.moyi.gratitude.infra.database.EntryRows.SEEN_ROW
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementSetter
 import org.springframework.jdbc.core.RowMapper
@@ -148,8 +150,8 @@ internal class ArchiveDays(
     /**
      * At most [limit] days of [bondId], newest first and strictly before [before] where given,
      * on which **one entry** matches [terms] and that same entry is one [memberId] may read in
-     * full as far as rows can say: they wrote it or it was revealed ([SEEN_ROW]), it is not
-     * erased ([LIVE_ROW]), and its author is not in [withdrawnMemberIds]. Each day carries the
+     * full as far as rows can say: they wrote it or it was revealed ([EntryRows.SEEN_ROW]), it is not
+     * erased ([EntryRows.LIVE_ROW]), and its author is not in [withdrawnMemberIds]. Each day carries the
      * ids of its entries that matched (ADR-0039 decisions 2 and 3).
      *
      * **The match and the visibility are asked of one row.** Asked of the day, "a day with an
@@ -157,7 +159,7 @@ internal class ArchiveDays(
      * would list a day the caller wrote on, and say what the partner wrote before the reveal
      * (c6-corpus H-S2).
      *
-     * **An erased entry never matches, whatever its projection still holds** ([LIVE_ROW]).
+     * **An erased entry never matches, whatever its projection still holds** ([EntryRows.LIVE_ROW]).
      * This build empties the projection with every erasure (`searchProjectionOf`, V25), but a
      * build from before V25 does not map the column, so an entry it erases keeps its words
      * there, during a blue/green overlap or after a rollback across V25 (final review I1;
@@ -203,7 +205,7 @@ internal class ArchiveDays(
     /**
      * The days of [bondId] dated [today]'s month and day in an earlier year, newest first, at
      * most [ON_THIS_DAY_YEARS], that hold an entry [memberId] may read in full as far as rows
-     * can say: they wrote it or it was revealed ([SEEN_ROW]), it is not erased ([LIVE_ROW]),
+     * can say: they wrote it or it was revealed ([EntryRows.SEEN_ROW]), it is not erased ([EntryRows.LIVE_ROW]),
      * and its author is not in [withdrawnMemberIds] (ADR-0039 decision 15).
      *
      * **A day of tombstones is not a memory** (the controller's default 5, c6-corpus H-O5),
@@ -246,17 +248,7 @@ internal class ArchiveDays(
 
         private fun closedAtOf(row: ResultSet): Instant? = row.getTimestamp("closed_at")?.toInstant()
 
-        /**
-         * BR-1's "ever readable" asked of one entry row `e`: the caller wrote it, or it has been
-         * revealed. Its one argument is the caller's member id. The archive lists a day by it
-         * ([SEEN]); a search asks it of the very row that matched ([matching]), never of the day.
-         */
-        private const val SEEN_ROW = "(e.author_member_id = ? OR e.revealed_at IS NOT NULL)"
-
         private const val SEEN = "AND EXISTS (SELECT 1 FROM entries e WHERE e.bond_day_id = d.id AND $SEEN_ROW)"
-
-        /** Neither mark of an erasure, as `Entry.isErased` asks both. No argument. */
-        private const val LIVE_ROW = "e.deleted_at IS NULL AND e.status <> 'DELETED'"
 
         private const val MARKED =
             "AND EXISTS (SELECT 1 FROM entries e JOIN entry_favourites f ON f.entry_id = e.id " +

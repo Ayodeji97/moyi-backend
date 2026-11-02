@@ -7,6 +7,7 @@ import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
+import com.moyi.gratitude.infra.database.EntryEmbeddings
 import com.moyi.gratitude.infra.database.EntryRepository
 import com.moyi.gratitude.infra.database.EntryStore
 import com.moyi.identity.api.UserDirectory
@@ -189,7 +190,8 @@ internal class ArchiveReadOrderTest(
     internal class StoppableEntryStore(
         entries: EntryRepository,
         entityManager: EntityManager,
-    ) : EntryStore(entries, entityManager) {
+        embeddings: EntryEmbeddings,
+    ) : EntryStore(entries, entityManager, embeddings) {
         private val then = AtomicReference<(() -> Unit)?>()
 
         private val happened = AtomicBoolean()
@@ -222,7 +224,8 @@ internal class ArchiveReadOrderTest(
         fun stoppableEntryStore(
             entries: EntryRepository,
             entityManager: EntityManager,
-        ): EntryStore = StoppableEntryStore(entries, entityManager)
+            embeddings: EntryEmbeddings,
+        ): EntryStore = StoppableEntryStore(entries, entityManager, embeddings)
     }
 
     private companion object {

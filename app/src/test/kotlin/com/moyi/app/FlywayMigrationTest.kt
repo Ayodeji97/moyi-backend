@@ -138,18 +138,18 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll((1..27).toList() + listOf(29, 30, 31, 32, 33, 40)),
-            "Expected every module's migrations, V1 to V27, V29 to V33 and V40, found: $versions",
+            versions.containsAll((1..27).toList() + listOf(29, 30, 31, 32, 33, 40, 41)),
+            "Expected every module's migrations, V1 to V27, V29 to V33, V40 and V41, found: $versions",
         )
 
         val extensions =
             jdbcTemplate.queryForList(
-                "SELECT extname FROM pg_extension WHERE extname IN ('citext', 'pgcrypto', 'unaccent', 'btree_gin')",
+                "SELECT extname FROM pg_extension WHERE extname IN ('citext', 'pgcrypto', 'unaccent', 'btree_gin', 'vector')",
                 String::class.java,
             )
         assertTrue(
-            extensions.containsAll(listOf("citext", "pgcrypto", "unaccent", "btree_gin")),
-            "Expected citext, pgcrypto, unaccent and btree_gin (V25, search) extensions, found: $extensions",
+            extensions.containsAll(listOf("citext", "pgcrypto", "unaccent", "btree_gin", "vector")),
+            "Expected citext, pgcrypto, unaccent and btree_gin (V25, search) and vector (V41) extensions, found: $extensions",
         )
 
         val identityTables =

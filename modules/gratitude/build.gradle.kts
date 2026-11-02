@@ -26,6 +26,9 @@ dependencies {
     // photo on an entry is shown to its reader (spec §4 D2, ADR-0048). `media` is
     // a leaf, so this makes no cycle (spec §2.1, ADR-0047).
     implementation(projects.modules.media)
+    // `com.moyi.ai.api` only: `EmbeddingSpace`, which names the table an entry's vectors
+    // live in (V41, ADR-0054). `ai` is a leaf that knows nothing of this module.
+    implementation(projects.modules.ai)
 
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")
