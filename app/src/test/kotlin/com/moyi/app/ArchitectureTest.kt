@@ -51,6 +51,7 @@ class ArchitectureTest {
                 "scheduling",
                 "admin",
                 "analytics",
+                "ai",
             )
 
         /**

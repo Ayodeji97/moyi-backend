@@ -235,6 +235,19 @@ management:
 # `.client-email` and `.private-key-pem` (MOYI_NOTIFICATION_PUSH_FCM_…).
 # Until a Firebase project exists, config/deploy.yml says LOG, in the open.
 
+# Embeddings for semantic search (ADR-0054, modules/ai AiProperties). The same
+# posture again: the provider defaults to OPENAI, which refuses to start
+# without its key; `none` must be named, and with it search and "remember when"
+# answer from keywords alone. The values, and their environment variables:
+#
+#   moyi.ai.embedding.provider          MOYI_AI_EMBEDDING_PROVIDER          openai | voyage | none
+#   moyi.ai.embedding.openai.api-key    MOYI_AI_EMBEDDING_OPENAI_API_KEY    required while openai
+#   moyi.ai.embedding.voyage.api-key    MOYI_AI_EMBEDDING_VOYAGE_API_KEY    required while voyage
+#   moyi.ai.embedding.timeout           MOYI_AI_EMBEDDING_TIMEOUT           per request, default 10s
+#
+# A key is a secret: never here, never logged (AiProperties redacts it). Only
+# the `local` profile and the test contexts say `none` in a file.
+
 # Emailed and shared links (ADR-0018 decision 2 and its amendment, ADR-0022
 # decision 2). No base URL is set here on purpose: each one is required, from
 # the environment, and a missing one is a failed boot, not a link to a page

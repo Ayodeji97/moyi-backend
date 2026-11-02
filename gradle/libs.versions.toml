@@ -31,6 +31,11 @@ shedlock = "7.10.1"
 # to one internal class in `modules/media` (doc 25:118). R2 speaks the S3 API, and
 # the same class reaches MinIO in tests and locally. Not in the Spring Boot BOM.
 awssdk = "2.55.16"
+# Embeddings for semantic search (ADR-0054), behind `modules/ai`'s EmbeddingPort.
+# 2.0.x is the line built for Spring Boot 4.0/4.1; 2.1 targets Boot 4.2, so it is
+# not taken. The BOM and two libraries only, never the starter: the module
+# builds its beans itself, as PushSenderConfiguration does.
+springAi = "2.0.2"
 
 [libraries]
 konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
@@ -44,6 +49,9 @@ shedlock-jdbc = { module = "net.javacrumbs.shedlock:shedlock-provider-jdbc-templ
 kotest-assertions-core = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 awssdk-bom = { module = "software.amazon.awssdk:bom", version.ref = "awssdk" }
+spring-ai-bom = { module = "org.springframework.ai:spring-ai-bom", version.ref = "springAi" }
+spring-ai-openai = { module = "org.springframework.ai:spring-ai-openai" }
+spring-ai-model = { module = "org.springframework.ai:spring-ai-model" }
 # flyway-core / flyway-database-postgresql, the postgresql JDBC driver, and
 # Testcontainers are NOT pinned here — their versions come from the Spring
 # Boot BOM (spring-boot-dependencies) that every Spring-facing module

@@ -44,6 +44,7 @@ include(
     "modules:scheduling",
     "modules:admin",
     "modules:analytics",
+    "modules:ai",
     "contracts",
     // Build-time tooling, not part of the deployable. `app` does not depend
     // on it, which is what keeps the corpus builder's HTTP client off the
