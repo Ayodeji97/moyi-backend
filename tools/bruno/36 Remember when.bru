@@ -1,0 +1,28 @@
+meta {
+  name: Remember when
+  type: http
+  seq: 36
+}
+
+get {
+  url: {{api}}/bonds/{{bondId}}/remember?q=the walk by the river
+  body: none
+  auth: bearer
+}
+
+params:query {
+  q: the walk by the river
+  ~limit: 10
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  "Remember when" (FR-204, ADR-0054): a question in plain words, answered with the days of your archive most relevant to it, most relevant first, each day whole. Never generated text: every answer is an entry one of you wrote. No cursor: limit is 1 to 20, 10 when left out, and fewer days, or none, is usual.
+
+  Two rankings are fused: by the question's words, and by its meaning while the bond's semantic search is on and a provider is configured. With neither (production names no provider yet), it is the words' ranking alone, which needs every word of q in one entry: "the walk by the river" finds a day only if one entry holds all five words; "river" alone is kinder. Your partner's entry is found only once it has been revealed.
+
+  q follows search's rules: blank, or longer than 100 characters, is 422 on q, never sent back. Thirty questions an hour.
+}
