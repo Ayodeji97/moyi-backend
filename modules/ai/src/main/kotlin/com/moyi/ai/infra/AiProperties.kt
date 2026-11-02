@@ -40,11 +40,18 @@ internal data class AiProperties(
         NONE,
     }
 
+    /**
+     * The base URL **includes `/v1`**: the OpenAI SDK under Spring AI uses a configured value
+     * verbatim and appends only `/embeddings` (it adds `/v1` itself only when the value is blank).
+     * Without it every request is a 404, which the port reports as "provider error" and search
+     * silently falls back to keywords; `OpenAiWiringTest` pins the default. [Voyage]'s base URL is
+     * the bare host, because [VoyageEmbeddingModel] adds the whole path.
+     */
     internal data class OpenAi(
         val apiKey: String? = null,
         val model: String = "text-embedding-3-small",
         @field:NotBlank
-        val baseUrl: String = "https://api.openai.com",
+        val baseUrl: String = "https://api.openai.com/v1",
     ) {
         /** The generated one would print the key. */
         override fun toString() = "OpenAi(model=$model, baseUrl=$baseUrl, apiKey=${apiKey?.let { "<redacted>" }})"

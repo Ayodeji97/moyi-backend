@@ -1,14 +1,18 @@
 package com.moyi.ai.infra
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.comparables.shouldBeLessThan
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import org.springframework.ai.embedding.EmbeddingRequest
 import org.springframework.http.client.SimpleClientHttpRequestFactory
+import org.springframework.web.client.ResourceAccessException
 import org.springframework.web.client.RestClient
+import java.net.SocketTimeoutException
 import java.time.Duration
 
 internal class VoyageEmbeddingModelTest {
@@ -76,8 +80,15 @@ internal class VoyageEmbeddingModelTest {
 
     @Test
     fun `a slow provider times out`() {
+        // A valid answer, only late: without the read timeout the call would succeed.
         stub.delay = Duration.ofSeconds(3)
-        stub.responses += 200 to "{}"
-        shouldThrow<Exception> { model(timeout = Duration.ofMillis(300)).call(EmbeddingRequest(listOf("a"), null)) }
+        stub.responses += 200 to """{"data":[{"embedding":[1.0],"index":0}],"usage":{"total_tokens":1}}"""
+        val started = System.nanoTime()
+        val thrown =
+            shouldThrow<ResourceAccessException> {
+                model(timeout = Duration.ofMillis(300)).call(EmbeddingRequest(listOf("a"), null))
+            }
+        thrown.cause.shouldBeInstanceOf<SocketTimeoutException>()
+        Duration.ofNanos(System.nanoTime() - started) shouldBeLessThan Duration.ofSeconds(2)
     }
 }

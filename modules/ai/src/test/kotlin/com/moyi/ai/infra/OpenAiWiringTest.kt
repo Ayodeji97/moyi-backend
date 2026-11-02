@@ -7,6 +7,7 @@ import io.kotest.matchers.string.shouldContain
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Test
 import org.springframework.web.client.RestClient
+import java.net.URI
 
 /**
  * Both real providers, wired as production wires them (AiConfiguration), against a stub on a
@@ -31,6 +32,26 @@ internal class OpenAiWiringTest {
                 )
             port.embed(listOf("hello")).single().size shouldBe EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL.dimensions
             stub.authorizations.single() shouldBe "Bearer sk-test"
+        }
+    }
+
+    @Test
+    fun `the default OpenAI base URL carries the path the SDK appends embeddings to`() {
+        // The SDK uses a configured base URL verbatim and adds only `/embeddings`, so the default
+        // must end in `/v1`. The stub stands in for the host; the path is the default's own.
+        val defaultPath = URI(AiProperties.OpenAi().baseUrl).path
+        StubHttpServer("/v1/embeddings").use { stub ->
+            val vector = List(EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL.dimensions) { "0.0" }.joinToString(",")
+            stub.responses += 200 to """{"object":"list","data":[{"object":"embedding","index":0,"embedding":[$vector]}],""" +
+                """"model":"text-embedding-3-small","usage":{"prompt_tokens":1,"total_tokens":1}}"""
+            val port =
+                AiConfiguration().embeddingPort(
+                    AiProperties(openai = AiProperties.OpenAi(apiKey = "sk-test", baseUrl = stub.baseUrl + defaultPath)),
+                    SimpleMeterRegistry(),
+                    RestClient.builder(),
+                )
+            port.embed(listOf("hello")).single().size shouldBe EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL.dimensions
+            stub.requests.size shouldBe 1
         }
     }
 
