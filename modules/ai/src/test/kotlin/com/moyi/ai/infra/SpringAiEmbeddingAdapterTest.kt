@@ -61,12 +61,29 @@ internal class SpringAiEmbeddingAdapterTest {
         listOf<Throwable>(
             InterruptedException(),
             IllegalStateException("retry interrupted", InterruptedException()),
-            RuntimeException("read", java.io.InterruptedIOException()),
         ).forEach { failure ->
             val adapter = SpringAiEmbeddingAdapter(model { throw failure }, EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL, meters, "openai")
             try {
                 shouldThrow<EmbeddingUnavailableException> { adapter.embed(listOf("words")) }
                 Thread.currentThread().isInterrupted shouldBe true
+            } finally {
+                Thread.interrupted()
+            }
+        }
+    }
+
+    /** Review of Task 7, round 2: a read timeout is an `InterruptedIOException` too, and nobody asked the thread to stop. */
+    @Test
+    fun `a provider timeout fails the call and leaves the thread uninterrupted`() {
+        // A read timeout, and OkHttp's whole-call timeout: both `InterruptedIOException`s, neither an interrupt.
+        listOf<Throwable>(
+            IllegalStateException("I/O error", java.net.SocketTimeoutException("Read timed out")),
+            IllegalStateException("invalid data", java.io.InterruptedIOException("timeout")),
+        ).forEach { failure ->
+            val adapter = SpringAiEmbeddingAdapter(model { throw failure }, EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL, meters, "openai")
+            try {
+                shouldThrow<EmbeddingUnavailableException> { adapter.embed(listOf("words")) }
+                Thread.currentThread().isInterrupted shouldBe false
             } finally {
                 Thread.interrupted()
             }

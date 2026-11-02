@@ -7,7 +7,6 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
 import org.springframework.ai.embedding.EmbeddingModel
 import org.springframework.ai.embedding.EmbeddingRequest
-import java.io.InterruptedIOException
 import java.time.Duration
 
 /**
@@ -37,10 +36,16 @@ internal class SpringAiEmbeddingAdapter(
     }
 
     /**
-     * Any provider exception becomes a fixed reason: its message may quote the input. An
-     * interrupt anywhere in its causes is put back on the thread, which catching it cleared: the
-     * caller cancelled the call (the search's timeout) or is shutting down (the sweep), and must
-     * still see that it was asked to stop.
+     * Any provider exception becomes a fixed reason: its message may quote the input.
+     *
+     * **A real interrupt in its causes is put back on the thread**, which catching it cleared:
+     * the caller cancelled the call (the search's timeout) or is shutting down (the sweep), and
+     * must still see that it was asked to stop. Only an [InterruptedException] is one. An
+     * `InterruptedIOException` is how both clients report a **timeout** (a read timeout is a
+     * `SocketTimeoutException`, OkHttp's whole-call timeout a plain `InterruptedIOException`;
+     * `TimedOutCallTest` sees each), and taking one for an interrupt would carry the flag into the
+     * sweep's next bond. An interrupt Okio meets during I/O it reports the same way, but Okio
+     * keeps the thread's status set itself.
      */
     @Suppress("TooGenericExceptionCaught")
     private fun call(texts: List<String>): List<FloatArray> =
@@ -51,9 +56,7 @@ internal class SpringAiEmbeddingAdapter(
                 .sortedBy { it.index }
                 .map { it.output }
         } catch (e: Exception) {
-            if (generateSequence<Throwable>(e) { it.cause }.any { it is InterruptedException || it is InterruptedIOException }) {
-                Thread.currentThread().interrupt()
-            }
+            if (generateSequence<Throwable>(e) { it.cause }.any { it is InterruptedException }) Thread.currentThread().interrupt()
             throw EmbeddingUnavailableException("provider error", e)
         }
 

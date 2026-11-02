@@ -27,6 +27,13 @@ internal class StubHttpServer(
     /** How long the server waits before answering: the slow provider. */
     var delay: Duration = Duration.ZERO
 
+    /**
+     * When set, a request is answered by a body that never ends, one byte every [trickle] until
+     * [close]: each read is quick, the whole response never arrives (a client's call timeout).
+     */
+    @Volatile
+    var trickle: Duration? = null
+
     /** When set, no request is ever answered until [close]: the provider that hangs. */
     @Volatile
     var stall: Boolean = false
@@ -46,6 +53,18 @@ internal class StubHttpServer(
                 if (stall) {
                     released.await()
                     exchange.close()
+                    return@createContext
+                }
+                trickle?.let { every ->
+                    exchange.sendResponseHeaders(200, 0)
+                    exchange.responseBody.use { body ->
+                        runCatching {
+                            while (!released.await(every.toMillis(), TimeUnit.MILLISECONDS)) {
+                                body.write(' '.code)
+                                body.flush()
+                            }
+                        }
+                    }
                     return@createContext
                 }
                 Thread.sleep(delay.toMillis())
