@@ -93,7 +93,7 @@ internal class EntryEmbeddings(
                 ON CONFLICT (entry_id) DO UPDATE
                 SET embedding = EXCLUDED.embedding, text_hash = EXCLUDED.text_hash, created_at = EXCLUDED.created_at
                 """.trimIndent(),
-                "[" + vector.joinToString(",") + "]",
+                vectorLiteral(vector),
                 textHash,
                 at.atOffset(ZoneOffset.UTC),
                 entryId,
@@ -132,6 +132,9 @@ internal class EntryEmbeddings(
                 EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL -> "entry_embeddings_openai_1536"
                 EmbeddingSpace.VOYAGE_3_5 -> "entry_embeddings_voyage_1024"
             }
+
+        /** [vector] as pgvector's text form, `[1.0,0.5,…]`, for a `?::vector` parameter. */
+        fun vectorLiteral(vector: FloatArray): String = vector.joinToString(",", prefix = "[", postfix = "]")
 
         /** SHA-256 of [text]'s UTF-8 bytes: what Postgres's `sha256(convert_to(text_search, 'UTF8'))` computes. */
         fun hashOf(text: String): ByteArray = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8))

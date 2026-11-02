@@ -23,12 +23,8 @@ import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Import
-import org.springframework.http.HttpHeaders
-import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
-import org.springframework.test.web.servlet.get
-import org.springframework.test.web.servlet.patch
 import org.springframework.transaction.IllegalTransactionStateException
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
@@ -164,24 +160,7 @@ internal class ForgetBondEmbeddingsTest(
         return rig.pair(ada, bea).also { clock.set(NOW) }
     }
 
-    private fun turnOff(bond: String) {
-        val etag =
-            mockMvc
-                .get("/api/v1/bonds/$bond") { header(HttpHeaders.AUTHORIZATION, bearer(ada)) }
-                .andReturn()
-                .response
-                .getHeader(HttpHeaders.ETAG)!!
-        mockMvc
-            .patch("/api/v1/bonds/$bond") {
-                header(HttpHeaders.AUTHORIZATION, bearer(ada))
-                header(HttpHeaders.IF_MATCH, etag)
-                contentType = MediaType.APPLICATION_JSON
-                content = """{"semanticSearchEnabled":false}"""
-            }.andReturn()
-            .response.status shouldBe 200
-    }
-
-    private fun bearer(user: UUID) = "Bearer ${tokens.issue(user).token}"
+    private fun turnOff(bond: String) = rig.turnOffSemanticSearch(ada, bond)
 
     private fun vectorsOf(entry: String): Int =
         listOf("entry_embeddings_openai_1536", "entry_embeddings_voyage_1024").sumOf { table ->

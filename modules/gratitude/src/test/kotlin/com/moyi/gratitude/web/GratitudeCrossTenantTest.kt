@@ -3,10 +3,14 @@ package com.moyi.gratitude.web
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.web.idempotency.IdempotencyInterceptor
+import com.moyi.gratitude.api.EmbeddingSweep
+import com.moyi.gratitude.infra.FakeEmbeddingPort
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
+import com.moyi.gratitude.service.WithdrawalRig
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.collections.shouldNotBeEmpty
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import org.junit.jupiter.api.AfterEach
@@ -20,6 +24,7 @@ import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders
 import org.springframework.web.bind.annotation.RequestMethod
@@ -60,15 +65,19 @@ import javax.sql.DataSource
  */
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
+@Suppress("LongParameterList") // What Spring hands the test.
 internal class GratitudeCrossTenantTest(
     @Autowired private val mockMvc: MockMvc,
     @Autowired private val tokens: AccessTokenIssuer,
     @Autowired private val routes: RequestMappingHandlerMapping,
     @Autowired directory: UserDirectory,
     @Autowired dataSource: DataSource,
+    @Autowired private val fake: FakeEmbeddingPort,
+    @Autowired private val sweep: EmbeddingSweep,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
+    private val rig = WithdrawalRig(mockMvc, tokens, jdbc)
 
     /** `bond.web.BondCrossTenantTest`'s own table, plus this task's route. */
     private val fixtures: Map<String, Fixture> =
@@ -137,6 +146,7 @@ internal class GratitudeCrossTenantTest(
         jdbc.execute("TRUNCATE TABLE outbox_deliveries, outbox_events")
         jdbc.execute("TRUNCATE TABLE idempotency_keys, entries, bond_days, blocks, bond_invites, bond_members, bonds CASCADE")
         users.clear()
+        fake.clear()
     }
 
     @Test
@@ -172,6 +182,44 @@ internal class GratitudeCrossTenantTest(
             stranger.contentAsString.withoutInstance() shouldBe notAnId.contentAsString.withoutInstance()
         }
     }
+
+    /**
+     * The search with semantic matching on (ADR-0054, spec §3.5): another bond's words are no
+     * meaning match however near, and a stranger's `q` is answered `404` before it is embedded,
+     * so it never reaches a provider.
+     */
+    @Test
+    fun `semantic search finds nothing across bonds, and a stranger's q is never embedded`() {
+        fake.table = mapOf(LAMP to NEAR, QUERY to NEAR)
+        val ada = users.verified("Ada")
+        val eve = users.verified("Eve")
+        val adas = createBond(ada)
+        val eves = createBond(eve)
+        rig.submit(ada, adas, "bread again")
+        rig.submit(eve, eves, LAMP)
+        sweep.embedPending(EMBED_BUDGET).embedded shouldBe 2
+
+        searched(ada, adas, QUERY) shouldBe EMPTY_PAGE
+        // Not vacuous: the same q finds Eve's day in her own bond, by meaning alone.
+        searched(eve, eves, QUERY) shouldContain "\"text\":\"$LAMP\""
+
+        call("GET /api/v1/bonds/{bondId}/search", eve, adas, Fixture(query = "q=$STRANGERS_QUERY")).status shouldBe 404
+        fake.texts shouldNotContain STRANGERS_QUERY
+    }
+
+    private fun searched(
+        user: UUID,
+        bond: String,
+        q: String,
+    ): String =
+        mockMvc
+            .get("/api/v1/bonds/$bond/search") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(user).token}")
+                param("q", q)
+            }.andReturn()
+            .response
+            .also { it.status shouldBe 200 }
+            .contentAsString
 
     /** Every `METHOD /path` this context serves whose pattern names a bond — `bond`'s own routes and `gratitude`'s together. */
     private fun bondScopedRoutes(): Set<String> =
@@ -221,4 +269,13 @@ internal class GratitudeCrossTenantTest(
     }
 
     private fun String.withoutInstance(): String = replace(Regex(""""instance":"[^"]*""""), "\"instance\":\"-\"")
+
+    private companion object {
+        const val LAMP = "the quiet lamp by the bed"
+        const val QUERY = "a calm light"
+        const val STRANGERS_QUERY = "lamplight"
+        const val EMPTY_PAGE = """{"items":[],"nextCursor":null}"""
+        const val EMBED_BUDGET = 10
+        val NEAR = FloatArray(FakeEmbeddingPort.DEFAULT_SPACE.dimensions).also { it[0] = 1f }
+    }
 }

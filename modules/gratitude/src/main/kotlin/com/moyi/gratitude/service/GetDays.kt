@@ -9,6 +9,7 @@ import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.domain.SearchTerms
+import com.moyi.gratitude.domain.SemanticMatch
 import com.moyi.gratitude.infra.database.ArchiveDay
 import com.moyi.gratitude.infra.database.ArchiveDays
 import com.moyi.gratitude.infra.database.EntryStore
@@ -229,6 +230,10 @@ internal class GetDays(
      * **No `hasLeft` or `isOpen` check**: an ended bond is its archive, and is searched as it
      * is read (the controller's default 3).
      *
+     * **With [semantic]**, entries match by meaning too ([ArchiveDays.matching]), while the bond's
+     * setting, resolved again with the withdrawn for every window, is on: a turn-off that commits
+     * after `q` was embedded stops the next statement reading any vector (ADR-0054).
+     *
      * @throws IllegalArgumentException [limit] is outside 1..[MAX_LIMIT], as for [page].
      */
     @Transactional(readOnly = true)
@@ -237,6 +242,7 @@ internal class GetDays(
         terms: SearchTerms,
         before: LocalDate?,
         limit: Int,
+        semantic: SemanticMatch? = null,
         textOctets: Int = PAGE_TEXT_OCTETS,
     ): DaysPage {
         require(limit in 1..MAX_LIMIT) { "a page of the archive is 1 to $MAX_LIMIT days" }
@@ -246,9 +252,10 @@ internal class GetDays(
             limit,
             textOctets,
             select = { from, size ->
-                // Asked again for every window: see `candidates`.
-                val withdrawn = access.readerNow(membership).withdrawnAuthors
-                archive.matching(membership.bondId, membership.memberId, terms, from, size, withdrawn)
+                // Asked again for every window: see `candidates`. The setting with it: once it is off, no vector is read.
+                val now = access.membershipNow(membership)
+                val meaning = semantic?.takeIf { now.semanticSearchEnabled }
+                archive.matching(membership.bondId, membership.memberId, terms, from, size, now.asReader().withdrawnAuthors, meaning)
             },
             shows = { day, _ -> day.matchedInFull },
         )

@@ -5,12 +5,15 @@ import com.moyi.common.events.OutboxDispatcher
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
+import com.moyi.gratitude.api.EmbeddingSweep
+import com.moyi.gratitude.infra.FakeEmbeddingPort
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.gratitude.service.GetDays
 import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
+import io.micrometer.core.instrument.MeterRegistry
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -52,6 +55,9 @@ internal class SearchWithdrawalTest(
     @Autowired private val json: ObjectMapper,
     @Autowired private val dispatcher: OutboxDispatcher,
     @Autowired access: BondAccess,
+    @Autowired private val fake: FakeEmbeddingPort,
+    @Autowired private val sweep: EmbeddingSweep,
+    @Autowired private val meters: MeterRegistry,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -79,6 +85,7 @@ internal class SearchWithdrawalTest(
     @AfterEach
     fun clear() {
         interruptible.disarm()
+        fake.clear()
         pool.shutdownNow()
         rig.bonds.clear()
         users.clear()
@@ -175,6 +182,37 @@ internal class SearchWithdrawalTest(
         interruptible.resolutions shouldBe 3
     }
 
+    /**
+     * Semantic search (ADR-0054): the setting is read again with the withdrawn, for every window.
+     * The turn-off commits after the controller's guard, so `q` is embedded on the guard's
+     * answer; the candidate query that follows must read no vector.
+     */
+    @Test
+    fun `a turn-off committed after q was embedded reads no vector`() {
+        fake.table = mapOf(LAMP to NEAR, "calm light" to NEAR)
+        clock.set(BOND_CREATED)
+        val bond = rig.bonds.pair(ada, bea)
+        clock.set(NOW)
+        rig.bonds.submit(ada, bond, LAMP)
+        rig.bonds.submit(bea, bond, "bread again")
+        sweep.embedPending(EMBED_BUDGET).embedded shouldBe 2
+        rig.datesOf(rig.page(bea, bond, mapOf("q" to "calm light"), route = "search")["items"].toList()) shouldBe
+            listOf(DAY_ONE.toString())
+        interruptible.afterResolution(1) {
+            pool.submit { rig.bonds.turnOffSemanticSearch(ada, bond) }.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        }
+        val used = meters.counter("gratitude.search.semantic", "outcome", "used").count()
+
+        val answer = rig.search(bea, bond, mapOf("q" to "calm light"))
+
+        answer.status shouldBe 200
+        answer.contentAsString shouldBe """{"items":[],"nextCursor":null}"""
+        interruptible.fired shouldBe true
+        // `q` was embedded on the guard's answer, and the vectors are still there: only the re-read setting dropped them.
+        meters.counter("gratitude.search.semantic", "outcome", "used").count() - used shouldBe 1.0
+        jdbc.queryForObject("SELECT count(*) FROM entry_embeddings_openai_1536 WHERE bond_id = ?::uuid", Int::class.java, bond) shouldBe 2
+    }
+
     // ---- helpers ----
 
     /** A bond of [author] and [reader] with [DAYS] revealed days: the author's "zebra number N", the reader's "lion number N". */
@@ -213,6 +251,9 @@ internal class SearchWithdrawalTest(
         const val DAYS = 4
         const val DISPATCH_BUDGET = 10
         const val TIMEOUT_SECONDS = 10L
+        const val EMBED_BUDGET = 10
+        const val LAMP = "the quiet lamp by the bed"
+        val NEAR = FloatArray(FakeEmbeddingPort.DEFAULT_SPACE.dimensions).also { it[0] = 1f }
         val UUID_PATTERN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         val WALKS =
             listOf(

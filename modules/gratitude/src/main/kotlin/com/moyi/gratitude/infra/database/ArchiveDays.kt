@@ -4,6 +4,7 @@ import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.SearchTerms
+import com.moyi.gratitude.domain.SemanticMatch
 import com.moyi.gratitude.infra.database.EntryRows.LIVE_ROW
 import com.moyi.gratitude.infra.database.EntryRows.SEEN_ROW
 import org.springframework.jdbc.core.JdbcTemplate
@@ -175,6 +176,15 @@ internal class ArchiveDays(
      * **`q` is a parameter**, folded by the function V25's generated column folds with, and
      * parsed by `plainto_tsquery` (T-11): every word, as a whole word, in one entry.
      *
+     * **With [semantic], an entry also matches by meaning** (ADR-0054, spec §3.5): its vector in
+     * [SemanticMatch.space]'s table lies within [SemanticMatch.maxDistance] of `q`'s. The two are
+     * one `OR` inside the one row's predicate, so everything above (the gate's two clauses, the
+     * withdrawn, the order and the keyset) holds for a meaning match by construction: the
+     * partner's unrevealed words match by meaning no more than by keyword (T-01). The vector is
+     * read through its bond, never by scanning the table: Postgres ran the `EXISTS` as a hashed
+     * subplan over a sequential scan of every bond's vectors when the subquery named the bond as
+     * `e.bond_id`, so it names the bond's id (`SearchCandidatesTest` reads the plan).
+     *
      * Driven from `entries`, so the planner may start from `entries_search_idx`; the measured
      * cost is in ADR-0039.
      *
@@ -193,8 +203,9 @@ internal class ArchiveDays(
         before: LocalDate?,
         limit: Int,
         withdrawnMemberIds: Set<UUID>,
+        semantic: SemanticMatch? = null,
     ): List<ArchiveDay> {
-        val (sql, arguments) = matchingQuery(bondId, memberId, terms, before, limit, withdrawnMemberIds)
+        val (sql, arguments) = matchingQuery(bondId, memberId, terms, before, limit, withdrawnMemberIds, semantic)
         return jdbc.query(
             sql,
             PreparedStatementSetter { statement -> arguments.forEachIndexed { index, value -> statement.setObject(index + 1, value) } },
@@ -290,6 +301,9 @@ internal class ArchiveDays(
             return sql to arguments
         }
 
+        /** An entry's words hold every word of `q` (T-11). */
+        private const val WORDS_MATCH = "e.search_vector @@ plainto_tsquery('simple', public.immutable_unaccent(?))"
+
         /** [matching]'s statement and its arguments, in order: apart so that a measurement can ask Postgres how it runs. */
         @Suppress("LongParameterList")
         fun matchingQuery(
@@ -299,6 +313,7 @@ internal class ArchiveDays(
             before: LocalDate?,
             limit: Int,
             withdrawnMemberIds: Set<UUID>,
+            semantic: SemanticMatch? = null,
         ): Pair<String, List<Any>> {
             val sql =
                 listOfNotNull(
@@ -306,7 +321,18 @@ internal class ArchiveDays(
                     "FROM entries e JOIN bond_days d ON d.id = e.bond_day_id AND d.bond_id = e.bond_id",
                     "WHERE e.bond_id = ?",
                     before?.let { "AND d.date < ?" },
-                    "AND e.search_vector @@ plainto_tsquery('simple', public.immutable_unaccent(?))",
+                    when (semantic) {
+                        null -> {
+                            "AND $WORDS_MATCH"
+                        }
+
+                        // `x.bond_id = ?`, the bond itself and not `e.bond_id`: Postgres may run the EXISTS
+                        // as a hashed subplan, read once, and only a constant bounds that read to the bond.
+                        else -> {
+                            "AND ($WORDS_MATCH OR EXISTS (SELECT 1 FROM ${EntryEmbeddings.tableOf(semantic.space)} x " +
+                                "WHERE x.bond_id = ? AND x.entry_id = e.id AND x.embedding <=> ?::vector <= ?))"
+                        }
+                    },
                     "AND $SEEN_ROW",
                     "AND $LIVE_ROW",
                     withdrawnMemberIds
@@ -316,7 +342,8 @@ internal class ArchiveDays(
                     "ORDER BY d.date DESC",
                     "LIMIT ?",
                 ).joinToString("\n")
-            val arguments = listOfNotNull<Any>(bondId, before, terms.value, memberId) + withdrawnMemberIds + limit
+            val meaning = semantic?.let { listOf(bondId, EntryEmbeddings.vectorLiteral(it.vector), it.maxDistance) }.orEmpty()
+            val arguments = listOfNotNull<Any>(bondId, before, terms.value) + meaning + memberId + withdrawnMemberIds + limit
             return sql to arguments
         }
 
