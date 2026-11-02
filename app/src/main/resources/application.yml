@@ -253,8 +253,12 @@ management:
 #   moyi.ai.embedding.voyage.api-key    MOYI_AI_EMBEDDING_VOYAGE_API_KEY    required while voyage
 #   moyi.ai.embedding.timeout           MOYI_AI_EMBEDDING_TIMEOUT           per request, default 10s
 #
-# A key is a secret: never here, never logged (AiProperties redacts it). Only
-# the `local` profile and the test contexts say `none` in a file.
+# A key is a secret: never here, never logged (AiProperties redacts it). `none`
+# is said in a file by the `local`, `media-worker` and test profiles, and by
+# config/deploy.yml until the owner switches a provider on (its comment says how).
+# The search box also needs the max-distance the eval chose for the live model
+# (`moyi.gratitude.semantic-search.max-distance.<MODEL>`): with none set for it,
+# search and "remember when" stay keywords only, though entries are embedded.
 
 # Emailed and shared links (ADR-0018 decision 2 and its amendment, ADR-0022
 # decision 2). No base URL is set here on purpose: each one is required, from
