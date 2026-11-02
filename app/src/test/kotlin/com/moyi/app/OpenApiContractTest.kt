@@ -655,6 +655,46 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `remember documents q as search's, its own limit, no cursor, and says it may answer fewer days`() {
+        val remember = api.paths["/api/v1/bonds/{bondId}/remember"]!!
+        remember.readOperationsMap().keys.map { it.name } shouldBe listOf("GET")
+        val get = remember.get
+        get.operationId shouldBe "remember"
+        get.responses.keys shouldContainAll listOf("200", "400", "401", "404", "422", "429")
+        get.responses.keys shouldNotContain "409"
+        get.requestBody.shouldBeNull()
+
+        val query = get.parameters.filter { it.`in` == "query" }.associateBy { it.name }
+        query.keys shouldBe setOf("q", "limit")
+        query.getValue("q").required shouldBe true
+        query.getValue("q").schema.minLength shouldBe 1
+        query.getValue("q").schema.maxLength shouldBe 1024
+        query.getValue("q").description shouldContain "400 MALFORMED_REQUEST"
+        query
+            .getValue("limit")
+            .schema.minimum
+            .toInt() shouldBe 1
+        query
+            .getValue("limit")
+            .schema.maximum
+            .toInt() shouldBe 20
+        query
+            .getValue("limit")
+            .schema.default
+            .toString() shouldBe "10"
+        get.responses["200"]!!
+            .content["application/json"]!!
+            .schema.`$ref` shouldBe "#/components/schemas/RememberResponse"
+        api.components.schemas["RememberResponse"]!!.required shouldBe listOf("items")
+
+        val told = get.description.shouldNotBeNull()
+        told shouldContain "most relevant first"
+        told shouldContain "fewer days than `limit`"
+        told shouldContain "no cursor"
+        told shouldContain "never generated text"
+    }
+
+    @Test
     fun `one day of the archive is the feed's day, at a date, with the one 404 and no parameter but its path`() {
         val day = api.paths["/api/v1/bonds/{bondId}/days/{date}"]!!.get
         day.operationId shouldBe "day"
