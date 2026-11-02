@@ -4,8 +4,8 @@
 **Covers:** FR-204 (`03-product-requirements.md:150`), the first item of doc 15's Phase 10
 "ML/AI layer" (`15-roadmap-and-milestones.md:145`), pulled forward under Option B
 (`15:21`). Also lays the shared `ai` module that FR-200, FR-201 and FR-205 will reuse.
-**Base:** `main` @ `e88944b`. Migrations from **V37**, the next free after V36; ADR from
-**0053**. Renumber at merge if a peer has moved either sequence.
+**Base:** `main` @ `c0af373` (renumbered after #118 took ADR-0053 and V37–V39). Migrations from
+**V40**, the next free after V39; ADR from **0054**. Renumber at merge if a peer has moved either sequence.
 
 Read ADR-0039 (search and on-this-day) and ADR-0035 (the outbox poller and withdrawal)
 first: this slice changes neither of their rulings and depends on both.
@@ -71,7 +71,7 @@ never writes anything a user reads: every result is an entry a person wrote.
 - Metrics (Micrometer): `moyi.ai.embedding.requests{provider,outcome}`,
   `moyi.ai.embedding.tokens{provider}`, `moyi.ai.embedding.latency{provider}`.
 
-### 3.2 Storage (V37)
+### 3.2 Storage (V41, gratitude module)
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
@@ -103,7 +103,7 @@ CREATE INDEX ON entry_embeddings_openai_1536 (bond_id);
 - The pgvector image replaces `postgres:18` in compose, Testcontainers and moyi-prod-1
   (`pgvector/pgvector:0.8.7-pg18`, pinned; checked 2026-10-30 on Docker Hub: amd64 and arm64).
 
-### 3.3 The setting (V38, bond module)
+### 3.3 The setting (V40, bond module)
 
 - `bonds.semantic_search_enabled boolean NOT NULL DEFAULT true`, beside the B4 settings,
   with the B4 `ETag`/412 behaviour.
@@ -141,7 +141,7 @@ CREATE INDEX ON entry_embeddings_openai_1536 (bond_id);
 - **The user's request never waits on a provider.** Until the row exists, the entry is found
   by keywords only.
 - Metrics: requests, latency and outcome per provider, entries embedded or skipped, and the
-  job's last success. A lag gauge and token usage are deferred (ADR-0053).
+  job's last success. A lag gauge and token usage are deferred (ADR-0054).
 
 ### 3.5 The search box: `GET /api/v1/bonds/{bondId}/search` (unchanged contract)
 
@@ -207,7 +207,7 @@ CREATE INDEX ON entry_embeddings_openai_1536 (bond_id);
 
 ## 6. Owed outside the backend
 
-- ADR-0053: the `ai` module, one table per model, no approximate index, threshold vs RRF,
+- ADR-0054: the `ai` module, one table per model, no approximate index, threshold vs RRF,
   consent and deletion.
 - Privacy policy line + sub-processor entry (doc 20).
 - moyi-app: the "Remember when" frame and the setting toggle in bond settings (each endpoint

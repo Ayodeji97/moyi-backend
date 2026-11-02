@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-30-semantic-search-design.md` (amended 2026-10-31 with this plan's decisions 1, 2 and 4).
 
-**Branch:** `feat/semantic-search-s1`, cut from `origin/main` after #119 (spec) merges. **ADR-0053.** Migrations **V37** (bond), **V38** (gratitude). Renumber at merge if a peer has moved the sequence. There is no `outOfOrder` (ADR-0037:489-501).
+**Branch:** `feat/semantic-search-s1`, cut from `origin/main` after #119 (spec) merges. **ADR-0054.** Migrations **V40** (bond), **V41** (gratitude). Renumber at merge if a peer has moved the sequence. There is no `outOfOrder` (ADR-0037:489-501).
 
 ## Global constraints
 
@@ -25,7 +25,7 @@
 - Commits: Conventional Commits, subject ≤ 88 chars including ` (#N)`, body ends `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Run `git config core.hooksPath .githooks` first. Only one Gradle run at a time.
 - Metric names follow `gratitude.<area>.<thing>` (`ModerateMedia.kt:146`).
 
-## Decisions this plan makes (recorded in ADR-0053; the spec is amended to match)
+## Decisions this plan makes (recorded in ADR-0054; the spec is amended to match)
 
 1. **A sweep, not outbox consumers, fills the vectors** (amends spec §3.4). `OutboxJob` holds a DB transaction for each delivery (60 s), and there is no dead-letter queue (`Backoff.kt`). A provider call inside it would hold a transaction across the network and retry for ever. Instead, `EmbeddingJob` (ShedLock, every minute) asks `gratitude.api.EmbeddingSweep` to embed up to 200 eligible entries that have no vector in the live model's table. Eligible means: live, `text_search` not null, and the bond's setting on. Steps: read (short tx), call the provider (no tx), write (short tx under the bond lock, re-checking the setting and the text hash). This one mechanism covers new entries, edits, the backfill after re-enabling, catching up after an outage and switching models. **`EntryTextEdited` is therefore not needed**: an edit deletes the old vector (decision 3), and the sweep refills it. Keyword search finds the entry in the meantime.
 2. **Turning it off deletes through the outbox, and stops reading at once** (amends spec §3.3, "same transaction"). `bond` cannot call `gratitude`, which depends on it. `UpdateBond` sets false and publishes `SemanticSearchDisabled`, and the `gratitude.semantic-search-off` consumer deletes the bond's rows (SQL only, no provider call, so it is safe inside a delivery). From the moment of the switch, search and remember skip the semantic half, because `BondMembership.semanticSearchEnabled` is false, and the sweep's write re-checks the setting under the bond lock. So no vector is read, and none is added, after "off".
@@ -66,13 +66,13 @@ modules/ai/                                     NEW module
   src/test/kotlin/com/moyi/ai/infra/{AiPropertiesTest,SpringAiEmbeddingAdapterTest,VoyageEmbeddingModelTest,OpenAiWiringTest}.kt
   src/test/kotlin/com/moyi/ai/infra/StubHttpServer.kt        JDK HttpServer stub (no new dependency)
 modules/bond/
-  src/main/resources/db/migration/V37__bond_semantic_search.sql
+  src/main/resources/db/migration/V40__bond_semantic_search.sql
   domain/Bond.kt, domain/Proposal.kt                       field + kind
   service/UpdateBond.kt, service/EnableSemanticSearch.kt (NEW), service/BondEntityTag.kt, service/BondViews.kt, service/BondAccessAdapter.kt
   api/BondAccess.kt                                         membership/closing-view field + bondsWithSemanticSearch
   web/PatchBondRequest.kt, web/BondResponse.kt, web/SemanticSearchController.kt (NEW)
 modules/gratitude/
-  src/main/resources/db/migration/V38__gratitude_entry_embeddings.sql
+  src/main/resources/db/migration/V41__gratitude_entry_embeddings.sql
   api/EmbeddingSweep.kt                                     for scheduling
   infra/database/EntryEmbeddings.kt (NEW)                   tables, missing, upsert, delete
   infra/database/EntryStore.kt                              delete vectors when the projection changes
@@ -87,8 +87,8 @@ common/security/.../ratelimit/RateLimitBucket.kt          REMEMBER_USER
 common/testing/.../PostgresIntegrationTest.kt             pgvector image
 tools/embedding-eval/ (NEW)                               live re-embed + comparison (manual)
 contracts/.../RememberDocumentation.kt (NEW), SemanticSearchDocumentation.kt (NEW)
-adr/0053-semantic-search-and-the-ai-module.md
-docker-compose.yml, config/deploy.yml, .kamal/secrets, ops/backup/restore-drill.sh, scripts/smoke.sh, tools/bruno/35-37
+adr/0054-semantic-search-and-the-ai-module.md
+docker-compose.yml, config/deploy.yml, .kamal/secrets, ops/backup/restore-drill.sh, scripts/smoke.sh, tools/bruno/36-38
 ```
 
 ---
@@ -538,7 +538,7 @@ git commit -m "feat(ai): Voyage as our own Spring AI EmbeddingModel, with a retr
 ### Task 4: the setting, turned off by one member and on by both
 
 **Files:**
-- Create: `modules/bond/src/main/resources/db/migration/V37__bond_semantic_search.sql`, `service/EnableSemanticSearch.kt`, `service/SemanticSearchDisabled.kt`, `web/SemanticSearchController.kt`
+- Create: `modules/bond/src/main/resources/db/migration/V40__bond_semantic_search.sql`, `service/EnableSemanticSearch.kt`, `service/SemanticSearchDisabled.kt`, `web/SemanticSearchController.kt`
 - Modify: `domain/Bond.kt` (field; `BondSettings.semanticSearchEnabled: Boolean?`; `update`; `create` default true; `withSemanticSearch(on: Boolean)`), `domain/Proposal.kt:13` (`SEMANTIC_SEARCH_ON` + factory), `infra/database/BondEntity.kt` (column), `service/UpdateBond.kt` (publish on true→false), `service/BondEntityTag.kt:16-44` (field + pending proposal), `service/BondViews.kt:104-108`, `web/PatchBondRequest.kt` (field, `atLeastOneSetting`, refuse true), `web/BondResponse.kt` (`semanticSearchEnabled`, `pendingSemanticSearch`), `api/BondAccess.kt` + `service/BondAccessAdapter.kt:148-171` (`semanticSearchEnabled` on `BondMembership` and `BondClosingView`; `bondsWithSemanticSearch(after: UUID?, limit: Int): List<UUID>`), `app/.../ArchitectureTest.kt:148` (add `bondsWithSemanticSearch` to `UNGUARDED_BOND_READS`), `app/.../FlywayMigrationTest.kt:134-152`
 - Test: `modules/bond/src/test/kotlin/com/moyi/bond/web/SemanticSearchSettingTest.kt` (new); extend `BondCrossTenantTest`, `ProposalRaceTest`
 
@@ -550,7 +550,7 @@ git commit -m "feat(ai): Voyage as our own Spring AI EmbeddingModel, with a retr
 - [ ] **Step 1: Migration**
 
 ```sql
--- V37: whether a bond's entries are embedded for semantic search (FR-204, ADR-0053).
+-- V40: whether a bond's entries are embedded for semantic search (FR-204, ADR-0054).
 -- On by default (the owner's ruling, 2026-10-30); either member turns it off, both turn it on.
 ALTER TABLE bonds ADD COLUMN semantic_search_enabled boolean NOT NULL DEFAULT true;
 
@@ -660,7 +660,7 @@ git commit -m "feat(bond): semantic search on by default; one member turns it of
 ### Task 5: vectors beside entries, and dying with their words
 
 **Files:**
-- Create: `modules/gratitude/src/main/resources/db/migration/V38__gratitude_entry_embeddings.sql`, `infra/database/EntryEmbeddings.kt`
+- Create: `modules/gratitude/src/main/resources/db/migration/V41__gratitude_entry_embeddings.sql`, `infra/database/EntryEmbeddings.kt`
 - Modify: `infra/database/EntryStore.kt:48-64`, `modules/gratitude/build.gradle.kts` (`implementation(projects.modules.ai)`), `app/.../FlywayMigrationTest.kt` (38, extension `vector`)
 - Test: `modules/gratitude/src/test/kotlin/com/moyi/gratitude/infra/database/EntryEmbeddingsTest.kt`
 
@@ -684,7 +684,7 @@ internal class EntryEmbeddings(jdbc: JdbcTemplate) {
 - [ ] **Step 1: Migration**
 
 ```sql
--- V38: an entry's text_search as vectors, one table per embedding model (FR-204, ADR-0053).
+-- V41: an entry's text_search as vectors, one table per embedding model (FR-204, ADR-0054).
 -- No approximate index: a bond's rows are few, so an exact scan through bond_id is faster and misses nothing.
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -871,7 +871,7 @@ internal class EmbedPendingEntries(
     private val embedded = meters.counter("gratitude.ai.embedding.entries", "outcome", "embedded")
     private val skipped = meters.counter("gratitude.ai.embedding.entries", "outcome", "skipped")
 
-    /** Not transactional: the provider is called with no transaction open (ADR-0053 decision 1). */
+    /** Not transactional: the provider is called with no transaction open (ADR-0054 decision 1). */
     override fun embedPending(budget: Int): EmbeddingRun {
         val space = port.space ?: return EmbeddingRun(0, 0, false)
         var done = 0; var skips = 0; var after: UUID? = null
@@ -1137,7 +1137,7 @@ withClue("search precision at the configured max-distance for $space") { precisi
 ```
 `floor` lives in `eval/floors.json`, written from the first measured run **minus 0.02**, so ordinary noise does not fail the build but a real regression does. If a vectors file is missing, the test **fails** with "run tools/embedding-eval generate"; it does not skip.
 
-- [ ] **Step 4: Run the tool with Daniel's keys** (Daniel runs the command himself, `! ./gradlew :tools:embedding-eval:run --args="generate"`), commit the vectors and floors, write the measured numbers into ADR-0053, set `moyi.gratitude.semantic-search.max-distance.*` in `application.yml` from the printout, and set the live provider from the comparison.
+- [ ] **Step 4: Run the tool with Daniel's keys** (Daniel runs the command himself, `! ./gradlew :tools:embedding-eval:run --args="generate"`), commit the vectors and floors, write the measured numbers into ADR-0054, set `moyi.gratitude.semantic-search.max-distance.*` in `application.yml` from the printout, and set the live provider from the comparison.
 
 - [ ] **Step 5: Run the gate**
 
@@ -1156,14 +1156,14 @@ git commit -m "test(gratitude): a retrieval eval on a golden set gates recall, M
 ### Task 10: contract, privacy scan, docs and tools
 
 **Files:**
-- Create: `contracts/src/main/kotlin/com/moyi/contracts/RememberDocumentation.kt`, `SemanticSearchDocumentation.kt` (call from the customizer in `OpenApiConfiguration.kt:157-188`), `adr/0053-semantic-search-and-the-ai-module.md`, `tools/bruno/35 Remember when.bru`, `36 Turn semantic search off.bru`, `37 Turn semantic search on.bru`
+- Create: `contracts/src/main/kotlin/com/moyi/contracts/RememberDocumentation.kt`, `SemanticSearchDocumentation.kt` (call from the customizer in `OpenApiConfiguration.kt:157-188`), `adr/0054-semantic-search-and-the-ai-module.md`, `tools/bruno/36 Remember when.bru`, `37 Turn semantic search off.bru`, `38 Turn semantic search on.bru`
 - Modify: `contracts/openapi.json` (regenerated), `app/src/test/kotlin/com/moyi/app/OpenApiContractTest.kt`, `app/src/test/kotlin/com/moyi/app/SecretsNeverLoggedTest.kt`, `scripts/smoke.sh`, `docs/state-map/data/*` (+ `scripts/state-map-generate`, `scripts/state-map-check --strict`), `app/src/test/kotlin/com/moyi/app/ProductionStartsWithoutMediaSecretsTest.kt` (or a sibling `ProductionStartsWithoutAiSecretsTest.kt`)
 
 - [ ] **Step 1: `SecretsNeverLoggedTest`.** Add the markers `REMEMBERED = "zqkremembersoup"` and `EMBEDDED = "Ada~embedded~this"`. Submit an entry containing `EMBEDDED`, run the sweep with the fake port, call `/remember?q=REMEMBERED`, and `scan.watch` both. Run it and watch it pass. Then **break it on purpose** (log the query at DEBUG in `QueryEmbedder`), see red, and restore.
 - [ ] **Step 2: Contract.** Run `./gradlew :app:test --tests '*OpenApiContractTest*'`, `cp app/build/openapi/openapi.json contracts/openapi.json`, and read the diff. Expected: new paths `/remember` and `/semantic-search`, and new **optional** fields on `BondResponse` and `PatchBondRequest`. **The search operation is unchanged.** The new 422 code `TURNED_ON_BY_BOTH` is a field-violation code, not an `ErrorCode`, so it is not breaking. If oasdiff flags anything as breaking, stop and report; do not label it away.
-- [ ] **Step 3: Production starts without the AI secret.** Add a test parsing `config/deploy.yml` that asserts `MOYI_AI_EMBEDDING_PROVIDER: none` is in `env.clear` while no `MOYI_AI_EMBEDDING_*_API_KEY` is in `env.secret`. Add that line to `deploy.yml` with the "to switch on" comment in the house style (`deploy.yml:218-222`).
+- [ ] **Step 3: Production starts without the AI secret.** Add a test parsing `config/deploy.yml` that asserts `MOYI_AI_EMBEDDING_PROVIDER: none` is in `env.clear` while no `MOYI_AI_EMBEDDING_*_API_KEY` is in `env.secret`. Add that line to `deploy.yml` with the "to switch on" comment in the house style (`deploy.yml:234-241`).
 - [ ] **Step 4: Smoke probes** (`scripts/smoke.sh`, near the search block at :2170): with the provider none, search is `200` and keyword-only; `/remember` is `200`; a stranger's `/remember` is 404; `PATCH` `{"semanticSearchEnabled":false}` is 200, and after the outbox pass `sql "SELECT count(*) FROM entry_embeddings_openai_1536 WHERE bond_id = …"` is `0`; `PATCH` true is 422 on the field. Run `MOYI_DB=moyi_s1_smoke scripts/smoke.sh` and update the header's "Last run" sentence with the measured counts.
-- [ ] **Step 5: Bruno, state map, ADR-0053.** The ADR records: the module split, one table per model, no approximate index (with the measured `EXPLAIN`), threshold vs RRF, consent and deletion, the sweep over consumers (decision 1), the measured eval numbers and provider choice (Task 9), and the deferred token-usage metric and lag gauge.
+- [ ] **Step 5: Bruno, state map, ADR-0054.** The ADR records: the module split, one table per model, no approximate index (with the measured `EXPLAIN`), threshold vs RRF, consent and deletion, the sweep over consumers (decision 1), the measured eval numbers and provider choice (Task 9), and the deferred token-usage metric and lag gauge.
 - [ ] **Step 6: Full verification**
 
 Run: `./gradlew build --rerun-tasks` (JDK 25). Count tests from the JUnit XML and report the number.
@@ -1172,8 +1172,8 @@ Expected: green.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add contracts app/src/test adr/0053-semantic-search-and-the-ai-module.md tools/bruno scripts/smoke.sh docs config/deploy.yml
-git commit -m "docs: ADR-0053, the contract, smoke probes and Bruno requests for semantic search"
+git add contracts app/src/test adr/0054-semantic-search-and-the-ai-module.md tools/bruno scripts/smoke.sh docs config/deploy.yml
+git commit -m "docs: ADR-0054, the contract, smoke probes and Bruno requests for semantic search"
 ```
 
 ---
@@ -1181,9 +1181,12 @@ git commit -m "docs: ADR-0053, the contract, smoke probes and Bruno requests for
 ### Task 11 (with Daniel, after merge): production
 
 Not done by an agent. Daniel runs each step, with Claude guiding (the deploy-together rule):
-1. Rehearse on the restore drill: `ops/backup/restore-drill.sh` against the pgvector image, and confirm V37/V38 apply on a copy of production data.
-2. Switch the `postgres` accessory image in `config/deploy.yml:302-303` to `pgvector/pgvector:0.8.7-pg18` (same data volume), then `kamal accessory reboot postgres` in a quiet window.
-3. Deploy the app (V37/V38 run).
+
+**Gate first (from #117):** no deploy of main of any kind until steps 1–3 of `ops/media-worker/README.md` are done on the server (egress limiter installed and active, media-check copied). Steps 3 and 4 below are deploys.
+
+1. Rehearse on the restore drill: `ops/backup/restore-drill.sh` against the pgvector image, and confirm V40/V41 apply on a copy of production data.
+2. Switch the `postgres` accessory image in `config/deploy.yml:328-329` to `pgvector/pgvector:0.8.7-pg18` (same data volume), then `kamal accessory reboot postgres` in a quiet window.
+3. Deploy the app (V40/V41 run).
 4. Add the chosen provider's key to Bitwarden `moyi-prod`, the `.kamal/secrets` fetch list and `env.secret`. Remove `MOYI_AI_EMBEDDING_PROVIDER: none`. Deploy. Watch `gratitude.ai.embedding.requests` and the last-success gauge.
 5. Privacy policy line and sub-processor entry published before step 4.
 
