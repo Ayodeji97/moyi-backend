@@ -57,6 +57,8 @@ moyi:
       cron: "-"
     idempotency-keys:
       cron: "-"
+    embedding:
+      cron: "-"
   # The worker holds none of the API's secrets (config/deploy.yml gives them to
   # the `web` role alone; review of #117): a decoder that is subverted must not
   # find the key that signs sessions, the HMAC key or the email key in its
@@ -74,6 +76,11 @@ moyi:
   notification:
     email:
       provider: log
+  # The embedding provider's key is the API's too (ADR-0054). The default, openai, refuses to
+  # start without it; the worker embeds nothing (the sweep is the API's timed job), so none.
+  ai:
+    embedding:
+      provider: none
   # Written once the application is ready, removed as it stops (ReadyFile).
   # /tmp is the worker's tmpfs: its root file system is read-only.
   ready-file: /tmp/moyi-ready

@@ -158,8 +158,10 @@ class ArchitectureTest {
 
         /**
          * The work nobody asked for (`gratitude.service`): the close job's three steps, the
-         * withdrawal's consumer, the daily reminder's sweep, the day's push consumer and the
-         * on-this-day sweep. Each reads a bond with no caller whose membership could be checked.
+         * withdrawal's consumer, the daily reminder's sweep, the day's push consumer, the
+         * on-this-day sweep and the embedding sweep (ADR-0054). Each reads a bond with no caller
+         * whose membership could be checked. (`ForgetBondEmbeddings`, the embedding's other
+         * caller-less work, reads no bond at all, so it is not here.)
          */
         private val WORK_WITH_NO_CALLER =
             setOf(
@@ -170,6 +172,7 @@ class ArchitectureTest {
                 "SendDailyReminders.kt",
                 "NotifyDayMembers.kt",
                 "SendOnThisDayPushes.kt",
+                "EmbedPendingEntries.kt",
             )
 
         /**
@@ -410,8 +413,8 @@ class ArchitectureTest {
 
         assertTrue(
             violations.isEmpty(),
-            "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer and the on-this-day " +
-                "sweep may call bond's unguarded reads. Found in: $violations",
+            "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer, the on-this-day " +
+                "sweep and the embedding sweep may call bond's unguarded reads. Found in: $violations",
         )
     }
 
