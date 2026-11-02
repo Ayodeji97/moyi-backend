@@ -1,6 +1,6 @@
 # Phase 10, slice S1 — semantic search
 
-**Status:** design approved in conversation 2026-10-30; for review · **Amended:** 2026-10-31 (§3.1 provider default, §3.3 off, §3.4 write path) after the codebase map for the plan · **Date:** 2026-10-30 · **Author:** Claude, for Daniel
+**Status:** design approved in conversation 2026-10-30; for review · **Amended:** 2026-10-31 (§3.1 provider default, §3.3 off, §3.4 write path) after the codebase map for the plan; 2026-11-02 (§3.1 port shape and metric names, §3.3 an ended bond, §3.5 metric name, §4 the eval's place) after the plan's pre-flight scan · **Date:** 2026-10-30 · **Author:** Claude, for Daniel
 **Covers:** FR-204 (`03-product-requirements.md:150`), the first item of doc 15's Phase 10
 "ML/AI layer" (`15-roadmap-and-milestones.md:145`), pulled forward under Option B
 (`15:21`). Also lays the shared `ai` module that FR-200, FR-201 and FR-205 will reuse.
@@ -55,9 +55,11 @@ never writes anything a user reads: every result is an entry a person wrote.
 
 `modules/ai`, a new module on the existing convention plugins.
 
-- `api/EmbeddingPort`: `embed(texts: List<String>): List<Embedding>`; `Embedding` carries
-  the vector and the `EmbeddingModelId` (provider + model + dimensions). Other modules depend
-  on this port only.
+- `api/EmbeddingPort` (amended 2026-11-02): `val space: EmbeddingSpace?` and
+  `embed(texts: List<String>): List<FloatArray>`. A process embeds in one space at a time, so
+  the space is the port's, not each vector's: `EmbeddingSpace` (`OPENAI_TEXT_EMBEDDING_3_SMALL(1536)`,
+  `VOYAGE_3_5(1024)`) is the model id, and `null` means no provider. Other modules depend on
+  this port only.
 - `infra/OpenAiEmbeddingAdapter`: Spring AI **2.0.x** `EmbeddingModel` (2.0.1 is the stable
   line for Boot 4.0/4.1; 2.1 milestones target Boot 4.2, so they are not taken).
 - `infra/VoyageEmbeddingAdapter`: our own `EmbeddingModel` over Voyage's HTTP API
@@ -68,8 +70,9 @@ never writes anything a user reads: every result is an entry a person wrote.
   exists. With `none`, the port reports no space and every caller degrades (§3.5).
 - Keys come from env (`MOYI_AI_EMBEDDING_OPENAI_API_KEY`, `MOYI_AI_EMBEDDING_VOYAGE_API_KEY`), passed to Kamal as
   secrets. Never logged, never in a response. Covered by the existing gitleaks rules [inferred].
-- Metrics (Micrometer): `moyi.ai.embedding.requests{provider,outcome}`,
-  `moyi.ai.embedding.tokens{provider}`, `moyi.ai.embedding.latency{provider}`.
+- Metrics (Micrometer; amended 2026-11-02 to the repo's `gratitude.<area>.<thing>` convention,
+  `ModerateMedia.kt:146`): `gratitude.ai.embedding.requests{provider,outcome}`,
+  `gratitude.ai.embedding.latency{provider}`. Token usage is deferred (§3.4, ADR-0054).
 
 ### 3.2 Storage (V41, gratitude module)
 
@@ -119,6 +122,11 @@ CREATE INDEX ON entry_embeddings_openai_1536 (bond_id);
   lapses after 7 days. A solo bond applies the change at once. Once on, the sweep backfills
   (§3.4).
 - An ended bond keeps its setting; search on an ended bond reads as ADR-0039 default 3 allows.
+  **(Provisional, owner to confirm; added 2026-11-02.)** Because the sweep keeps embedding an
+  ended bond whose setting is on, a member can still turn it off: `PATCH
+  {"semanticSearchEnabled": false}` is accepted on an ended bond, skipping the ended-bond
+  refusal for that field alone (as cancelling a deletion request does). Nothing else is accepted
+  on an ended bond: any other field, or `false` with another field, is still `409`.
 
 ### 3.4 The write path (amended 2026-10-31: a sweep, not outbox consumers)
 
@@ -153,9 +161,10 @@ CREATE INDEX ON entry_embeddings_openai_1536 (bond_id);
   tombstoned entry, which closes T-01 for the new path. The existing cross-tenant and
   pre-reveal fixtures are extended to run with semantic matching on.
 - Order, keyset, `DaysResponse`, limits, `q` rules, no snippet: all unchanged.
-- `q` is embedded once per request (5 s timeout). The semantic predicate is **dropped** (keyword
-  only, still `200`) when the setting is off, the provider is `none` or failing, or the
-  timeout passes. Counted as `moyi.search.semantic{outcome=used|disabled|degraded}`.
+- `q` is embedded once per request (5 s timeout; the call is cancelled when it passes). The
+  semantic predicate is **dropped** (keyword only, still `200`) when the setting is off, the
+  provider is `none` or failing, or the timeout passes. Counted as
+  `gratitude.search.semantic{outcome=used|disabled|degraded}` (amended 2026-11-02, §3.1).
 - `:threshold` is per model, set in config, chosen by the eval (§4) for **precision ≥ 0.9** on
   the golden set. A stray day with no highlight would confuse people, so missing a match costs
   less than showing a wrong one.
@@ -179,19 +188,24 @@ CREATE INDEX ON entry_embeddings_openai_1536 (bond_id);
 
 ## 4. Evals
 
-- **Golden set** (`modules/ai/src/test/resources/eval/`): about 150 synthetic entries across 3
+Amended 2026-11-02: the eval lives in `gratitude`, not `ai`, because it must drive
+gratitude's real, gated queries, which `ai` cannot see.
+
+- **Golden set** (`modules/gratitude/src/test/resources/eval/`): about 150 synthetic entries across 3
   test bonds, plus about 60 queries, each labelled with its relevant entry IDs. Queries are
   paraphrases that share **no keyword** with their targets, so the eval measures meaning, not
   word overlap. Synthetic only: no real entry text in the repo.
 - **Stored vectors:** each provider's embeddings of the golden set are committed as fixtures,
   so CI never calls a provider and the eval is deterministic.
-- **CI gate** (`./gradlew :modules:ai:eval`): for the live model, "Remember when" recall@10 ≥
-  [set from the first measured run] and MRR ≥ [same], and search-box precision at the
-  configured threshold ≥ 0.9. A drop fails the build.
-- **Provider comparison** (manual workflow, uses real keys): re-embeds the golden set with
-  both providers, regenerates the fixtures, and prints recall@10, MRR, the threshold for
-  precision 0.9, p95 latency and cost per 1k entries. The result is recorded in the ADR and
-  decides the live provider.
+- **CI gate** (`RetrievalEvalTest`, run by `:modules:gratitude:test` and so by every build):
+  for each model with stored vectors, "Remember when" recall@10 ≥ [set from the first measured
+  run] and MRR ≥ [same], and search-box precision at the threshold shipped in app's
+  `application.yml` ≥ 0.9. It alone computes these metrics and prints them, with the threshold
+  that gives precision 0.9. A drop fails the build.
+- **Provider comparison** (manual workflow, uses real keys, `tools/embedding-eval`): re-embeds
+  the golden set with both providers, regenerates the fixtures, and reports p95 latency and
+  tokens (cost per 1k entries). The gate's printout on the new fixtures gives recall@10, MRR
+  and the threshold. Together they are recorded in the ADR and decide the live provider.
 
 ## 5. Testing
 
