@@ -48,7 +48,19 @@ internal class EmbeddingJobTest(
     }
 
     @Test
-    fun `a run the provider failed is not a success`() {
+    fun `a run with a failed call and a successful one is a success`() {
+        clock.set(Instant.parse("2026-11-02T10:00:00Z"))
+        job.embedOnce()
+        clock.set(Instant.parse("2026-11-02T10:01:00Z"))
+        sweep.next = EmbeddingRun(embedded = 1, skipped = 0, failed = true)
+
+        job.embedOnce()
+
+        lastSuccess() shouldBe Instant.parse("2026-11-02T10:01:00Z").epochSecond.toDouble()
+    }
+
+    @Test
+    fun `a run in which every provider call failed is not a success`() {
         clock.set(Instant.parse("2026-11-02T10:00:00Z"))
         job.embedOnce()
         clock.set(Instant.parse("2026-11-02T10:01:00Z"))

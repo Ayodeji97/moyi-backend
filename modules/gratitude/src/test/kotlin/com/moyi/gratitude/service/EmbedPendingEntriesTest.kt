@@ -136,7 +136,7 @@ internal class EmbedPendingEntriesTest(
     }
 
     @Test
-    fun `a provider failure stops the run and leaves the entries pending`() {
+    fun `a provider failure leaves the entries pending`() {
         fake.failNext = true
         val bond = pair()
         submit(bond, "words")
@@ -144,6 +144,51 @@ internal class EmbedPendingEntriesTest(
         sweep.embedPending(10).failed shouldBe true
         embeddings.countFor(bond.uuid) shouldBe 0
         sweep.embedPending(10).embedded shouldBe 1
+    }
+
+    /** Review of Task 6: one input the provider refuses must not stop every bond after it, run after run. */
+    @Test
+    fun `a bond whose input the provider refuses does not stop a later bond from being embedded`() {
+        val (first, second) = inIdOrder(pair(), pair())
+        submit(first, "refused")
+        submit(second, "accepted")
+        fake.failOn = setOf("refused")
+
+        sweep.embedPending(10) shouldBe EmbeddingRun(embedded = 1, skipped = 0, failed = true)
+        embeddings.countFor(second.uuid) shouldBe 1
+        embeddings.countFor(first.uuid) shouldBe 0
+    }
+
+    @Test
+    fun `three failures in a row end the run, and the provider is not asked again`() {
+        // A member may hold only so many bonds: two couples, two bonds each.
+        val cy = users.verified("Cy")
+        val dee = users.verified("Dee")
+        val authors = mapOf(pair() to ada, pair() to ada, pair(cy, dee) to cy, pair(cy, dee) to cy)
+        val bonds = inIdOrder(*authors.keys.toTypedArray())
+        bonds.forEachIndexed { i, bond -> submit(bond, "words $i", authors.getValue(bond)) }
+        fake.failOn = bonds.indices.map { "words $it" }.toSet()
+
+        sweep.embedPending(10) shouldBe EmbeddingRun(embedded = 0, skipped = 0, failed = true)
+        fake.texts shouldBe listOf("words 0", "words 1", "words 2")
+    }
+
+    /**
+     * Review of Task 6: the page of bonds is read before the walk reaches each one, and a member
+     * who turns it off in between must not have their words sent. Off is committed while the
+     * first bond's provider call is in progress; the second bond's words are never read.
+     */
+    @Test
+    fun `a bond turned off after the page was read has no words sent`() {
+        val (first, second) = inIdOrder(pair(), pair())
+        submit(first, "the first bond's words")
+        submit(second, "the second bond's words")
+        fake.during = { turnOff(second) }
+
+        sweep.embedPending(10).embedded shouldBe 1
+
+        fake.texts shouldBe listOf("the first bond's words")
+        embeddings.countFor(second.uuid) shouldBe 0
     }
 
     /** ADR-0054 decision 1: a provider call of seconds never holds a connection or a lock. */
@@ -241,17 +286,24 @@ internal class EmbedPendingEntriesTest(
 
     private fun counted(outcome: String): Double = meters.counter("gratitude.ai.embedding.entries", "outcome", outcome).count()
 
-    private fun pair(): String {
+    private fun pair(
+        creator: UUID = ada,
+        joiner: UUID = bea,
+    ): String {
         clock.set(BOND_CREATED)
-        return rig.pair(ada, bea).also { clock.set(NOW) }
+        return rig.pair(creator, joiner).also { clock.set(NOW) }
     }
+
+    /** The walk's order: bond ids, as Postgres orders a `uuid` (its bytes, which is the hex text's order). */
+    private fun inIdOrder(vararg bonds: String): List<String> = bonds.sorted()
 
     private fun solo(): String = rig.idOf(rig.create(ada))
 
     private fun submit(
         bond: String,
         words: String,
-    ): String = rig.submit(ada, bond, words)
+        author: UUID = ada,
+    ): String = rig.submit(author, bond, words)
 
     /** The real route: `PATCH /bonds/{id}`, which takes the bond's lock and publishes `SemanticSearchDisabled`. */
     private fun turnOff(bond: String) {

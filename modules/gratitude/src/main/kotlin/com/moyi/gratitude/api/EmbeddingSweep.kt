@@ -18,8 +18,10 @@ interface EmbeddingSweep {
 
 /**
  * What one sweep did: vectors written, vectors refused at the write (the setting turned off, or
- * the words changed or gone, since they were read), and whether the provider failed and stopped
- * the run. Entries not reached stay pending for the next run.
+ * the words changed or gone, since they were read), and whether any provider call failed. A
+ * failed call skips its bond; three in a row end the run. Entries not reached, or refused, stay
+ * pending for the next run. A run with [failed] and anything embedded or skipped had at least
+ * one provider call succeed.
  */
 data class EmbeddingRun(
     val embedded: Int,

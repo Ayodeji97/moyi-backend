@@ -16,6 +16,7 @@ import kotlin.random.Random
  * when it was ([calledInTransaction]): the sweep must call a provider with none open. Otherwise it
  * answers a deterministic unit vector seeded from the text's hash, or the exact vector [table]
  * holds for that text (Tasks 7-9). [failNext] makes the next call fail as a provider would,
+ * [failOn] makes every call fail that carries one of its texts (an input the provider refuses),
  * [delay] makes each call slow, and [during] runs once inside the next call, after it has
  * recorded: the moment between the sweep's read and its write. [clear] resets it all.
  */
@@ -32,6 +33,9 @@ internal class FakeEmbeddingPort : EmbeddingPort {
     var failNext = false
 
     @Volatile
+    var failOn: Set<String> = emptySet()
+
+    @Volatile
     var delay: Duration = Duration.ZERO
 
     @Volatile
@@ -46,7 +50,7 @@ internal class FakeEmbeddingPort : EmbeddingPort {
         calledInTransaction += TransactionSynchronizationManager.isActualTransactionActive()
         during?.also { during = null }?.invoke()
         if (!delay.isZero) Thread.sleep(delay)
-        if (failNext) {
+        if (failNext || texts.any { it in failOn }) {
             failNext = false
             throw EmbeddingUnavailableException("provider error")
         }
@@ -58,6 +62,7 @@ internal class FakeEmbeddingPort : EmbeddingPort {
         texts.clear()
         calledInTransaction.clear()
         failNext = false
+        failOn = emptySet()
         delay = Duration.ZERO
         during = null
         table = emptyMap()

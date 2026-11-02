@@ -19,10 +19,11 @@ import java.util.concurrent.atomic.AtomicLong
  * minute or two; a backlog (a new provider, a model change) drains at a steady pace rather than
  * in one run that outlives its lock.
  *
- * **The last-success gauge is stamped only by a run the provider did not fail**: a provider
- * that is down leaves it stale, as a job that stopped running does. With the provider's own
- * `gratitude.ai.embedding.requests{outcome=failed}` it is what alerting reads in S1; the gauge
- * of the oldest pending entry's age is deferred (ADR-0054).
+ * **The last-success gauge is stamped by a run with no failed provider call, or with at least
+ * one that succeeded** (anything embedded or skipped). A provider that is down leaves it stale,
+ * as a job that stopped running does; one input the provider refuses does not, and shows in
+ * `gratitude.ai.embedding.requests{outcome=failed}` instead. Those two are what alerting reads
+ * in S1; the gauge of the oldest pending entry's age is deferred (ADR-0054).
  */
 @Component
 internal class EmbeddingJob(
@@ -36,7 +37,7 @@ internal class EmbeddingJob(
     init {
         Gauge
             .builder(LAST_SUCCESS) { lastSuccess.get().toDouble() }
-            .description("Epoch seconds of the embedding job's last run that the provider did not fail")
+            .description("Epoch seconds of the embedding job's last run with no failed provider call, or with one that succeeded")
             .register(meters)
     }
 
@@ -50,12 +51,13 @@ internal class EmbeddingJob(
     fun embedOnce(): EmbeddingRun {
         val now = clock.instant()
         val run = sweep.embedPending(BUDGET)
+        val reachedProvider = run.embedded + run.skipped > 0
+        if (!run.failed || reachedProvider) lastSuccess.set(now.epochSecond)
+        // Counts only: which entries were pending is the couple's.
         if (run.failed) {
-            // Counts only: which entries were pending is the couple's.
-            log.warn("embedding: provider unavailable; embedded {}, skipped {} before it failed", run.embedded, run.skipped)
-        } else {
-            lastSuccess.set(now.epochSecond)
-            if (run.embedded + run.skipped > 0) log.debug("embedding: embedded {}, skipped {}", run.embedded, run.skipped)
+            log.warn("embedding: a provider call failed; embedded {}, skipped {}", run.embedded, run.skipped)
+        } else if (reachedProvider) {
+            log.debug("embedding: embedded {}, skipped {}", run.embedded, run.skipped)
         }
         return run
     }

@@ -22,6 +22,11 @@ import java.util.UUID
  * pending entries is one; the provider call is made with **no transaction open**, so a call of
  * seconds holds neither a connection nor a lock (ADR-0054 decision 1); the write is the other.
  *
+ * **The read asks the setting again before it reads any words.** The page of bonds was read
+ * before the walk reached this one, and a member may have turned it off since: their words must
+ * not be sent. No lock is needed here; one that turns it off during the provider call is the
+ * write's to catch.
+ *
  * **The write re-checks under the bond's lock.** It takes [BondAccess.lockClosingViewOf], the
  * same `bonds` row lock `UpdateBond.patch` takes before it turns the setting off, and reads the
  * setting after it. So a turn-off that committed while the provider was called is seen, and
@@ -31,7 +36,10 @@ import java.util.UUID
  * makes [EntryEmbeddings.upsert]'s hash check safe against an edit (its KDoc). A vector refused
  * at the write is counted as skipped: the entry, if it still has words, is pending again.
  *
- * A provider failure ends the run, with what was written kept and the rest pending for the next.
+ * **A provider failure skips the bond, and three in a row end the run.** One input the provider
+ * always refuses must not stop every bond after it for ever, since each run walks from the start;
+ * [MAX_CONSECUTIVE_FAILURES] refusals in a row mean the provider is down, and it is not hammered.
+ * What was refused stays pending for the next run; the run reports `failed`.
  */
 @Component
 internal class EmbedPendingEntries(
@@ -67,15 +75,26 @@ internal class EmbedPendingEntries(
         bondId: UUID,
         run: Tally,
     ) {
-        val pending = transactions.execute { embeddings.missing(space, bondId, minOf(BATCH, run.left)) }.orEmpty()
+        val pending =
+            transactions
+                .execute {
+                    // Turned off since the page was read: no word of this bond is read, or sent.
+                    if (access.closingViewOf(bondId)?.semanticSearchEnabled == true) {
+                        embeddings.missing(space, bondId, minOf(BATCH, run.left))
+                    } else {
+                        emptyList()
+                    }
+                }.orEmpty()
         if (pending.isEmpty()) return
         val vectors =
             try {
                 port.embed(pending.map { it.text })
             } catch (_: EmbeddingUnavailableException) {
-                run.failed = true
+                run.failures++
+                run.consecutiveFailures++
                 return
             }
+        run.consecutiveFailures = 0
         val wrote = write(space, bondId, pending, vectors)
         run.done += wrote
         run.skips += pending.size - wrote
@@ -110,9 +129,11 @@ internal class EmbedPendingEntries(
     ) {
         var done = 0
         var skips = 0
-        var failed = false
+        var failures = 0
+        var consecutiveFailures = 0
+        val failed get() = failures > 0
         val left get() = budget - done - skips
-        val goesOn get() = left > 0 && !failed
+        val goesOn get() = left > 0 && consecutiveFailures < MAX_CONSECUTIVE_FAILURES
     }
 
     private companion object {
@@ -123,5 +144,8 @@ internal class EmbedPendingEntries(
 
         /** Texts sent to the provider in one call, at most. */
         const val BATCH = 64
+
+        /** Provider calls refused in a row that end the run: the provider is down, not one input. */
+        const val MAX_CONSECUTIVE_FAILURES = 3
     }
 }
