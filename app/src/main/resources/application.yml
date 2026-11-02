@@ -116,9 +116,10 @@ logging:
     # authenticator valve still prints it.
     #
     # SecretsNeverLoggedTest raises every level above these by property and
-    # fails if any one of the fifteen pins from here to the end of this block
-    # is removed: these six and the nine below. Each was removed in turn and
-    # seen failing on 2026-10-21 (slice C6b, task 2 review m3).
+    # fails if any one of the sixteen pins from here to the end of this block
+    # is removed: these six and the ten below. Each was removed in turn and
+    # seen failing on 2026-10-21 (slice C6b, task 2 review m3); the sixteenth,
+    # HttpURLConnection, on 2026-11-02 (ADR-0054).
     org.hibernate.orm.core: INFO
     org.hibernate.orm.jdbc.bind: "OFF"
     org.hibernate.orm.jdbc.extract: "OFF"
@@ -192,6 +193,13 @@ logging:
     #     resolution out of the log then. What is given up: its "Using
     #     @ExceptionHandler" and "Resolved" lines, at DEBUG, for every exception.
     org.springframework.web.servlet.mvc.method.annotation.ExceptionHandlerExceptionResolver: INFO
+    # ADR-0054: the JDK's HttpURLConnection, at DEBUG, prints every request's
+    # headers as it sends them, the embedding provider's `Authorization: Bearer`
+    # key among them (Voyage's client runs on it; seen 2026-11-02 with
+    # everything at TRACE). What is given up: the JDK's DEBUG trace of
+    # outbound HTTP headers. SecretsNeverLoggedTest fails if this line is
+    # removed.
+    sun.net.www.protocol.http.HttpURLConnection: INFO
 
 management:
   server:

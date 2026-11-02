@@ -39,7 +39,13 @@ internal class VoyageEmbeddingModel(
         val input: List<String>,
         val model: String,
         @get:JsonProperty("input_type") val inputType: String,
-    )
+    ) {
+        /**
+         * The generated one would print the words: `RestClient` logs the body it writes, by its
+         * `toString`, at DEBUG ("Writing [...]"). Seen by `SecretsNeverLoggedTest` (ADR-0054).
+         */
+        override fun toString() = "VoyageRequest(model=$model, inputType=$inputType, input=<${input.size} redacted>)"
+    }
 
     private data class VoyageResponse(
         val data: List<Item>?,
