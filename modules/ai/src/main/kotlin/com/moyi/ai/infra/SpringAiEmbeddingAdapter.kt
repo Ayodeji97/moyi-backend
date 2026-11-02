@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Timer
 import org.springframework.ai.embedding.EmbeddingModel
 import org.springframework.ai.embedding.EmbeddingRequest
+import java.io.InterruptedIOException
 import java.time.Duration
 
 /**
@@ -35,7 +36,12 @@ internal class SpringAiEmbeddingAdapter(
         }
     }
 
-    /** Any provider exception becomes a fixed reason: its message may quote the input. */
+    /**
+     * Any provider exception becomes a fixed reason: its message may quote the input. An
+     * interrupt anywhere in its causes is put back on the thread, which catching it cleared: the
+     * caller cancelled the call (the search's timeout) or is shutting down (the sweep), and must
+     * still see that it was asked to stop.
+     */
     @Suppress("TooGenericExceptionCaught")
     private fun call(texts: List<String>): List<FloatArray> =
         try {
@@ -45,6 +51,9 @@ internal class SpringAiEmbeddingAdapter(
                 .sortedBy { it.index }
                 .map { it.output }
         } catch (e: Exception) {
+            if (generateSequence<Throwable>(e) { it.cause }.any { it is InterruptedException || it is InterruptedIOException }) {
+                Thread.currentThread().interrupt()
+            }
             throw EmbeddingUnavailableException("provider error", e)
         }
 

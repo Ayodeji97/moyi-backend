@@ -11,6 +11,8 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
@@ -63,24 +65,25 @@ internal class QueryEmbedder(
     }
 
     /** The one call, bounded by the timeout; `null` on any failure. */
-    @Suppress("TooGenericExceptionCaught") // "Never throws": the search must not fail for its optional half.
     private fun embed(query: String): FloatArray? {
-        val future = executor.submit<FloatArray> { port.embed(listOf(query)).single() }
+        // Inside the `try`: a submit the executor refuses (shut down) is a failure like any other.
+        var future: Future<FloatArray>? = null
         return try {
+            future = executor.submit<FloatArray> { port.embed(listOf(query)).single() }
             future.get(properties.queryTimeout.toNanos(), TimeUnit.NANOSECONDS)
         } catch (_: TimeoutException) {
-            future.cancel(true)
+            future?.cancel(true)
             null
         } catch (_: InterruptedException) {
-            future.cancel(true)
+            future?.cancel(true)
             Thread.currentThread().interrupt()
             null
         } catch (failure: ExecutionException) {
             val cause = failure.cause
             if (cause !is EmbeddingUnavailableException) log.warn("Embedding a search query failed: {}", cause?.javaClass?.name)
             null
-        } catch (failure: RuntimeException) {
-            // The executor refused the task (shutting down): the search goes on without its meaning half.
+        } catch (failure: RejectedExecutionException) {
+            // The executor is shut down: the search goes on without its meaning half.
             log.warn("Embedding a search query failed: {}", failure.javaClass.name)
             null
         }

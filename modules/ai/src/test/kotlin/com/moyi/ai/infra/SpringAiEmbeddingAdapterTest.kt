@@ -55,6 +55,24 @@ internal class SpringAiEmbeddingAdapterTest {
         meters.counter("gratitude.ai.embedding.requests", "provider", "openai", "outcome", "failed").count() shouldBe 1.0
     }
 
+    /** Review of Task 7: an interrupt wrapped by a client must still reach the caller as an interrupt. */
+    @Test
+    fun `an interrupted call keeps the thread's interrupt, however the client wrapped it`() {
+        listOf<Throwable>(
+            InterruptedException(),
+            IllegalStateException("retry interrupted", InterruptedException()),
+            RuntimeException("read", java.io.InterruptedIOException()),
+        ).forEach { failure ->
+            val adapter = SpringAiEmbeddingAdapter(model { throw failure }, EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL, meters, "openai")
+            try {
+                shouldThrow<EmbeddingUnavailableException> { adapter.embed(listOf("words")) }
+                Thread.currentThread().isInterrupted shouldBe true
+            } finally {
+                Thread.interrupted()
+            }
+        }
+    }
+
     @Test
     fun `a vector of the wrong size is refused`() {
         val adapter =

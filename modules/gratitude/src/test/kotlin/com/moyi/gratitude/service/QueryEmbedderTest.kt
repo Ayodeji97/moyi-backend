@@ -105,6 +105,17 @@ internal class QueryEmbedderTest(
         counted("degraded") shouldBe 1.0
     }
 
+    /** Review of Task 7: a request that arrives while the bean is shutting down must still be answered. */
+    @Test
+    fun `a refused submit, the executor shut down, is keywords only and never thrown`() {
+        val embedder = embedder(port { FloatArray(SPACE.dimensions) })
+        embedder.close()
+
+        embedder.matchFor(membership, "calm light").shouldBeNull()
+
+        counted("degraded") shouldBe 1.0
+    }
+
     @Test
     fun `a model with no threshold is not asked`() {
         val asked = mutableListOf<String>()
