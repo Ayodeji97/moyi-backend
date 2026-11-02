@@ -477,6 +477,9 @@ class OpenApiConfiguration {
                 "proposeBondTimezone",
                 "confirmBondTimezone",
                 "requestBondDeletion",
+                // Semantic search S1 (ADR-0054): BOND_ARCHIVED on a bond that has ended.
+                // `cancelSemanticSearchRequest` is absent for the reason the B5 cancels are.
+                "requestSemanticSearch",
                 // Fix round 1, C2: BOND_ARCHIVED, DAY_CLOSED, ENTRY_ALREADY_EXISTS
                 // and IDEMPOTENCY_KEY_IN_FLIGHT are all 409s this operation can
                 // give — the headline behaviour of the slice (BR-2) among them

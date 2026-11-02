@@ -4,6 +4,7 @@ import com.moyi.bond.domain.Bond
 import com.moyi.bond.domain.BondSettings
 import com.moyi.bond.domain.BondType
 import com.moyi.bond.domain.Change
+import jakarta.validation.constraints.AssertFalse
 import jakarta.validation.constraints.AssertTrue
 import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
@@ -47,6 +48,13 @@ internal data class PatchBondRequest(
     val revealTimeLocal: Optional<String>? = null,
     val strictMode: Boolean? = null,
     val anchorTimezone: String? = null,
+    /**
+     * FR-204, ADR-0054: either member may turn semantic search **off** here, alone.
+     * `true` is refused on the field, because turning it on needs the other
+     * member's agreement. `@AssertFalse` passes `null`, so an omitted field is fine.
+     */
+    @field:AssertFalse(message = "can only be turned on through /bonds/{bondId}/semantic-search, with the other member's agreement")
+    val semanticSearchEnabled: Boolean? = null,
 ) {
     /**
      * `HH:mm`, when the caller sent a value at all.
@@ -82,7 +90,7 @@ internal data class PatchBondRequest(
      */
     @get:AssertTrue(message = "must name at least one setting to change")
     private val atLeastOneSetting: Boolean
-        get() = name != null || type != null || revealTimeLocal != null || strictMode != null
+        get() = name != null || type != null || revealTimeLocal != null || strictMode != null || semanticSearchEnabled != null
 
     /**
      * Builds the domain's settings, constructing its value types here at the
@@ -97,6 +105,7 @@ internal data class PatchBondRequest(
             type = type?.trim()?.let(BondType::valueOf),
             revealTimeLocal = revealTimeLocal?.let { Change(it.orElse(null)?.let(LocalTime::parse)) },
             strictMode = strictMode,
+            semanticSearchEnabled = semanticSearchEnabled,
         )
 
     private companion object {

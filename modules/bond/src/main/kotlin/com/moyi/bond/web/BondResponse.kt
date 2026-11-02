@@ -35,6 +35,8 @@ internal data class BondResponse(
     val anchorTimezone: String,
     val revealTimeLocal: String?,
     val strictMode: Boolean,
+    /** FR-204, ADR-0054: whether this bond's entries are embedded for semantic search. On by default. */
+    val semanticSearchEnabled: Boolean,
     val status: BondStatus,
     val maxMembers: Int,
     val createdAt: Instant,
@@ -48,6 +50,8 @@ internal data class BondResponse(
     val pendingTimezoneChange: PendingTimezoneChangeResponse?,
     /** FR-028: the deletion request waiting for the other member. */
     val pendingDeletionRequest: PendingDeletionRequestResponse?,
+    /** FR-204: a request to turn semantic search back on, waiting for the other member. */
+    val pendingSemanticSearchRequest: PendingSemanticSearchRequestResponse?,
 ) {
     companion object {
         private val HH_MM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
@@ -62,6 +66,7 @@ internal data class BondResponse(
                 // `21:00:00`, and the API takes and gives one shape (doc 06 §1).
                 revealTimeLocal = view.bond.revealTimeLocal?.let(HH_MM::format),
                 strictMode = view.bond.strictMode,
+                semanticSearchEnabled = view.bond.semanticSearchEnabled,
                 status = view.bond.status,
                 maxMembers = view.bond.maxMembers,
                 createdAt = view.bond.createdAt,
@@ -72,6 +77,7 @@ internal data class BondResponse(
                 invite = view.invite?.let(InviteResponse::from),
                 pendingTimezoneChange = view.timezoneChange?.let(PendingTimezoneChangeResponse::from),
                 pendingDeletionRequest = view.deletion?.let(PendingDeletionRequestResponse::from),
+                pendingSemanticSearchRequest = view.semanticSearchOn?.let(PendingSemanticSearchRequestResponse::from),
             )
 
         /** The `ETag` for a bond: an opaque validator of this caller’s public representation. */
@@ -160,6 +166,22 @@ internal data class PendingDeletionRequestResponse(
     companion object {
         fun from(proposal: Proposal) =
             PendingDeletionRequestResponse(
+                requestedByMemberId = proposal.proposedByMemberId.value,
+                requestedAt = proposal.proposedAt,
+                expiresAt = proposal.expiresAt,
+            )
+    }
+}
+
+/** A request to turn semantic search back on, waiting for the other member (FR-204). No payload, as for a deletion. */
+internal data class PendingSemanticSearchRequestResponse(
+    val requestedByMemberId: UUID,
+    val requestedAt: Instant,
+    val expiresAt: Instant,
+) {
+    companion object {
+        fun from(proposal: Proposal) =
+            PendingSemanticSearchRequestResponse(
                 requestedByMemberId = proposal.proposedByMemberId.value,
                 requestedAt = proposal.proposedAt,
                 expiresAt = proposal.expiresAt,

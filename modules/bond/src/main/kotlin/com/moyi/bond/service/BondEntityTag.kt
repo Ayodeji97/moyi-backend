@@ -19,6 +19,7 @@ internal fun BondView.entityTag(): String {
                     bond.anchorTimezone.id,
                     bond.revealTimeLocal,
                     bond.strictMode,
+                    bond.semanticSearchEnabled,
                     bond.status,
                     bond.maxMembers,
                     bond.createdAt,
@@ -40,6 +41,7 @@ internal fun BondView.entityTag(): String {
                 ),
             )
             addAll(listOf(deletion?.proposedByMemberId?.value, deletion?.proposedAt, deletion?.expiresAt))
+            addAll(listOf(semanticSearchOn?.proposedByMemberId?.value, semanticSearchOn?.proposedAt, semanticSearchOn?.expiresAt))
             addAll(listOf(me.id.value, me.role))
             addAll(listOf(invite?.invite?.id?.value, invite?.invite?.code?.value, invite?.link, invite?.invite?.expiresAt))
         }

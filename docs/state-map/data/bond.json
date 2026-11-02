@@ -622,7 +622,7 @@
     "rule": "BR-9, FR-028",
     "evidence": "smoke",
     "evidenceRef": "a PATCH during the cooling-off is 409 BOND_ARCHIVED",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen) throw BondArchivedException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen && !settings.isOnlySemanticSearchOff()) throw BondArchivedException()"
   },
   {
     "id": "bond-archived-patch",
@@ -647,7 +647,7 @@
     "rule": "BR-9, ADR-0028 §4",
     "evidence": "smoke",
     "evidenceRef": "…the PATCH is then 409 BOND_ARCHIVED",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen) throw BondArchivedException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen && !settings.isOnlySemanticSearchOff()) throw BondArchivedException()"
   },
   {
     "id": "bond-none-leave",

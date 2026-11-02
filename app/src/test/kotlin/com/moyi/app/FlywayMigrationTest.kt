@@ -138,8 +138,8 @@ class FlywayMigrationTest(
         val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
         assertTrue(
-            versions.containsAll((1..27).toList() + listOf(29, 30, 31, 32, 33)),
-            "Expected every module's migrations, V1 to V27 and V29 to V33, found: $versions",
+            versions.containsAll((1..27).toList() + listOf(29, 30, 31, 32, 33, 40)),
+            "Expected every module's migrations, V1 to V27, V29 to V33 and V40, found: $versions",
         )
 
         val extensions =

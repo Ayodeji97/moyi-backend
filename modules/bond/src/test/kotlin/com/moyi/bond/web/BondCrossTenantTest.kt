@@ -96,6 +96,9 @@ internal class BondCrossTenantTest(
             "DELETE /api/v1/bonds/{bondId}/timezone" to Fixture(),
             "POST /api/v1/bonds/{bondId}/deletion-request" to Fixture(),
             "DELETE /api/v1/bonds/{bondId}/deletion-request" to Fixture(),
+            // Semantic search S1 (ADR-0054): asking to turn it on, and calling the request off.
+            "POST /api/v1/bonds/{bondId}/semantic-search" to Fixture(),
+            "DELETE /api/v1/bonds/{bondId}/semantic-search" to Fixture(),
             // Phase 4 N2. The PUT carries a body a member would succeed with, so the 404 is the guard's.
             "GET /api/v1/bonds/{bondId}/members/me/notifications" to Fixture(),
             "PUT /api/v1/bonds/{bondId}/members/me/notifications" to Fixture(body = """{"categories":{"onThisDay":true}}"""),

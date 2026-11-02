@@ -2,7 +2,9 @@ package com.moyi.bond.service
 
 import com.moyi.bond.domain.BondSettings
 import com.moyi.bond.domain.Membership
+import com.moyi.bond.domain.ProposalKind
 import com.moyi.bond.infra.database.BondStore
+import com.moyi.bond.infra.database.ProposalStore
 import com.moyi.bond.infra.database.StrictModeChanges
 import com.moyi.common.web.IfMatch
 import com.moyi.common.web.PreconditionFailedException
@@ -48,12 +50,15 @@ internal class UpdateBond(
     private val views: BondViews,
     private val strictModeChanges: StrictModeChanges,
     private val clock: Clock,
+    private val support: BondSupport,
+    private val proposals: ProposalStore,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     /**
      * @throws BondNotFoundException the caller's membership went away between the guard and here
-     * @throws BondArchivedException the bond has ended (BR-9, ADR-0028)
+     * @throws BondArchivedException the bond has ended (BR-9, ADR-0028), unless the request
+     *   only turns semantic search off (ADR-0054 decision 9, provisional)
      * @throws PreconditionFailedException the caller's `If-Match` is not the current version
      */
     @Transactional
@@ -68,7 +73,8 @@ internal class UpdateBond(
         // Archived before the precondition: a member of a bond that has ended
         // gets the same `409` whatever version they hold, because "this has
         // ended" is the more useful answer and it is true regardless of theirs.
-        if (!bond.isOpen) throw BondArchivedException()
+        // An ended bond refuses every change but withdrawing consent to the embedding provider (ADR-0054 decision 9).
+        if (!bond.isOpen && !settings.isOnlySemanticSearchOff()) throw BondArchivedException()
         if (!ifMatch.matches(views.of(bond, membership.userId).entityTag())) throw PreconditionFailedException()
 
         val updated = bond.update(settings)
@@ -78,6 +84,12 @@ internal class UpdateBond(
         // its time, under the bond's lock, in this transaction.
         if (updated.strictMode != bond.strictMode) {
             strictModeChanges.record(bond.id, clock.instant().truncatedTo(ChronoUnit.MICROS), updated.strictMode)
+        }
+        if (bond.semanticSearchEnabled && !updated.semanticSearchEnabled) {
+            val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
+            // In this transaction, so the switch and the order to delete the vectors commit together (ADR-0054).
+            support.events.publish(SemanticSearchDisabled.of(bond, now))
+            proposals.cancelLive(bond.id, ProposalKind.SEMANTIC_SEARCH_ON, now) // never a pending deletion or timezone change
         }
         log.info("Bond {} settings updated", membership.bondId.value)
         // Re-read, so the `ETag` carries the version the row now has rather than

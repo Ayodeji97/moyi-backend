@@ -28,4 +28,10 @@ internal class BondClosingStore(
         after: UUID?,
         limit: Int,
     ): List<UUID> = bonds.findEverPairedAfter(after, limit)
+
+    /** The embedding sweep's page (ADR-0054): every bond with semantic search on, solo and ended included. */
+    fun withSemanticSearchAfter(
+        after: UUID?,
+        limit: Int,
+    ): List<UUID> = bonds.findWithSemanticSearchAfter(after, limit)
 }

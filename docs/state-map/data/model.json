@@ -554,7 +554,10 @@
     }
   ],
   "pending": {
-    "endpoints": [],
+    "endpoints": [
+      "POST /api/v1/bonds/{bondId}/semantic-search",
+      "DELETE /api/v1/bonds/{bondId}/semantic-search"
+    ],
     "codes": []
   },
   "contractGaps": [

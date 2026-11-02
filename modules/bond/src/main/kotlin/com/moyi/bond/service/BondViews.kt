@@ -97,15 +97,17 @@ internal data class BondView(
     /**
      * Whatever is waiting for the other member to agree to (FR-027, FR-028).
      *
-     * A list rather than two fields, because that is what the store returns and
-     * the two kinds are one mechanism; [timezoneChange] and [deletion] are the
-     * two questions the HTTP layer asks of it.
+     * A list rather than one field per kind, because that is what the store
+     * returns and the kinds are one mechanism; [timezoneChange], [deletion] and
+     * [semanticSearchOn] are the questions the HTTP layer asks of it.
      */
     val proposals: List<Proposal> = emptyList(),
 ) {
     val timezoneChange: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.TIMEZONE_CHANGE }
 
     val deletion: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.DELETION }
+
+    val semanticSearchOn: Proposal? get() = proposals.firstOrNull { it.kind == ProposalKind.SEMANTIC_SEARCH_ON }
 }
 
 internal data class MemberView(

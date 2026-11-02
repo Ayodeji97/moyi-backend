@@ -146,7 +146,15 @@ class ArchitectureTest {
          * pushes an event or the on-this-day sweep makes (ADR-0046).
          */
         private val UNGUARDED_BOND_READS =
-            listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep", "remindersDueBetween", "audienceOf", "onThisDayDueBetween")
+            listOf(
+                "closingViewOf",
+                "lockClosingViewOf",
+                "bondsToSweep",
+                "bondsWithSemanticSearch",
+                "remindersDueBetween",
+                "audienceOf",
+                "onThisDayDueBetween",
+            )
 
         /**
          * The work nobody asked for (`gratitude.service`): the close job's three steps, the

@@ -333,6 +333,12 @@ class OpenApiContractTest(
         deletion.post.responses.keys shouldNotContain "200"
         deletion.delete.responses shouldContainKey "204"
 
+        // ADR-0054: asking for semantic search back on is the deletion request's shape.
+        val semanticSearch = api.paths["/api/v1/bonds/{bondId}/semantic-search"]!!
+        semanticSearch.post.responses.keys shouldContainAll listOf("202", "404", "409")
+        semanticSearch.delete.responses shouldContainKey "204"
+        semanticSearch.delete.responses.keys shouldNotContain "409"
+
         // The three new codes are in the one enum a client switches on, which is
         // what makes them a breaking change and worth the label (ADR-0024).
         api.components.schemas["ProblemDetail"]!!
