@@ -20,8 +20,8 @@ import com.moyi.identity.api.UserDirectory
 import io.kotest.assertions.withClue
 import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
-import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.shouldBeInstanceOf
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.BeforeEach
@@ -29,6 +29,8 @@ import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import org.junit.jupiter.api.fail
+import org.opentest4j.AssertionFailedError
+import org.opentest4j.TestAbortedException
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
@@ -128,26 +130,48 @@ internal class RetrievalEvalTest(
     }
 
     @TestFactory
-    fun `each space with stored vectors meets its floors`(): List<DynamicTest> {
-        val stored = GoldenSet.storedVectors()
-        return EmbeddingSpace.entries.map { space ->
+    fun `each space with stored vectors meets its floors`(): List<DynamicTest> = spaces(GoldenSet.storedVectors(), floors())
+
+    /**
+     * A floor for a space with no vectors is a lost vectors file, not a space never measured: it
+     * fails, where a skip would let the gate go quiet unnoticed.
+     */
+    @Test
+    fun `a space with a floor and no vectors fails, and one with neither is skipped`() {
+        val plan = spaces(stored = emptyMap(), floors = mapOf(EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL to Floor(0.5, 0.5)))
+        val outcomes = plan.associate { it.displayName to runCatching { it.executable.execute() }.exceptionOrNull() }
+
+        outcomes.getValue("OPENAI_TEXT_EMBEDDING_3_SMALL").shouldBeInstanceOf<AssertionFailedError>().message shouldBe
+            "eval/floors.json gates OPENAI_TEXT_EMBEDDING_3_SMALL, but it has no vectors file: run tools/embedding-eval generate"
+        outcomes.getValue("VOYAGE_3_5").shouldBeInstanceOf<TestAbortedException>()
+    }
+
+    /** One dynamic test per space: gated with its vectors, failed with a floor and none, skipped with neither. */
+    private fun spaces(
+        stored: Map<EmbeddingSpace, Map<String, FloatArray>>,
+        floors: Map<EmbeddingSpace, Floor>,
+    ): List<DynamicTest> =
+        EmbeddingSpace.entries.map { space ->
             DynamicTest.dynamicTest(space.name) {
                 val vectors = stored[space]
+                if (vectors == null && space in floors) {
+                    fail("eval/floors.json gates $space, but it has no vectors file: run tools/embedding-eval generate")
+                }
                 assumeTrue(vectors != null, "no vectors for $space: run tools/embedding-eval generate")
-                gate(space, checkNotNull(vectors))
+                gate(space, checkNotNull(vectors), floors)
             }
         }
-    }
 
     private fun gate(
         space: EmbeddingSpace,
         vectors: Map<String, FloatArray>,
+        floors: Map<EmbeddingSpace, Floor>,
     ) {
         val shipped = shippedMaxDistance(space)
         val measured = measure(GoldenSet.load(), vectors, space, shipped)
         report(space, measured)
         if (shipped == null) fail("$MAX_DISTANCE_KEY.$space is not set in app's application.yml: set it from the printed threshold")
-        val floor = floors()[space] ?: fail("eval/floors.json has no floor for $space: write the printed recall and MRR, less 0.02")
+        val floor = floors[space] ?: fail("eval/floors.json has no floor for $space: write the printed recall and MRR, less 0.02")
         withClue("remember recall@10 for $space") { measured.recallAt10 shouldBeGreaterThanOrEqual floor.recall }
         withClue("remember MRR for $space") { measured.mrr shouldBeGreaterThanOrEqual floor.mrr }
         withClue("search precision at the shipped max-distance for $space") {
@@ -163,6 +187,7 @@ internal class RetrievalEvalTest(
         val recallAt10: Double,
         val mrr: Double,
         val precisionAt: Map<Double, Double?>,
+        val shipped: Double?,
         val precisionAtShipped: Double?,
         val largestThreshold: Double?,
         val probes: List<Probe>,
@@ -202,6 +227,7 @@ internal class RetrievalEvalTest(
             recallAt10 = answerable.map { RetrievalMetrics.recallAt(RetrievalMetrics.K, remembered.getValue(it), it.relevant) }.average(),
             mrr = answerable.map { RetrievalMetrics.reciprocalRank(RetrievalMetrics.K, remembered.getValue(it), it.relevant) }.average(),
             precisionAt = precisionAt,
+            shipped = shipped,
             precisionAtShipped = shipped?.let { precision(seeded, golden, asked, space, it) },
             largestThreshold = RetrievalMetrics.largestThreshold(precisionAt, PRECISION_FLOOR),
             probes =
@@ -307,13 +333,13 @@ internal class RetrievalEvalTest(
         println("[retrieval-eval] $space")
         println("[retrieval-eval]   remember recall@10         ${"%.4f".format(measured.recallAt10)}")
         println("[retrieval-eval]   remember MRR               ${"%.4f".format(measured.mrr)}")
-        println(
-            "[retrieval-eval]   search precision, shipped  ${measured.precisionAtShipped?.let {
-                "%.4f".format(
-                    it,
-                )
-            } ?: "(no shipped max-distance)"}",
-        )
+        val atShipped =
+            when {
+                measured.shipped == null -> "(no shipped max-distance)"
+                measured.precisionAtShipped == null -> "nothing found at ${measured.shipped}"
+                else -> "%.4f at %s".format(measured.precisionAtShipped, measured.shipped)
+            }
+        println("[retrieval-eval]   search precision, shipped  $atShipped")
         println("[retrieval-eval]   largest max-distance at precision >= 0.9: ${measured.largestThreshold ?: "none on the grid"}")
         measured.precisionAt.forEach { (threshold, precision) ->
             println("[retrieval-eval]     precision at %.2f: %s".format(threshold, precision?.let { "%.4f".format(it) } ?: "nothing found"))

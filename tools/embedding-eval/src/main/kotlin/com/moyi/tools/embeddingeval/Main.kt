@@ -29,24 +29,37 @@ fun main(args: Array<String>) {
             System.err.println("No provider key: set ${Providers.OPENAI_KEY} and/or ${Providers.VOYAGE_KEY}.")
             exitProcess(1)
         }
-        providers.forEach { provider ->
-            val space = checkNotNull(provider.port.space) { "${provider.name} has no space" }
-            val run = EmbeddingRun.of(provider.port, texts)
-            val written = VectorsFile.write(golden.toAbsolutePath().parent, space, run.vectors, Instant.now())
-            val entries = texts.entries.size
-            println(
-                """
-                |
-                |${provider.name} ($space): ${run.vectors.size} vectors -> $written
-                |  p95 latency, one query        ${"%.0f".format(EmbeddingRun.p95(run.queryMillis))} ms (${run.queryMillis.size} calls)
-                |  p95 latency, a sweep batch    ${"%.0f".format(
-                    EmbeddingRun.p95(run.batchMillis),
-                )} ms (${run.batchMillis.size} calls of up to ${EmbeddingRun.SWEEP_BATCH})
-                |  tokens, estimated (chars / 4) ${run.estimatedEntryTokens} for $entries entries (${run.estimatedEntryTokens * PER_THOUSAND / entries} per 1k entries), ${run.estimatedQueryTokens} for ${texts.queries.size} queries
-                """.trimMargin(),
-            )
-        }
+        val failed =
+            providers.filterNot { provider ->
+                runCatching { run(provider, texts, golden) }
+                    .onFailure { System.err.println(ProviderFailure.describe(provider.name, it)) }
+                    .isSuccess
+            }
+        if (failed.isNotEmpty()) exitProcess(1)
     }
+}
+
+/** One provider's vectors, written beside [golden], and what only its run can measure, printed. Throws on a provider failure. */
+private fun run(
+    provider: Provider,
+    texts: GoldenTexts,
+    golden: Path,
+) {
+    val space = checkNotNull(provider.port.space) { "${provider.name} has no space" }
+    val run = EmbeddingRun.of(provider.port, texts)
+    val written = VectorsFile.write(golden.toAbsolutePath().parent, space, run.vectors, Instant.now())
+    val entries = texts.entries.size
+    println(
+        """
+        |
+        |${provider.name} ($space): ${run.vectors.size} vectors -> $written
+        |  p95 latency, one query        ${"%.0f".format(EmbeddingRun.p95(run.queryMillis))} ms (${run.queryMillis.size} calls)
+        |  p95 latency, a sweep batch    ${"%.0f".format(
+            EmbeddingRun.p95(run.batchMillis),
+        )} ms (${run.batchMillis.size} calls of up to ${EmbeddingRun.SWEEP_BATCH})
+        |  tokens, estimated (chars / 4) ${run.estimatedEntryTokens} for $entries entries (${run.estimatedEntryTokens * PER_THOUSAND / entries} per 1k entries), ${run.estimatedQueryTokens} for ${texts.queries.size} queries
+        """.trimMargin(),
+    )
 }
 
 private const val DEFAULT_GOLDEN = "modules/gratitude/src/test/resources/eval/golden.json"
