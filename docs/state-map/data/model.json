@@ -156,7 +156,7 @@
         },
         {
           "id": "bond.proposal",
-          "label": "The proposal (the latest of the kind the endpoint works on, the zone change or the deletion)",
+          "label": "The proposal (the latest of the kind the endpoint works on: the zone change, the deletion, or turning semantic search back on)",
           "states": [
             {
               "id": "NONE",
@@ -554,10 +554,7 @@
     }
   ],
   "pending": {
-    "endpoints": [
-      "POST /api/v1/bonds/{bondId}/semantic-search",
-      "DELETE /api/v1/bonds/{bondId}/semantic-search"
-    ],
+    "endpoints": [],
     "codes": []
   },
   "contractGaps": [

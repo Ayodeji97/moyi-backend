@@ -256,7 +256,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "The body names no setting at all; or names anchorTimezone, which only moves through /timezone with your partner's agreement; or name is blank or over 60 characters, type is unknown, or revealTimeLocal is not a time such as 21:00. The body is checked before membership is, so a stranger gets this too.",
+        "reason": "The body names no setting at all; or names anchorTimezone, which only moves through /timezone with your partner's agreement; or name is blank or over 60 characters, type is unknown, or revealTimeLocal is not a time such as 21:00; or semanticSearchEnabled is true (ASSERT_FALSE on the field: it is turned on only through /semantic-search, by both members). The body is checked before membership is, so a stranger gets this too.",
         "evidence": "smoke",
         "evidenceRef": "an empty patch is 422",
         "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/web/PatchBondRequest.kt#@get:AssertTrue(message = \"must name at least one setting to change\")"
@@ -603,6 +603,42 @@
     "curl": "curl -X DELETE \"$API/bonds/$BOND/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "summary": "ask to turn semantic search back on, or agree to it",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/semantic-search\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "summary": "call off a request to turn semantic search back on",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists.",
+        "evidence": "test",
+        "evidenceRef": "BondCrossTenantTest#every bond-scoped route is covered, and answers a stranger exactly as it answers nonsense",
+        "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+      }
+    ],
+    "curl": "curl -X DELETE \"$API/bonds/$BOND/semantic-search\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
     "id": "GET /api/v1/bonds/{bondId}/days",
     "summary": "list the archive",
     "machine": "day",
@@ -683,6 +719,32 @@
       }
     ],
     "curl": "curl -G \"$API/bonds/$BOND/search\" --data-urlencode \"q=the long walk\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/bonds/{bondId}/remember",
+    "summary": "ask the archive a question (\"Remember when\")",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [],
+    "requestErrors": [
+      {
+        "status": 404,
+        "code": "NOT_FOUND",
+        "reason": "The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so nothing of q is sent to a provider for a stranger.",
+        "evidence": "smoke",
+        "evidenceRef": "remember: a stranger is told the bond's 404",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/BondGuard.kt#throw NotFoundException(\"That bond was not found.\")"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "q is missing, blank, longer than 100 characters or 1,024 bytes, or holds NUL (search's own rules); or limit is not a whole number from 1 to 20. Each parameter is named, never its value.",
+        "evidence": "smoke",
+        "evidenceRef": "remember: no q is one 422 on q",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/RememberQuery.kt#if (size == null || terms == null) throw DaysQueryNotValidException(violations)"
+      }
+    ],
+    "curl": "curl -G \"$API/bonds/$BOND/remember\" --data-urlencode \"q=the walk by the river\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
     "id": "GET /api/v1/bonds/{bondId}/on-this-day",

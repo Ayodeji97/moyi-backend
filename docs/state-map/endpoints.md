@@ -699,8 +699,10 @@ curl -X PATCH "$API/bonds/$BOND" -H "Authorization: Bearer $TOKEN" -H "If-Match:
 | `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
 | `bond` | `PENDING_MEMBER` |  | 200 stays | The name, the type, the reveal time and Strict mode may be changed by either member alone, given the bond's current ETag as If-Match. The answer carries the new ETag. | ADR-0029 §1 | smoke |
 | `bond` | `ACTIVE` |  | 200 stays | The same on a bond of two: either member may change these settings without the other, given the current ETag. Your partner's copy of the ETag stops matching. | ADR-0029 §1 | test |
-| `bond` | `PENDING_DELETION` |  | 409 `BOND_ARCHIVED` | A bond counting down to deletion takes no settings change. The code is the one an ended bond gives. | BR-9, FR-028 | smoke |
-| `bond` | `ARCHIVED` |  | 409 `BOND_ARCHIVED` | An ended bond is read only. This is answered before the If-Match is compared, so a stale tag gets it too. | BR-9, ADR-0028 §4 | smoke |
+| `bond` | `PENDING_DELETION` | the body changes anything else, with or without turning semantic search off | 409 `BOND_ARCHIVED` | A bond counting down to deletion takes no settings change but turning semantic search off. The code is the one an ended bond gives. | BR-9, FR-028, ADR-0054 decision 9 (provisional, the owner to confirm) | smoke |
+| `bond` | `PENDING_DELETION` | the body is {"semanticSearchEnabled": false} and nothing else | 200 stays | As on an ended bond: turning semantic search off is taken during the countdown, with the current ETag, and the bond's vectors are deleted. | ADR-0054 decision 9 (provisional, the owner to confirm) | never-run |
+| `bond` | `ARCHIVED` | the body changes anything else, with or without turning semantic search off | 409 `BOND_ARCHIVED` | An ended bond takes no change but turning semantic search off (the next row). This is answered before the If-Match is compared, so a stale tag gets it too. | BR-9, ADR-0028 §4, ADR-0054 decision 9 (provisional, the owner to confirm) | smoke |
+| `bond` | `ARCHIVED` | the body is {"semanticSearchEnabled": false} and nothing else | 200 stays | Turning semantic search off is never refused: the sweep would otherwise keep sending an ended bond's words to the provider. It is the one change an ended bond takes, with the current ETag. A member who has left may make it too, and the other member sees it. The bond's vectors are then deleted, as on an open bond. | ADR-0054 decision 9 (provisional, the owner to confirm) | smoke |
 
 #### Whatever the state
 
@@ -708,7 +710,7 @@ curl -X PATCH "$API/bonds/$BOND" -H "Authorization: Bearer $TOKEN" -H "If-Match:
 |---|---|---|---|
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
 | 412 | `PRECONDITION_FAILED` | The If-Match you sent is not the bond's current ETag: somebody changed the bond since you read it, the tag is a weak one (W/"..."), or it cannot be parsed. Nothing is written. Read the bond again and retry. A bond that has ended or is counting down answers 409 BOND_ARCHIVED before the tag is compared. | smoke |
-| 422 | `VALIDATION_FAILED` | The body names no setting at all; or names anchorTimezone, which only moves through /timezone with your partner's agreement; or name is blank or over 60 characters, type is unknown, or revealTimeLocal is not a time such as 21:00. The body is checked before membership is, so a stranger gets this too. | smoke |
+| 422 | `VALIDATION_FAILED` | The body names no setting at all; or names anchorTimezone, which only moves through /timezone with your partner's agreement; or name is blank or over 60 characters, type is unknown, or revealTimeLocal is not a time such as 21:00; or semanticSearchEnabled is true (ASSERT_FALSE on the field: it is turned on only through /semantic-search, by both members). The body is checked before membership is, so a stranger gets this too. | smoke |
 | 428 | `PRECONDITION_REQUIRED` | No If-Match header, a blank one, or If-Match: *. The update must be conditional, so that two people editing at once cannot silently overwrite each other. It is checked after membership and before the bond's state is read. | smoke |
 
 #### The contract is silent on
@@ -1321,6 +1323,80 @@ curl -X DELETE "$API/bonds/$BOND/deletion-request" -H "Authorization: Bearer $TO
 |---|---|---|---|
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
 
+### POST /bonds/{bondId}/semantic-search
+
+ask to turn semantic search back on, or agree to it
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl -X POST "$API/bonds/$BOND/semantic-search" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 202 stays | Alone in the bond, your request is the agreement: semantic search is on at once and nothing waits. If it is already on, nothing changes. Either way the answer is the bond. Once on, its entries are embedded in the background. | FR-204, ADR-0054 (spec §3.3) | smoke |
+| `bond` | `ACTIVE` | semantic search is off, and no request to turn it on is waiting | 202 stays | Your request is recorded and waits seven days for your partner, whose own request is the agreement. Semantic search stays off until then. Your partner's copy of the ETag stops matching. | FR-204, ADR-0054, the B5 consent pattern | smoke |
+| `bond` | `ACTIVE` | semantic search is off, and your own request is waiting | 202 stays | Asking again changes nothing: your request still waits for your partner, with its first expiry. | FR-204, ADR-0054 | smoke |
+| `bond` | `ACTIVE` | semantic search is off, and your partner's request is waiting | 202 stays | Your request agrees to your partner's: semantic search is on, for both of you. The bond's entries are embedded in the background over the next minutes; until then they are found by their words. | FR-204, ADR-0054, the B5 consent pattern | smoke |
+| `bond` | `ACTIVE` | semantic search is on | 202 stays | It is already on: nothing is asked for and nothing changes. The answer is the bond as it is. | FR-204, ADR-0054 | smoke |
+| `bond` | `PENDING_DELETION` |  | 409 `BOND_ARCHIVED` | A bond counting down to deletion takes no request to turn semantic search on. The code is the one an ended bond gives. Turning it off is still taken (PATCH). | FR-204, ADR-0054, BR-9 | never-run |
+| `bond` | `ARCHIVED` |  | 409 `BOND_ARCHIVED` | Nothing can turn semantic search on for a bond that has ended, whoever asks and however it ended. Turning it off is still taken (PATCH, ADR-0054 decision 9). | FR-204, ADR-0054, BR-9 | smoke |
+| `bond.proposal` | `NONE` | semantic search is off, and the bond is two people | 202 → `PROPOSED` | Your request is recorded and waits seven days for your partner, whose own request is the agreement. On a bond that has ended the answer is BOND_ARCHIVED: see the bond region. | FR-204, ADR-0054 | smoke |
+| `bond.proposal` | `NONE` | you are alone in the bond, or semantic search is already on | 202 stays | No request is made: alone in the bond the setting changes at once, and when it is already on nothing changes. | FR-204, ADR-0054 | smoke |
+| `bond.proposal` | `PROPOSED` | you opened it | 202 stays | Asking again changes nothing. | FR-204, ADR-0054 | smoke |
+| `bond.proposal` | `PROPOSED` | your partner opened it | 202 → `CONFIRMED` | Your request is the agreement: semantic search is on for the bond. | FR-204, ADR-0054 | smoke |
+| `bond.proposal` | `CONFIRMED` | semantic search is still on | 202 stays | Semantic search is on: nothing is asked for, and no request is opened. | FR-204, ADR-0054 | smoke |
+| `bond.proposal` | `CONFIRMED` | semantic search has been turned off since, and the bond is two people | 202 → `PROPOSED` | It was agreed, and turned off again since: a new request is opened and waits for your partner. | FR-204, ADR-0054 | never-run |
+| `bond.proposal` | `CANCELLED` |  | 202 → `PROPOSED` | A request called off leaves nothing waiting, so asking again opens a new one. | FR-204, ADR-0054 | smoke |
+| `bond.proposal` | `LAPSED` |  | 202 → `PROPOSED` | A request left unanswered for seven days has lapsed; asking again opens a new one. | FR-204, ADR-0054 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
+
+### DELETE /bonds/{bondId}/semantic-search
+
+call off a request to turn semantic search back on
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl -X DELETE "$API/bonds/$BOND/semantic-search" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 404 `NOT_FOUND` | Alone in the bond, a request to turn semantic search on is never left waiting (it is on at once), so there is nothing to call off. | FR-204, ADR-0054 | never-run |
+| `bond` | `ACTIVE` | a request to turn it on is waiting, yours or your partner's | 204 stays | Either of you may call a waiting request off: the one who asked, or the one being asked, which is how a request is declined. Semantic search stays off. | FR-204, ADR-0054 | smoke |
+| `bond` | `ACTIVE` | no request to turn it on is waiting | 404 `NOT_FOUND` | Nothing is waiting to be called off: no request was made, it was answered, or it lapsed after seven days. | FR-204, ADR-0054 | smoke |
+| `bond` | `PENDING_DELETION` | a request to turn it on, made before the countdown, is still waiting | 204 stays | A request made before the countdown began is not called off by it, and either member may still call it off. Nothing else changes; it could not be agreed to now (409). | FR-204, ADR-0054 | never-run |
+| `bond` | `PENDING_DELETION` | no request to turn it on is waiting | 404 `NOT_FOUND` | Nothing is waiting to be called off. | FR-204, ADR-0054 | never-run |
+| `bond` | `ARCHIVED` |  | 404 `NOT_FOUND` | Ending a bond calls off every request still waiting (ADR-0028), so there is never one to call off here. | FR-204, ADR-0054, ADR-0028 | smoke |
+| `bond.proposal` | `NONE` |  | 404 `NOT_FOUND` | Nothing is waiting to be called off. | FR-204, ADR-0054 | smoke |
+| `bond.proposal` | `PROPOSED` |  | 204 → `CANCELLED` | Either member may withdraw a request that has not been agreed to: the one who asked, or the one being asked. | FR-204, ADR-0054 | smoke |
+| `bond.proposal` | `CONFIRMED` |  | 404 `NOT_FOUND` | An agreed request is not waiting, so it cannot be called off. To turn semantic search off, one member PATCHes the bond. | FR-204, ADR-0054 | never-run |
+| `bond.proposal` | `CANCELLED` |  | 404 `NOT_FOUND` | Nothing is waiting to be called off. | FR-204, ADR-0054 | never-run |
+| `bond.proposal` | `LAPSED` |  | 404 `NOT_FOUND` | A lapsed request is not waiting. | FR-204, ADR-0054 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
+
 ### GET /bonds/{bondId}/milestones
 
 the milestones reached, and the next
@@ -1711,6 +1787,39 @@ curl -G "$API/bonds/$BOND/search" --data-urlencode "q=the long walk" -H "Authori
 |---|---|---|---|
 | 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so the same bytes whatever q is, as long as it can be decoded: a q whose bytes are not UTF-8 is everyone's 400 MALFORMED_REQUEST, member or stranger, after authentication. | smoke |
 | 422 | `VALIDATION_FAILED` | q is missing, blank, longer than 100 characters or 1,024 bytes, or holds NUL; or limit or cursor cannot be read. Each parameter is named, never its value: what was searched for is not sent back. | smoke |
+
+### GET /bonds/{bondId}/remember
+
+ask the archive a question ("Remember when")
+
+**Needs:** an access token.
+
+**Try it:**
+
+```sh
+curl -G "$API/bonds/$BOND/remember" --data-urlencode "q=the walk by the river" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `day` | `NOT_OPENED` |  | 200 stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | FR-204, ADR-0054 | never-run |
+| `day` | `OPEN` |  | 200 stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | FR-204, ADR-0054 | never-run |
+| `day` | `PARTIAL` |  | 200 stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | FR-204, ADR-0054 | never-run |
+| `day` | `PENDING_REVEAL` |  | 200 stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | FR-204, ADR-0054 | never-run |
+| `day` | `REVEALED` |  | 200 stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | FR-204, ADR-0054 | smoke |
+| `day` | `SOLO` |  | 200 stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | FR-204, ADR-0054 | never-run |
+| `day` | `EMPTY` |  | 200 stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | FR-204, ADR-0054 | never-run |
+| `day` | `FROZEN` |  | 200 stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | FR-204, ADR-0054 | never-run |
+| `day` | `SUSPENDED` |  | 200 stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | FR-204, ADR-0054 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. One answer for all, decided before q is read, so nothing of q is sent to a provider for a stranger. | smoke |
+| 422 | `VALIDATION_FAILED` | q is missing, blank, longer than 100 characters or 1,024 bytes, or holds NUL (search's own rules); or limit is not a whole number from 1 to 20. Each parameter is named, never its value. | smoke |
 
 ### GET /bonds/{bondId}/on-this-day
 
