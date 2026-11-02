@@ -12,7 +12,7 @@ import org.springframework.web.client.RestClient
 
 /**
  * The provider is chosen by configuration, the real one is the default, and a real one without
- * its key refuses to start, naming the variable that is missing. Building a model contacts
+ * its key refuses to start, naming the variable that is missing (OPENAI's case is in OpenAiWiringTest). Building a model contacts
  * nothing, so these run without a network; the HTTP each model sends is Task 3's to test.
  */
 internal class AiConfigurationTest {
@@ -35,12 +35,6 @@ internal class AiConfigurationTest {
         port(
             AiProperties(provider = AiProperties.Provider.VOYAGE, voyage = AiProperties.Voyage(apiKey = "pa-test")),
         ).space shouldBe EmbeddingSpace.VOYAGE_3_5
-    }
-
-    @Test
-    fun `the default provider without a key refuses to start`() {
-        shouldThrow<IllegalStateException> { port(AiProperties()) }
-            .message shouldContain "MOYI_AI_EMBEDDING_OPENAI_API_KEY"
     }
 
     @Test

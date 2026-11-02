@@ -14,6 +14,11 @@ dependencies {
     // The RestClient.Builder bean the Voyage model is built from, as notification uses.
     implementation("org.springframework.boot:spring-boot-starter-restclient")
     implementation("io.micrometer:micrometer-core")
+    // Jackson 3 (`tools.jackson`), the tree Spring 7's RestClient converts with: without its
+    // Kotlin module, Voyage's response cannot be read into a Kotlin data class (seen in
+    // VoyageEmbeddingModelTest: "Type definition error"). Not Jackson 2's module, which the
+    // OpenAI SDK brings for itself (contracts/SchemaNullabilityPin).
+    implementation("tools.jackson.module:jackson-module-kotlin")
 
     testImplementation(projects.common.testing)
     testImplementation("org.springframework.boot:spring-boot-starter-test")
