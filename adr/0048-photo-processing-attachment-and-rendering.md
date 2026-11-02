@@ -330,6 +330,10 @@ there the asset's state decides it. CI installs `libvips-tools` and `libheif-plu
   not 768 MB (ADR-0052 decision 4).
 - **R2, not run:** one GET of a photo URL signed up to an hour earlier, against the real bucket,
   when uploads are switched on (MinIO serves it; R2's SigV4 is expected to, as S3's does).
+  **Moved to the owner's verification of the switch-on** (ADR-0052, "Switched on"):
+  `scripts/r2-switch-on-check.sh` uploads a photo, waits for `READY`, waits until its URL's
+  signature is `MOYI_CHECK_URL_MIN_AGE` minutes old (the runbook says 40) and GETs it, printing
+  neither the URL nor the key. Seen against MinIO; owed against R2 until the owner has run it.
 - **D3:** voice notes, still `UPLOADED` after `media.process` has passed them; D3 processes them,
   and claims `voiceMediaId` (`MEDIA_NOT_YET_SUPPORTED` until then). `AttachableKind` gains `VOICE`.
 - **D4:** the verdict that lets a partner see a photo. **The author's "not shared" for a

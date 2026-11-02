@@ -1,0 +1,35 @@
+meta {
+  name: Report entry
+  type: http
+  seq: 35
+}
+
+post {
+  url: {{api}}/entries/{{partnerEntryId}}/report
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+script:pre-request {
+  // A new key on every send: a retry of one send is then the same report, never a second (doc 06 section 1).
+  req.setHeader("Idempotency-Key", require("uuid").v4());
+}
+
+body:json {
+  {
+    "reason": "OTHER",
+    "detail": "A made-up detail, for trying the route."
+  }
+}
+
+docs {
+  Reports your partner's entry, with its photo and voice note, to a person who reviews it (FR-100, ADR-0053). 201 with the report's id, the entry's and the reason. The reason is NON_CONSENSUAL, MINOR_SEXUAL_CONTENT, VIOLENCE_OR_SELF_HARM, HARASSMENT or OTHER, exactly as written; anything else is 422. The detail is optional, what the reviewer should know, at most 500 characters.
+
+  From the moment it is filed, the entry's photo and voice note are held back from you: run Today and they are PROCESSING. Your partner is shown them NOT_SHARED and is told nothing else, ever. The words stay. A person then dismisses the report (the media is shown again) or upholds it (it is deleted, or blocked).
+
+  Run Days first, which keeps your partner's entry of the newest day as partnerEntryId. Your own entry is 409 REPORT_ON_OWN_ENTRY; anything you were never shown is 404. A reported entry that has since been deleted is still accepted, and so is a report after the bond has ended. Ten a day; the eleventh is 429.
+}

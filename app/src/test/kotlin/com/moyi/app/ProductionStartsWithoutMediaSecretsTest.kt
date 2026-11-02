@@ -8,10 +8,11 @@ import org.yaml.snakeyaml.Yaml
 import java.io.File
 
 /**
- * Production's `config/deploy.yml` either names the media stand-in or supplies
- * every value the real storage needs (ADR-0047), names image processing off in
- * the API and native only in the media worker (ADR-0048, ADR-0052), and runs
- * the worker as the owner ruled.
+ * Production's `config/deploy.yml` stores media in R2 and supplies every value
+ * it needs, the endpoint and the token as secrets that `.kamal/secrets` sets
+ * (ADR-0047, ADR-0052's switch-on), names image processing off in the API and
+ * native only in the media worker (ADR-0048, ADR-0052), and runs the worker as
+ * the owner ruled.
  *
  * The lesson of #96's first deploy: a provider that defaults to the real
  * service and refuses to start without its secrets took production down when
@@ -19,8 +20,9 @@ import java.io.File
  * here too, and fails closed, so the deploy file must say one or the other.
  * `MediaStorageConfigurationTest` holds the two halves of the wiring; this
  * holds the file that is actually deployed. The jar itself was started with
- * that environment and no media secrets when this landed (the pull request
- * that added it records the run).
+ * that environment and no media secrets when this landed, and again with fake
+ * storage secrets (started) and without one (refused, naming it) when storage
+ * was switched on (the pull requests record the runs).
  *
  * Parsed as YAML. **Each role's container sees the top-level `env` with its own
  * `servers.<role>.env` merged over it** (Kamal 2.12, `Role#env`), so every rule
@@ -76,17 +78,99 @@ internal class ProductionStartsWithoutMediaSecretsTest {
                     ?.lowercase()
             val standIn = provider == "unavailable"
             // The endpoint names the Cloudflare account, which this public repository does not
-            // (ADR-0052's switch-on), so it may be a secret as well as a plain value.
+            // (ADR-0052's switch-on): a secret, like both halves of the token, never a plain value.
             val r2Complete =
                 "MOYI_MEDIA_STORAGE_R2_BUCKET" in env.clear &&
-                    ("MOYI_MEDIA_STORAGE_R2_ENDPOINT" in env.clear || "MOYI_MEDIA_STORAGE_R2_ENDPOINT" in env.secret) &&
-                    listOf("MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID", "MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY").all { it in env.secret }
+                    "MOYI_MEDIA_STORAGE_R2_ENDPOINT" !in env.clear &&
+                    STORAGE_SECRETS.all { it in env.secret }
 
             val found = provider ?: "<default R2>"
-            withClue("config/deploy.yml would start a $role whose media storage refuses to start (provider: $found)") {
+            withClue(
+                "config/deploy.yml would start a $role whose media storage refuses to start, " +
+                    "or names the R2 endpoint in plain text (provider: $found)",
+            ) {
                 (standIn || ((provider == null || provider == "r2") && r2Complete)) shouldBe true
             }
         }
+    }
+
+    /**
+     * The switch-on (ADR-0047, ADR-0052): production stores media. Both roles
+     * reach the bucket, the API to sign uploads and URLs, check completions and
+     * purge, the worker to read uploads and write what it makes of them; so
+     * each role's environment names R2, the bucket `moyi-media`, and the
+     * endpoint and the token as secrets. Switching storage off again
+     * (`ops/media-worker/README.md`) is a deliberate act, and changes this
+     * test in the same pull request.
+     */
+    @Test
+    fun `deploy-yml stores media in R2's moyi-media bucket in every role, its endpoint and token as secrets`() {
+        roles.forEach { (role, env) ->
+            withClue("$role's media storage provider") {
+                (
+                    env.clear["MOYI_MEDIA_STORAGE_PROVIDER"]
+                        ?.toString()
+                        ?.trim()
+                        ?.lowercase() ?: "r2"
+                ) shouldBe "r2"
+            }
+            withClue("$role's bucket") { env.clear["MOYI_MEDIA_STORAGE_R2_BUCKET"] shouldBe "moyi-media" }
+            withClue("$role's storage secrets") { (STORAGE_SECRETS - env.secret) shouldBe emptySet() }
+        }
+    }
+
+    /**
+     * Review of #117: the worker decodes what strangers upload, so it holds
+     * only what it needs, the database's password and the bucket's three
+     * values; the session-signing pair, the HMAC key and the email key are the
+     * API's alone. A secret added to the top-level `env` later reaches the
+     * worker too, and fails this until it is put where it belongs. (When
+     * moderation is switched on, its key is the worker's, and is added here.)
+     */
+    @Test
+    fun `the media worker holds only the database's and the bucket's secrets, the API its own as well`() {
+        roles.getValue("media-worker").secret shouldContainExactlyInAnyOrder
+            listOf("SPRING_DATASOURCE_PASSWORD") + STORAGE_SECRETS
+        roles.getValue("web").secret shouldContainExactlyInAnyOrder
+            listOf("SPRING_DATASOURCE_PASSWORD") + STORAGE_SECRETS + API_SECRETS
+    }
+
+    /**
+     * Every secret `config/deploy.yml` names (the application's, each
+     * accessory's, the registry's) is set by `.kamal/secrets`, from a field its
+     * `kamal secrets fetch` line fetches from Bitwarden. A name listed in
+     * deploy.yml and never set reaches the container empty, and the storage's
+     * refusal to start then names it (MediaStorageConfigurationTest); a field
+     * extracted but not fetched fails the deploy before anything boots. Both
+     * are caught here, before a deploy is tried.
+     */
+    @Test
+    fun `every secret deploy-yml names is set by kamal-secrets from a field it fetches`() {
+        val lines = File("../.kamal/secrets").readLines().map(String::trim).filterNot { it.startsWith("#") }
+        val fetched =
+            lines
+                .single { it.startsWith("SECRETS=\$(kamal secrets fetch ") }
+                .removeSuffix(")")
+                .substringAfter("--from moyi-prod ")
+                .split(Regex("\\s+"))
+                .toSet()
+        val extract = Regex("^([A-Z0-9_]+)=\\$\\(kamal secrets extract ([A-Z0-9_]+) \\\$SECRETS\\)$")
+        val set = lines.mapNotNull { extract.matchEntire(it) }.associate { it.groupValues[1] to it.groupValues[2] }
+
+        withClue("fields .kamal/secrets extracts but never fetches") { (set.values.toSet() - fetched) shouldBe emptySet() }
+        withClue("secrets config/deploy.yml names that .kamal/secrets never sets") { (namedSecrets() - set.keys) shouldBe emptySet() }
+    }
+
+    /** The secret names deploy.yml asks Kamal for: `NAME:SOURCE` asks for `SOURCE`. */
+    @Suppress("UNCHECKED_CAST")
+    private fun namedSecrets(): Set<String> {
+        fun secretsOf(section: Map<String, Any?>?): List<String> =
+            (((section?.get("env") as? Map<String, Any?>)?.get("secret")) as? List<*>).orEmpty().map {
+                it.toString().substringAfter(':')
+            }
+        val accessories = (deploy["accessories"] as? Map<String, Any?>).orEmpty().values.map { it as? Map<String, Any?> }
+        val registry = ((deploy["registry"] as? Map<String, Any?>)?.get("password") as? List<*>).orEmpty().map { it.toString() }
+        return (secretsOf(deploy) + servers.values.flatMap(::secretsOf) + accessories.flatMap(::secretsOf) + registry).toSet()
     }
 
     /**
@@ -276,6 +360,22 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     }
 
     private companion object {
+        /** R2's endpoint (it names the account) and both halves of the bucket's token. */
+        val STORAGE_SECRETS =
+            setOf(
+                "MOYI_MEDIA_STORAGE_R2_ENDPOINT",
+                "MOYI_MEDIA_STORAGE_R2_ACCESS_KEY_ID",
+                "MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY",
+            )
+
+        /** What the API alone needs: the session-signing pair, the HMAC key, the email key. */
+        val API_SECRETS =
+            setOf(
+                "MOYI_SECURITY_JWT_PRIVATE_KEY_PEM",
+                "MOYI_SECURITY_JWT_PUBLIC_KEY_PEM",
+                "MOYI_SECURITY_HASHING_SECRET",
+                "MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY",
+            )
         const val KIB = 1024L
         const val MIB = 1024L * KIB
         const val GIB = 1024L * MIB

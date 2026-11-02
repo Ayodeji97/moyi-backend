@@ -11,9 +11,10 @@ import java.util.UUID
  * `result_kind` CHECK, as a type, so a kind the table would refuse cannot be
  * written in the first place and a replay always knows what to re-read.
  * A new idempotent resource adds a value here and to that CHECK together
- * (MEDIA: V33, for `POST /media/{id}/complete`, ADR-0047).
+ * (MEDIA: V33, for `POST /media/{id}/complete`, ADR-0047; REPORT: V37, for
+ * `POST /entries/{entryId}/report`, ADR-0053).
  */
-enum class ResultKind { ENTRY, MEDIA, }
+enum class ResultKind { ENTRY, MEDIA, REPORT, }
 
 /**
  * What [IdempotencyInterceptor] read off an `@Idempotent` request, handed to

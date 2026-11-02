@@ -270,6 +270,7 @@ stateDiagram-v2
 | delete your entry<br>`DELETE /entries/{entryId}` | 404 `NOT_FOUND` | 204 → `DELETED` (the bond takes entries)<br>204 → `DELETED` (the bond has ended or is counting down to deletion, or you have left it) | 204 → `DELETED` (the bond takes entries)<br>204 → `DELETED` (the bond has ended or is counting down to deletion, or you have left it) | 204 stays |
 | leave the bond<br>`POST /bonds/{bondId}/leave` | 204 stays | 204 → `DELETED` (the body says withdrawEntries: true)<br>204 stays (the body is absent, or does not say withdrawEntries: true) | 204 → `DELETED` (the body says withdrawEntries: true)<br>204 stays (the body is absent, or does not say withdrawEntries: true) | 204 stays |
 | block your partner<br>`POST /bonds/{bondId}/block` | 204 stays | 204 → `DELETED` (the body says withdrawEntries: true)<br>204 stays (the body says withdrawEntries: false) | 204 → `DELETED` (the body says withdrawEntries: true)<br>204 stays (the body says withdrawEntries: false) | 204 stays |
+| report your partner's entry to a person<br>`POST /entries/{entryId}/report` | 404 `NOT_FOUND` | 409 `REPORT_ON_OWN_ENTRY` | 409 `REPORT_ON_OWN_ENTRY` | 409 `REPORT_ON_OWN_ENTRY` |
 
 ### You can
 
@@ -317,6 +318,10 @@ stateDiagram-v2
 | `REVEALED` | edit your entry | a new request, and the bond takes entries | 409 `ENTRY_IMMUTABLE` | Your partner may already have read these words, so they can no longer be changed. You can still delete the entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-7 | smoke |
 | `DELETED` | edit your entry | a new request, and the bond takes entries | 409 `ENTRY_IMMUTABLE` | An erased entry has no words to edit, and the answer does not say whether it was ever revealed. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-7 | test |
 | `NONE` | delete your entry |  | 404 `NOT_FOUND` | You have no entry behind the id you sent. Your partner's entry, a stranger's and an id nobody has all get this one answer. | ADR-0032 §9 | smoke |
+| `NONE` | report your partner's entry to a person |  | 404 `NOT_FOUND` | You have written nothing to name; an id nobody was issued is the one 404. | FR-100, ADR-0053 | smoke |
+| `SUBMITTED` | report your partner's entry to a person |  | 409 `REPORT_ON_OWN_ENTRY` | A report is about what your partner shared. Your own entry is refused, revealed or not; to take it back, delete it. | FR-100, ADR-0053 | test |
+| `REVEALED` | report your partner's entry to a person |  | 409 `REPORT_ON_OWN_ENTRY` | A report is about what your partner shared. Your own entry is refused; nothing is held. | FR-100, ADR-0053 | smoke |
+| `DELETED` | report your partner's entry to a person |  | 409 `REPORT_ON_OWN_ENTRY` | Your own tombstone is still your own entry: refused as the whole entry was. | FR-100, ADR-0053 | test |
 
 ### Happens without you
 
@@ -354,6 +359,7 @@ stateDiagram-v2
 |---|---|---|---|---|
 | write today's entry<br>`POST /bonds/{bondId}/entries` | 201 stays (the bond takes entries, and you have no live entry for today)<br>409 `ENTRY_ALREADY_EXISTS` (a new request, the bond takes entries, and you have a live entry for today) | 201 → `VISIBLE` (the bond takes entries, you have no live entry for today, the bond has no reveal time or it has passed, and the day did not end before the bond became two people)<br>201 stays (the bond takes entries, you have no live entry for today, and the bond's reveal time is still ahead)<br>201 stays (the bond takes entries, an offline draft's intendedAt names a day that ended before the bond became two people, and your partner has written on it)<br>409 `ENTRY_ALREADY_EXISTS` (a new request, the bond takes entries, and you have a live entry for today) | 409 `DAY_CLOSED` (a new request, and the bond takes entries) | 409 `DAY_CLOSED` (a new request, and the bond takes entries) |
 | read today: the day, both entries, the streak and the bond's prompt of the day<br>`GET /bonds/{bondId}/today` | 200 stays | 200 stays | 200 stays | 200 stays |
+| report your partner's entry to a person<br>`POST /entries/{entryId}/report` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 201 stays | 201 stays |
 
 ### You can
 
@@ -367,6 +373,8 @@ stateDiagram-v2
 | `LOCKED` | read today: the day, both entries, the streak and the bond's prompt of the day |  | stays | You are shown who wrote it and the word LOCKED, and nothing else: no text, no id, no time, no length. | test |
 | `VISIBLE` | read today: the day, both entries, the streak and the bond's prompt of the day |  | stays | The entry has been revealed, so you read it in full. What decides this is the entry's own reveal stamp, never the day's status. | smoke |
 | `DELETED` | read today: the day, both entries, the streak and the bond's prompt of the day |  | stays | Your partner deleted or withdrew an entry you had already been able to read. You are shown the same entry without its words: its id and times, text null, status DELETED. | smoke |
+| `VISIBLE` | report your partner's entry to a person |  | stays | Filed for a person to review, and from this moment its photo and voice note are held back from you: you are shown them PROCESSING, the author NOT_SHARED (ADR-0051's view of anything held back), and the author is told nothing else. The words stay. On a bond that has ended too: a report is never contact. | smoke |
+| `DELETED` | report your partner's entry to a person |  | stays | A tombstone you were shown can still be reported: what you saw before it was erased may be what you report. Its photo and voice note are already deleted to everyone; what of them is not yet purged is held, its objects kept until the report is decided (ADR-0053 decision 8a). You are shown the tombstone as before. | test |
 
 ### Refused here
 
@@ -376,6 +384,8 @@ stateDiagram-v2
 | `LOCKED` | write today's entry | a new request, the bond takes entries, and you have a live entry for today | 409 `ENTRY_ALREADY_EXISTS` | Both of you have written and the day is waiting for its reveal time, so a write from you is a second entry: it is refused, and your partner's entry stays locked. (the probe that shows this answer runs before the partner has written; nothing runs it here) On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-2 | never-run |
 | `VISIBLE` | write today's entry | a new request, and the bond takes entries | 409 `DAY_CLOSED` | You can read your partner's words only on a revealed day, and a revealed day takes no new entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-10 | test |
 | `DELETED` | write today's entry | a new request, and the bond takes entries | 409 `DAY_CLOSED` | A tombstone with its id and dates is shown only for an entry you could once read, so the day was revealed, and a revealed day takes no new entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. | BR-10 | never-run |
+| `NONE` | report your partner's entry to a person |  | 404 `NOT_FOUND` | There is no entry to name: an id nobody was issued is the one 404 every entry you were never shown gets. | FR-100, ADR-0053 | smoke |
+| `LOCKED` | report your partner's entry to a person |  | 404 `NOT_FOUND` | You have not been shown it: a locked entry is answered exactly as an id that does not exist, byte for byte, never 403. Nothing is filed or held. | FR-100, ADR-0053 | smoke |
 
 ### Happens without you
 

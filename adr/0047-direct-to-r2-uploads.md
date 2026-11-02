@@ -198,6 +198,15 @@ bucket (30 an hour per user, doc 06 §4) joins `RateLimitBucket`.
   and see R2 refuse them (decision 1). **Configure the storage only with or after D5 deployed**
   (ADR-0050): before it, an erased entry's photo is never released and an asset deleted then never
   has its objects purged, and nothing goes back for either.
+  **Done, but for what only R2 can show** (ADR-0052, "Switched on"): the bucket, its rule and its
+  token are the owner's (done); `config/deploy.yml` now names the bucket and lists the endpoint
+  (it names the account, so a secret: Bitwarden's existing `R2_ENDPOINT`) and both halves of the
+  token as secrets, in both roles; D5 is live. **Moved, not done: the PUT of altered bytes against
+  the real bucket** is now `scripts/r2-switch-on-check.sh`, which the owner runs after the
+  switch-on deploy (`ops/media-worker/README.md`, step 6). It PUTs a body one byte longer, a body
+  of the signed length with one byte changed (the checksum, this decision's open item) and another
+  `Content-Type`, and reports each refusal; if R2 takes the changed byte, it says whether the
+  completion's digest check then refused it. Seen against MinIO only.
 - **D2:** `media.process` must read the asset's status again and skip one that is `DELETED`: a
   `MediaUploaded` can name an asset deleted after it was published. And
   `media.process`, the signed GET URLs on `GET /media/{id}`, the FR-044a claim and

@@ -57,6 +57,23 @@ moyi:
       cron: "-"
     idempotency-keys:
       cron: "-"
+  # The worker holds none of the API's secrets (config/deploy.yml gives them to
+  # the `web` role alone; review of #117): a decoder that is subverted must not
+  # find the key that signs sessions, the HMAC key or the email key in its
+  # environment. The beans that would need them are still built, since the
+  # jar is one, so here they are given what needs no secret. Nothing in the
+  # worker uses them: it serves no request (so issues and checks no token and
+  # hashes no address) and runs only the three consumers above (so sends no
+  # email). EPHEMERAL makes a key at start-up and logs a warning saying so; LOG
+  # would write an email to this log, and none is ever sent from here.
+  security:
+    jwt:
+      key-source: ephemeral
+    hashing:
+      secret-source: ephemeral
+  notification:
+    email:
+      provider: log
   # Written once the application is ready, removed as it stops (ReadyFile).
   # /tmp is the worker's tmpfs: its root file system is read-only.
   ready-file: /tmp/moyi-ready

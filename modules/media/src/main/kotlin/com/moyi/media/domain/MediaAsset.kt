@@ -116,9 +116,21 @@ internal class MediaAsset(
      * and deletes it. No best-effort delete and no purge touches them.
      */
     val evidenceHeld: Boolean = false,
+    /**
+     * An open member's report holds it (`media_report_holds`, ADR-0053): whoever
+     * deletes the asset meanwhile, its objects stay until the report is
+     * decided, and the decision hands them to `media.purge` (review of #118, P1).
+     */
+    val reportHeld: Boolean = false,
 ) {
     /** A deleted asset is gone to its owner too: every route answers it as one that never existed. */
     val isGone: Boolean get() = status == MediaStatus.DELETED
+
+    /**
+     * Its objects are kept whoever deletes it: evidence (ADR-0051), or held by
+     * an open report (ADR-0053). No best-effort delete and no purge touches them.
+     */
+    val keepsObjects: Boolean get() = evidenceHeld || reportHeld
 
     /**
      * What `POST /media/{id}/complete` does, given what the storage holds under

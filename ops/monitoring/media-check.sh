@@ -5,7 +5,7 @@
 # /usr/local/sbin/moyi-media-check. What to do when it fires:
 # ops/monitoring/media-pipeline-stuck.md.
 #
-# Nine things, the first eight read from the database:
+# Eleven things, the first ten read from the database:
 #   - no upload has waited UPLOADED for more than 30 minutes: nothing has
 #     taken it up, which since ADR-0052 means the media worker is down or
 #     not deployed, or its outbox poller is stuck. Docker's health check
@@ -33,7 +33,8 @@
 #   - nothing is held as evidence (ADR-0051, Q16): child sexual abuse
 #     material that moderation blocked waits, served to nobody, kept whoever
 #     deleted it, for the operator to report it and then delete it
-#     (ops/moderation/takedown.md). A held asset is not "unpurged" above;
+#     (ops/moderation/takedown.md). A held asset is not "unpurged" above,
+#     and nor is one an open member's report holds (counted below);
 #   - while a moderator is configured (MEDIA_MODERATION_ON=1 in the env file:
 #     the media worker runs one), nothing has been READY for 30 minutes
 #     without a verdict (FR-101: a partner sees nothing until moderation has
@@ -44,11 +45,18 @@
 #     set): the runbook's section 1 asks for a look once a day.
 #     Fails at once, every run, until that is done: it is the one thing in
 #     this check that a person must act on the same day;
-#   - where the worker's egress limit is installed
+#   - no member's report (FR-100, ADR-0053) has waited for the operator for
+#     more than REPORT_REVIEW_DAYS (2 unless set): what it reported is held
+#     back from the reporter until a person decides (takedown.md §3). What a
+#     report holds back is counted here and not as "unreviewed" above;
+#   - no report of sexual content involving a minor is open at all: it is
+#     the priority review (Q16), and fails at once, as a blocked asset does,
+#     until the operator has decided it (takedown.md §3, then §2);
+#   - while a media worker container runs, its egress limit is installed
 #     (/usr/local/sbin/moyi-media-worker-egress, ops/media-worker/README.md),
-#     every running worker container is limited by it (ADR-0052): a worker
-#     started while the limiter was down reaches the whole internet, and this
-#     is how somebody hears.
+#     its service is active, and every worker container is limited by it
+#     (ADR-0052): a worker started while the limiter was missing or down
+#     reaches the whole internet, and this is how somebody hears.
 #
 # All well: it pings the heartbeat. Anything wrong: it pings the heartbeat's
 # /fail URL with the reason, which alerts at once. If the box, Docker or
@@ -59,10 +67,10 @@
 # the runbook, and a heartbeat's body is not the place for them.
 #
 # /etc/moyi-monitoring/heartbeats.env (root-only) holds MEDIA_PING_URL, and
-# may set MEDIA_MODERATION_ON=1 and QUARANTINE_REVIEW_DAYS.
+# may set MEDIA_MODERATION_ON=1, QUARANTINE_REVIEW_DAYS and REPORT_REVIEW_DAYS.
 set -euo pipefail
 
-ENV_FILE=/etc/moyi-monitoring/heartbeats.env
+ENV_FILE="${MOYI_MONITORING_ENV:-/etc/moyi-monitoring/heartbeats.env}" # the variable for ops/monitoring/test-media-check.sh only
 die() { echo "moyi-media-check: $*" >&2; exit 1; }
 [ -r "$ENV_FILE" ] || die "$ENV_FILE is missing"
 # shellcheck source=/dev/null
@@ -70,16 +78,19 @@ die() { echo "moyi-media-check: $*" >&2; exit 1; }
 : "${MEDIA_PING_URL:?set in $ENV_FILE}"
 MEDIA_MODERATION_ON="${MEDIA_MODERATION_ON:-0}"
 QUARANTINE_REVIEW_DAYS="${QUARANTINE_REVIEW_DAYS:-3}"
+REPORT_REVIEW_DAYS="${REPORT_REVIEW_DAYS:-2}"
 [[ "$MEDIA_MODERATION_ON" =~ ^[01]$ ]] || die "MEDIA_MODERATION_ON must be 0 or 1"
 [[ "$QUARANTINE_REVIEW_DAYS" =~ ^[0-9]+$ ]] || die "QUARANTINE_REVIEW_DAYS must be a whole number of days"
+[[ "$REPORT_REVIEW_DAYS" =~ ^[0-9]+$ ]] || die "REPORT_REVIEW_DAYS must be a whole number of days"
 
-waiting="" stuck="" unpurged="" reaper_late="" demotion_late="" blocked="" unmoderated="" unreviewed=""
-read -r waiting stuck unpurged reaper_late demotion_late blocked unmoderated unreviewed < <(docker exec moyi-postgres psql -U moyi -d moyi -AtF ' ' -c "
+waiting="" stuck="" unpurged="" reaper_late="" demotion_late="" blocked="" unmoderated="" unreviewed="" reports_late="" reports_priority=""
+read -r waiting stuck unpurged reaper_late demotion_late blocked unmoderated unreviewed reports_late reports_priority < <(docker exec moyi-postgres psql -U moyi -d moyi -AtF ' ' -c "
   SELECT
     (SELECT count(*) FROM media_assets WHERE status = 'UPLOADED' AND created_at < now() - interval '30 minutes'),
     (SELECT count(*) FROM media_assets WHERE status = 'PROCESSING' AND created_at < now() - interval '30 minutes'),
-    (SELECT count(*) FROM media_assets WHERE status = 'DELETED' AND purged_at IS NULL AND NOT evidence_held
-       AND deleted_at < now() - interval '1 day'),
+    (SELECT count(*) FROM media_assets a WHERE a.status = 'DELETED' AND a.purged_at IS NULL AND NOT a.evidence_held
+       AND a.deleted_at < now() - interval '1 day'
+       AND NOT EXISTS (SELECT 1 FROM media_report_holds h WHERE h.media_id = a.id)),
     (SELECT count(*) FROM shedlock s LEFT JOIN job_runs r ON r.name = s.name
        WHERE s.name = 'media-reaper' AND (r.last_success_at IS NULL OR r.last_success_at < now() - interval '2 hours')),
     (SELECT count(*) FROM shedlock s LEFT JOIN job_runs r ON r.name = s.name
@@ -87,10 +98,14 @@ read -r waiting stuck unpurged reaper_late demotion_late blocked unmoderated unr
     (SELECT count(*) FROM media_assets WHERE evidence_held),
     (SELECT count(*) FROM media_assets WHERE $MEDIA_MODERATION_ON = 1 AND status = 'READY' AND moderation_verdict IS NULL
        AND ready_at < now() - interval '30 minutes'),
-    (SELECT count(*) FROM media_assets WHERE status = 'QUARANTINED' AND moderation_verdict = 'QUARANTINED'
-       AND moderated_at < now() - make_interval(days => $QUARANTINE_REVIEW_DAYS))
+    (SELECT count(*) FROM media_assets a WHERE a.status = 'QUARANTINED' AND a.moderation_verdict = 'QUARANTINED'
+       AND a.moderated_at < now() - make_interval(days => $QUARANTINE_REVIEW_DAYS)
+       AND NOT EXISTS (SELECT 1 FROM media_report_holds h WHERE h.media_id = a.id)),
+    (SELECT count(*) FROM entry_reports WHERE status = 'OPEN'
+       AND created_at < now() - make_interval(days => $REPORT_REVIEW_DAYS)),
+    (SELECT count(*) FROM entry_reports WHERE status = 'OPEN' AND reason = 'MINOR_SEXUAL_CONTENT')
 ") || true
-[ -n "$unreviewed" ] || die "could not read the database"
+[ -n "$reports_priority" ] || die "could not read the database"
 
 problem=""
 [ "$waiting" -eq 0 ] || problem="$waiting uploads waiting UPLOADED for more than 30 minutes (is the media worker running?)"
@@ -101,14 +116,25 @@ problem=""
 [ "$blocked" -eq 0 ] || problem="${problem:+$problem; }$blocked blocked assets await the takedown runbook (ops/moderation/takedown.md)"
 [ "$unmoderated" -eq 0 ] || problem="${problem:+$problem; }$unmoderated ready assets without a verdict for more than 30 minutes"
 [ "$unreviewed" -eq 0 ] || problem="${problem:+$problem; }$unreviewed held-back assets unreviewed for more than $QUARANTINE_REVIEW_DAYS days"
-EGRESS=/usr/local/sbin/moyi-media-worker-egress
-if [ -x "$EGRESS" ] && ! "$EGRESS" check 2>/dev/null; then
-  problem="${problem:+$problem; }a media worker container runs without its egress limit"
+[ "$reports_late" -eq 0 ] || problem="${problem:+$problem; }$reports_late member reports open for more than $REPORT_REVIEW_DAYS days (moyi reports list)"
+[ "$reports_priority" -eq 0 ] || problem="${problem:+$problem; }$reports_priority reports of sexual content involving a minor await the takedown runbook (§3, then §2)"
+# A running worker container must be limited (ADR-0052): the limiter
+# installed, its service active, and every worker container limited. Missing
+# or stopped is as bad as not limiting (review of #117): it was silent before.
+EGRESS="${MOYI_EGRESS_BIN:-/usr/local/sbin/moyi-media-worker-egress}"
+if [ -n "$(docker ps -q --filter label=service=moyi --filter label=role=media-worker)" ]; then
+  if [ ! -x "$EGRESS" ]; then
+    problem="${problem:+$problem; }a media worker runs and its egress limiter is not installed"
+  elif ! systemctl is-active --quiet moyi-media-worker-egress; then
+    problem="${problem:+$problem; }a media worker runs and the moyi-media-worker-egress service is not active"
+  elif ! "$EGRESS" check 2>/dev/null; then
+    problem="${problem:+$problem; }a media worker container runs without its egress limit"
+  fi
 fi
 
 if [ -z "$problem" ]; then
   curl --fail --silent --max-time 10 --retry 3 "$MEDIA_PING_URL" >/dev/null
-  echo "moyi-media-check: ok (nothing stuck, unpurged, blocked, unmoderated or unreviewed; both jobs running)"
+  echo "moyi-media-check: ok (nothing stuck, unpurged, blocked, unmoderated or unreviewed, no report waiting; both jobs running)"
 else
   curl --fail --silent --max-time 10 --retry 3 --data-raw "$problem" "$MEDIA_PING_URL/fail" >/dev/null || true
   die "$problem"
