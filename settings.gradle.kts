@@ -50,4 +50,7 @@ include(
     // on it, which is what keeps the corpus builder's HTTP client off the
     // runtime classpath — see tools/breach-corpus/build.gradle.kts.
     "tools:breach-corpus",
+    // The same for the embedding eval's one-off provider run (ADR-0054): it
+    // reaches a provider with the owner's keys, so nothing deployed depends on it.
+    "tools:embedding-eval",
 )
