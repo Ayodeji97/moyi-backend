@@ -6,7 +6,7 @@
 #
 #   1. downloads it with a READ-ONLY R2 token;
 #   2. decrypts it with the age private key, which lives in Bitwarden only;
-#   3. restores it into a fresh postgres:18 of its own;
+#   3. restores it into a fresh pgvector/pgvector:0.8.7-pg18 of its own;
 #   4. boots the production image against it, beside a Valkey of its own:
 #      Flyway checks the restored schema against the image's migrations, so a
 #      boot is a schema check;
@@ -122,11 +122,11 @@ say "Decrypting"
 age --decrypt --identity "$WORK/age.key" --output "$WORK/plain.dump" "$WORK/backup.age"
 rm -f "$WORK/age.key" "$WORK/backup.age"
 
-say "Restoring into a fresh postgres:18"
+say "Restoring into a fresh pgvector/pgvector:0.8.7-pg18"
 docker network create "$NET" >/dev/null
 PGPASS="$(openssl rand -hex 24)"
 docker run -d --name moyi-drill-postgres --network "$NET" \
-  -e POSTGRES_USER=moyi -e POSTGRES_DB=moyi -e POSTGRES_PASSWORD="$PGPASS" postgres:18 >/dev/null
+  -e POSTGRES_USER=moyi -e POSTGRES_DB=moyi -e POSTGRES_PASSWORD="$PGPASS" pgvector/pgvector:0.8.7-pg18 >/dev/null
 # Over TCP: the image's first-boot server listens on its socket only, and is
 # stopped and restarted once initdb is done; the real one is the one on TCP.
 ready=""
@@ -134,7 +134,7 @@ for _ in $(seq 1 90); do
   docker exec moyi-drill-postgres pg_isready -h 127.0.0.1 -U moyi -d moyi >/dev/null 2>&1 && { ready=1; break; }
   sleep 1
 done
-[ -n "$ready" ] || die "postgres:18 did not come up"
+[ -n "$ready" ] || die "pgvector/pgvector:0.8.7-pg18 did not come up"
 docker exec -i moyi-drill-postgres pg_restore --username=moyi --dbname=moyi --exit-on-error <"$WORK/plain.dump"
 rm -f "$WORK/plain.dump"
 read -r USERS ENTRIES < <(docker exec moyi-drill-postgres psql -U moyi -d moyi -AtF ' ' -c \

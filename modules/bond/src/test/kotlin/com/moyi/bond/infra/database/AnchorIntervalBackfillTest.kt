@@ -6,6 +6,7 @@ import com.moyi.bond.infra.FakeUserDirectory
 import com.moyi.common.events.EventConsumer
 import com.moyi.common.security.TokenRevocation
 import com.moyi.common.security.TokenRevocations
+import com.moyi.common.testing.PostgresIntegrationTest
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
@@ -216,6 +217,6 @@ internal class AnchorIntervalBackfillTest(
         @Suppress("unused")
         @ServiceConnection
         @JvmStatic
-        val postgres: PostgreSQLContainer = PostgreSQLContainer("postgres:18").also { it.start() }
+        val postgres: PostgreSQLContainer = PostgreSQLContainer(PostgresIntegrationTest.IMAGE).also { it.start() }
     }
 }

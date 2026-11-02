@@ -2,6 +2,7 @@ package com.moyi.common.testing
 
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection
 import org.testcontainers.postgresql.PostgreSQLContainer
+import org.testcontainers.utility.DockerImageName
 
 /**
  * Extend this for any test that needs a real Postgres rather than a mock —
@@ -40,11 +41,15 @@ import org.testcontainers.postgresql.PostgreSQLContainer
 @Suppress("UtilityClassWithPublicConstructor")
 abstract class PostgresIntegrationTest {
     companion object {
+        /** Postgres 18 with the pgvector extension; every container the tests start uses it. */
+        val IMAGE: DockerImageName =
+            DockerImageName.parse("pgvector/pgvector:0.8.7-pg18").asCompatibleSubstituteFor("postgres")
+
         @Suppress("unused")
         @ServiceConnection
         @JvmStatic
         val postgres: PostgreSQLContainer =
-            PostgreSQLContainer("postgres:18")
+            PostgreSQLContainer(IMAGE)
                 .withCommand("postgres", "-c", "fsync=off", "-c", "max_connections=$MAX_CONNECTIONS")
                 .also { it.start() }
 
