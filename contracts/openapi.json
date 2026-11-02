@@ -2613,6 +2613,106 @@
         "tags" : [ "on-this-day-controller" ]
       }
     },
+    "/api/v1/bonds/{bondId}/remember" : {
+      "get" : {
+        "operationId" : "remember",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "q",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RememberResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "remember-controller" ]
+      }
+    },
     "/api/v1/bonds/{bondId}/search" : {
       "get" : {
         "description" : "The days of the bond on which one entry the caller can read in full holds every word of `q`, newest first, each day whole and in the feed's day shape. Whole words, compared without case or accents (`cafe` finds `Café`); no prefixes, no stemming, no operators. The caller's own entry is found before it is revealed; the partner's only once it has been.\n\n**Only a null `nextCursor` means the end.** A page can hold fewer days than `limit` and still have a `nextCursor`, because it is also bounded by its size. There is no count of matches, and nothing says which entry of a day matched or where: a client that highlights does so itself.\n\n`q` is never echoed in a refusal, and the response is never to be stored.",
@@ -5885,6 +5985,17 @@
           }
         },
         "required" : [ "acceptedTermsVersion", "displayName", "email", "locale", "password" ]
+      },
+      "RememberResponse" : {
+        "type" : "object",
+        "properties" : {
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/DayResponse"
+            }
+          }
+        }
       },
       "ReportRequest" : {
         "type" : "object",

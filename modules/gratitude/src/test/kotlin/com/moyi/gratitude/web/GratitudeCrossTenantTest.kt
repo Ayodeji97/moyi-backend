@@ -128,6 +128,9 @@ internal class GratitudeCrossTenantTest(
             // Slice C6b. A q that would be searched: a stranger must get the bond's 404 before q is read. `SearchTest` sends a
             // stranger q values that cannot be read, and none at all, and expects this same 404.
             "GET /api/v1/bonds/{bondId}/search" to Fixture(query = "q=cross-tenant"),
+            // Semantic search S1 (ADR-0054). A q that would be remembered: a stranger gets the bond's 404 before q is read,
+            // and before anything is sent to a provider. `RememberTest` sends a stranger q values that cannot be read.
+            "GET /api/v1/bonds/{bondId}/remember" to Fixture(query = "q=cross-tenant"),
             // No parameters: a stranger gets the bond's 404, never an empty list of memories.
             "GET /api/v1/bonds/{bondId}/on-this-day" to Fixture(),
             // Slice C6c. No parameters: a stranger gets the bond's 404, never a list of what it reached.

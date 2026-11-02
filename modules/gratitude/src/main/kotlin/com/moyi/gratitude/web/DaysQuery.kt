@@ -59,13 +59,19 @@ internal data class DaysQuery(
                 parse: (String) -> T?,
             ): T? = raw?.let { parse(it) ?: null.also { violations += violation } }
 
-            val pageSize = read(limit, LIMIT) { it.takeIf(WHOLE_NUMBER::matches)?.toInt()?.takeIf { n -> n in 1..GetDays.MAX_LIMIT } }
+            val pageSize = read(limit, LIMIT) { wholeNumberIn(it, 1..GetDays.MAX_LIMIT) }
             val before = read(cursor, CURSOR) { DayCursor.parse(it)?.before }
             val onOrBefore = read(until, UNTIL, ::strictIsoDate)
             val favouritesOnly = read(favourites, FAVOURITES) { it.toBooleanStrictOrNull() }
             if (violations.isNotEmpty()) throw DaysQueryNotValidException(violations)
             return DaysQuery(pageSize ?: GetDays.DEFAULT_LIMIT, before, onOrBefore, favouritesOnly ?: false)
         }
+
+        /** [raw] as a whole number in [range], written in its one spelling, or `null`. Every `limit` there is is read by this. */
+        fun wholeNumberIn(
+            raw: String,
+            range: IntRange,
+        ): Int? = raw.takeIf(WHOLE_NUMBER::matches)?.toInt()?.takeIf { it in range }
 
         // What each says is about the parameter, never the value: a refusal must not carry back what was sent.
         private val LIMIT = FieldViolation("limit", "RANGE", "must be a whole number from 1 to ${GetDays.MAX_LIMIT}")

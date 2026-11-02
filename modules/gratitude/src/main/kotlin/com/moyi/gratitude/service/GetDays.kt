@@ -135,7 +135,12 @@ internal data class DaysPage(
  * members (ADR-0028, `states.md` §9), and this is that archive.
  */
 @Service
-@Suppress("LongParameterList") // What the archive is read from, each named, as GetToday's.
+@Suppress(
+    "LongParameterList", // What the archive is read from, each named, as GetToday's.
+    // One public function per route of the archive, each reading through the same private steps; ADR-0054's remember is
+    // the twelfth. Split, the steps would have to be shared across classes, and the marker-last order is easier to hold in one.
+    "TooManyFunctions",
+)
 internal class GetDays(
     private val archive: ArchiveDays,
     private val entries: EntryStore,
@@ -262,6 +267,55 @@ internal class GetDays(
     }
 
     /**
+     * `GET /bonds/{bondId}/remember` (ADR-0054, spec §3.6): the days of the bond's entries the
+     * caller may read, **most relevant first**, at most [limit] of them.
+     *
+     * **Two rankings, fused.** [ArchiveDays.rankedByWords] (`ts_rank`) and, while the bond's
+     * setting is on and [semantic] was given, [ArchiveDays.rankedByMeaning] (distance), each at
+     * most [ArchiveDays.RANKED_CANDIDATES] entries, are merged by [fuse] (RRF, k = 60). Both are
+     * asked of the gate's own rows, which exclude the known withdrawn before their `LIMIT`; the
+     * setting and the withdrawn are resolved once, here, after the joining-day reconcile and
+     * after `q` was embedded, so a turn-off that commits while the provider was asked reads no
+     * vector. Without [semantic] (setting off, no provider, a failure, the timeout) the answer is
+     * the keyword ranking alone, the same `200`.
+     *
+     * **Then search's reading.** The fused entries become their days, each day at its best
+     * entry's place, [ArchiveDay.matched] its entries that were ranked; twice [limit] of them are
+     * read through the gate, the marker last, and a day is shown only if a ranked entry of it was
+     * read in full ([search]'s rule, for its reason: a withdrawal that commits after the rankings
+     * were read makes that entry a tombstone). What is shown is the whole day, in the archive's
+     * shape, and nothing says which entry matched (decision 4). Taken in order while the text
+     * stays within [textOctets], the first day always, as a page is. No cursor: it is a top-k.
+     *
+     * No `hasLeft` or `isOpen` check: an ended bond is its archive, as for [search].
+     *
+     * @throws IllegalArgumentException [limit] is outside 1..[REMEMBER_MAX_LIMIT].
+     */
+    @Transactional(readOnly = true)
+    fun remember(
+        membership: BondMembership,
+        terms: SearchTerms,
+        semantic: SemanticMatch?,
+        limit: Int,
+        textOctets: Int = PAGE_TEXT_OCTETS,
+    ): List<DayView> {
+        require(limit in 1..REMEMBER_MAX_LIMIT) { "remember answers 1 to $REMEMBER_MAX_LIMIT days" }
+        val now = access.membershipNow(membership)
+        val withdrawn = now.asReader().withdrawnAuthors
+        val words = archive.rankedByWords(membership.bondId, membership.memberId, terms, withdrawn)
+        val meaning =
+            semantic
+                ?.takeIf { now.semanticSearchEnabled }
+                ?.let { archive.rankedByMeaning(membership.bondId, membership.memberId, it, withdrawn) }
+        val ranked = fuse(listOfNotNull(words, meaning))
+        // `multiplyExact`, though `limit` is at most REMEMBER_MAX_LIMIT: a product that cannot wrap, whoever calls.
+        val candidates = archive.daysOf(membership.bondId, ranked).take(Math.multiplyExact(limit, 2))
+        val answer = Filling(limit, textOctets)
+        show(membership, candidates, { day, _ -> day.matchedInFull }, answer)
+        return answer.days
+    }
+
+    /**
      * `GET /bonds/{bondId}/on-this-day` (FR-092; ADR-0039): the days of earlier years dated the
      * bond's today, newest first, as the archive shows each.
      *
@@ -332,14 +386,7 @@ internal class GetDays(
             // `addExact`, though `limit` is at most MAX_LIMIT by the callers' checks: a sum that cannot wrap, whoever calls.
             val size = if (windows == 0) Math.addExact(limit, 1) else REFILL_WINDOW
             val candidates = select(examined, size)
-            val read = read(membership, candidates)
-            val marked = marksOf(membership, read)
-            val reacted = reactionsOn(read)
-            val shown = mediaOn(membership, read)
-            for (day in read) {
-                val kept = day.keptOf(marked)
-                if (shows(day, kept)) page.offer(day, kept, reacted, shown)
-            }
+            show(membership, candidates, shows, page)
             windows++
             older = candidates.size == size
             examined = candidates.lastOrNull()?.date ?: examined
@@ -357,6 +404,27 @@ internal class GetDays(
                 else -> null
             }
         return DaysPage(page.days, next)
+    }
+
+    /**
+     * One window of [fill], and the whole of [remember]: [candidates] read through the gate, the
+     * marker after their entries ([read]), then the caller's marks, the reactions and the media of
+     * what was read in full, and each day [shows] keeps offered to [page] in order.
+     */
+    private fun show(
+        membership: BondMembership,
+        candidates: List<ArchiveDay>,
+        shows: (Read, Set<EntryId>) -> Boolean,
+        page: Filling,
+    ) {
+        val read = read(membership, candidates)
+        val marked = marksOf(membership, read)
+        val reacted = reactionsOn(read)
+        val shown = mediaOn(membership, read)
+        for (day in read) {
+            val kept = day.keptOf(marked)
+            if (shows(day, kept)) page.offer(day, kept, reacted, shown)
+        }
     }
 
     /**
@@ -530,6 +598,10 @@ internal class GetDays(
         /** The most days a page may be asked for, and what it is when nothing is asked (doc 06 §3). */
         const val MAX_LIMIT = 50
         const val DEFAULT_LIMIT = 20
+
+        /** The most days "Remember when" answers, and what it answers when nothing is asked (spec §3.6). */
+        const val REMEMBER_MAX_LIMIT = 20
+        const val REMEMBER_DEFAULT_LIMIT = 10
 
         /**
          * How many candidates a request reads at a time once its first

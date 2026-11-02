@@ -120,7 +120,7 @@ class OpenApiContractTest(
         // socket; documented as query parameters they would generate a client
         // that sends them. Path parameters (`/sessions/{id}`) are real.
         // Cookie parameters: none, ever. Query parameters: the archive feed's
-        // four (slice C5b), search's three (slice C6b) and no others. A resolver
+        // four (slice C5b), search's three (slice C6b), remember's two (ADR-0054) and no others. A resolver
         // type documented as one would generate a client that sends it, so the
         // list is exhaustive: a new query parameter has to be added here by
         // somebody who meant it.
@@ -132,7 +132,8 @@ class OpenApiContractTest(
                     .map { "$route ${it.`in`} ${it.name}" }
             }.toSet() shouldBe
             listOf("limit", "cursor", "until", "favourites").map { "GET /api/v1/bonds/{bondId}/days query $it" }.toSet() +
-            listOf("q", "limit", "cursor").map { "GET /api/v1/bonds/{bondId}/search query $it" }
+            listOf("q", "limit", "cursor").map { "GET /api/v1/bonds/{bondId}/search query $it" } +
+            listOf("q", "limit").map { "GET /api/v1/bonds/{bondId}/remember query $it" }
         // Headers are not all accidental — `If-Match` is required by doc 06 §1
         // and has to appear, or a generated client cannot send it. The list is
         // exhaustive on purpose: a *new* header parameter should have to be
