@@ -76,8 +76,8 @@ internal class MediaQuarantineCommandsTest(
         val out = moyi("list").also { it.code shouldBe 0 }.out
         val lines = out.lines()
 
-        // Review of #113: the header names the function's seven columns in its order, verdict first.
-        lines.first() shouldBe "verdict\tmediaId\tkind\tstatus\treason\tattached\tmoderatedAt"
+        // Review of #113: the header names the function's columns in its order, verdict first (the eighth, V38: open reports).
+        lines.first() shouldBe "verdict\tmediaId\tkind\tstatus\treason\tattached\tmoderatedAt\treports"
         val violentRow = lines.single { violent.toString() in it }
         violentRow shouldStartWith "QUARANTINED\t$violent\tIMAGE\tQUARANTINED\tEXTREME_VIOLENCE\tf\t"
         violentRow shouldNotContain "DO NOT VIEW"

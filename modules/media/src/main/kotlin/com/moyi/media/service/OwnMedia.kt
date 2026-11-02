@@ -112,8 +112,9 @@ internal class OwnMedia(
                 }
             }
         val asset = checkNotNull(deleted) { "delete's transaction produces the asset unless it threw" }
-        // Held as evidence (Q16, ADR-0051): gone to its owner, its objects kept for the operator's report.
-        if (asset.evidenceHeld) return
+        // Held as evidence (Q16, ADR-0051), or by an open member's report (ADR-0053): gone to its owner, its objects
+        // kept until the operator has decided; media.purge deletes them then.
+        if (asset.keepsObjects) return
         for (key in asset.objectKeys) {
             try {
                 storage.delete(key)

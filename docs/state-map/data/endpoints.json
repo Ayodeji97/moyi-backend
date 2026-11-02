@@ -875,6 +875,59 @@
     "curl": "curl -X DELETE \"$API/entries/$ENTRY/reaction\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "POST /api/v1/entries/{entryId}/report",
+    "summary": "report your partner's entry to a person",
+    "machine": "day",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same report, and nothing filed twice)",
+      "Content-Type (application/json, {\"reason\": \"NON_CONSENSUAL\", \"MINOR_SEXUAL_CONTENT\", \"VIOLENCE_OR_SELF_HARM\", \"HARASSMENT\" or \"OTHER\", \"detail\": optional, at most 500 characters}. The body is checked before the entry is looked at)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "reason is missing, null, or not one of the five names exactly as written; or detail is blank, longer than 500 characters, or holds a NUL or an unpaired surrogate. Nothing is filed or held.",
+        "evidence": "smoke",
+        "evidenceRef": "a report with an unknown reason is 422 on reason",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/ReportRequest.kt#): Boolean = value == null || ReportReason.named(value) != null"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. Nothing is filed or held.",
+        "evidence": "smoke",
+        "evidenceRef": "a report with no Idempotency-Key is 422 VALIDATION_FAILED",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#violationOf(key)?.let { throw IdempotencyKeyNotValidException(it) }"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another body, or another entry.",
+        "evidence": "test",
+        "evidenceRef": "ReportsTest#the same key is the same report, filed once, and answered again as a replay",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      },
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/entries/$ENTRY/report\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\" -H 'Content-Type: application/json' -d '{\"reason\": \"NON_CONSENSUAL\"}'"
+  },
+  {
     "id": "POST /api/v1/auth/register",
     "summary": "register",
     "machine": "account",

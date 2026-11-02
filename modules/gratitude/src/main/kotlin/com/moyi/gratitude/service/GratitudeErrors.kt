@@ -166,6 +166,18 @@ internal class ReactionOnOwnEntryException :
         "You cannot react to your own entry.",
     )
 
+/**
+ * FR-100: a report is about what the other member shared (ADR-0053). Raised
+ * only for an entry the caller wrote, by [ReportEntry]; an entry they were
+ * never shown is [EntryNotFoundException] to them, as it is on every route.
+ */
+internal class ReportOnOwnEntryException :
+    ApiException(
+        HttpStatus.CONFLICT,
+        ErrorCode.REPORT_ON_OWN_ENTRY,
+        "You cannot report your own entry. To take it back, delete it.",
+    )
+
 /** A competing operation on the reaction has not finished; no successful removal is promised. */
 internal class ReactionBusyException :
     ApiException(

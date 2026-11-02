@@ -9,6 +9,7 @@ import io.github.bucket4j.distributed.ExpirationAfterWriteStrategy
 import io.github.bucket4j.distributed.proxy.ProxyManager
 import io.github.bucket4j.redis.lettuce.Bucket4jLettuce
 import io.lettuce.core.RedisClient
+import io.lettuce.core.api.StatefulRedisConnection
 import io.lettuce.core.codec.ByteArrayCodec
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
@@ -45,9 +46,20 @@ import java.util.concurrent.atomic.AtomicReference
  * one per in-flight login (Codex's P2 on #33: without that gate, every
  * request that saw the expired hold probed together).
  *
- * **Connected lazily.** The application must boot with Redis down; the first
- * consume connects, and a failed connect is retried on the next attempt
- * after the interval. Once up, Lettuce reconnects on its own.
+ * **Connected lazily, and again whenever the connection is gone.** The
+ * application must boot with Redis down; the first consume connects, and a
+ * failed connect is retried on the next attempt after the interval. Lettuce
+ * reconnects a connection whose server went away, but not one whose client
+ * was shut down: [LettuceConnectionFactory] is a `SmartLifecycle`, and a
+ * `stop()` (a context paused between test classes, as Spring 7's test
+ * framework does, or a lifecycle stop in production) destroys its client and
+ * every connection made from it, and `start()` makes a new client. The
+ * connection used to be built once, in a `lazy`, and was then closed for
+ * good: every request failed open, silently but for the WARN, for the life of
+ * the process (review of #118, P2-d). So the connection is now checked before
+ * each use: rebuilt when it is closed or when the factory's client is no
+ * longer the one it was made from (`RedisRateLimiterTest`, "a factory stopped
+ * and started again").
  */
 class RedisRateLimiter(
     private val connections: LettuceConnectionFactory,
@@ -72,10 +84,15 @@ class RedisRateLimiter(
     /** Set by the one caller allowed to probe once the hold has expired. */
     private val probing = AtomicBoolean(false)
 
-    // `lazy` does not cache a failed initialiser, which is exactly the retry
-    // this needs: a connect that failed at the first request is attempted
-    // again at the next one.
-    private val proxies: ProxyManager<ByteArray> by lazy { connect() }
+    /** The client, the connection made from it and the buckets over it; `null` until the first connect. */
+    private class Connected(
+        val client: RedisClient,
+        val connection: StatefulRedisConnection<ByteArray, ByteArray>,
+        val proxies: ProxyManager<ByteArray>,
+    )
+
+    @Volatile
+    private var connected: Connected? = null
 
     override fun tryConsume(
         bucket: RateLimitBucket,
@@ -119,7 +136,7 @@ class RedisRateLimiter(
     ): RateLimitDecision =
         try {
             val probe =
-                proxies
+                proxies()
                     .builder()
                     .build(redisKey(bucket, key)) { configurationOf(bucket) }
                     .tryConsumeAndReturnRemaining(1)
@@ -177,18 +194,42 @@ class RedisRateLimiter(
         return RateLimitDecision.Unavailable
     }
 
-    private fun connect(): ProxyManager<ByteArray> {
+    /**
+     * The buckets over a live connection from the factory's current client:
+     * the one made before if it still is, a new one otherwise. A factory that
+     * is stopped has no client, and `requiredNativeClient` throws; that is the
+     * outage the caller already treats as one. A failed connect leaves nothing
+     * cached, so the next probe tries again.
+     */
+    private fun proxies(): ProxyManager<ByteArray> {
         val client =
             connections.requiredNativeClient as? RedisClient
                 ?: error("Rate limiting expects a standalone Redis client; got ${connections.requiredNativeClient.javaClass.name}")
-        return Bucket4jLettuce
-            .casBasedBuilder(client.connect(ByteArrayCodec.INSTANCE))
-            .clientClock(ClockTimeMeter(clock))
-            .requestTimeout(properties.requestTimeout)
-            // Doc 07 §5: "rolling" — a bucket that has refilled to the brim
-            // has nothing to remember, and its key goes with it.
-            .expirationAfterWrite(ExpirationAfterWriteStrategy.basedOnTimeForRefillingBucketUpToMax(KEEP_AFTER_FULL))
-            .build()
+        connected?.takeIf { it.client === client && it.connection.isOpen }?.let { return it.proxies }
+        return synchronized(this) {
+            val current = connected
+            if (current != null && current.client === client && current.connection.isOpen) {
+                current.proxies
+            } else {
+                // The old one is closed, or belongs to a client that was shut down; closing it again is harmless.
+                current?.let { runCatching { it.connection.close() } }
+                connect(client).also { connected = it }.proxies
+            }
+        }
+    }
+
+    private fun connect(client: RedisClient): Connected {
+        val connection = client.connect(ByteArrayCodec.INSTANCE)
+        val proxies =
+            Bucket4jLettuce
+                .casBasedBuilder(connection)
+                .clientClock(ClockTimeMeter(clock))
+                .requestTimeout(properties.requestTimeout)
+                // Doc 07 §5: "rolling" — a bucket that has refilled to the brim
+                // has nothing to remember, and its key goes with it.
+                .expirationAfterWrite(ExpirationAfterWriteStrategy.basedOnTimeForRefillingBucketUpToMax(KEEP_AFTER_FULL))
+                .build()
+        return Connected(client, connection, proxies)
     }
 
     /** `rl:{bucket}:{key}` per doc 07 §5, with the key hashed so no address or email is ever a Redis key. */

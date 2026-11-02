@@ -473,6 +473,21 @@
       "id": "event:operator-blocks",
       "label": "the operator blocks it on a member's report (moyi media quarantine block)",
       "actor": "system"
+    },
+    {
+      "id": "event:partner-reports",
+      "label": "your partner reports the entry it is on (POST /entries/{entryId}/report)",
+      "actor": "partner"
+    },
+    {
+      "id": "event:operator-dismisses-report",
+      "label": "the operator dismisses the report (moyi reports dismiss)",
+      "actor": "system"
+    },
+    {
+      "id": "event:operator-upholds-report",
+      "label": "the operator upholds the report (moyi reports uphold delete|block)",
+      "actor": "system"
     }
   ],
   "everywhere": [

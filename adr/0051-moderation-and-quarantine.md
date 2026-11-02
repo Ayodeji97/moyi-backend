@@ -326,7 +326,9 @@ table, three functions. No new error code. Two new consumers and one new event. 
    to this path, but no report route exists (ADR-0036 question 5: "a later phase's"), its reason
    values (OQ-26b) and rate limit (OQ-26c) are open, and its queue is Phase 5's admin console (doc
    15:117). Not built here; until it is, reports reach the support address and the runbook's
-   section 3. Build it before launch, or accept the email path?
+   section 3. Build it before launch, or accept the email path? *(Amended 2026-10-30: built,
+   ADR-0053: `POST /entries/{entryId}/report`, its reasons, ten a day, and the queue as functions
+   beside these. The hold now records what it held an asset back from (V38).)*
 
 ## Owed
 
@@ -345,7 +347,7 @@ table, three functions. No new error code. Two new consumers and one new event. 
 - **The client (moyi-app):** `NOT_SHARED` for the author ("not shared", no reason), `sensitive`
   blurred behind "tap to view", the honest help text Q16 asks for.
 - **Voice moderation**, once ruled (open question 3).
-- **The report route** (open question 6).
+- **The report route** (open question 6): built, ADR-0053.
 - **R2 and Rekognition, not run:** no real photo has been sent to Rekognition; the adapter is
   tested against a server speaking its wire protocol. One real call when the account exists.
 
