@@ -125,9 +125,16 @@ page by id) and takes at most **64** of a bond's entries a run (`BATCH`), oldest
 withdrawn** (final review I1: a withdrawal makes the words unreadable at its commit, but the
 `EntriesWithdrawn` consumer erases them later, and an archived bond keeps its setting on; the
 withdrawn come from the same `closingViewOf` read, and the write re-checks them under the lock).
+**Conceded:** a withdrawal that commits while the provider is being called has already let that
+batch's words reach the provider; the write's re-check keeps any vector of them from being stored,
+but cannot unsend them. It is the race a turn-off during the call has, accepted for the same
+reason: only a lock held across the network call would close it, which decision 1 refuses.
 **A model with no max-distance is not embedded for at all** (final review M1): search and remember
 would read none of its vectors, so the run is the empty, not-failed one a missing provider gives,
-and no history goes to a provider for nothing. **Each bond visited is also repaired** (final review
+and no history goes to a provider for nothing. As no gauge shows that, the sweep logs one WARN at
+startup naming the model and the property to set (`moyi.gratitude.semantic-search.max-distance.<MODEL>`).
+The walk lists bonds by an allow-list of statuses (`PENDING_MEMBER`, `ACTIVE`, `ARCHIVED`), so a
+status added later, such as Phase 5's `DELETED`, is skipped until it is named. **Each bond visited is also repaired** (final review
 I2, decision 3): in the write's transaction, under the lock, its rows whose `text_hash` is no longer
 their entry's words, or whose entry is erased, are deleted (`EntryEmbeddings.deleteStale`), and the
 entry is pending again; an unlocked check in the read decides whether a bond with nothing pending
@@ -417,9 +424,13 @@ one event, one consumer, one job. No `ErrorCode` added.
   max-distance are shipped sends **every existing history** of every bond with it on, not only what
   is written from then: the documents must be published before that deploy, not after it.
 - **The sweep's cost is O(all bonds) a minute**: each run walks every bond with the setting on and
-  asks each for pending entries (and, since I2, for stale rows). Fine at today's size; drive it from
-  a pending-entries query (entries with words and no row in the live table, joined to the bonds
-  that allow it) when the bond count makes the walk measurable.
+  asks each for pending entries. Fine at today's size; drive it from a pending-entries query
+  (entries with words and no row in the live table, joined to the bonds that allow it) when the
+  bond count makes the walk measurable.
+- **The stale check (decision 3) is O(all vectors of opted-in bonds) a run**, one SHA-256 of
+  `text_search` per row, every minute: negligible at today's size, and the dominant cost of the run
+  as histories grow. Owed: run the repair less often than the embedding, hourly or once after
+  startup (the rows it exists for come from a rollback, which a restart follows), not every minute.
 - **Turning off while already off leaves a pending request to turn it on** (decision 6): it is the
   other member's to answer or let lapse. Whether off should also cancel it when already off is the
   owner's to say; today it does not.
