@@ -340,29 +340,33 @@ no-answer queries, how many days remember returned and the nearest distance. It 
 when recall or MRR drops below `floors.json`, or precision at the shipped threshold below 0.9. A
 space named in `floors.json` with no vectors fails; a space with neither is skipped.
 
-## Measured (Task 9 Step 4, owed)
+## Measured (Task 9 Step 4, 2026-11-03)
 
-**Not yet measured.** The owner runs the tool with his keys
-(`./gradlew :tools:embedding-eval:run --args="generate"`, then `RetrievalEvalTest`). Until then no
-vectors file and no `floors.json` exist, both spaces are skipped, and no max-distance is shipped,
-so the search box and remember stay keyword-only even where a provider is configured. To be filled
-in from the printout, for each model:
+The owner supplied an OpenAI key, and the tool was run
+(`./gradlew :tools:embedding-eval:run --args="generate"`, then `RetrievalEvalTest`). Voyage has not
+been run: no key, so its space is skipped.
 
 | | OpenAI `text-embedding-3-small` | Voyage `voyage-3.5` |
 |---|---|---|
-| remember recall@10 | owed | owed |
-| remember MRR | owed | owed |
-| search precision at the shipped max-distance | owed | owed |
-| max-distance chosen (largest with precision ≥ 0.9) | owed | owed |
-| p95 latency, one query | owed | owed |
-| p95 latency, a sweep batch of 64 | owed | owed |
-| estimated tokens for the golden set (chars / 4) | owed | owed |
-| no-answer queries: days remember returned (each of 10) | owed | owed |
-| no-answer queries: nearest distance (each of 10) | owed | owed |
+| remember recall@10 | 0.9750 | not run |
+| remember MRR | 0.9767 | not run |
+| search precision at the shipped max-distance | 0.9697 at 0.57 | not run |
+| max-distance: largest with precision ≥ 0.9, and shipped | 0.59; **0.57 shipped** | not run |
+| p95 latency, one query | 267 ms (60 calls) | not run |
+| p95 latency, a sweep batch of 64 | 2,413 ms (3 calls) | not run |
+| estimated tokens for the golden set (chars / 4) | 2,177 for 150 entries, 529 for 60 queries | not run |
+| no-answer queries: days remember returned (each of 10) | 10 each | not run |
+| no-answer queries: nearest distance | 0.6748 to 0.8282 | not run |
 
-**The live provider: pending**, chosen from this table. Then: set the max-distance in
-`application.yml`, write `floors.json` (measured values less 0.02), commit the vectors, and switch
-production on (decision 15).
+Precision is 1.0 up to 0.53, 0.97 at 0.57, 0.92 at 0.59 and 0.89 at 0.60. The value shipped is
+0.57, not the largest that passes. 0.59 sits 0.02 above the 0.9 floor on 60 queries, where one
+query moves precision by about 0.03. 0.57 costs one true match in 33. `floors.json` holds recall
+0.955 and MRR 0.9567, the measured values less 0.02. Remember's floor is open question 2, ruled:
+no floor.
+
+**The live provider is OpenAI**, the only one measured. It is not switched on: production still
+names `none` until the owner switches it on (decision 15). The privacy-policy line and the
+sub-processor entry come first (Owed).
 
 ## Consequences
 
@@ -407,15 +411,37 @@ one event, one consumer, one job. No `ErrorCode` added.
    accepted on an ended or counting-down bond, including from a member who has *left* an archived
    bond, and the other member sees the setting change. The alternative: the sweep skips ended bonds
    (one predicate, one test) and an ended bond refuses the `PATCH` as before.
-2. **Does "Remember when" get a relevance floor? (open)** Today, with a provider up, **any** query,
-   nonsense too, returns up to `limit` days, because every visible embedded entry is in the meaning
-   ranking and it has no cut-off. With the provider down or `none`, the answer is the words'
-   ranking alone, which needs every word of `q` in one entry, so an empty answer is usual (seen in
-   the smoke run: "when did we have soup" answers no day where "soup" finds one). The eval prints,
-   for its 10 no-answer queries, how many days come back and how near the nearest is (owed above),
-   which is the number to rule on. Options: a loose meaning floor for remember; the words' ranking
-   matching any word rather than every word; or both accepted as they are, with client copy that
-   says what an answer means. Nothing is built until the owner rules.
+2. **Does "Remember when" get a relevance floor? Ruled 2026-11-03 by the owner: no floor, for
+   now.** With a provider up, any query, nonsense included, returns up to `limit` days: every
+   visible embedded entry is in the meaning ranking, and no cut-off applies. Two floors were
+   measured on the golden set (text-embedding-3-small, 50 answerable queries and 10 no-relevant
+   ones). Neither separates the two groups:
+   - **A per-entry floor** on the meaning list costs too much recall before it silences the
+     no-relevant queries. At 0.65, recall@10 is 0.79 (against 0.975 unfloored) and no
+     no-relevant query gets a day. Reaching 0.955 recall needs 0.78, where 8 of the 10 still get
+     days. A real question has several right days, and its weaker ones lie at 0.65–0.78. That is
+     where the no-relevant queries' nearest entries lie (0.67–0.83).
+   - **A query-level gate** (no meaning half when even the nearest entry is beyond G) does
+     better, but still fails. The answerable queries' nearest distances run up to 0.7189; the
+     no-relevant ones start at 0.6748. G 0.67 silences every no-relevant query at recall 0.94,
+     and loses exactly the indirect phrasings meaning search is for ("our four-legged
+     companion" for the dog, "moments full of melody"). Its margin is 0.005 on 60 hand-written
+     queries.
+
+   The ruling weighs the two failures. Telling a couple "nothing" about a memory they have is
+   worse than showing their closest moments for one they never wrote about. A threshold this
+   close to the line would misfire both ways on real writing. The client says what an answer
+   means: its copy presents remember's days as moments that feel close, not as a match (owed to
+   moyi-app). Reversible: a floor or gate is configuration plus code, with no migration and no
+   contract change, because remember can already answer `[]`. Revisit with real query data, or
+   with a reranker that judges relevance rather than distance. Both grids came from a one-off
+   change to `RetrievalEvalTest`, not committed. The no-relevant probes it still prints are the
+   starting point for measuring again.
+
+   Still open beside it: with the provider down or `none`, remember is the words' ranking alone,
+   which needs every word of `q` in one entry, so an empty answer is usual (the smoke run: "when
+   did we have soup" answers no day where "soup" finds one). Matching any word rather than every
+   word is a separate change, and not ruled.
 
 ## Owed
 
