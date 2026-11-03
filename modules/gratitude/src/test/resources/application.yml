@@ -83,5 +83,8 @@ moyi:
       query-timeout: 1s
       # The threshold `SemanticSearchTest`'s vector table is built around: a near phrase lies
       # well inside it, and the fake's seeded vectors for every other text lie near 1.0.
+      # VOYAGE_3_5's is here so that the sweep embeds in that space too when a test switches the
+      # fake to it: a model with no max-distance has nothing embedded (final review M1).
       max-distance:
         OPENAI_TEXT_EMBEDDING_3_SMALL: 0.35
+        VOYAGE_3_5: 0.35

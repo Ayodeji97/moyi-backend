@@ -40,6 +40,10 @@ import java.util.UUID
  * always refuses must not stop every bond after it for ever, since each run walks from the start;
  * [MAX_CONSECUTIVE_FAILURES] refusals in a row mean the provider is down, and it is not hammered.
  * What was refused stays pending for the next run; the run reports `failed`.
+ *
+ * **A model with no max-distance is not embedded for** ([SemanticSearchProperties.maxDistance]):
+ * search and remember ask nothing of it, so the run is the empty one a missing provider gives,
+ * not a failure; the gauge is stamped as for any quiet run.
  */
 @Component
 internal class EmbedPendingEntries(
@@ -49,13 +53,16 @@ internal class EmbedPendingEntries(
     private val transactions: TransactionTemplate,
     private val clock: Clock,
     meters: MeterRegistry,
+    private val properties: SemanticSearchProperties,
 ) : EmbeddingSweep {
     private val embedded = meters.counter(ENTRIES, "outcome", "embedded")
     private val skipped = meters.counter(ENTRIES, "outcome", "skipped")
 
     /** Not transactional: the provider is called with no transaction open (ADR-0054 decision 1). */
     override fun embedPending(budget: Int): EmbeddingRun {
-        val space = port.space ?: return EmbeddingRun(0, 0, false)
+        // No provider, or a model nobody has measured: search and remember would read none of
+        // its vectors, so no word is sent for them (final review M1). An empty run, not failed.
+        val space = port.space?.takeIf { it in properties.maxDistance } ?: return EmbeddingRun(0, 0, false)
         val run = Tally(budget)
         var after: UUID? = null
         while (run.goesOn) {

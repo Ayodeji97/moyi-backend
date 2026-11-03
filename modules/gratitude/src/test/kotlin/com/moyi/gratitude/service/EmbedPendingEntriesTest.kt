@@ -67,6 +67,7 @@ internal class EmbedPendingEntriesTest(
     @Autowired private val access: BondAccess,
     @Autowired private val transactions: TransactionTemplate,
     @Autowired private val meters: MeterRegistry,
+    @Autowired private val properties: SemanticSearchProperties,
 ) : IntegrationTest() {
     private val users = directory as FakeUserDirectory
     private val jdbc = JdbcTemplate(dataSource)
@@ -132,6 +133,24 @@ internal class EmbedPendingEntriesTest(
 
         sweep.embedPending(10) shouldBe EmbeddingRun(0, 0, false)
         fake.texts shouldBe emptyList()
+    }
+
+    /**
+     * Final review M1: search and remember ask nothing of a model with no max-distance, so its
+     * vectors would serve no read, and every bond's history would go to the provider for none.
+     */
+    @Test
+    fun `a model with no max-distance has nothing sent and nothing embedded`() {
+        val bond = pair()
+        submit(bond, "words")
+        val unmeasured =
+            EmbedPendingEntries(fake, embeddings, access, transactions, clock, meters, SemanticSearchProperties(maxDistance = mapOf()))
+
+        unmeasured.embedPending(10) shouldBe EmbeddingRun(0, 0, false)
+        fake.texts shouldBe emptyList()
+        embeddings.countFor(bond.uuid) shouldBe 0
+        // Not vacuous: the configured model's sweep embeds it.
+        sweep.embedPending(10).embedded shouldBe 1
     }
 
     @Test
@@ -266,7 +285,7 @@ internal class EmbedPendingEntriesTest(
         val bond = pair()
         val id = submit(bond, "words")
         val fine = Clock.fixed(Instant.parse("2026-09-15T10:00:00.123456789Z"), ZoneOffset.UTC)
-        val byHand = EmbedPendingEntries(fake, embeddings, access, transactions, fine, meters)
+        val byHand = EmbedPendingEntries(fake, embeddings, access, transactions, fine, meters, properties)
 
         byHand.embedPending(10).embedded shouldBe 1
 
