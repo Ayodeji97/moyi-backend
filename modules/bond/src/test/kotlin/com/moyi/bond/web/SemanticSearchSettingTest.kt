@@ -220,6 +220,21 @@ internal class SemanticSearchSettingTest(
         access.bondsWithSemanticSearch(null, 100).map { it.toString() } shouldNotContain off
     }
 
+    /** Final review M2: a bond counting down to its deletion is not sent to the provider for its last days. */
+    @Test
+    fun `bondsWithSemanticSearch leaves out a bond pending deletion`() {
+        val kept = solo(ada)
+        val leaving = solo(bea) // a lone member's request confirms itself
+        post(bea, "/bonds/$leaving/deletion-request").status shouldBe 202
+        jdbc.queryForObject("SELECT status FROM bonds WHERE id = ?", String::class.java, UUID.fromString(leaving)) shouldBe
+            "PENDING_DELETION"
+        jdbc.queryForObject("SELECT semantic_search_enabled FROM bonds WHERE id = ?", Boolean::class.java, UUID.fromString(leaving)) shouldBe
+            true
+
+        access.bondsWithSemanticSearch(null, 100).map { it.toString() } shouldContain kept
+        access.bondsWithSemanticSearch(null, 100).map { it.toString() } shouldNotContain leaving
+    }
+
     @Test
     fun `bondsWithSemanticSearch pages by id`() {
         val all = listOf(pair(ada, bea), solo(cy), solo(dee)).map(UUID::fromString).sorted()

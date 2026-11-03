@@ -65,13 +65,16 @@ internal interface BondRepository : Repository<BondEntity, UUID> {
      * Keyset page of every bond with semantic search on (ADR-0054): open or
      * ended, paired or solo. Deliberately **not** [findEverPairedAfter]'s
      * filter: a solo bond's entries are embedded too, and so are an ended
-     * bond's while its setting is on.
+     * bond's while its setting is on. **Not a bond pending deletion** (final
+     * review M2): its history is about to be destroyed, and sending it to the
+     * provider in its last days would serve no search worth the disclosure.
      */
     @Query(
         nativeQuery = true,
         value = """
             SELECT b.id FROM bonds b
             WHERE b.semantic_search_enabled
+              AND b.status <> 'PENDING_DELETION'
               AND (CAST(:after AS uuid) IS NULL OR b.id > CAST(:after AS uuid))
             ORDER BY b.id
             LIMIT :limit
