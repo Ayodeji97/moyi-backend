@@ -7,6 +7,7 @@ import com.moyi.gratitude.domain.SearchTerms
 import com.moyi.gratitude.domain.SemanticMatch
 import com.moyi.gratitude.infra.database.EntryRows.LIVE_ROW
 import com.moyi.gratitude.infra.database.EntryRows.SEEN_ROW
+import com.moyi.gratitude.infra.database.EntryRows.VECTOR_OF_ITS_WORDS
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementSetter
 import org.springframework.jdbc.core.RowMapper
@@ -183,10 +184,13 @@ internal class ArchiveDays(
      * partner's unrevealed words match by meaning no more than by keyword (T-01). The vector is
      * read through its bond, never by scanning the table: Postgres ran the `EXISTS` as a hashed
      * subplan over a sequential scan of every bond's vectors when the subquery named the bond as
-     * `e.bond_id`, so it names the bond's id (`SearchCandidatesTest` reads the plan).
+     * `e.bond_id`, so it names the bond's id (`SearchCandidatesTest` reads the plan). **A vector
+     * is asked only while it is still its entry's words** ([EntryRows.VECTOR_OF_ITS_WORDS]), so one
+     * a writer left behind matches nothing (final review I2).
      *
-     * Driven from `entries`, so the planner may start from `entries_search_idx`; the measured
-     * cost is in ADR-0039.
+     * Driven from `entries`, so the keyword-only form may start from `entries_search_idx`; the
+     * measured cost is in ADR-0039. With [semantic] the `OR` takes it off that index, and the
+     * plan starts from the bond's entries instead (`entries_bond_recent_idx`; ADR-0054 decision 7).
      *
      * **The join names the bond on both sides** (`d.bond_id = e.bond_id`). Without it nothing
      * bounds `bond_days` to the bond, and for a word the bond uses often the planner was free to
@@ -260,7 +264,8 @@ internal class ArchiveDays(
     /**
      * "Remember when"'s meaning ranking: at most [limit] ids of entries of [bondId] whose vector in
      * [SemanticMatch.table] is nearest [SemanticMatch.vector], nearest first, inside the
-     * same gate as [rankedByWords]. **No [SemanticMatch.maxDistance] cut-off**: a ranking needs
+     * same gate as [rankedByWords], and only while the vector is still its entry's words
+     * ([EntryRows.VECTOR_OF_ITS_WORDS]). **No [SemanticMatch.maxDistance] cut-off**: a ranking needs
      * none, and the fusion puts what both rankings hold first.
      */
     fun rankedByMeaning(
@@ -433,7 +438,8 @@ internal class ArchiveDays(
                                 // as a hashed subplan, read once, and only a constant bounds that read to the bond.
                                 else -> {
                                     "AND ($WORDS_MATCH OR EXISTS (SELECT 1 FROM ${EntryEmbeddings.nameOf(semantic.table)} x " +
-                                        "WHERE x.bond_id = ? AND x.entry_id = e.id AND x.embedding <=> ?::vector <= ?))"
+                                        "WHERE x.bond_id = ? AND x.entry_id = e.id AND $VECTOR_OF_ITS_WORDS " +
+                                        "AND x.embedding <=> ?::vector <= ?))"
                                 }
                             },
                             "GROUP BY d.id, d.date, d.status, d.closed_at, d.entry_count",
@@ -487,7 +493,9 @@ internal class ArchiveDays(
                     bondId,
                     memberId,
                     withdrawnMemberIds,
-                    join = "JOIN ${EntryEmbeddings.nameOf(semantic.table)} x ON x.entry_id = e.id AND x.bond_id = ?",
+                    join = "JOIN ${EntryEmbeddings.nameOf(
+                        semantic.table,
+                    )} x ON x.entry_id = e.id AND x.bond_id = ? AND $VECTOR_OF_ITS_WORDS",
                     joinArguments = listOf(bondId),
                 )
             val sql =

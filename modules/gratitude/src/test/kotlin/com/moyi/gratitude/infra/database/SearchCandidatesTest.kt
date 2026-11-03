@@ -117,6 +117,39 @@ internal class SearchCandidatesTest(
         archive.matching(UUID.fromString(bond), me, lamp(), null, LIMIT, emptySet()) shouldBe emptyList()
     }
 
+    /**
+     * Final review I2. A vector is read only while its `text_hash` is still its entry's words:
+     * a build from before V41 edits or erases an entry without deleting its vector, and after the
+     * roll forward that vector must match nothing, by search or by remember.
+     */
+    @Test
+    fun `a vector whose hash is not its entry's words matches nothing`() {
+        val current =
+            rig.insertEntry(
+                rig.insertDay(bond, LocalDate.parse("2026-09-10"), "REVEALED"),
+                bond,
+                me,
+                EntryState.REVEALED,
+                "a quiet glow",
+                at("2026-09-10"),
+            )!!
+        val stale =
+            rig.insertEntry(
+                rig.insertDay(bond, LocalDate.parse("2026-09-11"), "REVEALED"),
+                bond,
+                me,
+                EntryState.REVEALED,
+                "a quiet glow",
+                at("2026-09-11"),
+            )!!
+        near(current)
+        embed(stale, NEAR, hashedFrom = "the words it held before an older build edited it")
+
+        archive.matching(UUID.fromString(bond), me, lamp(), null, LIMIT, emptySet(), semantic()).map { it.date.toString() } shouldBe
+            listOf("2026-09-10")
+        archive.rankedByMeaning(UUID.fromString(bond), me, semantic(), emptySet()) shouldBe listOf(current)
+    }
+
     /** NFR-033 for the meaning half: the vectors are read through their entry or their bond, never by scanning the table. */
     @Test
     fun `the meaning half reads the bond's vectors, not the table's`() {
@@ -165,7 +198,7 @@ internal class SearchCandidatesTest(
               RETURNING id, bond_id
             )
             INSERT INTO ${EntryEmbeddings.tableOf(SPACE)} (entry_id, bond_id, embedding, text_hash, created_at)
-            SELECT w.id, w.bond_id, v.embedding, '\x00', now()
+            SELECT w.id, w.bond_id, v.embedding, sha256(convert_to('thank you for the walk', 'UTF8')), now()
             FROM written w,
                  -- Correlated through WHERE, so that each entry gets its own vector.
                  LATERAL (SELECT array_agg(random() - 0.5)::vector(1536) AS embedding
@@ -180,16 +213,23 @@ internal class SearchCandidatesTest(
 
     private fun near(entry: UUID) = embed(entry, NEAR)
 
+    /**
+     * [vector] for [entry], hashed from the words [hashedFrom] (by default the entry's own
+     * `text_search`, as the sweep writes it; an erased row's empty words hash as nothing at all).
+     */
     private fun embed(
         entry: UUID,
         vector: FloatArray,
+        hashedFrom: String? = null,
     ) {
         jdbc.update(
             "INSERT INTO ${EntryEmbeddings.tableOf(SPACE)} (entry_id, bond_id, embedding, text_hash, created_at) " +
-                "VALUES (?, ?::uuid, ?::vector, '\\x00', now())",
-            entry,
+                "SELECT e.id, ?::uuid, ?::vector, " +
+                "coalesce(sha256(convert_to(coalesce(?, e.text_search), 'UTF8')), '\\x00'), now() FROM entries e WHERE e.id = ?",
             bond,
             EntryEmbeddings.vectorLiteral(vector),
+            hashedFrom,
+            entry,
         ) shouldBe 1
     }
 

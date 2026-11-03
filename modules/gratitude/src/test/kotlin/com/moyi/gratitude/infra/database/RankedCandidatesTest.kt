@@ -104,7 +104,7 @@ internal class RankedCandidatesTest(
               RETURNING id, bond_id
             )
             INSERT INTO ${EntryEmbeddings.tableOf(SPACE)} (entry_id, bond_id, embedding, text_hash, created_at)
-            SELECT w.id, w.bond_id, v.embedding, '\x00', now()
+            SELECT w.id, w.bond_id, v.embedding, sha256(convert_to('thank you for the walk', 'UTF8')), now()
             FROM written w,
                  LATERAL (SELECT array_agg(random() - 0.5)::vector(1536) AS embedding
                           FROM generate_series(1, ?) WHERE w.id IS NOT NULL) v

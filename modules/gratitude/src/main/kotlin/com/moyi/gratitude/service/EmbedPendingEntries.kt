@@ -8,6 +8,7 @@ import com.moyi.gratitude.api.EmbeddingRun
 import com.moyi.gratitude.api.EmbeddingSweep
 import com.moyi.gratitude.infra.database.EntryEmbeddings
 import io.micrometer.core.instrument.MeterRegistry
+import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
@@ -43,6 +44,11 @@ import java.util.UUID
  * [MAX_CONSECUTIVE_FAILURES] refusals in a row mean the provider is down, and it is not hammered.
  * What was refused stays pending for the next run; the run reports `failed`.
  *
+ * **Each bond visited is also repaired** (final review I2): under the same lock, before the
+ * write, its rows whose `text_hash` is no longer their entry's words, or whose entry is erased,
+ * are deleted ([EntryEmbeddings.deleteStale]); an unlocked check in the read decides whether a
+ * bond with nothing pending needs the lock at all. Reads never use such a row meanwhile.
+ *
  * **A model with no max-distance is not embedded for** ([SemanticSearchProperties.maxDistance]):
  * search and remember ask nothing of it, so the run is the empty one a missing provider gives,
  * not a failure; the gauge is stamped as for any quiet run.
@@ -58,6 +64,7 @@ internal class EmbedPendingEntries(
     meters: MeterRegistry,
     private val properties: SemanticSearchProperties,
 ) : EmbeddingSweep {
+    private val log = LoggerFactory.getLogger(javaClass)
     private val embedded = meters.counter(ENTRIES, "outcome", "embedded")
     private val skipped = meters.counter(ENTRIES, "outcome", "skipped")
 
@@ -85,19 +92,32 @@ internal class EmbedPendingEntries(
         bondId: UUID,
         run: Tally,
     ) {
-        val pending =
-            transactions
-                .execute {
-                    // Turned off since the page was read: no word of this bond is read, or sent.
-                    // Nor any word of a member who has withdrawn, before their erasure has run.
-                    val view = access.closingViewOf(bondId)
-                    if (view?.semanticSearchEnabled == true) {
-                        embeddings.missing(space, bondId, minOf(BATCH, run.left), view.withdrawnMemberIds)
-                    } else {
-                        emptyList()
-                    }
-                }.orEmpty()
-        if (pending.isEmpty()) return
+        val (pending, stale) =
+            transactions.execute {
+                // Turned off since the page was read: no word of this bond is read, or sent.
+                // Nor any word of a member who has withdrawn, before their erasure has run.
+                val view = access.closingViewOf(bondId)
+                if (view?.semanticSearchEnabled == true) {
+                    embeddings.missing(space, bondId, minOf(BATCH, run.left), view.withdrawnMemberIds) to embeddings.hasStale(bondId)
+                } else {
+                    emptyList<EntryEmbeddings.Pending>() to false
+                }
+            } ?: (emptyList<EntryEmbeddings.Pending>() to false)
+        when {
+            pending.isNotEmpty() -> embedAndWrite(space, bondId, pending, run)
+
+            // Nothing to send, only rows to repair: the lock, and no provider call.
+            stale -> write(space, bondId, emptyList(), emptyList())
+        }
+    }
+
+    /** [pending] sent to the provider with no transaction open, then written; a refusal is counted and skips the bond. */
+    private fun embedAndWrite(
+        space: EmbeddingSpace,
+        bondId: UUID,
+        pending: List<EntryEmbeddings.Pending>,
+        run: Tally,
+    ) {
         val vectors =
             try {
                 port.embed(pending.map { it.text })
@@ -131,6 +151,9 @@ internal class EmbedPendingEntries(
             if (view?.semanticSearchEnabled != true) {
                 0
             } else {
+                // Rows an older or careless writer left behind their words (I2): pending again next run.
+                val repaired = embeddings.deleteStale(bondId)
+                if (repaired > 0) log.info("Deleted {} embeddings of bond {} that no longer matched their entry", repaired, bondId)
                 // A withdrawal that committed while the provider was called: its words are not kept.
                 pending.zip(vectors).filterNot { (entry, _) -> entry.authorMemberId in view.withdrawnMemberIds }.count { (entry, vector) ->
                     embeddings.upsert(space, entry.entryId, bondId, vector, EntryEmbeddings.hashOf(entry.text), now)

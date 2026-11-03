@@ -316,6 +316,32 @@ internal class EmbedPendingEntriesTest(
         fake.texts shouldBe listOf("an old plum", "a new pear")
     }
 
+    /**
+     * Final review I2. A build from before V41 edits and erases entries without deleting their
+     * vectors. After the roll forward the sweep deletes, under the bond's lock, every row whose
+     * hash is no longer its entry's words or whose entry is erased; the edited entry is then
+     * pending again and embedded by the run after.
+     */
+    @Test
+    fun `a vector an older build left behind its words is deleted by the next sweep`() {
+        val bond = pair()
+        val edited = submit(bond, "an old plum")
+        val erased = submit(bond, "a lost glove", author = bea)
+        sweep.embedPending(10).embedded shouldBe 2
+        // What an older build's edit and erasure leave: the words changed or gone, the vectors not.
+        jdbc.update("UPDATE entries SET text = 'a new pear', text_search = 'a new pear' WHERE id = ?::uuid", edited) shouldBe 1
+        jdbc.update("UPDATE entries SET text = NULL, text_search = NULL, deleted_at = now() WHERE id = ?::uuid", erased) shouldBe 1
+
+        sweep.embedPending(10) shouldBe EmbeddingRun(embedded = 0, skipped = 0, failed = false)
+        vectorsOf(edited) shouldBe 0
+        vectorsOf(erased) shouldBe 0
+
+        sweep.embedPending(10).embedded shouldBe 1
+        fake.texts.last() shouldBe "a new pear"
+        vectorsOf(edited) shouldBe 1
+        vectorsOf(erased) shouldBe 0
+    }
+
     /** CLAUDE.md's timestamp rule: what is stored is what the sweep meant, not Postgres's rounding of it. */
     @Test
     fun `the vector's time is stored truncated to microseconds`() {
