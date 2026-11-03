@@ -36,8 +36,11 @@ has `val space: EmbeddingSpace?` and `embed(texts): List<FloatArray>`; `Embeddin
 id with its dimensions (`OPENAI_TEXT_EMBEDDING_3_SMALL(1536)`, `VOYAGE_3_5(1024)`), and `null` means
 no provider. A process embeds in one space at a time, so the space is the port's, not each
 vector's. `EmbeddingUnavailableException` carries a fixed reason (`"provider error"`, `"no
-provider"`, `"wrong dimensions"`), never the input; the provider's exception is kept only as its
-cause. `gratitude` depends on the port alone; FR-200, FR-201 and FR-205 will reuse it.
+provider"`, `"wrong dimensions"`), never the input, and **never the provider's exception as its
+cause** (final review M4): a later `log.warn(..., e)` would print that exception's message, and the
+SDKs' quote the request. It keeps what may be told instead: `failure`, the simple class names of
+the provider's chain, and `status`, an HTTP status read without reading a body (a `statusCode()`
+method, or Voyage's own refusal message). The eval tool prints those. `gratitude` depends on the port alone; FR-200, FR-201 and FR-205 will reuse it.
 
 - **OpenAI through Spring AI 2.0.2** (`OpenAiEmbeddingModel`, built by its builder; the
   constructor taking options is deprecated in 2.0). It runs on the official OpenAI Java SDK over
@@ -85,7 +88,12 @@ before it joins), `embedding vector(N)`, `text_hash bytea` (SHA-256 of the embed
 `created_at`, with an index on `bond_id`. Every column has a fixed size and the index stays a plain
 one; a third model is a new table, and switching models is a backfill into it (the sweep, decision
 1), never an in-place rewrite. `EntryEmbeddings.tableOf(space)`, an exhaustive `when`, is the one
-place a table name comes from. **What is embedded is `entries.text_search`**, the projection ADR-0039
+place a table name comes from: it maps the provider's `EmbeddingSpace` onto `VectorTable`,
+gratitude's own name for a table, and that onto its SQL name. `SemanticMatch` (in
+`gratitude.domain`) carries the `VectorTable`, not the `EmbeddingSpace`, so the domain layer
+imports nothing from another module (final review M5); `ArchitectureTest` now forbids any domain
+layer importing another module. The mapping lives in `infra`, not `service`, because both read it
+and `infra` may not depend on `service`. **What is embedded is `entries.text_search`**, the projection ADR-0039
 writes and every erasure empties, never `text`: what search may see is what `text_search` holds.
 The pgvector image (`pgvector/pgvector:0.8.7-pg18`) replaces `postgres:18` in compose,
 Testcontainers and the restore drill; production's is owed (Owed).
@@ -111,9 +119,19 @@ one query must cover more than one bond, or a bond passes ~50k entries.
 provider call inside a consumer would hold a transaction across the network and retry for ever.
 `EmbeddingJob` (`scheduling`, every minute, ShedLock `embedding`, `lockAtMostFor` 5 min,
 `lockAtLeastFor` 20 s) asks `gratitude.api.EmbeddingSweep.embedPending(200)`. The sweep walks bonds
-with the setting on (open or ended, paired or solo; 100 a page by id) and takes at most **64** of a
-bond's entries a run (`BATCH`), oldest first: live, `text_search` not null, no row in the live
-model's table. For each bond: the setting is read again and, if still on, the words are read (a
+with the setting on (open or ended, paired or solo, **not pending deletion**: final review M2; 100 a
+page by id) and takes at most **64** of a bond's entries a run (`BATCH`), oldest first: live,
+`text_search` not null, no row in the live model's table, and **not written by a member who has
+withdrawn** (final review I1: a withdrawal makes the words unreadable at its commit, but the
+`EntriesWithdrawn` consumer erases them later, and an archived bond keeps its setting on; the
+withdrawn come from the same `closingViewOf` read, and the write re-checks them under the lock).
+**A model with no max-distance is not embedded for at all** (final review M1): search and remember
+would read none of its vectors, so the run is the empty, not-failed one a missing provider gives,
+and no history goes to a provider for nothing. **Each bond visited is also repaired** (final review
+I2, decision 3): in the write's transaction, under the lock, its rows whose `text_hash` is no longer
+their entry's words, or whose entry is erased, are deleted (`EntryEmbeddings.deleteStale`), and the
+entry is pending again; an unlocked check in the read decides whether a bond with nothing pending
+needs the lock at all. For each bond: the setting is read again and, if still on, the words are read (a
 short transaction); the provider is called **with no transaction open**; the vectors are written in
 a short transaction **under the bond's row lock**, after the setting is read once more under it,
 and only where `text_search` still hashes to what was sent (`upsert`'s `INSERT … SELECT … WHERE
@@ -154,6 +172,22 @@ ADR-0050 list, with a vector in both tables, and that an in-flight vector of the
 refused at the write. It relies on every caller handing `update` an entity read after its lock
 (`lockAndFind`, `findForDayFresh`), which `RevealFreshReadTest` holds.
 
+**`text_hash` is load-bearing on the read side too** (final review I2, the controller's ruling).
+Every read of an embedding table, the search's meaning half and remember's meaning ranking, also
+asks `x.text_hash = sha256(convert_to(e.text_search, 'UTF8'))` (`EntryRows.VECTOR_OF_ITS_WORDS`, one
+fragment, the expression `upsert` uses); the sweep deletes what fails it. **Why:** without it "a
+vector never outlives its words" rests on every writer of `text_search` taking the bond lock and
+being this build or later. A rollback to an image from before V41 edits and erases entries without
+deleting their vectors; after the roll forward, an edited entry would match by its old words, and
+an erased one's vector would persist for ever. A future writer that skips `EntryStore.update`'s
+delete would do the same. Now such a row matches nothing from the moment its words change, and is
+gone at the next sweep. It also closes the deferred minor that `EntryStore.update` trusts the
+`before` it is handed: a wrong `before` can no longer leave a readable stale vector. The cost is
+one hash of `text_search` per candidate row, at a bond's scale; the `EXPLAIN` tests are unchanged
+(no sequential scan, the bond constant bound). `SearchCandidatesTest` and `EmbedPendingEntriesTest`
+plant a mismatched hash by SQL, as an older writer would leave it, and go red with the predicate or
+the repair removed.
+
 ### The setting and consent
 
 **2. Off: one member, through `PATCH`, and nothing is read or written from that moment** (plan
@@ -171,7 +205,10 @@ after the outbox pass.
 
 **6. `PATCH` takes `false` only.** `true` is `422` on the field, code `ASSERT_FALSE`
 (`@field:AssertFalse`): a standard Bean Validation code, not a new `ErrorCode`, so no breaking
-change. Turning it off when it is already off publishes nothing more and leaves a pending request
+change. **The rule lives in the domain** (final review F3): `Bond.update` refuses
+`semanticSearchEnabled = true` (`require`, as its other argument checks), so no caller can turn it
+on without the proposal (`Bond.withSemanticSearch`, after agreement); the edge's annotation reports
+it first, so the contract is unchanged. Turning it off when it is already off publishes nothing more and leaves a pending request
 to turn it on for the other member to answer.
 
 **5. On: both members, the deletion request's shape** (plan decision 5). `POST
@@ -187,7 +224,8 @@ on, the sweep backfills.
 {"semanticSearchEnabled": false}` alone is accepted on a bond that has ended or is counting down to
 deletion, skipping the ended-bond refusal for that body alone, as cancelling a deletion request
 does; any other field, or `false` with another field, is still `409`. Why: the sweep keeps
-embedding an ended bond whose setting is on (an ended bond is still read, ADR-0039 default 3), so a
+embedding an archived bond whose setting is on (an ended bond is still read, ADR-0039 default 3;
+one pending deletion it skips, decision 1), so a
 member must be able to withdraw consent to the third-party processor; refusing a privacy feature's
 off switch is never right (the same reasoning as ADR-0053's report on an ended bond). **What it
 implies, for the owner:** a member who has *left* an archived bond can turn it off too, and the
@@ -324,7 +362,9 @@ production on (decision 15).
 **Positive.** A search finds by meaning without changing its contract or order; "Remember when"
 answers a question with what the two of them wrote. A provider that is down, slow or absent costs
 nothing but the meaning half. Either member withdraws consent alone, and the bond's vectors are
-deleted. A vector never outlives its words. The scan is exact and bounded by the bond.
+deleted. A vector never outlives its words, and is not read once they change even where a writer
+failed to delete it (decision 3's `text_hash` check, against rollbacks and future writers). The
+scan is exact and bounded by the bond.
 
 **Negative.** Entry text goes to a third party once a provider is switched on (the owner's ruling
 2; the privacy policy line is owed). The vectors are a second copy derived from the words (decision
@@ -372,6 +412,22 @@ one event, one consumer, one job. No `ErrorCode` added.
 
 ## Owed
 
+- **The privacy-policy line and the sub-processor entry are a HARD precondition of switching a
+  provider on.** The setting defaults to on (V40), so the first sweep after a key and a
+  max-distance are shipped sends **every existing history** of every bond with it on, not only what
+  is written from then: the documents must be published before that deploy, not after it.
+- **The sweep's cost is O(all bonds) a minute**: each run walks every bond with the setting on and
+  asks each for pending entries (and, since I2, for stale rows). Fine at today's size; drive it from
+  a pending-entries query (entries with words and no row in the live table, joined to the bonds
+  that allow it) when the bond count makes the walk measurable.
+- **Turning off while already off leaves a pending request to turn it on** (decision 6): it is the
+  other member's to answer or let lapse. Whether off should also cancel it when already off is the
+  owner's to say; today it does not.
+- **Old-space vectors are kept after a model switch, or a switch to `none`**, until an erasure
+  deletes the entry's rows or the setting is turned off: nothing reads them, but they are a copy of
+  what was written. The retention line here and doc 07's retention table must say so (or a cleanup
+  of non-live tables is built). The same holds for stale rows (decision 3) under `none` or a model
+  with no max-distance: the sweep does not run, so they are never read and not yet deleted.
 - **Production's Postgres on the pgvector image, before this branch is deployed.**
   `config/deploy.yml`'s `postgres` accessory is still `postgres:18`, which has no `vector`
   extension, so V41's `CREATE EXTENSION` would fail the deploy's migration. A restart with the same
