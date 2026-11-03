@@ -8,6 +8,7 @@ import com.moyi.gratitude.api.EmbeddingRun
 import com.moyi.gratitude.api.EmbeddingSweep
 import com.moyi.gratitude.infra.database.EntryEmbeddings
 import io.micrometer.core.instrument.MeterRegistry
+import jakarta.annotation.PostConstruct
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import org.springframework.transaction.support.TransactionTemplate
@@ -67,6 +68,24 @@ internal class EmbedPendingEntries(
     private val log = LoggerFactory.getLogger(javaClass)
     private val embedded = meters.counter(ENTRIES, "outcome", "embedded")
     private val skipped = meters.counter(ENTRIES, "outcome", "skipped")
+
+    /**
+     * Said once, at startup, when a provider is configured but its model has no max-distance:
+     * then every run is empty (final review M1), which no gauge shows. Names the space and the
+     * property to set, and nothing secret.
+     */
+    @PostConstruct
+    fun warnIfUnmeasured() {
+        val space = port.space ?: return
+        if (space !in properties.maxDistance) {
+            log.warn(
+                "Semantic search: the provider's model {} has no max-distance, so nothing will be embedded " +
+                    "or searched by meaning; set moyi.gratitude.semantic-search.max-distance.{}",
+                space,
+                space,
+            )
+        }
+    }
 
     /** Not transactional: the provider is called with no transaction open (ADR-0054 decision 1). */
     override fun embedPending(budget: Int): EmbeddingRun {

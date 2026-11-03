@@ -17,13 +17,18 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.micrometer.core.instrument.MeterRegistry
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
+import org.springframework.boot.test.system.CapturedOutput
+import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
 import org.springframework.context.annotation.Import
 import org.springframework.http.HttpHeaders
@@ -55,6 +60,7 @@ import javax.sql.DataSource
 @SpringBootTest(classes = [GratitudeTestApplication::class])
 @AutoConfigureMockMvc
 @Import(EntryChangesTest.TimeConfiguration::class)
+@ExtendWith(OutputCaptureExtension::class)
 @Suppress("LongParameterList") // What Spring hands the test.
 internal class EmbedPendingEntriesTest(
     @Autowired private val mockMvc: MockMvc,
@@ -152,6 +158,25 @@ internal class EmbedPendingEntriesTest(
         embeddings.countFor(bond.uuid) shouldBe 0
         // Not vacuous: the configured model's sweep embeds it.
         sweep.embedPending(10).embedded shouldBe 1
+    }
+
+    /** Fix round M1: the empty run shows on no gauge, so the missing threshold is said once at startup. */
+    @Test
+    fun `a model with no max-distance is warned of at startup, with the property to set`(output: CapturedOutput) {
+        val unmeasured =
+            EmbedPendingEntries(fake, embeddings, access, transactions, clock, meters, SemanticSearchProperties(maxDistance = mapOf()))
+
+        unmeasured.warnIfUnmeasured()
+
+        val line = output.out.lines().single { it.contains("moyi.gratitude.semantic-search.max-distance.OPENAI_TEXT_EMBEDDING_3_SMALL") }
+        line shouldContain "WARN"
+        line shouldContain "OPENAI_TEXT_EMBEDDING_3_SMALL"
+        // A measured model, or no provider at all, says nothing.
+        val before = output.out.length
+        EmbedPendingEntries(fake, embeddings, access, transactions, clock, meters, properties).warnIfUnmeasured()
+        fake.space = null
+        unmeasured.warnIfUnmeasured()
+        output.out.substring(before) shouldNotContain "max-distance"
     }
 
     @Test
