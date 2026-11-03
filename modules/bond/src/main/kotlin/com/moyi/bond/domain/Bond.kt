@@ -107,7 +107,8 @@ internal data class BondSettings(
     /**
      * Only ever `false` here (FR-204, ADR-0054): one member may withdraw consent to
      * the embedding provider alone, but turning it on needs both, so that is
-     * `POST /bonds/{bondId}/semantic-search` and the web layer refuses `true`.
+     * `POST /bonds/{bondId}/semantic-search`. [Bond.update] refuses `true`, the rule's
+     * one home; the web layer's `@AssertFalse` reports it as a `422` before it gets there.
      */
     val semanticSearchEnabled: Boolean? = null,
 ) {
@@ -339,6 +340,8 @@ internal data class Bond(
      */
     fun update(settings: BondSettings): Bond {
         check(isOpen || settings.isOnlySemanticSearchOff()) { "a bond that has ended cannot be changed" }
+        // FR-204, ADR-0054: consent to the provider is both members', so on is [withSemanticSearch]'s, after a proposal.
+        require(settings.semanticSearchEnabled != true) { "semantic search is turned on by agreement, never by an update" }
         return copy(
             name = settings.name ?: name,
             type = settings.type ?: type,
