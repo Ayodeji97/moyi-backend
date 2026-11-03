@@ -10,15 +10,10 @@ import java.net.InetSocketAddress
 
 /** A provider's failure prints its name, the exception classes and a status: never a message, which may quote the input. */
 internal class ProviderFailureTest {
-    /** As the OpenAI SDK's service exceptions carry it, with the body in the message. */
-    private class ServiceException : RuntimeException("401: {\"error\": \"the secret entry text\"}") {
-        @Suppress("FunctionOnlyReturningConstant", "unused") // Read by reflection, as the SDK's is.
-        fun statusCode(): Int = 401
-    }
-
     @Test
-    fun `a status read from the exception, and no message`() {
-        val described = ProviderFailure.describe("openai", EmbeddingUnavailableException("provider error", ServiceException()))
+    fun `the port's classes and status, and no message`() {
+        val described =
+            ProviderFailure.describe("openai", EmbeddingUnavailableException("provider error", failure = "ServiceException", status = 401))
 
         described shouldBe "openai failed: EmbeddingUnavailableException < ServiceException, HTTP 401"
         described shouldNotContain "secret"

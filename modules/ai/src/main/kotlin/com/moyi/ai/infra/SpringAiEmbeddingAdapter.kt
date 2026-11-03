@@ -56,9 +56,29 @@ internal class SpringAiEmbeddingAdapter(
                 .sortedBy { it.index }
                 .map { it.output }
         } catch (e: Exception) {
-            if (generateSequence<Throwable>(e) { it.cause }.any { it is InterruptedException }) Thread.currentThread().interrupt()
-            throw EmbeddingUnavailableException("provider error", e)
+            val chain = generateSequence<Throwable>(e) { it.cause }.toList()
+            // Asked of the chain before it is dropped: the exception thrown carries none of it.
+            if (chain.any { it is InterruptedException }) Thread.currentThread().interrupt()
+            throw EmbeddingUnavailableException(
+                "provider error",
+                failure = chain.joinToString(" < ") { it.javaClass.simpleName },
+                status = chain.firstNotNullOfOrNull(::statusOf),
+            )
         }
+
+    /**
+     * An HTTP status read without reading a body: a `statusCode()` method (the OpenAI SDK's
+     * service exceptions), or [VoyageEmbeddingModel]'s own refusal, its message matched whole.
+     */
+    private fun statusOf(failure: Throwable): Int? =
+        failure.javaClass.methods
+            .firstOrNull { it.name == "statusCode" && it.parameterCount == 0 }
+            ?.let { runCatching { it.invoke(failure) as? Int }.getOrNull() }
+            ?: failure.message
+                ?.let { VOYAGE_REFUSAL.matchEntire(it) }
+                ?.groupValues
+                ?.get(1)
+                ?.toInt()
 
     private fun record(
         outcome: String,
@@ -75,6 +95,8 @@ internal class SpringAiEmbeddingAdapter(
     companion object {
         const val REQUESTS = "gratitude.ai.embedding.requests"
         const val LATENCY = "gratitude.ai.embedding.latency"
+
+        private val VOYAGE_REFUSAL = Regex("""Voyage refused the request: (\d{3})""")
     }
 }
 

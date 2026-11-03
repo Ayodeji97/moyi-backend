@@ -28,8 +28,15 @@ interface EmbeddingPort {
  * No vector could be made. The message is a fixed reason ("timeout", "provider error",
  * "no provider"), **never the text**: a provider's own message may quote its input, which is
  * entry or query text.
+ *
+ * **It never carries the provider's exception as its `cause`** (final review M4): a later
+ * `log.warn(..., e)` would print that exception's message, and the SDK's quote the request.
+ * What may be told of it is kept instead: [failure], the simple class names of its chain,
+ * outermost first and joined by `" < "`, and [status], an HTTP status where one could be read
+ * without reading a message body. Neither holds a word of the input.
  */
 class EmbeddingUnavailableException(
     reason: String,
-    cause: Throwable? = null,
-) : RuntimeException(reason, cause)
+    val failure: String? = null,
+    val status: Int? = null,
+) : RuntimeException(reason)

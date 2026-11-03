@@ -52,7 +52,42 @@ internal class SpringAiEmbeddingAdapterTest {
             )
         val thrown = shouldThrow<EmbeddingUnavailableException> { adapter.embed(listOf("secret words")) }
         thrown.message shouldBe "provider error"
+        // Final review M4: no provider exception rides along, so no `log.warn(..., e)` can print its message.
+        thrown.cause shouldBe null
         meters.counter("gratitude.ai.embedding.requests", "provider", "openai", "outcome", "failed").count() shouldBe 1.0
+    }
+
+    /** As the OpenAI SDK's service exceptions carry it: the body, which may quote the input, in the message. */
+    private class ServiceException : RuntimeException("401: {\"error\": \"secret words\"}") {
+        @Suppress("FunctionOnlyReturningConstant", "unused") // Read by reflection, as the SDK's is.
+        fun statusCode(): Int = 401
+    }
+
+    @Test
+    fun `a provider failure is told by its classes and status alone`() {
+        val adapter =
+            SpringAiEmbeddingAdapter(
+                model { throw IllegalStateException("wrapped", ServiceException()) },
+                EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL,
+                meters,
+                "openai",
+            )
+        val thrown = shouldThrow<EmbeddingUnavailableException> { adapter.embed(listOf("secret words")) }
+        thrown.cause shouldBe null
+        thrown.failure shouldBe "IllegalStateException < ServiceException"
+        thrown.status shouldBe 401
+    }
+
+    @Test
+    fun `Voyage's refusal gives its status`() {
+        val adapter =
+            SpringAiEmbeddingAdapter(
+                model { error("Voyage refused the request: 429") },
+                EmbeddingSpace.VOYAGE_3_5,
+                meters,
+                "voyage",
+            )
+        shouldThrow<EmbeddingUnavailableException> { adapter.embed(listOf("secret words")) }.status shouldBe 429
     }
 
     /** Review of Task 7: an interrupt wrapped by a client must still reach the caller as an interrupt. */
