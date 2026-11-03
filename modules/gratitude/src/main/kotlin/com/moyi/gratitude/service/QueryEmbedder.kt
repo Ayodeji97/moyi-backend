@@ -4,6 +4,7 @@ import com.moyi.ai.api.EmbeddingPort
 import com.moyi.ai.api.EmbeddingUnavailableException
 import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.SemanticMatch
+import com.moyi.gratitude.infra.database.EntryEmbeddings
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import jakarta.annotation.PreDestroy
@@ -59,7 +60,8 @@ internal class QueryEmbedder(
             disabled.increment()
             return null
         }
-        val match = embed(query)?.takeIf { it.size == space.dimensions }?.let { SemanticMatch(space, it, maxDistance) }
+        val table = EntryEmbeddings.vectorTableOf(space)
+        val match = embed(query)?.takeIf { it.size == space.dimensions }?.let { SemanticMatch(table, it, maxDistance) }
         (if (match == null) degraded else used).increment()
         return match
     }

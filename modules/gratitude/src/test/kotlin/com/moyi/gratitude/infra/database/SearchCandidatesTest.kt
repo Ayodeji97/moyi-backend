@@ -193,7 +193,7 @@ internal class SearchCandidatesTest(
         ) shouldBe 1
     }
 
-    private fun semantic() = SemanticMatch(SPACE, NEAR, MAX_DISTANCE)
+    private fun semantic() = SemanticMatch(EntryEmbeddings.vectorTableOf(SPACE), NEAR, MAX_DISTANCE)
 
     private fun lamp() = SearchTerms.of("lamp")!!
 

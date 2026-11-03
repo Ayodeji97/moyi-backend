@@ -283,7 +283,7 @@ internal class RetrievalEvalTest(
         space: EmbeddingSpace,
     ): List<String> {
         // The ranking never reads the cut-off (RememberTest's calmLight): any value will do.
-        val meaning = SemanticMatch(space, vector, 0.0)
+        val meaning = SemanticMatch(EntryEmbeddings.vectorTableOf(space), vector, 0.0)
         val days = getDays.remember(seeded.readers.getValue(query.bond), terms(query), meaning, RetrievalMetrics.K)
         return days.map { seeded.entryOn.getValue(query.bond to it.date) }
     }
@@ -298,7 +298,7 @@ internal class RetrievalEvalTest(
     ): Double? =
         RetrievalMetrics.pooledPrecision(
             golden.queries.map { query ->
-                val meaning = SemanticMatch(space, asked.getValue(query), maxDistance)
+                val meaning = SemanticMatch(EntryEmbeddings.vectorTableOf(space), asked.getValue(query), maxDistance)
                 val found = mutableListOf<String>()
                 var before: LocalDate? = null
                 do {

@@ -328,6 +328,29 @@ class ArchitectureTest {
     }
 
     @Test
+    fun `a module's domain imports nothing from another module`() {
+        // "domain depends on nothing" (CLAUDE.md), across modules as well as across layers: the
+        // layer rule above asks only about a module's own layers, so `gratitude.domain` importing
+        // `ai.api` passed it (final review M5). Main sources only, for the layer rule's reason.
+        val violations =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
+                .flatMap { file ->
+                    val from = locationOf(file.packagee?.name)?.takeIf { it.layer == "domain" } ?: return@flatMap emptyList()
+                    file.imports.mapNotNull { import ->
+                        val to = locationOf(import.name)
+                        if (to != null && to.module != from.module) "${file.name}: ${import.name}" else null
+                    }
+                }
+
+        assertTrue(
+            violations.isEmpty(),
+            "A module's domain depends on nothing, another module's api included: map the foreign type in service " +
+                "or infra into one the domain owns. Found: $violations",
+        )
+    }
+
+    @Test
     fun `JPA entities live only in a module's infra layer`() {
         val violations = project.classes().inModuleButNotIn("infra") { it.hasAnnotationWithName("Entity", "jakarta.persistence.Entity") }
 

@@ -94,7 +94,8 @@ internal class SearchPlanMeasurement(
         embed("e.bond_id <> ?::uuid AND e.id IN (SELECT id FROM entries WHERE bond_id <> ?::uuid LIMIT $VECTOR_ROWS)", BOND, BOND)
         jdbc.execute("ANALYZE entry_embeddings_openai_1536")
         val query = FloatArray(EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL.dimensions) { (it % 7).toFloat() / 7f - 0.5f }
-        val semantic = SemanticMatch(EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL, query, SEMANTIC_MAX_DISTANCE)
+        val semantic =
+            SemanticMatch(EntryEmbeddings.vectorTableOf(EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL), query, SEMANTIC_MAX_DISTANCE)
         val large =
             analyzed {
                 WORDS.associateWith { word ->

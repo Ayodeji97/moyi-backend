@@ -282,7 +282,8 @@ internal class RememberTest(
     // ---- helpers ----
 
     /** "calm light" as the fake embeds it. The cut-off is never read by a ranking, so it is set to admit nothing. */
-    private fun calmLight() = SemanticMatch(FakeEmbeddingPort.DEFAULT_SPACE, NEAR.getValue("calm light"), 0.0)
+    private fun calmLight() =
+        SemanticMatch(EntryEmbeddings.vectorTableOf(FakeEmbeddingPort.DEFAULT_SPACE), NEAR.getValue("calm light"), 0.0)
 
     private fun semantic(outcome: String) = meters.counter("gratitude.search.semantic", "outcome", outcome).count()
 

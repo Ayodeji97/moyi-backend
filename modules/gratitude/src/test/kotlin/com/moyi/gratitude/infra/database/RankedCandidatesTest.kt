@@ -116,7 +116,7 @@ internal class RankedCandidatesTest(
         )
     }
 
-    private fun semantic() = SemanticMatch(SPACE, FloatArray(SPACE.dimensions).also { it[0] = 1f }, 0.0)
+    private fun semantic() = SemanticMatch(EntryEmbeddings.vectorTableOf(SPACE), FloatArray(SPACE.dimensions).also { it[0] = 1f }, 0.0)
 
     private companion object {
         const val PLAN_BONDS = 20

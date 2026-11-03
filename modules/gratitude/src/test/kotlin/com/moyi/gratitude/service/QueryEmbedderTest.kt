@@ -7,6 +7,7 @@ import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondMembership
 import com.moyi.common.security.AccessTokenIssuer
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.gratitude.domain.VectorTable
 import com.moyi.gratitude.infra.FakeUserDirectory
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import com.moyi.gratitude.web.EntryChangesTest
@@ -133,7 +134,7 @@ internal class QueryEmbedderTest(
 
         val match = embedder(port { vector }).matchFor(membership, "calm light").shouldNotBeNull()
 
-        match.space shouldBe SPACE
+        match.table shouldBe VectorTable.OPENAI_1536
         match.vector shouldBe vector
         match.maxDistance shouldBe MAX_DISTANCE
         match.toString() shouldNotContain "0.123"

@@ -177,7 +177,7 @@ internal class ArchiveDays(
      * parsed by `plainto_tsquery` (T-11): every word, as a whole word, in one entry.
      *
      * **With [semantic], an entry also matches by meaning** (ADR-0054, spec §3.5): its vector in
-     * [SemanticMatch.space]'s table lies within [SemanticMatch.maxDistance] of `q`'s. The two are
+     * [SemanticMatch.table] lies within [SemanticMatch.maxDistance] of `q`'s. The two are
      * one `OR` inside the one row's predicate, so everything above (the gate's two clauses, the
      * withdrawn, the order and the keyset) holds for a meaning match by construction: the
      * partner's unrevealed words match by meaning no more than by keyword (T-01). The vector is
@@ -259,7 +259,7 @@ internal class ArchiveDays(
 
     /**
      * "Remember when"'s meaning ranking: at most [limit] ids of entries of [bondId] whose vector in
-     * [SemanticMatch.space]'s table is nearest [SemanticMatch.vector], nearest first, inside the
+     * [SemanticMatch.table] is nearest [SemanticMatch.vector], nearest first, inside the
      * same gate as [rankedByWords]. **No [SemanticMatch.maxDistance] cut-off**: a ranking needs
      * none, and the fusion puts what both rankings hold first.
      */
@@ -432,7 +432,7 @@ internal class ArchiveDays(
                                 // `x.bond_id = ?`, the bond itself and not `e.bond_id`: Postgres may run the EXISTS
                                 // as a hashed subplan, read once, and only a constant bounds that read to the bond.
                                 else -> {
-                                    "AND ($WORDS_MATCH OR EXISTS (SELECT 1 FROM ${EntryEmbeddings.tableOf(semantic.space)} x " +
+                                    "AND ($WORDS_MATCH OR EXISTS (SELECT 1 FROM ${EntryEmbeddings.nameOf(semantic.table)} x " +
                                         "WHERE x.bond_id = ? AND x.entry_id = e.id AND x.embedding <=> ?::vector <= ?))"
                                 }
                             },
@@ -487,7 +487,7 @@ internal class ArchiveDays(
                     bondId,
                     memberId,
                     withdrawnMemberIds,
-                    join = "JOIN ${EntryEmbeddings.tableOf(semantic.space)} x ON x.entry_id = e.id AND x.bond_id = ?",
+                    join = "JOIN ${EntryEmbeddings.nameOf(semantic.table)} x ON x.entry_id = e.id AND x.bond_id = ?",
                     joinArguments = listOf(bondId),
                 )
             val sql =

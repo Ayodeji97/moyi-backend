@@ -1,6 +1,7 @@
 package com.moyi.gratitude.infra.database
 
 import com.moyi.ai.api.EmbeddingSpace
+import com.moyi.gratitude.domain.VectorTable
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import java.security.MessageDigest
@@ -105,33 +106,44 @@ internal class EntryEmbeddings(
 
     /** The entry's rows in every table: its words have changed or gone. */
     fun deleteForEntry(entryId: UUID) {
-        EmbeddingSpace.entries.forEach { space ->
-            jdbc.update("DELETE FROM ${tableOf(space)} WHERE entry_id = ?", entryId)
+        VectorTable.entries.forEach { table ->
+            jdbc.update("DELETE FROM ${nameOf(table)} WHERE entry_id = ?", entryId)
         }
     }
 
     /** The bond's rows in every table, and how many there were. */
     fun deleteForBond(bondId: UUID): Int =
-        EmbeddingSpace.entries.sumOf { space ->
-            jdbc.update("DELETE FROM ${tableOf(space)} WHERE bond_id = ?", bondId)
+        VectorTable.entries.sumOf { table ->
+            jdbc.update("DELETE FROM ${nameOf(table)} WHERE bond_id = ?", bondId)
         }
 
     /** The bond's rows across every table. */
     fun countFor(bondId: UUID): Int =
-        EmbeddingSpace.entries.sumOf { space ->
-            jdbc.queryForObject("SELECT count(*) FROM ${tableOf(space)} WHERE bond_id = ?", Int::class.java, bondId)!!
+        VectorTable.entries.sumOf { table ->
+            jdbc.queryForObject("SELECT count(*) FROM ${nameOf(table)} WHERE bond_id = ?", Int::class.java, bondId)!!
         }
 
     internal companion object {
         /**
-         * The table [space]'s vectors live in. An exhaustive `when`, so a new space does not
-         * compile until it has a table; static, so `ArchiveDays`' companion can name it.
+         * The table [space]'s vectors live in, as gratitude names it. An exhaustive `when`, so a
+         * new space does not compile until it has a table. Here, in `infra`, and not in
+         * `service`: both read it, and `infra` may not depend on `service` (`ArchitectureTest`).
          */
-        fun tableOf(space: EmbeddingSpace): String =
+        fun vectorTableOf(space: EmbeddingSpace): VectorTable =
             when (space) {
-                EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL -> "entry_embeddings_openai_1536"
-                EmbeddingSpace.VOYAGE_3_5 -> "entry_embeddings_voyage_1024"
+                EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL -> VectorTable.OPENAI_1536
+                EmbeddingSpace.VOYAGE_3_5 -> VectorTable.VOYAGE_1024
             }
+
+        /** [table]'s name in SQL; static, so `ArchiveDays`' companion can name it. */
+        fun nameOf(table: VectorTable): String =
+            when (table) {
+                VectorTable.OPENAI_1536 -> "entry_embeddings_openai_1536"
+                VectorTable.VOYAGE_1024 -> "entry_embeddings_voyage_1024"
+            }
+
+        /** The table [space]'s vectors live in: [nameOf] of [vectorTableOf]. */
+        fun tableOf(space: EmbeddingSpace): String = nameOf(vectorTableOf(space))
 
         /** [vector] as pgvector's text form, `[1.0,0.5,…]`, for a `?::vector` parameter. */
         fun vectorLiteral(vector: FloatArray): String = vector.joinToString(",", prefix = "[", postfix = "]")
