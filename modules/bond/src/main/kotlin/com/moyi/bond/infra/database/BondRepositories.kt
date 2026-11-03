@@ -68,13 +68,15 @@ internal interface BondRepository : Repository<BondEntity, UUID> {
      * bond's while its setting is on. **Not a bond pending deletion** (final
      * review M2): its history is about to be destroyed, and sending it to the
      * provider in its last days would serve no search worth the disclosure.
+     * **An allow-list of statuses** (V9's CHECK names five), so a status the
+     * walk has not been told about, such as Phase 5's `DELETED`, is skipped.
      */
     @Query(
         nativeQuery = true,
         value = """
             SELECT b.id FROM bonds b
             WHERE b.semantic_search_enabled
-              AND b.status <> 'PENDING_DELETION'
+              AND b.status IN ('PENDING_MEMBER', 'ACTIVE', 'ARCHIVED')
               AND (CAST(:after AS uuid) IS NULL OR b.id > CAST(:after AS uuid))
             ORDER BY b.id
             LIMIT :limit

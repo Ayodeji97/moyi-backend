@@ -234,6 +234,17 @@ internal class SemanticSearchSettingTest(
         access.bondsWithSemanticSearch(null, 100).map { it.toString() } shouldNotContain leaving
     }
 
+    /** Fix round M3: an allow-list, so a status the walk has not been told about (DELETED, Phase 5) is skipped by default. */
+    @Test
+    fun `bondsWithSemanticSearch lists only the statuses it allows`() {
+        val kept = solo(ada)
+        val deleted = solo(bea)
+        jdbc.update("UPDATE bonds SET status = 'DELETED' WHERE id = ?", UUID.fromString(deleted)) shouldBe 1
+
+        access.bondsWithSemanticSearch(null, 100).map { it.toString() } shouldContain kept
+        access.bondsWithSemanticSearch(null, 100).map { it.toString() } shouldNotContain deleted
+    }
+
     @Test
     fun `bondsWithSemanticSearch pages by id`() {
         val all = listOf(pair(ada, bea), solo(cy), solo(dee)).map(UUID::fromString).sorted()
