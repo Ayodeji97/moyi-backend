@@ -48,7 +48,7 @@ internal class EntryEmbeddings(
      * Up to [limit] live entries of [bondId] with words and no row in [space]'s table, oldest
      * first, **none written by a member in [withdrawnMemberIds]**. Whether the bond's setting
      * allows embedding at all is the caller's to ask, and so is who has withdrawn: both come
-     * from `BondAccess.closingViewOf`, read in the caller's transaction.
+     * from the bond's unguarded view, which the sweep reads in the caller's transaction.
      *
      * The withdrawn are left out because their words are unreadable from the withdrawal's
      * commit, while the consumer that erases them runs later (ADR-0035): a sweep in between must
