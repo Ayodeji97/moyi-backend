@@ -18,10 +18,11 @@ internal enum class ProposalKind { TIMEZONE_CHANGE, DELETION, SEMANTIC_SEARCH_ON
  * A change one member has asked for and the other has not yet agreed to
  * (FR-027, FR-028, BR-6, ADR-0030).
  *
- * **One type for both kinds, because the rules are one set of rules:** seven
+ * **One type for every kind, because the rules are one set of rules:** seven
  * days to answer, only the *other* member may confirm, either may cancel, and
  * an unanswered one lapses rather than nagging. [payload] is the only thing
- * that differs — a zone id for a timezone change, nothing for a deletion.
+ * that differs — a zone id for a timezone change, nothing for a deletion or
+ * for turning semantic search on.
  *
  * Lapsing is a **predicate, not a state**: the clock is asked at read time, in
  * `BondProposalRepository.findLive`, and nothing ever writes a row to say "this

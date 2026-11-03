@@ -106,8 +106,7 @@ internal class TimedOutCallTest {
         slowBody: Boolean = false,
     ) {
         if (slowBody) stub.trickle = TRICKLE else stub.stall = true
-        val failure = shouldThrow<EmbeddingUnavailableException> { port.embed(listOf("first bond")) }
-        println("timeout cause chain: " + generateSequence<Throwable>(failure) { it.cause }.joinToString(" <- ") { it.javaClass.name })
+        shouldThrow<EmbeddingUnavailableException> { port.embed(listOf("first bond")) }
 
         Thread.currentThread().isInterrupted shouldBe false
         stub.stall = false
