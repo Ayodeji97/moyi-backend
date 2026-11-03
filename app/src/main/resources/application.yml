@@ -305,3 +305,16 @@ management:
 # address is the client, which behind a proxy means every request shares one
 # address — over-strict and visible, rather than spoofable. Production sets
 # it to kamal-proxy's Docker range and Cloudflare's published ranges.
+
+moyi:
+  gratitude:
+    semantic-search:
+      # The largest distance (1 - cosine similarity) at which the search box still counts an
+      # entry as matching by meaning, per model. Chosen from RetrievalEvalTest's printout on the
+      # golden set (2026-11-03, text-embedding-3-small): precision is 1.0 up to 0.53, 0.97 at
+      # 0.57, 0.92 at 0.59 (the largest still >= 0.9) and 0.89 at 0.60. 0.57 is taken over 0.59
+      # for its margin above the 0.9 floor at the cost of one true match in 33. RetrievalEvalTest
+      # gates the value set here; re-run tools/embedding-eval before changing it. A model with
+      # no entry here has nothing embedded and searches by words alone (ADR-0054).
+      max-distance:
+        OPENAI_TEXT_EMBEDDING_3_SMALL: 0.57
