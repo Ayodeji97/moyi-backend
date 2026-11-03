@@ -226,10 +226,9 @@ internal class SemanticSearchSettingTest(
         val kept = solo(ada)
         val leaving = solo(bea) // a lone member's request confirms itself
         post(bea, "/bonds/$leaving/deletion-request").status shouldBe 202
-        jdbc.queryForObject("SELECT status FROM bonds WHERE id = ?", String::class.java, UUID.fromString(leaving)) shouldBe
-            "PENDING_DELETION"
-        jdbc.queryForObject("SELECT semantic_search_enabled FROM bonds WHERE id = ?", Boolean::class.java, UUID.fromString(leaving)) shouldBe
-            true
+        val row = jdbc.queryForMap("SELECT status, semantic_search_enabled FROM bonds WHERE id = ?", UUID.fromString(leaving))
+        row["status"] shouldBe "PENDING_DELETION"
+        row["semantic_search_enabled"] shouldBe true
 
         access.bondsWithSemanticSearch(null, 100).map { it.toString() } shouldContain kept
         access.bondsWithSemanticSearch(null, 100).map { it.toString() } shouldNotContain leaving
