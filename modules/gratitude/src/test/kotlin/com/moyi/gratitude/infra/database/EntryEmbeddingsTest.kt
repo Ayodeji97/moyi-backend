@@ -280,7 +280,8 @@ internal class EntryEmbeddingsTest(
     fun `each space has its own table, and a pending entry never prints its words`() {
         EmbeddingSpace.entries.map { EntryEmbeddings.tableOf(it) } shouldBe
             listOf("entry_embeddings_openai_1536", "entry_embeddings_voyage_1024")
-        EntryEmbeddings.Pending(UUID.randomUUID(), UUID.randomUUID(), "secret words").toString() shouldNotContain "secret"
+        EntryEmbeddings.Pending(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "secret words").toString() shouldNotContain
+            "secret"
     }
 
     // ---- helpers ----

@@ -3,6 +3,8 @@ package com.moyi.gratitude.infra.database
 import com.moyi.ai.api.EmbeddingSpace
 import com.moyi.gratitude.domain.VectorTable
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.PreparedStatementSetter
+import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Component
 import java.security.MessageDigest
 import java.time.Instant
@@ -31,6 +33,7 @@ internal class EntryEmbeddings(
     data class Pending(
         val entryId: UUID,
         val bondId: UUID,
+        val authorMemberId: UUID,
         val text: String,
     ) {
         override fun toString() = "Pending($entryId)"
@@ -38,30 +41,45 @@ internal class EntryEmbeddings(
 
     /**
      * Up to [limit] live entries of [bondId] with words and no row in [space]'s table, oldest
-     * first. Whether the bond's setting allows embedding at all is the caller's to ask.
+     * first, **none written by a member in [withdrawnMemberIds]**. Whether the bond's setting
+     * allows embedding at all is the caller's to ask, and so is who has withdrawn: both come
+     * from `BondAccess.closingViewOf`, read in the caller's transaction.
+     *
+     * The withdrawn are left out because their words are unreadable from the withdrawal's
+     * commit, while the consumer that erases them runs later (ADR-0035): a sweep in between must
+     * not send them (final review I1).
      */
     fun missing(
         space: EmbeddingSpace,
         bondId: UUID,
         limit: Int,
-    ): List<Pending> =
-        jdbc.query(
+        withdrawnMemberIds: Set<UUID> = emptySet(),
+    ): List<Pending> {
+        val excluding =
+            withdrawnMemberIds
+                .takeIf { it.isNotEmpty() }
+                ?.let { ids -> "AND e.author_member_id NOT IN (${ids.joinToString { "?" }})" }
+                .orEmpty()
+        return jdbc.query(
             """
-            SELECT e.id, e.bond_id, e.text_search FROM entries e
-            WHERE e.bond_id = ? AND e.text_search IS NOT NULL AND ${EntryRows.LIVE_ROW}
+            SELECT e.id, e.bond_id, e.author_member_id, e.text_search FROM entries e
+            WHERE e.bond_id = ? AND e.text_search IS NOT NULL AND ${EntryRows.LIVE_ROW} $excluding
               AND NOT EXISTS (SELECT 1 FROM ${tableOf(space)} x WHERE x.entry_id = e.id)
             ORDER BY e.created_at LIMIT ?
             """.trimIndent(),
-            { row, _ ->
+            PreparedStatementSetter { statement ->
+                (listOf<Any>(bondId) + withdrawnMemberIds + limit).forEachIndexed { index, value -> statement.setObject(index + 1, value) }
+            },
+            RowMapper { row, _ ->
                 Pending(
                     row.getObject("id", UUID::class.java),
                     row.getObject("bond_id", UUID::class.java),
+                    row.getObject("author_member_id", UUID::class.java),
                     row.getString("text_search"),
                 )
             },
-            bondId,
-            limit,
         )
+    }
 
     /**
      * Writes [vector] for [entryId] in [space]'s table **only if the entry, in [bondId], still

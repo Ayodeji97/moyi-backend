@@ -25,7 +25,9 @@ import java.util.UUID
  * **The read asks the setting again before it reads any words.** The page of bonds was read
  * before the walk reached this one, and a member may have turned it off since: their words must
  * not be sent. No lock is needed here; one that turns it off during the provider call is the
- * write's to catch.
+ * write's to catch. **Nor any word of a member who has withdrawn**: the same read names them,
+ * and their entries are left out before the words are read (final review I1); one that
+ * withdraws during the provider call is the write's to catch, as a turn-off is.
  *
  * **The write re-checks under the bond's lock.** It takes [BondAccess.lockClosingViewOf], the
  * same `bonds` row lock `UpdateBond.patch` takes before it turns the setting off, and reads the
@@ -46,6 +48,7 @@ import java.util.UUID
  * not a failure; the gauge is stamped as for any quiet run.
  */
 @Component
+@Suppress("LongParameterList") // What Spring hands the sweep.
 internal class EmbedPendingEntries(
     private val port: EmbeddingPort,
     private val embeddings: EntryEmbeddings,
@@ -86,8 +89,10 @@ internal class EmbedPendingEntries(
             transactions
                 .execute {
                     // Turned off since the page was read: no word of this bond is read, or sent.
-                    if (access.closingViewOf(bondId)?.semanticSearchEnabled == true) {
-                        embeddings.missing(space, bondId, minOf(BATCH, run.left))
+                    // Nor any word of a member who has withdrawn, before their erasure has run.
+                    val view = access.closingViewOf(bondId)
+                    if (view?.semanticSearchEnabled == true) {
+                        embeddings.missing(space, bondId, minOf(BATCH, run.left), view.withdrawnMemberIds)
                     } else {
                         emptyList()
                     }
@@ -107,7 +112,10 @@ internal class EmbedPendingEntries(
         run.skips += pending.size - wrote
     }
 
-    /** How many of [vectors] were written: none if the setting is off by the time the lock is held. */
+    /**
+     * How many of [vectors] were written: none if the setting is off by the time the lock is held,
+     * and none of a member who has withdrawn by then (the lock's view holds them; I1).
+     */
     private fun write(
         space: EmbeddingSpace,
         bondId: UUID,
@@ -123,7 +131,8 @@ internal class EmbedPendingEntries(
             if (view?.semanticSearchEnabled != true) {
                 0
             } else {
-                pending.zip(vectors).count { (entry, vector) ->
+                // A withdrawal that committed while the provider was called: its words are not kept.
+                pending.zip(vectors).filterNot { (entry, _) -> entry.authorMemberId in view.withdrawnMemberIds }.count { (entry, vector) ->
                     embeddings.upsert(space, entry.entryId, bondId, vector, EntryEmbeddings.hashOf(entry.text), now)
                 }
             }

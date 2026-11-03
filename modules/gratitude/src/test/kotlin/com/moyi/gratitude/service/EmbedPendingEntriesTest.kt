@@ -14,6 +14,7 @@ import com.moyi.gratitude.infra.database.EntryEmbeddings
 import com.moyi.gratitude.web.EntryChangesTest
 import com.moyi.identity.api.UserDirectory
 import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.shouldBe
 import io.micrometer.core.instrument.MeterRegistry
@@ -209,6 +210,42 @@ internal class EmbedPendingEntriesTest(
         embeddings.countFor(second.uuid) shouldBe 0
     }
 
+    /**
+     * Final review I1. Bea ends the bond and takes her words back: from that commit they are
+     * unreadable, but the `EntriesWithdrawn` consumer erases them later, and the bond, archived,
+     * keeps its setting on. A sweep that runs first must send none of them. The consumer is held
+     * back here: nothing dispatches the outbox, and her row still holds its words.
+     */
+    @Test
+    fun `a withdrawn member's words are never sent while their erasure waits`() {
+        val bond = pair()
+        submit(bond, "ada's words")
+        val hers = submit(bond, "bea's words", author = bea)
+        rig.block(bea, bond, withdraw = true)
+        jdbc.queryForObject("SELECT text_search FROM entries WHERE id = ?::uuid", String::class.java, hers) shouldBe "bea's words"
+        access.closingViewOf(bond.uuid)!!.semanticSearchEnabled shouldBe true
+
+        sweep.embedPending(10) shouldBe EmbeddingRun(embedded = 1, skipped = 0, failed = false)
+
+        fake.texts shouldBe listOf("ada's words")
+        vectorsOf(hers) shouldBe 0
+    }
+
+    /** I1, the write's half: a withdrawal that commits while the provider is called is seen under the lock. */
+    @Test
+    fun `a withdrawal committed during the provider call leaves no vector of the withdrawn`() {
+        val bond = pair()
+        val his = submit(bond, "ada's words")
+        val hers = submit(bond, "bea's words", author = bea)
+        fake.during = { rig.block(bea, bond, withdraw = true) }
+
+        sweep.embedPending(10) shouldBe EmbeddingRun(embedded = 1, skipped = 1, failed = false)
+
+        fake.texts shouldContainExactlyInAnyOrder listOf("ada's words", "bea's words") // one created_at: either order
+        vectorsOf(his) shouldBe 1
+        vectorsOf(hers) shouldBe 0
+    }
+
     /** ADR-0054 decision 1: a provider call of seconds never holds a connection or a lock. */
     @Test
     fun `the provider is called with no transaction open`() {
@@ -301,6 +338,9 @@ internal class EmbedPendingEntriesTest(
     // ---- helpers ----
 
     private val String.uuid: UUID get() = UUID.fromString(this)
+
+    private fun vectorsOf(entry: String): Int =
+        jdbc.queryForObject("SELECT count(*) FROM entry_embeddings_openai_1536 WHERE entry_id = ?::uuid", Int::class.java, entry)!!
 
     private fun counted(outcome: String): Double = meters.counter("gratitude.ai.embedding.entries", "outcome", outcome).count()
 
