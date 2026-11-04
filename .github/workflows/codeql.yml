@@ -121,6 +121,12 @@ jobs:
         uses: github/codeql-action/analyze@v4
         with:
           category: /language:java-kotlin
+          # The extraction build leaves a Gradle daemon with a 4 GB heap.
+          # CodeQL otherwise budgets ~14 GB on the 16 GB runner, and query
+          # execution has twice lost the runner before producing results.
+          # Leave room for Gradle, the OS and the action's other processes.
+          ram: 6144
+          threads: 2
 
       # The check that makes the rest of this file trustworthy.
       #
