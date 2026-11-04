@@ -16,9 +16,10 @@
 # Then it prints the time taken, against the RTO of four hours (NFR-024), and
 # removes everything it made, the decrypted dump included.
 #
-# Nothing it starts can reach production: its database, cache and app are
-# containers on a network of its own, and the app is given throwaway keys and
-# a Resend key that does not exist, so no email can leave it.
+# Its database, cache and app are containers on a network of their own.
+# The app gets throwaway keys, disabled timers and no production service
+# credentials. Email keeps a non-logging sender with an invalid key and
+# loopback endpoint; push, media and embeddings use their offline providers.
 #
 #   ops/backup/restore-drill.sh --email <an account in the backup> [--object daily/<name>] [--version <commit>]
 #
@@ -157,6 +158,19 @@ openssl pkey -in "$WORK/jwt.pem" -pubout -out "$WORK/jwt.pub"
   echo "MOYI_SECURITY_JWT_PUBLIC_KEY_PEM=$(tr -d '\n' <"$WORK/jwt.pub")"
   echo "MOYI_SECURITY_HASHING_SECRET=$(openssl rand -hex 32)"
   echo "MOYI_SECURITY_ARGON2_ITERATIONS=6"
+  # A recovery drill reads data; it must not replay restored outbox events,
+  # send notifications, decode uploads or send entry text to an AI provider.
+  echo "MOYI_SCHEDULING_ENABLED=false"
+  echo "MOYI_NOTIFICATION_PUSH_PROVIDER=log"
+  echo "MOYI_MEDIA_STORAGE_PROVIDER=unavailable"
+  echo "MOYI_MEDIA_PROCESSING_PROVIDER=off"
+  echo "MOYI_MEDIA_MODERATION_IMAGE_PROVIDER=none"
+  echo "MOYI_MEDIA_MODERATION_KNOWNIMAGES_PROVIDER=none"
+  echo "MOYI_MEDIA_MODERATION_VOICE_PROVIDER=none"
+  echo "MOYI_AI_EMBEDDING_PROVIDER=none"
+  # Keep email bodies out of logs; a real sender has neither a valid key
+  # nor a reachable endpoint. No production provider credential is supplied.
+  echo "MOYI_NOTIFICATION_EMAIL_RESEND_BASE_URL=http://127.0.0.1:9"
   echo "MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY=re_restore_drill_sends_nothing"
   echo "MOYI_NOTIFICATION_EMAIL_FROM=Moyi drill <drill@localhost>"
   echo "MOYI_IDENTITY_VERIFICATION_LINK_BASE_URL=http://localhost/verify"

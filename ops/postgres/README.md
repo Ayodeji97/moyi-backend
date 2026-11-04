@@ -42,7 +42,9 @@ The production restore below remains a separate gate.
    on the Mac. It needs the vault and the account password, and must end
    `RESTORE DRILL PASSED`. Use the CI-published image of the exact commit to
    be deployed. Production was at V36 on 2026-11-04, so this checks V37–V41,
-   not only V40/V41. Record elapsed time and migration validation. Do not
+   not only V40/V41. The drill disables scheduled work and external
+   providers; its email endpoint is loopback and no production provider
+   credentials are supplied. Record elapsed time and migration validation. Do not
    substitute a fresh synthetic database for this gate.
 5. Merge the image PR and wait for main's CI, including its manifest job.
    Deploy from a clean checkout whose HEAD is current `origin/main`.
