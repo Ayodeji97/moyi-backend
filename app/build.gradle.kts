@@ -130,6 +130,14 @@ tasks.named<Test>("test") {
         .file(rootProject.layout.projectDirectory.file("config/deploy.yml"))
         .withPropertyName("deployConfiguration")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    // PostgresImageTest reads these too: changing only an image in compose or
+    // the drill must invalidate the cached test result.
+    inputs
+        .files(
+            rootProject.layout.projectDirectory.file("docker-compose.yml"),
+            rootProject.layout.projectDirectory.file("ops/backup/restore-drill.sh"),
+        ).withPropertyName("postgresImageConfigurations")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     // And the secrets file it checks deploy.yml's secrets against, for the same reason
     // (seen: R2_ENDPOINT taken out of its fetch line, and the suite reported up to date).
     inputs

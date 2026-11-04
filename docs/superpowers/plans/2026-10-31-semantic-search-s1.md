@@ -1288,3 +1288,13 @@ Not done by an agent. Daniel runs each step, with Claude guiding (the deploy-tog
 2. Mutations, one at a time (break it, see red, restore it): remove `SEEN_ROW` from the gated-entry builder `rankedByMeaning` uses (Review focus 1's search and remember tests must fail); remove the hash condition from `upsert` (the edit-race test must fail); remove the `deleteForEntry` call in `EntryStore.update` (the edit test must fail); skip the `semanticSearchEnabled` re-check in the sweep's write (the off-race test must fail).
 3. Smoke run with measured counts in the header.
 4. The PR description lists what was run and what was only read.
+
+
+## Production image correction — 2026-11-04
+
+Task 11 must use `pgvector/pgvector:0.8.7-pg18-trixie`, not the plain
+`-pg18` tag shown above. The running production image and database report
+glibc/collation 2.41 (Debian 13); the plain tag uses Debian 12/glibc 2.36.
+The matching trixie image avoids changing collation underneath existing
+indexes. See `ops/postgres/README.md` for the restore gate, image swap and
+post-deploy checks. This changes the image variant, not ADR-0054 semantics.

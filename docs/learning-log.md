@@ -2942,3 +2942,19 @@ Wrong about (review of #117): "`kamal rollback` to the release before turns stor
          back, the configuration does not. Read in the gem, not assumed: the way off is now a
          pull request kept ready on a branch. And "the gate is a runbook step" was a gate
          nothing enforced; the deploy hook now asks the server.
+
+
+## 2026-11-04 · Ops · pgvector needs the same collation, not only the same Postgres major
+
+Expected: replacing Postgres 18 with a pgvector Postgres 18 image preserves the database.
+Reality: the plain pgvector tag uses Debian 12/glibc 2.36, while the running production
+         image and database report Debian 13/collation 2.41. The trixie variant preserves
+         those versions. Production, compose, tests and the restore drill now share it,
+         guarded by a test whose external files are declared as Gradle inputs.
+Wrong about: a systemd service being active means its watcher is stable. Production's
+         old media limiter passed its immediate check but had restarted over 153,000
+         times on an invalid Docker event format. Installing the already-merged fix
+         left it healthy with zero restarts on repeated checks. The current monitoring
+         script also needs V39 reporting tables, so enabling it before the app migration
+         would fail on the production V36 database. A fresh encrypted backup succeeded;
+         the vault-dependent restore drill remains a separate deployment gate.
