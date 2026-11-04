@@ -1,7 +1,9 @@
 package com.moyi.gratitude.infra.database
 
+import com.moyi.ai.api.EmbeddingSpace
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.gratitude.domain.SearchTerms
+import com.moyi.gratitude.domain.SemanticMatch
 import com.moyi.gratitude.infra.GratitudeTestApplication
 import io.kotest.assertions.withClue
 import io.kotest.matchers.shouldBe
@@ -71,6 +73,61 @@ internal class SearchPlanMeasurement(
             }
         withClue("plans that read beyond the measured bond: $tableWide") { tableWide shouldBe emptyList() }
         large.forEach { (word, plan) -> withClue("500k, $word: $plan") { (plan.milliseconds < NFR_004_MS) shouldBe true } }
+    }
+
+    /**
+     * ADR-0054 (the Task 7 review's carry): with semantic search on, the search's statement adds
+     * `OR EXISTS (… vector table … x.bond_id = ? …)` to the keyword match, which takes the keyword
+     * half off `entries_search_idx`. Asked of the same seed, with vectors for every entry of the
+     * measured bond and for [VECTOR_ROWS] entries of other bonds (all half a million would be 3 GB
+     * of OpenAI vectors; the vector table's other bonds matter only to its own `bond_id` scan, and
+     * the entries table is at full size). The same criterion, and no sequential scan of the vector
+     * table either. The query vector is random: what is measured is the plan's shape and time.
+     */
+    @Test
+    fun `a search with meaning on reads in proportion to its bond, not to the table`() {
+        jdbc.execute("TRUNCATE TABLE entries, bond_days CASCADE")
+        seed(bonds = listOf(BOND), days = TARGET_DAYS)
+        seed(bonds = List((SMALL - TARGET_DAYS * 2) / OTHER_ENTRIES) { UUID.randomUUID() }, days = OTHER_ENTRIES / 2)
+        seed(bonds = List((LARGE - SMALL) / OTHER_ENTRIES) { UUID.randomUUID() }, days = OTHER_ENTRIES / 2)
+        embed("e.bond_id = ?::uuid", BOND)
+        embed("e.bond_id <> ?::uuid AND e.id IN (SELECT id FROM entries WHERE bond_id <> ?::uuid LIMIT $VECTOR_ROWS)", BOND, BOND)
+        jdbc.execute("ANALYZE entry_embeddings_openai_1536")
+        val query = FloatArray(EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL.dimensions) { (it % 7).toFloat() / 7f - 0.5f }
+        val semantic =
+            SemanticMatch(EntryEmbeddings.vectorTableOf(EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL), query, SEMANTIC_MAX_DISTANCE)
+        val large =
+            analyzed {
+                WORDS.associateWith { word ->
+                    explain(ArchiveDays.matchingQuery(BOND, MEMBER, SearchTerms.of(word)!!, null, PAGE, emptySet(), semantic))
+                }
+            }
+
+        println("S1 SEMANTIC SEARCH MEASUREMENT 500k entries, ${TARGET_DAYS * 2 + VECTOR_ROWS} vectors: $large")
+        val tableWide =
+            large.mapNotNull { (word, plan) ->
+                "$word: $plan".takeIf { plan.widestIndexScan > TARGET_DAYS * 2 || plan.seqScans.isNotEmpty() }
+            }
+        withClue("plans that read beyond the measured bond: $tableWide") { tableWide shouldBe emptyList() }
+        large.forEach { (word, plan) -> withClue("500k, $word: $plan") { (plan.milliseconds < NFR_004_MS) shouldBe true } }
+    }
+
+    /** A random 1536-dimension vector about the origin, made per row, for the entries [where] picks: far from the query. */
+    private fun embed(
+        where: String,
+        vararg arguments: Any,
+    ) {
+        jdbc.update(
+            """
+            INSERT INTO entry_embeddings_openai_1536 (entry_id, bond_id, embedding, text_hash, created_at)
+            SELECT e.id, e.bond_id,
+                   ARRAY(SELECT (random() - 0.5)::real FROM generate_series(1, ${EmbeddingSpace.OPENAI_TEXT_EMBEDDING_3_SMALL.dimensions})
+                         WHERE e.id IS NOT NULL)::vector,
+                   sha256(convert_to(e.text_search, 'UTF8')), now()
+            FROM entries e WHERE $where
+            """.trimIndent(),
+            *arguments,
+        )
     }
 
     private data class Plan(
@@ -187,6 +244,10 @@ internal class SearchPlanMeasurement(
         const val NFR_004_MS = 300.0
         val WORDS = listOf("thank", "lamp", "zebra")
         val ON_THIS_DAY: LocalDate = LocalDate.of(2026, 6, 1)
-        val SEQ_SCAN_FORBIDDEN = setOf("bond_days", "entries")
+        val SEQ_SCAN_FORBIDDEN = setOf("bond_days", "entries", "entry_embeddings_openai_1536")
+        const val VECTOR_ROWS = 20_000
+
+        /** The vectors are random about the origin, so almost none lies this near the query: the bond is scanned to the end. */
+        const val SEMANTIC_MAX_DISTANCE = 0.9
     }
 }

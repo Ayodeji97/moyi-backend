@@ -120,6 +120,7 @@ internal class BondAccessAdapter(
                 // lock when `lockClosingViewOf` is the caller: an ending
                 // that committed while the closer waited is in this set.
                 withdrawnMemberIds = withdrawals.membersOf(id),
+                semanticSearchEnabled = bond.semanticSearchEnabled,
             )
         }
     }
@@ -129,6 +130,12 @@ internal class BondAccessAdapter(
         after: UUID?,
         limit: Int,
     ): List<UUID> = closing.everPairedAfter(after, limit)
+
+    @Transactional(readOnly = true)
+    override fun bondsWithSemanticSearch(
+        after: UUID?,
+        limit: Int,
+    ): List<UUID> = closing.withSemanticSearchAfter(after, limit)
 
     /**
      * Read through the caller's own membership row, as the guard reads it, so
@@ -169,6 +176,7 @@ internal class BondAccessAdapter(
             // the same set. Under `lockMembershipOf` this is read after the lock.
             withdrawnMemberIds = withdrawals.membersOf(membership.bondId),
             type = bond.type.toApi(),
+            semanticSearchEnabled = bond.semanticSearchEnabled,
         )
 
     /**
@@ -187,15 +195,16 @@ internal class BondAccessAdapter(
             dayBoundsAtFn = { at -> timeline.dayBoundsAt(at).toApi() },
             usedLabelsUpToFn = timeline::usedLabelsUpTo,
         )
-
-    private fun DayBounds.toApi(): BondDayBounds =
-        BondDayBounds(
-            date = date,
-            startsAt = startsAt,
-            endsAt = endsAt,
-            isDegenerate = isDegenerate,
-        )
 }
+
+/** Top-level, not a member, for [DomainBondType.toApi]'s reason below. */
+private fun DayBounds.toApi(): BondDayBounds =
+    BondDayBounds(
+        date = date,
+        startsAt = startsAt,
+        endsAt = endsAt,
+        isDegenerate = isDegenerate,
+    )
 
 /**
  * The second member's `joined_at` — the second-earliest across every

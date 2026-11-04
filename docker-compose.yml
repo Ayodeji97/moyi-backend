@@ -10,7 +10,7 @@ name: moyi-backend
 
 services:
   postgres:
-    image: postgres:18
+    image: pgvector/pgvector:0.8.7-pg18
     environment:
       POSTGRES_DB: moyi
       POSTGRES_USER: moyi

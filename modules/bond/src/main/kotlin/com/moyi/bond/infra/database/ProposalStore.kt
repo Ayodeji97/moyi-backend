@@ -69,4 +69,11 @@ internal class ProposalStore(
         bondId: BondId,
         now: Instant,
     ): Int = proposals.cancelLiveOf(bondId.value, now)
+
+    /** Cancels the open proposals of one kind only; [cancelLiveOf] stays for ending a bond (ADR-0028). */
+    fun cancelLive(
+        bondId: BondId,
+        kind: ProposalKind,
+        now: Instant,
+    ): Int = proposals.cancelLive(bondId.value, kind, now)
 }

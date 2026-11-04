@@ -11,10 +11,22 @@ internal const val SEARCH_OPERATION = "search"
  * mirrors `EntryText`'s. The drift guard is on the other side: `SearchTermsTest` reads the committed
  * `contracts/openapi.json` and holds both limits stated there to `SearchTerms`'s constants.
  */
-private const val SEARCH_MAX_OCTETS = 1024
+internal const val SEARCH_MAX_OCTETS = 1024
 
 /** Mirrors `gratitude.domain.SearchTerms.MAX_GRAPHEMES`; see [SEARCH_MAX_OCTETS]. */
-private const val SEARCH_MAX_GRAPHEMES = 100
+internal const val SEARCH_MAX_GRAPHEMES = 100
+
+/**
+ * The rules `q` is read by (ADR-0039 decision 9), stated once for the two routes that read it the
+ * same way (`SearchQuery.termsOf`): the search box and "Remember when" (ADR-0054).
+ */
+internal const val SEARCH_TERMS_RULES =
+    "1 to $SEARCH_MAX_GRAPHEMES characters (graphemes, counted on the " +
+        "NFKC-normalised, trimmed text), at most $SEARCH_MAX_OCTETS UTF-8 octets, not only space, no " +
+        "U+0000. `maxLength` states the octet cap in UTF-16 characters, a coarse hint. A value that " +
+        "cannot be searched is 422 VALIDATION_FAILED on `q`, and is never sent back. A value whose " +
+        "percent-decoded bytes are not UTF-8 is 400 MALFORMED_REQUEST, for a member and a stranger " +
+        "alike, after authentication and before the membership check."
 
 /**
  * `GET /bonds/{bondId}/search` (ADR-0039). The handler takes `q`, `limit` and `cursor` as
@@ -39,12 +51,7 @@ internal fun documentSearch(api: OpenAPI) {
                     parameter.required = true
                     parameter.schema = StringSchema().minLength(1).maxLength(SEARCH_MAX_OCTETS)
                     parameter.description =
-                        "The words to look for: 1 to $SEARCH_MAX_GRAPHEMES characters (graphemes, counted on the " +
-                        "NFKC-normalised, trimmed text), at most $SEARCH_MAX_OCTETS UTF-8 octets, not only space, no " +
-                        "U+0000. `maxLength` states the octet cap in UTF-16 characters, a coarse hint. A value that " +
-                        "cannot be searched is 422 VALIDATION_FAILED on `q`, and is never sent back. A value whose " +
-                        "percent-decoded bytes are not UTF-8 is 400 MALFORMED_REQUEST, for a member and a stranger " +
-                        "alike, after authentication and before the membership check. Words with no letter or digit " +
+                        "The words to look for: $SEARCH_TERMS_RULES Words with no letter or digit " +
                         "in them (punctuation, emoji) match nothing."
                 }
 

@@ -12,15 +12,18 @@ import com.moyi.common.events.OutboxEvent
 import com.moyi.common.events.ReceivedEvent
 import com.moyi.common.events.StartFrom
 import com.moyi.common.testing.IntegrationTest
+import com.moyi.gratitude.api.EmbeddingSweep
 import com.moyi.notification.api.NotificationPreferences
 import com.moyi.notification.api.Notifications
 import com.moyi.notification.api.PushCategory
 import com.moyi.notification.api.PushRecipient
 import com.moyi.notification.api.PushRequest
+import com.sun.net.httpserver.HttpServer
 import io.kotest.assertions.withClue
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldStartWith
+import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -35,16 +38,20 @@ import org.springframework.boot.test.context.TestConfiguration
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
 import org.springframework.boot.test.web.server.LocalServerPort
+import org.springframework.context.ApplicationContext
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Import
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.annotation.DirtiesContext
 import org.springframework.test.context.ActiveProfiles
+import org.springframework.test.context.DynamicPropertyRegistry
+import org.springframework.test.context.DynamicPropertySource
 import org.springframework.transaction.annotation.Propagation
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
+import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URI
 import java.net.http.HttpClient
@@ -55,7 +62,9 @@ import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 import javax.sql.DataSource
+import kotlin.math.sqrt
 
 /**
  * CLAUDE.md: entry text, passwords, tokens and invite codes never reach a
@@ -80,7 +89,9 @@ import javax.sql.DataSource
  * the archive (the feed with and without `favourites`, one day, a bookmark
  * set and removed, a conditional read that answers `304`), a search, by a
  * word that is watched (and the same word beside bytes that are not UTF-8, a `400`), on this day with a memory, the
- * milestones, a reaction set,
+ * milestones, a reaction set, an entry embedded by the sweep and a "Remember when" question
+ * (ADR-0054) through each provider's **real** client (Voyage's and OpenAI's, a subclass
+ * each) against a stub of its API, with its key,
  * a push token registered, sent to through the outbox and forgotten (ADR-0044),
  * replaced, refused and taken back, delete, an ending
  * that withdraws, the withdrawal's erasure by the dispatcher, a failing
@@ -120,7 +131,14 @@ import javax.sql.DataSource
  * was also seen failing before its pin was added, and so was the pin on
  * `StatementCreatorUtils`. On 2026-10-21 all fourteen pins were removed in turn,
  * the six search and error-resolver ones among them, and it failed for each; the
- * fifteenth, `Http11Processor`, was seen failing before it was added.
+ * fifteenth, `Http11Processor`, was seen failing before it was added. On 2026-11-02
+ * (ADR-0054) the first run with the Voyage client failed on two roads, both closed since and
+ * each seen failing again when removed: `RestClient` printing the request body by its
+ * `toString` at DEBUG (Voyage's request now redacts it), and the JDK's `HttpURLConnection`
+ * printing the `Authorization` header at DEBUG (the sixteenth pin). A log line of the request
+ * body written in `VoyageEmbeddingModel` itself was also seen failing. The OpenAI client, added
+ * to the scan in Task 10's review, failed on a third: Spring AI's `OpenAiEmbeddingModel` printing
+ * the SDK's request, its inputs in it, at TRACE (the seventeenth pin, `org.springframework.ai`).
  */
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -142,24 +160,35 @@ import javax.sql.DataSource
         // Each account registers from its own address: registration is three
         // an hour per address, and other classes in this JVM share the Redis.
         "moyi.security.client-address.trusted-proxies=127.0.0.0/8,::1/128",
+        // ADR-0054: with provider `none` no word is ever sent, so the scan would prove nothing. Each
+        // subclass runs one real provider client against an [EmbeddingStub], with a key that is
+        // watched; the provider, its base URL and its key are its @DynamicPropertySource's, because a
+        // property written here is printed by the test framework's own context cache at TRACE.
+        "moyi.gratitude.semantic-search.max-distance.VOYAGE_3_5=0.5",
+        "moyi.gratitude.semantic-search.max-distance.OPENAI_TEXT_EMBEDDING_3_SMALL=0.5",
     ],
 )
 @Import(SecretsNeverLoggedTest.ConsumerConfiguration::class)
 @ActiveProfiles("test")
 @ExtendWith(OutputCaptureExtension::class)
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-@Suppress("LongParameterList") // The real dispatcher and its proxied failing consumer are both exercised.
-class SecretsNeverLoggedTest(
-    @LocalServerPort private val port: Int,
-    @Autowired private val dispatcher: OutboxDispatcher,
-    @Autowired private val logging: LoggingSystem,
-    @Autowired dataSource: DataSource,
-    @Autowired private val publisher: EventPublisher,
-    @Autowired private val transactions: TransactionTemplate,
-    @Autowired private val failingConsumer: FailingConsumer,
-    @Autowired private val notifications: Notifications,
+abstract class SecretsNeverLoggedTest(
+    // Constructor injection only (doc 18 §4): each provider's subclass passes its port and its
+    // context, and the beans are read from the context, so neither repeats nine parameters.
+    private val port: Int,
+    context: ApplicationContext,
 ) : IntegrationTest() {
-    private val jdbc = JdbcTemplate(dataSource)
+    private val dispatcher = context.getBean(OutboxDispatcher::class.java)
+    private val logging = context.getBean(LoggingSystem::class.java)
+    private val publisher = context.getBean(EventPublisher::class.java)
+    private val transactions = context.getBean(TransactionTemplate::class.java)
+    private val failingConsumer = context.getBean(FailingConsumer::class.java)
+    private val notifications = context.getBean(Notifications::class.java)
+    private val sweep = context.getBean(EmbeddingSweep::class.java)
+    private val jdbc = JdbcTemplate(context.getBean(DataSource::class.java))
+
+    /** ADR-0054: the provider client this context runs, its stub, its watched key and its table. */
+    protected abstract val provider: Provider
     private val http = HttpClient.newHttpClient()
     private val json = JsonMapper.builder().build()
     private val root = LoggerFactory.getLogger(org.slf4j.Logger.ROOT_LOGGER_NAME) as Logger
@@ -270,6 +299,7 @@ class SecretsNeverLoggedTest(
         // filter, and Http11Processor logged the whole target, the words in it, at INFO. Sent over a plain socket,
         // because java.net.http will not send it.
         requestLine("/api/v1/bonds/$bond/search?q=$SEARCH_TERMS%20x|y") shouldStartWith "HTTP/1.1 400"
+        meaningIsNeverLogged(ada)
         send("DELETE", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         send("PUT", "/entries/$adaEntry/favourite", bea, null).status shouldBe 204
         // A reaction each way; hers replaced, refused twice, taken back, and set again for the erasure to remove.
@@ -411,6 +441,45 @@ class SecretsNeverLoggedTest(
             "SENT"
         send("DELETE", "/me/devices/current/push-token", session, null).status shouldBe 204
         jdbc.queryForObject("SELECT count(*) FROM push_tokens", Int::class.java) shouldBe 0
+    }
+
+    /**
+     * ADR-0054: the words sent to an embedding provider, and the provider's key, held to the entry's
+     * standard. An entry is written in a bond of Ada's own, the sweep embeds it (and the paired
+     * bond's two entries) through the real [provider]'s client, and "Remember when" embeds a question
+     * that matches no word, so it can only be answered by meaning. The stub counts what reached
+     * it: without that, a sweep that sent nothing would pass this scan for the wrong reason.
+     */
+    private fun meaningIsNeverLogged(session: Session) {
+        scan.watch("embedded entry", EMBEDDED)
+        scan.watch("remember question", REMEMBERED, wholeWord = true)
+        scan.watch("embedding provider key", provider.key)
+        val own = post("/bonds", session, """{"name":"Mine","type":"COUPLE","anchorTimezone":"Africa/Lagos"}""")
+        own.status shouldBe 201
+        val bond = own.json["id"].asString()
+        post("/bonds/$bond/entries", session, """{"text":"$EMBEDDED"}""", idempotent = true).status shouldBe 201
+
+        val calls = provider.stub.calls.get()
+        val run = sweep.embedPending(DISPATCH_BUDGET)
+        withClue("the sweep embedded nothing through the stub: the scan below proved nothing about it") {
+            run.failed shouldBe false
+            (run.embedded >= 1) shouldBe true
+            (provider.stub.calls.get() > calls) shouldBe true
+        }
+        jdbc.queryForObject(
+            "SELECT count(*) FROM ${provider.table} WHERE bond_id = ?::uuid",
+            Int::class.java,
+            bond,
+        ) shouldBe 1
+
+        val asked = provider.stub.calls.get()
+        val remembered = get("/bonds/$bond/remember?q=$REMEMBERED", session)
+        remembered.status shouldBe 200
+        withClue("the question was not embedded, so only the keyword ranking ran") {
+            provider.stub.calls.get() shouldBe asked + 1
+        }
+        // No word of the question is in the entry: the day comes back by meaning alone.
+        remembered.body.contains(EMBEDDED) shouldBe true
     }
 
     /** The catch in the dispatcher runs after this consumer's transactional interceptor. */
@@ -640,7 +709,55 @@ class SecretsNeverLoggedTest(
         val exceptFrom: List<String> = emptyList(),
     )
 
-    private companion object {
+    /** One provider as the scan runs it: a stub of its API, the fake key it is given, the table its vectors go to. */
+    class Provider(
+        val stub: EmbeddingStub,
+        val key: String,
+        val table: String,
+    )
+
+    /**
+     * `/v1/embeddings` as both providers answer it, OpenAI's shape (Voyage's client reads the fields
+     * it shares): every input gets the same unit vector of [dimensions], so any question is at
+     * distance 0 from any entry. The app's classpath cannot see `modules/ai`'s test
+     * `StubHttpServer`. It logs nothing, and keeps nothing but a count.
+     */
+    class EmbeddingStub(
+        dimensions: Int,
+    ) {
+        val calls = AtomicInteger()
+        private val mapper = JsonMapper.builder().build()
+        private val component = (1 / sqrt(dimensions.toDouble())).toFloat()
+        private val server =
+            HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).apply {
+                createContext("/v1/embeddings") { exchange ->
+                    val inputs = mapper.readTree(exchange.requestBody.readAllBytes())["input"].size()
+                    calls.incrementAndGet()
+                    val vector = List(dimensions) { component }.joinToString(",", "[", "]")
+                    val data = List(inputs) { """{"object":"embedding","embedding":$vector,"index":$it}""" }.joinToString(",")
+                    val body =
+                        (
+                            """{"object":"list","data":[$data],"model":"stub",""" +
+                                """"usage":{"prompt_tokens":$inputs,"total_tokens":$inputs}}"""
+                        ).toByteArray()
+                    exchange.responseHeaders.add("Content-Type", "application/json")
+                    exchange.sendResponseHeaders(HTTP_OK, body.size.toLong())
+                    exchange.responseBody.use { it.write(body) }
+                }
+                start()
+            }
+
+        /** The host alone: Voyage's client adds `/v1/embeddings`; OpenAI's base URL is this and `/v1`. */
+        val baseUrl = "http://127.0.0.1:${server.address.port}"
+
+        fun stop() = server.stop(0)
+
+        private companion object {
+            const val HTTP_OK = 200
+        }
+    }
+
+    companion object {
         // `~` is in no UUID, no SQL the application writes and no base64url
         // token, so a match is the entry and nothing else.
         const val ADA_TEXT = "Ada~wrote~this first"
@@ -660,9 +777,13 @@ class SecretsNeverLoggedTest(
         /** Three runs: an event, the pushes it asked for, and one to spare. */
         const val DRAIN_ROUNDS = 3
         const val PUSH_TOKEN = "fcm~push~token~secret"
+
+        /** ADR-0054: an entry's words sent to the provider, and a question asked of "Remember when". */
+        const val EMBEDDED = "Ada~embedded~this"
+        const val REMEMBERED = "zqkremembersoup"
         const val PUSH_STALE_SECONDS = 3_600L
 
-        val ENTRY_MARKERS =
+        private val ENTRY_MARKERS =
             listOf("entry text 0" to Watched(Regex("~wrote~")), "entry text 1" to Watched(Regex("~edited~")))
 
         /**
@@ -715,5 +836,58 @@ class SecretsNeverLoggedTest(
 
         /** Libraries that must be seen logging below INFO for the test to mean anything. */
         val RAISED_EXPECTED_FROM = listOf("org.hibernate.", "org.springframework.", "org.apache.")
+    }
+}
+
+/** ADR-0054: the scan with Voyage's client, our own `RestClient` adapter (`VoyageEmbeddingModel`). */
+internal class SecretsNeverLoggedWithVoyageTest(
+    @LocalServerPort port: Int,
+    @Autowired context: ApplicationContext,
+) : SecretsNeverLoggedTest(port, context) {
+    override val provider = VOYAGE
+
+    companion object {
+        /** Started with the class, before the context that is pointed at it; stopped after it. */
+        private val VOYAGE = Provider(EmbeddingStub(dimensions = 1024), key = "pa-zqkfakekey", table = "entry_embeddings_voyage_1024")
+
+        @JvmStatic
+        @DynamicPropertySource
+        fun voyage(registry: DynamicPropertyRegistry) {
+            registry.add("moyi.ai.embedding.provider") { "voyage" }
+            registry.add("moyi.ai.embedding.voyage.base-url") { VOYAGE.stub.baseUrl }
+            registry.add("moyi.ai.embedding.voyage.api-key") { VOYAGE.key }
+        }
+
+        @JvmStatic
+        @AfterAll
+        fun stopStub() = VOYAGE.stub.stop()
+    }
+}
+
+/**
+ * ADR-0054: the scan with OpenAI's client, Spring AI's `OpenAiEmbeddingModel` over the OpenAI SDK
+ * and OkHttp. Its base URL carries `/v1` (`AiProperties.OpenAi`).
+ */
+internal class SecretsNeverLoggedWithOpenAiTest(
+    @LocalServerPort port: Int,
+    @Autowired context: ApplicationContext,
+) : SecretsNeverLoggedTest(port, context) {
+    override val provider = OPENAI
+
+    companion object {
+        /** Started with the class, before the context that is pointed at it; stopped after it. */
+        private val OPENAI = Provider(EmbeddingStub(dimensions = 1536), key = "sk-zqkfakekey", table = "entry_embeddings_openai_1536")
+
+        @JvmStatic
+        @DynamicPropertySource
+        fun openai(registry: DynamicPropertyRegistry) {
+            registry.add("moyi.ai.embedding.provider") { "openai" }
+            registry.add("moyi.ai.embedding.openai.base-url") { "${OPENAI.stub.baseUrl}/v1" }
+            registry.add("moyi.ai.embedding.openai.api-key") { OPENAI.key }
+        }
+
+        @JvmStatic
+        @AfterAll
+        fun stopStub() = OPENAI.stub.stop()
     }
 }

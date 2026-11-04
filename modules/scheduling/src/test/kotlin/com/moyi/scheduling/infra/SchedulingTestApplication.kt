@@ -10,6 +10,8 @@ import com.moyi.common.web.idempotency.IdempotencyKeyStore
 import com.moyi.gratitude.api.CloseResult
 import com.moyi.gratitude.api.DailyReminders
 import com.moyi.gratitude.api.DayCloser
+import com.moyi.gratitude.api.EmbeddingRun
+import com.moyi.gratitude.api.EmbeddingSweep
 import com.moyi.gratitude.api.OnThisDayPushes
 import com.moyi.gratitude.api.OnThisDayRun
 import com.moyi.gratitude.api.ReminderRun
@@ -73,6 +75,9 @@ internal class SchedulingTestApplication {
 
     @Bean
     fun mediaLifecycle(): RecordingMediaLifecycle = RecordingMediaLifecycle()
+
+    @Bean
+    fun embeddingSweep(): RecordingEmbeddingSweep = RecordingEmbeddingSweep()
 }
 
 /**
@@ -114,6 +119,24 @@ internal class RecordingMediaLifecycle : MediaLifecycle {
         demotions.clear()
         answers.clear()
         failing = false
+    }
+}
+
+/** An [EmbeddingSweep] that records the budgets it was asked for, and answers [next]. */
+internal class RecordingEmbeddingSweep : EmbeddingSweep {
+    val budgets = CopyOnWriteArrayList<Int>()
+
+    @Volatile
+    var next: EmbeddingRun = EmbeddingRun(embedded = 0, skipped = 0, failed = false)
+
+    override fun embedPending(budget: Int): EmbeddingRun {
+        budgets += budget
+        return next
+    }
+
+    fun reset() {
+        budgets.clear()
+        next = EmbeddingRun(embedded = 0, skipped = 0, failed = false)
     }
 }
 

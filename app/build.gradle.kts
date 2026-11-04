@@ -27,6 +27,9 @@ dependencies {
     // Phase 3 slice C3: the fifteen-minute close job and the key reaper,
     // with ShedLock's table (V16). It calls `gratitude.api.DayCloser`.
     implementation(projects.modules.scheduling)
+    // Semantic search (ADR-0054): the EmbeddingPort and the provider behind it.
+    // Gratitude reaches it through `ai.api` only.
+    implementation(projects.modules.ai)
     implementation(projects.common.web)
     // The filter chain, the JWT encoder/decoder and the current-user resolver.
     // Reachable transitively through identity already; declared so the

@@ -15,9 +15,19 @@ internal class PostgresContainerTest {
         show("fsync") shouldBe "off"
     }
 
-    private fun show(setting: String): String {
+    @Test
+    fun `the shared container can create the vector extension`() {
+        psql("CREATE EXTENSION IF NOT EXISTS vector; SELECT '[1,0]'::vector <=> '[0,1]'::vector") shouldBe "1"
+    }
+
+    private fun show(setting: String): String = psql("SHOW $setting")
+
+    private fun psql(sql: String): String {
         val postgres = PostgresIntegrationTest.postgres
-        val result = postgres.execInContainer("psql", "-U", postgres.username, "-d", postgres.databaseName, "-tAc", "SHOW $setting")
-        return result.stdout.trim()
+        val result = postgres.execInContainer("psql", "-U", postgres.username, "-d", postgres.databaseName, "-tAc", sql)
+        return result.stdout
+            .lines()
+            .last { it.isNotBlank() }
+            .trim()
     }
 }

@@ -47,6 +47,13 @@ internal class ArchiveRig(
         parameters: Map<String, String> = emptyMap(),
     ): MockHttpServletResponse = read(user, "/api/v1/bonds/$bond/search", parameters, emptyMap())
 
+    /** `GET /bonds/{bond}/remember`, whatever it answers. */
+    fun remember(
+        user: UUID,
+        bond: String,
+        parameters: Map<String, String> = emptyMap(),
+    ): MockHttpServletResponse = read(user, "/api/v1/bonds/$bond/remember", parameters, emptyMap())
+
     private fun read(
         user: UUID,
         path: String,

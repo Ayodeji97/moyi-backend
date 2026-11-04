@@ -112,6 +112,18 @@ interface BondAccess {
     ): List<UUID>
 
     /**
+     * The ids of every bond with semantic search on, in id order, after
+     * [after]: a keyset page for the embedding sweep (ADR-0054). Open or
+     * ended, paired or solo; **not** [bondsToSweep]'s "ever paired" filter,
+     * which would leave a solo bond's entries unembedded. The sweep still
+     * re-checks the setting under the bond lock before it writes.
+     */
+    fun bondsWithSemanticSearch(
+        after: UUID?,
+        limit: Int,
+    ): List<UUID>
+
+    /**
      * The display name of the other member of [membership]'s bond, as
      * identity holds it now, for the archive's author label (ADR-0036
      * question 5, ruled 2026-10-21). `null` only while the bond has never had
@@ -231,6 +243,12 @@ class BondMembership internal constructor(
     val withdrawnMemberIds: Set<UUID>,
     /** The bond's type, as it is now: a `PATCH` can change it. */
     val type: BondType,
+    /**
+     * Whether the bond's entries may be embedded and searched by meaning (FR-204,
+     * ADR-0054). Search and remember check it: from the moment it is off, no
+     * vector is read and none is written.
+     */
+    val semanticSearchEnabled: Boolean,
 ) {
     /**
      * Whether this member's writes are taken: the bond is open (`PENDING_MEMBER` or `ACTIVE`)
@@ -254,7 +272,7 @@ class BondMembership internal constructor(
  * nobody, and a type that cannot carry a member cannot be mistaken for
  * permission to act as one.
  */
-@Suppress("LongParameterList") // Eight facts, each named at the one place that builds this (`BondAccessAdapter`), as with [BondMembership].
+@Suppress("LongParameterList") // Nine facts, each named at the one place that builds this (`BondAccessAdapter`), as with [BondMembership].
 class BondClosingView internal constructor(
     val bondId: UUID,
     /** As [BondMembership.activeSince]: the second member's join, `null` while the bond waits for one. */
@@ -298,6 +316,12 @@ class BondClosingView internal constructor(
      * revealed, and the stamp outlives the erasure (FR-029a, spec §6.7).
      */
     val withdrawnMemberIds: Set<UUID>,
+    /**
+     * Whether the bond's entries may be embedded (FR-204, ADR-0054). Under
+     * [BondAccess.lockClosingViewOf] it is read after the lock, which is what
+     * lets the embedding sweep re-check it before it writes.
+     */
+    val semanticSearchEnabled: Boolean,
 ) {
     /**
      * Whether the bond was in Strict mode up to [instant], not including it

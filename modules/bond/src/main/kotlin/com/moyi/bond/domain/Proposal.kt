@@ -4,22 +4,25 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * What kind of thing is being proposed (FR-027, FR-028).
+ * What kind of thing is being proposed (FR-027, FR-028, FR-204).
  *
- * Both are changes the corpus says one member may not make alone: moving the
+ * Each is a change the corpus says one member may not make alone: moving the
  * anchor timezone decides which day an entry belongs to for **both** of them
- * (doc 04 §6), and deleting the bond destroys what the other person wrote.
+ * (doc 04 §6), deleting the bond destroys what the other person wrote, and
+ * turning semantic search on sends what both of them wrote to an embedding
+ * provider (ADR-0054). Turning it *off* is one member's call and no proposal.
  */
-internal enum class ProposalKind { TIMEZONE_CHANGE, DELETION }
+internal enum class ProposalKind { TIMEZONE_CHANGE, DELETION, SEMANTIC_SEARCH_ON }
 
 /**
  * A change one member has asked for and the other has not yet agreed to
  * (FR-027, FR-028, BR-6, ADR-0030).
  *
- * **One type for both kinds, because the rules are one set of rules:** seven
+ * **One type for every kind, because the rules are one set of rules:** seven
  * days to answer, only the *other* member may confirm, either may cancel, and
  * an unanswered one lapses rather than nagging. [payload] is the only thing
- * that differs — a zone id for a timezone change, nothing for a deletion.
+ * that differs — a zone id for a timezone change, nothing for a deletion or
+ * for turning semantic search on.
  *
  * Lapsing is a **predicate, not a state**: the clock is asked at read time, in
  * `BondProposalRepository.findLive`, and nothing ever writes a row to say "this
@@ -77,7 +80,7 @@ internal data class Proposal(
         val TTL: Duration = Duration.ofDays(7)
 
         /**
-         * Both factories build the object directly rather than through a shared
+         * The factories build the object directly rather than through a shared
          * private helper: detekt's parameter limit is six and the helper needed
          * seven, and a data class's own constructor is exempt precisely because
          * named arguments are readable at any width.
@@ -112,6 +115,26 @@ internal data class Proposal(
                 id = id,
                 bondId = bondId,
                 kind = ProposalKind.DELETION,
+                payload = null,
+                proposedByMemberId = proposedBy,
+                proposedAt = now,
+                expiresAt = now.plus(TTL),
+                confirmedByMemberId = null,
+                confirmedAt = null,
+                cancelledAt = null,
+            )
+
+        /** FR-204: one member asks for semantic search back on; the other's agreement applies it. */
+        fun semanticSearchOn(
+            id: ProposalId,
+            bondId: BondId,
+            proposedBy: MemberId,
+            now: Instant,
+        ): Proposal =
+            Proposal(
+                id = id,
+                bondId = bondId,
+                kind = ProposalKind.SEMANTIC_SEARCH_ON,
                 payload = null,
                 proposedByMemberId = proposedBy,
                 proposedAt = now,

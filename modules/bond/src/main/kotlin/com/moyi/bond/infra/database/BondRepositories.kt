@@ -62,6 +62,32 @@ internal interface BondRepository : Repository<BondEntity, UUID> {
     ): List<UUID>
 
     /**
+     * Keyset page of every bond with semantic search on (ADR-0054): open or
+     * ended, paired or solo. Deliberately **not** [findEverPairedAfter]'s
+     * filter: a solo bond's entries are embedded too, and so are an ended
+     * bond's while its setting is on. **Not a bond pending deletion** (final
+     * review M2): its history is about to be destroyed, and sending it to the
+     * provider in its last days would serve no search worth the disclosure.
+     * **An allow-list of statuses** (V9's CHECK names five), so a status the
+     * walk has not been told about, such as Phase 5's `DELETED`, is skipped.
+     */
+    @Query(
+        nativeQuery = true,
+        value = """
+            SELECT b.id FROM bonds b
+            WHERE b.semantic_search_enabled
+              AND b.status IN ('PENDING_MEMBER', 'ACTIVE', 'ARCHIVED')
+              AND (CAST(:after AS uuid) IS NULL OR b.id > CAST(:after AS uuid))
+            ORDER BY b.id
+            LIMIT :limit
+        """,
+    )
+    fun findWithSemanticSearchAfter(
+        after: UUID?,
+        limit: Int,
+    ): List<UUID>
+
+    /**
      * Serialises "count my open bonds, then create one" for the rest of the
      * current transaction, and is the reason FR-025's limit cannot be raced.
      *
@@ -426,6 +452,28 @@ internal interface BondProposalRepository : Repository<BondProposalEntity, UUID>
     )
     fun cancelLiveOf(
         bondId: UUID,
+        now: Instant,
+    ): Int
+
+    /**
+     * [cancelLiveOf] for one kind only: what turning semantic search off does to
+     * a pending request to turn it on (ADR-0054), leaving a pending deletion or
+     * timezone change alone.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE BondProposalEntity p
+           SET p.cancelledAt = :now
+         WHERE p.bondId = :bondId
+           AND p.kind = :kind
+           AND p.confirmedAt IS NULL
+           AND p.cancelledAt IS NULL
+        """,
+    )
+    fun cancelLive(
+        bondId: UUID,
+        kind: ProposalKind,
         now: Instant,
     ): Int
 }

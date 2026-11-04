@@ -1,0 +1,36 @@
+meta {
+  name: Turn semantic search off
+  type: http
+  seq: 37
+}
+
+patch {
+  url: {{api}}/bonds/{{bondId}}
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+script:pre-request {
+  // The PATCH is conditional (doc 06 section 1): the bond's ETag, as you read it now, goes in If-Match.
+  const axios = require("axios");
+  const bond = await axios.get(`${bru.getEnvVar("api")}/bonds/${bru.getVar("bondId") ?? bru.getEnvVar("bondId")}`, {
+    headers: { Authorization: `Bearer ${bru.getVar("accessToken")}` },
+  });
+  req.setHeader("If-Match", bond.headers["etag"]);
+}
+
+body:json {
+  {
+    "semanticSearchEnabled": false
+  }
+}
+
+docs {
+  Turns semantic search off for the bond, for both of you, on your own say (FR-204, ADR-0054). 200 with the bond. Within seconds every vector made of your bond's entries is deleted, and from that moment no word of the bond is sent to the embedding provider: search and Remember when find by words alone.
+
+  Only false is accepted here; true is 422 on semanticSearchEnabled (ASSERT_FALSE). Turning it back on needs both of you: Turn semantic search on. It is also accepted on a bond that has ended, where nothing else is (provisional, the owner to confirm).
+}

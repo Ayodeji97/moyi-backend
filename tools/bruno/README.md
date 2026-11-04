@@ -6,8 +6,9 @@ the archive and read this date in earlier years, the one that reads the mileston
 two that give the device you signed in from a push token and take it away, the two that
 read and set which kinds of push you want in the bond, and the four of a photo's upload (an
 intent, the upload straight to the storage, the completion, and a read of it; Phase 4 D1,
-ADR-0047), and the one that reports your partner's entry to a person (FR-100, ADR-0053),
-for running it by hand:
+ADR-0047), the one that reports your partner's entry to a person (FR-100, ADR-0053), and
+the three of semantic search: a "Remember when" question, and turning the bond's semantic
+search off and on (FR-204, ADR-0054), for running it by hand:
 milestone M3 is two people using the HTTP API for a week, and there is no app yet.
 `scripts/moyi` is the same loop from a terminal.
 
@@ -40,6 +41,10 @@ to take them back. A block's body is required: it must say which, and without th
 `400` and ends nothing. Taking them back erases them for good. Leave bond's example body is
 its default, so sending it as it stands does what sending nothing would; Block's example
 takes the entries back.
+
+**Turn semantic search off and on are not part of the loop.** Off is one member's to
+decide, for both, and deletes every vector of the bond's entries at once; on again needs
+both of you. Remember when only reads.
 
 **Report entry is not part of the loop either.** It files a real report that a person reads,
 and holds your partner's photo and voice note back from you until they decide; against

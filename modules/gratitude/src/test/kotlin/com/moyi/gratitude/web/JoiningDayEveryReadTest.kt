@@ -74,6 +74,8 @@ internal class JoiningDayEveryReadTest(
             // read after the date is parsed and the day reconciled, which is what this test is for.
             "/api/v1/bonds/{bondId}/days/{date}" to Fixture(pathVariables = mapOf("date" to JOINING_DATE), expectedStatus = 404),
             "/api/v1/bonds/{bondId}/search" to Fixture(query = "q=waiting"),
+            // ADR-0054: "Remember when" reconciles before it embeds `q` and before it reads.
+            "/api/v1/bonds/{bondId}/remember" to Fixture(query = "q=waiting"),
             "/api/v1/bonds/{bondId}/on-this-day" to Fixture(),
             "/api/v1/bonds/{bondId}/milestones" to Fixture(),
         )

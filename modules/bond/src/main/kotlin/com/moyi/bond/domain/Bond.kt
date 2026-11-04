@@ -104,7 +104,22 @@ internal data class BondSettings(
     val type: BondType? = null,
     val revealTimeLocal: Change<LocalTime>? = null,
     val strictMode: Boolean? = null,
-)
+    /**
+     * Only ever `false` here (FR-204, ADR-0054): one member may withdraw consent to
+     * the embedding provider alone, but turning it on needs both, so that is
+     * `POST /bonds/{bondId}/semantic-search`. [Bond.update] refuses `true`, the rule's
+     * one home; the web layer's `@AssertFalse` reports it as a `422` before it gets there.
+     */
+    val semanticSearchEnabled: Boolean? = null,
+) {
+    /**
+     * Turning semantic search off and nothing else: the one change an ended bond
+     * still takes (ADR-0054 decision 9, provisional), because the sweep keeps
+     * embedding an ended bond whose setting is on.
+     */
+    fun isOnlySemanticSearchOff(): Boolean =
+        semanticSearchEnabled == false && name == null && type == null && revealTimeLocal == null && strictMode == null
+}
 
 /**
  * The aggregate root (ADR-0003): a relationship between a small number of
@@ -125,6 +140,7 @@ internal data class BondSettings(
  * "is this person a member of this bond" has to stay answerable for them, and
  * [activeMembers] is the narrower question.
  */
+@Suppress("TooManyFunctions") // Each is one transition of the aggregate root; ADR-0054 added the eleventh.
 internal data class Bond(
     val id: BondId,
     val type: BondType,
@@ -133,6 +149,8 @@ internal data class Bond(
     val timezoneChangedAt: Instant?,
     val revealTimeLocal: LocalTime?,
     val strictMode: Boolean,
+    /** Whether this bond's entries are embedded for semantic search (FR-204, ADR-0054). On from creation. */
+    val semanticSearchEnabled: Boolean,
     val status: BondStatus,
     val maxMembers: Int,
     val createdBy: UserId,
@@ -312,6 +330,8 @@ internal data class Bond(
      *
      * `check(isOpen)`: BR-9, and the same rule [leave] applies, because an
      * archived bond is a record rather than a thing with settings (ADR-0028).
+     * The one exception is [BondSettings.isOnlySemanticSearchOff] (ADR-0054
+     * decision 9, provisional): withdrawing consent to the embedding provider.
      *
      * **The seats do not move when the type does.** FR-021 puts the limit on
      * the row, every v1 type seats two, and a type that ever seats a different
@@ -319,13 +339,26 @@ internal data class Bond(
      * arithmetic side effect here.
      */
     fun update(settings: BondSettings): Bond {
-        check(isOpen) { "a bond that has ended cannot be changed" }
+        check(isOpen || settings.isOnlySemanticSearchOff()) { "a bond that has ended cannot be changed" }
+        // FR-204, ADR-0054: consent to the provider is both members', so on is [withSemanticSearch]'s, after a proposal.
+        require(settings.semanticSearchEnabled != true) { "semantic search is turned on by agreement, never by an update" }
         return copy(
             name = settings.name ?: name,
             type = settings.type ?: type,
             revealTimeLocal = settings.revealTimeLocal.orKeep(revealTimeLocal),
             strictMode = settings.strictMode ?: strictMode,
+            semanticSearchEnabled = settings.semanticSearchEnabled ?: semanticSearchEnabled,
         )
+    }
+
+    /**
+     * Sets semantic search (FR-204, ADR-0054). Turning it **on** is what both
+     * members agreed to through a proposal, so it needs an open bond; turning it
+     * off is allowed on an ended one (decision 9, provisional).
+     */
+    fun withSemanticSearch(on: Boolean): Bond {
+        check(!on || isOpen) { "a bond that has ended cannot turn semantic search on" }
+        return copy(semanticSearchEnabled = on)
     }
 
     /**
@@ -482,6 +515,8 @@ internal data class Bond(
                 timezoneChangedAt = null,
                 revealTimeLocal = draft.revealTimeLocal,
                 strictMode = false,
+                // On by default: the owner's ruling, 2026-10-30 (ADR-0054).
+                semanticSearchEnabled = true,
                 status = BondStatus.PENDING_MEMBER,
                 maxMembers = draft.type.maxMembers,
                 createdBy = draft.creator,

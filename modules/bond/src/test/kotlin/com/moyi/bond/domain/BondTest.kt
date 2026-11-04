@@ -324,6 +324,18 @@ internal class BondTest {
     }
 
     @Test
+    fun `an update turns semantic search off, and never on`() {
+        // FR-204, ADR-0054: on needs both members (`withSemanticSearch`, after a proposal).
+        // The edge refuses `true` too; this is the layer no caller can bypass.
+        val off = create().update(BondSettings(semanticSearchEnabled = false))
+        off.semanticSearchEnabled shouldBe false
+
+        shouldThrow<IllegalArgumentException> { off.update(BondSettings(semanticSearchEnabled = true)) }
+        shouldThrow<IllegalArgumentException> { off.update(BondSettings(name = "Us two", semanticSearchEnabled = true)) }
+        off.withSemanticSearch(true).semanticSearchEnabled shouldBe true
+    }
+
+    @Test
     fun `a member's settings are replaced wholesale`() {
         val member = create().members.single()
 

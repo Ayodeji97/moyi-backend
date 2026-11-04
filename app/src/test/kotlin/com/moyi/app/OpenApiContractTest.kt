@@ -120,7 +120,7 @@ class OpenApiContractTest(
         // socket; documented as query parameters they would generate a client
         // that sends them. Path parameters (`/sessions/{id}`) are real.
         // Cookie parameters: none, ever. Query parameters: the archive feed's
-        // four (slice C5b), search's three (slice C6b) and no others. A resolver
+        // four (slice C5b), search's three (slice C6b), remember's two (ADR-0054) and no others. A resolver
         // type documented as one would generate a client that sends it, so the
         // list is exhaustive: a new query parameter has to be added here by
         // somebody who meant it.
@@ -132,7 +132,8 @@ class OpenApiContractTest(
                     .map { "$route ${it.`in`} ${it.name}" }
             }.toSet() shouldBe
             listOf("limit", "cursor", "until", "favourites").map { "GET /api/v1/bonds/{bondId}/days query $it" }.toSet() +
-            listOf("q", "limit", "cursor").map { "GET /api/v1/bonds/{bondId}/search query $it" }
+            listOf("q", "limit", "cursor").map { "GET /api/v1/bonds/{bondId}/search query $it" } +
+            listOf("q", "limit").map { "GET /api/v1/bonds/{bondId}/remember query $it" }
         // Headers are not all accidental — `If-Match` is required by doc 06 §1
         // and has to appear, or a generated client cannot send it. The list is
         // exhaustive on purpose: a *new* header parameter should have to be
@@ -332,6 +333,12 @@ class OpenApiContractTest(
         deletion.post.responses.keys shouldContainAll listOf("202", "404", "409")
         deletion.post.responses.keys shouldNotContain "200"
         deletion.delete.responses shouldContainKey "204"
+
+        // ADR-0054: asking for semantic search back on is the deletion request's shape.
+        val semanticSearch = api.paths["/api/v1/bonds/{bondId}/semantic-search"]!!
+        semanticSearch.post.responses.keys shouldContainAll listOf("202", "404", "409")
+        semanticSearch.delete.responses shouldContainKey "204"
+        semanticSearch.delete.responses.keys shouldNotContain "409"
 
         // The three new codes are in the one enum a client switches on, which is
         // what makes them a breaking change and worth the label (ADR-0024).
@@ -645,6 +652,46 @@ class OpenApiContractTest(
         told shouldContain "Whole words"
         told shouldContain "never echoed"
         told shouldContain "no count"
+    }
+
+    @Test
+    fun `remember documents q as search's, its own limit, no cursor, and says it may answer fewer days`() {
+        val remember = api.paths["/api/v1/bonds/{bondId}/remember"]!!
+        remember.readOperationsMap().keys.map { it.name } shouldBe listOf("GET")
+        val get = remember.get
+        get.operationId shouldBe "remember"
+        get.responses.keys shouldContainAll listOf("200", "400", "401", "404", "422", "429")
+        get.responses.keys shouldNotContain "409"
+        get.requestBody.shouldBeNull()
+
+        val query = get.parameters.filter { it.`in` == "query" }.associateBy { it.name }
+        query.keys shouldBe setOf("q", "limit")
+        query.getValue("q").required shouldBe true
+        query.getValue("q").schema.minLength shouldBe 1
+        query.getValue("q").schema.maxLength shouldBe 1024
+        query.getValue("q").description shouldContain "400 MALFORMED_REQUEST"
+        query
+            .getValue("limit")
+            .schema.minimum
+            .toInt() shouldBe 1
+        query
+            .getValue("limit")
+            .schema.maximum
+            .toInt() shouldBe 20
+        query
+            .getValue("limit")
+            .schema.default
+            .toString() shouldBe "10"
+        get.responses["200"]!!
+            .content["application/json"]!!
+            .schema.`$ref` shouldBe "#/components/schemas/RememberResponse"
+        api.components.schemas["RememberResponse"]!!.required shouldBe listOf("items")
+
+        val told = get.description.shouldNotBeNull()
+        told shouldContain "most relevant first"
+        told shouldContain "fewer days than `limit`"
+        told shouldContain "no cursor"
+        told shouldContain "never generated text"
     }
 
     @Test

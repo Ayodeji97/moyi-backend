@@ -29,6 +29,8 @@ import java.io.File
  * about a container's environment is checked on each role's merged
  * environment. An accessory's `env` (Postgres's, Valkey's) reaches a container
  * that is not the application, and never counts (review of #106).
+ *
+ * Since ADR-0054 it holds the embedding provider to the same rule: named `none` until a key exists.
  */
 internal class ProductionStartsWithoutMediaSecretsTest {
     @Suppress("UNCHECKED_CAST")
@@ -346,6 +348,28 @@ internal class ProductionStartsWithoutMediaSecretsTest {
             size("web", "-Xmx") + metaspace + size("web", "-XX:ReservedCodeCacheSize=") + size("web", "-XX:MaxDirectMemorySize=") + threads
         val container = bytes((servers.getValue("web")["options"] as Map<*, *>)["memory"].toString())
         withClue("the API's JVM budgets ${jvm / MIB} MiB in a ${container / MIB} MiB container") { (jvm <= container) shouldBe true }
+    }
+
+    /**
+     * ADR-0054: the embedding provider defaults to OpenAI, which refuses to start without its key,
+     * the lesson of #96 again. Until the owner has chosen the provider by the eval and holds its key,
+     * every role names `none` (search and "Remember when" answer from keywords, and no word is sent
+     * anywhere). No role holds an embedding key yet, as a secret or a plain value; when one is
+     * switched on, the key is the API's alone (`servers.web.env.secret`), because the worker embeds
+     * nothing, and this test changes in the same pull request.
+     */
+    @Test
+    fun `deploy-yml names the embedding provider none in every role, and no role holds an embedding key`() {
+        roles.forEach { (role, env) ->
+            withClue("$role's MOYI_AI_EMBEDDING_PROVIDER") {
+                env.clear["MOYI_AI_EMBEDDING_PROVIDER"]
+                    ?.toString()
+                    ?.trim()
+                    ?.lowercase() shouldBe "none"
+            }
+            val keys = (env.clear.keys + env.secret).filter { it.startsWith("MOYI_AI_EMBEDDING_") && it.endsWith("_API_KEY") }
+            withClue("$role holds an embedding key") { keys shouldBe emptyList() }
+        }
     }
 
     /** `512m`, `1421240K`, `2g`, or a number of bytes, as the JVM and Docker read them. */

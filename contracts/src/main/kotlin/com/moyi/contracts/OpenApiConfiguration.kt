@@ -187,6 +187,8 @@ class OpenApiConfiguration {
             documentOnThisDay(api)
             documentMilestones(api)
             documentReports(api)
+            documentRemember(api)
+            documentSemanticSearch(api)
         }
 
     /**
@@ -261,8 +263,9 @@ class OpenApiConfiguration {
         buildList {
             if (operation.requestBody != null) addAll(listOf(HttpStatus.BAD_REQUEST, HttpStatus.UNPROCESSABLE_ENTITY))
             // A query parameter Tomcat cannot decode is `UndecodableParameterFilter`'s 400, on every route. Documented on
-            // search, the route most likely to be sent such bytes; the API-wide 400 is owed (ADR-0039, final review m1).
-            if (operation.operationId == SEARCH_OPERATION) add(HttpStatus.BAD_REQUEST)
+            // search and remember, the routes most likely to be sent such bytes (ADR-0054 adds remember, which reads `q`
+            // the same way); the API-wide 400 is owed (ADR-0039, final review m1).
+            if (operation.operationId == SEARCH_OPERATION || operation.operationId == REMEMBER_OPERATION) add(HttpStatus.BAD_REQUEST)
             if (!public) addAll(listOf(HttpStatus.UNAUTHORIZED, HttpStatus.FORBIDDEN))
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
             if (operation.operationId in CURRENT_DEVICE_OPERATIONS) add(HttpStatus.NOT_FOUND)
@@ -477,6 +480,9 @@ class OpenApiConfiguration {
                 "proposeBondTimezone",
                 "confirmBondTimezone",
                 "requestBondDeletion",
+                // Semantic search S1 (ADR-0054): BOND_ARCHIVED on a bond that has ended.
+                // `cancelSemanticSearchRequest` is absent for the reason the B5 cancels are.
+                "requestSemanticSearch",
                 // Fix round 1, C2: BOND_ARCHIVED, DAY_CLOSED, ENTRY_ALREADY_EXISTS
                 // and IDEMPOTENCY_KEY_IN_FLIGHT are all 409s this operation can
                 // give — the headline behaviour of the slice (BR-2) among them
