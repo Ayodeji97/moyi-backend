@@ -21,7 +21,7 @@ bucket4j = "8.21.0"
 # OpenAPI generation (doc 05, doc 06 §5, ADR-0024). springdoc 3.x is the line
 # built for Spring Boot 4 / Jackson 3; swagger-parser validates the document
 # the contract test reads back.
-springdoc = "3.1.1"
+springdoc = "3.2.0"
 swaggerParser = "2.1.48"
 # One instance runs a scheduled job at a time (doc 05 §5.2), on Postgres and
 # not Redis (spec §12.3: Redis fails open here, which is unsafe for a lock).
@@ -30,7 +30,7 @@ shedlock = "7.10.1"
 # The S3 client and presigner for Cloudflare R2 (Phase 4 D1, ADR-0047), confined
 # to one internal class in `modules/media` (doc 25:118). R2 speaks the S3 API, and
 # the same class reaches MinIO in tests and locally. Not in the Spring Boot BOM.
-awssdk = "2.55.16"
+awssdk = "2.57.8"
 # Embeddings for semantic search (ADR-0054), behind `modules/ai`'s EmbeddingPort.
 # 2.0.x is the line built for Spring Boot 4.0/4.1; 2.1 targets Boot 4.2, so it is
 # not taken. The BOM and two libraries only, never the starter: the module
