@@ -43,7 +43,7 @@ abstract class PostgresIntegrationTest {
     companion object {
         /** Postgres 18 with the pgvector extension; every container the tests start uses it. */
         val IMAGE: DockerImageName =
-            DockerImageName.parse("pgvector/pgvector:0.8.7-pg18").asCompatibleSubstituteFor("postgres")
+            DockerImageName.parse("pgvector/pgvector:0.8.7-pg18-trixie").asCompatibleSubstituteFor("postgres")
 
         @Suppress("unused")
         @ServiceConnection

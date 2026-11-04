@@ -6,7 +6,7 @@
 #
 #   1. downloads it with a READ-ONLY R2 token;
 #   2. decrypts it with the age private key, which lives in Bitwarden only;
-#   3. restores it into a fresh pgvector/pgvector:0.8.7-pg18 of its own;
+#   3. restores it into a fresh pgvector/pgvector:0.8.7-pg18-trixie of its own;
 #   4. boots the production image against it, beside a Valkey of its own:
 #      Flyway checks the restored schema against the image's migrations, so a
 #      boot is a schema check;
@@ -16,9 +16,10 @@
 # Then it prints the time taken, against the RTO of four hours (NFR-024), and
 # removes everything it made, the decrypted dump included.
 #
-# Nothing it starts can reach production: its database, cache and app are
-# containers on a network of its own, and the app is given throwaway keys and
-# a Resend key that does not exist, so no email can leave it.
+# Its database, cache and app are containers on a network of their own.
+# The app gets throwaway keys, disabled timers and no production service
+# credentials. Email keeps a non-logging sender with an invalid key and
+# loopback endpoint; push, media and embeddings use their offline providers.
 #
 #   ops/backup/restore-drill.sh --email <an account in the backup> [--object daily/<name>] [--version <commit>]
 #
@@ -122,11 +123,11 @@ say "Decrypting"
 age --decrypt --identity "$WORK/age.key" --output "$WORK/plain.dump" "$WORK/backup.age"
 rm -f "$WORK/age.key" "$WORK/backup.age"
 
-say "Restoring into a fresh pgvector/pgvector:0.8.7-pg18"
+say "Restoring into a fresh pgvector/pgvector:0.8.7-pg18-trixie"
 docker network create "$NET" >/dev/null
 PGPASS="$(openssl rand -hex 24)"
 docker run -d --name moyi-drill-postgres --network "$NET" \
-  -e POSTGRES_USER=moyi -e POSTGRES_DB=moyi -e POSTGRES_PASSWORD="$PGPASS" pgvector/pgvector:0.8.7-pg18 >/dev/null
+  -e POSTGRES_USER=moyi -e POSTGRES_DB=moyi -e POSTGRES_PASSWORD="$PGPASS" pgvector/pgvector:0.8.7-pg18-trixie >/dev/null
 # Over TCP: the image's first-boot server listens on its socket only, and is
 # stopped and restarted once initdb is done; the real one is the one on TCP.
 ready=""
@@ -134,7 +135,7 @@ for _ in $(seq 1 90); do
   docker exec moyi-drill-postgres pg_isready -h 127.0.0.1 -U moyi -d moyi >/dev/null 2>&1 && { ready=1; break; }
   sleep 1
 done
-[ -n "$ready" ] || die "pgvector/pgvector:0.8.7-pg18 did not come up"
+[ -n "$ready" ] || die "pgvector/pgvector:0.8.7-pg18-trixie did not come up"
 docker exec -i moyi-drill-postgres pg_restore --username=moyi --dbname=moyi --exit-on-error <"$WORK/plain.dump"
 rm -f "$WORK/plain.dump"
 read -r USERS ENTRIES < <(docker exec moyi-drill-postgres psql -U moyi -d moyi -AtF ' ' -c \
@@ -157,6 +158,19 @@ openssl pkey -in "$WORK/jwt.pem" -pubout -out "$WORK/jwt.pub"
   echo "MOYI_SECURITY_JWT_PUBLIC_KEY_PEM=$(tr -d '\n' <"$WORK/jwt.pub")"
   echo "MOYI_SECURITY_HASHING_SECRET=$(openssl rand -hex 32)"
   echo "MOYI_SECURITY_ARGON2_ITERATIONS=6"
+  # A recovery drill reads data; it must not replay restored outbox events,
+  # send notifications, decode uploads or send entry text to an AI provider.
+  echo "MOYI_SCHEDULING_ENABLED=false"
+  echo "MOYI_NOTIFICATION_PUSH_PROVIDER=log"
+  echo "MOYI_MEDIA_STORAGE_PROVIDER=unavailable"
+  echo "MOYI_MEDIA_PROCESSING_PROVIDER=off"
+  echo "MOYI_MEDIA_MODERATION_IMAGE_PROVIDER=none"
+  echo "MOYI_MEDIA_MODERATION_KNOWNIMAGES_PROVIDER=none"
+  echo "MOYI_MEDIA_MODERATION_VOICE_PROVIDER=none"
+  echo "MOYI_AI_EMBEDDING_PROVIDER=none"
+  # Keep email bodies out of logs; a real sender has neither a valid key
+  # nor a reachable endpoint. No production provider credential is supplied.
+  echo "MOYI_NOTIFICATION_EMAIL_RESEND_BASE_URL=http://127.0.0.1:9"
   echo "MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY=re_restore_drill_sends_nothing"
   echo "MOYI_NOTIFICATION_EMAIL_FROM=Moyi drill <drill@localhost>"
   echo "MOYI_IDENTITY_VERIFICATION_LINK_BASE_URL=http://localhost/verify"

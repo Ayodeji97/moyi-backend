@@ -339,7 +339,14 @@ accessories:
   # Docker network, never on the server's address (doc 10 §8: "the single
   # most common way a hobby project leaks its entire database").
   postgres:
-    image: postgres:18
+    # Postgres 18.6 with pgvector 0.8.7 (V41 needs it), on Debian 13 (trixie):
+    # the same glibc, 2.41, reported by the running production image on
+    # 2026-11-04. The untagged `-pg18` build is Debian 12 (glibc 2.36). Opened on
+    # that, the database warns of a collation version mismatch, and affected
+    # indexes on text would need rebuilding (seen 2026-11-04,
+    # ops/postgres/README.md). Change it only on the same Debian release, or
+    # with that rebuild.
+    image: pgvector/pgvector:0.8.7-pg18-trixie
     host: 91.98.71.136
     # Tuned to Postgres's share of the box, not the whole of it (doc 10 §2.1).
     cmd: postgres -c shared_buffers=512MB -c effective_cache_size=1536MB

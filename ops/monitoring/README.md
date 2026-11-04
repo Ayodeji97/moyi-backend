@@ -71,6 +71,10 @@ asset existed and the check reported ok as long as both jobs ran; since storage 
 on (ops/media-worker/README.md) it watches real uploads, and #116's version also watches the
 worker, so a copy installed before #116 is copied again (that runbook's step 3).
 
+Since reporting (ADR-0053), the current script also needs V39 (`entry_reports`
+and `media_report_holds`). If production is older, stage the files first and
+enable the timer after the deployment applies V39.
+
 Since D4 (ADR-0051) it needs V36 too, and it also fails while anything is held as evidence (child
 abuse material awaiting the takedown runbook), while anything moderation held back has waited more
 than `QUARANTINE_REVIEW_DAYS` (3 by default) for review, and, once moderation is switched on,

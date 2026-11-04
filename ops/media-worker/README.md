@@ -130,12 +130,14 @@ container `Up … (healthy)`, and `limited`. `check` passes when no worker runs
 at all, so the `docker ps` line must show one. The worker stays healthy: its
 open connection to Postgres is kept, and new ones are allowed.
 
-### Step 3. The media check, as of #116
+### Step 3. The media check
 
 `ops/monitoring/media-check.sh` gained two checks in #116 (an upload waiting
 `UPLOADED` for 30 minutes; a worker running without its limit), so the copy on
 the server is older than the one that watches the worker. Copy it, with its
-units, again:
+units, again. The current script also needs the reporting tables in V39;
+when production is older, stage these files now and start/enable the check
+only after step 4 has applied V39:
 
 ```
 scp ops/monitoring/media-check.sh moyi:/usr/local/sbin/moyi-media-check
