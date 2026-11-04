@@ -10,6 +10,7 @@ import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
+import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.put
 import java.sql.Timestamp
@@ -176,6 +177,27 @@ internal class WithdrawalRig(
                 }
             }.andReturn()
             .response.status shouldBe 204
+    }
+
+    /** The real route: `PATCH /bonds/{id}`, which takes the bond's lock and publishes `SemanticSearchDisabled`. */
+    fun turnOffSemanticSearch(
+        user: UUID,
+        bond: String,
+    ) {
+        val etag =
+            mockMvc
+                .get("/api/v1/bonds/$bond") { header(HttpHeaders.AUTHORIZATION, bearer(user)) }
+                .andReturn()
+                .response
+                .getHeader(HttpHeaders.ETAG)!!
+        mockMvc
+            .patch("/api/v1/bonds/$bond") {
+                header(HttpHeaders.AUTHORIZATION, bearer(user))
+                header(HttpHeaders.IF_MATCH, etag)
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"semanticSearchEnabled":false}"""
+            }.andReturn()
+            .response.status shouldBe 200
     }
 
     fun get(

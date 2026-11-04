@@ -34,14 +34,23 @@ internal data class SearchQuery(
                     violations += refused.errors.orEmpty()
                     null
                 }
-            val terms =
-                when (q) {
-                    null -> null.also { violations += Q_MISSING }
-                    else -> SearchTerms.of(q) ?: null.also { violations += Q_NOT_SEARCHABLE }
-                }
+            val terms = termsOf(q, violations)
             if (paging == null || terms == null) throw DaysQueryNotValidException(violations)
             return SearchQuery(terms, paging.limit, paging.before)
         }
+
+        /**
+         * `q` read by [SearchTerms.of], or `null` with its violation added to [violations]. The one
+         * reading of `q` for every route that takes one (search and "Remember when").
+         */
+        fun termsOf(
+            q: String?,
+            violations: MutableList<FieldViolation>,
+        ): SearchTerms? =
+            when (q) {
+                null -> null.also { violations += Q_MISSING }
+                else -> SearchTerms.of(q) ?: null.also { violations += Q_NOT_SEARCHABLE }
+            }
 
         // About the parameter, never its value: what somebody searched for is their words.
         private val Q_MISSING = FieldViolation("q", "REQUIRED", "is required: the words to look for")

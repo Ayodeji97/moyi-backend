@@ -88,6 +88,15 @@ enum class RateLimitBucket(
      */
     REPORTS_CREATE_USER("reports:create:user", Subject.USER, 10, Duration.ofDays(1)),
 
+    /**
+     * ADR-0054 addition (spec §3.6: "its own Bucket4j bucket, because each call
+     * spends a provider request"; doc 06 §4 names none): 30 "Remember when"
+     * calls an hour per user. Each call may embed `q` with a paid provider, so
+     * this bounds what one account can spend; the search box needs no bucket of
+     * its own because a person types into it, and this is asked a question.
+     */
+    REMEMBER_USER("remember:user", Subject.USER, 30, Duration.ofHours(1)),
+
     /** Doc 06 §4: "global authenticated 120 / min", per user, on every request that carries a valid token. */
     AUTHENTICATED("authenticated:user", Subject.USER, 120, Duration.ofMinutes(1)),
     ;

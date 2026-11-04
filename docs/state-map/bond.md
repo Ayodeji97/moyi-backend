@@ -39,7 +39,7 @@ stateDiagram-v2
 | list your bonds<br>`GET /bonds` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays |
 | create a bond<br>`POST /bonds` | 201 → `PENDING_MEMBER` (your email is verified, and you are in fewer than three bonds that are open or counting down to deletion)<br>403 `EMAIL_NOT_VERIFIED` (your email is not verified)<br>409 `BOND_LIMIT_REACHED` (your email is verified, and you are already in three bonds that are open or counting down to deletion) | 201 stays (you are in fewer than three bonds that are open or counting down to deletion)<br>409 `BOND_LIMIT_REACHED` (you are already in three bonds that are open or counting down to deletion) | 201 stays (you are in fewer than three bonds that are open or counting down to deletion)<br>409 `BOND_LIMIT_REACHED` (you are already in three bonds that are open or counting down to deletion) | 201 stays (you are in fewer than three bonds that are open or counting down to deletion)<br>409 `BOND_LIMIT_REACHED` (you are already in three bonds that are open or counting down to deletion) | 201 stays (you are in fewer than three bonds that are open or counting down to deletion)<br>409 `BOND_LIMIT_REACHED` (you are already in three bonds that are open or counting down to deletion) |
 | read a bond<br>`GET /bonds/{bondId}` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
-| change the bond's settings<br>`PATCH /bonds/{bondId}` | 404 `NOT_FOUND` | 200 stays | 200 stays | 409 `BOND_ARCHIVED` | 409 `BOND_ARCHIVED` |
+| change the bond's settings<br>`PATCH /bonds/{bondId}` | 404 `NOT_FOUND` | 200 stays | 200 stays | 409 `BOND_ARCHIVED` (the body changes anything else, with or without turning semantic search off)<br>200 stays (the body is {"semanticSearchEnabled": false} and nothing else) | 409 `BOND_ARCHIVED` (the body changes anything else, with or without turning semantic search off)<br>200 stays (the body is {"semanticSearchEnabled": false} and nothing else) |
 | leave the bond<br>`POST /bonds/{bondId}/leave` | 404 `NOT_FOUND` | 204 → `ARCHIVED` | 204 → `ARCHIVED` | 204 stays (you are still in the bond)<br>204 stays (you have already left it, and it is still counting down) | 409 `BOND_ARCHIVED` |
 | block your partner<br>`POST /bonds/{bondId}/block` | 404 `NOT_FOUND` | 204 → `ARCHIVED` | 204 → `ARCHIVED` | 204 stays (you are still in the bond)<br>204 stays (you have already left it, and it is still counting down) | 204 stays |
 | issue a new invite<br>`POST /bonds/{bondId}/invites` | 404 `NOT_FOUND` | 201 stays | 409 `BOND_FULL` | 409 `BOND_ARCHIVED` | 409 `BOND_ARCHIVED` |
@@ -59,6 +59,8 @@ stateDiagram-v2
 | read today: the day, both entries, the streak and the bond's prompt of the day<br>`GET /bonds/{bondId}/today` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
 | read the streak<br>`GET /bonds/{bondId}/streak` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
 | the milestones reached, and the next<br>`GET /bonds/{bondId}/milestones` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
+| ask to turn semantic search back on, or agree to it<br>`POST /bonds/{bondId}/semantic-search` | 404 `NOT_FOUND` | 202 stays | 202 stays (semantic search is off, and no request to turn it on is waiting)<br>202 stays (semantic search is off, and your own request is waiting)<br>202 stays (semantic search is off, and your partner's request is waiting)<br>202 stays (semantic search is on) | 409 `BOND_ARCHIVED` | 409 `BOND_ARCHIVED` |
+| call off a request to turn semantic search back on<br>`DELETE /bonds/{bondId}/semantic-search` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 204 stays (a request to turn it on is waiting, yours or your partner's)<br>404 `NOT_FOUND` (no request to turn it on is waiting) | 204 stays (a request to turn it on, made before the countdown, is still waiting)<br>404 `NOT_FOUND` (no request to turn it on is waiting) | 404 `NOT_FOUND` |
 
 ### You can
 
@@ -80,6 +82,8 @@ stateDiagram-v2
 | `ARCHIVED` | read a bond |  | stays | An ended bond is a record both members keep. The member who left reads it too. | smoke |
 | `PENDING_MEMBER` | change the bond's settings |  | stays | The name, the type, the reveal time and Strict mode may be changed by either member alone, given the bond's current ETag as If-Match. The answer carries the new ETag. | smoke |
 | `ACTIVE` | change the bond's settings |  | stays | The same on a bond of two: either member may change these settings without the other, given the current ETag. Your partner's copy of the ETag stops matching. | test |
+| `PENDING_DELETION` | change the bond's settings | the body is {"semanticSearchEnabled": false} and nothing else | stays | As on an ended bond: turning semantic search off is taken during the countdown, with the current ETag, and the bond's vectors are deleted. | never-run |
+| `ARCHIVED` | change the bond's settings | the body is {"semanticSearchEnabled": false} and nothing else | stays | Turning semantic search off is never refused: the sweep would otherwise keep sending an ended bond's words to the provider. It is the one change an ended bond takes, with the current ETag. A member who has left may make it too, and the other member sees it. The bond's vectors are then deleted, as on an open bond. | smoke |
 | `PENDING_MEMBER` | leave the bond |  | `ARCHIVED` | Leaving a bond nobody joined ends it: it becomes ARCHIVED and its live invite is revoked. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). | test |
 | `ACTIVE` | leave the bond |  | `ARCHIVED` | One member leaving ends the bond for both: it becomes ARCHIVED, a record each of you can still read. Nobody is notified, and anything waiting to be agreed is cancelled. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). | smoke |
 | `PENDING_DELETION` | leave the bond | you are still in the bond | stays | Your membership ends and the bond goes on counting down: the deletion was agreed, and walking away does not undo that. From here you cannot call the deletion off; if your partner does, the bond becomes ARCHIVED. Your entries stay as they are unless the body says withdrawEntries: true, in which case they are taken back for both of you (ADR-0035 §11). | smoke |
@@ -138,6 +142,13 @@ stateDiagram-v2
 | `ACTIVE` | the milestones reached, and the next |  | stays | Each of 7, 30, 100 and 365 complete days reached, with the date of the day that reached it, and the next threshold, with no count. Today counts once it has revealed and follows the last evaluated day, as the streak's numbers do. | smoke |
 | `PENDING_DELETION` | the milestones reached, and the next |  | stays | What was reached is kept and nothing is next: the bond takes no writes while it counts down. Calling the deletion off brings next back. The same bytes as an ended bond's. | test |
 | `ARCHIVED` | the milestones reached, and the next |  | stays | An ended bond keeps what it reached, and nothing is next: the same bytes for both members, whether it was left or blocked. | test |
+| `PENDING_MEMBER` | ask to turn semantic search back on, or agree to it |  | stays | Alone in the bond, your request is the agreement: semantic search is on at once and nothing waits. If it is already on, nothing changes. Either way the answer is the bond. Once on, its entries are embedded in the background. | smoke |
+| `ACTIVE` | ask to turn semantic search back on, or agree to it | semantic search is off, and no request to turn it on is waiting | stays | Your request is recorded and waits seven days for your partner, whose own request is the agreement. Semantic search stays off until then. Your partner's copy of the ETag stops matching. | smoke |
+| `ACTIVE` | ask to turn semantic search back on, or agree to it | semantic search is off, and your own request is waiting | stays | Asking again changes nothing: your request still waits for your partner, with its first expiry. | smoke |
+| `ACTIVE` | ask to turn semantic search back on, or agree to it | semantic search is off, and your partner's request is waiting | stays | Your request agrees to your partner's: semantic search is on, for both of you. The bond's entries are embedded in the background over the next minutes; until then they are found by their words. | smoke |
+| `ACTIVE` | ask to turn semantic search back on, or agree to it | semantic search is on | stays | It is already on: nothing is asked for and nothing changes. The answer is the bond as it is. | smoke |
+| `ACTIVE` | call off a request to turn semantic search back on | a request to turn it on is waiting, yours or your partner's | stays | Either of you may call a waiting request off: the one who asked, or the one being asked, which is how a request is declined. Semantic search stays off. | smoke |
+| `PENDING_DELETION` | call off a request to turn semantic search back on | a request to turn it on, made before the countdown, is still waiting | stays | A request made before the countdown began is not called off by it, and either member may still call it off. Nothing else changes; it could not be agreed to now (409). | never-run |
 
 ### Refused here
 
@@ -151,8 +162,8 @@ stateDiagram-v2
 | `ARCHIVED` | create a bond | you are already in three bonds that are open or counting down to deletion | 409 `BOND_LIMIT_REACHED` | No bond is made and this one is untouched. This one does not count toward your three: it has ended. | FR-025, ADR-0030 §4c | smoke |
 | `NO_BOND` | read a bond |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
 | `NO_BOND` | change the bond's settings |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
-| `PENDING_DELETION` | change the bond's settings |  | 409 `BOND_ARCHIVED` | A bond counting down to deletion takes no settings change. The code is the one an ended bond gives. | BR-9, FR-028 | smoke |
-| `ARCHIVED` | change the bond's settings |  | 409 `BOND_ARCHIVED` | An ended bond is read only. This is answered before the If-Match is compared, so a stale tag gets it too. | BR-9, ADR-0028 §4 | smoke |
+| `PENDING_DELETION` | change the bond's settings | the body changes anything else, with or without turning semantic search off | 409 `BOND_ARCHIVED` | A bond counting down to deletion takes no settings change but turning semantic search off. The code is the one an ended bond gives. | BR-9, FR-028, ADR-0054 decision 9 (provisional, the owner to confirm) | smoke |
+| `ARCHIVED` | change the bond's settings | the body changes anything else, with or without turning semantic search off | 409 `BOND_ARCHIVED` | An ended bond takes no change but turning semantic search off (the next row). This is answered before the If-Match is compared, so a stale tag gets it too. | BR-9, ADR-0028 §4, ADR-0054 decision 9 (provisional, the owner to confirm) | smoke |
 | `NO_BOND` | leave the bond |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
 | `ARCHIVED` | leave the bond |  | 409 `BOND_ARCHIVED` | A bond that has ended cannot be left again, by the member who left or the one who stayed. Nothing is withdrawn, whatever the body says. To take your entries back from an ended bond, block. | BR-9, ADR-0028 §2 | smoke |
 | `NO_BOND` | block your partner |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
@@ -219,6 +230,14 @@ stateDiagram-v2
 | `NO_BOND` | read the streak |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
 | `NO_BOND` | the milestones reached, and the next |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
 | `ACTIVE` | agree to the time zone change | your partner's zone change is waiting, the proposalId you send is its id, and the zone moved in the last 30 days (not reachable by requests) | 409 `TIMEZONE_CHANGE_TOO_SOON` | The 30-day rule is asked again at agreement, and the proposal stays waiting. No sequence of requests reaches this: the zone moves only by a proposal being agreed or by a lone member's change, and neither can happen while this proposal waits. The test cited reaches it by changing the bond's row in the database. | ADR-0030 §6 | test |
+| `NO_BOND` | ask to turn semantic search back on, or agree to it |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `PENDING_DELETION` | ask to turn semantic search back on, or agree to it |  | 409 `BOND_ARCHIVED` | A bond counting down to deletion takes no request to turn semantic search on. The code is the one an ended bond gives. Turning it off is still taken (PATCH). | FR-204, ADR-0054, BR-9 | never-run |
+| `ARCHIVED` | ask to turn semantic search back on, or agree to it |  | 409 `BOND_ARCHIVED` | Nothing can turn semantic search on for a bond that has ended, whoever asks and however it ended. Turning it off is still taken (PATCH, ADR-0054 decision 9). | FR-204, ADR-0054, BR-9 | smoke |
+| `NO_BOND` | call off a request to turn semantic search back on |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `PENDING_MEMBER` | call off a request to turn semantic search back on |  | 404 `NOT_FOUND` | Alone in the bond, a request to turn semantic search on is never left waiting (it is on at once), so there is nothing to call off. | FR-204, ADR-0054 | never-run |
+| `ACTIVE` | call off a request to turn semantic search back on | no request to turn it on is waiting | 404 `NOT_FOUND` | Nothing is waiting to be called off: no request was made, it was answered, or it lapsed after seven days. | FR-204, ADR-0054 | smoke |
+| `PENDING_DELETION` | call off a request to turn semantic search back on | no request to turn it on is waiting | 404 `NOT_FOUND` | Nothing is waiting to be called off. | FR-204, ADR-0054 | never-run |
+| `ARCHIVED` | call off a request to turn semantic search back on |  | 404 `NOT_FOUND` | Ending a bond calls off every request still waiting (ADR-0028), so there is never one to call off here. | FR-204, ADR-0054, ADR-0028 | smoke |
 
 ### Happens without you
 
@@ -336,7 +355,7 @@ stateDiagram-v2
 | `CREATED` | your partner accepts the invite | partner |  | `ACCEPTED` | Somebody accepts the code you shared. It is spent, and the bond shows no invite from then on. | test |
 | `CREATED` | the invite expires, seven days on | system |  | `EXPIRED` | Seven days after it was issued the code stops being live. No job does this and no row is written: every read asks whether the expiry time has passed. The test cited moves the expiry into the past and finds the code unusable; the seven days are read from the code. | test |
 
-## The proposal (the latest of the kind the endpoint works on, the zone change or the deletion)
+## The proposal (the latest of the kind the endpoint works on: the zone change, the deletion, or turning semantic search back on)
 
 ```mermaid
 stateDiagram-v2
@@ -345,12 +364,12 @@ stateDiagram-v2
     state "confirmed" as bond_proposal__CONFIRMED
     state "cancelled" as bond_proposal__CANCELLED
     state "lapsed, unanswered" as bond_proposal__LAPSED
-    bond_proposal__NONE --> bond_proposal__PROPOSED: you - 2 actions, partner - proposes a change
-    bond_proposal__CONFIRMED --> bond_proposal__PROPOSED: you - 2 actions, partner - proposes a change
-    bond_proposal__CANCELLED --> bond_proposal__PROPOSED: you - 2 actions, partner - proposes a change
-    bond_proposal__LAPSED --> bond_proposal__PROPOSED: you - 2 actions, partner - proposes a change
-    bond_proposal__PROPOSED --> bond_proposal__CONFIRMED: you - 2 actions, partner - agrees to your proposal
-    bond_proposal__PROPOSED --> bond_proposal__CANCELLED: you - 4 actions, partner - 3 actions
+    bond_proposal__NONE --> bond_proposal__PROPOSED: you - 3 actions, partner - proposes a change
+    bond_proposal__CONFIRMED --> bond_proposal__PROPOSED: you - 3 actions, partner - proposes a change
+    bond_proposal__CANCELLED --> bond_proposal__PROPOSED: you - 3 actions, partner - proposes a change
+    bond_proposal__LAPSED --> bond_proposal__PROPOSED: you - 3 actions, partner - proposes a change
+    bond_proposal__PROPOSED --> bond_proposal__CONFIRMED: you - 3 actions, partner - agrees to your proposal
+    bond_proposal__PROPOSED --> bond_proposal__CANCELLED: you - 5 actions, partner - 3 actions
     bond_proposal__NONE --> bond_proposal__CONFIRMED: you - ask for the bond's deletion, or agree to it
     bond_proposal__LAPSED --> bond_proposal__CANCELLED: you - 2 actions, partner - 2 actions
     bond_proposal__PROPOSED --> bond_proposal__LAPSED: system - proposal lapses, seven days unanswered
@@ -367,6 +386,8 @@ stateDiagram-v2
 | call off the deletion<br>`DELETE /bonds/{bondId}/deletion-request` | 404 `NOT_FOUND` | 204 → `CANCELLED` | 204 stays (the bond is counting down, and you are still in it)<br>404 `NOT_FOUND` (the bond is counting down, and you have left it)<br>404 `NOT_FOUND` (the deletion it started has already been called off) | 404 `NOT_FOUND` | 404 `NOT_FOUND` |
 | leave the bond<br>`POST /bonds/{bondId}/leave` | 204 stays | 204 → `CANCELLED` | 204 stays | 204 stays | 204 → `CANCELLED` |
 | block your partner<br>`POST /bonds/{bondId}/block` | 204 stays | 204 → `CANCELLED` | 204 stays | 204 stays | 204 → `CANCELLED` |
+| ask to turn semantic search back on, or agree to it<br>`POST /bonds/{bondId}/semantic-search` | 202 → `PROPOSED` (semantic search is off, and the bond is two people)<br>202 stays (you are alone in the bond, or semantic search is already on) | 202 stays (you opened it)<br>202 → `CONFIRMED` (your partner opened it) | 202 stays (semantic search is still on)<br>202 → `PROPOSED` (semantic search has been turned off since, and the bond is two people) | 202 → `PROPOSED` | 202 → `PROPOSED` |
+| call off a request to turn semantic search back on<br>`DELETE /bonds/{bondId}/semantic-search` | 404 `NOT_FOUND` | 204 → `CANCELLED` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 404 `NOT_FOUND` |
 
 ### You can
 
@@ -400,6 +421,15 @@ stateDiagram-v2
 | `CONFIRMED` | block your partner |  | stays | An agreed proposal is history and is not touched. If it is the deletion and the bond is counting down, the countdown goes on without you: see the bond region. | test |
 | `CANCELLED` | block your partner |  | stays | A proposal already called off stays as it is. | never-run |
 | `LAPSED` | block your partner |  | `CANCELLED` | The statement that cancels what is waiting does not ask the clock, so a proposal that had lapsed and was never closed is stamped cancelled too. No response can show the difference: a lapsed proposal was already invisible. | never-run |
+| `NONE` | ask to turn semantic search back on, or agree to it | semantic search is off, and the bond is two people | `PROPOSED` | Your request is recorded and waits seven days for your partner, whose own request is the agreement. On a bond that has ended the answer is BOND_ARCHIVED: see the bond region. | smoke |
+| `NONE` | ask to turn semantic search back on, or agree to it | you are alone in the bond, or semantic search is already on | stays | No request is made: alone in the bond the setting changes at once, and when it is already on nothing changes. | smoke |
+| `PROPOSED` | ask to turn semantic search back on, or agree to it | you opened it | stays | Asking again changes nothing. | smoke |
+| `PROPOSED` | ask to turn semantic search back on, or agree to it | your partner opened it | `CONFIRMED` | Your request is the agreement: semantic search is on for the bond. | smoke |
+| `CONFIRMED` | ask to turn semantic search back on, or agree to it | semantic search is still on | stays | Semantic search is on: nothing is asked for, and no request is opened. | smoke |
+| `CONFIRMED` | ask to turn semantic search back on, or agree to it | semantic search has been turned off since, and the bond is two people | `PROPOSED` | It was agreed, and turned off again since: a new request is opened and waits for your partner. | never-run |
+| `CANCELLED` | ask to turn semantic search back on, or agree to it |  | `PROPOSED` | A request called off leaves nothing waiting, so asking again opens a new one. | smoke |
+| `LAPSED` | ask to turn semantic search back on, or agree to it |  | `PROPOSED` | A request left unanswered for seven days has lapsed; asking again opens a new one. | never-run |
+| `PROPOSED` | call off a request to turn semantic search back on |  | `CANCELLED` | Either member may withdraw a request that has not been agreed to: the one who asked, or the one being asked. | smoke |
 
 ### Refused here
 
@@ -424,6 +454,10 @@ stateDiagram-v2
 | `CONFIRMED` | call off the deletion | the deletion it started has already been called off | 404 `NOT_FOUND` | The countdown is over and nothing is waiting, so a second call finds nothing. (a test asserts the status, not the code) | ADR-0030 §5 | never-run |
 | `CANCELLED` | call off the deletion |  | 404 `NOT_FOUND` | The request was already withdrawn, or was cancelled when the bond ended. There is nothing to call off. | ADR-0030 §5 | never-run |
 | `LAPSED` | call off the deletion |  | 404 `NOT_FOUND` | The request lapsed unanswered, which already has the effect of withdrawing it. There is nothing to call off. | ADR-0030 §5 | never-run |
+| `NONE` | call off a request to turn semantic search back on |  | 404 `NOT_FOUND` | Nothing is waiting to be called off. | FR-204, ADR-0054 | smoke |
+| `CONFIRMED` | call off a request to turn semantic search back on |  | 404 `NOT_FOUND` | An agreed request is not waiting, so it cannot be called off. To turn semantic search off, one member PATCHes the bond. | FR-204, ADR-0054 | never-run |
+| `CANCELLED` | call off a request to turn semantic search back on |  | 404 `NOT_FOUND` | Nothing is waiting to be called off. | FR-204, ADR-0054 | never-run |
+| `LAPSED` | call off a request to turn semantic search back on |  | 404 `NOT_FOUND` | A lapsed request is not waiting. | FR-204, ADR-0054 | never-run |
 
 ### Happens without you
 

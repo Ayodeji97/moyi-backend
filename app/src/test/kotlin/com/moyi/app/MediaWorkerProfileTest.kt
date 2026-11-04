@@ -28,7 +28,8 @@ import java.nio.file.Path
  *
  * Each assertion was seen failing with its line in application-media-worker.yml
  * removed or changed (`servlet` for `none`; a consumer dropped from `only`; the
- * idempotency-key job's cron dropped).
+ * idempotency-key job's cron dropped; the embedding job's cron and the embedding provider
+ * dropped).
  */
 @SpringBootTest(
     properties = [
@@ -85,6 +86,8 @@ class MediaWorkerProfileTest(
         value("moyi.security.jwt.key-source") shouldBe "ephemeral"
         value("moyi.security.hashing.secret-source") shouldBe "ephemeral"
         value("moyi.notification.email.provider") shouldBe "log"
+        // ADR-0054: the worker builds `ai`'s configuration too, and the default provider refuses to start without its key.
+        value("moyi.ai.embedding.provider") shouldBe "none"
     }
 
     @Test

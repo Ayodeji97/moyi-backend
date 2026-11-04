@@ -132,7 +132,19 @@
 # Last run on 2026-10-30, after that review, on feat/report-route (main e88944b), from a jar of
 # 2c0e3bf, on a fresh database that applied 38 migrations to V39, against its own compose project
 # (moyi-report: Postgres 55454, Valkey 63814, MinIO 59028), the jar booted by hand (local profile)
-# and --attach: 1273 passed, 0 failed, 0 skipped, 33 sections. Before it, from 3e8a78a: 1254, 0, 0. D3 last run
+# and --attach: 1273 passed, 0 failed, 0 skipped, 33 sections. Before it, from 3e8a78a: 1254, 0, 0.
+# Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
+# local profile and production name it: search 200 by words alone; "Remember when" 200 from the
+# words' ranking alone (and a plain question whose words are not all in one entry answers no day),
+# its q and limit each one 422, a stranger's 404; PATCH true a 422 ASSERT_FALSE on the field; a
+# vector put in by hand gone once one member turns the setting off and the outbox runs; back on
+# by both members (a request, a repeat, a cancel, an agreement), a solo bond alone; and an ended
+# bond taking `false` and nothing else (decision 9, provisional). Last run on 2026-11-02, on
+# feat/semantic-search-s1, from a jar of e9daa6f, on a fresh database that applied 40 migrations
+# to V41, against its own compose project (moyi-s1: Postgres 55461, Valkey 56401, MinIO 59291),
+# the jar booted by hand (local profile) and --attach: 1327 passed, 0 failed, 0 skipped, 34
+# sections. The run before it, on the same jar, failed one probe of its own: it had asked
+# "remember" a plain question and expected the words' ranking to find it (see the section). D3 last run
 # on 2026-10-29, after main (d2429fc D2, 66032c0 D5) was merged in, from a jar of
 # that merge, on a fresh database that applied 34 migrations to V35, against its own
 # compose project (moyi-d3: Postgres 55443, Valkey 63803, MinIO 59006), the jar
@@ -2242,6 +2254,83 @@ is "on this day: …exactly nothing" "$LAST_BODY" '{"items":[]}'
 expect "on this day: nothing for the one who left" 200 "" -- "$API/bonds/$SE_BOND/on-this-day" -H "Authorization: Bearer $SE_B"
 is "on this day: …the same bytes" "$LAST_BODY" '{"items":[]}'
 search "search: the ended bond is still searched, by the one who left" 200 'thank you for the long walk home' "walk" "$SE_B"
+
+echo; echo "semantic search and remember when — keywords alone with no provider, and the setting off and on (FR-204, ADR-0054)"
+flush_buckets
+# What this section is for: semantic search as the jar serves it with the provider `none`, which
+# is what local runs and production name until a key exists. Search is 200 and finds by words
+# alone; "Remember when" is 200 from the words' ranking alone, its q read as search's, and the
+# stranger's 404 first. PATCH cannot turn it on. Turning it off deletes the bond's vectors through
+# the outbox: with no provider nothing writes one, so one is put in by hand first. Back on needs
+# both members, a solo bond alone; an ended bond still takes `false` and nothing else (decision 9,
+# provisional).
+verified_account "meaner" "203.0.113.190"; MS_A="$ACCOUNT_ACCESS"
+verified_account "meant" "203.0.113.191"; MS_B="$ACCOUNT_ACCESS"
+verified_account "unmeant" "203.0.113.192"; MS_O="$ACCOUNT_ACCESS"
+revealed_bond "semantic" "$MS_A" "$MS_B" "we walked the dog along the river" "grateful for soup on a cold evening"
+MS_BOND="$RB_BOND"; MS_A_ENTRY="$RB_A_ENTRY"
+# ms_bond <token> — the bond's ETag, as that member reads it.
+ms_bond() { curl -s -D - -o /dev/null "$API/bonds/$MS_BOND" -H "Authorization: Bearer $1" | tr -d '\r' | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
+
+expect "semantic: a new bond has it on" 200 '"semanticSearchEnabled":true' -- "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_A"
+expect "semantic: search with no provider is 200, by words alone" 200 'we walked the dog along the river' -- -G "$API/bonds/$MS_BOND/search" --data-urlencode "q=river" -H "Authorization: Bearer $MS_A"
+expect "semantic: …and a word no entry holds finds nothing, however near its meaning" 200 '"items":[]' -- -G "$API/bonds/$MS_BOND/search" --data-urlencode "q=stream" -H "Authorization: Bearer $MS_A"
+
+expect "remember: the words' ranking alone, with no provider" 200 'grateful for soup on a cold evening' -- -G "$API/bonds/$MS_BOND/remember" --data-urlencode "q=cold soup" -H "Authorization: Bearer $MS_A"
+is "remember: an answer is days, and nothing else" "$(python3 -c 'import json,sys; print(sorted(json.loads(sys.argv[1])))' "$LAST_BODY")" "['items']"
+header_is "remember: never stored" "Cache-Control" "no-cache, no-store, max-age=0, must-revalidate"
+expect "remember: a question that shares no word answers no day" 200 '' -- -G "$API/bonds/$MS_BOND/remember" --data-urlencode "q=zebra" -H "Authorization: Bearer $MS_B"
+is "remember: …exactly no day" "$LAST_BODY" '{"items":[]}'
+# The words' ranking matches as search does: every word of q in one entry. So with no provider, a
+# question asked in plain words ("when did we have soup") answers no day, though "soup" alone does
+# (seen 2026-11-02; ADR-0054 records it for the owner, beside the relevance floor).
+expect "remember: with no provider, a plain question whose words are not all in one entry answers no day" 200 '"items":[]' -- -G "$API/bonds/$MS_BOND/remember" --data-urlencode "q=when did we have soup" -H "Authorization: Bearer $MS_A"
+expect "remember: no q is one 422 on q" 422 '"field":"q"' -- "$API/bonds/$MS_BOND/remember" -H "Authorization: Bearer $MS_A"
+expect "remember: a limit of 21 is one 422 on limit" 422 '"field":"limit"' -- -G "$API/bonds/$MS_BOND/remember" --data-urlencode "q=soup" --data-urlencode "limit=21" -H "Authorization: Bearer $MS_A"
+expect "remember: a stranger is told the bond's 404" 404 '"code":"NOT_FOUND"' -- -G "$API/bonds/$MS_BOND/remember" --data-urlencode "q=soup" -H "Authorization: Bearer $MS_O"
+
+# Off: one member, PATCH false. True is refused on the field.
+MS_ETAG="$(ms_bond "$MS_A")"
+expect "semantic: PATCH cannot turn it on: 422 on the field" 422 '"field":"semanticSearchEnabled"' -- -X PATCH "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_A" -H "If-Match: $MS_ETAG" -d '{"semanticSearchEnabled":true}'
+[[ "$LAST_BODY" == *'"code":"ASSERT_FALSE"'* ]] && pass "semantic: …its code ASSERT_FALSE" || fail "semantic: ASSERT_FALSE" "${LAST_BODY:0:200}"
+# No provider writes no vector, so one is put in for her entry: zeros, in the OpenAI model's table.
+db_is "semantic: a vector put in by hand" "$(sql "WITH v AS (INSERT INTO entry_embeddings_openai_1536 (entry_id, bond_id, embedding, text_hash, created_at) VALUES ('$MS_A_ENTRY', '$MS_BOND', array_fill(0::real, ARRAY[1536])::vector, sha256('x'::bytea), now()) RETURNING 1) SELECT count(*) FROM v")" "1"
+db_is "semantic: …the bond has one" "$(sql "SELECT count(*) FROM entry_embeddings_openai_1536 WHERE bond_id = '$MS_BOND'")" "1"
+MS_ETAG="$(ms_bond "$MS_B")"
+expect "semantic: one member turns it off: 200" 200 '"semanticSearchEnabled":false' -- -X PATCH "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_B" -H "If-Match: $MS_ETAG" -d '{"semanticSearchEnabled":false}'
+MS_LEFT="$(sql "SELECT count(*) FROM entry_embeddings_openai_1536 WHERE bond_id = '$MS_BOND'")"
+for _ in $(seq 1 20); do [ "$MS_LEFT" = 0 ] && break; case "$MS_LEFT" in psql-*) break ;; esac; sleep 1; MS_LEFT="$(sql "SELECT count(*) FROM entry_embeddings_openai_1536 WHERE bond_id = '$MS_BOND'")"; done
+db_is "semantic: …and after the outbox pass the bond has no vector" "$MS_LEFT" "0"
+expect "semantic: …and she sees it off" 200 '"semanticSearchEnabled":false' -- "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_A"
+expect "remember: with it off, still the words' ranking" 200 'we walked the dog along the river' -- -G "$API/bonds/$MS_BOND/remember" --data-urlencode "q=the river" -H "Authorization: Bearer $MS_B"
+
+# On again: both members, the deletion request's shape.
+expect "semantic: calling a request off with nothing waiting is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_A"
+expect "semantic: asking to turn it back on is 202, and it stays off" 202 '"semanticSearchEnabled":false' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_A"
+[[ "$LAST_BODY" == *'"pendingSemanticSearchRequest":{'* ]] && pass "semantic: …with her request pending" || fail "semantic: pending request" "${LAST_BODY:0:300}"
+expect "semantic: asking again is 202, and nothing changes" 202 '"semanticSearchEnabled":false' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_A"
+expect "semantic: the other member calls it off: 204" 204 "" -- -X DELETE "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_B"
+expect "semantic: …and nothing is pending" 200 '"pendingSemanticSearchRequest":null' -- "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_A"
+expect "semantic: she asks again: 202" 202 '"semanticSearchEnabled":false' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_A"
+expect "semantic: the other member's request turns it on: 202" 202 '"semanticSearchEnabled":true' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_B"
+expect "semantic: asking while it is on changes nothing: 202" 202 '"pendingSemanticSearchRequest":null' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_A"
+expect "semantic: a stranger asking is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_O"
+expect "semantic: a stranger calling it off is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_O"
+
+# A solo bond: off, then on again by its one member.
+expect "semantic: a bond of one" 201 '"semanticSearchEnabled":true' -- -X POST "$API/bonds" -H "Authorization: Bearer $MS_O" -d "$(bond_body "Me")"
+MS_SOLO="$(printf '%s' "$LAST_BODY" | jget id)"; MS_SOLO_ETAG="$(etag_of)"
+expect "semantic: …turned off by its member" 200 '"semanticSearchEnabled":false' -- -X PATCH "$API/bonds/$MS_SOLO" -H "Authorization: Bearer $MS_O" -H "If-Match: $MS_SOLO_ETAG" -d '{"semanticSearchEnabled":false}'
+expect "semantic: a solo bond turns it back on alone: 202" 202 '"semanticSearchEnabled":true' -- -X POST "$API/bonds/$MS_SOLO/semantic-search" -H "Authorization: Bearer $MS_O"
+
+# Ended (decision 9, provisional): only false is taken, and nothing can turn it on.
+expect "semantic: he leaves" 204 "" -- -X POST "$API/bonds/$MS_BOND/leave" -H "Authorization: Bearer $MS_B"
+MS_ETAG="$(ms_bond "$MS_A")"
+expect "semantic: on an ended bond, any other change is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X PATCH "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_A" -H "If-Match: $MS_ETAG" -d '{"semanticSearchEnabled":false,"strictMode":true}'
+expect "semantic: on an ended bond, turning it off is still 200" 200 '"semanticSearchEnabled":false' -- -X PATCH "$API/bonds/$MS_BOND" -H "Authorization: Bearer $MS_A" -H "If-Match: $MS_ETAG" -d '{"semanticSearchEnabled":false}'
+expect "semantic: on an ended bond, asking to turn it on is 409 BOND_ARCHIVED" 409 '"code":"BOND_ARCHIVED"' -- -X POST "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_A"
+expect "semantic: on an ended bond, calling a request off is 404" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/bonds/$MS_BOND/semantic-search" -H "Authorization: Bearer $MS_B"
+expect "remember: the ended bond is still asked, by the one who left" 200 'grateful for soup on a cold evening' -- -G "$API/bonds/$MS_BOND/remember" --data-urlencode "q=soup" -H "Authorization: Bearer $MS_B"
 
 echo; echo "milestones — what the bond has reached of 7, 30, 100 and 365 complete days, and what is next (FR-075, ADR-0041)"
 flush_buckets

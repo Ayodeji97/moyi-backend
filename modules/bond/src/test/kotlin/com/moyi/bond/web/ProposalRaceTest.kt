@@ -178,6 +178,28 @@ internal class ProposalRaceTest(
     }
 
     @Test
+    fun `both members asking to turn semantic search on at the same moment make one proposal, and it is on`() {
+        repeat(RACES) { run ->
+            val (ada, bea, bondId) = pairedBond(run)
+            // Built in SQL: how it got turned off is SemanticSearchSettingTest's business.
+            jdbc.update("UPDATE bonds SET semantic_search_enabled = false")
+
+            val statuses =
+                inParallel(listOf({ requestSemanticSearch(ada, bondId) }, { requestSemanticSearch(bea, bondId) })).map { it.status }
+
+            withClue("run $run: $statuses") {
+                // The bond's row lock serialises them into ask-then-agree: the
+                // second always finds the first's proposal and confirms it.
+                statuses shouldContainExactlyInAnyOrder listOf(202, 202)
+                jdbc.queryForObject("SELECT count(*) FROM bond_proposals", Int::class.java) shouldBe 1
+                jdbc.queryForObject("SELECT count(*) FROM bond_proposals WHERE confirmed_at IS NOT NULL", Int::class.java) shouldBe 1
+                jdbc.queryForObject("SELECT semantic_search_enabled FROM bonds", Boolean::class.java) shouldBe true
+            }
+            clear()
+        }
+    }
+
+    @Test
     fun `a cancellation authorized before a leave cannot undo deletion after that leave commits`() {
         val (ada, bea, bondId) = pairedBond(0)
         requestDeletion(ada, bondId).status shouldBe 202
@@ -282,6 +304,15 @@ internal class ProposalRaceTest(
     ): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/bonds/$bondId/deletion-request") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }
+            .andReturn()
+            .response
+
+    private fun requestSemanticSearch(
+        userId: UUID,
+        bondId: String,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/semantic-search") { header(HttpHeaders.AUTHORIZATION, bearer(userId)) }
             .andReturn()
             .response
 

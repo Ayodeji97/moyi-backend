@@ -123,6 +123,10 @@ internal class GratitudeTestApplication {
     @Bean
     fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
 
+    /** `ai` is not scanned: the sweep, search and remember reach this stand-in, and no provider (ADR-0054). */
+    @Bean
+    fun fakeEmbeddingPort(): FakeEmbeddingPort = FakeEmbeddingPort()
+
     companion object {
         /**
          * `media`'s own routes, left out: this module reaches `media` through

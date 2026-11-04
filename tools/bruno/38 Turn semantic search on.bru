@@ -1,0 +1,21 @@
+meta {
+  name: Turn semantic search on
+  type: http
+  seq: 38
+}
+
+post {
+  url: {{api}}/bonds/{{bondId}}/semantic-search
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+docs {
+  Asks to turn the bond's semantic search back on, or agrees when your partner has asked (FR-204, ADR-0054). 202 with the bond. In a bond of two nothing changes until the other runs this too, within seven days; the bond's pendingSemanticSearchRequest shows a request waiting. Alone in a bond, it is on at once. Asking while it is on changes nothing. A bond that has ended is 409 BOND_ARCHIVED.
+
+  To call a waiting request off, yours or your partner's, send DELETE to the same URL: 204, or 404 when nothing is waiting. Once on, the bond's entries are embedded in the background over the next minutes.
+}

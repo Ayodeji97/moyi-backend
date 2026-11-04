@@ -72,6 +72,12 @@ moyi:
         provider: stand-in
       voice:
         provider: stand-in
+  ai:
+    embedding:
+      # No key on a laptop: search and "remember when" answer from keywords.
+      # OPENAI, the default, refuses to start without its key (ADR-0054); set
+      # MOYI_AI_EMBEDDING_PROVIDER=openai and the key to try the real thing.
+      provider: none
   security:
     jwt:
       # Generated at startup: every token dies with the process, which is fine

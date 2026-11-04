@@ -3,6 +3,7 @@ package com.moyi.gratitude.web
 import com.moyi.bond.api.BondAccess
 import com.moyi.common.security.CurrentUser
 import com.moyi.gratitude.service.GetDays
+import com.moyi.gratitude.service.QueryEmbedder
 import com.moyi.gratitude.service.ReconcileJoiningDay
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -35,6 +36,7 @@ internal class SearchController(
     private val access: BondAccess,
     private val getDays: GetDays,
     private val joining: ReconcileJoiningDay,
+    private val queryEmbedder: QueryEmbedder,
 ) {
     // Named `search`: the method name is the API's operationId.
     @GetMapping("/{bondId}/search")
@@ -48,7 +50,9 @@ internal class SearchController(
         val membership = access.guard(caller, bondId)
         val query = SearchQuery.parse(q, limit, cursor)
         joining.beforeRead(membership)
-        val page = getDays.search(membership, query.terms, query.before, query.limit)
+        // Outside any transaction, as every provider call is: `null` is keywords only (spec §3.5).
+        val semantic = queryEmbedder.matchFor(membership, query.terms.value)
+        val page = getDays.search(membership, query.terms, query.before, query.limit, semantic)
         // Once for the request, after the read: every day carries the archive's one shape (DayResponse).
         return DaysResponse.from(page, access.partnerDisplayNameOf(membership))
     }

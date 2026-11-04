@@ -67,6 +67,11 @@ moyi:
       # (ADR-0051). Moderation is tested in modules/media.
       image:
         provider: none
+  ai:
+    embedding:
+      # OPENAI, the default, refuses to start without a key (ADR-0054). The
+      # port is tested in modules/ai; here only the composition has to start.
+      provider: none
   security:
     jwt:
       key-source: ephemeral

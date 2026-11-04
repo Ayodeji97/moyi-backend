@@ -239,6 +239,19 @@ env:
     # here and _CLIENT_EMAIL and _PRIVATE_KEY_PEM as secrets; without them the
     # default provider, FCM, refuses to start.
     MOYI_NOTIFICATION_PUSH_PROVIDER: log
+    # No entry is embedded for semantic search until the owner has chosen the
+    # provider by the eval and holds its key (ADR-0054). `none` sends no word
+    # anywhere: search and "Remember when" answer from keywords alone, and the
+    # embedding sweep does nothing. To switch on, in the API's role alone:
+    # MOYI_AI_EMBEDDING_PROVIDER: openai (or voyage) in servers.web.env.clear,
+    # and MOYI_AI_EMBEDDING_OPENAI_API_KEY (or _VOYAGE_API_KEY) in
+    # servers.web.env.secret, never the top-level ones: the media worker embeds
+    # nothing, and an environment variable here would outrank the `none` its
+    # profile names. And ship the max-distance the eval chose for that model
+    # (moyi.gratitude.semantic-search.max-distance in application.yml).
+    # Without its key the default provider, OpenAI, refuses to start.
+    # ProductionStartsWithoutMediaSecretsTest holds this line.
+    MOYI_AI_EMBEDDING_PROVIDER: none
     # Media is stored in R2 (ADR-0047), the default provider: the bucket
     # `moyi-media`, in Cloudflare's EU jurisdiction, with a token scoped to it
     # alone (Object Read & Write). The endpoint and both halves of the token

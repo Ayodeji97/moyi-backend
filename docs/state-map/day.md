@@ -56,6 +56,7 @@ stateDiagram-v2
 | react to your partner's entry<br>`PUT /entries/{entryId}/reaction` | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays |
 | take your reaction back<br>`DELETE /entries/{entryId}/reaction` | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays | 204 stays |
 | search the archive by words<br>`GET /bonds/{bondId}/search` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays |
+| ask the archive a question ("Remember when")<br>`GET /bonds/{bondId}/remember` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays |
 | this date in earlier years<br>`GET /bonds/{bondId}/on-this-day` | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays | 200 stays |
 
 ### You can
@@ -190,6 +191,15 @@ stateDiagram-v2
 | `EMPTY` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
 | `FROZEN` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
 | `SUSPENDED` | search the archive by words |  | stays | Search is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
+| `NOT_OPENED` | ask the archive a question ("Remember when") |  | stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | never-run |
+| `OPEN` | ask the archive a question ("Remember when") |  | stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | never-run |
+| `PARTIAL` | ask the archive a question ("Remember when") |  | stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | never-run |
+| `PENDING_REVEAL` | ask the archive a question ("Remember when") |  | stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | never-run |
+| `REVEALED` | ask the archive a question ("Remember when") |  | stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | smoke |
+| `SOLO` | ask the archive a question ("Remember when") |  | stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | never-run |
+| `EMPTY` | ask the archive a question ("Remember when") |  | stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | never-run |
+| `FROZEN` | ask the archive a question ("Remember when") |  | stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | never-run |
+| `SUSPENDED` | ask the archive a question ("Remember when") |  | stays | "Remember when" is independent of today's day status; it reads the archive, ranked by relevance. The request still requires an authenticated member of the bond. | never-run |
 | `NOT_OPENED` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
 | `OPEN` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |
 | `PARTIAL` | this date in earlier years |  | stays | On this day is independent of today's day status; it reads the archive. The request still requires an authenticated member of the bond. | never-run |

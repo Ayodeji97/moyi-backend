@@ -23,6 +23,7 @@ import java.util.UUID
 internal class EntryStore(
     private val entries: EntryRepository,
     private val entityManager: EntityManager,
+    private val embeddings: EntryEmbeddings,
 ) {
     /**
      * Writes one entry, and flushes it. `entries_one_per_member_per_day`
@@ -45,9 +46,18 @@ internal class EntryStore(
         return entity.toDomain()
     }
 
-    /** Updates a managed row while the caller holds its parent day's lock. */
+    /**
+     * Updates a managed row while the caller holds its parent day's lock.
+     *
+     * **The one place `text_search` changes**, so the one place an entry's vectors are deleted:
+     * when the projection differs from what the row held, in this transaction, whatever changed
+     * it (an edit, the author's delete, the withdrawal's consumer, the close job's or a read's
+     * pre-step). A vector is the meaning of words, and outlives them nowhere (ADR-0054). An update
+     * that leaves the words alone (a reveal, a photo) keeps them.
+     */
     fun update(entry: Entry) {
         val entity = checkNotNull(entries.findById(entry.id.value)) { "cannot update a missing entry" }
+        val before = entity.textSearch
         entity.text = entry.text?.value
         // The projection follows the words, so an erasure empties it in the same statement (ADR-0039).
         entity.textSearch = searchProjectionOf(entry.text)
@@ -61,6 +71,7 @@ internal class EntryStore(
         // An erasure nulls it (ADR-0038); nothing else changes it.
         entity.promptId = entry.promptId?.value
         entries.saveAndFlush(entity)
+        if (before != entity.textSearch) embeddings.deleteForEntry(entry.id.value)
     }
 
     /**

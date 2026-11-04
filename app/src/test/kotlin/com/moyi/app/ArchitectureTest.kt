@@ -51,6 +51,7 @@ class ArchitectureTest {
                 "scheduling",
                 "admin",
                 "analytics",
+                "ai",
             )
 
         /**
@@ -145,12 +146,22 @@ class ArchitectureTest {
          * pushes an event or the on-this-day sweep makes (ADR-0046).
          */
         private val UNGUARDED_BOND_READS =
-            listOf("closingViewOf", "lockClosingViewOf", "bondsToSweep", "remindersDueBetween", "audienceOf", "onThisDayDueBetween")
+            listOf(
+                "closingViewOf",
+                "lockClosingViewOf",
+                "bondsToSweep",
+                "bondsWithSemanticSearch",
+                "remindersDueBetween",
+                "audienceOf",
+                "onThisDayDueBetween",
+            )
 
         /**
          * The work nobody asked for (`gratitude.service`): the close job's three steps, the
-         * withdrawal's consumer, the daily reminder's sweep, the day's push consumer and the
-         * on-this-day sweep. Each reads a bond with no caller whose membership could be checked.
+         * withdrawal's consumer, the daily reminder's sweep, the day's push consumer, the
+         * on-this-day sweep and the embedding sweep (ADR-0054). Each reads a bond with no caller
+         * whose membership could be checked. (`ForgetBondEmbeddings`, the embedding's other
+         * caller-less work, reads no bond at all, so it is not here.)
          */
         private val WORK_WITH_NO_CALLER =
             setOf(
@@ -161,6 +172,7 @@ class ArchitectureTest {
                 "SendDailyReminders.kt",
                 "NotifyDayMembers.kt",
                 "SendOnThisDayPushes.kt",
+                "EmbedPendingEntries.kt",
             )
 
         /**
@@ -316,6 +328,29 @@ class ArchitectureTest {
     }
 
     @Test
+    fun `a module's domain imports nothing from another module`() {
+        // "domain depends on nothing" (CLAUDE.md), across modules as well as across layers: the
+        // layer rule above asks only about a module's own layers, so `gratitude.domain` importing
+        // `ai.api` passed it (final review M5). Main sources only, for the layer rule's reason.
+        val violations =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
+                .flatMap { file ->
+                    val from = locationOf(file.packagee?.name)?.takeIf { it.layer == "domain" } ?: return@flatMap emptyList()
+                    file.imports.mapNotNull { import ->
+                        val to = locationOf(import.name)
+                        if (to != null && to.module != from.module) "${file.name}: ${import.name}" else null
+                    }
+                }
+
+        assertTrue(
+            violations.isEmpty(),
+            "A module's domain depends on nothing, another module's api included: map the foreign type in service " +
+                "or infra into one the domain owns. Found: $violations",
+        )
+    }
+
+    @Test
     fun `JPA entities live only in a module's infra layer`() {
         val violations = project.classes().inModuleButNotIn("infra") { it.hasAnnotationWithName("Entity", "jakarta.persistence.Entity") }
 
@@ -401,8 +436,8 @@ class ArchitectureTest {
 
         assertTrue(
             violations.isEmpty(),
-            "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer and the on-this-day " +
-                "sweep may call bond's unguarded reads. Found in: $violations",
+            "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer, the on-this-day " +
+                "sweep and the embedding sweep may call bond's unguarded reads. Found in: $violations",
         )
     }
 

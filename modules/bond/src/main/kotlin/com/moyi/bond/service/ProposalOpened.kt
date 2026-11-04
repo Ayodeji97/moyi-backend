@@ -8,9 +8,11 @@ import com.moyi.common.events.OutboxEvent
  * ADR-0046): one member asked for a change the other must agree to, and it
  * waits on them (FR-027, FR-028, ADR-0030). Published in the proposal's own
  * transaction wherever a **two-party** proposal row is made: a zone change
- * ([ChangeTimezone.propose], which makes none while the bond has one member)
- * and a deletion request ([RequestDeletion.request], whose lone-member
- * request confirms itself and asks nobody). `EndBond` makes no proposal; it
+ * ([ChangeTimezone.propose], which makes none while the bond has one member),
+ * a deletion request ([RequestDeletion.request], whose lone-member request
+ * confirms itself and asks nobody) and a request to turn semantic search on
+ * ([EnableSemanticSearch.request], which a bond still waiting for its second
+ * member applies at once, ADR-0054). `EndBond` makes no proposal; it
  * cancels the live ones. Read by [NotifyBondMembers], which tells the other
  * member, once.
  *

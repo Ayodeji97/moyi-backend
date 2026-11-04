@@ -26,6 +26,13 @@ dependencies {
     // photo on an entry is shown to its reader (spec §4 D2, ADR-0048). `media` is
     // a leaf, so this makes no cycle (spec §2.1, ADR-0047).
     implementation(projects.modules.media)
+    // `com.moyi.ai.api` only: `EmbeddingSpace`, which names the table an entry's vectors
+    // live in (V41, ADR-0054), and `EmbeddingPort`, which the sweep embeds them through.
+    // `ai` is a leaf that knows nothing of this module.
+    implementation(projects.modules.ai)
+
+    // The embedding sweep counts what it embedded and skipped (ADR-0054).
+    implementation("io.micrometer:micrometer-core")
 
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -33,8 +40,6 @@ dependencies {
     implementation("tools.jackson.module:jackson-module-kotlin")
 
     testImplementation(projects.common.testing)
-    // A registry for `media`'s processing meter, which this module's test context scans.
-    testImplementation("io.micrometer:micrometer-core")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testRuntimeOnly("org.springframework.boot:spring-boot-starter-flyway")

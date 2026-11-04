@@ -4,6 +4,10 @@ import com.moyi.gratitude.domain.BondDayId
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.SearchTerms
+import com.moyi.gratitude.domain.SemanticMatch
+import com.moyi.gratitude.infra.database.EntryRows.LIVE_ROW
+import com.moyi.gratitude.infra.database.EntryRows.SEEN_ROW
+import com.moyi.gratitude.infra.database.EntryRows.VECTOR_OF_ITS_WORDS
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.PreparedStatementSetter
 import org.springframework.jdbc.core.RowMapper
@@ -148,8 +152,8 @@ internal class ArchiveDays(
     /**
      * At most [limit] days of [bondId], newest first and strictly before [before] where given,
      * on which **one entry** matches [terms] and that same entry is one [memberId] may read in
-     * full as far as rows can say: they wrote it or it was revealed ([SEEN_ROW]), it is not
-     * erased ([LIVE_ROW]), and its author is not in [withdrawnMemberIds]. Each day carries the
+     * full as far as rows can say: they wrote it or it was revealed ([EntryRows.SEEN_ROW]), it is not
+     * erased ([EntryRows.LIVE_ROW]), and its author is not in [withdrawnMemberIds]. Each day carries the
      * ids of its entries that matched (ADR-0039 decisions 2 and 3).
      *
      * **The match and the visibility are asked of one row.** Asked of the day, "a day with an
@@ -157,7 +161,7 @@ internal class ArchiveDays(
      * would list a day the caller wrote on, and say what the partner wrote before the reveal
      * (c6-corpus H-S2).
      *
-     * **An erased entry never matches, whatever its projection still holds** ([LIVE_ROW]).
+     * **An erased entry never matches, whatever its projection still holds** ([EntryRows.LIVE_ROW]).
      * This build empties the projection with every erasure (`searchProjectionOf`, V25), but a
      * build from before V25 does not map the column, so an entry it erases keeps its words
      * there, during a blue/green overlap or after a rollback across V25 (final review I1;
@@ -173,8 +177,20 @@ internal class ArchiveDays(
      * **`q` is a parameter**, folded by the function V25's generated column folds with, and
      * parsed by `plainto_tsquery` (T-11): every word, as a whole word, in one entry.
      *
-     * Driven from `entries`, so the planner may start from `entries_search_idx`; the measured
-     * cost is in ADR-0039.
+     * **With [semantic], an entry also matches by meaning** (ADR-0054, spec §3.5): its vector in
+     * [SemanticMatch.table] lies within [SemanticMatch.maxDistance] of `q`'s. The two are
+     * one `OR` inside the one row's predicate, so everything above (the gate's two clauses, the
+     * withdrawn, the order and the keyset) holds for a meaning match by construction: the
+     * partner's unrevealed words match by meaning no more than by keyword (T-01). The vector is
+     * read through its bond, never by scanning the table: Postgres ran the `EXISTS` as a hashed
+     * subplan over a sequential scan of every bond's vectors when the subquery named the bond as
+     * `e.bond_id`, so it names the bond's id (`SearchCandidatesTest` reads the plan). **A vector
+     * is asked only while it is still its entry's words** ([EntryRows.VECTOR_OF_ITS_WORDS]), so one
+     * a writer left behind matches nothing (final review I2).
+     *
+     * Driven from `entries`, so the keyword-only form may start from `entries_search_idx`; the
+     * measured cost is in ADR-0039. With [semantic] the `OR` takes it off that index, and the
+     * plan starts from the bond's entries instead (`entries_bond_recent_idx`; ADR-0054 decision 7).
      *
      * **The join names the bond on both sides** (`d.bond_id = e.bond_id`). Without it nothing
      * bounds `bond_days` to the bond, and for a word the bond uses often the planner was free to
@@ -191,8 +207,9 @@ internal class ArchiveDays(
         before: LocalDate?,
         limit: Int,
         withdrawnMemberIds: Set<UUID>,
+        semantic: SemanticMatch? = null,
     ): List<ArchiveDay> {
-        val (sql, arguments) = matchingQuery(bondId, memberId, terms, before, limit, withdrawnMemberIds)
+        val (sql, arguments) = matchingQuery(bondId, memberId, terms, before, limit, withdrawnMemberIds, semantic)
         return jdbc.query(
             sql,
             PreparedStatementSetter { statement -> arguments.forEachIndexed { index, value -> statement.setObject(index + 1, value) } },
@@ -203,7 +220,7 @@ internal class ArchiveDays(
     /**
      * The days of [bondId] dated [today]'s month and day in an earlier year, newest first, at
      * most [ON_THIS_DAY_YEARS], that hold an entry [memberId] may read in full as far as rows
-     * can say: they wrote it or it was revealed ([SEEN_ROW]), it is not erased ([LIVE_ROW]),
+     * can say: they wrote it or it was revealed ([EntryRows.SEEN_ROW]), it is not erased ([EntryRows.LIVE_ROW]),
      * and its author is not in [withdrawnMemberIds] (ADR-0039 decision 15).
      *
      * **A day of tombstones is not a memory** (the controller's default 5, c6-corpus H-O5),
@@ -230,6 +247,70 @@ internal class ArchiveDays(
         )
     }
 
+    /**
+     * "Remember when"'s keyword ranking (ADR-0054, spec §3.6): at most [limit] ids of entries of
+     * [bondId] that hold every word of [terms], most relevant first by `ts_rank`, then by id so
+     * that equal ranks keep one order. **Each one asked of the gate's rows** ([gatedEntries]): the
+     * same entries a search could find, and no others. No date bound: it is a top-k, not a feed.
+     */
+    fun rankedByWords(
+        bondId: UUID,
+        memberId: UUID,
+        terms: SearchTerms,
+        withdrawnMemberIds: Set<UUID>,
+        limit: Int = RANKED_CANDIDATES,
+    ): List<UUID> = ids(rankedByWordsQuery(bondId, memberId, terms, withdrawnMemberIds, limit))
+
+    /**
+     * "Remember when"'s meaning ranking: at most [limit] ids of entries of [bondId] whose vector in
+     * [SemanticMatch.table] is nearest [SemanticMatch.vector], nearest first, inside the
+     * same gate as [rankedByWords], and only while the vector is still its entry's words
+     * ([EntryRows.VECTOR_OF_ITS_WORDS]). **No [SemanticMatch.maxDistance] cut-off**: a ranking needs
+     * none, and the fusion puts what both rankings hold first.
+     */
+    fun rankedByMeaning(
+        bondId: UUID,
+        memberId: UUID,
+        semantic: SemanticMatch,
+        withdrawnMemberIds: Set<UUID>,
+        limit: Int = RANKED_CANDIDATES,
+    ): List<UUID> = ids(rankedByMeaningQuery(bondId, memberId, semantic, withdrawnMemberIds, limit))
+
+    /**
+     * The days of [entryIds], in the order their first entry is given, each carrying in
+     * [ArchiveDay.matched] those of [entryIds] that are its own. An id that is not an entry of
+     * [bondId] is passed over. One query. It decides nothing about what is shown: the ids are a
+     * ranking's, and every day is read through the gate after this.
+     */
+    fun daysOf(
+        bondId: UUID,
+        entryIds: List<UUID>,
+    ): List<ArchiveDay> {
+        if (entryIds.isEmpty()) return emptyList()
+        val rows =
+            jdbc.query(
+                DAYS_OF_ENTRIES,
+                PreparedStatementSetter { statement ->
+                    statement.setObject(1, bondId)
+                    statement.setArray(2, statement.connection.createArrayOf("uuid", entryIds.toTypedArray()))
+                },
+                RowMapper { row, _ -> row.getObject("entry_id", UUID::class.java) to ROW.mapRow(row, 0)!! },
+            )
+        val dayOf = rows.toMap()
+        val matched = rows.groupBy({ it.second.id }, { EntryId(it.first) })
+        return entryIds
+            .mapNotNull { dayOf[it] }
+            .distinctBy { it.id }
+            .map { it.copy(matched = matched.getValue(it.id).toSet()) }
+    }
+
+    private fun ids(query: Pair<String, List<Any>>): List<UUID> =
+        jdbc.query(
+            query.first,
+            PreparedStatementSetter { statement -> query.second.forEachIndexed { index, value -> statement.setObject(index + 1, value) } },
+            RowMapper { row, _ -> row.getObject("id", UUID::class.java) },
+        )
+
     internal companion object {
         private const val SELECT = "SELECT d.id, d.date, d.status, d.closed_at, d.entry_count FROM bond_days d"
 
@@ -246,17 +327,7 @@ internal class ArchiveDays(
 
         private fun closedAtOf(row: ResultSet): Instant? = row.getTimestamp("closed_at")?.toInstant()
 
-        /**
-         * BR-1's "ever readable" asked of one entry row `e`: the caller wrote it, or it has been
-         * revealed. Its one argument is the caller's member id. The archive lists a day by it
-         * ([SEEN]); a search asks it of the very row that matched ([matching]), never of the day.
-         */
-        private const val SEEN_ROW = "(e.author_member_id = ? OR e.revealed_at IS NOT NULL)"
-
         private const val SEEN = "AND EXISTS (SELECT 1 FROM entries e WHERE e.bond_day_id = d.id AND $SEEN_ROW)"
-
-        /** Neither mark of an erasure, as `Entry.isErased` asks both. No argument. */
-        private const val LIVE_ROW = "e.deleted_at IS NULL AND e.status <> 'DELETED'"
 
         private const val MARKED =
             "AND EXISTS (SELECT 1 FROM entries e JOIN entry_favourites f ON f.entry_id = e.id " +
@@ -298,6 +369,42 @@ internal class ArchiveDays(
             return sql to arguments
         }
 
+        /** An entry's words hold every word of `q` (T-11). */
+        private const val WORDS_MATCH = "e.search_vector @@ plainto_tsquery('simple', public.immutable_unaccent(?))"
+
+        /**
+         * **The gate, as rows can ask it, written once** (T-01): the entries of [bondId] that
+         * [memberId] may read in full as far as rows can say. They wrote it or it was revealed
+         * ([EntryRows.SEEN_ROW]), it is not erased ([EntryRows.LIVE_ROW]), and its author is not in
+         * [withdrawnMemberIds]. [matchingQuery], [rankedByWordsQuery] and [rankedByMeaningQuery] each
+         * start from it, so that a search and both of "Remember when"'s rankings cannot drift apart
+         * on who may be found (preflight F24).
+         *
+         * Lines of SQL, `FROM entries e`, then [join] where given, then the `WHERE` and its `AND`s; a
+         * caller adds its own `AND`s after them. The arguments are [joinArguments] and then the
+         * gate's, in the order the text names them.
+         */
+        private fun gatedEntries(
+            bondId: UUID,
+            memberId: UUID,
+            withdrawnMemberIds: Set<UUID>,
+            join: String? = null,
+            joinArguments: List<Any> = emptyList(),
+        ): Pair<List<String>, List<Any>> {
+            val sql =
+                listOfNotNull(
+                    "FROM entries e",
+                    join,
+                    "WHERE e.bond_id = ?",
+                    "AND $SEEN_ROW",
+                    "AND $LIVE_ROW",
+                    withdrawnMemberIds
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { ids -> "AND e.author_member_id NOT IN (${ids.joinToString { "?" }})" },
+                )
+            return sql to joinArguments + bondId + memberId + withdrawnMemberIds
+        }
+
         /** [matching]'s statement and its arguments, in order: apart so that a measurement can ask Postgres how it runs. */
         @Suppress("LongParameterList")
         fun matchingQuery(
@@ -307,26 +414,101 @@ internal class ArchiveDays(
             before: LocalDate?,
             limit: Int,
             withdrawnMemberIds: Set<UUID>,
+            semantic: SemanticMatch? = null,
         ): Pair<String, List<Any>> {
+            val (gate, gated) =
+                gatedEntries(
+                    bondId,
+                    memberId,
+                    withdrawnMemberIds,
+                    join = "JOIN bond_days d ON d.id = e.bond_day_id AND d.bond_id = e.bond_id",
+                )
             val sql =
-                listOfNotNull(
-                    "SELECT d.id, d.date, d.status, d.closed_at, d.entry_count, array_agg(e.id) AS matched",
-                    "FROM entries e JOIN bond_days d ON d.id = e.bond_day_id AND d.bond_id = e.bond_id",
-                    "WHERE e.bond_id = ?",
-                    before?.let { "AND d.date < ?" },
-                    "AND e.search_vector @@ plainto_tsquery('simple', public.immutable_unaccent(?))",
-                    "AND $SEEN_ROW",
-                    "AND $LIVE_ROW",
-                    withdrawnMemberIds
-                        .takeIf { it.isNotEmpty() }
-                        ?.let { ids -> "AND e.author_member_id NOT IN (${ids.joinToString { "?" }})" },
-                    "GROUP BY d.id, d.date, d.status, d.closed_at, d.entry_count",
-                    "ORDER BY d.date DESC",
-                    "LIMIT ?",
+                (
+                    listOf("SELECT d.id, d.date, d.status, d.closed_at, d.entry_count, array_agg(e.id) AS matched") +
+                        gate +
+                        listOfNotNull(
+                            before?.let { "AND d.date < ?" },
+                            when (semantic) {
+                                null -> {
+                                    "AND $WORDS_MATCH"
+                                }
+
+                                // `x.bond_id = ?`, the bond itself and not `e.bond_id`: Postgres may run the EXISTS
+                                // as a hashed subplan, read once, and only a constant bounds that read to the bond.
+                                else -> {
+                                    "AND ($WORDS_MATCH OR EXISTS (SELECT 1 FROM ${EntryEmbeddings.nameOf(semantic.table)} x " +
+                                        "WHERE x.bond_id = ? AND x.entry_id = e.id AND $VECTOR_OF_ITS_WORDS " +
+                                        "AND x.embedding <=> ?::vector <= ?))"
+                                }
+                            },
+                            "GROUP BY d.id, d.date, d.status, d.closed_at, d.entry_count",
+                            "ORDER BY d.date DESC",
+                            "LIMIT ?",
+                        )
                 ).joinToString("\n")
-            val arguments = listOfNotNull<Any>(bondId, before, terms.value, memberId) + withdrawnMemberIds + limit
+            val meaning = semantic?.let { listOf(bondId, EntryEmbeddings.vectorLiteral(it.vector), it.maxDistance) }.orEmpty()
+            val arguments = gated + listOfNotNull<Any>(before, terms.value) + meaning + limit
             return sql to arguments
         }
+
+        /** How many entries each of "Remember when"'s rankings holds before they are fused (spec §3.6). */
+        const val RANKED_CANDIDATES = 50
+
+        /** [rankedByWords]'s statement and its arguments, in order. */
+        fun rankedByWordsQuery(
+            bondId: UUID,
+            memberId: UUID,
+            terms: SearchTerms,
+            withdrawnMemberIds: Set<UUID>,
+            limit: Int = RANKED_CANDIDATES,
+        ): Pair<String, List<Any>> {
+            val (gate, gated) = gatedEntries(bondId, memberId, withdrawnMemberIds)
+            val sql =
+                (
+                    listOf("SELECT e.id") +
+                        gate +
+                        listOf(
+                            "AND $WORDS_MATCH",
+                            "ORDER BY ts_rank(e.search_vector, plainto_tsquery('simple', public.immutable_unaccent(?))) DESC, e.id",
+                            "LIMIT ?",
+                        )
+                ).joinToString("\n")
+            return sql to gated + terms.value + terms.value + limit
+        }
+
+        /**
+         * [rankedByMeaning]'s statement and its arguments, in order. The vectors are joined
+         * through the bond's id, a constant, as [matchingQuery]'s are and for its reason.
+         */
+        fun rankedByMeaningQuery(
+            bondId: UUID,
+            memberId: UUID,
+            semantic: SemanticMatch,
+            withdrawnMemberIds: Set<UUID>,
+            limit: Int = RANKED_CANDIDATES,
+        ): Pair<String, List<Any>> {
+            val (gate, gated) =
+                gatedEntries(
+                    bondId,
+                    memberId,
+                    withdrawnMemberIds,
+                    join = "JOIN ${EntryEmbeddings.nameOf(
+                        semantic.table,
+                    )} x ON x.entry_id = e.id AND x.bond_id = ? AND $VECTOR_OF_ITS_WORDS",
+                    joinArguments = listOf(bondId),
+                )
+            val sql =
+                (listOf("SELECT e.id") + gate + listOf("ORDER BY x.embedding <=> ?::vector, e.id", "LIMIT ?"))
+                    .joinToString("\n")
+            return sql to gated + EntryEmbeddings.vectorLiteral(semantic.vector) + limit
+        }
+
+        /** The day of each of [entryIds] that is an entry of [bondId]. */
+        const val DAYS_OF_ENTRIES =
+            "SELECT e.id AS entry_id, d.id, d.date, d.status, d.closed_at, d.entry_count " +
+                "FROM entries e JOIN bond_days d ON d.id = e.bond_day_id AND d.bond_id = e.bond_id " +
+                "WHERE e.bond_id = ? AND e.id = ANY(?)"
 
         /** The most earlier years [onThisDay] reads: more than any bond can have, and a bound all the same. */
         const val ON_THIS_DAY_YEARS = 100

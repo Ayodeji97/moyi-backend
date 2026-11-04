@@ -605,7 +605,7 @@
     "from": "PENDING_DELETION",
     "action": "PATCH /api/v1/bonds/{bondId}",
     "actor": "you",
-    "when": "",
+    "when": "the body changes anything else, with or without turning semantic search off",
     "guards": [
       {
         "region": "account",
@@ -618,11 +618,36 @@
     "to": "PENDING_DELETION",
     "status": 409,
     "code": "BOND_ARCHIVED",
-    "reason": "A bond counting down to deletion takes no settings change. The code is the one an ended bond gives.",
-    "rule": "BR-9, FR-028",
+    "reason": "A bond counting down to deletion takes no settings change but turning semantic search off. The code is the one an ended bond gives.",
+    "rule": "BR-9, FR-028, ADR-0054 decision 9 (provisional, the owner to confirm)",
     "evidence": "smoke",
     "evidenceRef": "a PATCH during the cooling-off is 409 BOND_ARCHIVED",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen) throw BondArchivedException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen && !settings.isOnlySemanticSearchOff()) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-pending-deletion-patch-semantic-off",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "PATCH /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "the body is {\"semanticSearchEnabled\": false} and nothing else",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 200,
+    "code": null,
+    "reason": "As on an ended bond: turning semantic search off is taken during the countdown, with the current ETag, and the bond's vectors are deleted.",
+    "rule": "ADR-0054 decision 9 (provisional, the owner to confirm)",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen && !settings.isOnlySemanticSearchOff()) throw BondArchivedException()"
   },
   {
     "id": "bond-archived-patch",
@@ -630,7 +655,7 @@
     "from": "ARCHIVED",
     "action": "PATCH /api/v1/bonds/{bondId}",
     "actor": "you",
-    "when": "",
+    "when": "the body changes anything else, with or without turning semantic search off",
     "guards": [
       {
         "region": "account",
@@ -643,11 +668,36 @@
     "to": "ARCHIVED",
     "status": 409,
     "code": "BOND_ARCHIVED",
-    "reason": "An ended bond is read only. This is answered before the If-Match is compared, so a stale tag gets it too.",
-    "rule": "BR-9, ADR-0028 §4",
+    "reason": "An ended bond takes no change but turning semantic search off (the next row). This is answered before the If-Match is compared, so a stale tag gets it too.",
+    "rule": "BR-9, ADR-0028 §4, ADR-0054 decision 9 (provisional, the owner to confirm)",
     "evidence": "smoke",
     "evidenceRef": "…the PATCH is then 409 BOND_ARCHIVED",
-    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen) throw BondArchivedException()"
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen && !settings.isOnlySemanticSearchOff()) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-patch-semantic-off",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "PATCH /api/v1/bonds/{bondId}",
+    "actor": "you",
+    "when": "the body is {\"semanticSearchEnabled\": false} and nothing else",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ARCHIVED",
+    "status": 200,
+    "code": null,
+    "reason": "Turning semantic search off is never refused: the sweep would otherwise keep sending an ended bond's words to the provider. It is the one change an ended bond takes, with the current ETag. A member who has left may make it too, and the other member sees it. The bond's vectors are then deleted, as on an open bond.",
+    "rule": "ADR-0054 decision 9 (provisional, the owner to confirm)",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: on an ended bond, turning it off is still 200",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/UpdateBond.kt#if (!bond.isOpen && !settings.isOnlySemanticSearchOff()) throw BondArchivedException()"
   },
   {
     "id": "bond-none-leave",
@@ -5978,6 +6028,381 @@
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/ChangeTimezone.kt#if (!bond.mayChangeTimezoneAt(now)) {"
   },
   {
+    "id": "bond-none-semantic-on",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: a stranger asking is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-semantic-on",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_MEMBER",
+    "status": 202,
+    "code": null,
+    "reason": "Alone in the bond, your request is the agreement: semantic search is on at once and nothing waits. If it is already on, nothing changes. Either way the answer is the bond. Once on, its entries are embedded in the background.",
+    "rule": "FR-204, ADR-0054 (spec §3.3)",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: a solo bond turns it back on alone: 202",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#bond.status == BondStatus.PENDING_MEMBER -> {"
+  },
+  {
+    "id": "bond-active-semantic-on",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "semantic search is off, and no request to turn it on is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 202,
+    "code": null,
+    "reason": "Your request is recorded and waits seven days for your partner, whose own request is the agreement. Semantic search stays off until then. Your partner's copy of the ETag stops matching.",
+    "rule": "FR-204, ADR-0054, the B5 consent pattern",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: asking to turn it back on is 202, and it stays off",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#existing == null -> {"
+  },
+  {
+    "id": "bond-active-semantic-on-repeat",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "semantic search is off, and your own request is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 202,
+    "code": null,
+    "reason": "Asking again changes nothing: your request still waits for your partner, with its first expiry.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: asking again is 202, and nothing changes",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#existing.proposedByMemberId == membership.memberId -> {"
+  },
+  {
+    "id": "bond-active-semantic-on-agree",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "semantic search is off, and your partner's request is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 202,
+    "code": null,
+    "reason": "Your request agrees to your partner's: semantic search is on, for both of you. The bond's entries are embedded in the background over the next minutes; until then they are found by their words.",
+    "rule": "FR-204, ADR-0054, the B5 consent pattern",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: the other member's request turns it on: 202",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#bonds.update(bond.withSemanticSearch(true))"
+  },
+  {
+    "id": "bond-active-semantic-on-already",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "semantic search is on",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 202,
+    "code": null,
+    "reason": "It is already on: nothing is asked for and nothing changes. The answer is the bond as it is.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: asking while it is on changes nothing: 202",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#bond.semanticSearchEnabled -> {"
+  },
+  {
+    "id": "bond-pending-deletion-semantic-on",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "A bond counting down to deletion takes no request to turn semantic search on. The code is the one an ended bond gives. Turning it off is still taken (PATCH).",
+    "rule": "FR-204, ADR-0054, BR-9",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-archived-semantic-on",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 409,
+    "code": "BOND_ARCHIVED",
+    "reason": "Nothing can turn semantic search on for a bond that has ended, whoever asks and however it ended. Turning it off is still taken (PATCH, ADR-0054 decision 9).",
+    "rule": "FR-204, ADR-0054, BR-9",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: on an ended bond, asking to turn it on is 409 BOND_ARCHIVED",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (!bond.isOpen) throw BondArchivedException()"
+  },
+  {
+    "id": "bond-none-semantic-cancel",
+    "region": "bond",
+    "from": "NO_BOND",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NO_BOND",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403.",
+    "rule": "T-02, ADR-0026 §2",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: a stranger calling it off is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/BondAccessGuard.kt#val bond = bonds.findByMember(bondId, caller) ?: throw BondNotFoundException()"
+  },
+  {
+    "id": "bond-pending-member-semantic-cancel",
+    "region": "bond",
+    "from": "PENDING_MEMBER",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_MEMBER",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Alone in the bond, a request to turn semantic search on is never left waiting (it is on at once), so there is nothing to call off.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-active-semantic-cancel",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "a request to turn it on is waiting, yours or your partner's",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "ACTIVE",
+    "status": 204,
+    "code": null,
+    "reason": "Either of you may call a waiting request off: the one who asked, or the one being asked, which is how a request is declined. Semantic search stays off.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: the other member calls it off: 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#log.info(\"A request for semantic search was called off on bond {}\", membership.bondId.value)"
+  },
+  {
+    "id": "bond-active-semantic-cancel-nothing",
+    "region": "bond",
+    "from": "ACTIVE",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "no request to turn it on is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ACTIVE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing is waiting to be called off: no request was made, it was answered, or it lapsed after seven days.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: calling a request off with nothing waiting is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-pending-deletion-semantic-cancel",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "a request to turn it on, made before the countdown, is still waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PENDING_DELETION",
+    "status": 204,
+    "code": null,
+    "reason": "A request made before the countdown began is not called off by it, and either member may still call it off. Nothing else changes; it could not be agreed to now (409).",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#log.info(\"A request for semantic search was called off on bond {}\", membership.bondId.value)"
+  },
+  {
+    "id": "bond-pending-deletion-semantic-cancel-nothing",
+    "region": "bond",
+    "from": "PENDING_DELETION",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "no request to turn it on is waiting",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "PENDING_DELETION",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing is waiting to be called off.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "bond-archived-semantic-cancel",
+    "region": "bond",
+    "from": "ARCHIVED",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "ARCHIVED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Ending a bond calls off every request still waiting (ADR-0028), so there is never one to call off here.",
+    "rule": "FR-204, ADR-0054, ADR-0028",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: on an ended bond, calling a request off is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
     "id": "proposal-confirmed-timezone-confirm",
     "region": "bond.proposal",
     "from": "CONFIRMED",
@@ -7259,5 +7684,409 @@
     "evidence": "test",
     "evidenceRef": "BondTimezoneEndpointTest#a lapsed proposal cannot be confirmed, and a fresh one may be made",
     "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/infra/database/BondRepositories.kt#AND p.expiresAt > :now"
+  },
+  {
+    "id": "proposal-none-semantic-on",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "semantic search is off, and the bond is two people",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "Your request is recorded and waits seven days for your partner, whose own request is the agreement. On a bond that has ended the answer is BOND_ARCHIVED: see the bond region.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: asking to turn it back on is 202, and it stays off",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#val proposal = Proposal.semanticSearchOn(ProposalId(support.ids.timeOrdered()), bond.id, membership.memberId, now)"
+  },
+  {
+    "id": "proposal-none-semantic-on-at-once",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "you are alone in the bond, or semantic search is already on",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "PENDING_MEMBER",
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "NONE",
+    "status": 202,
+    "code": null,
+    "reason": "No request is made: alone in the bond the setting changes at once, and when it is already on nothing changes.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: a solo bond turns it back on alone: 202",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#bond.status == BondStatus.PENDING_MEMBER -> {"
+  },
+  {
+    "id": "proposal-proposed-semantic-on-repeat",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "you opened it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "Asking again changes nothing.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: asking again is 202, and nothing changes",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#existing.proposedByMemberId == membership.memberId -> {"
+  },
+  {
+    "id": "proposal-proposed-semantic-on-agree",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "your partner opened it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 202,
+    "code": null,
+    "reason": "Your request is the agreement: semantic search is on for the bond.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: the other member's request turns it on: 202",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (proposals.confirm(proposal.id, membership.memberId, now)) {"
+  },
+  {
+    "id": "proposal-confirmed-semantic-on",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "semantic search is still on",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CONFIRMED",
+    "status": 202,
+    "code": null,
+    "reason": "Semantic search is on: nothing is asked for, and no request is opened.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: asking while it is on changes nothing: 202",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#bond.semanticSearchEnabled -> {"
+  },
+  {
+    "id": "proposal-confirmed-semantic-on-again",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "semantic search has been turned off since, and the bond is two people",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "It was agreed, and turned off again since: a new request is opened and waits for your partner.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#existing == null -> {"
+  },
+  {
+    "id": "proposal-cancelled-semantic-on",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "A request called off leaves nothing waiting, so asking again opens a new one.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: she asks again: 202",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#existing == null -> {"
+  },
+  {
+    "id": "proposal-lapsed-semantic-on",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "POST /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "PROPOSED",
+    "status": 202,
+    "code": null,
+    "reason": "A request left unanswered for seven days has lapsed; asking again opens a new one.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#proposals.closeLapsed(membership.bondId, ProposalKind.SEMANTIC_SEARCH_ON, now)"
+  },
+  {
+    "id": "proposal-none-semantic-cancel",
+    "region": "bond.proposal",
+    "from": "NONE",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "NONE",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing is waiting to be called off.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: calling a request off with nothing waiting is 404",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-proposed-semantic-cancel",
+    "region": "bond.proposal",
+    "from": "PROPOSED",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "CANCELLED",
+    "status": 204,
+    "code": null,
+    "reason": "Either member may withdraw a request that has not been agreed to: the one who asked, or the one being asked.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "smoke",
+    "evidenceRef": "semantic: the other member calls it off: 204",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-confirmed-semantic-cancel",
+    "region": "bond.proposal",
+    "from": "CONFIRMED",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CONFIRMED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "An agreed request is not waiting, so it cannot be called off. To turn semantic search off, one member PATCHes the bond.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-cancelled-semantic-cancel",
+    "region": "bond.proposal",
+    "from": "CANCELLED",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "CANCELLED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "Nothing is waiting to be called off.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
+  },
+  {
+    "id": "proposal-lapsed-semantic-cancel",
+    "region": "bond.proposal",
+    "from": "LAPSED",
+    "action": "DELETE /api/v1/bonds/{bondId}/semantic-search",
+    "actor": "you",
+    "when": "",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "refused",
+    "to": "LAPSED",
+    "status": 404,
+    "code": "NOT_FOUND",
+    "reason": "A lapsed request is not waiting.",
+    "rule": "FR-204, ADR-0054",
+    "evidence": "never-run",
+    "evidenceRef": "",
+    "codeRef": "modules/bond/src/main/kotlin/com/moyi/bond/service/EnableSemanticSearch.kt#if (pending == null || !proposals.cancel(pending.id, now)) throw ProposalNotFoundException()"
   }
 ]
