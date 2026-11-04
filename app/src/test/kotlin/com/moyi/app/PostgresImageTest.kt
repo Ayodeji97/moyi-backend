@@ -17,7 +17,7 @@ import java.io.File
  * Why it matters: production's current `postgres:18` image reports
  * glibc 2.41. The untagged `pgvector/pgvector:0.8.7-pg18` is Debian 12, with
  * glibc 2.36. That database opened on it warns "collation version mismatch",
- * and every index on text would need rebuilding (ops/postgres/README.md, seen
+ * and affected text indexes would need rebuilding (ops/postgres/README.md, seen
  * 2026-11-04). The tests had already moved to that image while production had
  * not: the four drifting apart is the failure this test exists to catch.
  */
