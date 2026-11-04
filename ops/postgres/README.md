@@ -21,16 +21,20 @@ The production restore below remains a separate gate.
 
 ## Before the maintenance window
 
-1. Finish the media prerequisites in `../media-worker/README.md`, steps 1–3.
+1. Merge the image PR and wait for main's CI, including its manifest job.
+   Use a clean checkout whose HEAD is current `origin/main`; record that
+   commit for the restore drill and deployment. Merging publishes the image
+   and configuration; it does not restart production.
+2. Finish the media prerequisites in `../media-worker/README.md`, steps 1–3.
    Check the limiter's restart count twice: `is-active` alone can pass between
    crashes. A worker must exist, be healthy, and pass the limiter's `check`.
    The current media monitoring script also queries the reporting tables
    added in V39. On production at V36, stage the new script, but enable its
    timer only after the app deploy has applied V39.
-2. Unlock Bitwarden locally, sync, verify the three R2 fields without printing
+3. Unlock Bitwarden locally, sync, verify the three R2 fields without printing
    them, and check the bucket token as the media runbook describes. Do not
    put the vault password or session key in chat or a command argument.
-3. Take a fresh encrypted backup:
+4. Take a fresh encrypted backup:
 
    ```sh
    ssh moyi 'systemctl start moyi-backup && systemctl show moyi-backup -p Result -p ExecMainStatus'
@@ -38,7 +42,7 @@ The production restore below remains a separate gate.
 
    Require `Result=success` and `ExecMainStatus=0`. Record the new backup
    object from the backup journal without dumping the environment files.
-4. Run `ops/backup/restore-drill.sh --email <restored-account> --version <main-sha>`
+5. Run `ops/backup/restore-drill.sh --email <restored-account> --version <main-sha>`
    on the Mac. It needs the vault and the account password, and must end
    `RESTORE DRILL PASSED`. Use the CI-published image of the exact commit to
    be deployed. Production was at V36 on 2026-11-04, so this checks V37–V41,
@@ -46,8 +50,6 @@ The production restore below remains a separate gate.
    providers; its email endpoint is loopback and no production provider
    credentials are supplied. Record elapsed time and migration validation. Do not
    substitute a fresh synthetic database for this gate.
-5. Merge the image PR and wait for main's CI, including its manifest job.
-   Deploy from a clean checkout whose HEAD is current `origin/main`.
 
 ## Swap, then deploy
 
