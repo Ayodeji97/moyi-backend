@@ -43,6 +43,7 @@ recovery with WAL archiving is Phase 5 (doc 15).
 | Date | Backup | Image | Time | Result |
 |---|---|---|---|---|
 | 2026-10-27 | `daily/moyi-2026-10-27T030304Z.dump.age` (74 KB, 30 tables; 3 users, 2 entries) | `4db6532` | 1 m 46 s, two typed passwords included | **Passed**: Flyway validated, signed in as a restored account, an entry's text read back through the API |
+| 2026-11-05 | `daily/moyi-2026-11-05T133437Z.dump.age` (101 KB, 35 tables; 3 users, 2 entries), taken minutes before | `a8e7652` | 1 m 20 s, one typed password (the vault was already unlocked) | **Passed**, as the gate of `ops/postgres/README.md` step 5: production was at V36, so the image applied V37–V41 to the restored data before the read-back. The media mirror step was skipped (no `MIRROR_DRILL_KEY_ID` yet). A first attempt with `--version a8e7652` stopped at the image pull: CI tags the full 40-character commit, never the short one |
 
 ## Consequences
 **Positive:** a lost or compromised server costs at most a day, and its backups
