@@ -42,7 +42,7 @@ The production restore below remains a separate gate.
 
    Require `Result=success` and `ExecMainStatus=0`. Record the new backup
    object from the backup journal without dumping the environment files.
-5. Run `ops/backup/restore-drill.sh --email <restored-account> --version "$(git rev-parse HEAD)"`
+5. Run `ops/backup/restore-drill.sh --email 'restored@example.com' --version "$(git rev-parse HEAD)"`
    on the Mac. CI tags images with the full 40-character commit; a short one
    is answered `not found` at the image pull (2026-11-05). It needs the vault
    and the account password, and must end
@@ -73,9 +73,9 @@ app deploy. Check the Postgres logs for collation warnings. If either check
 fails, stop here; do not run migrations on an unvalidated image.
 
 From `kamal app stop` until the deploy's new web container is healthy, the
-API is down and the uptime monitor says so. On 2026-11-05 that was about ten
-minutes, because the deploy had not run and a lone `/healthz` reading was
-taken for it. The deploy is done only when `kamal deploy` ends
+API is down and the uptime monitor says so. On 2026-11-05 that was about nine
+minutes (17:26 to 17:35), because the deploy had not run and a `200` was
+reported in its place; Flyway at V36 and an empty `docker ps` showed it. The deploy is done only when `kamal deploy` ends
 `Finished all in …` and the checks below have been read.
 
 After deployment, require `/healthz` 200, Flyway success through V41,

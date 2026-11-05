@@ -163,8 +163,8 @@ from `modules/media`, as it does for `notification`.
 declared is refused by the storage itself, not by code of ours that could be bypassed. A
 production without media credentials starts, and says so in its log. Replacing R2 is one class.
 
-**Negative.** Whether R2 enforces the signed checksum is unproven until someone PUTs altered bytes
-at the real bucket. A completion waits up to 3 s on a storage that does not answer (holding no
+**Negative.** Whether R2 enforces the signed checksum was unproven when this was decided; the
+2026-11-05 run against the real bucket settled it (decision 1), and the length is signed either way. A completion waits up to 3 s on a storage that does not answer (holding no
 database connection while it does). A deleted upload's bytes may outlive the deletion by up to two days if the storage
 cannot be reached at that moment. The test double is a community image whose maintainer is not
 MinIO.

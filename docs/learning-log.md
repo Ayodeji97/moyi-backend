@@ -2968,7 +2968,7 @@ Reality: every gate passed on the first real reading. The R2 token answered `200
          1 m 20 s; collation read `2.41|2.41`; and R2 refused a body with one byte changed
          (`400`), settling ADR-0047's inferred checksum item. The outage came from between two
          gates: after `kamal app stop` and the swap, the deploy did not run, a `200` was
-         reported, and the API was down for about ten minutes until an uptime email, Flyway
+         reported, and the API was down for about nine minutes (17:26 to 17:35) until an uptime email, Flyway
          at V36 and an empty `docker ps` said so. The re-run deploy took 79 s.
 Wrong about: a short commit being a version. CI tags images with the full SHA, and the drill
          stopped at the pull with `not found`; the runbook now passes `git rev-parse HEAD`. And
