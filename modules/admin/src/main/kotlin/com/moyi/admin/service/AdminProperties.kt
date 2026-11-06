@@ -11,7 +11,12 @@ import kotlin.time.toJavaDuration
  * The console's switches (spec §5, §6). Off by default: the console does not exist
  * unless [enabled]. When it is on, [validate] refuses to let the app start without
  * an allow-list and a 256-bit TOTP key. Messages name the property, never its value.
+ *
+ * Conditional, like every admin bean: the app's `@ConfigurationPropertiesScan("com.moyi")`
+ * would otherwise bind it with the console off, and switched off the console has no beans.
+ * `AdminConfiguration` binds it when the console is on.
  */
+@ConditionalOnAdminConsole
 @ConfigurationProperties("moyi.admin")
 internal data class AdminProperties(
     val enabled: Boolean = false,

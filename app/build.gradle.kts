@@ -68,6 +68,9 @@ dependencies {
     // autoconfigure into a stack-specific module — needed explicitly now.
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation(projects.common.testing)
+    // The admin chain's tests build a signed-in session the way the sign-in controller does:
+    // a security context, with factor authorities, under Spring's session key (Ruling B).
+    testImplementation("org.springframework.security:spring-security-web")
     // Architecture tests (doc 25 §7 step 8) live here: `app` is the one
     // module with the whole project on its build path, and Konsist scans
     // by project directory, not Gradle dependency graph, so placement
