@@ -71,6 +71,9 @@ dependencies {
     // The admin chain's tests build a signed-in session the way the sign-in controller does:
     // a security context, with factor authorities, under Spring's session key (Ruling B).
     testImplementation("org.springframework.security:spring-security-web")
+    // The sign-in tests compute a current TOTP code from the stored secret, as the
+    // operator's authenticator app would (Ruling B): the same library the console uses.
+    testImplementation(libs.java.otp)
     // Architecture tests (doc 25 §7 step 8) live here: `app` is the one
     // module with the whole project on its build path, and Konsist scans
     // by project directory, not Gradle dependency graph, so placement

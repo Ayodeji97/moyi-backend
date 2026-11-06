@@ -1,17 +1,22 @@
 <!DOCTYPE html>
 <html lang="en" xmlns:th="http://www.thymeleaf.org">
-<head>
-    <meta charset="utf-8">
-    <title>Moyi admin: sign in</title>
-</head>
+<head th:replace="~{admin/layout :: head('Sign in')}"></head>
 <body>
+<header th:replace="~{admin/layout :: masthead}"></header>
 <main>
     <h1>Sign in</h1>
-    <form method="post" th:action="@{/admin/login}">
-        <label for="email">Email</label>
-        <input id="email" name="email" type="email" autocomplete="username" required>
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <p th:if="${param.enrolled}" class="notice" role="status">Your account is ready. Sign in with your new password.</p>
+    <p th:if="${param.signedOut}" class="notice" role="status">You are signed out.</p>
+    <p th:if="${error}" id="form-error" class="error" role="alert" th:text="${error}">Refused.</p>
+    <form method="post" th:action="@{/admin/login}" th:attr="aria-describedby=${error} ? 'form-error'">
+        <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="username" required>
+        </div>
+        <div class="field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+        </div>
         <button type="submit">Continue</button>
     </form>
 </main>

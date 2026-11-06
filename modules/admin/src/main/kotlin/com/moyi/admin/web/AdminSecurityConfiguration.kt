@@ -5,12 +5,12 @@ import com.moyi.admin.service.ConditionalOnAdminConsole
 import com.moyi.admin.service.LiveAdminSessions
 import com.moyi.common.security.ClientAddressResolver
 import com.moyi.common.security.ProblemAuthenticationEntryPoint
-import jakarta.servlet.http.HttpServletResponse
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.core.annotation.Order
 import org.springframework.http.HttpHeaders
+import org.springframework.http.HttpStatus
 import org.springframework.security.authorization.AuthorityAuthorizationManager
 import org.springframework.security.authorization.AuthorizationManagerFactories
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
@@ -69,13 +69,19 @@ internal class AdminSecurityConfiguration {
         problems: ProblemAuthenticationEntryPoint,
         @Qualifier("securityFilterChain") apiChain: SecurityFilterChain,
         sessions: LiveAdminSessions,
+        errors: AdminErrorPage,
     ): SecurityFilterChain {
         val factors =
             AuthorizationManagerFactories
                 .multiFactor<RequestAuthorizationContext>()
                 .requireFactors(AdminAuthorities.FACTOR_PASSWORD, AdminAuthorities.FACTOR_TOTP)
                 .build()
-        val apiHeaders = apiChain.filters.filterIsInstance<HeaderWriterFilter>().firstOrNull()
+        // Without it a refused address would differ from the API's 401 by its headers alone;
+        // a missing filter is a wiring change to fail on at startup, not a quieter refusal.
+        val apiHeaders =
+            checkNotNull(apiChain.filters.filterIsInstance<HeaderWriterFilter>().singleOrNull()) {
+                "The API chain (bean 'securityFilterChain') has no single HeaderWriterFilter for the admin allow-list to answer in"
+            }
 
         http {
             securityMatcher("/admin/**")
@@ -107,22 +113,22 @@ internal class AdminSecurityConfiguration {
             }
             exceptionHandling {
                 authenticationEntryPoint = LoginUrlAuthenticationEntryPoint(LOGIN)
-                accessDeniedHandler = missingFactor()
+                accessDeniedHandler = missingFactor(errors)
             }
         }
         return http.build()
     }
 
-    private fun missingFactor(): AccessDeniedHandler =
+    private fun missingFactor(errors: AdminErrorPage): AccessDeniedHandler =
         DelegatingMissingAuthorityAccessDeniedHandler
             .builder()
             .addEntryPointFor(LoginUrlAuthenticationEntryPoint(LOGIN), AdminAuthorities.FACTOR_PASSWORD)
             .addEntryPointFor(LoginUrlAuthenticationEntryPoint(TOTP), AdminAuthorities.FACTOR_TOTP)
             .build()
             .apply {
-                // Anything else, a missing CSRF token among them: a bare 403. Not `sendError`,
-                // whose error dispatch would leave the admin chain for the API's.
-                setDefaultAccessDeniedHandler { _, response, _ -> response.status = HttpServletResponse.SC_FORBIDDEN }
+                // Anything else, a missing CSRF token among them: the admin error page, written
+                // here. Not `sendError`, whose error dispatch would leave the admin chain for the API's.
+                setDefaultAccessDeniedHandler { request, response, _ -> errors.write(request, response, HttpStatus.FORBIDDEN) }
             }
 
     companion object {

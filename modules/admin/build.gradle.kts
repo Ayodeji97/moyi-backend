@@ -18,6 +18,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("tools.jackson.module:jackson-module-kotlin")
+    // `moyi_admin_sign_in_total`, the sign-in counter (spec §10).
+    implementation("io.micrometer:micrometer-core")
 
     // TOTP (RFC 6238) and the QR code for enrolment (spec §6).
     implementation(libs.java.otp)

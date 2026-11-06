@@ -1,12 +1,13 @@
 <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Moyi admin</title>
-</head>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head('Console')}"></head>
 <body>
+<header th:replace="~{admin/layout :: masthead}"></header>
 <main>
     <h1>Signed in</h1>
+    <form method="post" th:action="@{/admin/logout}">
+        <button type="submit">Sign out</button>
+    </form>
 </main>
 </body>
 </html>

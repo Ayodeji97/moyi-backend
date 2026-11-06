@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head('Code')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<main>
+    <h1>Enter your code</h1>
+    <p>Open your authenticator app and enter the six-digit code it shows for Moyi admin.</p>
+    <form method="post" th:action="@{/admin/login/totp}">
+        <div class="field">
+            <label for="code">Code</label>
+            <input id="code" name="code" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+                   autocomplete="one-time-code" required
+                   th:attr="aria-invalid=${error} ? 'true', aria-describedby=${error} ? 'code-error'">
+            <p th:if="${error}" id="code-error" class="error" th:text="${error}">Wrong code.</p>
+        </div>
+        <button type="submit">Sign in</button>
+    </form>
+</main>
+</body>
+</html>

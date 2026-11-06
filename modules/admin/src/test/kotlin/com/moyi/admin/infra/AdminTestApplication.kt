@@ -1,6 +1,9 @@
 package com.moyi.admin.infra
 
 import com.moyi.common.security.TokenRevocations
+import com.moyi.identity.api.PasswordHashing
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan
 import org.springframework.boot.persistence.autoconfigure.EntityScan
@@ -27,4 +30,32 @@ internal class AdminTestApplication {
      */
     @Bean
     fun tokenRevocations(): TokenRevocations = TokenRevocations { null }
+
+    /**
+     * Identity is not scanned here, so its Argon2 hasher and breach corpus are not built: this
+     * stands in for the port. A "hash" is the text behind a prefix, and the breach corpus is
+     * [BREACHED]. The real port is exercised by `app`'s sign-in tests.
+     */
+    @Bean
+    fun passwordHashing(): PasswordHashing =
+        object : PasswordHashing {
+            override fun hash(raw: String): String = "test:$raw"
+
+            override fun matches(
+                raw: String,
+                hash: String,
+            ): Boolean = hash == "test:$raw"
+
+            override fun matchesDummy(raw: String): Boolean = false
+
+            override fun isBreached(raw: String): Boolean = raw == BREACHED
+        }
+
+    /** No actuator in this context; the sign-in counter needs a registry to count in. */
+    @Bean
+    fun meterRegistry(): MeterRegistry = SimpleMeterRegistry()
+
+    companion object {
+        const val BREACHED = "passwordpassword"
+    }
 }

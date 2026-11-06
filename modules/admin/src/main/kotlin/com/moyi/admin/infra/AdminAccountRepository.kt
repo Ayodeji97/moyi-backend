@@ -3,6 +3,7 @@ package com.moyi.admin.infra
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
+import java.time.Instant
 import java.util.UUID
 
 internal interface AdminAccountRepository : JpaRepository<AdminAccountEntity, UUID> {
@@ -31,4 +32,29 @@ internal interface AdminAccountRepository : JpaRepository<AdminAccountEntity, UU
         id: UUID,
         step: Long,
     ): Int
+
+    /**
+     * Counts one failed sign-in step (spec §6: password and code count together), in one
+     * statement so two failures at once cannot both read the same count. The [maxFailures]th
+     * consecutive failure locks the account until [lockUntil] and starts the count again, so
+     * a lock that has run out is not re-armed by a single later mistake.
+     */
+    @Modifying
+    @Query(
+        "UPDATE admin_accounts SET " +
+            "failed_attempts = CASE WHEN failed_attempts + 1 >= :maxFailures THEN 0 ELSE failed_attempts + 1 END, " +
+            "locked_until = CASE WHEN failed_attempts + 1 >= :maxFailures THEN :lockUntil ELSE locked_until END " +
+            "WHERE id = :id",
+        nativeQuery = true,
+    )
+    fun recordFailure(
+        id: UUID,
+        maxFailures: Int,
+        lockUntil: Instant,
+    ): Int
+
+    /** A completed sign-in: the count of consecutive failures starts again from nothing. */
+    @Modifying
+    @Query("UPDATE admin_accounts SET failed_attempts = 0, locked_until = NULL WHERE id = :id", nativeQuery = true)
+    fun clearFailures(id: UUID): Int
 }

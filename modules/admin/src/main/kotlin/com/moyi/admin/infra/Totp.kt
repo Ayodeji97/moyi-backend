@@ -52,7 +52,8 @@ internal class Totp(
 
     private fun encode(s: String) = URLEncoder.encode(s, Charsets.UTF_8).replace("+", "%20")
 
-    private fun base32(bytes: ByteArray): String {
+    /** RFC 4648 base32 without padding: the form authenticator apps take when typed in. */
+    fun base32(bytes: ByteArray): String {
         val out = StringBuilder()
         var buffer = 0
         var bits = 0
