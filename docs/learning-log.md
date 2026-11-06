@@ -2958,3 +2958,24 @@ Wrong about: a systemd service being active means its watcher is stable. Product
          script also needs V39 reporting tables, so enabling it before the app migration
          would fail on the production V36 database. A fresh encrypted backup succeeded;
          the vault-dependent restore drill remains a separate deployment gate.
+
+
+## 2026-11-06 · Admin console A1 · the builder check found five faults in a spec before any code
+Expected: Spring Security 7's multi-factor support, Spring Session JDBC and the existing Redis
+         limiter would carry the admin console, because each is the documented way to do its job.
+Reality: an independent builder check of the first draft read each against this application and
+         found that `@EnableMultiFactorAuthentication` publishes one global authorization factory
+         the stateless JWT chain would pick up (a bearer carries only FACTOR_BEARER, so it would
+         have broken the API); that 7.1.2 has no TOTP factor at all (OTT there is a magic link); that
+         Spring Session's filter wraps every request in the app, the API's included; that the
+         Redis limiter fails open by design and renders JSON from an interceptor; and that "off"
+         could not be indistinguishable from an unknown path without noticing which chain answers
+         an unknown path. Each became a decision in ADR-0055 before a line was written.
+Wrong about: a feature being "the documented way" means it composes with the application it is
+         added to. The question to ask of a framework switch is not what it does but what else
+         in the process it changes, which is a thing only a check against the running design finds.
+Then, the first smoke run: the enrolment page, which every MockMvc test had passed, was cut off
+         mid-form for a visitor with no session. The QR code makes it larger than the response
+         buffer, the form's CSRF token then needed a session after the response was committed, and
+         Tomcat dropped the connection. The tests all arrived with a session already made. Fixed
+         with a real-server test that makes a first visit with no cookie.
