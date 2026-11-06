@@ -6,6 +6,7 @@ import com.moyi.admin.service.AdminConsoleServiceTest
 import com.moyi.admin.service.AdminConsoleServiceTest.Companion.code
 import com.moyi.common.testing.IntegrationTest
 import com.moyi.common.testing.MutableClock
+import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldEndWith
@@ -18,8 +19,10 @@ import org.springframework.context.annotation.Import
 import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockHttpSession
+import org.springframework.security.access.AccessDeniedException
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
@@ -120,11 +123,52 @@ internal class AdminAuthFlowTest(
     }
 
     @Test
-    fun `an exception out of an admin controller is the error page, with none of its message`() {
-        val page = AdminErrorAdvice().failed(IllegalStateException("the password was hunter2"))
+    fun `an admin path's failure is the error page with none of its message, and any other path is left alone`() {
+        val resolver = AdminErrorResolver()
+        val admin = MockHttpServletRequest("POST", "/admin/login")
+        val page = resolver.resolveException(admin, MockHttpServletResponse(), null, IllegalStateException("the password was hunter2"))!!
         page.viewName shouldBe AdminErrorPage.VIEW
         page.status shouldBe HttpStatus.INTERNAL_SERVER_ERROR
         page.model.values.joinToString() shouldNotContain "hunter2"
+
+        resolver
+            .resolveException(MockHttpServletRequest("GET", "/api/v1/me"), MockHttpServletResponse(), null, IllegalStateException())
+            .shouldBeNull()
+        resolver
+            .resolveException(MockHttpServletRequest("GET", "/administrator"), MockHttpServletResponse(), null, IllegalStateException())
+            .shouldBeNull()
+        resolver.resolveException(admin, MockHttpServletResponse(), null, AccessDeniedException("for the filter")).shouldBeNull()
+    }
+
+    @Test
+    fun `a signed-in session's unknown path and wrong method get the error page, not JSON`() {
+        val session = signedIn()
+        get("/admin/nope", session).let {
+            it.status shouldBe 404
+            it.contentType!! shouldContain MediaType.TEXT_HTML_VALUE
+            it.contentAsString shouldContain "Error 404"
+        }
+        get("/admin/logout", session).let {
+            it.status shouldBe 405
+            it.contentType!! shouldContain MediaType.TEXT_HTML_VALUE
+            it.contentAsString shouldContain "Error 405"
+        }
+    }
+
+    private fun signedIn(): MockHttpSession {
+        val email = "flow-${UUID.randomUUID().toString().take(8)}@example.com"
+        val token = jdbc.queryForObject("SELECT admin_invite(?::citext, 'SUPPORT')", String::class.java, email)!!
+        val session = MockHttpSession()
+        get("/admin/enrol?token=$token", session)
+        val secret =
+            cipher.decrypt(
+                jdbc.queryForObject("SELECT totp_secret_enc FROM admin_accounts WHERE email = ?::citext", String::class.java, email)!!,
+            )
+        val form = mapOf("token" to token, "password" to PASSWORD, "confirm" to PASSWORD, "code" to code(secret, clock.instant()))
+        post("/admin/enrol", session, form).status shouldBe 302
+        post("/admin/login", session, mapOf("email" to email, "password" to PASSWORD)).status shouldBe 302
+        post("/admin/login/totp", session, mapOf("code" to code(secret, clock.instant().plusSeconds(30)))).status shouldBe 302
+        return session
     }
 
     private fun get(

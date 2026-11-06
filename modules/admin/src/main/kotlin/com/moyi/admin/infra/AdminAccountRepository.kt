@@ -57,4 +57,16 @@ internal interface AdminAccountRepository : JpaRepository<AdminAccountEntity, UU
     @Modifying
     @Query("UPDATE admin_accounts SET failed_attempts = 0, locked_until = NULL WHERE id = :id", nativeQuery = true)
     fun clearFailures(id: UUID): Int
+
+    /**
+     * Enrolment's fresh secret, written alone and only to an account still `INVITED`: 0 when
+     * the account was enrolled, disabled or re-invited meanwhile. A whole-entity flush here
+     * would write back a stale snapshot of every other column.
+     */
+    @Modifying
+    @Query("UPDATE admin_accounts SET totp_secret_enc = :sealed WHERE id = :id AND status = 'INVITED'", nativeQuery = true)
+    fun replaceInvitedSecret(
+        id: UUID,
+        sealed: String,
+    ): Int
 }

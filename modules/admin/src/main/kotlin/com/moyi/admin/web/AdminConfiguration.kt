@@ -5,6 +5,7 @@ import com.moyi.admin.service.ConditionalOnAdminConsole
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Import
+import org.springframework.web.servlet.HandlerExceptionResolver
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
 
@@ -26,6 +27,11 @@ internal class AdminConfiguration(
 ) : WebMvcConfigurer {
     init {
         properties.validate()
+    }
+
+    /** First, so that an admin path's failure is the admin page and never the API's JSON. */
+    override fun extendHandlerExceptionResolvers(resolvers: MutableList<HandlerExceptionResolver>) {
+        resolvers.add(0, AdminErrorResolver())
     }
 
     override fun addResourceHandlers(registry: ResourceHandlerRegistry) {

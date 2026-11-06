@@ -47,16 +47,28 @@ internal class AdminEnrolment(
     private val cipher by lazy { TotpSecretCipher(checkNotNull(properties.keyBytes()) { "moyi.admin.totp-key is not valid base64" }) }
     private val issuer = properties.issuer
 
-    /** A fresh secret for the invited account, or `null` when the link is not valid. */
+    /**
+     * A fresh secret for the invited account, or `null` when the link is not valid.
+     *
+     * Two guards against undoing a concurrent [complete] (or `admin_disable`): the invitation is
+     * taken `FOR UPDATE`, so a load that arrives while [complete] holds it queues, and then finds
+     * it consumed; and the secret is written by a statement of its own that changes only an
+     * account still `INVITED`. Flushing the loaded entity instead would write back every column
+     * of a snapshot taken before the other transaction committed.
+     */
     @Transactional
+    @Suppress("ReturnCount") // No valid link, or no longer invited by the time of the write.
     fun begin(token: String): EnrolmentPage? {
-        val (_, account) = openInvitation(token, forUpdate = false) ?: return null
+        val (_, account) = openInvitation(token, forUpdate = true) ?: return null
         val secret = totp.newSecret()
-        account.totpSecretEnc = cipher.encrypt(secret)
+        if (accounts.replaceInvitedSecret(account.getId(), cipher.encrypt(secret)) != 1) return null
         return page(account, secret)
     }
 
-    /** The secret [begin] stored, shown again beside a refusal, so what was scanned still holds. */
+    /**
+     * The secret [begin] stored, shown again beside a refusal: the key the operator scanned,
+     * unless the page was loaded again since, in which case it is the newer one.
+     */
     @Transactional(readOnly = true)
     @Suppress("ReturnCount") // No valid link, or no secret yet: nothing to show again.
     fun current(token: String): EnrolmentPage? {

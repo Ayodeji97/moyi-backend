@@ -9,16 +9,20 @@ import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldEndWith
 import io.kotest.matchers.string.shouldNotContain
+import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockHttpSession
 import org.springframework.test.web.servlet.MockMvc
+import java.sql.Connection
 import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 import kotlin.random.Random
 
@@ -30,7 +34,7 @@ import kotlin.random.Random
 class AdminEnrolmentTest(
     @Autowired mockMvc: MockMvc,
     @Autowired private val clock: MutableClock,
-    @Autowired dataSource: DataSource,
+    @Autowired private val dataSource: DataSource,
 ) : AdminEnabledTest() {
     private val jdbc = JdbcTemplate(dataSource)
     private val console = AdminConsoleDriver(mockMvc, jdbc)
@@ -147,6 +151,78 @@ class AdminEnrolmentTest(
         shouldBeInvalid(console.enrolPage("not base64 at all"))
     }
 
+    @Test
+    fun `a page load queued behind a finishing enrolment does not undo it`() {
+        val email = newEmail()
+        val token = console.invite(email)
+        console.enrolPage(token).status shouldBe 200
+        val id = console.idOf(email)
+        val pool = Executors.newSingleThreadExecutor()
+
+        val reload =
+            try {
+                dataSource.connection.use { holder ->
+                    holder.autoCommit = false
+                    try {
+                        // What `complete` holds and writes until it commits: the invitation
+                        // locked, the account active, the invitation spent.
+                        holder.finishEnrolment(token, id)
+                        val holderPid = backendPidOf(holder)
+                        val page = pool.submit<MockHttpServletResponse> { console.enrolPage(token) }
+                        await().atMost(Duration.ofSeconds(TIMEOUT_SECONDS)).until { blockedBy(holderPid) >= 1 }
+                        holder.commit()
+                        page.get(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    } finally {
+                        holder.rollback()
+                        holder.autoCommit = true
+                    }
+                }
+            } finally {
+                pool.shutdownNow()
+            }
+
+        shouldBeInvalid(reload)
+        statusOf(email) shouldBe "ACTIVE"
+        jdbc.queryForObject(
+            "SELECT password_hash FROM admin_accounts WHERE id = ?",
+            String::class.java,
+            id,
+        ) shouldBe "held-hash"
+        totpLastStep(email) shouldBe 1L
+    }
+
+    private fun Connection.finishEnrolment(
+        token: String,
+        id: UUID,
+    ) {
+        prepareStatement("SELECT 1 FROM admin_invitations WHERE token_hash = $TOKEN_HASH FOR UPDATE").use {
+            it.setString(1, token)
+            it.executeQuery().use { rows -> rows.next() shouldBe true }
+        }
+        prepareStatement(
+            "UPDATE admin_accounts SET status = 'ACTIVE', password_hash = 'held-hash', totp_last_step = 1, " +
+                "activated_at = now(), credentials_changed_at = now() WHERE id = ?",
+        ).use {
+            it.setObject(1, id)
+            it.executeUpdate() shouldBe 1
+        }
+        prepareStatement("UPDATE admin_invitations SET consumed_at = now() WHERE token_hash = $TOKEN_HASH").use {
+            it.setString(1, token)
+            it.executeUpdate() shouldBe 1
+        }
+    }
+
+    private fun backendPidOf(connection: Connection): Int =
+        connection.createStatement().use { statement ->
+            statement.executeQuery("SELECT pg_backend_pid()").use { rows ->
+                rows.next()
+                rows.getInt(1)
+            }
+        }
+
+    private fun blockedBy(holderPid: Int): Int =
+        jdbc.queryForObject("SELECT count(*) FROM pg_stat_activity WHERE ? = ANY(pg_blocking_pids(pid))", Int::class.java, holderPid)!!
+
     private fun shouldBeInvalid(page: MockHttpServletResponse) {
         page.status shouldBe 404
         page.contentAsString shouldContain "This link is not valid."
@@ -163,7 +239,7 @@ class AdminEnrolmentTest(
 
     private fun consumedAt(token: String): OffsetDateTime? =
         jdbc.queryForObject(
-            "SELECT consumed_at FROM admin_invitations WHERE token_hash = sha256(decode(translate(?, '-_', '+/') || '=', 'base64'))",
+            "SELECT consumed_at FROM admin_invitations WHERE token_hash = $TOKEN_HASH",
             OffsetDateTime::class.java,
             token,
         )
@@ -171,7 +247,7 @@ class AdminEnrolmentTest(
     private fun expiresAt(token: String) =
         jdbc
             .queryForObject(
-                "SELECT expires_at FROM admin_invitations WHERE token_hash = sha256(decode(translate(?, '-_', '+/') || '=', 'base64'))",
+                "SELECT expires_at FROM admin_invitations WHERE token_hash = $TOKEN_HASH",
                 OffsetDateTime::class.java,
                 token,
             )!!
@@ -194,6 +270,10 @@ class AdminEnrolmentTest(
 
     private companion object {
         const val PASSWORD = "seventeen quiet harbour lamps"
+        const val TIMEOUT_SECONDS = 20L
+
+        /** The stored hash of a token, as `admin_invite` made it: SHA-256 of the 32 raw bytes. */
+        const val TOKEN_HASH = "sha256(decode(translate(?, '-_', '+/') || '=', 'base64'))"
         val KEY = Regex("""<code id="secret">([A-Z2-7]+)</code>""")
     }
 }

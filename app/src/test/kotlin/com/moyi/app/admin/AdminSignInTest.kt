@@ -24,6 +24,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockHttpSession
 import org.springframework.test.web.servlet.MockMvc
+import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
 import java.sql.Connection
 import java.time.Duration
@@ -223,6 +224,28 @@ class AdminSignInTest(
         response.contentAsString shouldContain "Error 403"
         response.contentAsString shouldNotContain "Exception"
         response.getHeader("Content-Security-Policy") shouldNotBe null
+    }
+
+    @Test
+    fun `a signed-in session's unknown path and wrong method get the admin error page, not the API's JSON`() {
+        val (email, secret) = enrolled()
+        val session = signedIn(email, nextCode(secret))
+        listOf("/admin/nope" to 404, "/admin/logout" to 405).forEach { (path, status) ->
+            withClue(path) {
+                val page =
+                    mockMvc
+                        .get(path) {
+                            with { it.apply { remoteAddr = ALLOWED } }
+                            this.session = session
+                        }.andReturn()
+                        .response
+                page.status shouldBe status
+                page.contentType!! shouldContain MediaType.TEXT_HTML_VALUE
+                page.contentAsString shouldContain "Error $status"
+                page.contentAsString shouldNotContain "\"type\""
+                page.getHeader("Content-Security-Policy") shouldNotBe null
+            }
+        }
     }
 
     @Test
