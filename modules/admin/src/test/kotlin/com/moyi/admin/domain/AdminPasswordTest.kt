@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
-class AdminPasswordTest {
+internal class AdminPasswordTest {
     @Test
     fun `14 code points are refused and 15 accepted`() {
         assertNull(AdminPassword.of("a".repeat(14)))

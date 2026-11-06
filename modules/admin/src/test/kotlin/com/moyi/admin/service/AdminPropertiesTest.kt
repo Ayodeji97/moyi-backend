@@ -7,7 +7,7 @@ import org.junit.jupiter.api.assertDoesNotThrow
 import org.junit.jupiter.api.assertThrows
 import java.util.Base64
 
-class AdminPropertiesTest {
+internal class AdminPropertiesTest {
     private val goodKey = Base64.getEncoder().encodeToString(ByteArray(32) { 7 })
 
     @Test

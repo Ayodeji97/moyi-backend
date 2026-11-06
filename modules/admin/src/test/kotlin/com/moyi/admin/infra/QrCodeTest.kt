@@ -7,7 +7,7 @@ import java.io.ByteArrayInputStream
 import java.util.Base64
 import javax.imageio.ImageIO
 
-class QrCodeTest {
+internal class QrCodeTest {
     @Test
     fun `renders a decodable png data uri`() {
         val uri = QrCode.pngDataUri("otpauth://totp/Moyi:op?secret=ABC")

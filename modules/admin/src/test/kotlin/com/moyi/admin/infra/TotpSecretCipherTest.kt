@@ -7,7 +7,7 @@ import org.junit.jupiter.api.assertThrows
 import java.util.Base64
 import javax.crypto.AEADBadTagException
 
-class TotpSecretCipherTest {
+internal class TotpSecretCipherTest {
     private val cipher = TotpSecretCipher(ByteArray(32) { it.toByte() })
     private val secret = "12345678901234567890".toByteArray()
 

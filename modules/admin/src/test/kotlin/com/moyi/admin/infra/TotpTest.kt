@@ -11,7 +11,7 @@ import java.time.Instant
 import java.time.ZoneOffset
 import javax.crypto.spec.SecretKeySpec
 
-class TotpTest {
+internal class TotpTest {
     private val secret = "12345678901234567890".toByteArray()
 
     private fun totpAt(epochSecond: Long) = Totp(Clock.fixed(Instant.ofEpochSecond(epochSecond), ZoneOffset.UTC))
