@@ -29,6 +29,9 @@ import java.util.UUID
  * and a locked account with the right password gets the same answer as a wrong password, so
  * the lock confirms nothing. Only a completed sign-in (both factors) resets the count: if the
  * password step reset it, anyone holding the password could try codes four at a time forever.
+ * Each step reads the account `FOR UPDATE` first, so "is it locked?" and the failure it then
+ * counts are one decision per account: without the row lock, every attempt that read the row
+ * before the fifth failure committed would pass the gate and get a full guess.
  *
  * **Timing.** An unknown email, or an account that cannot sign in, still costs one Argon2
  * verification (`matchesDummy`), so how long a refusal takes does not say whether the
@@ -66,7 +69,10 @@ internal class AdminSignIn(
         password: String,
         from: ClientAddress?,
     ): PasswordStep {
-        val account = accounts.findByEmail(email)
+        // Locked for the rest of the step, Argon2 included: attempts on one account queue here,
+        // one verification at a time. That serialisation is the point (the gate and the count
+        // must see the same row); at one operator it costs nothing. An unknown email locks nothing.
+        val account = accounts.findForUpdateByEmail(email)
         val hash = account?.passwordHash
         if (account == null || hash == null || account.status != AdminStatus.ACTIVE) {
             passwords.matchesDummy(password)
@@ -92,7 +98,8 @@ internal class AdminSignIn(
         code: String,
         from: ClientAddress?,
     ): TotpStep {
-        val account = accounts.findById(adminId).orElse(null)
+        // Locked for the rest of the step: see the class comment.
+        val account = accounts.findForUpdateById(adminId)
         val sealed = account?.totpSecretEnc
         if (account == null || sealed == null || account.status != AdminStatus.ACTIVE) {
             recordRefusal(account?.getId(), STEP_TOTP, "not_active", from)

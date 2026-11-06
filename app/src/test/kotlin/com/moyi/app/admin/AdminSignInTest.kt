@@ -152,7 +152,8 @@ class AdminSignInTest(
                             }
                         }
                     start.countDown()
-                    // Both are blocked on the row, which is to say both are at the CAS.
+                    // Both are queued on the account row, which the code step locks first; the
+                    // compare-and-set then decides between them, one after the other.
                     await().atMost(Duration.ofSeconds(TIMEOUT_SECONDS)).until { blockedBy(holderPid) == 2 }
                     release()
                     futures.map { it.get(TIMEOUT_SECONDS, TimeUnit.SECONDS) }
@@ -299,8 +300,8 @@ class AdminSignInTest(
     private fun counted(outcome: String): Double = meters.counter("moyi.admin.sign_in", "outcome", outcome).count()
 
     /**
-     * Runs [block] while another transaction holds the account's row lock, the one the
-     * compare-and-set must take; `release` commits it. Rolled back however [block] ends, so a
+     * Runs [block] while another transaction holds the account's row lock, the one the code
+     * step takes before anything else; `release` commits it. Rolled back however [block] ends, so a
      * failed assertion does not leave requests queued behind it.
      */
     private fun <T> whileRowIsHeld(

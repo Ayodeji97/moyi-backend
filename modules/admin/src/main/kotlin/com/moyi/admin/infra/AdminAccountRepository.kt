@@ -1,6 +1,8 @@
 package com.moyi.admin.infra
 
+import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import java.time.Instant
@@ -16,6 +18,19 @@ internal interface AdminAccountRepository : JpaRepository<AdminAccountEntity, UU
      */
     @Query("SELECT * FROM admin_accounts WHERE email = CAST(:email AS citext)", nativeQuery = true)
     fun findByEmail(email: String): AdminAccountEntity?
+
+    /**
+     * [findByEmail], with the row locked until the transaction ends (`FOR UPDATE`): the
+     * sign-in steps read the lock state and count the failure under one lock, so two
+     * attempts on one account cannot both decide from the same unlocked snapshot.
+     */
+    @Query("SELECT * FROM admin_accounts WHERE email = CAST(:email AS citext) FOR UPDATE", nativeQuery = true)
+    fun findForUpdateByEmail(email: String): AdminAccountEntity?
+
+    /** The row by id, locked until the transaction ends; see [findForUpdateByEmail]. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT a FROM AdminAccountEntity a WHERE a.id = :id")
+    fun findForUpdateById(id: UUID): AdminAccountEntity?
 
     /**
      * Spends a TOTP time step exactly once: the row changes only if [step] is
