@@ -306,8 +306,8 @@ only `modules/admin` may depend on them.
   (re-invite).
 - Metrics: `moyi_admin_sign_in_total{outcome}` and `moyi_admin_lookup_total`. A sign-in
   failure rate belongs on doc 11's security dashboard.
-- Smoke: `scripts/smoke.sh` gains an admin section. It checks that `/admin` is 404 when off
-  and from a refused address, runs invite → enrol → sign in with a computed code → lookup,
+- Smoke: `scripts/smoke.sh` gains an admin section. It checks that `/admin` is 404 when off,
+  that a refused address gets the API's unauthenticated `401` problem with no cookie (§4), runs invite → enrol → sign in with a computed code → lookup,
   and probes that a replayed code, a missing CSRF token and a one-factor session are each
   refused. It then reads `audit_log` to confirm the rows exist and that `UPDATE` and `DELETE`
   raise.
