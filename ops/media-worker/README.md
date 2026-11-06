@@ -201,7 +201,7 @@ From a verified test account of yours (one that is in no bond with a real
 person), on the Mac:
 
 ```
-MOYI_CHECK_API=https://api.getmoyi.app/api/v1 MOYI_CHECK_EMAIL=<the test account> \
+MOYI_CHECK_API=https://api.getmoyi.app/api/v1 MOYI_CHECK_EMAIL='test@example.com' \
   MOYI_CHECK_URL_MIN_AGE=40 scripts/r2-switch-on-check.sh
 ```
 

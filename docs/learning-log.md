@@ -2958,3 +2958,20 @@ Wrong about: a systemd service being active means its watcher is stable. Product
          script also needs V39 reporting tables, so enabling it before the app migration
          would fail on the production V36 database. A fresh encrypted backup succeeded;
          the vault-dependent restore drill remains a separate deployment gate.
+
+## 2026-11-05 · Ops · The deploy of V37–V41: every gate held, and the step between two gates did not
+
+Expected: the gates to be where a deploy could go wrong: R2's token, the worker's limiter, the
+         restore drill on real data, the collation after the image swap.
+Reality: every gate passed on the first real reading. The R2 token answered `200`; the limiter
+         kept zero restarts; the drill restored the 13:34 backup and ran V37–V41 on it in
+         1 m 20 s; collation read `2.41|2.41`; and R2 refused a body with one byte changed
+         (`400`), settling ADR-0047's inferred checksum item. The outage came from between two
+         gates: after `kamal app stop` and the swap, the deploy did not run, a `200` was
+         reported, and the API was down for about nine minutes (17:26 to 17:35) until an uptime email, Flyway
+         at V36 and an empty `docker ps` said so. The re-run deploy took 79 s.
+Wrong about: a short commit being a version. CI tags images with the full SHA, and the drill
+         stopped at the pull with `not found`; the runbook now passes `git rev-parse HEAD`. And
+         about a placeholder in a command: `<a test account>` was read by zsh as a redirect.
+         A step handed to someone else is done when its own output says so, not when a
+         reading taken somewhere near it looks right.
