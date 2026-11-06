@@ -115,6 +115,21 @@ class UserLookupTest(
     }
 
     @Test
+    fun `a UUID-looking query that is not a canonical UUID is looked up as an email, and finds nothing`() {
+        // UUID.fromString takes "1-1-1-1-1" as 00000001-0001-0001-0001-000000000001; plan
+        // Review Focus 5 says such a string is an email query, which matches nobody.
+        val session = admin("SUPPORT")
+        val page = lookup(session, "1-1-1-1-1")
+        page.status shouldBe 200
+        page.contentAsString shouldContain "No account matches."
+        jdbc.queryForObject(
+            "SELECT metadata->>'by' FROM audit_log WHERE action = 'USER_LOOKED_UP' AND outcome = 'REFUSED' AND actor_id = ?",
+            String::class.java,
+            actorOf(session),
+        ) shouldBe "email"
+    }
+
+    @Test
     fun `every lookup writes exactly one audit row`() {
         val user = user()
         val session = admin("SUPPORT")
@@ -168,6 +183,11 @@ class UserLookupTest(
                 param("q", q)
             }.andReturn()
             .response
+
+    private fun actorOf(session: MockHttpSession): UUID =
+        (session.getAttribute(HttpSessionSecurityContextRepository.SPRING_SECURITY_CONTEXT_KEY) as SecurityContextImpl)
+            .authentication!!
+            .principal as UUID
 
     private fun counter(outcome: String): Double = meters.counter("moyi.admin.lookup", "outcome", outcome).count()
 

@@ -100,6 +100,18 @@ internal class AdminConsoleServiceTest(
     }
 
     @Test
+    fun `a second invitation kills the first link, and only the new one opens the page`() {
+        val (email, old) = invited()
+        enrolment.begin(old).shouldNotBeNull()
+
+        val new = jdbc.queryForObject("SELECT admin_invite(?::citext, 'SUPPORT')", String::class.java, email)!!
+
+        enrolment.begin(old).shouldBeNull()
+        enrolment.complete(old, PASSWORD, PASSWORD, "123456", null) shouldBe EnrolmentResult.InvalidLink
+        enrolment.begin(new).shouldNotBeNull().email shouldBe email
+    }
+
+    @Test
     fun `an invited account that never saw its page cannot finish with any code`() {
         val (_, token) = invited()
         enrolment.complete(token, PASSWORD, PASSWORD, "123456", null) shouldBe EnrolmentResult.WrongCode
