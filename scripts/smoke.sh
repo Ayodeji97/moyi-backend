@@ -3146,7 +3146,9 @@ else
   AD_PASSWORD="smoke admin passphrase $RANDOM-$RANDOM-x7Q"
   AD_TOKEN="$(sql "SELECT admin_invite('$AD_EMAIL', 'SUPPORT')")"
   case "$AD_TOKEN" in psql-error*|"") fail "admin: admin_invite returns a token" "$AD_TOKEN"; AD_TOKEN="" ;; *) pass "admin: admin_invite returns a one-time token (${#AD_TOKEN} characters)" ;; esac
-  db_is "admin: …stored as its hash only, never the token" "$(sql "SELECT count(*) FROM admin_invitations WHERE encode(token_hash,'escape') = '$AD_TOKEN'")" "0"
+  # The token is base64url of 32 random bytes and the column holds SHA-256 of those bytes, so the
+  # check decodes it first: digest() of the 43 characters themselves would never match.
+  db_is "admin: …stored as its hash only, the SHA-256 of the token" "$(sql "SELECT i.token_hash = digest(decode(translate('$AD_TOKEN', '-_', '+/') || '=', 'base64'), 'sha256') FROM admin_invitations i JOIN admin_accounts a ON a.id = i.admin_id WHERE a.email = '$AD_EMAIL' AND i.consumed_at IS NULL")" "t"
 
   adm_code "$ADM_DIR/enrol" "$ADM/enrol?token=not-a-real-token-at-all-0000000000000000000"
   adm_is "admin: an invalid enrolment link is one page" 404
