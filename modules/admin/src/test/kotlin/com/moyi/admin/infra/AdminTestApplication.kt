@@ -1,7 +1,9 @@
 package com.moyi.admin.infra
 
+import com.moyi.bond.api.BondAdminLookup
 import com.moyi.common.security.TokenRevocations
 import com.moyi.identity.api.PasswordHashing
+import com.moyi.identity.api.UserAdminLookup
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.springframework.boot.autoconfigure.SpringBootApplication
@@ -49,6 +51,21 @@ internal class AdminTestApplication {
             override fun matchesDummy(raw: String): Boolean = false
 
             override fun isBreached(raw: String): Boolean = raw == BREACHED
+        }
+
+    /** Nobody exists in this context; `app`'s lookup tests run the real ports. */
+    @Bean
+    fun userAdminLookup(): UserAdminLookup =
+        object : UserAdminLookup {
+            override fun byId(id: java.util.UUID) = null
+
+            override fun byEmail(email: String) = null
+        }
+
+    @Bean
+    fun bondAdminLookup(): BondAdminLookup =
+        object : BondAdminLookup {
+            override fun bondsOf(userId: java.util.UUID) = emptyList<com.moyi.bond.api.BondAdminView>()
         }
 
     /** No actuator in this context; the sign-in counter needs a registry to count in. */

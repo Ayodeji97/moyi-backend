@@ -23,6 +23,7 @@ import org.springframework.mock.web.MockHttpServletRequest
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockHttpSession
 import org.springframework.security.access.AccessDeniedException
+import org.springframework.security.authentication.BadCredentialsException
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
@@ -137,7 +138,12 @@ internal class AdminAuthFlowTest(
         resolver
             .resolveException(MockHttpServletRequest("GET", "/administrator"), MockHttpServletResponse(), null, IllegalStateException())
             .shouldBeNull()
-        resolver.resolveException(admin, MockHttpServletResponse(), null, AccessDeniedException("for the filter")).shouldBeNull()
+        // A role refusal from `@PreAuthorize` is the admin 403 page (the API's advice would answer JSON);
+        // an authentication failure is the filter's to send to sign-in.
+        val denied = resolver.resolveException(admin, MockHttpServletResponse(), null, AccessDeniedException("SUPPORT needed"))!!
+        denied.status shouldBe HttpStatus.FORBIDDEN
+        denied.model.values.joinToString() shouldNotContain "SUPPORT"
+        resolver.resolveException(admin, MockHttpServletResponse(), null, BadCredentialsException("for the filter")).shouldBeNull()
     }
 
     @Test

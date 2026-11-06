@@ -46,6 +46,7 @@ internal class AdminErrorPage(
 
     companion object {
         const val VIEW = "admin/error"
+        const val NOT_PERMITTED = "Your role does not allow that."
         private const val UNREADABLE = "That request could not be read."
         private const val FAILED = "Something went wrong. Try again in a moment."
 
@@ -94,13 +95,21 @@ internal class AdminErrorResolver : HandlerExceptionResolver {
     ): ModelAndView? {
         val path = request.requestURI.removePrefix(request.contextPath)
         val adminPath = path == ADMIN || path.startsWith("$ADMIN/")
-        // Spring Security's own: ExceptionTranslationFilter must see them, to send the request
-        // to sign in or to the code step (a `@PreAuthorize` refusal raises one in a handler).
-        val security = failure is AccessDeniedException || failure is AuthenticationException
-        if (!adminPath || security) return null
-        val status = (failure as? ErrorResponse)?.let { HttpStatus.resolve(it.statusCode.value()) } ?: HttpStatus.INTERNAL_SERVER_ERROR
+        // An authentication failure is Spring Security's own: ExceptionTranslationFilter sends the
+        // request to sign in. A `@PreAuthorize` refusal (a session with both factors and no
+        // sufficient role) is an AccessDeniedException raised in a handler; left alone, the API's
+        // advice would answer it in JSON, so it is the admin 403 page here. The URL rules have
+        // already stopped a session missing a factor, so no factor redirect is lost by this.
+        if (!adminPath || failure is AuthenticationException) return null
+        val status =
+            when (failure) {
+                is AccessDeniedException -> HttpStatus.FORBIDDEN
+                else -> (failure as? ErrorResponse)?.let { HttpStatus.resolve(it.statusCode.value()) } ?: HttpStatus.INTERNAL_SERVER_ERROR
+            }
         if (status.is5xxServerError) log.error("An admin request failed: {}", failure.javaClass.name)
-        return ModelAndView(AdminErrorPage.VIEW, AdminErrorPage.model(status), status)
+        val model = AdminErrorPage.model(status).toMutableMap()
+        if (failure is AccessDeniedException) model["message"] = AdminErrorPage.NOT_PERMITTED
+        return ModelAndView(AdminErrorPage.VIEW, model, status)
     }
 
     private companion object {

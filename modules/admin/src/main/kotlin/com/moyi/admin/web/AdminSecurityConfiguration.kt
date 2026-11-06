@@ -11,6 +11,8 @@ import org.springframework.context.annotation.Configuration
 import org.springframework.core.annotation.Order
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpStatus
+import org.springframework.security.access.hierarchicalroles.RoleHierarchy
+import org.springframework.security.access.hierarchicalroles.RoleHierarchyImpl
 import org.springframework.security.authorization.AuthorityAuthorizationManager
 import org.springframework.security.authorization.AuthorizationManagerFactories
 import org.springframework.security.config.annotation.web.builders.HttpSecurity
@@ -132,6 +134,22 @@ internal class AdminSecurityConfiguration {
             }
 
     companion object {
+        /**
+         * `ADMIN > MODERATOR > SUPPORT` (spec §5), for `@PreAuthorize("hasRole(...)")`. Static, as
+         * Spring asks of anything method security needs while it is itself being built. It exists
+         * only with the console on, and the API grants no `ROLE_` authority, so it changes nothing there.
+         */
+        @Bean
+        @JvmStatic
+        fun adminRoleHierarchy(): RoleHierarchy =
+            RoleHierarchyImpl
+                .withDefaultRolePrefix()
+                .role("ADMIN")
+                .implies("MODERATOR")
+                .role("MODERATOR")
+                .implies("SUPPORT")
+                .build()
+
         const val LOGIN = "/admin/login"
         const val TOTP = "/admin/login/totp"
 
