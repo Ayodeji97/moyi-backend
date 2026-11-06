@@ -33,11 +33,12 @@ internal class AdminEnrolmentController(
         request: HttpServletRequest,
         response: HttpServletResponse,
     ): String {
+        val page = enrolment.begin(token) ?: return invalidLink(response)
         // The page (its QR code) outgrows the response buffer, so it is committed part-way
         // through the form, and the form's CSRF token cannot start a session then: Tomcat
-        // cut the page off. The session is made here, before anything is written.
+        // cut the page off. The session is made here, before anything is written, and only
+        // for a link that opens the page: an invalid one is given no session.
         request.getSession(true)
-        val page = enrolment.begin(token) ?: return invalidLink(response)
         model.addAttribute("page", page)
         model.addAttribute("token", token)
         return ENROL

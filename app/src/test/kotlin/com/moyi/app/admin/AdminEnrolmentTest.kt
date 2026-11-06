@@ -4,6 +4,7 @@ import com.moyi.app.admin.AdminConsoleDriver.Companion.code
 import com.moyi.common.testing.MutableClock
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
@@ -83,6 +84,21 @@ class AdminEnrolmentTest(
         response.body().trim() shouldEndWith "</html>"
         response.body() shouldContain "name=\"_csrf\""
         response.headers().allValues("Set-Cookie").single() shouldContain "moyi-admin="
+    }
+
+    /** The other half of the session made up front: only a link that opens the page earns one. */
+    @Test
+    fun `an invalid link on a real server is the one page, and is given no session`() {
+        val request =
+            HttpRequest
+                .newBuilder(URI("http://localhost:$port/admin/enrol?token=not-a-real-token-at-all-0000000000000000000"))
+                .header("X-Forwarded-For", ALLOWED)
+                .build()
+        val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+
+        response.statusCode() shouldBe 404
+        response.body() shouldContain "This link is not valid."
+        response.headers().allValues("Set-Cookie").filter { it.startsWith("moyi-admin=") }.shouldBeEmpty()
     }
 
     @Test
