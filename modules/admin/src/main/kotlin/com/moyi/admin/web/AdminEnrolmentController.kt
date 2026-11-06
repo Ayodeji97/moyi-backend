@@ -30,8 +30,13 @@ internal class AdminEnrolmentController(
     fun enrolPage(
         @RequestParam(defaultValue = "") token: String,
         model: Model,
+        request: HttpServletRequest,
         response: HttpServletResponse,
     ): String {
+        // The page (its QR code) outgrows the response buffer, so it is committed part-way
+        // through the form, and the form's CSRF token cannot start a session then: Tomcat
+        // cut the page off. The session is made here, before anything is written.
+        request.getSession(true)
         val page = enrolment.begin(token) ?: return invalidLink(response)
         model.addAttribute("page", page)
         model.addAttribute("token", token)

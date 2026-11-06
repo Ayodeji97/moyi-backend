@@ -12,10 +12,15 @@ import io.kotest.matchers.string.shouldNotContain
 import org.awaitility.Awaitility.await
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.boot.test.web.server.LocalServerPort
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.mock.web.MockHttpServletResponse
 import org.springframework.mock.web.MockHttpSession
 import org.springframework.test.web.servlet.MockMvc
+import java.net.URI
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
 import java.sql.Connection
 import java.time.Duration
 import java.time.OffsetDateTime
@@ -35,6 +40,7 @@ class AdminEnrolmentTest(
     @Autowired mockMvc: MockMvc,
     @Autowired private val clock: MutableClock,
     @Autowired private val dataSource: DataSource,
+    @LocalServerPort private val port: Int,
 ) : AdminEnabledTest() {
     private val jdbc = JdbcTemplate(dataSource)
     private val console = AdminConsoleDriver(mockMvc, jdbc)
@@ -54,6 +60,29 @@ class AdminEnrolmentTest(
         second.status shouldBe 200
         keyOn(second) shouldNotBe firstKey
         keyOn(second) shouldBe base32(console.secretOf(email))
+    }
+
+    /**
+     * Found by the smoke run, not by `MockMvc`: the page is larger than the response buffer
+     * (the QR code), so a visitor with no session yet had the response committed before the
+     * form's CSRF token needed one, and Tomcat cut the page off mid-form. Only a real server,
+     * and a first visit with no cookie, shows it.
+     */
+    @Test
+    fun `a first visit with no session gets the whole page, with its form and a session cookie`() {
+        val token = console.invite(newEmail())
+
+        val request =
+            HttpRequest
+                .newBuilder(URI("http://localhost:$port/admin/enrol?token=$token"))
+                .header("X-Forwarded-For", ALLOWED)
+                .build()
+        val response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString())
+
+        response.statusCode() shouldBe 200
+        response.body().trim() shouldEndWith "</html>"
+        response.body() shouldContain "name=\"_csrf\""
+        response.headers().allValues("Set-Cookie").single() shouldContain "moyi-admin="
     }
 
     @Test
