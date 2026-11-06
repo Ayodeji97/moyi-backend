@@ -2,9 +2,9 @@ package com.moyi.app.admin
 
 import com.moyi.app.admin.AdminConsoleDriver.Companion.code
 import com.moyi.common.testing.MutableClock
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.nulls.shouldBeNull
 import io.kotest.matchers.nulls.shouldNotBeNull
-import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldContain
@@ -98,7 +98,11 @@ class AdminEnrolmentTest(
 
         response.statusCode() shouldBe 404
         response.body() shouldContain "This link is not valid."
-        response.headers().allValues("Set-Cookie").filter { it.startsWith("moyi-admin=") }.shouldBeEmpty()
+        response
+            .headers()
+            .allValues("Set-Cookie")
+            .filter { it.startsWith("moyi-admin=") }
+            .shouldBeEmpty()
     }
 
     @Test
