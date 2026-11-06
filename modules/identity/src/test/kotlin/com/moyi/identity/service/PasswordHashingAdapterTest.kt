@@ -27,6 +27,14 @@ internal class PasswordHashingAdapterTest(
     }
 
     @Test
+    fun `a password hashed in full-width form verifies as its NFKC-equal ASCII text`() {
+        val hash = hashing.hash("\uFF50\uFF41\uFF53\uFF53\uFF57\uFF4F\uFF52\uFF44-long-ok-1")
+
+        hashing.matches("password-long-ok-1", hash) shouldBe true
+        hashing.matches("\uFF50\uFF41\uFF53\uFF53\uFF57\uFF4F\uFF52\uFF44-long-ok-1", hash) shouldBe true
+    }
+
+    @Test
     fun `the breached corpus is asked, and a string that breaks the shape rules is not breached`() {
         hashing.isBreached("password") shouldBe true
         hashing.isBreached("a-long-unbreached-passphrase-42") shouldBe false
