@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head th:replace="~{admin/layout :: head('User lookup')}"></head>
+<body>
+<header th:replace="~{admin/layout :: masthead}"></header>
+<main>
+    <h1>User lookup</h1>
+    <form method="get" th:action="@{/admin/users}">
+        <label for="q">User id or exact email</label>
+        <input id="q" name="q" type="text" autocomplete="off" required>
+        <button type="submit">Look up</button>
+    </form>
+
+    <p th:if="${notFound}">No account matches.</p>
+
+    <section th:if="${user != null}">
+        <h2>Account</h2>
+        <dl>
+            <dt>Id</dt><dd th:text="${user.id}"></dd>
+            <dt>Email</dt><dd th:text="${user.email}"></dd>
+            <dt>Display name</dt><dd th:text="${user.displayName}"></dd>
+            <dt>Locale</dt><dd th:text="${user.locale}"></dd>
+            <dt>Created</dt><dd th:text="${user.createdAt}"></dd>
+            <dt>Email verified</dt><dd th:text="${user.emailVerified} ? 'yes' : 'no'"></dd>
+            <dt>Locked until</dt><dd th:text="${user.lockedUntil != null} ? ${user.lockedUntil} : 'not locked'"></dd>
+            <dt>Live sessions</dt><dd th:text="${user.liveSessions}"></dd>
+            <dt>Tokens invalid before</dt><dd th:text="${user.tokensInvalidBefore != null} ? ${user.tokensInvalidBefore} : 'never'"></dd>
+        </dl>
+
+        <h2>Bonds</h2>
+        <p th:if="${#lists.isEmpty(bonds)}">This user is in no bond.</p>
+        <table th:unless="${#lists.isEmpty(bonds)}">
+            <thead>
+            <tr><th>Bond</th><th>Status</th><th>Created</th><th>Ended</th><th>Partner</th></tr>
+            </thead>
+            <tbody>
+            <tr th:each="bond : ${bonds}">
+                <td th:text="${bond.bondId}"></td>
+                <td th:text="${bond.status}"></td>
+                <td th:text="${bond.createdAt}"></td>
+                <td th:text="${bond.endedAt != null} ? ${bond.endedAt} : '-'"></td>
+                <td>
+                    <a th:if="${bond.partnerUserId != null}" th:href="@{/admin/users(q=${bond.partnerUserId})}"
+                       th:text="${bond.partnerUserId}"></a>
+                    <span th:if="${bond.partnerUserId == null}">waiting for a partner</span>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </section>
+    <p><a th:href="@{/admin}">Back to the console</a></p>
+</main>
+</body>
+</html>

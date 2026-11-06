@@ -80,6 +80,12 @@ servers:
         JAVA_TOOL_OPTIONS: >-
           -XX:+ExitOnOutOfMemoryError -XX:MaxDirectMemorySize=10M -Xmx1292m
           -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=240M -Xss1M
+        # The admin console (ADR-0055): off. Under servers.web only, never the
+        # top level, so the media worker (which serves no web) cannot get it.
+        # To switch on, follow ops/admin/README.md: set "true", list the
+        # operator's own address, and add the key to `secret` below.
+        MOYI_ADMIN_ENABLED: "false"
+        # MOYI_ADMIN_ALLOWED_NETWORKS: 203.0.113.7/32
       # The API's secrets, merged over the top-level ones (Kamal 2.12,
       # Role#env): the session-signing pair, the HMAC key behind ip_hash and
       # the rate limits, and the email key. The media worker gets none of them.
@@ -88,6 +94,10 @@ servers:
         - MOYI_SECURITY_JWT_PUBLIC_KEY_PEM
         - MOYI_SECURITY_HASHING_SECRET
         - MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY
+        # The admin console's TOTP key (ADR-0055, ops/admin/README.md) is named
+        # here and not listed: add MOYI_ADMIN_TOTP_KEY to this list, and to the
+        # vault, only when the owner switches the console on. The app refuses
+        # to start with the console enabled and no key.
 
   # The media worker (the owner's Q5 and his ruling of 2026-10-29: a role, not
   # an accessory, so it is redeployed with the application). The same image,

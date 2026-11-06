@@ -212,6 +212,25 @@ logging:
     # SecretsNeverLoggedTest fails if this line is removed.
     org.springframework.ai: INFO
 
+server:
+  servlet:
+    session:
+      # Idle timeout (spec §6), stated here rather than left to the container's
+      # default: an operator idle for half an hour is signed out.
+      timeout: 30m
+      # The admin console's session cookie (spec §6), the only session this
+      # application ever creates: the API chain is STATELESS, and
+      # ApiChainUnchangedTest fails if any API response sets a cookie. The
+      # names are global, and only /admin uses them. Path=/admin keeps the
+      # browser from sending it to /api; not `__Host-`, which forces Path=/.
+      # No Domain. The `local` profile drops Secure.
+      cookie:
+        name: moyi-admin
+        path: /admin
+        http-only: true
+        secure: true
+        same-site: strict
+
 management:
   server:
     # The actuator on a port of its own, which kamal-proxy does not route: the

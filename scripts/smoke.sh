@@ -133,6 +133,19 @@
 # 2c0e3bf, on a fresh database that applied 38 migrations to V39, against its own compose project
 # (moyi-report: Postgres 55454, Valkey 63814, MinIO 59028), the jar booted by hand (local profile)
 # and --attach: 1273 passed, 0 failed, 0 skipped, 33 sections. Before it, from 3e8a78a: 1254, 0, 0.
+# Since the admin console A1 (FR-110, FR-111, FR-116, ADR-0055) it signs in to /admin: a refused address
+# (X-Forwarded-For through the trusted loopback) gets the API's own 401, byte for byte, with or without a
+# bearer, and no cookie; an operator invited by admin_invite (the token stored only as its hash) is
+# enrolled in the browser, a wrong code enrolling nothing and the link spent; a sign-in needs the password
+# and then a code (oathtool, else the section is skipped and says so), one factor reaching nothing, a
+# wrong code and a replayed one refused, no CSRF token a 403, sign-out ending the session, five failures
+# locking the account; and audit_log holds the rows, none with an email, while UPDATE and DELETE on it
+# raise. It cannot show the console OFF (404 with a bearer): the local profile has it on, and
+# AdminDisabledTest shows it. Last run on 2026-11-06, on feat/admin-console-a1, from a jar of the tree
+# after its enrolment page was found cut off for a visitor with no session (the QR code outgrew the
+# response buffer; MockMvc cannot see it), on a fresh database that applied 41 migrations to V42, against
+# its own compose project (moyi-99: Postgres 55499, Valkey 56399, MinIO 59299), the jar booted by hand
+# (local profile) and --attach: 1369 passed, 0 failed, 0 skipped, 35 sections.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
@@ -3091,6 +3104,141 @@ header_is "reports: …ten a day" "X-RateLimit-Limit" "10"
 if grep -q "$RP_DETAIL" "$MOYI_LOG"; then fail "the report's detail is in no log line" "it is in $MOYI_LOG"; else pass "the report's detail is in no log line"; fi
 rm -rf "$RP_DIR"
 flush_buckets
+
+echo; echo "admin console — invite, enrol, two factors, lookup, and an audit log nothing can alter (FR-110, FR-111, FR-116, ADR-0055)"
+# The console is on in the local profile for loopback only. A server started
+# without it answers /admin/login as any unknown path (401, no token), and the
+# section says so and stops. The "off" half of the contract (404 with a bearer)
+# is the integration tests': this run has it on.
+ADM="$BASE/admin"
+ADM_DIR="$(mktemp -d)"
+adm_code() { # <jar> <curl args…>: status in ADM_CODE, body in ADM_BODY, headers in ADM_HEADERS
+  local jar="$1"; shift
+  ADM_CODE="$(curl -s -o "$ADM_DIR/body" -D "$ADM_DIR/hdrs" -w '%{http_code}' -c "$jar" -b "$jar" "$@")"
+  ADM_BODY="$(cat "$ADM_DIR/body")"; ADM_HEADERS="$(tr -d '\r' < "$ADM_DIR/hdrs")"
+}
+adm_csrf() { printf '%s' "$ADM_BODY" | python3 -c 'import re,sys; m=re.search(r"name=\"_csrf\"[^>]*value=\"([^\"]+)\"|value=\"([^\"]+)\"[^>]*name=\"_csrf\"", sys.stdin.read()); print((m.group(1) or m.group(2)) if m else "")'; }
+adm_secret() { printf '%s' "$ADM_BODY" | python3 -c 'import re,sys; m=re.search(r"id=\"secret\"[^>]*>([A-Z2-7]+)<", sys.stdin.read()); print(m.group(1) if m else "")'; }
+adm_location() { printf '%s\n' "$ADM_HEADERS" | grep -i '^location:' | head -1 | cut -d' ' -f2- || true; }
+adm_is() { # <label> <want-status> [<want-location-substring>]
+  if [ "$ADM_CODE" != "$2" ]; then fail "$1" "expected HTTP $2, got $ADM_CODE: ${ADM_BODY:0:160}"
+  elif [ -n "${3:-}" ] && [[ "$(adm_location)" != *"$3"* ]]; then fail "$1" "expected Location to contain '$3', got '$(adm_location)'"
+  else pass "$1 ($ADM_CODE)"; fi
+}
+adm_code "$ADM_DIR/probe" "$ADM/login"
+if ! command -v oathtool >/dev/null; then
+  skip "admin: the whole section (oathtool not installed: brew install oath-toolkit)"
+elif [ "$PSQL_OK" != 1 ]; then
+  skip "admin: the whole section (psql not reachable through docker compose)"
+elif [ "$ADM_CODE" != 200 ]; then
+  skip "admin: the whole section (this server has the console off: /admin/login answered $ADM_CODE)"
+else
+  pass "the console is on for this machine: /admin/login is 200"
+  # A refused address: loopback is a trusted proxy, so X-Forwarded-For names the caller.
+  expect "admin: a refused address gets the API's 401, with no token" 401 '"status":401' -- "$ADM/login" -H 'X-Forwarded-For: 203.0.113.9'
+  ADM_REFUSED="$(no_instance)"
+  expect "admin: …and the same from a refused address that brings a bearer token" 401 '"status":401' -- "$ADM/login" -H 'X-Forwarded-For: 203.0.113.9' -H 'Authorization: Bearer not-a-token'
+  is "admin: …byte for byte the same problem (but its instance)" "$(no_instance)" "$ADM_REFUSED"
+  adm_code "$ADM_DIR/refused" "$ADM/login" -H 'X-Forwarded-For: 203.0.113.9'
+  if printf '%s\n' "$ADM_HEADERS" | grep -qi '^set-cookie:'; then fail "admin: a refused address is given no session" "a cookie was set"; else pass "admin: a refused address is given no session"; fi
+
+  AD_EMAIL="admin-smoke-$RANDOM$RANDOM@example.com"
+  AD_PASSWORD="smoke admin passphrase $RANDOM-$RANDOM-x7Q"
+  AD_TOKEN="$(sql "SELECT admin_invite('$AD_EMAIL', 'SUPPORT')")"
+  case "$AD_TOKEN" in psql-error*|"") fail "admin: admin_invite returns a token" "$AD_TOKEN"; AD_TOKEN="" ;; *) pass "admin: admin_invite returns a one-time token (${#AD_TOKEN} characters)" ;; esac
+  # The token is base64url of 32 random bytes and the column holds SHA-256 of those bytes, so the
+  # check decodes it first: digest() of the 43 characters themselves would never match.
+  db_is "admin: …stored as its hash only, the SHA-256 of the token" "$(sql "SELECT i.token_hash = digest(decode(translate('$AD_TOKEN', '-_', '+/') || '=', 'base64'), 'sha256') FROM admin_invitations i JOIN admin_accounts a ON a.id = i.admin_id WHERE a.email = '$AD_EMAIL' AND i.consumed_at IS NULL")" "t"
+
+  adm_code "$ADM_DIR/enrol" "$ADM/enrol?token=not-a-real-token-at-all-0000000000000000000"
+  adm_is "admin: an invalid enrolment link is one page" 404
+  adm_code "$ADM_DIR/enrol" "$ADM/enrol?token=$AD_TOKEN"
+  adm_is "admin: the invitation opens the enrolment page" 200
+  AD_SECRET="$(adm_secret)"; AD_CSRF="$(adm_csrf)"
+  if [ -n "$AD_SECRET" ] && [ -n "$AD_CSRF" ]; then pass "admin: …with a secret to scan and a CSRF token"; else fail "admin: the enrolment page has a secret and a CSRF token" "secret='${AD_SECRET:+present}' csrf='${AD_CSRF:+present}'"; fi
+  adm_code "$ADM_DIR/enrol" -X POST "$ADM/enrol" --data-urlencode "token=$AD_TOKEN" --data-urlencode "password=$AD_PASSWORD" --data-urlencode "confirm=$AD_PASSWORD" --data-urlencode "code=000000" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin: a wrong code enrols nothing" 422
+  db_is "admin: …and the account is still INVITED" "$(sql "SELECT status FROM admin_accounts WHERE email='$AD_EMAIL'")" "INVITED"
+  adm_code "$ADM_DIR/enrol" "$ADM/enrol?token=$AD_TOKEN"; AD_SECRET="$(adm_secret)"; AD_CSRF="$(adm_csrf)"
+  adm_code "$ADM_DIR/enrol" -X POST "$ADM/enrol" --data-urlencode "token=$AD_TOKEN" --data-urlencode "password=$AD_PASSWORD" --data-urlencode "confirm=$AD_PASSWORD" --data-urlencode "code=$(oathtool --totp -b "$AD_SECRET")" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin: the right code enrols, and sends the operator to sign in" 302 "/admin/login"
+  db_is "admin: …the account is ACTIVE" "$(sql "SELECT status FROM admin_accounts WHERE email='$AD_EMAIL'")" "ACTIVE"
+  db_is "admin: …its TOTP secret is stored sealed, not as the base32 shown" "$(sql "SELECT (totp_secret_enc LIKE '%$AD_SECRET%') FROM admin_accounts WHERE email='$AD_EMAIL'")" "f"
+  adm_code "$ADM_DIR/enrol2" "$ADM/enrol?token=$AD_TOKEN"
+  adm_is "admin: …and the link cannot be used again" 404
+
+  # The enrolment spent the current step; the next step's code is inside the ±1 tolerance.
+  ad_next_code() { oathtool --totp -b -N "now + 30 seconds" "$AD_SECRET"; }
+  ad_password_step() { # <jar>
+    adm_code "$1" "$ADM/login"; AD_CSRF="$(adm_csrf)"
+    adm_code "$1" -X POST "$ADM/login" --data-urlencode "email=$AD_EMAIL" --data-urlencode "password=$AD_PASSWORD" --data-urlencode "_csrf=$AD_CSRF"
+  }
+  ad_code_step() { # <jar> <code>
+    adm_code "$1" "$ADM/login/totp"; AD_CSRF="$(adm_csrf)"
+    adm_code "$1" -X POST "$ADM/login/totp" --data-urlencode "code=$2" --data-urlencode "_csrf=$AD_CSRF"
+  }
+
+  adm_code "$ADM_DIR/anon" "$ADM/users?q=x"
+  adm_is "admin: no session at all is sent to sign in" 302 "/admin/login"
+  adm_code "$ADM_DIR/post-nocsrf" -X POST "$ADM/login" --data-urlencode "email=$AD_EMAIL" --data-urlencode "password=$AD_PASSWORD"
+  adm_is "admin: a sign-in POST with no CSRF token is refused" 403
+
+  ad_password_step "$ADM_DIR/one"
+  adm_is "admin: the right password alone moves to the code page" 302 "/admin/login/totp"
+  adm_code "$ADM_DIR/one" "$ADM/users?q=$EMAIL"
+  adm_is "admin: …and one factor reaches nothing else (sent to the code page)" 302 "/admin/login/totp"
+  ad_code_step "$ADM_DIR/one" "000000"
+  adm_is "admin: a wrong code is refused" 401
+  AD_GOOD="$(ad_next_code)"
+  ad_code_step "$ADM_DIR/one" "$AD_GOOD"
+  adm_is "admin: the next step's code signs in" 302 "/admin"
+
+  ad_password_step "$ADM_DIR/replay"
+  ad_code_step "$ADM_DIR/replay" "$AD_GOOD"
+  adm_is "admin: the same code a second time is refused (replay)" 401
+
+  adm_code "$ADM_DIR/one" "$ADM/users?q=$EMAIL"
+  adm_is "admin: both factors reach the user lookup" 200
+  if [[ "$ADM_BODY" == *"$EMAIL"* ]]; then pass "admin: …and it shows the user by their exact email"; else fail "admin: the lookup shows the user" "${ADM_BODY:0:200}"; fi
+  for h in "Content-Security-Policy: default-src 'none'" "Cache-Control: no-store" "Referrer-Policy: no-referrer"; do
+    if printf '%s\n' "$ADM_HEADERS" | grep -qi "^$h"; then pass "admin: …with the header $h"; else fail "admin: the lookup page's headers" "missing: $h"; fi
+  done
+  adm_code "$ADM_DIR/one" "$ADM/users?q=00000000-0000-7000-8000-000000000000"
+  adm_is "admin: a lookup that finds nothing is a page, not an error" 200
+  adm_code "$ADM_DIR/one" -X POST "$ADM/logout"
+  adm_is "admin: sign-out with no CSRF token is refused" 403
+  adm_code "$ADM_DIR/one" "$ADM"; AD_CSRF="$(adm_csrf)" # the sign-out button is on the home page
+  adm_code "$ADM_DIR/one" -X POST "$ADM/logout" --data-urlencode "_csrf=$AD_CSRF"
+  adm_is "admin: sign-out with it works" 302 "/admin/login"
+  adm_code "$ADM_DIR/one" "$ADM/users?q=$EMAIL"
+  adm_is "admin: …and the old session reaches nothing" 302 "/admin/login"
+
+  AD_ID="$(sql "SELECT id FROM admin_accounts WHERE email='$AD_EMAIL'")"
+  db_is "admin: audit has the invitation, the enrolment, the sign-in, the lookup and the sign-out" \
+    "$(sql "SELECT string_agg(DISTINCT action, ',' ORDER BY action) FROM audit_log WHERE (actor_id='$AD_ID' OR target_id='$AD_ID')")" \
+    "ADMIN_ENROLLED,ADMIN_INVITED,ADMIN_SIGN_IN,ADMIN_SIGN_OUT,USER_LOOKED_UP"
+  db_is "admin: …the refused attempts are recorded as REFUSED (a wrong code, a replay)" "$(sql "SELECT count(*) >= 2 FROM audit_log WHERE actor_id='$AD_ID' AND action='ADMIN_SIGN_IN' AND outcome='REFUSED'")" "t"
+  db_is "admin: …a lookup row names the user found" "$(sql "SELECT count(*) >= 1 FROM audit_log WHERE actor_id='$AD_ID' AND action='USER_LOOKED_UP' AND outcome='SUCCEEDED' AND target_type IS NOT NULL")" "t"
+  db_is "admin: …and no audit row holds the operator's or the user's email" "$(sql "SELECT count(*) FROM audit_log WHERE metadata::text ILIKE '%$AD_EMAIL%' OR metadata::text ILIKE '%$EMAIL%'")" "0"
+  AD_UPD="$(sql "UPDATE audit_log SET outcome = 'FAILED' WHERE actor_id = '$AD_ID'")"
+  case "$AD_UPD" in psql-error*append-only*) pass "admin: UPDATE audit_log raises: append-only";; *) fail "admin: UPDATE audit_log must raise" "$AD_UPD";; esac
+  AD_DEL="$(sql "DELETE FROM audit_log WHERE actor_id = '$AD_ID'")"
+  case "$AD_DEL" in psql-error*append-only*) pass "admin: DELETE audit_log raises: append-only";; *) fail "admin: DELETE audit_log must raise" "$AD_DEL";; esac
+  if grep -qF "$AD_TOKEN" "$MOYI_LOG" || grep -qF "$AD_SECRET" "$MOYI_LOG" || grep -qF "$AD_PASSWORD" "$MOYI_LOG"; then fail "admin: the token, the secret and the password are in no log line" "found in $MOYI_LOG"; else pass "admin: the token, the secret and the password are in no log line"; fi
+
+  # The lockout: five failures lock the account, and the right password then gets the same page.
+  for _ in 1 2 3 4 5; do
+    adm_code "$ADM_DIR/lock" "$ADM/login"; AD_CSRF="$(adm_csrf)"
+    adm_code "$ADM_DIR/lock" -X POST "$ADM/login" --data-urlencode "email=$AD_EMAIL" --data-urlencode "password=wrong password number $RANDOM" --data-urlencode "_csrf=$AD_CSRF"
+  done
+  ad_password_step "$ADM_DIR/locked"
+  adm_is "admin: after five failures the right password is refused as a wrong one" 401
+  db_is "admin: …the account is locked in the database" "$(sql "SELECT locked_until > now() FROM admin_accounts WHERE email='$AD_EMAIL'")" "t"
+
+  sql "SELECT admin_disable('$AD_EMAIL')" >/dev/null || true
+  db_is "admin: admin_disable disables the account" "$(sql "SELECT status FROM admin_accounts WHERE email='$AD_EMAIL'")" "DISABLED"
+fi
+rm -rf "$ADM_DIR"
 
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"

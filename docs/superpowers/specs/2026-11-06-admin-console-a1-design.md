@@ -77,7 +77,8 @@ re-invitation.
 ## 4. Switching it on, and who may reach it
 
 - `moyi.admin.enabled` defaults to **false** in every profile, including production. Off
-  means no admin chain, no admin controllers and no admin beans
+  means no admin chain, no admin controllers, no filters and no admin web beans (the
+  persistence beans, which serve no request, may exist: ruling D of the build)
   (`@ConditionalOnProperty`, plus `@ConditionalOnWebApplication`, so the media worker,
   which runs with `web-application-type: none`, can never serve it). `/admin/**` then falls
   through to the API chain like any unknown path: `401` problem without a bearer token,
@@ -305,8 +306,9 @@ only `modules/admin` may depend on them.
   (re-invite).
 - Metrics: `moyi_admin_sign_in_total{outcome}` and `moyi_admin_lookup_total`. A sign-in
   failure rate belongs on doc 11's security dashboard.
-- Smoke: `scripts/smoke.sh` gains an admin section. It checks that `/admin` is 404 when off
-  and from a refused address, runs invite → enrol → sign in with a computed code → lookup,
+- Smoke: `scripts/smoke.sh` gains an admin section. It runs with the console on (the local
+  profile), so the switched-off answer (§4: `401` without a bearer, `404` with one) is
+  proven by `AdminDisabledTest`, not by the smoke. It checks that a refused address gets the API's unauthenticated `401` problem with no cookie (§4), runs invite → enrol → sign in with a computed code → lookup,
   and probes that a replayed code, a missing CSRF token and a one-factor session are each
   refused. It then reads `audit_log` to confirm the rows exist and that `UPDATE` and `DELETE`
   raise.
