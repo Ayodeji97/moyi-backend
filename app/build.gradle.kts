@@ -9,6 +9,7 @@ dependencies {
     // `app` is the composition root: it depends on every module so that
     // their beans, entities and migrations are on the runtime classpath.
     implementation(projects.modules.identity)
+    implementation(projects.modules.admin)
     // Phase 2: bonds, members, invites and blocks (ADR-0026). Here for the
     // same reason identity is — beans, entities and V9 on the classpath.
     implementation(projects.modules.bond)
