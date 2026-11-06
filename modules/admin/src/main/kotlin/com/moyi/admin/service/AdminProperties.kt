@@ -4,13 +4,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties
 import java.time.Duration
 import java.util.Base64
 import kotlin.time.Duration.Companion.hours
-import kotlin.time.Duration.Companion.minutes
 import kotlin.time.toJavaDuration
 
 /**
  * The console's switches (spec §5, §6). Off by default: the console does not exist
  * unless [enabled]. When it is on, [validate] refuses to let the app start without
  * an allow-list and a 256-bit TOTP key. Messages name the property, never its value.
+ *
+ * There is no idle timeout here: that is `server.servlet.session.timeout` (30 minutes,
+ * `application.yml`), the container's own, since the console's is the only session.
  *
  * Conditional, like every admin bean: the app's `@ConfigurationPropertiesScan("com.moyi")`
  * would otherwise bind it with the console off, and switched off the console has no beans.
@@ -23,7 +25,6 @@ internal data class AdminProperties(
     val allowedNetworks: List<String> = emptyList(),
     /** Base64 of exactly 32 bytes: the AES-256 key that seals the TOTP secrets. */
     val totpKey: String? = null,
-    val idleTimeout: Duration = 30.minutes.toJavaDuration(),
     val absoluteTimeout: Duration = 8.hours.toJavaDuration(),
     val issuer: String = "Moyi admin",
 ) {
@@ -42,7 +43,7 @@ internal data class AdminProperties(
     /** The generated one would print the key. */
     override fun toString() =
         "AdminProperties(enabled=$enabled, allowedNetworks=$allowedNetworks, totpKey=${totpKey?.let { "<redacted>" }}, " +
-            "idleTimeout=$idleTimeout, absoluteTimeout=$absoluteTimeout, issuer=$issuer)"
+            "absoluteTimeout=$absoluteTimeout, issuer=$issuer)"
 
     private companion object {
         const val KEY_BYTES = 32

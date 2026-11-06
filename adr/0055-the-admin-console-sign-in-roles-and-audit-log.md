@@ -70,8 +70,8 @@ Cloudflare it would be Cloudflare's (runbook).
 **7. Sessions: the container's own `HttpSession`, in memory** (builder check, finding 5, replacing
 Spring Session JDBC, whose filter wraps every request including the API's). Cookie `moyi-admin`,
 `Secure`, `HttpOnly`, `SameSite=Strict`, `Path=/admin`, no `Domain` (not `__Host-`, which forces
-`Path=/`); `local` drops `Secure`. 30 minutes idle (`server.servlet.session.timeout`, stated), 8
-hours absolute. Every request re-reads the account and ends the session if it is not `ACTIVE` or its
+`Path=/`); `local` drops `Secure`. 30 minutes idle (`server.servlet.session.timeout`, stated; no
+`moyi.admin` property sets it), 8 hours absolute (`moyi.admin.absolute-timeout`). Every request re-reads the account and ends the session if it is not `ACTIVE` or its
 `credentials_changed_at` moved. **Cost: a deploy signs the operator out.** Accepted for one operator.
 
 **8. No per-address Redis limiter** (builder check, question 4). Only allowlisted addresses reach

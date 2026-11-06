@@ -105,7 +105,9 @@ An expired, used or wrong link shows one page, "This link is not valid", with no
 
 Email and password, then the code. Five failures in a row (either factor) lock the account for
 15 minutes; the same page appears for a locked account and a wrong password. A code is single
-use: the same code twice is refused. A session lasts 30 minutes idle and 8 hours at most.
+use: the same code twice is refused. A session lasts 30 minutes idle and 8 hours at most. The
+idle timeout is `server.servlet.session.timeout` (30m, in `application.yml`); there is no
+`moyi.admin` setting for it. The 8 hours are `moyi.admin.absolute-timeout`.
 
 ## 7. Disabling an account, and a lost phone
 
