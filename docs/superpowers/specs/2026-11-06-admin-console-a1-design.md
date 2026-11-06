@@ -77,7 +77,8 @@ re-invitation.
 ## 4. Switching it on, and who may reach it
 
 - `moyi.admin.enabled` defaults to **false** in every profile, including production. Off
-  means no admin chain, no admin controllers and no admin beans
+  means no admin chain, no admin controllers, no filters and no admin web beans (the
+  persistence beans, which serve no request, may exist: ruling D of the build)
   (`@ConditionalOnProperty`, plus `@ConditionalOnWebApplication`, so the media worker,
   which runs with `web-application-type: none`, can never serve it). `/admin/**` then falls
   through to the API chain like any unknown path: `401` problem without a bearer token,
