@@ -113,7 +113,7 @@ internal class StreakPropertiesTest {
             val with = run(days.take(at) + suspended + days.drop(at))
 
             // Dates shift by the inserted run, and nothing else may: compare everything but the date.
-            fun StreakState.undated() = copy(lastCompleteDate = null)
+            fun StreakState.undated() = Pair(copy(lastCompleteDate = null, lastRunLength = null, lastRunBrokenOn = null), lastRunLength)
             with.states.last().undated() shouldBe (run(days).states.lastOrNull() ?: StreakState.NONE).undated()
             with.decisions.filterIndexed { index, _ -> index !in at until at + suspended.size } shouldBe run(days).decisions
         }
@@ -150,6 +150,27 @@ internal class StreakPropertiesTest {
             days.foldIndexed(StreakState.NONE) { index, state, day ->
                 val step = StreakRules.step(state, start.plusDays(index.toLong()), day.outcome, day.strict)
                 if (step.freezeApplied) step.state.current shouldBeGreaterThanOrEqual 2
+                step.state
+            }
+        }
+    }
+
+    /**
+     * Issue #141: the last ended run is the run the latest break ended — its length the run as it
+     * stood before that day, its date that day's — and nothing but a break changes it.
+     */
+    @Test
+    fun `the last ended run is what the latest break ended, and only a break changes it`() {
+        forEachTimeline { _, days, _ ->
+            days.foldIndexed(StreakState.NONE) { index, state, day ->
+                val date = start.plusDays(index.toLong())
+                val step = StreakRules.step(state, date, day.outcome, day.strict)
+                if (step.change == StreakChange.BROKEN) {
+                    (step.state.lastRunLength to step.state.lastRunBrokenOn) shouldBe (state.current to date)
+                } else {
+                    (step.state.lastRunLength to step.state.lastRunBrokenOn) shouldBe (state.lastRunLength to state.lastRunBrokenOn)
+                }
+                step.state.lastRunLength?.let { step.state.longest shouldBeGreaterThanOrEqual it }
                 step.state
             }
         }

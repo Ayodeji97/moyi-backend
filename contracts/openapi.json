@@ -6351,11 +6351,17 @@
             "type" : "string",
             "format" : "date"
           },
+          "reason" : {
+            "type" : [ "string", "null" ],
+            "description" : "Why a FROZEN square is a rest day, and null on every other square. REST_DAY: a day the two did not both write on, covered by a banked freeze (\"we used a rest day\"). TIMEZONE_SHIFT: a date an approved time-zone change stepped over, which nobody could write on; no freeze was spent.",
+            "enum" : [ "REST_DAY", "TIMEZONE_SHIFT", null ]
+          },
           "status" : {
             "type" : "string",
             "enum" : [ "COMPLETE", "FROZEN", "SOLO", "MISSED", "OPEN" ]
           }
-        }
+        },
+        "required" : [ "reason" ]
       },
       "StreakResponse" : {
         "type" : "object",
@@ -6382,6 +6388,16 @@
             "type" : [ "string", "null" ],
             "format" : "date"
           },
+          "lastRunBrokenOn" : {
+            "type" : [ "string", "null" ],
+            "format" : "date",
+            "description" : "The date of the missed day that ended the run lastRunLength counts, in the bond's calendar; that day is not part of the run. Null exactly when lastRunLength is."
+          },
+          "lastRunLength" : {
+            "type" : [ "integer", "null" ],
+            "format" : "int32",
+            "description" : "The length of the run the latest break ended, or null while no run has ended: \"your streak ended at 21 days\". A run ends on a missed day no rest day covered; a covered day, a day missed with no run, a suspended day and a day missed after the bond ended end nothing. It stays the last ended run while the next one grows, so the ended copy is for when current is 0 and this is not null. Never today: today can only extend a run. It is not longest, which is the longest run ever. At least 1."
+          },
           "longest" : {
             "type" : "integer",
             "format" : "int32"
@@ -6393,7 +6409,8 @@
             "type" : "integer",
             "format" : "int32"
           }
-        }
+        },
+        "required" : [ "lastRunBrokenOn", "lastRunLength" ]
       },
       "SubmitEntryRequest" : {
         "type" : "object",

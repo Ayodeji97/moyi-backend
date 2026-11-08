@@ -440,14 +440,42 @@ class OpenApiContractTest(
         // member would tell one of them something about the other.
         api.components.schemas["StreakResponse"]!!
             .properties.keys shouldBe
-            setOf("current", "longest", "freezesAvailable", "freezeProgress", "strictMode", "totalCompleteDays", "lastCompleteDate", "days")
+            setOf(
+                "current",
+                "longest",
+                "freezesAvailable",
+                "freezeProgress",
+                "strictMode",
+                "totalCompleteDays",
+                "lastCompleteDate",
+                "lastRunLength",
+                "lastRunBrokenOn",
+                "days",
+            )
         api.components.schemas["StreakDayResponse"]!!
-            .properties.keys shouldBe setOf("date", "status")
+            .properties.keys shouldBe setOf("date", "status", "reason")
         api.components.schemas["TodayStreakResponse"]!!
             .properties.keys shouldBe
             setOf("current", "longest", "freezesAvailable", "strictMode")
         api.components.schemas["TodayResponse"]!!
             .properties.keys shouldContain "streak"
+    }
+
+    /** Issue #141: the ended run and a rest day's reason are always sent, null when there is none, and say when. */
+    @Test
+    fun `the streak sends the run that ended and why a day is frozen, every new field always sent`() {
+        val streak = api.components.schemas["StreakResponse"]!!
+        streak.required.orEmpty() shouldContainAll listOf("lastRunLength", "lastRunBrokenOn")
+        streak.properties["lastRunLength"]!!.types shouldBe setOf("integer", "null")
+        streak.properties["lastRunBrokenOn"]!!.types shouldBe setOf("string", "null")
+        streak.properties["lastRunLength"]!!.description.shouldNotBeNull() shouldContain "longest"
+        streak.properties["lastRunBrokenOn"]!!.description.shouldNotBeNull() shouldContain "not part of the run"
+
+        val day = api.components.schemas["StreakDayResponse"]!!
+        day.required.orEmpty() shouldContain "reason"
+        day.properties["reason"]!!.types shouldBe setOf("string", "null")
+        day.properties["reason"]!!.enum.map { it?.toString() } shouldBe listOf("REST_DAY", "TIMEZONE_SHIFT", null)
+        day.properties["reason"]!!.description.shouldNotBeNull() shouldContain "FROZEN"
     }
 
     @Test
