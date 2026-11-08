@@ -366,6 +366,13 @@ internal class StreakEvaluationTest(
         streak().let { Triple(it.current, it.total, it.consumed) shouldBe Triple(4, 3, 0) }
         // Three days were written on. The date nobody could have written on is not announced.
         outbox("StreakExtended") shouldBe 3
+        // Issue #141: on the calendar it is a rest day the zone change gave, not one a freeze paid for.
+        clock.set(Instant.parse("2026-09-17T12:00:00Z"))
+        mockMvc
+            .get("/api/v1/bonds/$bond/streak") { header(HttpHeaders.AUTHORIZATION, bearer(cara)) }
+            .andReturn()
+            .response
+            .contentAsString shouldContain """{"date":"2026-09-16","status":"FROZEN","reason":"TIMEZONE_SHIFT"}"""
     }
 
     /** Doc 04 §8.3: when a bond ends "the streak freezes rather than breaks — it is preserved at its value". */

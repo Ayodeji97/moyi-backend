@@ -91,6 +91,10 @@ internal class StreakEndpointTest(
         streak.numbers() shouldBe Numbers(current = 0, longest = 0, freezes = 0, progress = 0, total = 0)
         streak["strictMode"].asBoolean() shouldBe false
         streak["lastCompleteDate"].isNull shouldBe true
+        // No run has ended: both fields are sent, and null.
+        streak["lastRunLength"].isNull shouldBe true
+        streak["lastRunBrokenOn"].isNull shouldBe true
+        streak["days"].first()["reason"].isNull shouldBe true
         calendar(ada) shouldBe listOf("${day(0)} OPEN")
         today(ada)["streak"].toString() shouldBe """{"current":0,"longest":0,"freezesAvailable":0,"strictMode":false}"""
     }
@@ -267,6 +271,40 @@ internal class StreakEndpointTest(
 
         // Day 15, one entry, covered by the freeze; day 16, none, and nothing left to cover it.
         calendar(bea).takeLast(4) shouldBe listOf("${day(14)} COMPLETE", "${day(15)} FROZEN", "${day(16)} MISSED", "${day(17)} OPEN")
+        // Issue #141: the rest day says it was one; no other square has a reason.
+        reasons(bea).takeLast(4) shouldBe listOf("${day(14)} null", "${day(15)} REST_DAY", "${day(16)} null", "${day(17)} null")
+        // And day 16 ended a run of fifteen: fourteen written, one covered.
+        streak(bea).let { (it["lastRunLength"].asInt() to it["lastRunBrokenOn"].asString()) shouldBe (15 to day(16).toString()) }
+    }
+
+    /**
+     * Issue #141, `states.md` §7: "Your streak ended at 21 days." `longest` is the longest run
+     * ever, so it cannot say that; [lastRunLength] is the run the latest break ended, with the
+     * date of the day that ended it, and it stays that while the next run grows.
+     */
+    @Test
+    fun `a broken run is sent with its length and the day that ended it, and is kept while the next one grows`() {
+        (1..5).forEach { bothWriteOn(it) }
+        closeThrough(6)
+        clock.set(at(7))
+
+        for (member in listOf(ada, bea)) {
+            val ended = streak(member)
+            (ended["current"].asInt() to ended["longest"].asInt()) shouldBe (0 to 5)
+            (ended["lastRunLength"].asInt() to ended["lastRunBrokenOn"].asString()) shouldBe (5 to day(6).toString())
+        }
+
+        // Days 7 to 9 a run of three, day 10 missed, day 11 the start of the next.
+        (7..9).forEach { bothWriteOn(it) }
+        bothWriteOn(11)
+        closeThrough(11)
+        clock.set(at(12))
+
+        // The run of five is the longest; the run of three is the last that ended. The new one is one.
+        streak(ada).let {
+            (it["current"].asInt() to it["longest"].asInt()) shouldBe (1 to 5)
+            (it["lastRunLength"].asInt() to it["lastRunBrokenOn"].asString()) shouldBe (3 to day(10).toString())
+        }
     }
 
     /** FR-072, as the couple sees it: the fourteenth day shows the freeze it earned beside the fourteen, not at midnight. */
@@ -374,8 +412,19 @@ internal class StreakEndpointTest(
         val streak = streak(ada)
 
         streak.propertyNames().toSet() shouldBe
-            setOf("current", "longest", "freezesAvailable", "freezeProgress", "strictMode", "totalCompleteDays", "lastCompleteDate", "days")
-        streak["days"].first().propertyNames().toSet() shouldBe setOf("date", "status")
+            setOf(
+                "current",
+                "longest",
+                "freezesAvailable",
+                "freezeProgress",
+                "strictMode",
+                "totalCompleteDays",
+                "lastCompleteDate",
+                "lastRunLength",
+                "lastRunBrokenOn",
+                "days",
+            )
+        streak["days"].first().propertyNames().toSet() shouldBe setOf("date", "status", "reason")
         today(ada)["streak"].propertyNames().toSet() shouldBe setOf("current", "longest", "freezesAvailable", "strictMode")
     }
 
@@ -431,6 +480,9 @@ internal class StreakEndpointTest(
 
     private fun calendar(member: UUID): List<String> =
         streak(member)["days"].toList().map { "${it["date"].asString()} ${it["status"].asString()}" }
+
+    private fun reasons(member: UUID): List<String> =
+        streak(member)["days"].toList().map { "${it["date"].asString()} ${it["reason"].takeUnless { r -> r.isNull }?.asString()}" }
 
     private fun leave(member: UUID) {
         mockMvc

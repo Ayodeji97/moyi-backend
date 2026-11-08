@@ -2,7 +2,6 @@ package com.moyi.gratitude.infra.database
 
 import com.moyi.gratitude.domain.BondDayStatus
 import com.moyi.gratitude.domain.DayOutcome
-import com.moyi.gratitude.domain.StreakCell
 import com.moyi.gratitude.domain.StreakDay
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
@@ -27,8 +26,8 @@ internal data class CompleteDays(
  * evaluation also asks [completeDays], under its own lock, so that the
  * milestones it announces are counted as the read counts them.)
  *
- * What a square may say is [StreakCell]'s to decide; this only reads the two
- * columns it decides from.
+ * What a square may say, and why a rest day is one, is [StreakDay.of]'s to
+ * decide; this only reads the two columns it decides from.
  */
 @Component
 internal class StreakCalendar(
@@ -48,7 +47,7 @@ internal class StreakCalendar(
                     val date = row.getObject("date", LocalDate::class.java)
                     val status = BondDayStatus.valueOf(row.getString("status"))
                     val outcome = row.getString("evaluated_as")?.let(DayOutcome::valueOf)
-                    StreakCell.of(status, outcome, isToday = date == today)?.let { StreakDay(date, it) }
+                    StreakDay.of(date, status, outcome, isToday = date == today)
                 },
                 bondId,
                 from,
