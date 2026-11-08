@@ -23,6 +23,12 @@ import org.springframework.http.HttpStatus
  * its own. [ErrorCode.VALIDATION_FAILED] is "always accompanied by `errors`",
  * so an exception carrying that code supplies them. A [FieldViolation] holds
  * no rejected value, for the reason its own KDoc gives.
+ *
+ * [extensions] are RFC 9457 extension members of this one refusal: typed
+ * values a client reads instead of parsing [detail] (`allowedFrom` on
+ * `TIMEZONE_CHANGE_TOO_SOON`, #142). Each one is declared on `ProblemDetail`
+ * in the contract, as optional, with the code it comes with. The same rule as
+ * [detail]: nothing that echoes the request.
  */
 abstract class ApiException(
     val status: HttpStatus,
@@ -30,4 +36,5 @@ abstract class ApiException(
     val detail: String,
     cause: Throwable? = null,
     val errors: List<FieldViolation>? = null,
+    val extensions: Map<String, Any> = emptyMap(),
 ) : RuntimeException("$errorCode: $detail", cause)

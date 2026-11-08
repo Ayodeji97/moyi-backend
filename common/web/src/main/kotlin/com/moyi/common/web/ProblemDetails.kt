@@ -1,5 +1,6 @@
 package com.moyi.common.web
 
+import org.slf4j.MDC
 import org.springframework.http.HttpStatus
 import org.springframework.http.ProblemDetail
 import org.springframework.stereotype.Component
@@ -8,14 +9,20 @@ import java.net.URI
 /**
  * Builds the RFC 9457 body doc 06 §2 specifies, on top of Spring's own
  * [ProblemDetail] — which already carries `type`, `title`, `status`,
- * `detail` and `instance`. Only `code` and `errors` are ours to add.
+ * `detail` and `instance`. `code`, `errors`, `traceId` and an exception's own
+ * extension members are ours to add.
  *
- * **`traceId` is deliberately absent.** Doc 06 defines it as the
- * OpenTelemetry trace id, so that a user-reported problem maps to a trace.
- * There is no tracing in the application yet (doc 11, Phase 5). Emitting a
- * freshly-generated UUID in its place would satisfy the schema and be a lie:
- * a support engineer would search for it and find nothing, which is worse
- * than the field not being there. It is added by the slice that adds tracing.
+ * **`traceId` is the id the log lines carry** (ADR-0024, amended 2026-11-08).
+ * Doc 06 defines it as the OpenTelemetry trace id, so that a user-reported
+ * problem maps to what the server wrote about it. It was left out until
+ * tracing existed, because a freshly generated UUID in its place would have
+ * been a lie: a support engineer would search for it and find nothing. Now
+ * the application serves every request inside a trace (Micrometer Tracing over
+ * OpenTelemetry, `app`), and the tracer puts that trace's id in the logging
+ * context under [TRACE_ID_KEY], which is where every log line written for the
+ * request takes it from. The body takes it from the same place, so the two
+ * cannot disagree. Outside a trace (a module's own test context, which has no
+ * tracer) there is no id, and the member is left out rather than invented.
  *
  * An injectable component rather than an object: it needs the configured
  * base URI, and threading that through every call site as a parameter made
@@ -30,12 +37,15 @@ import java.net.URI
 class ProblemDetails(
     private val problems: ProblemProperties,
 ) {
-    private companion object {
+    companion object {
+        /** Micrometer Tracing's logging-context key for the current trace id: what the log lines and the body both read. */
+        const val TRACE_ID_KEY = "traceId"
+
         /** `VALIDATION_FAILED` -> `validation-failed`, so the URI reads as documentation. */
-        fun slugOf(errorCode: ErrorCode): String = errorCode.name.lowercase().replace('_', '-')
+        private fun slugOf(errorCode: ErrorCode): String = errorCode.name.lowercase().replace('_', '-')
 
         /** `VALIDATION_FAILED` -> `Validation failed`. */
-        fun titleOf(errorCode: ErrorCode): String =
+        private fun titleOf(errorCode: ErrorCode): String =
             errorCode.name
                 .lowercase()
                 .replace('_', ' ')
@@ -56,6 +66,16 @@ class ProblemDetails(
             this.instance = instance
             setProperty("code", errorCode.name)
             errors?.let { setProperty("errors", it) }
+            MDC.get(TRACE_ID_KEY)?.takeIf(String::isNotBlank)?.let { setProperty("traceId", it) }
+        }
+
+    /** The body of an [ApiException], its extension members included (`allowedFrom`, #142). */
+    fun of(
+        exception: ApiException,
+        instance: URI?,
+    ): ProblemDetail =
+        of(exception.status, exception.errorCode, exception.detail, instance, exception.errors).apply {
+            exception.extensions.forEach(::setProperty)
         }
 
     /**
