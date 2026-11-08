@@ -74,6 +74,9 @@ dependencies {
     // autoconfigure into a stack-specific module — needed explicitly now.
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation(projects.common.testing)
+    // TraceContextStaysInsideTest reads the tracer and the propagator the two runtime-only tracing artifacts wire.
+    testImplementation("io.micrometer:micrometer-tracing")
+    testImplementation("io.opentelemetry:opentelemetry-context")
     // Architecture tests (doc 25 §7 step 8) live here: `app` is the one
     // module with the whole project on its build path, and Konsist scans
     // by project directory, not Gradle dependency graph, so placement

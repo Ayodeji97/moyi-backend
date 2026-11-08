@@ -213,6 +213,23 @@ logging:
     org.springframework.ai: INFO
 
 management:
+  # Tracing gives an error body and its log lines one id (ADR-0024, amended
+  # 2026-11-08). It has no exporter, so no one downstream has a use for our
+  # trace context, and Boot's defaults would pass it on. TraceContextStaysInsideTest
+  # holds all three lines below.
+  tracing:
+    # A request's W3C `traceparent` is read and nothing else: no B3, and no
+    # `baggage`, which is a client's free text that would otherwise ride along.
+    baggage:
+      enabled: false
+    propagation:
+      consume: w3c
+  observations:
+    enable:
+      # No observation of our own calls to a third party (Voyage, Resend, FCM,
+      # each a RestClient from Boot's builder): an observed call is one the
+      # tracer writes `traceparent` into. Nothing reads those timers.
+      http.client.requests: false
   server:
     # The actuator on a port of its own, which kamal-proxy does not route: the
     # Prometheus scrape below needs no token (Prometheus holds none), so it
