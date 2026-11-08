@@ -443,6 +443,11 @@ header_is() {
   if [ "$got" = "$want" ]; then pass "$label ($name: $got)"; else fail "$label" "expected $name: $want, got '${got:-<absent>}'"; fi
 }
 
+# keep_body <name> — with SMOKE_BODIES=<dir>, writes LAST_BODY there as <name>.json: real bodies of each
+# shape a generated client must decode (a partner's entry LOCKED, REVEALED and DELETED; a problem with its
+# extension members), for testing a client's decoder against (#140). Nothing is written without the variable.
+keep_body() { [ -n "${SMOKE_BODIES:-}" ] || return 0; mkdir -p "$SMOKE_BODIES"; printf '%s' "$LAST_BODY" > "$SMOKE_BODIES/$1.json"; }
+
 # What has to be undone however the script ends: the app it booted, and the
 # prompts section's translations, which it puts into the shared library for one
 # run. Under `set -e` a run can die anywhere; left behind, those `PT~` texts
@@ -532,6 +537,11 @@ expect "unknown route under /api/v1 is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHE
 
 echo; echo "resource server (ADR-0019)"
 expect "GET /me without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- "$API/me"
+# Doc 06 §2, ADR-0024 (amended 2026-11-08): every error body carries the W3C id of its request's trace.
+[[ "$LAST_BODY" =~ \"traceId\":\"[0-9a-f]{32}\" ]] && pass "…and the error body carries a traceId, 32 hex digits" || fail "traceId on an error body" "${LAST_BODY:0:250}"
+FIRST_TRACE="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('traceId',''))" <<<"$LAST_BODY" 2>/dev/null || true)"
+expect "…and a second request is answered under a trace of its own" 401 '"traceId":"' -- "$API/me"
+[[ -n "$FIRST_TRACE" && "$LAST_BODY" != *"$FIRST_TRACE"* ]] && pass "…a different traceId" || fail "traceId per request" "first '$FIRST_TRACE', then ${LAST_BODY:0:250}"
 if curl -s -o /dev/null -D - "$API/me" | grep -qi "^www-authenticate: bearer"; then pass "…with a WWW-Authenticate: Bearer challenge"; else fail "WWW-Authenticate" "header missing on the 401"; fi
 expect "GET /me with a garbage token is 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/me" -H 'Authorization: Bearer not-a-jwt'
 
@@ -1024,6 +1034,21 @@ expect "the other member confirms: 200 and the zone moves" 200 '"anchorTimezone"
 # FR-027's month, as a 409 with a date rather than a 429 with a retry (ADR-0030).
 expect "a change within thirty days is 409 TIMEZONE_CHANGE_TOO_SOON" 409 '"code":"TIMEZONE_CHANGE_TOO_SOON"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Asia/Tokyo"}'
 [[ "$LAST_BODY" == *"can change again from"* ]] && pass "…and the detail names the date it becomes allowed" || fail "no date" "${LAST_BODY:0:250}"
+keep_body problem-timezone-too-soon
+# #142: the same date, typed, for a client to put into its own words: an extension member, YYYY-MM-DD.
+TOO_SOON="$(python3 -c "
+import json, sys, datetime, re
+body = json.load(sys.stdin)
+named = datetime.datetime.strptime(re.search(r'from (\d{1,2} \w+ \d{4})', body['detail']).group(1), '%d %B %Y').date()
+print(body.get('allowedFrom') == named.isoformat(), body.get('allowedFrom'), body.get('traceId', ''))" <<<"$LAST_BODY" 2>/dev/null || echo "unreadable")"
+case "$TOO_SOON" in True\ ????-??-??\ *) pass "…and allowedFrom carries that date, typed (${TOO_SOON:5:10})" ;; *) fail "allowedFrom" "got '$TOO_SOON' from ${LAST_BODY:0:300}" ;; esac
+# The refusal is logged at WARN; the body's traceId is the one that log line carries.
+TOO_SOON_TRACE="${TOO_SOON##* }"
+if [ "${#TOO_SOON_TRACE}" = 32 ] && grep "TIMEZONE_CHANGE_TOO_SOON -> 409" "$MOYI_LOG" | grep -q "$TOO_SOON_TRACE"; then
+  pass "…and its traceId is on the log line for that refusal"
+else
+  fail "traceId in the log" "'$TOO_SOON_TRACE' not on a TIMEZONE_CHANGE_TOO_SOON line of $MOYI_LOG"
+fi
 expect "a fixed-offset zone is 422 on the field" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"Etc/GMT+3"}'
 expect "a zone of one non-breaking space is 422, not 500" 422 '"field":"anchorTimezone"' -- -X PATCH "$API/bonds/$CONSENT_BOND/timezone" -H "Authorization: Bearer $PROPOSER_ACCESS" -d '{"anchorTimezone":"\u00a0"}'
 
@@ -1152,6 +1177,7 @@ expect "an entry naming a voice note nobody has is 422 on voiceMediaId" 422 '"fi
 # entry — the author and the status, nothing else, on the wire and in the log.
 expect "the partner's today is PARTIAL, with the entry locked" 200 '"status":"PARTIAL"' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $PARTNER_ACCESS"
 [[ "$LAST_BODY" == *'"partnerEntry":{"authorMemberId"'*'"status":"LOCKED"'* ]] && pass "…partnerEntry is exactly an author and a status" || fail "locked shape" "${LAST_BODY:0:250}"
+keep_body today-partner-locked
 [[ "$LAST_BODY" != *"$ENTRY_TEXT"* ]] && pass "…and the text never appears in the response" || fail "text leaked in response" "${LAST_BODY:0:250}"
 if grep -qF "$ENTRY_TEXT" "$MOYI_LOG"; then fail "text in log" "the entry text appears in the log"; else pass "…nor anywhere in the log"; fi
 
@@ -1191,6 +1217,7 @@ expect "the partner reads the author's edited words" 200 "\"text\":\"$EDITED_TEX
 # Slice C4: the streak. A day is counted when the close job evaluates it, and
 # today is added as soon as both have written — so the first shared day reads one.
 expect "the streak counts today once both have written" 200 '"current":1' -- "$API/bonds/$GRAT_BOND/streak" -H "Authorization: Bearer $PARTNER_ACCESS"
+keep_body streak
 [[ "$LAST_BODY" == *'"days":[{"date":"'*'"status":"COMPLETE"}]'* ]] && pass "…and its calendar is that one day, COMPLETE" || fail "streak calendar" "${LAST_BODY:0:250}"
 expect "…and today carries the same streak" 200 '"streak":{"current":1,"longest":1,"freezesAvailable":0,"strictMode":false}' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
 expect "PATCH after reveal is ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS" -d '{"text":"too late"}'
@@ -1438,6 +1465,7 @@ await_erased "$TAKEN_ENTRY"
 erased_check "the poller erases the withdrawn entry"
 expect "the partner's today, once it is erased" 200 '"status":"REVEALED"' -- "$API/bonds/$TAKEN_BOND/today" -H "Authorization: Bearer $READER_ACCESS"
 [ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "null|DELETED" ] && pass "…the withdrawn entry is a tombstone: text null, DELETED" || fail "tombstone" "${LAST_BODY:0:300}"
+keep_body today-partner-deleted
 [ "$(today_field myEntry text)" = "$READER_TEXT" ] && pass "…and the partner's own entry is whole" || fail "partner's own entry" "${LAST_BODY:0:300}"
 READER_ROW="$(sql "SELECT (text = '$READER_TEXT')::int || '|' || status FROM entries WHERE id='$READER_ENTRY'")"
 case "$READER_ROW" in psql-unavailable) skip "the partner's row check";; "1|REVEALED") pass "…in the database too: her row is untouched";; *) fail "partner's row" "expected 1|REVEALED, got '$READER_ROW'";; esac
@@ -1457,6 +1485,7 @@ expect "the one who stayed sees the tombstone" 200 '"status":"DELETED"' -- "$API
 while [ "$(( $(date +%s) - KEPT_SINCE ))" -lt 10 ]; do sleep 1; done
 expect "ten seconds on, the kept words are still read by the other member" 200 "\"text\":\"$KEPT_TEXT\"" -- "$API/bonds/$KEPT_BOND/today" -H "Authorization: Bearer $OTHER_ACCESS"
 [ "$(today_field partnerEntry text)|$(today_field partnerEntry status)" = "$KEPT_TEXT|REVEALED" ] && pass "…as the partner's entry, REVEALED" || fail "kept entry" "${LAST_BODY:0:300}"
+keep_body today-partner-revealed
 KEPT_ROW="$(sql "SELECT (text = '$KEPT_TEXT')::int || '|' || status FROM entries WHERE id='$KEPT_ENTRY'")"
 case "$KEPT_ROW" in psql-unavailable) skip "the kept row check";; "1|REVEALED") pass "…and the row still holds them";; *) fail "kept row" "expected 1|REVEALED, got '$KEPT_ROW'";; esac
 

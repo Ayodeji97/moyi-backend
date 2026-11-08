@@ -201,6 +201,16 @@ internal class SessionsEndpointTest(
                 .response
         response.status shouldBe 422
         response.contentAsString shouldContain "\"field\":\"device.platform\""
+        // The domain's enum judges it (#139), and says so by its own constraint's name.
+        response.contentAsString shouldContain "\"code\":\"VALID_DEVICE_PLATFORM\""
+
+        // Exactly the enum's names: a lower-case one is not one of them.
+        mockMvc
+            .post("/api/v1/auth/login") {
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"email":"ada@example.com","password":"$PASSWORD","device":${PIXEL.replace("ANDROID", "android")}}"""
+            }.andReturn()
+            .response.status shouldBe 422
     }
 
     @Test

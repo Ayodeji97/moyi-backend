@@ -2958,3 +2958,22 @@ Wrong about: a systemd service being active means its watcher is stable. Product
          script also needs V39 reporting tables, so enabling it before the app migration
          would fail on the production V36 database. A fresh encrypted backup succeeded;
          the vault-dependent restore drill remains a separate deployment gate.
+
+
+## 2026-11-08 · Contract · a legal document is not a decodable one
+
+Expected: the contract was precise because it validated and the client was generated from it.
+Reality: the mobile client filed five issues (#137 to #140, #142), each a place where the
+         document said less than the server does. Thirty-odd response schemas had no
+         `required` list, so every field generated as optional; the auth routes left out 401,
+         410, 415 and 503 that the state map had listed as gaps for weeks; `partnerEntry`'s
+         discriminator mapped three values to one schema, which is valid OpenAPI and which
+         OpenAPI Generator 7.26 turned into a sealed class nothing extended. Running the
+         generator against the document before and after was the proof both ways; reading
+         the document had passed it for a month.
+Wrong about: "a parent with a discriminator and one schema per value" being enough. A
+         `oneOf` of four one-to-one schemas generated the same empty sealed class; only the
+         `allOf` inheritance shape, with `status` declared on the parent alone, produced
+         subclasses. And `traceId` had been left out "until tracing exists" with nothing to
+         say when that would be: it was a dependency and a line in the problem builder.
+

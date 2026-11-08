@@ -578,11 +578,14 @@ internal class BondTest {
         // may arrive sooner than promised, never later.
         val midMorning = TimezoneChangeTooSoonException(Instant.parse("2026-10-28T09:00:00Z"), lagos)
         midMorning.detail shouldBe "The shared time zone can change again from 29 October 2026."
+        // The same date, typed (#142): what a client reads instead of the sentence.
+        midMorning.extensions shouldBe mapOf("allowedFrom" to "2026-10-29")
 
         // Exactly midnight in the bond's own zone is already a whole day, so it
         // is not pushed out by one. Africa/Lagos is UTC+1.
         val midnightInLagos = TimezoneChangeTooSoonException(Instant.parse("2026-10-27T23:00:00Z"), lagos)
         midnightInLagos.detail shouldBe "The shared time zone can change again from 28 October 2026."
+        midnightInLagos.extensions shouldBe mapOf("allowedFrom" to "2026-10-28")
     }
 
     private fun joiner(bond: Bond): Member = Member.member(MemberId(UUID.randomUUID()), bond.id, UserId(UUID.randomUUID()), lagos, now)
