@@ -133,6 +133,15 @@
 # 2c0e3bf, on a fresh database that applied 38 migrations to V39, against its own compose project
 # (moyi-report: Postgres 55454, Valkey 63814, MinIO 59028), the jar booted by hand (local profile)
 # and --attach: 1273 passed, 0 failed, 0 skipped, 33 sections. Before it, from 3e8a78a: 1254, 0, 0.
+# Since the member report (#127, ADR-0053 decision 14) a section of its own: a bond with nobody to
+# report and a stranger the same 404, 422 on reason, 201 with {id, reason} and its replay, one MEMBER
+# row holding nothing, the reported member's GET /bonds/{id} and GET /today byte for byte and ETag for
+# ETag the same after it, 201 after a block, the operator's list and dismissals, the detail in no log.
+# Run on 2026-11-08 on feat/report-member (main 0d674ca), a fresh database that applied 41 migrations
+# to V46, its own compose project (moyi-41e: Postgres 55445, Valkey 56345, MinIO 59249), the jar booted
+# by hand (local profile) and --attach: 1362 passed, 0 failed, 1 skipped (the tag across the erasure,
+# the poller having won the race), 35 sections. The run before it failed one probe: the entry
+# reports' list check still expected the list's old columns.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
@@ -3010,7 +3019,7 @@ expect "reports: the reporter still reads the entry's words" 200 '"text":"for yo
 
 if [ "$PSQL_OK" = 1 ]; then
   RP_LIST="$(reports list 2>&1)"
-  case "$RP_LIST" in *"$RP_REPORT"$'\t'NON_CONSENSUAL$'\t'"$RP_ENTRY"$'\t'2$'\t't*) pass "reports: the operator's list shows the report, what it holds and that it has a detail";; *) fail "reports: list" "${RP_LIST:0:400}";; esac
+  case "$RP_LIST" in *"$RP_REPORT"$'\t'NON_CONSENSUAL$'\t'ENTRY$'\t'"$RP_ENTRY"$'\t-\t'2$'\t't*) pass "reports: the operator's list shows the report, what it holds and that it has a detail";; *) fail "reports: list" "${RP_LIST:0:400}";; esac
   case "$RP_LIST" in *"$RP_DETAIL"*) fail "reports: …and never the detail" "the detail is in the list";; *) pass "reports: …and never the detail";; esac
   RP_SHOW="$(reports show "$RP_REPORT" 2>&1)"
   case "$RP_SHOW" in *"\"$RP_DETAIL\""*"$RP_PHOTO"*) pass "reports: show gives the operator the detail and what is held";; *) fail "reports: show" "${RP_SHOW:0:400}";; esac
@@ -3124,6 +3133,7 @@ db_is "member reports: …one report, of the member, open, holding nothing" \
 expect "member reports: the reported member reads the bond, after" 200 "\"id\":\"$MR_BOND\"" -- "$API/bonds/$MR_BOND" -H "Authorization: Bearer $MR_A"
 is "member reports: …the reported member's GET /bonds/{id} is byte for byte what it was" "$LAST_BODY" "$MR_BOND_BEFORE"
 is "member reports: …and its ETag" "$(tag)" "$MR_BOND_TAG_BEFORE"
+case "$MR_BOND_TAG_BEFORE" in '"'*'"') pass "member reports: …which is a real ETag ($MR_BOND_TAG_BEFORE)";; *) fail "member reports: the bond's ETag" "got '$MR_BOND_TAG_BEFORE'";; esac
 expect "member reports: the reported member reads today, after" 200 '"myEntry"' -- "$API/bonds/$MR_BOND/today" -H "Authorization: Bearer $MR_A"
 is "member reports: …the reported member's GET /today is byte for byte what it was" "$LAST_BODY" "$MR_TODAY_BEFORE"
 is "member reports: …and its ETag" "$(tag)" "$MR_TODAY_TAG_BEFORE"
