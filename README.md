@@ -159,6 +159,13 @@ pull request, `.github/workflows/api-contract.yml` diffs the file against
 `breaking-api-change` label; on merge it attaches the file to the rolling
 `api-latest` release.
 
+The document's base URL is the host (`https://api.getmoyi.app`, or
+`http://localhost:8080` locally) and every path carries `/api/v1`. Every
+status an operation can answer is declared on it, every field of a success
+body is `required` (a nullable one says `null` in its type), and every error
+body carries `traceId`, the id the server's log lines for that request carry
+(ADR-0024, amended 2026-11-08).
+
 ## How is it structured
 
 A **modular monolith** (ADR-0001): one deployable Spring Boot service,

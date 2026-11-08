@@ -126,6 +126,13 @@ internal class ProposalNeedsOtherMemberException :
  *
  * `409` and not `429` (ADR-0030): a month is not a rate limit, and a client that
  * treated it as one would show "please wait" and then retry into the same wall.
+ *
+ * **The date is also typed, as `allowedFrom`** (#142): an RFC 9457 extension
+ * member, `YYYY-MM-DD`, the same date the sentence names. The sentence is
+ * English prose and `ProblemDetail` says to switch on nothing in it; a client
+ * fills `allowedFrom` into its own words. On the refusal rather than on
+ * `BondResponse`: it is the answer to this attempt, and the refusal is where
+ * states.md §8 has the date shown.
  */
 internal class TimezoneChangeTooSoonException(
     allowedFrom: Instant,
@@ -134,6 +141,7 @@ internal class TimezoneChangeTooSoonException(
         HttpStatus.CONFLICT,
         ErrorCode.TIMEZONE_CHANGE_TOO_SOON,
         "The shared time zone can change again from ${DATE.format(readableDate(allowedFrom, zone))}.",
+        extensions = mapOf(ALLOWED_FROM to readableDate(allowedFrom, zone).toString()),
     ) {
     private companion object {
         /**
@@ -168,6 +176,9 @@ internal class TimezoneChangeTooSoonException(
          * *request's* locale, not the server's.
          */
         val DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH)
+
+        /** The extension member's name, as `ProblemDetail` declares it in the contract. */
+        const val ALLOWED_FROM = "allowedFrom"
     }
 }
 

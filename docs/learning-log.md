@@ -3010,6 +3010,31 @@ Wrong about: naming `/me`'s new body `MeResponse`. The name was already the bond
          `/me` reports the current version's row before the newest, or a rolled-back version would
          prompt for ever, re-consent writing nothing.)
 
+
+
+
+
+## 2026-11-08 · Contract · a legal document is not a decodable one
+
+Expected: the contract was precise because it validated and the client was generated from it.
+Reality: the mobile client filed five issues (#137 to #140, #142), each a place where the
+         document said less than the server does. Thirty-odd response schemas had no
+         `required` list, so every field generated as optional; the auth routes left out 401,
+         410, 415 and 503 that the state map had listed as gaps for weeks; `partnerEntry`'s
+         discriminator mapped three values to one schema, which is valid OpenAPI and which
+         OpenAPI Generator 7.26 turned into a sealed class nothing extended. Running the
+         generator against the document before and after was the proof both ways; reading
+         the document had passed it for a month.
+Wrong about: "a parent with a discriminator and one schema per value" being enough. A
+         `oneOf` of four one-to-one schemas generated the same empty sealed class; only the
+         `allOf` inheritance shape, with `status` declared on the parent alone, produced
+         subclasses. And `traceId` had been left out "until tracing exists" with nothing to
+         say when that would be: it was a dependency and a line in the problem builder.
+         The build was green with it; the smoke run was not: 27 probes that compare two
+         refusals byte for byte (the no-oracle checks) failed, because each body now names its
+         own request. No test had compared two error bodies under a tracer. The probes now
+         compare without the id, which is random per request and so says nothing either way.
+
 ## 2026-11-08 · Feature · In-app support messages (issue #129, ADR-0057)
 
 Expected: one route, one table, one migration, in the shape of the report route.

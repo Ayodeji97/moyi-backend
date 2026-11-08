@@ -48,6 +48,13 @@ dependencies {
     // Formats the meters the actuator already keeps the way Prometheus reads
     // them, at /actuator/prometheus on the management port (application.yml).
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
+    // Tracing (ADR-0024, amended 2026-11-08): every request is served inside an
+    // OpenTelemetry trace, whose id Micrometer Tracing puts in the logging context,
+    // so the log lines carry it and so does every error body (`traceId`, doc 06 §2).
+    // Boot's module and Micrometer's bridge, and no exporter: nothing leaves the
+    // process. Sending spans somewhere is a later decision, and only adds one.
+    runtimeOnly("org.springframework.boot:spring-boot-micrometer-tracing-opentelemetry")
+    runtimeOnly("io.micrometer:micrometer-tracing-bridge-otel")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     // Jackson 3 (`tools.jackson`), which is what Spring Boot 4 wires into
     // its message converters — not Jackson 2's `com.fasterxml.jackson`
@@ -69,6 +76,9 @@ dependencies {
     // autoconfigure into a stack-specific module — needed explicitly now.
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
     testImplementation(projects.common.testing)
+    // TraceContextStaysInsideTest reads the tracer and the propagator the two runtime-only tracing artifacts wire.
+    testImplementation("io.micrometer:micrometer-tracing")
+    testImplementation("io.opentelemetry:opentelemetry-context")
     // Architecture tests (doc 25 §7 step 8) live here: `app` is the one
     // module with the whole project on its build path, and Konsist scans
     // by project directory, not Gradle dependency graph, so placement

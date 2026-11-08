@@ -587,6 +587,21 @@ class ArchitectureTest {
     }
 
     @Test
+    fun `no response type leaves a null field out, so every field of a response is sent`() {
+        // The contract marks every field of every success body required (#138, contracts' ResponseFieldsDocumentation),
+        // which is true because the mapper writes nulls. @JsonInclude on a type in a web layer would make it false
+        // for that type alone, silently. The one use is the Resend client's request body, which is no response of ours.
+        val violations =
+            project.files
+                .filter { it.normalisedProjectPath.contains("/src/main/") }
+                .filter { file ->
+                    file.imports.any { it.name == "com.fasterxml.jackson.annotation.JsonInclude" } ||
+                        "@JsonInclude" in file.text
+                }.map { it.name }
+        assertEquals(listOf("ResendEmailSender"), violations, "a response type must not exclude null fields (#138)")
+    }
+
+    @Test
     fun `no file imports java-util-Date`() {
         val violations =
             project.files
