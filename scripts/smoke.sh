@@ -149,6 +149,15 @@
 # migrations to V41, against its own compose project (moyi-41c: Postgres 55443, Valkey 56343,
 # MinIO 59245), the jar booted by hand (local profile) and --attach: 1339 passed, 0 failed,
 # 0 skipped, 35 sections.
+# Since in-app support (FR-102, ADR-0057) it writes to support: 401 without a token, 422 on subject
+# and on body (each repeating nothing sent), a 201 and its replay under the key (same body, one
+# ticket), the sixth in a day 429 with Retry-After, the acknowledgement logged once by the logging
+# provider with the ticket's id and without a word of the message, and the operator's `moyi support`
+# list, show and close (the words emptied, each look logged). Last run on 2026-11-08, on
+# feat/support-messages, from a jar of 14ce084 (before main's #145 and #148 were merged in), on a
+# fresh database that applied every migration to V45.1, against its own compose project (moyi-41d:
+# Postgres 55444, Valkey 56344, MinIO 59247), the jar booted by hand (local profile) and --attach:
+# 1350 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the race).
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
