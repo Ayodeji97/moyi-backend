@@ -5,11 +5,12 @@
 # digits, a new one per request) and a TIMEZONE_CHANGE_TOO_SOON refusal's typed allowedFrom, equal to
 # the date its detail names, with its traceId on the log line for that refusal. Every "identical
 # body" probe now compares bodies without the traceId, which differs per request by design. Last
-# run on 2026-11-08, on fix/contract-precision, from a jar of 13e8b09 (main at 0d674ca merged in),
-# against its own compose project (moyi-41a: Postgres 55441, Valkey 56341, MinIO 59241), the jar
-# booted by hand (local profile) and --attach: 1332 passed, 0 failed, 0 skipped, 34 sections. The
-# database was the one an earlier run on the same project had used, a run whose 27 failures were
-# those identical-body probes meeting the traceId.
+# run on 2026-11-08, on fix/contract-precision, from a jar of 03df6263 (main at f9bef43, #148, merged
+# in), on a fresh database, against its own compose project (moyi-41a: Postgres 55441, Valkey
+# 56341, MinIO 59241), the jar booted by hand (local profile) and --attach: 1365 passed, 0 failed,
+# 0 skipped. An earlier run on the branch failed 27 identical-body probes on the traceId, before
+# they compared without it; one run with a media worker booted beside the API (to measure
+# metaspace) failed 3 media probes, because the worker took those events and its log is not read.
 #
 # What it is written to check (a run is the proof, not this header): the
 # packaged application boots against the compose Postgres,
