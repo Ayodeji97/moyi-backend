@@ -34,8 +34,10 @@ fails and **every** deploy stops. If it deploys with the fields empty, the API r
    Accounts → Create.
    - Name: `moyi-fcm-sender`
    - Role: **Firebase Cloud Messaging API Admin** (`roles/firebasecloudmessaging.admin`), and
-     nothing else. In particular, not Editor or Firebase Admin: this key lives on a server
-     and should be able to send a push and nothing more.
+     nothing else. In particular, not Editor or Firebase Admin. It is the narrowest predefined
+     role that can send. It also allows topic management and delivery-data reads, which the
+     app does not use. To limit the key to sending alone, make a custom role holding only
+     `cloudmessaging.messages.create` and grant that instead.
 2. APIs & Services: check that the **Firebase Cloud Messaging API** (the HTTP v1 API, not
    the legacy one) is enabled.
 3. Service account → Keys → Add key → JSON. The file downloads once.
@@ -48,7 +50,7 @@ In Bitwarden, open the secure note `moyi-prod` and add three hidden fields, copi
 |---|---|---|
 | `FCM_CLIENT_EMAIL` | `client_email` | |
 | `FCM_PRIVATE_KEY_PEM` | `private_key` | Paste it as it stands, with its `\n`. `FcmPushSender` reads both real and escaped line breaks. |
-| `FCM_PRIVATE_KEY_ID` | `private_key_id` | Optional; it names the key in Google's audit log. |
+| `FCM_PRIVATE_KEY_ID` | `private_key_id` | It names the key in Google's audit log. Step 4 fetches it, so it **must exist**: Kamal stops every deploy on a listed field the note lacks. To go without it, leave it out of the fetch list, the extract line and the `secret:` list too. |
 
 The project id (`project_id`) is not a secret. It goes in `config/deploy.yml` in step 4.
 
@@ -91,7 +93,7 @@ alone.
 ## 5. Deploy, then read the first lines
 
 Deploy as usual (`kamal deploy --skip-push --version=$(git rev-parse HEAD)`, the full SHA).
-Then:
+Then, straight after the deploy (the start-up line scrolls out of `--lines 300` on a busy API):
 
 ```sh
 kamal app logs --roles web --lines 300 | grep -m1 "Push provider"
@@ -108,18 +110,21 @@ without a way to send, and the old container keeps serving.
 
 With a release build of the app on a phone, signed in with a production test account:
 
-1. Make sure the app has registered its token (`PUT /me/devices/current/push-token`; the app
-   does this once it holds one).
+1. Make sure the app has registered its token (`PUT /api/v1/me/devices/current/push-token`;
+   the app does this once it holds one).
 2. Cause a push. Pairing a second test account sends `PARTNER_JOINED`, which is the quickest.
-3. In the API log, expect `FCM accepted a push, category PARTNER_JOINED` at DEBUG, or no WARN
-   from `FcmPushSender`. The phone should show the notification in the `partner_joined` channel
-   (ADR-0044, decision 9).
+3. In the API log, expect no WARN and no `Push token refused` line from `FcmPushSender`. Its
+   success line is DEBUG and production logs at INFO, so silence is the success signal. The
+   phone should show the notification in the `partner_joined` channel (ADR-0044 decision 9, as
+   amended for issue #134). This needs a client build that creates its channels; before that,
+   it lands in the app's default channel.
 
 | You see | It means |
 |---|---|
-| `Push token refused ... SENDER_ID_MISMATCH` | The app was built with `moyi-65b68`'s config files. See step 1.4. |
-| `Google's token endpoint refused the service account (HTTP 400/401)` | The key is wrong or deleted, or the PEM lost its line breaks. |
-| `FCM refused the message (HTTP 403, PERMISSION_DENIED)` | The role is missing, or the FCM API is not enabled. See step 2. |
-| `APNs credentials FCM cannot use` / `THIRD_PARTY_AUTH_ERROR` | The APNs key is not uploaded to `moyi-prod`. See step 1.3. |
+| INFO `Push token refused by the provider and will be forgotten: FCM: the token belongs to another project` | The app was built with `moyi-65b68`'s config files (FCM's `SENDER_ID_MISMATCH`, which is not printed), and the sender is forgetting those tokens. Fix step 1.4 at once. |
+| WARN `Push rejected by provider: Google's token endpoint refused the service account (HTTP 400/401)` | The key is wrong, or it was deleted in the console. |
+| WARN `Push rejected by provider: FCM refused the message (HTTP 403, PERMISSION_DENIED)` | The role is missing, or the FCM API is not enabled. See step 2. |
+| WARN `Push rejected by provider: FCM refused the message (HTTP 401, THIRD_PARTY_AUTH_ERROR)` | The APNs key is not uploaded to `moyi-prod`. See step 1.3. |
+| The API refuses to start: `private-key-pem is not a PEM block` or `not a PKCS#8 RSA private key` | The field holds something other than the JSON's `private_key`. |
 
 Wipe the test accounts afterwards, as with the other production checks.
