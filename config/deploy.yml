@@ -236,6 +236,8 @@ env:
     # owner publishes the documents; the versions are placeholders to be set
     # to the published documents' own before launch. Quoted: YAML reads a bare
     # 2026-11-08 as a date.
+    # Shared, not the web role's: the media worker binds the same properties and
+    # would refuse to start without them.
     MOYI_LEGAL_TERMS_VERSION: "2026-11-08"
     MOYI_LEGAL_TERMS_URL: https://getmoyi.app/terms
     MOYI_LEGAL_PRIVACY_VERSION: "2026-11-08"
@@ -247,10 +249,10 @@ env:
     # Since slice N3 (#100) production requests pushes, and each one is written
     # to the log, not sent, until there is a Firebase project (ADR-0044). The
     # log line names the category and the bond, never the token, and the
-    # ledger settles it as "not-sent:log", never as a delivery. To send:
-    # remove this line and add MOYI_NOTIFICATION_PUSH_FCM_PROJECT_ID
-    # here and _CLIENT_EMAIL and _PRIVATE_KEY_PEM as secrets; without them the
-    # default provider, FCM, refuses to start.
+    # ledger settles it as "not-sent:log", never as a delivery. To send, follow
+    # ops/notification/README.md: FCM is switched on in the web role's env,
+    # and this shared line STAYS, because the media worker builds a push sender
+    # too, holds no secrets, and on FCM would refuse to start.
     MOYI_NOTIFICATION_PUSH_PROVIDER: log
     # No entry is embedded for semantic search until the owner has chosen the
     # provider by the eval and holds its key (ADR-0054). `none` sends no word
