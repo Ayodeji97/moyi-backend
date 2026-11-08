@@ -233,16 +233,18 @@ env:
     # consent row records these versions, and changing one asks every person to
     # accept again. NOT YET PUBLISHED: site/ has no /terms, /privacy or
     # /data-processing page (2026-11-08), so these addresses are 404 until the
-    # owner publishes the documents; the versions are placeholders to be set
-    # to the published documents' own before launch. Quoted: YAML reads a bare
-    # 2026-11-08 as a date.
+    # owner publishes the documents. Until then each version is the sentinel
+    # "unpublished", never a date-like placeholder: a sign-up in the gap is then
+    # recorded as accepting "unpublished", and setting the real versions at
+    # publication asks every such person to accept again (review of #148).
+    # Real versions must be quoted: YAML reads a bare 2026-11-08 as a date.
     # Shared, not the web role's: the media worker binds the same properties and
     # would refuse to start without them.
-    MOYI_LEGAL_TERMS_VERSION: "2026-11-08"
+    MOYI_LEGAL_TERMS_VERSION: "unpublished"
     MOYI_LEGAL_TERMS_URL: https://getmoyi.app/terms
-    MOYI_LEGAL_PRIVACY_VERSION: "2026-11-08"
+    MOYI_LEGAL_PRIVACY_VERSION: "unpublished"
     MOYI_LEGAL_PRIVACY_URL: https://getmoyi.app/privacy
-    MOYI_LEGAL_SUMMARY_VERSION: "2026-11-08"
+    MOYI_LEGAL_SUMMARY_VERSION: "unpublished"
     MOYI_LEGAL_SUMMARY_URL: https://getmoyi.app/data-processing
     # getmoyi.app is verified in Resend (SPF, DKIM and DMARC pass).
     MOYI_NOTIFICATION_EMAIL_FROM: Moyi <hello@getmoyi.app>

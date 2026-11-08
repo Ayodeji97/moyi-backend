@@ -111,8 +111,10 @@ moved in time. The legal read costs nothing and caches.
 **Negative.** Six more required environment values before anything but `local` boots (and the restore
 drill's env file carries placeholders). A version change asks **everyone** to accept again,
 including for a typo fix; whether a change is material is the owner's to decide when he changes
-the value. Production's values are placeholders until the documents are published: the three
-`getmoyi.app` addresses are 404 today. Every consent row before this change carries a client-sent
+the value. Until the documents are published, production's versions are the sentinel `unpublished`
+and the three `getmoyi.app` addresses are 404. A sign-up in that gap is recorded as accepting
+`unpublished`, never a date that could later be mistaken for a real document's version, so setting
+the real versions at publication asks every such person to accept again (review of #148). Every consent row before this change carries a client-sent
 version, which will make every existing account (test accounts only, as of today) be asked again.
 `ProfileResponse` is a new schema name for `GET /me`'s body: a generated client's type for that call
 changes name, though every field it had is still there.
