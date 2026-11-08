@@ -286,8 +286,8 @@ internal interface DeviceRepository : Repository<DeviceEntity, UUID> {
 }
 
 /**
- * Consent records. One method, because writing is the only thing this slice
- * does with them — the export path (FR-009) adds its own read when it exists.
+ * Consent records: written at registration and by re-consent, and read one
+ * person at a time for `GET /me` (ADR-0056).
  *
  * On the bare [Repository] marker for the same reason as
  * [CredentialsRepository]: what a repository *cannot* do is part of its
@@ -296,6 +296,37 @@ internal interface DeviceRepository : Repository<DeviceEntity, UUID> {
  */
 internal interface ConsentRecordRepository : Repository<ConsentRecordEntity, UUID> {
     fun saveAll(records: Iterable<ConsentRecordEntity>): List<ConsentRecordEntity>
+
+    /** One person's rows: served by the unique key, whose leading column is `user_id` (V3). */
+    fun findAllByUserId(userId: UUID): List<ConsentRecordEntity>
+
+    /**
+     * Re-consent (ADR-0056 decision 4): the row, unless this person has already
+     * accepted this version of this document. `ON CONFLICT DO NOTHING` on the
+     * unique key rather than a read first, so two requests at once both succeed
+     * and the first acceptance, and its moment, is the one kept. `1` when a row
+     * was written, `0` when it was already there.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        nativeQuery = true,
+        value = """
+        INSERT INTO consent_records (id, user_id, document, version, accepted_at, ip_hash, user_agent_hash)
+        VALUES (:id, :userId, :document, :version, :acceptedAt, CAST(:ipHash AS text), CAST(:userAgentHash AS text))
+        ON CONFLICT ON CONSTRAINT consent_records_user_document_version_key DO NOTHING
+        
+        """,
+    )
+    @Suppress("LongParameterList") // The row's columns, one parameter each.
+    fun insertIfAbsent(
+        id: UUID,
+        userId: UUID,
+        document: String,
+        version: String,
+        acceptedAt: Instant,
+        ipHash: String?,
+        userAgentHash: String?,
+    ): Int
 }
 
 /**

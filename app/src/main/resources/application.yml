@@ -289,6 +289,20 @@ management:
 # said `https://moyi.com/…`, a domain registered in 2004 by someone else.
 # Only the `local` profile and the test contexts carry values.
 
+# The legal documents (FR-103, ADR-0056): the current Terms of Service,
+# Privacy Policy and data-processing summary, each a version and a URL. No
+# value here either, for the same reason: every consent row records one of
+# these versions, so a default would be a version recorded as accepted by
+# every deployment that forgot its own. All six are required:
+#
+#   moyi.legal.terms.version / .url      MOYI_LEGAL_TERMS_VERSION / MOYI_LEGAL_TERMS_URL
+#   moyi.legal.privacy.version / .url    MOYI_LEGAL_PRIVACY_VERSION / MOYI_LEGAL_PRIVACY_URL
+#   moyi.legal.summary.version / .url    MOYI_LEGAL_SUMMARY_VERSION / MOYI_LEGAL_SUMMARY_URL
+#
+# A version is 1-40 of A-Z a-z 0-9 . _ - (a label, compared and never
+# parsed); a URL is absolute http(s). Changing a version is what asks every
+# person to accept again (GET /me's legalAccepted lags GET /meta/legal's).
+
 # Access-token signing (doc 09 §3, ADR-0019). No key here on purpose: the key
 # source defaults to CONFIGURED, which refuses to start unless
 # `moyi.security.jwt.private-key-pem` and `moyi.security.jwt.public-key-pem`

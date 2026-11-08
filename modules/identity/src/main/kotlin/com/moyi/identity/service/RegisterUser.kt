@@ -16,6 +16,7 @@ import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.infra.database.AccountStore
 import com.moyi.identity.infra.database.IdentityConstraints
 import com.moyi.identity.infra.database.violates
+import com.moyi.identity.infra.legal.LegalProperties
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.stereotype.Service
@@ -52,6 +53,7 @@ import java.time.Clock
  * close. See `SendVerificationEmail`.
  */
 @Service
+@Suppress("LongParameterList") // Each is one step of registering, named where it is used; the legal versions are the seventh (ADR-0056).
 internal class RegisterUser(
     private val accounts: AccountStore,
     private val hasher: PasswordHasher,
@@ -59,6 +61,7 @@ internal class RegisterUser(
     private val clock: Clock,
     private val transactions: TransactionTemplate,
     private val verification: RequestVerification,
+    private val legal: LegalProperties,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -134,9 +137,10 @@ internal class RegisterUser(
     }
 
     /**
-     * FR-011's three rows. One version string covers all three because the
-     * user accepted one form, on one screen, at one moment — `06`'s request
-     * carries a single `acceptedTermsVersion` for exactly that reason.
+     * FR-011's three rows, each with the version **this deployment** names as
+     * current (ADR-0056), never one the client sent: the form the person
+     * accepted is the one the server served, through `GET /meta/legal`. The 18+
+     * declaration is recorded under the Terms version it was accepted with.
      */
     private fun consentRecordsFor(
         user: User,
@@ -148,7 +152,7 @@ internal class RegisterUser(
                 id = ids.timeOrdered(),
                 userId = user.id,
                 document = document,
-                version = command.acceptedTermsVersion,
+                version = legal.documents.versionOf(document),
                 acceptedAt = now,
                 // Doc 07 §2's corroborating evidence, hashed before it reached
                 // this class; the address itself never did (ADR-0023).
@@ -178,7 +182,6 @@ internal data class RegistrationCommand(
     val password: Password,
     val displayName: String,
     val locale: String,
-    val acceptedTermsVersion: String,
     /** Where the request came from, as the hashes the consent rows store. */
     val client: ClientContext,
 )

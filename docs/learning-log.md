@@ -2968,3 +2968,18 @@ Reality: without `android.notification.channel_id`, every category shares FCM's 
          two cannot drift.
 Wrong about: nothing yet. The list is spelt out in a test because the client creates these
          ids, and a rename here would quietly move pushes to the default channel.
+
+## 2026-11-08 · Feature · Legal versions are the server's, and re-consent (issue #128, ADR-0056)
+
+Expected: consent was already "recorded with version and timestamp" (FR-011), so the work was a
+         read-only `GET /meta/legal`.
+Reality: the rows existed, but their version was whatever the sign-up request said, one string
+         for all three documents. The server now records its own configured versions, `GET /me`
+         reports what was accepted, and `POST /me/legal-consent` accepts the current ones,
+         idempotently on the unique key. Existing rows are left as they are: rewriting them
+         would invent consent.
+Wrong about: naming `/me`'s new body `MeResponse`. The name was already the bond
+         module's, and springdoc settled the clash by silently pointing `/me` at the wrong schema;
+         only reading the contract diff showed it. (Also designed in, not found by a run:
+         `/me` reports the current version's row before the newest, or a rolled-back version would
+         prompt for ever, re-consent writing nothing.)
