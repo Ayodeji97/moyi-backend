@@ -160,7 +160,9 @@ class OpenApiConfiguration {
             api.components.addSchemas(PROBLEM_DETAIL, problemDetail()).addSchemas(FIELD_VIOLATION, fieldViolation())
             api.paths.forEach { (path, item) ->
                 item.readOperationsMap().forEach { (method, operation) ->
-                    val public = method == PathItem.HttpMethod.POST && path in SecurityConfiguration.PUBLIC_AUTH_ENDPOINTS
+                    val public =
+                        (method == PathItem.HttpMethod.POST && path in SecurityConfiguration.PUBLIC_AUTH_ENDPOINTS) ||
+                            (method == PathItem.HttpMethod.GET && path in SecurityConfiguration.PUBLIC_READS)
                     if (public) operation.security = emptyList()
                     statusesFor(operation, public).forEach { status ->
                         operation.responses.addApiResponse(status.value().toString(), problemResponse(status))
@@ -186,9 +188,11 @@ class OpenApiConfiguration {
             documentSearch(api)
             documentOnThisDay(api)
             documentMilestones(api)
+            documentStreak(api)
             documentReports(api)
             documentRemember(api)
             documentSemanticSearch(api)
+            documentLegal(api)
             documentSupport(api)
         }
 
@@ -288,7 +292,7 @@ class OpenApiConfiguration {
             }
             // The two archive reads declare what they produce, so a request that will take none of it is refused before
             // the handler: the one 406 a client can be told about, and the one that comes before the membership check.
-            if (operation.operationId in REVALIDATED_OPERATIONS) add(HttpStatus.NOT_ACCEPTABLE)
+            if (operation.operationId in DECLARED_JSON_OPERATIONS) add(HttpStatus.NOT_ACCEPTABLE)
             // A query parameter is read by the application, which refuses one it cannot read as it refuses a field.
             if (operation.parameters.orEmpty().any { it.`in` == QUERY_PARAMETER }) add(HttpStatus.UNPROCESSABLE_ENTITY)
             add(HttpStatus.TOO_MANY_REQUESTS)
@@ -1103,6 +1107,9 @@ private fun revalidationTag(): Header =
 
 /** The operations answered as conditional reads: `gratitude.web.DaysController`'s two, by operation id. */
 private val REVALIDATED_OPERATIONS = setOf("days", "day")
+
+/** The reads that declare `produces`, so refuse an `Accept` that admits no JSON before the handler: those two and `/meta/legal`. */
+private val DECLARED_JSON_OPERATIONS = REVALIDATED_OPERATIONS + LEGAL_DOCUMENTS_OPERATION
 private const val IF_NONE_MATCH = "If-None-Match"
 private const val REVALIDATION_ETAG = "ETag"
 private const val JSON = "application/json"

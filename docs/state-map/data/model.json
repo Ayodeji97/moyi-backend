@@ -604,6 +604,11 @@
       "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."
     },
     {
+      "endpoint": "GET /api/v1/meta/legal",
+      "status": 401,
+      "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Asserted by LegalEndpointTest (a token for nobody is 401) and CacheHeadersTest. The contract's generator gives a public route no 401."
+    },
+    {
       "endpoint": "POST /api/v1/auth/verify-email",
       "status": 401,
       "note": "401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401."

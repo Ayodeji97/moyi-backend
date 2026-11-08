@@ -139,10 +139,10 @@ class FlywayMigrationTest(
         // between 45 and 46, and an Int parse refused it.
         val versions = appliedVersions.map { it!!.toBigDecimal() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
-        val expected = ((1..27).toList() + listOf(29, 30, 31, 32, 33, 40, 41, 45)).map(Int::toBigDecimal) + "45.1".toBigDecimal()
+        val expected = ((1..27).toList() + listOf(29, 30, 31, 32, 33, 40, 41, 43, 45)).map(Int::toBigDecimal) + "45.1".toBigDecimal()
         assertTrue(
             versions.containsAll(expected),
-            "Expected every module's migrations, V1 to V27, V29 to V33, V40, V41, V45 and V45.1, found: $versions",
+            "Expected every module's migrations, V1 to V27, V29 to V33, V40, V41, V43, V45 and V45.1, found: $versions",
         )
 
         val extensions =

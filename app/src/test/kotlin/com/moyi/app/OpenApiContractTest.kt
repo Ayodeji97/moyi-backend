@@ -191,6 +191,35 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `the legal documents are a public conditional read, and re-consent takes no body (ADR-0056)`() {
+        val legal = api.paths["/api/v1/meta/legal"]!!.get
+        legal.operationId shouldBe "legalDocuments"
+        legal.security shouldBe emptyList()
+        legal.responses.keys shouldContainExactlyInAnyOrder listOf("200", "304", "406", "429", "500")
+        legal.responses["200"]!!.headers shouldContainKey "ETag"
+        legal.responses["200"]!!.content.keys shouldBe setOf("application/json")
+        legal.parameters.single().name shouldBe "If-None-Match"
+        api.components.schemas["LegalResponse"]!!
+            .properties.keys shouldBe setOf("terms", "privacy", "dataProcessingSummary")
+
+        val consent = api.paths["/api/v1/me/legal-consent"]!!.post
+        consent.operationId shouldBe "acceptLegalDocuments"
+        consent.requestBody shouldBe null
+        consent.responses.keys shouldContainAll listOf("204", "401")
+
+        val me =
+            api.paths["/api/v1/me"]!!
+                .get.responses["200"]!!
+                .content["application/json"]!!
+                .schema.`$ref`
+        me shouldBe "#/components/schemas/ProfileResponse"
+        api.components.schemas["ProfileResponse"]!!
+            .properties.keys shouldContainAll
+            api.components.schemas["UserResponse"]!!
+                .properties.keys + "legalAccepted"
+    }
+
+    @Test
     fun `ending a session documents its 404`() {
         api.paths["/api/v1/auth/sessions/{id}"]!!.delete.responses shouldContainKey "404"
     }
@@ -411,14 +440,42 @@ class OpenApiContractTest(
         // member would tell one of them something about the other.
         api.components.schemas["StreakResponse"]!!
             .properties.keys shouldBe
-            setOf("current", "longest", "freezesAvailable", "freezeProgress", "strictMode", "totalCompleteDays", "lastCompleteDate", "days")
+            setOf(
+                "current",
+                "longest",
+                "freezesAvailable",
+                "freezeProgress",
+                "strictMode",
+                "totalCompleteDays",
+                "lastCompleteDate",
+                "lastRunLength",
+                "lastRunBrokenOn",
+                "days",
+            )
         api.components.schemas["StreakDayResponse"]!!
-            .properties.keys shouldBe setOf("date", "status")
+            .properties.keys shouldBe setOf("date", "status", "reason")
         api.components.schemas["TodayStreakResponse"]!!
             .properties.keys shouldBe
             setOf("current", "longest", "freezesAvailable", "strictMode")
         api.components.schemas["TodayResponse"]!!
             .properties.keys shouldContain "streak"
+    }
+
+    /** Issue #141: the ended run and a rest day's reason are always sent, null when there is none, and say when. */
+    @Test
+    fun `the streak sends the run that ended and why a day is frozen, every new field always sent`() {
+        val streak = api.components.schemas["StreakResponse"]!!
+        streak.required.orEmpty() shouldContainAll listOf("lastRunLength", "lastRunBrokenOn")
+        streak.properties["lastRunLength"]!!.types shouldBe setOf("integer", "null")
+        streak.properties["lastRunBrokenOn"]!!.types shouldBe setOf("string", "null")
+        streak.properties["lastRunLength"]!!.description.shouldNotBeNull() shouldContain "longest"
+        streak.properties["lastRunBrokenOn"]!!.description.shouldNotBeNull() shouldContain "not part of the run"
+
+        val day = api.components.schemas["StreakDayResponse"]!!
+        day.required.orEmpty() shouldContain "reason"
+        day.properties["reason"]!!.types shouldBe setOf("string", "null")
+        day.properties["reason"]!!.enum.map { it?.toString() } shouldBe listOf("REST_DAY", "TIMEZONE_SHIFT", null)
+        day.properties["reason"]!!.description.shouldNotBeNull() shouldContain "FROZEN"
     }
 
     @Test
@@ -509,9 +566,10 @@ class OpenApiContractTest(
                 refused.description shouldContain "the same response for a member"
             }
         }
-        // Everywhere else a 406 comes after the handler, as it always has, and is documented nowhere (as 405 is not).
+        // Everywhere else a 406 comes after the handler, as it always has, and is documented nowhere (as 405 is not);
+        // but for the public legal read, which declares `produces` for the same reason (ADR-0056) and guards nothing.
         operations().filter { (_, op) -> op.responses.containsKey("406") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
-            listOf("days", "day")
+            listOf("days", "day", "legalDocuments")
     }
 
     @Test
@@ -748,9 +806,10 @@ class OpenApiContractTest(
                 read.responses.keys shouldNotContain "428"
             }
         }
-        // And only they: a 304 documented on a route that cannot give one is a branch a client is generated to handle for nothing.
+        // And only they, and the public legal read (ADR-0056): a 304 documented on a route that cannot give one is a
+        // branch a client is generated to handle for nothing.
         operations().filter { (_, op) -> op.responses.containsKey("304") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
-            listOf("days", "day")
+            listOf("days", "day", "legalDocuments")
     }
 
     @Test
@@ -1147,7 +1206,9 @@ class OpenApiContractTest(
     private fun operations(): List<Pair<String, Operation>> =
         api.paths.flatMap { (path, item) -> item.readOperationsMap().map { (method, op) -> "$method $path" to op } }
 
-    private fun isPublic(operation: String): Boolean = SecurityConfiguration.PUBLIC_AUTH_ENDPOINTS.any { operation == "POST $it" }
+    private fun isPublic(operation: String): Boolean =
+        SecurityConfiguration.PUBLIC_AUTH_ENDPOINTS.any { operation == "POST $it" } ||
+            SecurityConfiguration.PUBLIC_READS.any { operation == "GET $it" }
 
     private fun token(): String {
         mockMvc

@@ -24,9 +24,20 @@ internal data class StreakState(
     val freezeProgress: Int,
     val freezesConsumed: Int,
     val totalCompleteDays: Int,
+    /**
+     * The length of the run the latest break ended (issue #141, `states.md` §7: "Your streak
+     * ended at 21 days"), or `null` if no run has ended. Set by a [StreakChange.BROKEN] day and
+     * by nothing else, so it stays the last ended run while the next one grows. At least one: a
+     * missed day on a run of zero breaks nothing. Not [longest], which is the longest ever.
+     */
+    val lastRunLength: Int? = null,
+    /** The date of the missed day that ended [lastRunLength]'s run, itself not in it; `null` exactly when that is. */
+    val lastRunBrokenOn: LocalDate? = null,
 ) {
     init {
         require(current >= 0 && longest >= current) { "a streak's longest run is at least its current one" }
+        require((lastRunLength == null) == (lastRunBrokenOn == null)) { "an ended run has a length and a date, or neither" }
+        require(lastRunLength == null || lastRunLength in 1..longest) { "an ended run was a run, and no longer than the longest" }
         require(freezesAvailable in 0..StreakRules.MAX_FREEZES) { "at most ${StreakRules.MAX_FREEZES} freezes are banked" }
         require(freezeProgress in 0 until StreakRules.DAYS_PER_FREEZE) { "freeze progress resets at the threshold" }
     }
@@ -171,11 +182,54 @@ internal enum class StreakCell {
     }
 }
 
-/** One square of a bond's calendar. */
+/**
+ * Why a [StreakCell.FROZEN] square is a rest day (issue #141, `states.md` §7a): the copy differs.
+ * Derived from what the day was evaluated as, which is stored (ADR-0034 decision 4); no column of
+ * its own.
+ */
+internal enum class FrozenReason {
+    /** A missed day a banked freeze covered: "we used a rest day". */
+    REST_DAY,
+
+    /** A date an approved zone change stepped over (BR-6): nobody could have written on it, and no freeze was spent. */
+    TIMEZONE_SHIFT,
+}
+
+/** One square of a bond's calendar. [reason] is set on a [StreakCell.FROZEN] square and on no other. */
 internal data class StreakDay(
     val date: LocalDate,
     val cell: StreakCell,
-)
+    val reason: FrozenReason? = null,
+) {
+    init {
+        require((cell == StreakCell.FROZEN) == (reason != null)) { "a square has a reason exactly when it is FROZEN" }
+    }
+
+    companion object {
+        /**
+         * The square for the day on [date] ([StreakCell.of] decides which), with its reason when
+         * it is a rest day. A square is `FROZEN` for one of two outcomes only: a date a zone
+         * change stepped over is evaluated [DayOutcome.FROZEN_BY_SKIP], and a missed day becomes
+         * `FROZEN` when, and only when, it spends a freeze (`StreakStore.recordDay`; V17's
+         * `bond_days_freeze_check`). So the outcome says which.
+         */
+        fun of(
+            date: LocalDate,
+            status: BondDayStatus,
+            outcome: DayOutcome?,
+            isToday: Boolean,
+        ): StreakDay? =
+            StreakCell.of(status, outcome, isToday)?.let { cell ->
+                val reason =
+                    when {
+                        cell != StreakCell.FROZEN -> null
+                        outcome == DayOutcome.FROZEN_BY_SKIP -> FrozenReason.TIMEZONE_SHIFT
+                        else -> FrozenReason.REST_DAY
+                    }
+                StreakDay(date, cell, reason)
+            }
+    }
+}
 
 /** What one day did to the run — the vocabulary of `streak_events`, and of "why did my streak break?". */
 internal enum class StreakChange {
@@ -259,7 +313,7 @@ internal object StreakRules {
             }
 
             DayOutcome.MISSED -> {
-                missed(state, strict, recordedFreeze)
+                missed(state, date, strict, recordedFreeze)
             }
         }
 
@@ -287,6 +341,7 @@ internal object StreakRules {
 
     private fun missed(
         state: StreakState,
+        date: LocalDate,
         strict: Boolean,
         recordedFreeze: Boolean?,
     ): Evaluation {
@@ -298,8 +353,13 @@ internal object StreakRules {
             val next = extended(state).copy(freezesAvailable = state.freezesAvailable - 1, freezesConsumed = state.freezesConsumed + 1)
             Evaluation(next, freezeApplied = true, StreakChange.FREEZE_CONSUMED, freezeBanked = false)
         } else {
-            val change = if (state.current > 0) StreakChange.BROKEN else StreakChange.NONE
-            Evaluation(state.copy(current = 0), freezeApplied = false, change, freezeBanked = false)
+            if (state.current > 0) {
+                // The run this day ended, kept for "your streak ended at …" (issue #141).
+                val next = state.copy(current = 0, lastRunLength = state.current, lastRunBrokenOn = date)
+                Evaluation(next, freezeApplied = false, StreakChange.BROKEN, freezeBanked = false)
+            } else {
+                Evaluation(state, freezeApplied = false, StreakChange.NONE, freezeBanked = false)
+            }
         }
     }
 }

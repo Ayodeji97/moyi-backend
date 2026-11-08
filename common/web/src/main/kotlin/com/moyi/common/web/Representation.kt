@@ -144,8 +144,27 @@ class Representations(
             .body(representation)
     }
 
+    /**
+     * `200` with [body] serialised once, its `ETag`, and `Cache-Control:
+     * public, no-cache`: **for a response that is the same for everyone and
+     * holds nothing about anyone**, which is what `public` lets a shared cache
+     * keep. Still `no-cache`, so a cache asks before reusing it, and asking is
+     * a `304` while nothing has changed. First used by `GET /meta/legal`
+     * (ADR-0056), where a copy kept past a change would show a person a
+     * document other than the one their consent is recorded against.
+     */
+    fun <T : Any> shared(body: T): ResponseEntity<Representation<T>> {
+        val representation = of(body)
+        return ResponseEntity
+            .ok()
+            .eTag(representation.entityTag)
+            .header(HttpHeaders.CACHE_CONTROL, PUBLIC_REVALIDATE)
+            .body(representation)
+    }
+
     private companion object {
         const val PRIVATE_REVALIDATE = "private, no-cache"
+        const val PUBLIC_REVALIDATE = "public, no-cache"
     }
 }
 

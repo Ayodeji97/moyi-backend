@@ -1003,7 +1003,7 @@
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank (by every Unicode space, so a name of only no-break spaces too) or over 80 characters, or, once trimmed, holds a control character, a format character other than ZWNJ and ZWJ, or an unpaired surrogate (errors code VALID_DISPLAY_NAME, and NOT_BLANK too for an empty or all-space name; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created.",
+        "reason": "A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank (by every Unicode space, so a name of only no-break spaces too) or over 80 characters, or, once trimmed, holds a control character, a format character other than ZWNJ and ZWJ, or an unpaired surrogate (errors code VALID_DISPLAY_NAME, and NOT_BLANK too for an empty or all-space name; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion, if sent, is over 40 characters (it is optional and ignored: the consent rows record the versions GET /meta/legal names, ADR-0056); over18 is false. Nothing is created.",
         "evidence": "smoke",
         "evidenceRef": "a 422 spends a token too (validation runs after the limiter)",
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/RegisterRequest.kt#@field:AssertTrue(message = \"must be confirmed\")"
@@ -1017,7 +1017,7 @@
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
       }
     ],
-    "curl": "curl -X POST \"$API/auth/register\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"displayName\\\": \\\"Ada\\\", \\\"acceptedTermsVersion\\\": \\\"2026-09-01\\\", \\\"over18\\\": true}\""
+    "curl": "curl -X POST \"$API/auth/register\" -H 'Content-Type: application/json' -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"password\\\": \\\"$PASSWORD\\\", \\\"displayName\\\": \\\"Ada\\\", \\\"over18\\\": true}\""
   },
   {
     "id": "POST /api/v1/auth/verify-email",
@@ -1208,6 +1208,29 @@
     ],
     "requestErrors": [],
     "curl": "curl \"$API/me\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "POST /api/v1/me/legal-consent",
+    "summary": "accept the current Terms and Privacy Policy",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X POST \"$API/me/legal-consent\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
+    "id": "GET /api/v1/meta/legal",
+    "summary": "read the current legal documents",
+    "machine": "account",
+    "auth": "none",
+    "headers": [
+      "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
+      "If-None-Match (optional; a matching strong ETag returns 304 with no body. Sent with Cache-Control: public, no-cache)"
+    ],
+    "requestErrors": [],
+    "curl": "curl \"$API/meta/legal\""
   },
   {
     "id": "POST /api/v1/support/messages",

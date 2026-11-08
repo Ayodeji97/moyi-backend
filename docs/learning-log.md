@@ -2968,6 +2968,7 @@ Reality: without `android.notification.channel_id`, every category shares FCM's 
          two cannot drift.
 Wrong about: nothing yet. The list is spelt out in a test because the client creates these
          ids, and a rename here would quietly move pushes to the default channel.
+
 ## 2026-11-08 · Ops · The FCM switch-on runbook, and the comment that would have stopped the worker (issue #133)
 
 Expected: turning pushes on is the one-line change `config/deploy.yml` described ("remove
@@ -2978,6 +2979,36 @@ Reality: that line is in the shared env, which the media worker reads too. The w
          comment now says the shared line stays.
 Wrong about: a config comment being a safe place for a procedure. A procedure that spans a
          vault, a cloud console and two roles belongs in a runbook, read end to end.
+
+## 2026-11-08 · Feature · The ended run and the rest day's reason — one was stored already, one was in the audit log
+
+Expected: two new columns, one for each field of issue #141.
+Reality: the reason needed none. ADR-0034 had stored `evaluated_as` on every day precisely
+         because a covered day and a stepped-over date are both `FROZEN` and replay differently;
+         the calendar had been reading that column all along and throwing the distinction away.
+         The ended run was already in `streak_events` too, as the latest `BROKEN` line's
+         `streak_before`. It went into the projection anyway (V43), because the audit log is
+         what `recalculate` does not rebuild, and a number on a member's screen should be one
+         FR-074 can put back. The audit line became the back-fill instead.
+Wrong about: the property test's "compare everything but the date" helper. Copying a state
+         with only the date nulled tripped the new invariant (length and date null together)
+         on the first seed: an invariant on a data class constrains every `copy` a test makes,
+         not just the code's.
+
+## 2026-11-08 · Feature · Legal versions are the server's, and re-consent (issue #128, ADR-0056)
+
+Expected: consent was already "recorded with version and timestamp" (FR-011), so the work was a
+         read-only `GET /meta/legal`.
+Reality: the rows existed, but their version was whatever the sign-up request said, one string
+         for all three documents. The server now records its own configured versions, `GET /me`
+         reports what was accepted, and `POST /me/legal-consent` accepts the current ones,
+         idempotently on the unique key. Existing rows are left as they are: rewriting them
+         would invent consent.
+Wrong about: naming `/me`'s new body `MeResponse`. The name was already the bond
+         module's, and springdoc settled the clash by silently pointing `/me` at the wrong schema;
+         only reading the contract diff showed it. (Also designed in, not found by a run:
+         `/me` reports the current version's row before the newest, or a rolled-back version would
+         prompt for ever, re-consent writing nothing.)
 
 ## 2026-11-08 · Feature · In-app support messages (issue #129, ADR-0057)
 

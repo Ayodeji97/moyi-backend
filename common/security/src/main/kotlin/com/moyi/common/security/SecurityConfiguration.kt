@@ -46,7 +46,7 @@ import java.time.Duration
  * credentials, and there are none (doc 09 §5).
  *
  * **What is public is a list, not a pattern.** `POST` on the named auth
- * endpoints, `GET` on health and on the Prometheus scrape; everything else needs a bearer token,
+ * endpoints, `GET` on the named public reads, on health and on the Prometheus scrape; everything else needs a bearer token,
  * including any path that does not exist yet. A wildcard over everything
  * under `/auth/` would silently make `GET /auth/sessions` (FR-007) public the
  * day it is added.
@@ -71,6 +71,7 @@ class SecurityConfiguration {
             sessionManagement { sessionCreationPolicy = SessionCreationPolicy.STATELESS }
             authorizeHttpRequests {
                 PUBLIC_AUTH_ENDPOINTS.forEach { path -> authorize(HttpMethod.POST, path, permitAll) }
+                PUBLIC_READS.forEach { path -> authorize(HttpMethod.GET, path, permitAll) }
                 authorize(HttpMethod.GET, "/actuator/health", permitAll)
                 authorize(HttpMethod.GET, "/actuator/health/**", permitAll)
                 // The health verdict kamal-proxy routes on, on the application's
@@ -175,6 +176,13 @@ class SecurityConfiguration {
                 "/api/v1/auth/forgot-password",
                 "/api/v1/auth/reset-password",
             )
+
+        /**
+         * `GET` only, named one by one, for the reason [PUBLIC_AUTH_ENDPOINTS]
+         * is. `/meta/legal`: sign-up shows the Terms before there is an
+         * account (FR-103, ADR-0056).
+         */
+        val PUBLIC_READS: List<String> = listOf("/api/v1/meta/legal")
 
         /** Spring Security's default. Sixty seconds of tolerance for a phone whose clock is wrong. */
         val CLOCK_SKEW: Duration = Duration.ofSeconds(60)
