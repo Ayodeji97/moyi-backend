@@ -165,7 +165,9 @@
 # ticket), the sixth in a day 429 with Retry-After, the acknowledgement logged once by the logging
 # provider with the ticket's id and without a word of the message, and the operator's `moyi support`
 # list, show and close (the words emptied, each look logged). Last run on 2026-11-08, on
-# feat/support-messages, from a jar of a6e5b08 (main's #145 and #148 merged in, the CHECK at V47),
+# feat/support-messages, from a jar of a470027 (main's #147 merged in), on a fresh database migrated
+# to V47, against its own compose project (moyi-41d), --attach: 1389 passed, 0 failed, 0 skipped.
+# Before it, from a jar of a6e5b08 (main's #145 and #148 merged in, the CHECK at V47),
 # on a fresh database that applied every migration to V47, against its own compose project
 # (moyi-41d: Postgres 55444, Valkey 56344, MinIO 59247), the jar booted by hand (local profile)
 # and --attach: 1384 passed, 0 failed, 0 skipped. Before it, from 14ce084 (before the merge, the
