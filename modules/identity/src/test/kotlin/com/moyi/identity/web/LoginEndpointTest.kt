@@ -397,6 +397,9 @@ internal class LoginEndpointTest(
         forgot("ada@example.com").status shouldBe 202
         reset(secretIn(awaitEmail(2)), NEW_PASSWORD).status shouldBe 200
         awaitEmail(3)
+        // The key is user and change time; this class's clock stands still unless moved (it is a MutableClock
+        // since the grace-window tests needed one), and two real changes are never at one instant.
+        clock.advance(Duration.ofSeconds(1))
         forgot("ada@example.com").status shouldBe 202
         reset(secretIn(awaitEmail(4)), "yet another good password").status shouldBe 200
         awaitEmail(5)
