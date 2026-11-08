@@ -168,6 +168,21 @@ and `management.observations.enable.http.client.requests: false`, which leaves o
 and so carrying no trace header at all (nothing read those timers). The OpenAI client is the OpenAI SDK's own and
 was never instrumented. `TraceContextStaysInsideTest` holds each of the three settings.
 
+**What tracing costs in metaspace, measured** (review of #147; ADR-0052 sets the caps). Each jar was booted twice
+on a JDK 25 host with production's `JAVA_TOOL_OPTIONS` and Native Memory Tracking: as the API (`local` profile,
+`MaxMetaspaceSize=256m`) and as the media worker (`local,media-worker`, `MaxMetaspaceSize=160m`, processing
+provider off), beside each other on one database, with the whole of `scripts/smoke.sh` run against the API.
+Committed metaspace afterwards, from `jcmd VM.native_memory summary`:
+
+| | `main` @ fbd610d | this branch @ 79dc2a4 | cap | headroom on the branch |
+|---|---|---|---|---|
+| API | 145,555 KB | 147,367 KB (+1.8 MB) | 256 MiB | 43.8 % |
+| media worker | 111,216 KB | 113,964 KB (+2.7 MB) | 160 MiB | 30.4 % |
+
+The OpenTelemetry SDK and the bridge cost under 3 MB in either role. The worker's headroom is the narrower, and
+was before this change too (32.1 % on `main`). Measured on macOS arm64 and not on the production image; the
+class count, not the platform, decides metaspace, so the difference is what carries over.
+
 **Extension members, typed.** An `ApiException` may carry RFC 9457 extension members, declared on `ProblemDetail`
 as optional with the code they come with. The first is `allowedFrom` on `TIMEZONE_CHANGE_TOO_SOON` (#142): the
 date the sentence names, typed, for a client to put into its own words. On the refusal and not on `BondResponse`,
