@@ -199,7 +199,10 @@ same `ReportRequest`, `201` with `{id, reason}`.** Bond-scoped, with no member i
   after a block, after either has left, or during a deletion countdown, for decision 2's reason: a
   report is never contact. A bond the caller is not in, an unknown id, a value that is not a UUID,
   **and a bond that has never had a second member** are the one `404`, the same bytes: the last is
-  thrown by `bond` itself (`BondNotFoundException`), where the others are made. The body is judged
+  thrown by `bond` itself (`BondNotFoundException`), where the others are made. The route's two
+  404s of its own (an id that is not a UUID, and a replay of a key that names a report the caller
+  did not make) use `bond.api.BOND_NOT_FOUND_DETAIL`, the constant `BondNotFoundException` is
+  built from (review of #151), so no copy of the wording can drift. The body is judged
   before the bond is looked at (`422` to a stranger as to a member).
 - **The reasons are the same five** (decision 3; OQ-26b). Doc 26 §6's "How they're treating me",
   T-09's reason, is `HARASSMENT`, as decision 3 already said; it is the reason this route exists.
@@ -214,7 +217,7 @@ same `ReportRequest`, `201` with `{id, reason}`.** Bond-scoped, with no member i
   changes**: no push, no event, no field, no `ETag` (doc 26 §2.2; `MemberReportsTest` and the smoke
   compare the reported member's `GET /bonds/{id}` and `GET /today` bytes and `ETag` before and
   after). Decision 5's accepted cost does not arise here: there is no `NOT_SHARED` to infer from.
-- **Stored in the same table, as a second target** (V46): `entry_reports.target` is `ENTRY` or
+- **Stored in the same table, as a second target** (V48): `entry_reports.target` is `ENTRY` or
   `MEMBER`; a member report names `reported_member_id` (a `bond_members` id, never a user id) and no
   entry, a `CHECK` holds one or the other. One queue, one log, one priority order, the same alarm
   (decision 11 counts every open row) and the same commands (`moyi reports list|show|dismiss|uphold`,
@@ -243,7 +246,7 @@ Phase 5 console. `ErrorCode` gains `REPORT_ON_OWN_ENTRY`: a breaking change for 
 
 **Neutral.** V37 (`ResultKind.REPORT`), V38 (`media_report_holds`, `heldFrom` in V36's hold, three
 functions), V39 (`entry_reports`, `entry_report_log`, four functions). One route, one bucket, one
-error code. No event: nothing outside the report's transaction needs to know. Decision 14 adds V46 (`target`, `reported_member_id`, and
+error code. No event: nothing outside the report's transaction needs to know. Decision 14 adds V48 (`target`, `reported_member_id`, and
 `entry_report_list`/`_read` made again with them), a second route on the same bucket, and
 `BondAccess.partnerMemberIdOf`; no error code, no event. Additive to the contract.
 

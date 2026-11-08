@@ -1,5 +1,6 @@
 package com.moyi.bond.service
 
+import com.moyi.bond.api.BOND_NOT_FOUND_DETAIL
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.Membership
 import com.moyi.bond.domain.UserId
@@ -62,4 +63,4 @@ internal class BondAccessGuard(
  * the kind of thing and never the id — the id is already in `instance`, as the
  * path the caller typed, which is theirs to see.
  */
-internal class BondNotFoundException : NotFoundException("That bond was not found.")
+internal class BondNotFoundException : NotFoundException(BOND_NOT_FOUND_DETAIL)

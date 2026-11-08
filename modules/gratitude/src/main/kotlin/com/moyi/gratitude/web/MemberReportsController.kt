@@ -1,5 +1,6 @@
 package com.moyi.gratitude.web
 
+import com.moyi.bond.api.BOND_NOT_FOUND_DETAIL
 import com.moyi.common.security.CurrentUser
 import com.moyi.common.security.ratelimit.RateLimitBucket
 import com.moyi.common.security.ratelimit.RateLimited
@@ -58,7 +59,7 @@ internal class MemberReportsController(
         @Valid @RequestBody request: ReportRequest,
         http: HttpServletRequest,
     ): ResponseEntity<MemberReportResponse> {
-        val id = runCatching { UUID.fromString(bondId) }.getOrElse { throw NotFoundException("That bond was not found.") }
+        val id = runCatching { UUID.fromString(bondId) }.getOrElse { throw NotFoundException(BOND_NOT_FOUND_DETAIL) }
         val filed =
             reports.report(
                 caller.id,

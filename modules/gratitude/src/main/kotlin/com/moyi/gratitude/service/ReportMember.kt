@@ -1,5 +1,6 @@
 package com.moyi.gratitude.service
 
+import com.moyi.bond.api.BOND_NOT_FOUND_DETAIL
 import com.moyi.bond.api.BondAccess
 import com.moyi.common.core.IdGenerator
 import com.moyi.common.web.NotFoundException
@@ -107,6 +108,6 @@ internal class ReportMember(
                     null
                 }
             }
-        return report?.takeIf { reporter == it.reporterMemberId } ?: throw NotFoundException("That bond was not found.")
+        return report?.takeIf { reporter == it.reporterMemberId } ?: throw NotFoundException(BOND_NOT_FOUND_DETAIL)
     }
 }

@@ -13,7 +13,7 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * `entry_reports` (V39, V46): what a member reported, an entry or the other
+ * `entry_reports` (V39, V48): what a member reported, an entry or the other
  * member, and why (FR-100, ADR-0053 and its amendment for #127). One table
  * for both targets, so that both are one queue for the operator.
  *

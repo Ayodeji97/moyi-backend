@@ -2985,6 +2985,8 @@ Reality: none of them. The report table takes a `target` column and the operator
          unchanged; "How they're treating me" was already `HARASSMENT`. The one real choice was where
          the "nobody has joined yet" 404 is made: in `gratitude` it would have restated the bond's
          message, so `BondAccess.partnerMemberIdOf` throws the bond's own exception, and a test
-         compares its bytes with a stranger's.
+         compares its bytes with a stranger's. The review of #151 found the route's own two 404s
+         (an unreadable id, a replay of someone else's report) still hand-copying that sentence;
+         it is now one constant in `bond.api` that the guard's exception is built from too.
 Wrong about: nothing yet. Nothing the reported member reads may change, so the test reads their
          bond and their today, bytes and ETag, before and after; the smoke does the same over HTTP.

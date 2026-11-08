@@ -142,6 +142,28 @@ internal class MemberReportsTest(
         report(ada, bondId, """{"reason":"HARASSMENT"}""", key).status shouldBe 422
     }
 
+    /**
+     * The replay is authorised as a read of the report: a key that names a report the caller is not the reporter of
+     * is the bond's one `404`, byte for byte a stranger's. Reached here by moving the stored report to the other
+     * member, which no request can do; the rule is what is tested.
+     */
+    @Test
+    fun `a replay of a report the caller did not make is the bond's one 404, the same bytes as a stranger's`() {
+        val key = UUID.randomUUID().toString()
+        val id = body(report(ada, bondId, """{"reason":"OTHER"}""", key))["id"].asString()
+        jdbc.update(
+            "UPDATE entry_reports SET reporter_member_id = reported_member_id, reported_member_id = reporter_member_id WHERE id = ?::uuid",
+            id,
+        )
+
+        val replay = report(ada, bondId, """{"reason":"OTHER"}""", key)
+        val stranger = report(users.verified("Eve"), bondId, """{"reason":"OTHER"}""")
+
+        replay.status shouldBe 404
+        replay.contentAsString.withoutInstance() shouldBe stranger.contentAsString.withoutInstance()
+        replay.contentAsString shouldNotContain id
+    }
+
     @Test
     fun `without an Idempotency-Key it is refused, and nothing is filed`() {
         val refused =

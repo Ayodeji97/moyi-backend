@@ -561,7 +561,7 @@ case "$cmd" in
         if [ -z "$out" ]; then echo "No report is open."; exit 0; fi
         # The function's columns after the first, in its order. A priority row (sexual content involving a minor) is
         # never viewed (ops/moderation/takedown.md §2), and says so; it comes first.
-        # An entry report names its entry and no member, a member report the member and no entry (V46): "-" for neither.
+        # An entry report names its entry and no member, a member report the member and no entry (V48): "-" for neither.
         printf 'reportId\treason\ttarget\tentryId\tmemberId\theld\tdetail\treceivedAt\n'
         printf '%s\n' "$out" | awk -F '\t' 'BEGIN { OFS = "\t" } { p = $1; $1 = ""; sub(/^\t/, ""); if ($4 == "") $4 = "-"; if ($5 == "") $5 = "-"; if (p == "t") print $0, "DO NOT VIEW — runbook §2"; else print $0 }'
         ;;
