@@ -4715,7 +4715,7 @@
             "content" : {
               "application/json" : {
                 "schema" : {
-                  "$ref" : "#/components/schemas/UserResponse"
+                  "$ref" : "#/components/schemas/ProfileResponse"
                 }
               }
             },
@@ -4923,6 +4923,58 @@
           }
         },
         "tags" : [ "push-token-controller" ]
+      }
+    },
+    "/api/v1/me/legal-consent" : {
+      "post" : {
+        "description" : "The caller accepts the current Terms of Service and Privacy Policy, the versions `GET /meta/legal` names. No body, and none is read: the versions recorded are the server's. `204` whether or not anything was new; a version accepted before keeps the moment it was first accepted. Afterwards `GET /me`'s `legalAccepted` names the current versions.",
+        "operationId" : "acceptLegalDocuments",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "me-controller" ]
       }
     },
     "/api/v1/media/upload-intent" : {
@@ -5340,10 +5392,111 @@
         },
         "tags" : [ "media-controller" ]
       }
+    },
+    "/api/v1/meta/legal" : {
+      "get" : {
+        "description" : "The current Terms of Service, Privacy Policy and data-processing summary: each a `version` and the absolute `url` it is read at. Public: no token is needed, because sign-up shows them before there is an account. A `version` is an opaque label (letters, digits, `.`, `_`, `-`; at most 40): compare it with `GET /me`'s `legalAccepted`, never parse it. Where the two differ, ask the person to accept again and send `POST /me/legal-consent`. The data-processing summary is shown, never accepted on its own. Registration records the Terms and Privacy versions this answer names, whatever the request says.",
+        "operationId" : "legalDocuments",
+        "parameters" : [ {
+          "description" : "The `ETag` of an earlier answer the client still holds. If it is still current the answer is `304` with no body; any other value is ignored and the whole response is sent.",
+          "in" : "header",
+          "name" : "If-None-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/LegalResponse"
+                }
+              }
+            },
+            "description" : "OK",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator of this response body (RFC 9110 §8.8.3). Opaque: keep the whole value and send it back as `If-None-Match`. The same for every caller; sent with `Cache-Control: public, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "304" : {
+            "description" : "Not Modified: the documents are still those the client holds under that tag. No body.",
+            "headers" : {
+              "ETag" : {
+                "description" : "Strong validator of this response body (RFC 9110 §8.8.3). Opaque: keep the whole value and send it back as `If-None-Match`. The same for every caller; sent with `Cache-Control: public, no-cache`.",
+                "schema" : {
+                  "type" : "string"
+                }
+              }
+            }
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized: `UNAUTHENTICATED`. This route needs no access token, but one that is sent is checked, and an expired or unaccepted one is refused. Send no `Authorization` header here."
+          },
+          "406" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Acceptable"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "security" : [ ],
+        "tags" : [ "legal-controller" ]
+      }
     }
   },
   "components" : {
     "schemas" : {
+      "AcceptanceResponse" : {
+        "type" : "object",
+        "properties" : {
+          "acceptedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "version" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "acceptedAt", "version" ]
+      },
       "AchievedMilestoneResponse" : {
         "type" : "object",
         "properties" : {
@@ -5873,6 +6026,53 @@
         },
         "required" : [ "code", "expiresAt", "id", "link" ]
       },
+      "LegalAcceptedResponse" : {
+        "type" : "object",
+        "properties" : {
+          "privacy" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/AcceptanceResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
+          "terms" : {
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/AcceptanceResponse"
+            }, {
+              "type" : "null"
+            } ]
+          }
+        },
+        "required" : [ "privacy", "terms" ]
+      },
+      "LegalDocumentResponse" : {
+        "type" : "object",
+        "properties" : {
+          "url" : {
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "url", "version" ]
+      },
+      "LegalResponse" : {
+        "type" : "object",
+        "properties" : {
+          "dataProcessingSummary" : {
+            "$ref" : "#/components/schemas/LegalDocumentResponse"
+          },
+          "privacy" : {
+            "$ref" : "#/components/schemas/LegalDocumentResponse"
+          },
+          "terms" : {
+            "$ref" : "#/components/schemas/LegalDocumentResponse"
+          }
+        },
+        "required" : [ "dataProcessingSummary", "privacy", "terms" ]
+      },
       "LockedEntryResponse" : {
         "allOf" : [ {
           "$ref" : "#/components/schemas/PartnerEntryResponse"
@@ -6356,6 +6556,35 @@
         },
         "required" : [ "code", "status", "title", "type" ]
       },
+      "ProfileResponse" : {
+        "type" : "object",
+        "properties" : {
+          "displayName" : {
+            "type" : "string"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "emailVerified" : {
+            "type" : "boolean"
+          },
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "legalAccepted" : {
+            "$ref" : "#/components/schemas/LegalAcceptedResponse"
+          },
+          "locale" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "string",
+            "enum" : [ "PENDING_VERIFICATION", "ACTIVE", "SUSPENDED", "PENDING_DELETION", "DELETED" ]
+          }
+        },
+        "required" : [ "displayName", "email", "emailVerified", "id", "legalAccepted", "locale", "status" ]
+      },
       "PushTokenRequest" : {
         "type" : "object",
         "properties" : {
@@ -6393,7 +6622,7 @@
         "type" : "object",
         "properties" : {
           "acceptedTermsVersion" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
             "maxLength" : 40,
             "minLength" : 0
           },
@@ -6421,7 +6650,7 @@
             "minLength" : 1
           }
         },
-        "required" : [ "acceptedTermsVersion", "displayName", "email", "locale", "over18", "password" ]
+        "required" : [ "displayName", "email", "locale", "over18", "password" ]
       },
       "RememberResponse" : {
         "type" : "object",

@@ -151,6 +151,14 @@
 # 2c0e3bf, on a fresh database that applied 38 migrations to V39, against its own compose project
 # (moyi-report: Postgres 55454, Valkey 63814, MinIO 59028), the jar booted by hand (local profile)
 # and --attach: 1273 passed, 0 failed, 0 skipped, 33 sections. Before it, from 3e8a78a: 1254, 0, 0.
+# Since issue #128 (ADR-0056) it reads the legal documents with no token, its ETag and a 304 on
+# it; sees registration record the server's versions and not the one the request sent, GET /me
+# report them, re-consent answer 204 twice and add no row, and 401 without a token. Last run on
+# 2026-11-08, on feat/meta-legal-and-consent-versions, from a jar of the tree this header was
+# committed with (only this paragraph added after), on a fresh database that applied 40
+# migrations to V41, against its own compose project (moyi-41c: Postgres 55443, Valkey 56343,
+# MinIO 59245), the jar booted by hand (local profile) and --attach: 1339 passed, 0 failed,
+# 0 skipped, 35 sections.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
@@ -662,6 +670,30 @@ header_is "…and every authenticated request is counted against the per-user bu
 expect "a trailing slash is a 404 in the contract's shape" 404 '"type":"https://api.getmoyi.app/problems/not-found"' -- "$API/me/" -H "Authorization: Bearer $ACCESS"
 [[ "$LAST_BODY" == *'"detail":"No such resource."'* && "$LAST_BODY" != *"static resource"* ]] && pass "…that says only 'No such resource.'" || fail "404 detail" "${LAST_BODY:0:160}"
 expect "PUT /me is 405 METHOD_NOT_ALLOWED with a type" 405 '"type":"https://api.getmoyi.app/problems/method-not-allowed"' -- -X PUT "$API/me" -H "Authorization: Bearer $ACCESS"
+
+echo; echo "legal documents and recorded consent (FR-011, FR-103, ADR-0056)"
+# The versions are the local profile's (application-local.yml): local-1 for all three.
+# Registration above sent acceptedTermsVersion 2026-09-01, which must have been ignored.
+expect "GET /meta/legal without a token is 200 with the configured versions" 200 '"terms":{"version":"local-1","url":"http://localhost:3000/terms"}' -- "$API/meta/legal"
+[[ "$LAST_BODY" == *'"privacy":{"version":"local-1","url":"http://localhost:3000/privacy"}'* && "$LAST_BODY" == *'"dataProcessingSummary":{"version":"local-1","url":"http://localhost:3000/data-processing"}'* ]] \
+  && pass "…and the privacy policy and data-processing summary" || fail "legal body" "${LAST_BODY:0:240}"
+header_is "…which any cache may keep and must revalidate" Cache-Control "public, no-cache"
+LEGAL_TAG="$(printf '%s\n' "$LAST_HEADERS" | grep -i '^ETag:' | head -1 | cut -d' ' -f2- || true)"
+[ -n "$LEGAL_TAG" ] && pass "…with an ETag" || fail "legal ETag" "no ETag on GET /meta/legal"
+expect "GET /meta/legal with that ETag as If-None-Match is 304" 304 "" -- "$API/meta/legal" -H "If-None-Match: $LEGAL_TAG"
+[ -z "$LAST_BODY" ] && pass "…with no body" || fail "304 body" "got: ${LAST_BODY:0:100}"
+expect "GET /me says which versions were accepted at registration" 200 '"legalAccepted":{"terms":{"version":"local-1"' -- "$API/me" -H "Authorization: Bearer $ACCESS"
+[[ "$LAST_BODY" == *'"privacy":{"version":"local-1","acceptedAt":"'* && "$LAST_BODY" != *"2026-09-01"* ]] \
+  && pass "…the privacy policy too, and nowhere the version the client sent" || fail "legalAccepted" "${LAST_BODY:0:300}"
+expect "POST /me/legal-consent is 204 with no body" 204 "" -- -X POST "$API/me/legal-consent" -H "Authorization: Bearer $ACCESS"
+expect "…and again, idempotently, 204" 204 "" -- -X POST "$API/me/legal-consent" -H "Authorization: Bearer $ACCESS"
+expect "POST /me/legal-consent without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/me/legal-consent"
+CONSENTS="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT string_agg(c.document || '=' || c.version, ',' ORDER BY c.document) FROM consent_records c JOIN users u ON u.id = c.user_id WHERE u.email = '$EMAIL'" 2>/dev/null || echo "psql-unavailable")"
+case "$CONSENTS" in
+  "AGE_18=local-1,PRIVACY=local-1,TERMS=local-1") pass "the account holds three consent rows, all the server's version, none added by re-consent" ;;
+  psql-unavailable) skip "consent rows (psql unavailable)" ;;
+  *) fail "consent rows" "expected the three local-1 rows, got '$CONSENTS'" ;;
+esac
 expect "wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "not the password")"
 WRONG="$LAST_BODY"
 expect "unknown address is 401 too" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "nobody-$RANDOM@example.com" "not the password")"

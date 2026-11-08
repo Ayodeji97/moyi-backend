@@ -318,6 +318,36 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `the legal documents are a public conditional read, and re-consent takes no body (ADR-0056)`() {
+        val legal = api.paths["/api/v1/meta/legal"]!!.get
+        legal.operationId shouldBe "legalDocuments"
+        legal.security shouldBe emptyList()
+        // 401 too, as on every public route: a token that is sent is checked (ADR-0024, amended 2026-11-08).
+        legal.responses.keys shouldContainExactlyInAnyOrder listOf("200", "304", "401", "406", "429", "500")
+        legal.responses["200"]!!.headers shouldContainKey "ETag"
+        legal.responses["200"]!!.content.keys shouldBe setOf("application/json")
+        legal.parameters.single().name shouldBe "If-None-Match"
+        api.components.schemas["LegalResponse"]!!
+            .properties.keys shouldBe setOf("terms", "privacy", "dataProcessingSummary")
+
+        val consent = api.paths["/api/v1/me/legal-consent"]!!.post
+        consent.operationId shouldBe "acceptLegalDocuments"
+        consent.requestBody shouldBe null
+        consent.responses.keys shouldContainAll listOf("204", "401")
+
+        val me =
+            api.paths["/api/v1/me"]!!
+                .get.responses["200"]!!
+                .content["application/json"]!!
+                .schema.`$ref`
+        me shouldBe "#/components/schemas/ProfileResponse"
+        api.components.schemas["ProfileResponse"]!!
+            .properties.keys shouldContainAll
+            api.components.schemas["UserResponse"]!!
+                .properties.keys + "legalAccepted"
+    }
+
+    @Test
     fun `ending a session documents its 404`() {
         api.paths["/api/v1/auth/sessions/{id}"]!!.delete.responses shouldContainKey "404"
     }
@@ -664,9 +694,10 @@ class OpenApiContractTest(
                 refused.description shouldContain "the same response for a member"
             }
         }
-        // Everywhere else a 406 comes after the handler, as it always has, and is documented nowhere (as 405 is not).
+        // Everywhere else a 406 comes after the handler, as it always has, and is documented nowhere (as 405 is not);
+        // but for the public legal read, which declares `produces` for the same reason (ADR-0056) and guards nothing.
         operations().filter { (_, op) -> op.responses.containsKey("406") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
-            listOf("days", "day")
+            listOf("days", "day", "legalDocuments")
     }
 
     @Test
@@ -903,9 +934,10 @@ class OpenApiContractTest(
                 read.responses.keys shouldNotContain "428"
             }
         }
-        // And only they: a 304 documented on a route that cannot give one is a branch a client is generated to handle for nothing.
+        // And only they, and the public legal read (ADR-0056): a 304 documented on a route that cannot give one is a
+        // branch a client is generated to handle for nothing.
         operations().filter { (_, op) -> op.responses.containsKey("304") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
-            listOf("days", "day")
+            listOf("days", "day", "legalDocuments")
     }
 
     @Test
@@ -1354,7 +1386,9 @@ class OpenApiContractTest(
     private fun operations(): List<Pair<String, Operation>> =
         api.paths.flatMap { (path, item) -> item.readOperationsMap().map { (method, op) -> "$method $path" to op } }
 
-    private fun isPublic(operation: String): Boolean = SecurityConfiguration.PUBLIC_AUTH_ENDPOINTS.any { operation == "POST $it" }
+    private fun isPublic(operation: String): Boolean =
+        SecurityConfiguration.PUBLIC_AUTH_ENDPOINTS.any { operation == "POST $it" } ||
+            SecurityConfiguration.PUBLIC_READS.any { operation == "GET $it" }
 
     private fun token(): String {
         mockMvc
