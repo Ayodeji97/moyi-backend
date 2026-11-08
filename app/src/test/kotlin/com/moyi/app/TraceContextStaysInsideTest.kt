@@ -78,13 +78,21 @@ class TraceContextStaysInsideTest(
         val span = tracer.nextSpan().name("an inbound request").start()
         tracer.withSpan(span).use {
             tracer.createBaggageInScope("chosen-by-a-client", "forwarded?").use {
-                client.get().uri("/embeddings").retrieve().toBodilessEntity()
+                client
+                    .get()
+                    .uri("/embeddings")
+                    .retrieve()
+                    .toBodilessEntity()
             }
         }
         span.end()
 
         received.size shouldBe 1
-        received.single().keys.filter { it in TRACE_HEADERS }.shouldBeEmpty()
+        received
+            .single()
+            .keys
+            .filter { it in TRACE_HEADERS }
+            .shouldBeEmpty()
     }
 
     private fun traceIdOf(request: org.springframework.test.web.servlet.ResultActionsDsl): String =
