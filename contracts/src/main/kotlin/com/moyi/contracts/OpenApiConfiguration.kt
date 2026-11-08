@@ -174,6 +174,7 @@ class OpenApiConfiguration {
             documentSearch(api)
             documentOnThisDay(api)
             documentMilestones(api)
+            documentStreak(api)
             documentReports(api)
             documentRemember(api)
             documentSemanticSearch(api)
