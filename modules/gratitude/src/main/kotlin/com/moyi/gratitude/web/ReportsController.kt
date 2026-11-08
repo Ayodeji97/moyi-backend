@@ -26,7 +26,7 @@ import org.springframework.web.bind.annotation.RestController
  * doc 06's `POST /reports {targetType, targetId, …}`: the one target built is
  * an entry, its gate is the entry's, and an entry-scoped path keeps the one
  * `404` for everything the caller was never shown. A member report (doc 26's
- * other target) will be a route of its own when it is built.
+ * other target) is a route of its own, `MemberReportsController`.
  *
  * **`201` with the report's id**, and from that moment the entry's photo and
  * voice note are held back from the caller (shown to them as processing) and

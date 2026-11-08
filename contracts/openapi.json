@@ -2459,6 +2459,112 @@
         "tags" : [ "bond-member-settings-controller" ]
       }
     },
+    "/api/v1/bonds/{bondId}/members/other/report" : {
+      "post" : {
+        "operationId" : "reportMember",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "bondId",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReportRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MemberReportResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "member-reports-controller" ]
+      }
+    },
     "/api/v1/bonds/{bondId}/milestones" : {
       "get" : {
         "description" : "The bond's milestones at 7, 30, 100 and 365 complete days: days on which both members wrote, counted over the bond's whole life. A day a freeze covered is not a complete day, and a broken streak loses no milestone. `achieved` lists each one reached, oldest first, with the date of the day that reached it. Today counts once it has revealed, by the same rule as the streak's numbers.\n\n`next` is the next threshold and nothing else. It is null once all four are reached, and whenever the bond takes no writes from the caller: it has ended, the caller has left, or it is counting down to deletion. `achieved` is kept when the bond ends.",
@@ -5644,6 +5750,19 @@
         "properties" : {
           "categories" : {
             "$ref" : "#/components/schemas/NotificationCategoriesResponse"
+          }
+        }
+      },
+      "MemberReportResponse" : {
+        "type" : "object",
+        "properties" : {
+          "id" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "reason" : {
+            "type" : "string",
+            "enum" : [ "NON_CONSENSUAL", "MINOR_SEXUAL_CONTENT", "VIOLENCE_OR_SELF_HARM", "HARASSMENT", "OTHER" ]
           }
         }
       },

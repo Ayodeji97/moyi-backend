@@ -1425,6 +1425,49 @@ curl "$API/bonds/$BOND/milestones" -H "Authorization: Bearer $TOKEN"
 |---|---|---|---|
 | 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer. | smoke |
 
+### POST /bonds/{bondId}/members/other/report
+
+report the other member of your bond to a person
+
+**Needs:** an access token.
+
+- Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same report, and nothing filed twice)
+- Content-Type (application/json, the entry report's body: {"reason": "NON_CONSENSUAL", "MINOR_SEXUAL_CONTENT", "VIOLENCE_OR_SELF_HARM", "HARASSMENT" or "OTHER", "detail": optional, at most 500 characters}. The body is checked before the bond is looked at)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/bonds/$BOND/members/other/report" -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $(uuidgen)" -H 'Content-Type: application/json' -d '{"reason": "HARASSMENT"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 404 `NOT_FOUND` | Nobody has joined, so there is nobody to report. The same answer, byte for byte, as a bond you are not in. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
+| `bond` | `ACTIVE` |  | 201 stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
+| `bond` | `PENDING_DELETION` |  | 201 stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. A countdown to deletion does not refuse it: a report is never contact. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | never-run |
+| `bond` | `ARCHIVED` |  | 201 stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. Ended by a leave or a block, by either of you: a report is never contact, and the member who has just blocked may need it most. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 422 | `VALIDATION_FAILED` | reason is missing, null, or not one of the five names exactly as written; or detail is blank, longer than 500 characters, or holds a NUL or an unpaired surrogate. Nothing is filed. | smoke |
+| 422 | `VALIDATION_FAILED` | The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. Nothing is filed. | test |
+| 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another bond or route. | test |
+| 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | never-run |
+| 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed. | never-run |
+| 429 | `RATE_LIMITED` | reports:create:user, ten a day, shared with the entry report route: one queue, one person reading it. Refused attempts count. | test |
+
+#### The contract is silent on
+
+| Status | What the code does |
+|---|---|
+| 409 | IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route. |
+| 413 | MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route. |
+
 ## Day
 
 ### POST /bonds/{bondId}/entries

@@ -3092,6 +3092,55 @@ if grep -q "$RP_DETAIL" "$MOYI_LOG"; then fail "the report's detail is in no log
 rm -rf "$RP_DIR"
 flush_buckets
 
+echo; echo "member reports — a member reports the other member of the bond to a person (FR-100's member half, ADR-0053 amended for #127)"
+# The reported member's own reads are taken before and after, bytes and ETag: nothing they can see may change
+# (doc 26 §2.2). The report is then the operator's, in the same queue as an entry report.
+verified_account "mr-reported" "203.0.113.185"; MR_A="$ACCOUNT_ACCESS"
+verified_account "mr-reporter" "203.0.113.186"; MR_B="$ACCOUNT_ACCESS"
+verified_account "mr-stranger" "203.0.113.187"; MR_O="$ACCOUNT_ACCESS"
+expect "member reports: a bond for the two" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $MR_A" -d "$(bond_body "Us")"
+MR_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+MR_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "reporting the member of a bond with no partner yet is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_A" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+MR_ALONE="$(no_instance | sed "s/$MR_BOND/-/g")"
+expect "member reports: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$MR_CODE/accept" -H "Authorization: Bearer $MR_B"
+expect "a stranger reporting a member of the bond is 404" 404 '"code":"NOT_FOUND"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_O" -H "Idempotency-Key: $(new_key)" -d '{"reason":"OTHER"}'
+is "member reports: …the same bytes as the bond with nobody to report" "$(no_instance | sed "s/$MR_BOND/-/g")" "$MR_ALONE"
+expect "member reports: the reported member writes" 201 '"status":"SUBMITTED"' -- -X POST "$API/bonds/$MR_BOND/entries" -H "Authorization: Bearer $MR_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"for you"}'
+expect "member reports: the reporter writes, and the day reveals" 201 '"status":"REVEALED"' -- -X POST "$API/bonds/$MR_BOND/entries" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $(new_key)" -d '{"text":"and mine"}'
+expect "member reports: the reported member reads the bond, before" 200 "\"id\":\"$MR_BOND\"" -- "$API/bonds/$MR_BOND" -H "Authorization: Bearer $MR_A"
+MR_BOND_BEFORE="$LAST_BODY"; MR_BOND_TAG_BEFORE="$(tag)"
+expect "member reports: the reported member reads today, before" 200 '"myEntry"' -- "$API/bonds/$MR_BOND/today" -H "Authorization: Bearer $MR_A"
+MR_TODAY_BEFORE="$LAST_BODY"; MR_TODAY_TAG_BEFORE="$(tag)"
+expect "a report with an unknown reason is 422 on the member route too" 422 '"field":"reason"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"SPAM"}'
+MR_KEY="$(new_key)"
+expect "the reporter reports the other member: 201" 201 '"reason":"HARASSMENT"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $MR_KEY" -d '{"reason":"HARASSMENT","detail":"smoke-fake-member-report-detail"}'
+MR_FIRST="$LAST_BODY"; MR_REPORT="$(printf '%s' "$LAST_BODY" | jget id)"
+is "member reports: …the answer is the id and the reason, nothing else" "$(python3 -c 'import json,sys; print(sorted(json.loads(sys.argv[1])))' "$MR_FIRST")" "['id', 'reason']"
+expect "the same key again is the same member report, replayed" 201 "\"id\":\"$MR_REPORT\"" -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $MR_KEY" -d '{"reason":"HARASSMENT","detail":"smoke-fake-member-report-detail"}'
+header_is "member reports: …marked as a replay" "Idempotency-Replayed" "true"
+db_is "member reports: …one report, of the member, open, holding nothing" \
+  "$(sql "SELECT count(*) || '|' || min(target) || '|' || bool_and(entry_id IS NULL) || '|' || min(status) || '|' || (SELECT count(*) FROM media_report_holds WHERE report_id = '$MR_REPORT') FROM entry_reports WHERE bond_id = '$MR_BOND'")" "1|MEMBER|true|OPEN|0"
+expect "member reports: the reported member reads the bond, after" 200 "\"id\":\"$MR_BOND\"" -- "$API/bonds/$MR_BOND" -H "Authorization: Bearer $MR_A"
+is "member reports: …the reported member's GET /bonds/{id} is byte for byte what it was" "$LAST_BODY" "$MR_BOND_BEFORE"
+is "member reports: …and its ETag" "$(tag)" "$MR_BOND_TAG_BEFORE"
+expect "member reports: the reported member reads today, after" 200 '"myEntry"' -- "$API/bonds/$MR_BOND/today" -H "Authorization: Bearer $MR_A"
+is "member reports: …the reported member's GET /today is byte for byte what it was" "$LAST_BODY" "$MR_TODAY_BEFORE"
+is "member reports: …and its ETag" "$(tag)" "$MR_TODAY_TAG_BEFORE"
+expect "member reports: the reporter blocks the reported member" 204 '' -- -X POST "$API/bonds/$MR_BOND/block" -H "Authorization: Bearer $MR_B" -d '{"withdrawEntries":false}'
+expect "a member report after a block is 201" 201 '"reason":"VIOLENCE_OR_SELF_HARM"' -- -X POST "$API/bonds/$MR_BOND/members/other/report" -H "Authorization: Bearer $MR_B" -H "Idempotency-Key: $(new_key)" -d '{"reason":"VIOLENCE_OR_SELF_HARM"}'
+MR_AFTER_BLOCK="$(printf '%s' "$LAST_BODY" | jget id)"
+if docker compose exec -T postgres true >/dev/null 2>&1; then
+  MR_LIST="$(reports list 2>&1)"
+  case "$MR_LIST" in *"$MR_REPORT"$'\t'HARASSMENT$'\t'MEMBER$'\t-\t'*$'\t'0$'\t't*) pass "member reports: the operator's list shows the member report, naming no entry and holding nothing";; *) fail "member reports: list" "${MR_LIST:0:400}";; esac
+  MR_OUT="$(reports dismiss "$MR_REPORT" "smoke: dismissed" 2>&1)" && MR_OUT2="$(reports dismiss "$MR_AFTER_BLOCK" "smoke: dismissed" 2>&1)" \
+    && pass "the operator dismisses the member reports" || fail "the operator dismisses the member reports" "$MR_OUT ${MR_OUT2:-}"
+else
+  skip "member reports: the operator's queue (psql not reachable through docker compose)"
+fi
+if grep -q "smoke-fake-member-report-detail" "$MOYI_LOG"; then fail "the member report's detail is in no log line" "it is in $MOYI_LOG"; else pass "the member report's detail is in no log line"; fi
+flush_buckets
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.

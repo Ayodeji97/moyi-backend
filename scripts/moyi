@@ -61,6 +61,9 @@
 #                                            from stdin (at most 500 characters). From then its photo and voice
 #                                            note are held back from you until a person decides. Your partner is
 #                                            not told
+#   moyi report-partner <reason> [-]         report the other member of the bond in use to a person, with the
+#                                            same reasons and detail; also after the bond has ended or you
+#                                            blocked them. They are not told, and nothing they see changes
 #   moyi notifications [<kind>=on|off …]     which kinds of push you want in the bond in use: with nothing,
 #                                            shows them; with e.g. onThisDay=on reminder=off, sets those
 #                                            and leaves the rest. The kinds are the server's: reminder,
@@ -87,9 +90,12 @@
 #                                            a member reported child sexual abuse material: block it, held
 #                                            as evidence, never released (§3, then §2)
 #
-# And the queue of members' reports (FR-100, ADR-0053), the same way, recorded in entry_report_log:
+# And the queue of members' reports (FR-100, ADR-0053), the same way, recorded in entry_report_log. A report
+# names an entry (target ENTRY) or the other member of a bond (target MEMBER, by bond_members id); a member
+# report holds nothing back, and is dismissed or upheld as a report of words is:
 #
-#   moyi reports list                        the open reports, priority first: id, reason, entry, how many
+#   moyi reports list                        the open reports, priority first: id, reason, target, entry,
+#                                            member, how many
 #                                            photos and voice notes each holds back, whether it has a
 #                                            detail, when. A MINOR_SEXUAL_CONTENT row is marked DO NOT VIEW
 #   moyi reports show <reportId>             one report: the reporter's detail and what it holds back
@@ -529,6 +535,20 @@ case "$cmd" in
     show 201
     echo "Reported. A person will read it. Your partner is not told. Its photo and voice note are held back from you until then."
     ;;
+  report-partner)
+    usage="usage: moyi report-partner <reason> [-]   (NON_CONSENSUAL, MINOR_SEXUAL_CONTENT, VIOLENCE_OR_SELF_HARM, HARASSMENT or OTHER; - reads a detail from stdin)"
+    [ $# -eq 1 ] || { [ $# -eq 2 ] && [ "$2" = - ]; } || die "$usage"
+    signed_in; BOND="$(bond)"
+    # As `report`: the reason as typed, the detail from stdin, never an argument.
+    if [ $# -eq 2 ]; then
+      detail="$(cat)"
+      authed POST "/bonds/$BOND/members/other/report" "$(json_of reason "$1" detail "$detail")"
+    else
+      authed POST "/bonds/$BOND/members/other/report" "$(json_of reason "$1")"
+    fi
+    show 201
+    echo "Reported. A person will read it. Your partner is not told."
+    ;;
   reports)
     # The queue of members' reports (FR-100, ADR-0053): the operator's, through the database, as the quarantine is.
     usage="usage: moyi reports list | show <reportId> | dismiss <reportId> \"<note>\" | reclassify <reportId> <reason> \"<note>\" | uphold <reportId> delete|block \"<note>\""
@@ -541,14 +561,16 @@ case "$cmd" in
         if [ -z "$out" ]; then echo "No report is open."; exit 0; fi
         # The function's columns after the first, in its order. A priority row (sexual content involving a minor) is
         # never viewed (ops/moderation/takedown.md §2), and says so; it comes first.
-        printf 'reportId\treason\tentryId\theld\tdetail\treceivedAt\n'
-        printf '%s\n' "$out" | awk -F '\t' 'BEGIN { OFS = "\t" } { p = $1; $1 = ""; sub(/^\t/, ""); if (p == "t") print $0, "DO NOT VIEW — runbook §2"; else print $0 }'
+        # An entry report names its entry and no member, a member report the member and no entry (V46): "-" for neither.
+        printf 'reportId\treason\ttarget\tentryId\tmemberId\theld\tdetail\treceivedAt\n'
+        printf '%s\n' "$out" | awk -F '\t' 'BEGIN { OFS = "\t" } { p = $1; $1 = ""; sub(/^\t/, ""); if ($4 == "") $4 = "-"; if ($5 == "") $5 = "-"; if (p == "t") print $0, "DO NOT VIEW — runbook §2"; else print $0 }'
         ;;
       show)
         [ $# -eq 1 ] || die "$usage"
         need_uuid reportId "$1"
         # The detail as a JSON string, so that what the reporter typed (a tab, a new line) cannot break a row here.
-        out="$(ops_sql "SELECT report_id, reason, status, entry_id, bond_id, received_at, coalesce(to_json(detail)::text, '-'),
+        out="$(ops_sql "SELECT report_id, reason, status, target, coalesce(entry_id::text, '-'), coalesce(reported_member_id::text, '-'),
+                               bond_id, received_at, coalesce(to_json(detail)::text, '-'),
                                media_id, media_kind, media_status, media_verdict
                         FROM entry_report_read(:'report'::uuid, :'actor');" "report=$1" "actor=$OPERATOR")" ||
           die "the database refused (see above)"
@@ -556,10 +578,11 @@ case "$cmd" in
         printf '%s\n' "$out" | awk -F '\t' '
           NR == 1 {
             print "report:     " $1; print "reason:     " $2 ($2 == "MINOR_SEXUAL_CONTENT" ? "   DO NOT VIEW its media — runbook §2" : "")
-            print "status:     " $3; print "entry:      " $4; print "bond:       " $5; print "received:   " $6
-            print "detail:     " $7; print "holds back:"
+            print "status:     " $3; print "target:     " $4; print "entry:      " $5; print "member:     " $6
+            print "bond:       " $7; print "received:   " $8
+            print "detail:     " $9; print "holds back:"
           }
-          $8 != "" { held++; print "  " $9 "\t" $8 "\t" $10 "\t" $11 }
+          $10 != "" { held++; print "  " $11 "\t" $10 "\t" $12 "\t" $13 }
           END { if (held == 0) print "  nothing" }'
         ;;
       dismiss)

@@ -44,7 +44,10 @@ import com.moyi.bond.domain.BondType as DomainBondType
  * also taking the `Membership` that proves it was checked.
  */
 @Service
-@Suppress("LongParameterList") // Seven collaborators, each one store or port the facts above are read from; nothing to bundle them into.
+@Suppress(
+    "LongParameterList", // Seven collaborators, each one store or port the facts above are read from; nothing to bundle them into.
+    "TooManyFunctions", // One override per BondAccess method; the member report (ADR-0053 decision 14) added the twelfth.
+)
 internal class BondAccessAdapter(
     private val guard: BondAccessGuard,
     private val bonds: BondStore,
@@ -150,6 +153,15 @@ internal class BondAccessAdapter(
         check(bond.members.size <= 2) { "a bond has more than two member rows; the partner is no longer one row" }
         val partner = bond.members.firstOrNull { it.id.value != membership.memberId } ?: return null
         return displayNameOf(users.find(partner.userId.value))
+    }
+
+    /** [partnerDisplayNameOf]'s read of the other row; none is the guard's own `404` (ADR-0053, amended for #127). */
+    @Transactional(readOnly = true)
+    override fun partnerMemberIdOf(membership: BondMembership): UUID {
+        val bond = bonds.findByMember(BondId(membership.bondId), UserId(membership.userId)) ?: throw BondNotFoundException()
+        check(bond.members.size <= 2) { "a bond has more than two member rows; the partner is no longer one row" }
+        val partner = bond.members.firstOrNull { it.id.value != membership.memberId } ?: throw BondNotFoundException()
+        return partner.id.value
     }
 
     private fun assemble(

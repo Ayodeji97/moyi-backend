@@ -2978,3 +2978,13 @@ Reality: that line is in the shared env, which the media worker reads too. The w
          comment now says the shared line stays.
 Wrong about: a config comment being a safe place for a procedure. A procedure that spans a
          vault, a cloud console and two roles belongs in a runbook, read end to end.
+## 2026-11-08 · Feature · Reporting the other member, and the 404 that had to come from bond (issue #127)
+
+Expected: a second report route would need a second table, a second queue and new reasons.
+Reality: none of them. The report table takes a `target` column and the operator's commands work
+         unchanged; "How they're treating me" was already `HARASSMENT`. The one real choice was where
+         the "nobody has joined yet" 404 is made: in `gratitude` it would have restated the bond's
+         message, so `BondAccess.partnerMemberIdOf` throws the bond's own exception, and a test
+         compares its bytes with a stranger's.
+Wrong about: nothing yet. Nothing the reported member reads may change, so the test reads their
+         bond and their today, bytes and ETag, before and after; the smoke does the same over HTTP.

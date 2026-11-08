@@ -702,6 +702,16 @@
       "endpoint": "POST /api/v1/auth/reset-password",
       "status": 415,
       "note": "A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/members/other/report",
+      "status": 409,
+      "note": "IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/members/other/report",
+      "status": 413,
+      "note": "MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route."
     }
   ]
 }
