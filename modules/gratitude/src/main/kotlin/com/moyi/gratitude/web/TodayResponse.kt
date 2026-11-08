@@ -7,6 +7,7 @@ import com.moyi.gratitude.domain.Readability
 import com.moyi.gratitude.service.PromptView
 import com.moyi.gratitude.service.ShownMedia
 import com.moyi.gratitude.service.TodayView
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -76,7 +77,7 @@ internal data class TodayResponse(
     companion object {
         fun from(view: TodayView): TodayResponse =
             TodayResponse(
-                bondDay = BondDayResponse(date = view.date, status = view.status),
+                bondDay = BondDayResponse(date = view.date, status = view.status, settlesAt = view.settlesAt),
                 myEntry =
                     view.myEntry?.let {
                         EntryResponse.of(
@@ -192,4 +193,12 @@ internal sealed interface PartnerEntryResponse {
 internal data class BondDayResponse(
     val date: LocalDate,
     val status: BondDayStatus,
+    /**
+     * When this day settles (BR-3a as amended 2026-11-08): its end on the bond's calendar plus
+     * the late-entry grace, twelve hours. An entry written on this day and sent before then
+     * counts for it; one sent after counts for the day it is sent. Until then the day is not
+     * decided: a lone entry is unlocked, a missed day counted and the streak moved only after.
+     * Never `null` here; the client compares it with its own clock only to word what it shows.
+     */
+    val settlesAt: Instant,
 )

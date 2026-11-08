@@ -3,7 +3,8 @@
 **Status:** Accepted · **Date:** 2026-10-05 · **Deciders:** Daniel
 **Amended:** 2026-10-09 (the status; "Owed — C5, the archive" discharged — ADR-0036);
 2026-10-22 ("Owed — C6" discharged — ADR-0041); 2026-11-08 (the ended run and the rest day's
-reason, issue #141: see "Amendment — 2026-11-08")
+reason, issue #141: see "Amendment — 2026-11-08"); 2026-11-08 (decision 8, the undecided days
+of the late-entry grace, issue #132 — ADR-0033 decision 15)
 
 *(2026-10-09: the status read "Proposed" until this date, though the slice merged as #55, and its rulings as #56, on 2026-10-06. Brought to the convention of ADR-0026 to ADR-0031, which say "Accepted"; noted in ADR-0036's slice.)*
 
@@ -113,6 +114,18 @@ earned beside the fourteen — every number moves together because one function 
 Nothing else is computed at read time. A run that has lapsed reads zero because the job
 wrote and evaluated the missed days, never because a read noticed a gap; and while the job
 is behind, today is *not* added to a run that yesterday may have ended.
+
+*Amended 2026-11-08 (issue #132, ADR-0033 decision 15).* Yesterday is not settled, so not
+evaluated, until twelve hours after it ends. "Today" here now reads **"every undecided day"**:
+today and any earlier day still inside its late-entry grace. Each is drawn `OPEN` (with
+`settlesAt`) until it has revealed, then `COMPLETE`; and the read steps each revealed one,
+oldest first, while each directly follows the last evaluated day or the one stepped before it
+(or is the bond's first shared day). The first undecided day that has not revealed stops the
+walk: today cannot extend a run that an open yesterday may yet break. Without this, a couple
+who completed yesterday would be shown one day less every morning until noon. The reads go:
+the stored run, then the last evaluated date, then the squares, so an evaluation committing
+between them leaves the number one short for a moment and never counts a day twice
+(`GetStreak`'s KDoc).
 
 **9. The streak's row is its mutex.** Evaluation and `recalculate` take the bond's
 `streak_states` row `FOR UPDATE` (inserted if absent) and hold it for the bond's

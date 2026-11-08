@@ -14,6 +14,11 @@ internal class DayAssignmentTest {
     private val kiritimati = ZoneId.of("Pacific/Kiritimati")
     private val never: (LocalDate) -> Boolean = { false }
 
+    private companion object {
+        /** The owner's ruling of 2026-11-08: BR-3a's window, and how long a day stays open after it ends. */
+        val GRACE = LateEntryGrace(Duration.ofHours(12))
+    }
+
     // ---- BR-3/BR-3a's trust checks, against a plain fixed-zone calendar --------
 
     @Test
@@ -30,7 +35,7 @@ internal class DayAssignmentTest {
         // worked example is illustrating.
         val manchester2330 = ZonedDateTime.of(2026, 1, 14, 23, 30, 0, 0, ZoneId.of("Europe/London")).toInstant()
 
-        DayAssignment.dateFor(manchester2330, null, fixed(lagos), never) shouldBe LocalDate.of(2026, 1, 15)
+        DayAssignment.dateFor(manchester2330, null, fixed(lagos), GRACE, never) shouldBe LocalDate.of(2026, 1, 15)
     }
 
     @Test
@@ -38,7 +43,7 @@ internal class DayAssignmentTest {
         val now = Instant.parse("2026-09-15T08:00:00Z")
         val yesterdayEvening = Instant.parse("2026-09-14T20:00:00Z")
 
-        val resolution = DayAssignment.resolve(now, yesterdayEvening, fixed(lagos), never)
+        val resolution = DayAssignment.resolve(now, yesterdayEvening, fixed(lagos), GRACE, never)
 
         resolution.date shouldBe LocalDate.of(2026, 9, 14)
         resolution.resolvedAt shouldBe yesterdayEvening
@@ -52,7 +57,7 @@ internal class DayAssignmentTest {
     fun `no intendedAt files against the submission instant, and says it did`() {
         val now = Instant.parse("2026-09-15T08:00:00Z")
 
-        val resolution = DayAssignment.resolve(now, null, fixed(lagos), never)
+        val resolution = DayAssignment.resolve(now, null, fixed(lagos), GRACE, never)
 
         resolution.date shouldBe LocalDate.of(2026, 9, 15)
         resolution.resolvedAt shouldBe now
@@ -69,15 +74,15 @@ internal class DayAssignmentTest {
     fun `intendedAt ahead of the server clock is ignored, by however much`() {
         val now = Instant.parse("2026-09-15T08:00:00Z")
 
-        DayAssignment.resolve(now, now.plusSeconds(1), fixed(lagos), never).usedIntendedAt shouldBe false
-        DayAssignment.resolve(now, now.plusSeconds(301), fixed(lagos), never).usedIntendedAt shouldBe false
+        DayAssignment.resolve(now, now.plusSeconds(1), fixed(lagos), GRACE, never).usedIntendedAt shouldBe false
+        DayAssignment.resolve(now, now.plusSeconds(301), fixed(lagos), GRACE, never).usedIntendedAt shouldBe false
         // Six minutes ahead across a midnight: Lagos's 14th ends at 14T23:00Z.
-        val sixAhead = Instant.parse("2026-09-14T22:57:00Z").let { DayAssignment.resolve(it, it.plusSeconds(360), fixed(lagos), never) }
+        val sixAhead = Instant.parse("2026-09-14T22:57:00Z").let { DayAssignment.resolve(it, it.plusSeconds(360), fixed(lagos), GRACE, never) }
         sixAhead.date shouldBe LocalDate.of(2026, 9, 14)
         sixAhead.resolvedAt shouldBe Instant.parse("2026-09-14T22:57:00Z")
         sixAhead.usedIntendedAt shouldBe false
         // Two days ahead fell back rather than filing a date in the future:
-        val farAhead = DayAssignment.resolve(now, now.plus(Duration.ofDays(2)), fixed(lagos), never)
+        val farAhead = DayAssignment.resolve(now, now.plus(Duration.ofDays(2)), fixed(lagos), GRACE, never)
         farAhead.date shouldBe LocalDate.of(2026, 9, 15)
         farAhead.resolvedAt shouldBe now
         farAhead.usedIntendedAt shouldBe false
@@ -97,7 +102,7 @@ internal class DayAssignmentTest {
         // The claim, taken at its word, would be the 15th.
         fixed(lagos).dayAt(phone)!!.date shouldBe LocalDate.of(2026, 9, 15)
 
-        val resolution = DayAssignment.resolve(now, phone, fixed(lagos), never)
+        val resolution = DayAssignment.resolve(now, phone, fixed(lagos), GRACE, never)
 
         resolution.date shouldBe LocalDate.of(2026, 9, 14)
         resolution.resolvedAt shouldBe now
@@ -105,19 +110,39 @@ internal class DayAssignmentTest {
         resolution.bounds shouldBe
             DayWindow(LocalDate.of(2026, 9, 14), Instant.parse("2026-09-13T23:00:00Z"), Instant.parse("2026-09-14T23:00:00Z"))
         // One nanosecond ahead is ahead; the submission instant itself is not.
-        DayAssignment.resolve(now, now.plusNanos(1), fixed(lagos), never).usedIntendedAt shouldBe false
-        DayAssignment.resolve(now, now, fixed(lagos), never).usedIntendedAt shouldBe true
+        DayAssignment.resolve(now, now.plusNanos(1), fixed(lagos), GRACE, never).usedIntendedAt shouldBe false
+        DayAssignment.resolve(now, now, fixed(lagos), GRACE, never).usedIntendedAt shouldBe true
     }
 
     @Test
-    fun `intendedAt more than thirty-six hours old is ignored`() {
+    fun `intendedAt more than the twelve-hour grace old is ignored, and one exactly twelve hours old is used`() {
         val now = Instant.parse("2026-09-15T08:00:00Z")
 
-        // 35h before 15T08:00Z is 13T21:00Z, which is 13T22:00 in Lagos.
-        DayAssignment.dateFor(now, now.minus(Duration.ofHours(35)), fixed(lagos), never) shouldBe LocalDate.of(2026, 9, 13)
-        val stale = DayAssignment.resolve(now, now.minus(Duration.ofHours(37)), fixed(lagos), never)
+        // 11h before 15T08:00Z is 14T21:00Z, which is 14T22:00 in Lagos.
+        DayAssignment.dateFor(now, now.minus(Duration.ofHours(11)), fixed(lagos), GRACE, never) shouldBe LocalDate.of(2026, 9, 14)
+        // The boundary is inclusive: exactly the grace old is still inside it.
+        DayAssignment.resolve(now, now.minus(Duration.ofHours(12)), fixed(lagos), GRACE, never).claim shouldBe DayAssignment.Claim.USED
+        val stale = DayAssignment.resolve(now, now.minus(Duration.ofHours(12)).minusNanos(1_000), fixed(lagos), GRACE, never)
         stale.date shouldBe LocalDate.of(2026, 9, 15)
         stale.usedIntendedAt shouldBe false
+        stale.claim shouldBe DayAssignment.Claim.TOO_OLD
+        // Thirty-five hours, inside the window before the ruling, is outside it now.
+        DayAssignment.resolve(now, now.minus(Duration.ofHours(35)), fixed(lagos), GRACE, never).claim shouldBe DayAssignment.Claim.TOO_OLD
+    }
+
+    /**
+     * Issue #132's own example: written offline at 23:00 and sent at 07:00, the entry counts for
+     * the day it was written. The window is the grace handed in, not a constant of this object.
+     */
+    @Test
+    fun `written offline at 23 00 and sent at 07 00, the entry is the earlier day's, and the grace is the one handed in`() {
+        // 23:00 in Lagos on the 14th is 14T22:00Z; 07:00 on the 15th is 15T06:00Z — eight hours on.
+        val written = Instant.parse("2026-09-14T22:00:00Z")
+        val sent = Instant.parse("2026-09-15T06:00:00Z")
+
+        DayAssignment.dateFor(sent, written, fixed(lagos), GRACE, never) shouldBe LocalDate.of(2026, 9, 14)
+        DayAssignment.resolve(sent, written, fixed(lagos), LateEntryGrace(Duration.ofHours(7)), never).claim shouldBe
+            DayAssignment.Claim.TOO_OLD
     }
 
     @Test
@@ -132,7 +157,7 @@ internal class DayAssignmentTest {
         val yesterday = Instant.parse("2026-09-14T20:00:00Z")
         val settled: (LocalDate) -> Boolean = { it == LocalDate.of(2026, 9, 14) }
 
-        val resolution = DayAssignment.resolve(now, yesterday, fixed(lagos), settled)
+        val resolution = DayAssignment.resolve(now, yesterday, fixed(lagos), GRACE, settled)
 
         resolution.date shouldBe LocalDate.of(2026, 9, 15)
         resolution.resolvedAt shouldBe now
@@ -144,13 +169,13 @@ internal class DayAssignmentTest {
     @Test
     fun `a forty-five minute offset and a DST boundary both land where the calendar says`() {
         val kathmandu = ZoneId.of("Asia/Kathmandu") // UTC+05:45
-        DayAssignment.dateFor(Instant.parse("2026-09-14T18:20:00Z"), null, fixed(kathmandu), never) shouldBe LocalDate.of(2026, 9, 15)
+        DayAssignment.dateFor(Instant.parse("2026-09-14T18:20:00Z"), null, fixed(kathmandu), GRACE, never) shouldBe LocalDate.of(2026, 9, 15)
 
         // Europe/London springs forward 2026-03-29 at 01:00 UTC — a 23-hour
         // day, running from 29T00:00Z (GMT midnight) to 29T23:00Z (BST
         // midnight). The window is the calendar's, carried through as given.
         val london = ZoneId.of("Europe/London")
-        val springForward = DayAssignment.resolve(Instant.parse("2026-03-29T01:30:00Z"), null, fixed(london), never)
+        val springForward = DayAssignment.resolve(Instant.parse("2026-03-29T01:30:00Z"), null, fixed(london), GRACE, never)
         springForward.date shouldBe LocalDate.of(2026, 3, 29)
         springForward.bounds.startsAt shouldBe Instant.parse("2026-03-29T00:00:00Z")
         springForward.bounds.endsAt shouldBe Instant.parse("2026-03-29T23:00:00Z")
@@ -166,7 +191,7 @@ internal class DayAssignmentTest {
         val now = Instant.parse("2026-09-15T08:00:00Z")
         val sinceCreation = BondCalendar { at -> if (at.isBefore(created)) null else fixed(lagos).dayAt(at) }
 
-        val resolution = DayAssignment.resolve(now, Instant.parse("2026-09-15T06:00:00Z"), sinceCreation, never)
+        val resolution = DayAssignment.resolve(now, Instant.parse("2026-09-15T06:00:00Z"), sinceCreation, GRACE, never)
 
         resolution.date shouldBe LocalDate.of(2026, 9, 15)
         resolution.resolvedAt shouldBe now
@@ -182,9 +207,9 @@ internal class DayAssignmentTest {
      */
     @Test
     fun `a resolution says what became of the claim - used, absent, or which of four reasons refused it`() {
-        // Created 25 hours before now: twelve hours back the bond exists,
-        // thirty-five hours back (inside the offline window) it does not.
-        val created = Instant.parse("2026-09-14T07:00:00Z")
+        // Created 3 hours before now: two hours back the bond exists,
+        // eleven hours back (inside the window) it does not.
+        val created = Instant.parse("2026-09-15T05:00:00Z")
         val now = Instant.parse("2026-09-15T08:00:00Z")
         val sinceCreation = BondCalendar { at -> if (at.isBefore(created)) null else fixed(lagos).dayAt(at) }
         val the14thIsSettled: (LocalDate) -> Boolean = { it == LocalDate.of(2026, 9, 14) }
@@ -192,18 +217,20 @@ internal class DayAssignmentTest {
         fun claim(
             intendedAt: Instant?,
             isSettled: (LocalDate) -> Boolean = never,
-        ) = DayAssignment.resolve(now, intendedAt, sinceCreation, isSettled)
+        ) = DayAssignment.resolve(now, intendedAt, sinceCreation, GRACE, isSettled)
 
+        val the15thIsSettled: (LocalDate) -> Boolean = { it == LocalDate.of(2026, 9, 15) }
         claim(null).claim shouldBe DayAssignment.Claim.ABSENT
-        claim(now.minus(Duration.ofHours(12))).claim shouldBe DayAssignment.Claim.USED
+        claim(now.minus(Duration.ofHours(2))).claim shouldBe DayAssignment.Claim.USED
         claim(now.plusSeconds(240)).claim shouldBe DayAssignment.Claim.AHEAD_OF_CLOCK
-        claim(now.minus(Duration.ofHours(37))).claim shouldBe DayAssignment.Claim.TOO_OLD
-        // 35 hours back is inside the window, and before the bond was created.
-        claim(now.minus(Duration.ofHours(35))).claim shouldBe DayAssignment.Claim.BEFORE_THE_BOND
-        claim(now.minus(Duration.ofHours(12)), the14thIsSettled).claim shouldBe DayAssignment.Claim.DAY_SETTLED
+        claim(now.minus(Duration.ofHours(13))).claim shouldBe DayAssignment.Claim.TOO_OLD
+        // 11 hours back is inside the window, and before the bond was created.
+        claim(now.minus(Duration.ofHours(11))).claim shouldBe DayAssignment.Claim.BEFORE_THE_BOND
+        claim(now.minus(Duration.ofHours(2)), the15thIsSettled).claim shouldBe DayAssignment.Claim.DAY_SETTLED
+        claim(now.minus(Duration.ofHours(2)), the14thIsSettled).claim shouldBe DayAssignment.Claim.USED
 
         // `usedIntendedAt` is the same fact, asked as a yes or no.
-        for (intendedAt in listOf(null, now, now.plusSeconds(1), now.minus(Duration.ofHours(37)), now.minus(Duration.ofHours(35)))) {
+        for (intendedAt in listOf(null, now, now.plusSeconds(1), now.minus(Duration.ofHours(13)), now.minus(Duration.ofHours(11)))) {
             val resolution = claim(intendedAt)
             resolution.usedIntendedAt shouldBe (resolution.claim == DayAssignment.Claim.USED)
         }
@@ -226,6 +253,7 @@ internal class DayAssignmentTest {
                 submittedAt = Instant.parse("2026-09-15T12:00:00Z"),
                 intendedAt = null,
                 calendar = calendar,
+                grace = GRACE,
                 isSettled = never,
             )
 
@@ -242,13 +270,14 @@ internal class DayAssignmentTest {
         // Written on a flight at 22:00Z on the 15th — Lagos's 15th, 23:00
         // local — and sent three hours later, at 16T01:00Z, by which time
         // Kiritimati decides dates and it is already 16T15:00 there. BR-3a's
-        // window (36h) accepts the claim; the calendar is what keeps it on
+        // window (12h) accepts the claim; the calendar is what keeps it on
         // the day it was actually written.
         val resolution =
             DayAssignment.resolve(
                 submittedAt = Instant.parse("2026-09-16T01:00:00Z"),
                 intendedAt = Instant.parse("2026-09-15T22:00:00Z"),
                 calendar = calendar,
+                grace = GRACE,
                 isSettled = never,
             )
 
@@ -277,9 +306,10 @@ internal class DayAssignmentTest {
         val resolution =
             DayAssignment.resolve(
                 submittedAt = Instant.parse("2026-09-17T05:00:00Z"),
-                // 33 hours earlier — inside BR-3a's 36-hour window.
-                intendedAt = Instant.parse("2026-09-15T20:00:00Z"),
+                // 9 hours earlier — inside BR-3a's 12-hour window, and still the merged 16th.
+                intendedAt = Instant.parse("2026-09-16T20:00:00Z"),
                 calendar = calendar,
+                grace = GRACE,
                 isSettled = {
                     askedAbout += it
                     false
@@ -303,7 +333,7 @@ internal class DayAssignmentTest {
         val at = Instant.parse("2026-09-15T23:00:00Z")
         val skipped = DayWindow(LocalDate.of(2026, 9, 16), at, at)
 
-        val resolution = DayAssignment.resolve(at, null, { skipped }, never)
+        val resolution = DayAssignment.resolve(at, null, { skipped }, GRACE, never)
 
         resolution.bounds shouldBe skipped
     }

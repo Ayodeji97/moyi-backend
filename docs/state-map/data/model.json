@@ -336,7 +336,7 @@
     },
     {
       "id": "event:day-ends",
-      "label": "the day ends and the close job runs",
+      "label": "the day ends, its twelve-hour late-entry grace runs out, and the close job runs",
       "actor": "system"
     },
     {

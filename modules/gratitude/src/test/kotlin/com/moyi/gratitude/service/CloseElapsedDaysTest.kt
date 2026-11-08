@@ -82,26 +82,82 @@ internal class CloseElapsedDaysTest(
     }
 
     @Test
-    fun `each bond's day closes when its own calendar says, whatever the others are doing`() {
+    fun `each bond's day closes when its own calendar says and its grace has run out, whatever the others are doing`() {
         val auckland = bondWithOneEntry("Pacific/Auckland")
         val kathmandu = bondWithOneEntry("Asia/Kathmandu")
         val lagos = bondWithOneEntry("Africa/Lagos")
 
-        // Auckland's day ended at 12:00Z, and is settled a minute later (`DayCloser.SETTLE_MARGIN`).
-        closer.closeElapsedDays(Instant.parse("2026-09-15T12:00:59Z"), BUDGET).closed shouldBe 0
+        // Auckland's day ended at 12:00Z. It is settled twelve hours later (BR-3a's
+        // late-entry grace) and a minute more (`DayCloser.SETTLE_MARGIN`): not at its end,
+        // and not a minute after it, which is when it was settled before the grace.
+        closer.closeElapsedDays(Instant.parse("2026-09-15T12:01:00Z"), BUDGET).closed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("2026-09-16T00:00:59Z"), BUDGET).closed shouldBe 0
+        statuses() shouldBe mapOf(auckland to "PARTIAL", kathmandu to "PARTIAL", lagos to "PARTIAL")
 
-        val afterAuckland = closer.closeElapsedDays(Instant.parse("2026-09-15T12:01:00Z"), BUDGET)
+        val afterAuckland = closer.closeElapsedDays(Instant.parse("2026-09-16T00:01:00Z"), BUDGET)
         afterAuckland.closed shouldBe 1
         afterAuckland.bondsChanged shouldBe setOf(UUID.fromString(auckland))
         statuses() shouldBe mapOf(auckland to "SOLO", kathmandu to "PARTIAL", lagos to "PARTIAL")
 
         // 18:15Z: Kathmandu's quarter-hour offset is why the job runs every fifteen minutes.
-        closer.closeElapsedDays(Instant.parse("2026-09-15T18:15:59Z"), BUDGET).closed shouldBe 0
-        closer.closeElapsedDays(Instant.parse("2026-09-15T18:16:00Z"), BUDGET).closed shouldBe 1
+        closer.closeElapsedDays(Instant.parse("2026-09-16T06:15:59Z"), BUDGET).closed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("2026-09-16T06:16:00Z"), BUDGET).closed shouldBe 1
         statuses() shouldBe mapOf(auckland to "SOLO", kathmandu to "SOLO", lagos to "PARTIAL")
 
-        closer.closeElapsedDays(Instant.parse("2026-09-15T23:01:00Z"), BUDGET).closed shouldBe 1
+        closer.closeElapsedDays(LAGOS_END, BUDGET).closed shouldBe 1
         statuses() shouldBe mapOf(auckland to "SOLO", kathmandu to "SOLO", lagos to "SOLO")
+    }
+
+    /**
+     * Issue #132, the reason for the grace: written offline before the day ended and sent the
+     * next morning, an entry counts for the day it was written, and the day is decided once,
+     * after that — not at midnight, where the lone entry would have closed `SOLO`, been
+     * unlocked to the partner and broken the streak, and the late entry been filed on today.
+     */
+    @Test
+    fun `a day left open through its grace takes a late entry, and is decided once, after it`() {
+        val (bond, ada, bea) = pairedBond("Africa/Lagos")
+        submit(ada, bond, "hers").status shouldBe 201
+
+        // 07:00 on the 16th in Lagos: the 15th ended eight hours ago. The job leaves it open.
+        clock.set(Instant.parse("2026-09-16T06:00:00Z"))
+        val inGrace = closer.closeElapsedDays(clock.instant(), BUDGET)
+        inGrace.closed shouldBe 0
+        inGrace.created shouldBe 0
+        statuses() shouldBe mapOf(bond to "PARTIAL")
+        events("DayClosed") shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM entries WHERE revealed_at IS NOT NULL", Int::class.java) shouldBe 0
+
+        // Bea wrote at 23:00 on the 15th, offline, and her phone sends it now.
+        submitIntended(bea, bond, "his, from the flight", Instant.parse("2026-09-15T22:00:00Z")).let { response ->
+            response.status shouldBe 201
+            response.contentAsString shouldContain "\"date\":\"2026-09-15\""
+        }
+        jdbc.queryForObject("SELECT status FROM bond_days WHERE date = '2026-09-15'", String::class.java) shouldBe "REVEALED"
+
+        // The grace runs out at 11:00Z on the 16th; the job settles the day a minute later, once.
+        closer.closeElapsedDays(Instant.parse("2026-09-16T11:00:59Z"), BUDGET).closed shouldBe 0
+        closer.closeElapsedDays(LAGOS_END, BUDGET).closed shouldBe 1
+        closer.closeElapsedDays(LAGOS_END.plusSeconds(900), BUDGET).closed shouldBe 0
+        jdbc.queryForObject("SELECT status FROM bond_days WHERE date = '2026-09-15'", String::class.java) shouldBe "REVEALED"
+        jdbc.queryForObject("SELECT evaluated_as FROM bond_days WHERE date = '2026-09-15'", String::class.java) shouldBe "COMPLETE"
+        events("DayClosed") shouldBe 1
+    }
+
+    @Test
+    fun `a day nobody opened is not written closed inside its grace, so a late entry can still open it`() {
+        val (bond, _, bea) = pairedBond("Africa/Lagos")
+
+        clock.set(Instant.parse("2026-09-16T06:00:00Z"))
+        closer.closeElapsedDays(clock.instant(), BUDGET).created shouldBe 0
+        jdbc.queryForObject("SELECT count(*) FROM bond_days", Int::class.java) shouldBe 0
+
+        submitIntended(bea, bond, "his, late", Instant.parse("2026-09-15T22:00:00Z")).contentAsString shouldContain
+            "\"date\":\"2026-09-15\""
+        statuses() shouldBe mapOf(bond to "PARTIAL")
+
+        closer.closeElapsedDays(LAGOS_END, BUDGET).closed shouldBe 1
+        statuses() shouldBe mapOf(bond to "SOLO")
     }
 
     @Test
@@ -263,19 +319,21 @@ internal class CloseElapsedDaysTest(
 
     @Test
     fun `days that are looked at and left do not use up the budget of the days behind them`() {
+        // Los Angeles, so that the five reveal times (22:00 there, 05:00Z on the 16th) are
+        // still ahead when Auckland's day settles, twelve hours after it ends.
         repeat(5) {
-            val (bond, ada, bea) = pairedBond("Africa/Lagos")
+            val (bond, ada, bea) = pairedBond("America/Los_Angeles")
             jdbc.update("UPDATE bonds SET reveal_time_local = '22:00' WHERE id = ?::uuid", bond)
             submit(ada, bond, "hers").status shouldBe 201
             submit(bea, bond, "his").status shouldBe 201
         }
         val ended = bondWithOneEntry("Pacific/Auckland")
 
-        // Auckland's day is over at 12:00Z; the five Lagos days are pending until 21:00Z.
+        // Auckland's day is over at 12:00Z and settles at 00:01Z; the five days are pending until 05:00Z.
         val result =
             assertTimeoutPreemptively(
                 Duration.ofSeconds(30),
-                ThrowingSupplier { closer.closeElapsedDays(Instant.parse("2026-09-15T12:01:00Z"), budget = 1) },
+                ThrowingSupplier { closer.closeElapsedDays(Instant.parse("2026-09-16T00:01:00Z"), budget = 1) },
             )
 
         result.closed shouldBe 1
@@ -363,6 +421,21 @@ internal class CloseElapsedDaysTest(
             }.andReturn()
             .response
 
+    private fun submitIntended(
+        caller: UUID,
+        bondId: String,
+        text: String,
+        intendedAt: Instant,
+    ): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/bonds/$bondId/entries") {
+                header(HttpHeaders.AUTHORIZATION, bearer(caller))
+                header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"text":"$text","intendedAt":"$intendedAt"}"""
+            }.andReturn()
+            .response
+
     private fun bearer(userId: UUID): String = "Bearer ${tokens.issue(userId).token}"
 
     private fun codeOf(response: MockHttpServletResponse): String =
@@ -381,8 +454,11 @@ internal class CloseElapsedDaysTest(
     private companion object {
         val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
 
-        /** A minute past Lagos's midnight: the first instant the job settles the 15th (`DayCloser.SETTLE_MARGIN`). */
-        val LAGOS_END: Instant = Instant.parse("2026-09-15T23:01:00Z")
+        /**
+         * Twelve hours and a minute past Lagos's midnight: the first instant the job settles the
+         * 15th (BR-3a's late-entry grace, then `DayCloser.SETTLE_MARGIN`).
+         */
+        val LAGOS_END: Instant = Instant.parse("2026-09-16T11:01:00Z")
         const val BUDGET = 1_000
     }
 }

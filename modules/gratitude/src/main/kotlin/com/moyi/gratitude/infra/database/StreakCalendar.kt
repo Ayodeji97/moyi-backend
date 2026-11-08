@@ -5,6 +5,7 @@ import com.moyi.gratitude.domain.DayOutcome
 import com.moyi.gratitude.domain.StreakDay
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -33,12 +34,16 @@ internal data class CompleteDays(
 internal class StreakCalendar(
     private val jdbc: JdbcTemplate,
 ) {
-    /** The bond's squares from [from] to [to], oldest first. A date the calendar does not draw is not in the list. */
+    /**
+     * The bond's squares from [from] to [to], oldest first. A date the calendar does not draw is
+     * not in the list. [undecided] is the dates not yet decided — today, and any day inside its
+     * late-entry grace — each with when it settles (`GetStreak`).
+     */
     fun between(
         bondId: UUID,
         from: LocalDate,
         to: LocalDate,
-        today: LocalDate,
+        undecided: Map<LocalDate, Instant>,
     ): List<StreakDay> =
         jdbc
             .query(
@@ -47,7 +52,7 @@ internal class StreakCalendar(
                     val date = row.getObject("date", LocalDate::class.java)
                     val status = BondDayStatus.valueOf(row.getString("status"))
                     val outcome = row.getString("evaluated_as")?.let(DayOutcome::valueOf)
-                    StreakDay.of(date, status, outcome, isToday = date == today)
+                    StreakDay.of(date, status, outcome, undecided[date])
                 },
                 bondId,
                 from,

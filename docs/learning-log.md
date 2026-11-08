@@ -3009,3 +3009,20 @@ Wrong about: naming `/me`'s new body `MeResponse`. The name was already the bond
          only reading the contract diff showed it. (Also designed in, not found by a run:
          `/me` reports the current version's row before the newest, or a rolled-back version would
          prompt for ever, re-consent writing nothing.)
+
+## 2026-11-08 · Feature · A Bond-day stays open twelve hours past its end (issue #132, ADR-0033 decision 15)
+
+Expected: one threshold in the close job: settle days that ended twelve hours ago, not one
+         minute ago.
+Reality: three places had to move together, and the third was not the obvious one. The close
+         threshold, BR-3a's window (36 h became 12 h, and is now the same `LateEntryGrace`, so the
+         two cannot drift apart), and the missing-days step, which writes days nobody opened
+         closed `EMPTY` a minute after midnight: left alone, it would have settled the very day
+         a late entry was meant for, through the other door. And every reader that took "past"
+         to mean "decided" — the streak drew only today as open and added only today, so a
+         couple who completed yesterday would have been shown one day less every morning until
+         noon. The streak now walks every undecided day, oldest first.
+Wrong about: the walk's first version stopped at a square the job had already evaluated,
+         because "undecided" was computed from the read's clock while the test's job had run at
+         a later instant. A square already in the stored run is skipped, not a reason to stop.
+         Found by the existing streak tests, not the new ones.

@@ -1,5 +1,6 @@
 package com.moyi.gratitude.domain
 
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -129,7 +130,9 @@ internal enum class DayOutcome {
  * miss. `GET /today` already says as much about each day while it is today.
  *
  * Today, until it is complete, is still only [OPEN] here: who has written so
- * far today is `GET /today`'s to say.
+ * far today is `GET /today`'s to say. So is yesterday, while its late-entry
+ * grace runs (BR-3a as amended 2026-11-08): an entry sent late may still land
+ * on it, and nothing about it is decided until the close job settles it.
  */
 internal enum class StreakCell {
     /** Both wrote. */
@@ -144,7 +147,10 @@ internal enum class StreakCell {
     /** Nobody wrote. Not in the run. */
     MISSED,
 
-    /** Today, not complete yet. Whether anybody has written is `GET /today`'s to say, not this calendar's. */
+    /**
+     * Not decided yet, and not complete: today, or an earlier day inside its late-entry grace
+     * ([LateEntryGrace]). Whether anybody has written is `GET /today`'s to say, not this calendar's.
+     */
     OPEN,
     ;
 
@@ -154,19 +160,22 @@ internal enum class StreakCell {
          * (`null`: not evaluated yet), or `null` for a day the calendar does
          * not draw:
          *
-         * - a day not yet evaluated, unless it is today — its square could
-         *   still change (a missed day may become a rest day), and "the
-         *   numbers must agree with the grid": the run counts evaluated days;
+         * - a day not yet evaluated, unless it is [undecided] — its square
+         *   could still change (a missed day may become a rest day), and "the
+         *   numbers must agree with the grid": the run counts evaluated days.
+         *   An [undecided] day is today or one inside its late-entry grace,
+         *   which is drawn [COMPLETE] once it has revealed (that much cannot
+         *   change) and [OPEN] until then;
          * - a suspended day, and a missed day after the bond had ended, which
          *   moved nothing and must not sit in the grid looking like a break.
          */
         fun of(
             status: BondDayStatus,
             outcome: DayOutcome?,
-            isToday: Boolean,
+            undecided: Boolean,
         ): StreakCell? =
             when {
-                isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN
+                undecided && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN
                 outcome == DayOutcome.COMPLETE -> COMPLETE
                 outcome == DayOutcome.FROZEN_BY_SKIP -> FROZEN
                 outcome == DayOutcome.MISSED -> missed(status)
@@ -195,14 +204,20 @@ internal enum class FrozenReason {
     TIMEZONE_SHIFT,
 }
 
-/** One square of a bond's calendar. [reason] is set on a [StreakCell.FROZEN] square and on no other. */
+/**
+ * One square of a bond's calendar. [reason] is set on a [StreakCell.FROZEN] square and on no
+ * other; [settlesAt] on an [StreakCell.OPEN] square and on no other: when the day's late-entry
+ * grace runs out and the close job decides it (BR-3a, [LateEntryGrace.settlesAt]).
+ */
 internal data class StreakDay(
     val date: LocalDate,
     val cell: StreakCell,
     val reason: FrozenReason? = null,
+    val settlesAt: Instant? = null,
 ) {
     init {
         require((cell == StreakCell.FROZEN) == (reason != null)) { "a square has a reason exactly when it is FROZEN" }
+        require((cell == StreakCell.OPEN) == (settlesAt != null)) { "a square says when it settles exactly when it is OPEN" }
     }
 
     companion object {
@@ -212,21 +227,24 @@ internal data class StreakDay(
          * change stepped over is evaluated [DayOutcome.FROZEN_BY_SKIP], and a missed day becomes
          * `FROZEN` when, and only when, it spends a freeze (`StreakStore.recordDay`; V17's
          * `bond_days_freeze_check`). So the outcome says which.
+         *
+         * [settlesAt] is non-null exactly for an undecided day (today, or one inside its grace),
+         * and is when it settles; the square carries it only if it is drawn [StreakCell.OPEN].
          */
         fun of(
             date: LocalDate,
             status: BondDayStatus,
             outcome: DayOutcome?,
-            isToday: Boolean,
+            settlesAt: Instant?,
         ): StreakDay? =
-            StreakCell.of(status, outcome, isToday)?.let { cell ->
+            StreakCell.of(status, outcome, undecided = settlesAt != null)?.let { cell ->
                 val reason =
                     when {
                         cell != StreakCell.FROZEN -> null
                         outcome == DayOutcome.FROZEN_BY_SKIP -> FrozenReason.TIMEZONE_SHIFT
                         else -> FrozenReason.REST_DAY
                     }
-                StreakDay(date, cell, reason)
+                StreakDay(date, cell, reason, settlesAt.takeIf { cell == StreakCell.OPEN })
             }
     }
 }

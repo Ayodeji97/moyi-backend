@@ -784,9 +784,9 @@ class ArchitectureTest {
                 .orEmpty()
                 .map { it.type.name }
         assertTrue(
-            handed.sorted() == listOf("BondAccess", "Clock", "GetStreak", "StreakCalendar") &&
+            handed.sorted() == listOf("BondAccess", "GetStreak", "StreakCalendar") &&
                 milestones.secondaryConstructors.isEmpty(),
-            "GetMilestones is handed the bond's access port, the calendar, the streak's rule for today and the clock, " +
+            "GetMilestones is handed the bond's access port, the calendar and the streak's rule for the undecided days, " +
                 "and nothing else. Found: $handed",
         )
 

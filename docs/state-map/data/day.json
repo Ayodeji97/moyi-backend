@@ -86,7 +86,7 @@
     "to": "SUSPENDED",
     "status": 201,
     "code": null,
-    "reason": "The draft is within the 36-hour offline window and the day has no row, so this write opens it, and opens it SUSPENDED. A day that ended before the bond became two people is suspended for good, so nothing on it is revealed, even with both entries in. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
+    "reason": "The draft is within the twelve-hour late-entry grace and the day has no row, so this write opens it, and opens it SUSPENDED. A day that ended before the bond became two people is suspended for good, so nothing on it is revealed, even with both entries in. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
     "rule": "ADR-0032 §7",
     "evidence": "test",
     "evidenceRef": "JoiningDayTest#back-filling a day from before the pairing does not reveal it when it had no row",
@@ -184,6 +184,37 @@
     "evidence": "smoke",
     "evidenceRef": "an entry with typographic characters is 201, and echoes them",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#copy(status = BondDayStatus.REVEALED, revealedAt = revealedAt ?: now.truncatedTo(ChronoUnit.MICROS))"
+  },
+  {
+    "id": "day-partial-write-late",
+    "region": "day",
+    "from": "PARTIAL",
+    "action": "POST /api/v1/bonds/{bondId}/entries",
+    "actor": "you",
+    "when": "the bond takes entries, the day has ended but less than twelve hours ago, your partner wrote on it and you have not, and your offline draft's intendedAt names it",
+    "guards": [
+      {
+        "region": "account",
+        "states": [
+          "SIGNED_IN"
+        ]
+      },
+      {
+        "region": "bond",
+        "states": [
+          "ACTIVE"
+        ]
+      }
+    ],
+    "outcome": "ok",
+    "to": "REVEALED",
+    "status": 201,
+    "code": null,
+    "reason": "A day stays open for twelve hours after it ends (the late-entry grace), so an entry written on it offline and sent in that time is filed on it, not on today, and is the second entry: both are revealed, as on the day itself. A draft older than twelve hours is filed on today instead. The day is closed, and the streak decided, only once the grace has run out. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.",
+    "rule": "FR-045, BR-3a (amended 2026-11-08), ADR-0033 §15",
+    "evidence": "test",
+    "evidenceRef": "CloseElapsedDaysTest#a day left open through its grace takes a late entry, and is decided once, after it",
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/CloseElapsedDays.kt#val endedAsOf = grace.closesDaysEndedBy(now).minus(DayCloser.SETTLE_MARGIN)"
   },
   {
     "id": "day-partial-write-waits",
@@ -1986,7 +2017,7 @@
     "to": "PARTIAL",
     "status": 200,
     "code": null,
-    "reason": "Nobody can write in a bond that has stopped taking entries, so today is not drawn as open: the calendar ends at the last day that has a square. The day's row stays unsettled until midnight all the same.",
+    "reason": "Nobody can write in a bond that has stopped taking entries, so today is not drawn as open: the calendar ends at the last day that has a square. The day's row stays unsettled until its twelve-hour late-entry grace has run out all the same.",
     "rule": "ADR-0034 §12",
     "evidence": "test",
     "evidenceRef": "StreakEndpointTest#a bond that ended today after one had written has no open square either",
@@ -2082,7 +2113,7 @@
     "to": "REVEALED",
     "status": 200,
     "code": null,
-    "reason": "The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; after midnight the close job evaluates it and stores the same number.",
+    "reason": "The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; once its twelve-hour late-entry grace has run out the close job evaluates it and stores the same number. Yesterday, while its grace runs, is added the same way once it has revealed.",
     "rule": "FR-071",
     "evidence": "smoke",
     "evidenceRef": "the streak counts today once both have written",
@@ -2738,8 +2769,8 @@
     "to": "EMPTY",
     "status": null,
     "code": null,
-    "reason": "The day ended with no live entry. The close job, which runs a minute past every quarter-hour, closes it as EMPTY.",
-    "rule": "FR-063, ADR-0033 §3",
+    "reason": "The day ended with no live entry, and its twelve-hour late-entry grace has run out: until then an offline draft written on it may still arrive. The close job, which runs a minute past every quarter-hour, then closes it as EMPTY, once.",
+    "rule": "FR-063, BR-3a, ADR-0033 §3 and §15",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day nobody ended up writing on closes EMPTY",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.OPEN -> {"
@@ -2756,8 +2787,8 @@
     "to": "SOLO",
     "status": null,
     "code": null,
-    "reason": "The day ended with one entry, so it closes as a solo day.",
-    "rule": "FR-063",
+    "reason": "The day ended with one entry and its twelve-hour late-entry grace has run out, so it closes as a solo day and the lone entry is unlocked to the partner. Not at midnight: until the grace runs out the partner's offline draft may still complete it, and the lone entry stays locked to them.",
+    "rule": "FR-063, BR-3a, ADR-0033 §15",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day one member wrote on closes SOLO and their entry is revealed",
     "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/BondDay.kt#status == BondDayStatus.PARTIAL -> {"
@@ -2810,7 +2841,7 @@
     "to": "REVEALED",
     "status": null,
     "code": null,
-    "reason": "A reveal time later than the day's own end cannot hold the entries back past it: the day is revealed and closed in one step.",
+    "reason": "A reveal time later than the day's own end cannot hold the entries back past it: the day is revealed and closed in one step. It is closed only once its twelve-hour late-entry grace has run out (ADR-0033 §15).",
     "rule": "ADR-0033 §3, ADR-0035 question 9",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day still pending at its end is revealed once and closed, in one run",
@@ -2828,7 +2859,7 @@
     "to": "PENDING_REVEAL",
     "status": null,
     "code": null,
-    "reason": "The day ends and closes still PENDING_REVEAL: it gains closedAt and nothing else. Neither entry is revealed, one DayClosed is written and no DayRevealed. It counts as COMPLETE, so the streak and the milestones count it (owner, 2026-10-22), and it is the third status that is settled without being isClosed.",
+    "reason": "The day ends and closes still PENDING_REVEAL: it gains closedAt and nothing else. Neither entry is revealed, one DayClosed is written and no DayRevealed. It counts as COMPLETE, so the streak and the milestones count it (owner, 2026-10-22), and it is the third status that is settled without being isClosed. It is closed only once its twelve-hour late-entry grace has run out (ADR-0033 §15).",
     "rule": "ADR-0035 question 9, ADR-0040",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day both wrote on is withheld when the bond was archived before its reveal - nothing revealed, closed pending",
@@ -2846,7 +2877,7 @@
     "to": "REVEALED",
     "status": null,
     "code": null,
-    "reason": "A day revealed while it was running is stamped closed and nothing else about it changes.",
+    "reason": "A day revealed while it was running is stamped closed and nothing else about it changes. It is closed only once its twelve-hour late-entry grace has run out (ADR-0033 §15).",
     "rule": "ADR-0033 §3",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day both wrote on, revealed while it was open, gains closedAt and one DayClosed",
@@ -2864,7 +2895,7 @@
     "to": "SUSPENDED",
     "status": null,
     "code": null,
-    "reason": "A day that ended before the bond became two people is stamped closed as it stands. Nothing on it is revealed and it stays private for good.",
+    "reason": "A day that ended before the bond became two people is stamped closed as it stands. Nothing on it is revealed and it stays private for good. It is closed only once its twelve-hour late-entry grace has run out (ADR-0033 §15).",
     "rule": "doc 04 §8.3a, ADR-0033 §3",
     "evidence": "test",
     "evidenceRef": "CloseDayTest#a day from before the pairing is closed as it stands - still suspended, nothing revealed, no event",

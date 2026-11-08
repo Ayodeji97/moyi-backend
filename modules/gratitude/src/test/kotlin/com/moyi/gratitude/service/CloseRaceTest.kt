@@ -191,6 +191,56 @@ internal class CloseRaceTest(
         jdbc.queryForObject("SELECT count(*) FROM entries WHERE text IS NULL AND revealed_at IS NOT NULL", Int::class.java) shouldBe 1
     }
 
+    // --- a late entry at the grace boundary (issue #132, BR-3a as amended 2026-11-08) ---
+
+    /**
+     * The last instant the 15th takes a late entry: twelve hours after it ends, less a second.
+     * The entry's `intendedAt` is a second before the 15th ended, so it is exactly the grace old
+     * and still trusted. The closer's run is a minute and a second later, as a job on an instance
+     * whose clock is ahead would be; the two then meet on the bond's lock.
+     */
+    private fun aLateEntryAtTheGraceBoundary(): () -> MockHttpServletResponse {
+        submit(bea, """{"text":"his, on the day"}""").status shouldBe 201
+        clock.set(GRACE_ENDS.minusSeconds(1))
+        return { submit(ada, """{"text":"hers, sent late","intendedAt":"${END.minusSeconds(1)}"}""") }
+    }
+
+    private val graceRun: Instant = GRACE_ENDS.plus(DayCloser.SETTLE_MARGIN)
+
+    @Test
+    fun `a late entry that reaches the bond before the closer counts for its day, and the closer settles the day with it`() {
+        val late = aLateEntryAtTheGraceBoundary()
+
+        val (submitted, run) = inOrder(late, { closer.closeElapsedDays(graceRun, budget = 100) })
+
+        submitted.status shouldBe 201
+        submitted.contentAsString shouldContain "\"date\":\"2026-09-15\""
+        run.closed shouldBe 1
+        // Decided once, with both entries: revealed by the late one, then closed as it stood.
+        jdbc.queryForObject("SELECT status FROM bond_days WHERE date = '2026-09-15'", String::class.java) shouldBe "REVEALED"
+        jdbc.queryForObject("SELECT entry_count FROM bond_days WHERE date = '2026-09-15'", Int::class.java) shouldBe 2
+        jdbc.queryForObject("SELECT count(*) FROM outbox_events WHERE event_type = 'DayClosed'", Int::class.java) shouldBe
+            jdbc.queryForObject("SELECT count(*) FROM bond_days WHERE closed_at IS NOT NULL", Int::class.java)
+    }
+
+    @Test
+    fun `a late entry behind the closer finds its day settled, and is filed on today, never on the settled day`() {
+        val late = aLateEntryAtTheGraceBoundary()
+
+        val (run, submitted) = inOrder({ closer.closeElapsedDays(graceRun, budget = 100) }, late)
+
+        run.closed shouldBe 1
+        submitted.status shouldBe 201
+        submitted.contentAsString shouldContain "\"date\":\"2026-09-16\""
+        // Settled without it: Bea's lone entry, SOLO and unlocked, and nothing filed on it since.
+        jdbc.queryForObject("SELECT status FROM bond_days WHERE date = '2026-09-15'", String::class.java) shouldBe "SOLO"
+        jdbc.queryForObject("SELECT entry_count FROM bond_days WHERE date = '2026-09-15'", Int::class.java) shouldBe 1
+        jdbc.queryForObject(
+            "SELECT count(*) FROM entries e JOIN bond_days d ON d.id = e.bond_day_id WHERE d.date = '2026-09-15'",
+            Int::class.java,
+        ) shouldBe 1
+    }
+
     // --- the closer against itself: ShedLock lost, or two instances mid-deploy ---
 
     @Test
@@ -236,8 +286,8 @@ internal class CloseRaceTest(
                 val accepting = pool.submit(Callable { accept(dan, codeOf(created)) })
                 try {
                     awaitQueued(pid, 1)
-                    // Five seconds past midnight: the pairing has not committed.
-                    closer.closeElapsedDays(END.plusSeconds(5), budget = 100).closed shouldBe 0
+                    // Five seconds past the day's grace: the pairing has not committed.
+                    closer.closeElapsedDays(GRACE_ENDS.plusSeconds(5), budget = 100).closed shouldBe 0
                     jdbc.queryForObject("SELECT closed_at IS NULL FROM bond_days WHERE bond_id = '$waiting'", Boolean::class.java) shouldBe
                         true
                 } finally {
@@ -247,7 +297,7 @@ internal class CloseRaceTest(
             }
 
         accepted.status shouldBe 200
-        closer.closeElapsedDays(END.plus(DayCloser.SETTLE_MARGIN), budget = 100).closed shouldBe 1
+        closer.closeElapsedDays(GRACE_ENDS.plus(DayCloser.SETTLE_MARGIN), budget = 100).closed shouldBe 1
         jdbc.queryForObject("SELECT status FROM bond_days WHERE bond_id = '$waiting'", String::class.java) shouldBe "SOLO"
         jdbc.queryForObject("SELECT count(*) FROM entries WHERE bond_id = '$waiting' AND revealed_at IS NOT NULL", Int::class.java) shouldBe
             1
@@ -261,7 +311,7 @@ internal class CloseRaceTest(
         val waiting = idOf(created)
         submitTo(waiting, cara, """{"text":"written while waiting"}""").status shouldBe 201
         val activationBeforeLock = END.minusSeconds(30)
-        val activationAfterWait = END.plusSeconds(90)
+        val activationAfterWait = GRACE_ENDS.plusSeconds(90)
         clock.set(activationBeforeLock)
 
         dataSource.connection.use { holder ->
@@ -454,5 +504,8 @@ internal class CloseRaceTest(
     private companion object {
         val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
         val END: Instant = Instant.parse("2026-09-15T23:00:00Z")
+
+        /** When the day's twelve-hour late-entry grace runs out (BR-3a as amended 2026-11-08). */
+        val GRACE_ENDS: Instant = END.plus(Duration.ofHours(12))
     }
 }

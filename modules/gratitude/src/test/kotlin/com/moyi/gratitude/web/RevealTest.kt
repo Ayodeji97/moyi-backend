@@ -114,7 +114,7 @@ internal class RevealTest(
         for (member in listOf(ada, bea)) {
             val seen = today(member).contentAsString
             // FR-062: not PARTIAL, which would tell each of them the other has not written.
-            seen shouldContain "\"bondDay\":{\"date\":\"2026-09-15\",\"status\":\"PENDING_REVEAL\"}"
+            seen shouldContain "\"bondDay\":{\"date\":\"2026-09-15\",\"status\":\"PENDING_REVEAL\",\"settlesAt\":\"2026-09-16T11:00:00Z\"}"
             partnerEntryOf(seen) shouldMatch LOCKED_SHAPE
         }
         // BR-7 forbids editing what the partner may have read. Nobody has read this yet.
@@ -213,7 +213,7 @@ internal class RevealTest(
         deleteEntry(ada, adas).status shouldBe 204
 
         val forBea = today(bea).contentAsString
-        forBea shouldContain "\"bondDay\":{\"date\":\"2026-09-15\",\"status\":\"OPEN\"}"
+        forBea shouldContain "\"bondDay\":{\"date\":\"2026-09-15\",\"status\":\"OPEN\",\"settlesAt\":\"2026-09-16T11:00:00Z\"}"
         forBea shouldContain "\"partnerEntry\":null"
         forBea shouldNotContain adas
         entryCount() shouldBe 0
