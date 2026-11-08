@@ -162,6 +162,14 @@ the remaining lifetime at send time (never negative; FCM's default is four weeks
 it after `stale_after` (review of #96). The owner writes the words in the apps'
 string tables.
 
+*Amended 2026-11-08 (issue #134).* Android's `notification.channel_id` is also sent: the
+category's name in lower case, the same stem as the localisation keys (`reveal`, `reminder`,
+`partner_joined`, `solo_unlock`, `milestone`, `on_this_day`, `proposal_opened`), so a person can
+mute one kind of push and keep another (doc 13 §7). The client creates one channel per category
+with exactly these ids; a push naming a channel the phone has not created is shown in the app's
+default channel, so adding a category means a client release that creates its channel.
+`FcmPushSenderTest` spells the list out, so a rename fails the build rather than the phone.
+
 **10. The provider posture is ADR-0017's.** `moyi.notification.push.provider` defaults to `FCM`,
 which refuses to start without `fcm.project-id`, `fcm.client-email` and `fcm.private-key-pem`
 (a key file's escaped `\n` accepted). `LOG` is asked for by name: the `local` profile, the test
