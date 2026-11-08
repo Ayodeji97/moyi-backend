@@ -83,9 +83,6 @@ internal class RotateRefreshToken(
      * @throws RefreshTokenInvalidException unknown, expired, revoked, or its user can no longer sign in
      */
     fun rotate(presented: String): RotatedTokens {
-        // Microseconds, the resolution Postgres keeps: `rotated_at` is read back
-        // and compared with a later `now` to measure the grace window.
-        val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
         val hash = runCatching { VerificationSecret(presented.trim()).hash() }.getOrNull()
 
         val outcome =
@@ -97,6 +94,13 @@ internal class RotateRefreshToken(
                 // waited for it. (The lookup above loads no entity, so this
                 // read is not answered from the persistence context.)
                 tokens.lockSessionsOf(UserId(found.userId))
+                // The clock is read only now, holding the lock, so it is never
+                // earlier than a rotation this request waited on: read before
+                // the wait, it was, and a window of 0 let the loser of a race
+                // through as a grace retry (security review of #153).
+                // Microseconds, the resolution Postgres keeps: `rotated_at` is
+                // read back and compared with a later `now`.
+                val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
                 val previous = tokens.lockById(found.id) ?: return@execute Outcome.Invalid
                 when {
                     previous.revokedAt != null -> Outcome.Invalid

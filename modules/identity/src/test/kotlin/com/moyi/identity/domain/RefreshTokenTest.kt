@@ -38,8 +38,10 @@ internal class RefreshTokenTest {
     }
 
     @Test
-    fun `a window of zero is strict rotation, except at the very instant of the rotation`() {
+    fun `a window of zero is strict rotation, even at the rotation's instant or a clock read before it`() {
         presented.admitsRetry(successor, rotatedAt.plusNanos(1_000), Duration.ZERO) shouldBe false
+        presented.admitsRetry(successor, rotatedAt, Duration.ZERO) shouldBe false
+        presented.admitsRetry(successor, rotatedAt.minusNanos(1_000), Duration.ZERO) shouldBe false
     }
 
     private fun token(

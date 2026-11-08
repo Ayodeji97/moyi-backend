@@ -255,6 +255,66 @@ internal class RefreshGraceWindowTest(
         noReuseEmail()
     }
 
+    @Test
+    fun `the clock is read after the wait, so a request never acts at an instant before a rotation it waited on`() {
+        // Security review of #153: `now` was read before the sessions lock. A request that read the clock at T
+        // and then waited while another rotated the token at T+1s acted at T, before that rotation. With the
+        // window at 0 that was a grace retry instead of a reuse. Here the holder plays the winner: it holds the
+        // sessions lock while the refresh waits, then rotates R1 at the later instant and commits. The refresh's
+        // grace retry voids that successor, and stamps it with its own `now`, which must not be the earlier one.
+        val first = signIn()
+        val user = jdbc.queryForObject("SELECT id FROM users", UUID::class.java)!!
+        val rotate = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+        val later: Instant
+        try {
+            val holderPid = CompletableFuture<Int>()
+            val holder =
+                pool.submit {
+                    transactions.execute {
+                        jdbc.queryForObject(
+                            "SELECT 1 FROM (SELECT pg_advisory_xact_lock(1, hashtext(CAST(? AS text)))) AS held",
+                            Int::class.java,
+                            user,
+                        )
+                        holderPid.complete(jdbc.queryForObject("SELECT pg_backend_pid()", Int::class.java))
+                        rotate.await(10, TimeUnit.SECONDS)
+                        val at = java.sql.Timestamp.from(clock.instant())
+                        val successor = UUID.randomUUID()
+                        jdbc.update(
+                            """
+                            INSERT INTO refresh_tokens (id, user_id, family_id, token_hash, issued_at, expires_at, device_id)
+                            SELECT ?, user_id, family_id, encode(sha256(convert_to(CAST(? AS text), 'UTF8')), 'hex'),
+                                   ?, expires_at, device_id
+                              FROM refresh_tokens
+                            """.trimIndent(),
+                            successor,
+                            successor,
+                            at,
+                        )
+                        jdbc.update("UPDATE refresh_tokens SET rotated_at = ?, replaced_by = ? WHERE id <> ?", at, successor, successor)
+                    }
+                }
+            val pid = holderPid.get(10, TimeUnit.SECONDS)
+            val waiting = pool.submit<MockHttpServletResponse> { refresh(first) }
+
+            await().atMost(Duration.ofSeconds(10)).until { waiting.isDone || waitingOn(pid) == 1 }
+            waiting.isDone shouldBe false
+
+            clock.advance(Duration.ofSeconds(1))
+            later = clock.instant()
+            rotate.countDown()
+            holder.get(10, TimeUnit.SECONDS)
+            waiting.get(10, TimeUnit.SECONDS).status shouldBe 200
+        } finally {
+            pool.shutdownNow()
+        }
+        jdbc
+            .queryForObject("SELECT voided_at FROM refresh_tokens WHERE voided_at IS NOT NULL", java.sql.Timestamp::class.java)!!
+            .toInstant() shouldBe later
+        liveTokens() shouldBe 1
+    }
+
     // ---- helpers -----------------------------------------------------------
 
     /** Registers and signs Ada in; returns her refresh token once registration's own email has gone. */

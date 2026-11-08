@@ -38,7 +38,9 @@ internal data class RefreshToken(
      * still live, so nobody has used it yet; and no more than [window] has
      * passed since the rotation, counted from the *first* rotation so that a
      * retry does not extend it. A used successor means two parties hold the
-     * family, which is a reuse whatever the time.
+     * family, which is a reuse whatever the time. A window of zero admits
+     * nothing, whatever the instants say: it is the switch back to strict
+     * rotation, and must not depend on two requests' clocks.
      */
     fun admitsRetry(
         successor: RefreshToken?,
@@ -46,7 +48,8 @@ internal data class RefreshToken(
         window: Duration,
     ): Boolean {
         val rotated = rotatedAt ?: return false
-        return voidedAt == null &&
+        return !window.isZero &&
+            voidedAt == null &&
             revokedAt == null &&
             successor != null &&
             successor.id == replacedBy &&
