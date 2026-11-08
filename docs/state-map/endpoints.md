@@ -532,9 +532,9 @@ write to support
 
 **Needs:** an access token.
 
-- Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same ticket, filed and acknowledged once. Without one, each request is a new ticket)
+- Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same ticket, filed once and acknowledged at most once. A replay spends one of the five a day too, so a retry can be 429: wait for Retry-After, then the same key returns the same ticket. Without one, each request is a new ticket)
 - Content-Type (application/json, {"subject": 1 to 120 characters, "body": 1 to 5000 characters}; characters are Unicode code points, and neither may be blank)
-- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Five messages a day per account, one back every 4.8 hours, spent before the body is checked, so a 422 uses one too. The sixth is 429 with Retry-After)
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Five messages a day per account, one back every 4.8 hours, spent before the body is checked, so a 422 and a replay use one too. The sixth is 429 with Retry-After)
 
 **Try it:**
 
@@ -547,7 +547,7 @@ curl -X POST "$API/support/messages" -H "Authorization: Bearer $TOKEN" -H "Idemp
 | Region | In | When | Answer | Why | Rule | Evidence |
 |---|---|---|---|---|---|---|
 | `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session. Support is reached from inside the app, signed in; a signed-out person writes to the published support address instead (ADR-0057 decision 1). Nothing is filed. | ADR-0057 §1 | smoke |
-| `account.session` | `ACCESS_VALID` |  | 201 stays | The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email goes to the account's address if that address is confirmed, with the id as a reference and without the subject or body. Five a day: the sixth is 429 with Retry-After. | ADR-0057 §2, §5 | smoke |
+| `account.session` | `ACCESS_VALID` |  | 201 stays | The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. Five a day: the sixth is 429 with Retry-After. | ADR-0057 §2, §5 | smoke |
 | `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes. Exchange the refresh token at POST /auth/refresh, then send it again; nothing was filed, so a key sent with it is still unused. | ADR-0019 §5 | never-run |
 | `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired | 201 stays | Ending one session does not cancel its access token: until its 15 minutes run out the message is filed as from a live session. | ADR-0021 §6, ADR-0025 §5 | never-run |
 | `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | After logout-all or a password reset, a token issued before that second is refused whatever its remaining life. Nothing is filed. | ADR-0019 §4 | never-run |

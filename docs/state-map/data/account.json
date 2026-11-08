@@ -2113,7 +2113,7 @@
     "to": "ACCESS_VALID",
     "status": 201,
     "code": null,
-    "reason": "The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email goes to the account's address if that address is confirmed, with the id as a reference and without the subject or body. Five a day: the sixth is 429 with Retry-After.",
+    "reason": "The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. Five a day: the sixth is 429 with Retry-After.",
     "rule": "ADR-0057 §2, §5",
     "evidence": "smoke",
     "evidenceRef": "a support message is 201 with its id and time",

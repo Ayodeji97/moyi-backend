@@ -44,15 +44,20 @@ nothing trimmed. A refusal is `422 VALIDATION_FAILED` naming the field, and neve
 client that sends one is not filed twice for a retry after a lost answer: the key, the ticket and the
 event commit together (`IdempotentExecution.once`), and a replay is `201` with
 `Idempotency-Replayed: true` and the same id and time, re-read, authorised as the sender's, with no
-second email. A client that sends none still files: a duplicate support message costs an operator a
+second email. **A replay spends one of the five a day too** (decision 9): the bucket is taken before
+the handler, and so before the key is looked up. A retried fifth message can therefore be `429`
+rather than its replayed `201`; the client waits for `Retry-After` and sends the same key again,
+which returns the same ticket and files nothing new. A client that sends none still files: a duplicate support message costs an operator a
 second read, and requiring the key would turn a client that forgot it into a person who cannot reach
 support. `ResultKind.SUPPORT_TICKET`, with V47 widening `idempotency_keys`' `CHECK`.
 
 **5. The acknowledgement is sent after the commit and never repeats the message.** The filing
 transaction publishes `SupportTicketFiled` (ids only); `AcknowledgeSupportTicket` hears it
-`AFTER_COMMIT` and `@Async`, as identity's `SendSecurityNotice` does, with the same accepted gap (a
-process death between the commit and the send loses the email; the ticket, which is what matters, is
-kept). The email says the message arrived and a person will reply to this address, gives the ticket
+`AFTER_COMMIT` and `@Async`, as identity's `SendSecurityNotice` does, with a wider accepted gap: **the
+acknowledgement is best effort, sent once and never retried.** A process death between the commit and
+the send loses it, and so does a provider that refuses it or cannot be reached (a 5xx, a 429, a
+timeout: `AccountMailOutcome.FAILED`, logged by identity and by ticket id here, not queued again).
+The ticket, which is what matters, is kept either way, and the client is never promised an email. The email says the message arrived and a person will reply to this address, gives the ticket
 id as a reference, and says why the words are not in it. **Neither the subject nor the body is in
 it**: an email passes through a provider, a mailbox and whoever else reads that mailbox. It is a
 transactional email (one message, about something the person just did, nothing to unsubscribe from),

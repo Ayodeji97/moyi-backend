@@ -1238,9 +1238,9 @@
     "machine": "account",
     "auth": "bearer",
     "headers": [
-      "Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same ticket, filed and acknowledged once. Without one, each request is a new ticket)",
+      "Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same ticket, filed once and acknowledged at most once. A replay spends one of the five a day too, so a retry can be 429: wait for Retry-After, then the same key returns the same ticket. Without one, each request is a new ticket)",
       "Content-Type (application/json, {\"subject\": 1 to 120 characters, \"body\": 1 to 5000 characters}; characters are Unicode code points, and neither may be blank)",
-      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Five messages a day per account, one back every 4.8 hours, spent before the body is checked, so a 422 uses one too. The sixth is 429 with Retry-After)"
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Five messages a day per account, one back every 4.8 hours, spent before the body is checked, so a 422 and a replay use one too. The sixth is 429 with Retry-After)"
     ],
     "requestErrors": [
       {

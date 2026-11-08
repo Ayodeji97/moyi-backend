@@ -42,10 +42,12 @@ internal fun documentSupport(api: OpenAPI) {
 
 private const val SUPPORT_DESCRIPTION =
     "Writes to Moyi's support, as the signed-in account: the message becomes a ticket a person reads, and `201` " +
-        "answers with its id and when it arrived. Once it is stored, an acknowledgement email goes to the account's " +
-        "address, if that address has been confirmed; it gives the id as a reference and never repeats the subject " +
-        "or the body. A signed-out person cannot use this route. An `Idempotency-Key` is optional: repeating the " +
-        "request with the same key is the same ticket, `201` again with `Idempotency-Replayed: true`, filed and " +
-        "acknowledged once; without a key, each request is a new ticket. A `subject` or `body` that is absent, null, " +
-        "blank or too long is `422` naming the field. Five messages a day per account, refused ones included: the " +
-        "sixth is `429` with `Retry-After`."
+        "answers with its id and when it arrived. Once it is stored, an acknowledgement email is attempted once, to the " +
+        "account's address if that address has been confirmed; it gives the id as a reference and never repeats the " +
+        "subject or the body. It is best effort and not promised: it is not retried if the email provider fails. A " +
+        "signed-out person cannot use this route. An `Idempotency-Key` is optional: repeating the request with the " +
+        "same key is the same ticket, `201` again with `Idempotency-Replayed: true`, filed once and acknowledged at " +
+        "most once; without a key, each request is a new ticket. A replay spends one of the five a day as well, so " +
+        "a retry can be `429`: wait for `Retry-After`, then the same key returns the same ticket. A `subject` or " +
+        "`body` that is absent, null, blank or too long is `422` naming the field. Five messages a day per account, " +
+        "refused ones and replays included: the sixth is `429` with `Retry-After`."
