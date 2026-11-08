@@ -2959,6 +2959,15 @@ Wrong about: a systemd service being active means its watcher is stable. Product
          would fail on the production V36 database. A fresh encrypted backup succeeded;
          the vault-dependent restore drill remains a separate deployment gate.
 
+## 2026-11-08 · Feature · One Android channel per push category (issue #134)
+
+Expected: every push already landed somewhere sensible on Android.
+Reality: without `android.notification.channel_id`, every category shares FCM's fallback
+         channel, so muting reminders would also mute reveals. The id is now the category's
+         lower-case name, derived from the same stem as the localisation keys, so the
+         two cannot drift.
+Wrong about: nothing yet. The list is spelt out in a test because the client creates these
+         ids, and a rename here would quietly move pushes to the default channel.
 
 ## 2026-11-08 · Feature · The ended run and the rest day's reason — one was stored already, one was in the audit log
 
