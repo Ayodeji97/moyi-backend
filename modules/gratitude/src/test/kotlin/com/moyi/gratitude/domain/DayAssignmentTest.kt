@@ -77,7 +77,11 @@ internal class DayAssignmentTest {
         DayAssignment.resolve(now, now.plusSeconds(1), fixed(lagos), GRACE, never).usedIntendedAt shouldBe false
         DayAssignment.resolve(now, now.plusSeconds(301), fixed(lagos), GRACE, never).usedIntendedAt shouldBe false
         // Six minutes ahead across a midnight: Lagos's 14th ends at 14T23:00Z.
-        val sixAhead = Instant.parse("2026-09-14T22:57:00Z").let { DayAssignment.resolve(it, it.plusSeconds(360), fixed(lagos), GRACE, never) }
+        val sixAhead =
+            Instant
+                .parse(
+                    "2026-09-14T22:57:00Z",
+                ).let { DayAssignment.resolve(it, it.plusSeconds(360), fixed(lagos), GRACE, never) }
         sixAhead.date shouldBe LocalDate.of(2026, 9, 14)
         sixAhead.resolvedAt shouldBe Instant.parse("2026-09-14T22:57:00Z")
         sixAhead.usedIntendedAt shouldBe false
@@ -169,7 +173,8 @@ internal class DayAssignmentTest {
     @Test
     fun `a forty-five minute offset and a DST boundary both land where the calendar says`() {
         val kathmandu = ZoneId.of("Asia/Kathmandu") // UTC+05:45
-        DayAssignment.dateFor(Instant.parse("2026-09-14T18:20:00Z"), null, fixed(kathmandu), GRACE, never) shouldBe LocalDate.of(2026, 9, 15)
+        DayAssignment.dateFor(Instant.parse("2026-09-14T18:20:00Z"), null, fixed(kathmandu), GRACE, never) shouldBe
+            LocalDate.of(2026, 9, 15)
 
         // Europe/London springs forward 2026-03-29 at 01:00 UTC — a 23-hour
         // day, running from 29T00:00Z (GMT midnight) to 29T23:00Z (BST

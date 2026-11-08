@@ -581,7 +581,7 @@ class OpenApiContractTest(
                 "days",
             )
         api.components.schemas["StreakDayResponse"]!!
-            .properties.keys shouldBe setOf("date", "status", "reason")
+            .properties.keys shouldBe setOf("date", "status", "reason", "settlesAt")
         api.components.schemas["TodayStreakResponse"]!!
             .properties.keys shouldBe
             setOf("current", "longest", "freezesAvailable", "strictMode")
@@ -604,6 +604,14 @@ class OpenApiContractTest(
         day.properties["reason"]!!.types shouldBe setOf("string", "null")
         day.properties["reason"]!!.enum.map { it?.toString() } shouldBe listOf("REST_DAY", "TIMEZONE_SHIFT", null)
         day.properties["reason"]!!.description.shouldNotBeNull() shouldContain "FROZEN"
+        // Issue #132: when an OPEN square's day settles, sent on every square, null on all but OPEN ones.
+        day.required.orEmpty() shouldContain "settlesAt"
+        day.properties["settlesAt"]!!.types shouldBe setOf("string", "null")
+        day.properties["settlesAt"]!!.description.shouldNotBeNull() shouldContain "late-entry grace"
+        val today = api.components.schemas["BondDayResponse"]!!
+        today.required.orEmpty() shouldContain "settlesAt"
+        today.properties["settlesAt"]!!.types shouldBe setOf("string")
+        today.properties["settlesAt"]!!.description.shouldNotBeNull() shouldContain "late-entry grace"
     }
 
     @Test

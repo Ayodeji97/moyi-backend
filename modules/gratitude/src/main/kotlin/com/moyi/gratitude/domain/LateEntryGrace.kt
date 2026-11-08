@@ -47,13 +47,11 @@ internal data class LateEntryGrace(
         now: Instant,
     ): List<DayWindow> {
         val today = calendar.dayAt(now) ?: return emptyList()
-        val days = ArrayDeque(listOf(today))
-        while (true) {
-            val earlier = calendar.dayAt(days.first().startsAt.minusNanos(1)) ?: break
-            if (!settlesAt(earlier.endsAt).isAfter(now) || earlier.date >= days.first().date) break
-            days.addFirst(earlier)
-        }
-        return days.toList()
+        return generateSequence(today) { later ->
+            calendar
+                .dayAt(later.startsAt.minusNanos(1))
+                ?.takeIf { earlier -> settlesAt(earlier.endsAt).isAfter(now) && earlier.date < later.date }
+        }.toList().reversed()
     }
 
     companion object {

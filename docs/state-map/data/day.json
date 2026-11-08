@@ -1684,7 +1684,7 @@
     "rule": "BR-1",
     "evidence": "smoke",
     "evidenceRef": "both submissions make today REVEALED",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#streak = streak.view(membership, date, todayComplete = day.status == BondDayStatus.REVEALED),"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetToday.kt#streak = streak.view(membership),"
   },
   {
     "id": "day-solo-today",
@@ -1832,7 +1832,7 @@
     "rule": "FR-071",
     "evidence": "test",
     "evidenceRef": "StreakEndpointTest#a bond nobody has written in has a streak of nothing, and a calendar of today, open",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val unwritten = last == today && !from.isAfter(today) && membership.isOpen && stored.lastOrNull()?.date != today"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#.map { (date, settlesAt) -> StreakDay(date, StreakCell.OPEN, settlesAt = settlesAt) }"
   },
   {
     "id": "day-not-opened-streak-ended",
@@ -1864,7 +1864,7 @@
     "rule": "ADR-0034 §12",
     "evidence": "test",
     "evidenceRef": "StreakEndpointTest#a bond that ended today has no open square, for nobody can write in it",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val unwritten = last == today && !from.isAfter(today) && membership.isOpen && stored.lastOrNull()?.date != today"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#.map { (date, settlesAt) -> StreakDay(date, StreakCell.OPEN, settlesAt = settlesAt) }"
   },
   {
     "id": "day-not-opened-streak-waiting",
@@ -1926,7 +1926,7 @@
     "rule": "ADR-0034 §12",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#undecided && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
   },
   {
     "id": "day-open-streak-ended",
@@ -1989,7 +1989,7 @@
     "rule": "ADR-0034 §12",
     "evidence": "test",
     "evidenceRef": "StreakEndpointTest#today is on the calendar and OPEN whether or not anybody has written",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#undecided && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
   },
   {
     "id": "day-partial-streak-ended",
@@ -2052,7 +2052,7 @@
     "rule": "FR-071",
     "evidence": "smoke",
     "evidenceRef": "a day still waiting on its reveal time is not in the streak yet",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#isToday && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/domain/Streak.kt#undecided && outcome == null -> if (status == BondDayStatus.REVEALED) COMPLETE else OPEN"
   },
   {
     "id": "day-pending-reveal-streak-ended",
@@ -2117,7 +2117,7 @@
     "rule": "FR-071",
     "evidence": "smoke",
     "evidenceRef": "the streak counts today once both have written",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#if (countsToday(membership, today, todayComplete)) {"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#pending.complete.fold(pending.stored) { run, date ->"
   },
   {
     "id": "day-solo-streak",

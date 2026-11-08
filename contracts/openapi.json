@@ -5518,12 +5518,17 @@
             "type" : "string",
             "format" : "date"
           },
+          "settlesAt" : {
+            "type" : "string",
+            "format" : "date-time",
+            "description" : "When this day settles: its end on the bond's calendar plus the twelve-hour late-entry grace (issue #132). An entry written on this day and sent before then counts for it; one sent after counts for the day it is sent. Until then the day is not decided: a lone entry is not yet unlocked to the partner, and a missed day not yet counted. Never null."
+          },
           "status" : {
             "type" : "string",
             "enum" : [ "OPEN", "PARTIAL", "PENDING_REVEAL", "REVEALED", "SOLO", "EMPTY", "SUSPENDED", "FROZEN" ]
           }
         },
-        "required" : [ "date", "status" ]
+        "required" : [ "date", "settlesAt", "status" ]
       },
       "BondResponse" : {
         "type" : "object",
@@ -6848,12 +6853,17 @@
             "description" : "Why a FROZEN square is a rest day, and null on every other square. REST_DAY: a day the two did not both write on, covered by a banked freeze (\"we used a rest day\"). TIMEZONE_SHIFT: a date an approved time-zone change stepped over, which nobody could write on; no freeze was spent.",
             "enum" : [ "REST_DAY", "TIMEZONE_SHIFT", null ]
           },
+          "settlesAt" : {
+            "type" : [ "string", "null" ],
+            "format" : "date-time",
+            "description" : "When an OPEN square's day settles, and null on every other square (issue #132). An OPEN square is today, or an earlier day still inside its twelve-hour late-entry grace: an entry written on that day and sent before this instant still counts for it, and only then is the day decided (complete, a rest day or missed). Its end on the bond's calendar plus twelve hours."
+          },
           "status" : {
             "type" : "string",
             "enum" : [ "COMPLETE", "FROZEN", "SOLO", "MISSED", "OPEN" ]
           }
         },
-        "required" : [ "date", "reason", "status" ]
+        "required" : [ "date", "reason", "settlesAt", "status" ]
       },
       "StreakResponse" : {
         "type" : "object",

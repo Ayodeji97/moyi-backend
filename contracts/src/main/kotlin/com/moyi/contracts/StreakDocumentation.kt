@@ -8,6 +8,8 @@ private const val STREAK_DAY_RESPONSE = "StreakDayResponse"
 private const val LAST_RUN_LENGTH = "lastRunLength"
 private const val LAST_RUN_BROKEN_ON = "lastRunBrokenOn"
 private const val REASON = "reason"
+private const val SETTLES_AT = "settlesAt"
+private const val BOND_DAY_RESPONSE = "BondDayResponse"
 
 /**
  * `GET /bonds/{bondId}/streak`'s two additions of issue #141 (ADR-0034, as amended 2026-11-08):
@@ -33,7 +35,13 @@ internal fun documentStreak(api: OpenAPI) {
         // As the entry's `reaction`: a nullable enum lists null among its values, or a validator
         // that reads `enum` strictly refuses the null this field is sent on every other square.
         reason.enum = reason.enum.orEmpty().filterNotNull() + null
+        day.properties?.get(SETTLES_AT)?.description = SQUARE_SETTLES_AT_DESCRIPTION
     }
+    // Issue #132 (ADR-0033 decision 15): GET /today's day says when it settles.
+    api.components.schemas[BOND_DAY_RESPONSE]
+        ?.properties
+        ?.get(SETTLES_AT)
+        ?.description = TODAY_SETTLES_AT_DESCRIPTION
 }
 
 private const val LAST_RUN_LENGTH_DESCRIPTION =
@@ -51,3 +59,15 @@ private const val REASON_DESCRIPTION =
     "Why a FROZEN square is a rest day, and null on every other square. REST_DAY: a day the two did not both write on, " +
         "covered by a banked freeze (\"we used a rest day\"). TIMEZONE_SHIFT: a date an approved time-zone change stepped " +
         "over, which nobody could write on; no freeze was spent."
+
+private const val SQUARE_SETTLES_AT_DESCRIPTION =
+    "When an OPEN square's day settles, and null on every other square (issue #132). An OPEN square is today, or an " +
+        "earlier day still inside its twelve-hour late-entry grace: an entry written on that day and sent before this " +
+        "instant still counts for it, and only then is the day decided (complete, a rest day or missed). Its end on the " +
+        "bond's calendar plus twelve hours."
+
+private const val TODAY_SETTLES_AT_DESCRIPTION =
+    "When this day settles: its end on the bond's calendar plus the twelve-hour late-entry grace (issue #132). An " +
+        "entry written on this day and sent before then counts for it; one sent after counts for the day it is sent. " +
+        "Until then the day is not decided: a lone entry is not yet unlocked to the partner, and a missed day not yet " +
+        "counted. Never null."

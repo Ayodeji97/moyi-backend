@@ -3597,7 +3597,7 @@
     "rule": "ADR-0034",
     "evidence": "test",
     "evidenceRef": "StreakEndpointTest#a bond nobody has written in has a streak of nothing, and a calendar of today, open",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#val unwritten = last == today && !from.isAfter(today) && membership.isOpen && stored.lastOrNull()?.date != today"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetStreak.kt#.map { (date, settlesAt) -> StreakDay(date, StreakCell.OPEN, settlesAt = settlesAt) }"
   },
   {
     "id": "bond-pending-deletion-streak",
@@ -3697,7 +3697,7 @@
     "rule": "doc 04 §8.3a",
     "evidence": "test",
     "evidenceRef": "MilestonesEndpointTest#a bond still waiting for its second person has reached nothing, whatever its creator wrote",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val total = if (counted) evaluated.total + 1 else evaluated.total"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val total = evaluated.total + counted.size"
   },
   {
     "id": "bond-active-milestones",
@@ -3722,7 +3722,7 @@
     "rule": "FR-075, ADR-0041",
     "evidence": "smoke",
     "evidenceRef": "milestones: the seventh complete day is today, reached the moment both wrote",
-    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val counted = streak.countsToday(membership, today, todayComplete)"
+    "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/service/GetMilestones.kt#val counted = pending.complete.filter { evaluatedSince == null || it.isAfter(evaluatedSince) }"
   },
   {
     "id": "bond-pending-deletion-milestones",

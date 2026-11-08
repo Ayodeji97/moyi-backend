@@ -157,16 +157,16 @@ internal class GetStreak(
         squares: List<StreakDay>,
     ): List<LocalDate> {
         val joining = joiningDate(membership)
-        var expected = if (lastEvaluated == null || (joining != null && joining.isAfter(lastEvaluated))) joining else lastEvaluated.plusDays(1)
-        val added = mutableListOf<LocalDate>()
-        for (square in squares.sortedBy { it.date }) {
-            // Already in the stored run: a day the job settled early, by a clock ahead of this one's.
-            if (expected != null && square.date.isBefore(expected)) continue
-            if (expected == null || square.date != expected || square.cell != StreakCell.COMPLETE) break
-            added += square.date
-            expected = square.date.plusDays(1)
-        }
-        return added
+        val first = if (lastEvaluated == null || (joining != null && joining.isAfter(lastEvaluated))) joining else lastEvaluated.plusDays(1)
+        if (first == null) return emptyList()
+        // A square before `first` is already in the stored run (a day the job settled by a clock
+        // ahead of this one's), and is skipped; the first that does not extend the run stops it.
+        return squares
+            .sortedBy { it.date }
+            .dropWhile { it.date.isBefore(first) }
+            .withIndex()
+            .takeWhile { (index, square) -> square.date == first.plusDays(index.toLong()) && square.cell == StreakCell.COMPLETE }
+            .map { it.value.date }
     }
 
     private fun shown(
