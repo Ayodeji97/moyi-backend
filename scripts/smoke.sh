@@ -154,10 +154,11 @@
 # ticket), the sixth in a day 429 with Retry-After, the acknowledgement logged once by the logging
 # provider with the ticket's id and without a word of the message, and the operator's `moyi support`
 # list, show and close (the words emptied, each look logged). Last run on 2026-11-08, on
-# feat/support-messages, from a jar of 14ce084 (before main's #145 and #148 were merged in), on a
-# fresh database that applied every migration to V45 and V45.1 (now V47), against its own compose project (moyi-41d:
-# Postgres 55444, Valkey 56344, MinIO 59247), the jar booted by hand (local profile) and --attach:
-# 1350 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the race).
+# feat/support-messages, from a jar of a6e5b08 (main's #145 and #148 merged in, the CHECK at V47),
+# on a fresh database that applied every migration to V47, against its own compose project
+# (moyi-41d: Postgres 55444, Valkey 56344, MinIO 59247), the jar booted by hand (local profile)
+# and --attach: 1384 passed, 0 failed, 0 skipped. Before it, from 14ce084 (before the merge, the
+# CHECK then a decimal V45.1): 1350, 0 and 1 skipped (the tag across the erasure).
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
