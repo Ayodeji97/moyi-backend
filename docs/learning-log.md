@@ -2997,4 +2997,8 @@ Wrong about: "a parent with a discriminator and one schema per value" being enou
          `allOf` inheritance shape, with `status` declared on the parent alone, produced
          subclasses. And `traceId` had been left out "until tracing exists" with nothing to
          say when that would be: it was a dependency and a line in the problem builder.
+         The build was green with it; the smoke run was not: 27 probes that compare two
+         refusals byte for byte (the no-oracle checks) failed, because each body now names its
+         own request. No test had compared two error bodies under a tracer. The probes now
+         compare without the id, which is random per request and so says nothing either way.
 

@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# The contract-precision PR (#137 to #140, #142) adds five probes: an error body's traceId (32 hex
+# digits, a new one per request) and a TIMEZONE_CHANGE_TOO_SOON refusal's typed allowedFrom, equal to
+# the date its detail names, with its traceId on the log line for that refusal. Every "identical
+# body" probe now compares bodies without the traceId, which differs per request by design. Last
+# run on 2026-11-08, on fix/contract-precision, from a jar of 13e8b09 (main at 0d674ca merged in),
+# against its own compose project (moyi-41a: Postgres 55441, Valkey 56341, MinIO 59241), the jar
+# booted by hand (local profile) and --attach: 1332 passed, 0 failed, 0 skipped, 34 sections. The
+# database was the one an earlier run on the same project had used, a run whose 27 failures were
+# those identical-body probes meeting the traceId.
+#
 # What it is written to check (a run is the proof, not this header): the
 # packaged application boots against the compose Postgres,
 # and every identity endpoint that exists so far — registration, verification,
@@ -431,7 +441,12 @@ expect() {
   else
     pass "$label ($status)"
   fi
-  LAST_BODY="$text"
+  # An error body's traceId is the id of its own request's trace (ADR-0024, amended 2026-11-08): different on
+  # every request by design, and so different between two refusals that are otherwise byte for byte the same.
+  # LAST_BODY is the body without it, which is what every "identical body" probe compares (the id is random per
+  # request, so it says nothing about the bond or the account); LAST_RAW_BODY is the body as sent.
+  LAST_RAW_BODY="$text"
+  LAST_BODY="$(printf '%s' "$text" | sed -E 's/,"traceId":"[0-9a-f]{32}"//')"
 }
 
 # header_is <label> <header-name> <expected-value> — checked against LAST_HEADERS.
@@ -446,7 +461,7 @@ header_is() {
 # keep_body <name> — with SMOKE_BODIES=<dir>, writes LAST_BODY there as <name>.json: real bodies of each
 # shape a generated client must decode (a partner's entry LOCKED, REVEALED and DELETED; a problem with its
 # extension members), for testing a client's decoder against (#140). Nothing is written without the variable.
-keep_body() { [ -n "${SMOKE_BODIES:-}" ] || return 0; mkdir -p "$SMOKE_BODIES"; printf '%s' "$LAST_BODY" > "$SMOKE_BODIES/$1.json"; }
+keep_body() { [ -n "${SMOKE_BODIES:-}" ] || return 0; mkdir -p "$SMOKE_BODIES"; printf '%s' "$LAST_RAW_BODY" > "$SMOKE_BODIES/$1.json"; }
 
 # What has to be undone however the script ends: the app it booted, and the
 # prompts section's translations, which it puts into the shared library for one
@@ -538,10 +553,10 @@ expect "unknown route under /api/v1 is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHE
 echo; echo "resource server (ADR-0019)"
 expect "GET /me without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- "$API/me"
 # Doc 06 §2, ADR-0024 (amended 2026-11-08): every error body carries the W3C id of its request's trace.
-[[ "$LAST_BODY" =~ \"traceId\":\"[0-9a-f]{32}\" ]] && pass "…and the error body carries a traceId, 32 hex digits" || fail "traceId on an error body" "${LAST_BODY:0:250}"
-FIRST_TRACE="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('traceId',''))" <<<"$LAST_BODY" 2>/dev/null || true)"
+[[ "$LAST_RAW_BODY" =~ \"traceId\":\"[0-9a-f]{32}\" ]] && pass "…and the error body carries a traceId, 32 hex digits" || fail "traceId on an error body" "${LAST_RAW_BODY:0:250}"
+FIRST_TRACE="$(python3 -c "import json,sys; print(json.load(sys.stdin).get('traceId',''))" <<<"$LAST_RAW_BODY" 2>/dev/null || true)"
 expect "…and a second request is answered under a trace of its own" 401 '"traceId":"' -- "$API/me"
-[[ -n "$FIRST_TRACE" && "$LAST_BODY" != *"$FIRST_TRACE"* ]] && pass "…a different traceId" || fail "traceId per request" "first '$FIRST_TRACE', then ${LAST_BODY:0:250}"
+[[ -n "$FIRST_TRACE" && "$LAST_RAW_BODY" =~ \"traceId\":\"[0-9a-f]{32}\" && "$LAST_RAW_BODY" != *"$FIRST_TRACE"* ]] && pass "…a different traceId" || fail "traceId per request" "first '$FIRST_TRACE', then ${LAST_RAW_BODY:0:250}"
 if curl -s -o /dev/null -D - "$API/me" | grep -qi "^www-authenticate: bearer"; then pass "…with a WWW-Authenticate: Bearer challenge"; else fail "WWW-Authenticate" "header missing on the 401"; fi
 expect "GET /me with a garbage token is 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/me" -H 'Authorization: Bearer not-a-jwt'
 
@@ -1040,7 +1055,7 @@ TOO_SOON="$(python3 -c "
 import json, sys, datetime, re
 body = json.load(sys.stdin)
 named = datetime.datetime.strptime(re.search(r'from (\d{1,2} \w+ \d{4})', body['detail']).group(1), '%d %B %Y').date()
-print(body.get('allowedFrom') == named.isoformat(), body.get('allowedFrom'), body.get('traceId', ''))" <<<"$LAST_BODY" 2>/dev/null || echo "unreadable")"
+print(body.get('allowedFrom') == named.isoformat(), body.get('allowedFrom'), body.get('traceId', ''))" <<<"$LAST_RAW_BODY" 2>/dev/null || echo "unreadable")"
 case "$TOO_SOON" in True\ ????-??-??\ *) pass "…and allowedFrom carries that date, typed (${TOO_SOON:5:10})" ;; *) fail "allowedFrom" "got '$TOO_SOON' from ${LAST_BODY:0:300}" ;; esac
 # The refusal is logged at WARN; the body's traceId is the one that log line carries.
 TOO_SOON_TRACE="${TOO_SOON##* }"
@@ -2184,7 +2199,7 @@ for view in "days" "days/$PR_DATE"; do
 done
 
 # One 422 for every id that names no prompt, and the guard and the ending first.
-PR_ONE="$(curl -s -X POST "$API/bonds/$PR_BOND/entries" -H 'Content-Type: application/json' -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"x\",\"promptId\":\"$(new_key)\"}" | sed 's/"instance":"[^"]*"//')"
+PR_ONE="$(curl -s -X POST "$API/bonds/$PR_BOND/entries" -H 'Content-Type: application/json' -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d "{\"text\":\"x\",\"promptId\":\"$(new_key)\"}" | sed -E 's/"instance":"[^"]*"//; s/,"traceId":"[0-9a-f]{32}"//')"
 expect "prompts: an id no prompt has is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/bonds/$PR_BOND/entries" -H "Authorization: Bearer $PR_A" -H "Idempotency-Key: $(new_key)" -d '{"text":"x","promptId":"not-a-uuid"}'
 if [[ "$LAST_BODY" == *'"field":"promptId"'* ]]; then pass "prompts: …on the field promptId"; else fail "prompts: …on the field promptId" "${LAST_BODY:0:200}"; fi
 is "prompts: …the same body as for a uuid no prompt has" "$(no_instance | sed 's/"instance":"-"//')" "$PR_ONE"
@@ -2245,7 +2260,7 @@ SE_LONG="$(python3 -c 'print("zq" * 51)')"
 search "search: 102 characters is one 422 on q" 422 '"field":"q"' "$SE_LONG" "$SE_A"
 if [[ "$LAST_BODY" == *zqzqzq* ]]; then fail "search: the refusal carries q" "${LAST_BODY:0:200}"; else pass "search: the refusal does not carry q"; fi
 expect "search: NUL in q is one 422, not a 500" 422 '"field":"q"' -- "$API/bonds/$SE_BOND/search?q=zq%00zq" -H "Authorization: Bearer $SE_A"
-SE_STRANGER="$(curl -s "$API/bonds/$SE_BOND/search" -H "Authorization: Bearer $SE_O" | sed 's/"instance":"[^"]*"//')"
+SE_STRANGER="$(curl -s "$API/bonds/$SE_BOND/search" -H "Authorization: Bearer $SE_O" | sed -E 's/"instance":"[^"]*"//; s/,"traceId":"[0-9a-f]{32}"//')"
 expect "search: a stranger is told the bond's 404, whatever q is" 404 '"code":"NOT_FOUND"' -- -G "$API/bonds/$SE_BOND/search" --data-urlencode "q=   " -H "Authorization: Bearer $SE_O"
 is "search: …the same bytes as with no q at all" "$(no_instance | sed 's/"instance":"-"//')" "$SE_STRANGER"
 
