@@ -155,7 +155,7 @@
 # provider with the ticket's id and without a word of the message, and the operator's `moyi support`
 # list, show and close (the words emptied, each look logged). Last run on 2026-11-08, on
 # feat/support-messages, from a jar of 14ce084 (before main's #145 and #148 were merged in), on a
-# fresh database that applied every migration to V45.1, against its own compose project (moyi-41d:
+# fresh database that applied every migration to V45 and V45.1 (now V47), against its own compose project (moyi-41d:
 # Postgres 55444, Valkey 56344, MinIO 59247), the jar booted by hand (local profile) and --attach:
 # 1350 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the race).
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the

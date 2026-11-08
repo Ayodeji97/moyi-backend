@@ -135,14 +135,11 @@ class FlywayMigrationTest(
                 "SELECT version FROM flyway_schema_history WHERE success = true ORDER BY installed_rank",
                 String::class.java,
             )
-        // Decimal, not Int: V45.1 (common:web's, beside support's V45, ADR-0057) is a version Flyway orders
-        // between 45 and 46, and an Int parse refused it.
-        val versions = appliedVersions.map { it!!.toBigDecimal() }
+        val versions = appliedVersions.map { it!!.toInt() }
         assertEquals(versions.sorted(), versions, "Flyway applied migrations out of numeric order: $versions")
-        val expected = ((1..27).toList() + listOf(29, 30, 31, 32, 33, 40, 41, 43, 45)).map(Int::toBigDecimal) + "45.1".toBigDecimal()
         assertTrue(
-            versions.containsAll(expected),
-            "Expected every module's migrations, V1 to V27, V29 to V33, V40, V41, V43, V45 and V45.1, found: $versions",
+            versions.containsAll((1..27).toList() + listOf(29, 30, 31, 32, 33, 40, 41, 43, 45, 47)),
+            "Expected every module's migrations, V1 to V27, V29 to V33, V40, V41, V43, V45 and V47, found: $versions",
         )
 
         val extensions =

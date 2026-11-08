@@ -46,7 +46,7 @@ event commit together (`IdempotentExecution.once`), and a replay is `201` with
 `Idempotency-Replayed: true` and the same id and time, re-read, authorised as the sender's, with no
 second email. A client that sends none still files: a duplicate support message costs an operator a
 second read, and requiring the key would turn a client that forgot it into a person who cannot reach
-support. `ResultKind.SUPPORT_TICKET`, with V45.1 widening `idempotency_keys`' `CHECK`.
+support. `ResultKind.SUPPORT_TICKET`, with V47 widening `idempotency_keys`' `CHECK`.
 
 **5. The acknowledgement is sent after the commit and never repeats the message.** The filing
 transaction publishes `SupportTicketFiled` (ids only); `AcknowledgeSupportTicket` hears it
@@ -112,11 +112,10 @@ gets one additive operation.
 acknowledgement (decision 6), and the client is told `201` either way. The queue is SQL functions
 until the Phase 5 console. `support_ticket_read` reads identity's `users` table: a database function
 crossing a module, as V39's call media's functions, accepted for the operator's tool and not the
-application's. **Two migration versions from one claim**: the change was given V45, and the
-`idempotency_keys` `CHECK` is common:web's table (V33's and V37's reason for being there), so its
-widening is V45.1 in common:web's sequence, beside V45. `FlywayMigrationTest` read versions as
-integers and now reads them as decimals. A parallel change that widens the same `CHECK` must list
-`SUPPORT_TICKET` too, or drop it.
+application's. **Two migrations, V45 and V47**: the `idempotency_keys` `CHECK` is common:web's table (V33's and
+V37's reason for being there), so its widening is a migration in common:web's sequence, V47, claimed
+for it (a decimal V45.1 was tried first and ruled out by the coordinator on 2026-11-08). A parallel
+change that widens the same `CHECK` (#127) must list `SUPPORT_TICKET` too, whichever lands second.
 
 **Neutral.** A new module (`modules/support`), wired in `app` and listed in `ArchitectureTest`. One
 route, one bucket, one `ResultKind`, one `identity.api` port. No error code is added.

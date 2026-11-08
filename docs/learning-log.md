@@ -3014,8 +3014,9 @@ Wrong about: naming `/me`'s new body `MeResponse`. The name was already the bond
 
 Expected: one route, one table, one migration, in the shape of the report route.
 Reality: the idempotency record's `result_kind` CHECK is common:web's table, so a new idempotent
-         resource needs a second migration in that module's sequence; with one version given, it
-         became V45.1, and `FlywayMigrationTest` read versions as integers and refused it. And
+         resource needs a second migration in that module's sequence. It was first V45.1, beside
+         V45, which `FlywayMigrationTest` (reading versions as integers) refused; the ruling was
+         no decimal versions, and it is V47. And
          the acknowledgement could not be sent from the new module without learning the address,
          which `UserDirectory` withholds on purpose: identity now sends it (`AccountMail`), to a
          confirmed address only.
