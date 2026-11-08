@@ -305,32 +305,3 @@ stateDiagram-v2
 | In | What happens | Who | When | Leads to | Why | Evidence |
 |---|---|---|---|---|---|---|
 | `REQUESTED` | the reset link expires, an hour on | system |  | `EXPIRED` | A reset link stops working one hour after it was issued. No job does this and nothing is written: each presentation compares the link's expiry with the clock. | never-run |
-
-## Where the contract is silent
-
-The code answers these and `contracts/openapi.json` does not document them.
-
-| Endpoint | Status | What the code does |
-|---|---|---|
-| `POST /auth/register` | 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| `GET /meta/legal` | 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Asserted by LegalEndpointTest (a token for nobody is 401) and CacheHeadersTest. The contract's generator gives a public route no 401. |
-| `POST /auth/verify-email` | 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| `POST /auth/resend-verification` | 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| `POST /auth/logout` | 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| `POST /auth/forgot-password` | 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| `POST /auth/reset-password` | 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| `POST /auth/register` | 503 | 503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| `POST /auth/register` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
-| `POST /auth/verify-email` | 410 | 410 VERIFICATION_TOKEN_EXPIRED for a verification link that is past its 24 hours or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| `POST /auth/verify-email` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
-| `POST /auth/resend-verification` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
-| `POST /auth/login` | 401 | 401 INVALID_CREDENTIALS for every refused sign-in: a wrong password, an unknown address, a locked account; and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| `POST /auth/login` | 503 | 503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; sign-in checks the password under the same limit as registration. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| `POST /auth/login` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
-| `POST /auth/refresh` | 401 | 401 REFRESH_TOKEN_INVALID for a refresh token that is unknown, expired or revoked, 401 TOKEN_REUSE_DETECTED for one already exchanged, and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| `POST /auth/refresh` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
-| `POST /auth/logout` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
-| `POST /auth/forgot-password` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
-| `POST /auth/reset-password` | 410 | 410 PASSWORD_RESET_TOKEN_EXPIRED for a reset link that is past its hour or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| `POST /auth/reset-password` | 503 | 503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; the link is not spent. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| `POST /auth/reset-password` | 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
