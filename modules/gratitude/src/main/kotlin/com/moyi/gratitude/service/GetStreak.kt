@@ -22,6 +22,9 @@ internal data class StreakView(
     val strictMode: Boolean,
     val totalCompleteDays: Int,
     val lastCompleteDate: LocalDate?,
+    /** [StreakState.lastRunLength]: the run the latest break ended. Today never changes it. */
+    val lastRunLength: Int?,
+    val lastRunBrokenOn: LocalDate?,
 )
 
 internal data class StreakDetail(
@@ -105,6 +108,8 @@ internal class GetStreak(
             strictMode = membership.strictMode,
             totalCompleteDays = state.totalCompleteDays,
             lastCompleteDate = state.lastCompleteDate,
+            lastRunLength = state.lastRunLength,
+            lastRunBrokenOn = state.lastRunBrokenOn,
         )
     }
 

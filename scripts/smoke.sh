@@ -70,6 +70,14 @@
 # Since slice C6c it reads milestones: nothing reached and 7 next on a new bond; the seventh
 # complete day today, six earlier ones put in by hand, reached the moment both wrote and the
 # same for both; and after a leave, what was reached kept and nothing next, for both alike.
+# Since issue #141 it reads the run that ended and why a day is a rest day: 21 past days put in
+# by hand unevaluated, the bond's pairing moved back to the first, evaluated by the real close
+# job into a rest day a freeze paid for, a date a zone change stepped over, and a run of sixteen
+# that an empty day ended; the same bytes for both members.
+# Last run on 2026-11-08, on feat/streak-ended-run-and-freeze-reason (main d8315f5), from a jar of
+# that tree, on a fresh database that applied 41 migrations to V43, against its own compose project
+# (moyi-41b: Postgres 55442, Valkey 56342, MinIO 59243), the jar booted by hand (local profile) and
+# --attach: 1347 passed, 0 failed, 1 skipped (the tag across the erasure, the poller having won the race).
 # Since the favourites rulings (ADR-0036 questions 5 and 7) every day of the archive names the
 # partner and today does not, and a favourite's row holds no time (V26).
 # Since the entry-text rulings (ADR-0031, the owner's rulings 1 and 2) an entry of only
@@ -1191,7 +1199,8 @@ expect "the partner reads the author's edited words" 200 "\"text\":\"$EDITED_TEX
 # Slice C4: the streak. A day is counted when the close job evaluates it, and
 # today is added as soon as both have written — so the first shared day reads one.
 expect "the streak counts today once both have written" 200 '"current":1' -- "$API/bonds/$GRAT_BOND/streak" -H "Authorization: Bearer $PARTNER_ACCESS"
-[[ "$LAST_BODY" == *'"days":[{"date":"'*'"status":"COMPLETE"}]'* ]] && pass "…and its calendar is that one day, COMPLETE" || fail "streak calendar" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" == *'"days":[{"date":"'*'"status":"COMPLETE","reason":null}]'* ]] && pass "…and its calendar is that one day, COMPLETE" || fail "streak calendar" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" == *'"lastRunLength":null,"lastRunBrokenOn":null'* ]] && pass "…and no run has ended: both sent, both null" || fail "streak ended run" "${LAST_BODY:0:250}"
 expect "…and today carries the same streak" 200 '"streak":{"current":1,"longest":1,"freezesAvailable":0,"strictMode":false}' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
 expect "PATCH after reveal is ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS" -d '{"text":"too late"}'
 expect "the partner cannot delete the author's entry" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $PARTNER_ACCESS"
@@ -1242,7 +1251,7 @@ expect "both have written and the day is PENDING_REVEAL, not PARTIAL" 200 '"stat
 [[ "$LAST_BODY" == *'"status":"LOCKED"'* && "$LAST_BODY" != *"$TIMED_TEXT"* ]] && pass "…and the partner's entry is still locked, its words withheld" || fail "timed reveal" "${LAST_BODY:0:250}"
 expect "a day still waiting on its reveal time is not in the streak yet" 200 '"current":0' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $EARLY_ACCESS"
 # Today, until both have written, is OPEN on the calendar to both: who has written so far is GET /today's to say.
-[[ "$LAST_BODY" == *'"status":"OPEN"}]'* && "$LAST_BODY" != *PARTIAL* && "$LAST_BODY" != *PENDING_REVEAL* && "$LAST_BODY" != *SOLO* ]] && pass "…and its calendar says OPEN, not who has written" || fail "streak calendar vocabulary" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" == *'"status":"OPEN","reason":null}]'* && "$LAST_BODY" != *PARTIAL* && "$LAST_BODY" != *PENDING_REVEAL* && "$LAST_BODY" != *SOLO* ]] && pass "…and its calendar says OPEN, not who has written" || fail "streak calendar vocabulary" "${LAST_BODY:0:250}"
 expect "a stranger asking for a bond's streak gets the one 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $AUTHOR_ACCESS"
 
 echo; echo "gratitude — a confirmed zone change decides no date until tomorrow (BR-6, ADR-0031 §3)"
@@ -2372,6 +2381,62 @@ if [ "$MI_MADE" = 6 ]; then
   is "milestones: …the same bytes for the one who left" "$LAST_BODY" "$MI_ENDED"
 else
   skip "milestones: the seventh day and the ending (the days could not be put in by hand)"
+fi
+
+echo; echo "streak — the run that ended, and why a day is a rest day (issue #141, ADR-0034 as amended)"
+flush_buckets
+# What this section is for: the two fields of issue #141 as the jar serves them, decided by the
+# real close job. No day ends during a run, so 21 past days are put in by hand, closed and NOT
+# evaluated, and the bond's pairing and zone history are moved back twenty-one days in the same
+# statement (so the calendar draws them, and the job's missing-days step finds nothing to add):
+# the joining day empty, as the job would write it; fourteen days both wrote bank a freeze; a solo day spends it (FROZEN, REST_DAY); a date a zone
+# change stepped over keeps the run (FROZEN, TIMEZONE_SHIFT); an empty day with nothing banked ends
+# the run at sixteen; three more days and today make four. The job, on its five-second schedule,
+# evaluates them; the read is then checked field by field, the same for both members.
+verified_account "streaker" "203.0.113.140"; SR_A="$ACCOUNT_ACCESS"
+verified_account "streaked" "203.0.113.141"; SR_B="$ACCOUNT_ACCESS"
+revealed_bond "streak" "$SR_A" "$SR_B" "thank you for the long run" "and thank you for starting again"
+SR_BOND="$RB_BOND"
+SR_TODAY="$(sql "SELECT (now() AT TIME ZONE 'Africa/Lagos')::date")"
+case "$SR_TODAY" in
+  psql-unavailable|psql-error*) SR_MADE=no ;;
+  *) SR_MADE="$(sql "WITH m AS (UPDATE bond_members SET joined_at = joined_at - interval '21 days' WHERE bond_id = '$SR_BOND' RETURNING 1),
+    b AS (UPDATE bonds SET created_at = created_at - interval '21 days' WHERE id = '$SR_BOND' RETURNING 1),
+    a AS (UPDATE bond_anchor_intervals SET effective_from = effective_from - interval '21 days', first_label = first_label - 21 WHERE bond_id = '$SR_BOND' RETURNING 1),
+    d AS (INSERT INTO bond_days (id, bond_id, date, status, anchor_timezone, starts_at, ends_at, entry_count, created_at, closed_at, version)
+      SELECT gen_random_uuid(), '$SR_BOND', g.d, s.status, 'Africa/Lagos', g.d::timestamp AT TIME ZONE 'Africa/Lagos',
+             (g.d + 1)::timestamp AT TIME ZONE 'Africa/Lagos', s.n, now(), (g.d + 1)::timestamp AT TIME ZONE 'Africa/Lagos', 0
+      FROM (SELECT ('$SR_TODAY'::date - k) AS d, k FROM generate_series(1, 21) AS k) g
+      CROSS JOIN LATERAL (SELECT CASE g.k WHEN 21 THEN 'EMPTY' WHEN 6 THEN 'SOLO' WHEN 5 THEN 'FROZEN' WHEN 4 THEN 'EMPTY' ELSE 'REVEALED' END AS status,
+                                 CASE g.k WHEN 21 THEN 0 WHEN 6 THEN 1 WHEN 5 THEN 0 WHEN 4 THEN 0 ELSE 2 END AS n) s
+      RETURNING 1)
+    SELECT (SELECT count(*) FROM m) || '/' || (SELECT count(*) FROM b) || '/' || (SELECT count(*) FROM a) || '/' || (SELECT count(*) FROM d)")" ;;
+esac
+if [ "$SR_MADE" = "2/1/1/21" ]; then
+  SR_BROKEN="$(sql "SELECT '$SR_TODAY'::date - 4")"
+  SR_REST="$(sql "SELECT '$SR_TODAY'::date - 6")"
+  SR_SHIFT="$(sql "SELECT '$SR_TODAY'::date - 5")"
+  # The close job runs every five seconds; give it a few runs to evaluate the twenty days.
+  for _ in $(seq 1 30); do
+    [ "$(sql "SELECT count(*) FROM bond_days WHERE bond_id = '$SR_BOND' AND evaluated_at IS NOT NULL")" = 21 ] && break
+    sleep 1
+  done
+  db_is "streak: the close job evaluated the twenty-one days" "$(sql "SELECT count(*) FROM bond_days WHERE bond_id = '$SR_BOND' AND evaluated_at IS NOT NULL")" "21"
+  expect "streak: a run of sixteen ended, and today is the fourth of the next" 200 '"current":4' -- "$API/bonds/$SR_BOND/streak" -H "Authorization: Bearer $SR_A"
+  SR_BODY="$LAST_BODY"
+  is "streak: …the numbers, the ended run with the day that ended it" \
+    "$(python3 -c 'import json,sys; b=json.loads(sys.argv[1]); print(b["current"], b["longest"], b["freezesAvailable"], b["lastRunLength"], b["lastRunBrokenOn"])' "$SR_BODY")" \
+    "4 16 0 16 $SR_BROKEN"
+  is "streak: …a rest day a freeze paid for, a date a zone change stepped over, and no reason on any other square" \
+    "$(python3 -c 'import json,sys; b=json.loads(sys.argv[1]); print(sorted((d["date"], d["status"], d["reason"]) for d in b["days"] if d["reason"] or d["status"] == "FROZEN"), sum(1 for d in b["days"] if "reason" not in d))' "$SR_BODY")" \
+    "[('$SR_REST', 'FROZEN', 'REST_DAY'), ('$SR_SHIFT', 'FROZEN', 'TIMEZONE_SHIFT')] 0"
+  [[ "$SR_BODY" == *"{\"date\":\"$SR_BROKEN\",\"status\":\"MISSED\",\"reason\":null}"* ]] && pass "streak: …the day that ended it is MISSED, with no reason" || fail "streak: broken day" "${SR_BODY:0:250}"
+  db_is "streak: …and the job wrote the ended run on the projection, as recalculate would" "$(sql "SELECT last_run_length || '/' || last_run_broken_on FROM streak_states WHERE bond_id = '$SR_BOND'")" "16/$SR_BROKEN"
+  expect "streak: the same for the other member" 200 '"lastRunLength":16' -- "$API/bonds/$SR_BOND/streak" -H "Authorization: Bearer $SR_B"
+  is "streak: …the same bytes" "$LAST_BODY" "$SR_BODY"
+  expect "streak: today's streak object is as it was, without the new fields" 200 '"streak":{"current":4,"longest":16,"freezesAvailable":0,"strictMode":false}' -- "$API/bonds/$SR_BOND/today" -H "Authorization: Bearer $SR_A"
+else
+  skip "streak: the ended run and the rest-day reasons (the days could not be put in by hand: $SR_MADE)"
 fi
 
 echo; echo "push tokens (Phase 4 N1, ADR-0044)"

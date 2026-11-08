@@ -2958,3 +2958,20 @@ Wrong about: a systemd service being active means its watcher is stable. Product
          script also needs V39 reporting tables, so enabling it before the app migration
          would fail on the production V36 database. A fresh encrypted backup succeeded;
          the vault-dependent restore drill remains a separate deployment gate.
+
+
+## 2026-11-08 · Feature · The ended run and the rest day's reason — one was stored already, one was in the audit log
+
+Expected: two new columns, one for each field of issue #141.
+Reality: the reason needed none. ADR-0034 had stored `evaluated_as` on every day precisely
+         because a covered day and a stepped-over date are both `FROZEN` and replay differently;
+         the calendar had been reading that column all along and throwing the distinction away.
+         The ended run was already in `streak_events` too, as the latest `BROKEN` line's
+         `streak_before`. It went into the projection anyway (V43), because the audit log is
+         what `recalculate` does not rebuild, and a number on a member's screen should be one
+         FR-074 can put back. The audit line became the back-fill instead.
+Wrong about: the property test's "compare everything but the date" helper. Copying a state
+         with only the date nulled tripped the new invariant (length and date null together)
+         on the first seed: an invariant on a data class constrains every `copy` a test makes,
+         not just the code's.
+
