@@ -21,6 +21,9 @@ import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -181,6 +184,10 @@ internal class BondTimezoneEndpointTest(
         // A date rather than a countdown, for `states.md` §9's reason: a
         // countdown framed as a deadline is urgency, a date is a fact.
         response.contentAsString shouldContain "can change again from"
+        // And the same date typed, for a client to put into its own words (#142): an extension member, YYYY-MM-DD.
+        val named = Regex("can change again from (\\d{1,2} \\w+ \\d{4})").find(response.contentAsString)!!.groupValues[1]
+        val allowedFrom = Regex("\"allowedFrom\":\"([^\"]+)\"").find(response.contentAsString)!!.groupValues[1]
+        LocalDate.parse(allowedFrom) shouldBe LocalDate.parse(named, DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.ENGLISH))
         // Nothing new is *open*: the confirmed row from the first change is
         // still there, which is the history, and the refusal recorded nothing.
         jdbc.queryForObject(
@@ -202,6 +209,7 @@ internal class BondTimezoneEndpointTest(
 
         response.status shouldBe 409
         response.contentAsString shouldContain "\"code\":\"TIMEZONE_CHANGE_TOO_SOON\""
+        response.contentAsString shouldContain "\"allowedFrom\":\""
         jdbc.queryForObject("SELECT count(*) FROM bond_proposals WHERE confirmed_at IS NOT NULL", Int::class.java) shouldBe 0
     }
 
