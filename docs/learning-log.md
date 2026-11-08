@@ -2978,3 +2978,16 @@ Reality: that line is in the shared env, which the media worker reads too. The w
          comment now says the shared line stays.
 Wrong about: a config comment being a safe place for a procedure. A procedure that spans a
          vault, a cloud console and two roles belongs in a runbook, read end to end.
+
+## 2026-11-08 · Feature · In-app support messages (issue #129, ADR-0057)
+
+Expected: one route, one table, one migration, in the shape of the report route.
+Reality: the idempotency record's `result_kind` CHECK is common:web's table, so a new idempotent
+         resource needs a second migration in that module's sequence; with one version given, it
+         became V45.1, and `FlywayMigrationTest` read versions as integers and refused it. And
+         the acknowledgement could not be sent from the new module without learning the address,
+         which `UserDirectory` withholds on purpose: identity now sends it (`AccountMail`), to a
+         confirmed address only.
+Wrong about: the brief's "follow how entries count length". Graphemes cannot be backed by a
+         database CHECK; the report's detail already chose code points for that reason, and so
+         does support.

@@ -1210,6 +1210,60 @@
     "curl": "curl \"$API/me\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "POST /api/v1/support/messages",
+    "summary": "write to support",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same ticket, filed and acknowledged once. Without one, each request is a new ticket)",
+      "Content-Type (application/json, {\"subject\": 1 to 120 characters, \"body\": 1 to 5000 characters}; characters are Unicode code points, and neither may be blank)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Five messages a day per account, one back every 4.8 hours, spent before the body is checked, so a 422 uses one too. The sixth is 429 with Retry-After)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "subject or body is missing, null, blank, longer than its limit (120 and 5000 characters), or holds a NUL or an unpaired surrogate; errors names the field, and the message never repeats it. Nothing is filed and no email is sent.",
+        "evidence": "smoke",
+        "evidenceRef": "a support message with no subject is 422 on subject",
+        "codeRef": "modules/support/src/main/kotlin/com/moyi/support/domain/SupportText.kt#require(raw.codePointCount(0, raw.length) <= max) { \"must be at most $max characters\" }"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "An Idempotency-Key that is sent is blank, longer than 255 characters, or holds something other than visible ASCII. Leaving it out is allowed.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#violationOf(key)?.let { throw IdempotencyKeyNotValidException(it) }"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another subject or body.",
+        "evidence": "test",
+        "evidenceRef": "SupportMessagesTest#the same key with different words is refused, and without a key two messages are two tickets",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      },
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()"
+      }
+    ],
+    "curl": "curl -X POST \"$API/support/messages\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\" -H 'Content-Type: application/json' -d '{\"subject\": \"Locked out\", \"body\": \"What happened, in your words\"}'"
+  },
+  {
     "id": "POST /api/v1/auth/forgot-password",
     "summary": "ask for a password reset link",
     "machine": "account",

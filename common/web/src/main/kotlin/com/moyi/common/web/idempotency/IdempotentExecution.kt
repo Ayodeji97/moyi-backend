@@ -12,9 +12,10 @@ import java.util.UUID
  * written in the first place and a replay always knows what to re-read.
  * A new idempotent resource adds a value here and to that CHECK together
  * (MEDIA: V33, for `POST /media/{id}/complete`, ADR-0047; REPORT: V37, for
- * `POST /entries/{entryId}/report`, ADR-0053).
+ * `POST /entries/{entryId}/report`, ADR-0053; SUPPORT_TICKET: V45.1, for
+ * `POST /support/messages`, ADR-0057).
  */
-enum class ResultKind { ENTRY, MEDIA, REPORT, }
+enum class ResultKind { ENTRY, MEDIA, REPORT, SUPPORT_TICKET, }
 
 /**
  * What [IdempotencyInterceptor] read off an `@Idempotent` request, handed to

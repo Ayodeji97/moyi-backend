@@ -3092,6 +3092,56 @@ if grep -q "$RP_DETAIL" "$MOYI_LOG"; then fail "the report's detail is in no log
 rm -rf "$RP_DIR"
 flush_buckets
 
+echo; echo "support — a message to a person, acknowledged without its words (FR-102, ADR-0057)"
+support() {
+  MOYI_OPERATOR=smoke-operator MOYI_OPS_PSQL="docker compose exec -T postgres psql -U moyi -d $MOYI_DB" \
+    scripts/moyi support "$@"
+}
+verified_account "support" "203.0.113.190"; SU_A="$ACCOUNT_ACCESS"
+flush_buckets
+SU_SUBJECT="Support~subject~$RANDOM$RANDOM"
+SU_BODY="Support~body~$RANDOM$RANDOM we cannot see today"
+SU_MESSAGE="{\"subject\":\"$SU_SUBJECT\",\"body\":\"$SU_BODY\"}"
+expect "a support message without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/support/messages" -d "$SU_MESSAGE"
+expect "a support message with no subject is 422 on subject" 422 '"field":"subject"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"body\":\"$SU_BODY\"}"
+expect "a support message with a subject over 120 characters is 422 on subject" 422 '"field":"subject"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$(printf 's%.0s' $(seq 1 121))\",\"body\":\"$SU_BODY\"}"
+expect "a support message with a body over 5000 characters is 422 on body" 422 '"field":"body"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "{\"subject\":\"$SU_SUBJECT\",\"body\":\"$(python3 -c 'print("b" * 5001)')\"}"
+if [[ "$LAST_BODY" == *"$SU_SUBJECT"* || "$LAST_BODY" == *"bbbbbbbbbb"* ]]; then fail "support: …and the refusal repeats nothing sent" "${LAST_BODY:0:200}"; else pass "support: …and the refusal repeats nothing sent"; fi
+SU_KEY="$(new_key)"
+expect "a support message is 201 with its id and time" 201 '"createdAt"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -H "Idempotency-Key: $SU_KEY" -d "$SU_MESSAGE"
+SU_ID="$(printf '%s' "$LAST_BODY" | jget id)"
+SU_FIRST="$LAST_BODY"
+if [[ "$LAST_BODY" == *"$SU_BODY"* || "$LAST_BODY" == *"$SU_SUBJECT"* ]]; then fail "support: …which repeats nothing of the message" "${LAST_BODY:0:200}"; else pass "support: …which repeats nothing of the message"; fi
+expect "a support message replayed under its key is the same ticket" 201 "\"id\":\"$SU_ID\"" -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -H "Idempotency-Key: $SU_KEY" -d "$SU_MESSAGE"
+header_is "support: …and says it was replayed" Idempotency-Replayed true
+is "support: …the same body, byte for byte" "$LAST_BODY" "$SU_FIRST"
+expect "the sixth support message in a day is 429 RATE_LIMITED" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/support/messages" -H "Authorization: Bearer $SU_A" -d "$SU_MESSAGE"
+header_is "support: …five a day" X-RateLimit-Limit 5
+SU_RETRY="$(printf '%s\n' "$LAST_HEADERS" | grep -i '^retry-after:' | head -1 | cut -d' ' -f2- || true)"
+if [[ "$SU_RETRY" =~ ^[0-9]+$ ]] && [ "$SU_RETRY" -gt 0 ]; then pass "the sixth support message carries Retry-After ($SU_RETRY s)"; else fail "the sixth support message carries Retry-After" "got '${SU_RETRY:-<absent>}'"; fi
+db_is "support: one ticket was filed, open, for the replay and the 201 together" "$(sql "SELECT count(*) || '|' || min(status) FROM support_tickets WHERE user_id = (SELECT user_id FROM support_tickets WHERE id = '$SU_ID')")" "1|OPEN"
+SU_ACK=""
+for _ in $(seq 1 40); do
+  SU_ACK="$(grep -c "Support ticket $SU_ID acknowledgement: ACCEPTED" "$MOYI_LOG" || true)"
+  [ "$SU_ACK" -gt 0 ] && break
+  sleep 0.25
+done
+is "support: the acknowledgement was sent once (provider=log)" "$SU_ACK" "1"
+if grep -q "Your reference is $SU_ID" "$MOYI_LOG"; then pass "the support acknowledgement gives the ticket's id as its reference"; else fail "the support acknowledgement gives the ticket's id as its reference" "no 'Your reference is $SU_ID' in $MOYI_LOG"; fi
+if grep -qF "$SU_BODY" "$MOYI_LOG" || grep -qF "$SU_SUBJECT" "$MOYI_LOG"; then fail "the support acknowledgement does not repeat the message" "the subject or body is in $MOYI_LOG"; else pass "the support acknowledgement does not repeat the message, nor does any log line"; fi
+if [ "$PSQL_OK" = 1 ]; then
+  SU_OUT="$(support list 2>&1)" || true
+  if [[ "$SU_OUT" == *"$SU_ID"* && "$SU_OUT" != *"$SU_BODY"* ]]; then pass "support: the operator's list names the ticket, not its words"; else fail "support: the operator's list names the ticket, not its words" "${SU_OUT:0:300}"; fi
+  SU_OUT="$(support show "$SU_ID" 2>&1)" || true
+  if [[ "$SU_OUT" == *"$SU_BODY"* && "$SU_OUT" == *"reply to:   end-support-"* ]]; then pass "support: show gives the words and the address to answer at"; else fail "support: show gives the words and the address to answer at" "${SU_OUT:0:300}"; fi
+  SU_OUT="$(support close "$SU_ID" "smoke: answered by email" 2>&1)" && pass "support: the operator closes it" || fail "support: the operator closes it" "$SU_OUT"
+  db_is "support: …its words are deleted, and every look is logged" \
+    "$(sql "SELECT (subject IS NULL AND body IS NULL) || '|' || status || '|' || (SELECT string_agg(action, ',' ORDER BY at) FROM support_ticket_log WHERE ticket_id = '$SU_ID') FROM support_tickets WHERE id = '$SU_ID'")" "true|CLOSED|READ,CLOSED"
+else
+  skip "support: the operator's queue (psql not reachable through docker compose)"
+fi
+flush_buckets
+
 echo; echo "database state"
 ROW="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT u.status, (u.email_verified_at IS NOT NULL), count(t.id), count(t.consumed_at) FROM users u LEFT JOIN verification_tokens t ON t.user_id=u.id WHERE u.email='$EMAIL' GROUP BY 1,2" 2>/dev/null || echo "psql-unavailable")"
 # Two tokens by now — the verification link and the reset link — both consumed.
