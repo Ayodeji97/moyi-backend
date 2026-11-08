@@ -16,6 +16,19 @@ spring:
     locations: classpath:db/migration
 
 moyi:
+  legal:
+    # Required, with no value in application.yml (ADR-0056): every consent row
+    # records these versions, so a deployment states its own. Nothing listens on
+    # this port; scripts/smoke.sh checks GET /meta/legal against these values.
+    terms:
+      version: local-1
+      url: http://localhost:3000/terms
+    privacy:
+      version: local-1
+      url: http://localhost:3000/privacy
+    summary:
+      version: local-1
+      url: http://localhost:3000/data-processing
   identity:
     verification:
       # Required, with no value in application.yml (ADR-0018 amendment of

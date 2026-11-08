@@ -28,6 +28,18 @@ spring:
       ddl-auto: validate
 
 moyi:
+  legal:
+    # Required, with no value in application.yml (ADR-0056); the same values
+    # identity's own test context uses.
+    terms:
+      version: terms-t3
+      url: https://moyi.test/terms
+    privacy:
+      version: privacy-t2
+      url: https://moyi.test/privacy
+    summary:
+      version: summary-t1
+      url: https://moyi.test/data-processing
   identity:
     verification:
       # Required, with no value in application.yml (ADR-0018 amendment of

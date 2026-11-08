@@ -39,7 +39,7 @@ register
 **Try it:**
 
 ```sh
-curl -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{\"email\": \"$EMAIL\", \"password\": \"$PASSWORD\", \"displayName\": \"Ada\", \"acceptedTermsVersion\": \"2026-09-01\", \"over18\": true}"
+curl -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{\"email\": \"$EMAIL\", \"password\": \"$PASSWORD\", \"displayName\": \"Ada\", \"over18\": true}"
 ```
 
 #### Every answer
@@ -56,7 +56,7 @@ curl -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{\"ema
 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
-| 422 | `VALIDATION_FAILED` | A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank (by every Unicode space, so a name of only no-break spaces too) or over 80 characters, or, once trimmed, holds a control character, a format character other than ZWNJ and ZWJ, or an unpaired surrogate (errors code VALID_DISPLAY_NAME, and NOT_BLANK too for an empty or all-space name; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created. | smoke |
+| 422 | `VALIDATION_FAILED` | A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank (by every Unicode space, so a name of only no-break spaces too) or over 80 characters, or, once trimmed, holds a control character, a format character other than ZWNJ and ZWJ, or an unpaired surrogate (errors code VALID_DISPLAY_NAME, and NOT_BLANK too for an empty or all-space name; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion, if sent, is over 40 characters (it is optional and ignored: the consent rows record the versions GET /meta/legal names, ADR-0056); over18 is false. Nothing is created. | smoke |
 | 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. | test |
 
 #### The contract is silent on
@@ -466,10 +466,65 @@ curl "$API/me" -H "Authorization: Bearer $TOKEN"
 | Region | In | When | Answer | Why | Rule | Evidence |
 |---|---|---|---|---|---|---|
 | `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session, so there is nobody to act for. Sign in first. | ADR-0019 §5 | smoke |
-| `account.session` | `ACCESS_VALID` |  | 200 stays | Your own profile: id, email, display name, locale, emailVerified and status. It is read from the account at each call, so it shows a verification made a moment ago without a new token. | ADR-0019 §6 | smoke |
+| `account.session` | `ACCESS_VALID` |  | 200 stays | Your own profile: id, email, display name, locale, emailVerified and status, and legalAccepted: the version of the Terms and of the Privacy Policy you accepted and when (null for one with no acceptance recorded; ADR-0056). It is read from the account at each call, so it shows a verification made a moment ago without a new token. | ADR-0019 §6 | smoke |
 | `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes (the server allows 60 seconds for a wrong clock). Exchange the refresh token at POST /auth/refresh, then repeat the call. (a test asserts the 401 for an expired token on a test-only route, not the code) | ADR-0019 §5 | never-run |
 | `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired (15 minutes, and the 60 seconds more the server allows) | 200 stays | Ending one session does not cancel its access token. Until its 15 minutes run out the token is accepted everywhere a token is needed, and the profile is returned as before. | ADR-0021 §6, ADR-0025 §5 | never-run |
 | `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | After logout-all or a password reset, a token issued before that second is refused whatever its remaining life. The test cited sets the account's sign-out time directly, as those two do, and finds a token issued earlier refused; LoginEndpointTest shows the same 401 after a real logout-all and a real reset, by status. | ADR-0019 §4 | test |
+
+### POST /me/legal-consent
+
+accept the current Terms and Privacy Policy
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/me/legal-consent" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session, so there is nobody whose consent to record. Nothing is recorded. | ADR-0019 §5 | smoke |
+| `account.session` | `ACCESS_VALID` |  | 204 stays | You accept the current Terms and Privacy Policy, the versions GET /meta/legal names: a consent row for each one you have not accepted before, with the moment and the hashed address and user agent. No body is read, so the versions are the server's. Again is 204 and writes nothing; a version keeps the moment it was first accepted. | FR-011, FR-103, ADR-0056 | smoke |
+| `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes (the server allows 60 seconds for a wrong clock). Exchange the refresh token at POST /auth/refresh, then repeat the call. | ADR-0019 §5 | never-run |
+| `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired (15 minutes, and the 60 seconds more the server allows) | 204 stays | Ending one session does not cancel its access token, so the acceptance is recorded as from a live session. | ADR-0021 §6, ADR-0056 | never-run |
+| `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | Nothing is left that the server accepts. Sign in again. Nothing is recorded. | ADR-0019 §4 | never-run |
+
+### GET /meta/legal
+
+read the current legal documents
+
+**Needs:** no access token.
+
+- Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)
+- If-None-Match (optional; a matching strong ETag returns 304 with no body. Sent with Cache-Control: public, no-cache)
+
+**Try it:**
+
+```sh
+curl "$API/meta/legal"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account` | `ANONYMOUS` |  | 200 stays | The current Terms of Service, Privacy Policy and data-processing summary, each a version and the address it is read at. No token is needed, because sign-up shows them first. Cache-Control: public, no-cache with an ETag; the same tag as If-None-Match is a 304 with no body. Registration records the Terms and Privacy versions this names, whatever the request says. | FR-103, FR-011, ADR-0056 | smoke |
+| `account` | `PENDING_VERIFICATION` |  | 200 stays | The same answer as before there was an account: the documents are the same for everyone, and the answer names nobody. | FR-103, FR-011, ADR-0056 | test |
+| `account` | `ACTIVE_SIGNED_OUT` |  | 200 stays | The same answer as before there was an account: the documents are the same for everyone, and the answer names nobody. | FR-103, FR-011, ADR-0056 | test |
+| `account` | `SIGNED_IN` | no access token is sent, or one that is still accepted | 200 stays | The same answer as before there was an account: the documents are the same for everyone, and the answer names nobody. | FR-103, FR-011, ADR-0056 | test |
+| `account` | `SIGNED_IN` | an Authorization header carries an access token that is no longer accepted | 401 `UNAUTHENTICATED` | This route needs no access token, but a token that is sent is still checked before the controller runs, and one that is expired, cancelled or unreadable is refused there: nothing else happens. Send no Authorization header to this route. Signed in is where this bites: a client that adds its access token to every request sends an expired one here. | ADR-0019 | test |
+
+#### The contract is silent on
+
+| Status | What the code does |
+|---|---|
+| 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Asserted by LegalEndpointTest (a token for nobody is 401) and CacheHeadersTest. The contract's generator gives a public route no 401. |
 
 ### POST /auth/forgot-password
 

@@ -513,7 +513,6 @@ internal class RegistrationEndpointTest(
                     password = Password.of(PASSWORD),
                     displayName = "Ad\u202Ea",
                     locale = "en",
-                    acceptedTermsVersion = "2026-09-01",
                     client = ClientContext(addressHash = "address-hash", userAgentHash = null),
                 ),
             )

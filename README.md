@@ -69,8 +69,10 @@ link bases a verification, reset or invite link is built on:
 `MOYI_BOND_INVITE_LINK_BASE_URL`, pages on the marketing site; `local`
 points them at `localhost:3000`, and nothing else has a default, because a
 token travels in the link (ADR-0018's amendment). Set all three together: a boot
-reports only the first one missing. Everything under
-`/api/v1` except the auth endpoints needs `Authorization: Bearer <token>`;
+reports only the first one missing. So are the current legal documents
+(ADR-0056): `MOYI_LEGAL_{TERMS,PRIVACY,SUMMARY}_{VERSION,URL}`, the version
+every consent row records and the page it is read at. Everything under
+`/api/v1` except the auth endpoints and `GET /meta/legal` needs `Authorization: Bearer <token>`;
 `GET /api/v1/me` is the endpoint to try it on.
 
 Since slice F (ADR-0023) the compose Redis (Valkey) matters too: it holds
