@@ -2958,3 +2958,14 @@ Wrong about: a systemd service being active means its watcher is stable. Product
          script also needs V39 reporting tables, so enabling it before the app migration
          would fail on the production V36 database. A fresh encrypted backup succeeded;
          the vault-dependent restore drill remains a separate deployment gate.
+
+## 2026-11-08 · Ops · The FCM switch-on runbook, and the comment that would have stopped the worker (issue #133)
+
+Expected: turning pushes on is the one-line change `config/deploy.yml` described ("remove
+         this line and add the FCM variables").
+Reality: that line is in the shared env, which the media worker reads too. The worker builds a
+         push sender in every profile and holds no secrets, so following the comment would have
+         left it refusing to start. The runbook switches FCM on in the web role alone, and the
+         comment now says the shared line stays.
+Wrong about: a config comment being a safe place for a procedure. A procedure that spans a
+         vault, a cloud console and two roles belongs in a runbook, read end to end.
