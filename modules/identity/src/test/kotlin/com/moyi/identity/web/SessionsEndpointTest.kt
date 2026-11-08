@@ -204,6 +204,19 @@ internal class SessionsEndpointTest(
         // The domain's enum judges it (#139), and says so by its own constraint's name.
         response.contentAsString shouldContain "\"code\":\"VALID_DEVICE_PLATFORM\""
 
+        // A blank platform is one mistake, reported once, by @NotBlank: the enum's constraint leaves blank alone.
+        // (Until #147 the @Pattern reported it as well, PATTERN beside NOT_BLANK.)
+        val blank =
+            mockMvc
+                .post("/api/v1/auth/login") {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = """{"email":"ada@example.com","password":"$PASSWORD","device":${PIXEL.replace("ANDROID", "")}}"""
+                }.andReturn()
+                .response
+        blank.status shouldBe 422
+        Regex("\"field\":\"device.platform\"").findAll(blank.contentAsString).count() shouldBe 1
+        blank.contentAsString shouldContain "\"code\":\"NOT_BLANK\""
+
         // Exactly the enum's names: a lower-case one is not one of them.
         mockMvc
             .post("/api/v1/auth/login") {

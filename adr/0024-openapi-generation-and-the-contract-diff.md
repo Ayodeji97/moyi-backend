@@ -157,8 +157,16 @@ one. The tracer puts the trace id in the logging context; every log line written
 (structured ECS logging includes the context), and `ProblemDetails` puts the same value in the body, read from
 the same place, so the two cannot disagree. It is **optional** in the schema: present on every error body the
 application answers (`ProblemTraceIdTest` asks each kind of producer), but a client that required it would fail
-to read the one body that lacked it. A `traceparent` header sent by a client is honoured, as W3C Trace Context
-specifies, so a client may choose the id its request is logged under; the id is validated hex and names nothing.
+to read the one body that lacked it.
+
+**The trace context stays inside the process** (review of #147). Boot's defaults read W3C, B3 and `baggage` from a
+request and instrument every `RestClient` built from its builder to write them into calls to a third party
+(Voyage, Resend, FCM). With no exporter, nothing downstream has a use for our context, and a client's `baggage` is
+its free text. So: `management.tracing.propagation.consume: w3c` (a client's `traceparent` is honoured, so a
+client may choose the id its request is logged under; the id is validated hex and names nothing), baggage off,
+and `management.observations.enable.http.client.requests: false`, which leaves our own outbound calls unobserved
+and so carrying no trace header at all (nothing read those timers). The OpenAI client is the OpenAI SDK's own and
+was never instrumented. `TraceContextStaysInsideTest` holds each of the three settings.
 
 **Extension members, typed.** An `ApiException` may carry RFC 9457 extension members, declared on `ProblemDetail`
 as optional with the code they come with. The first is `allowedFrom` on `TIMEZONE_CHANGE_TOO_SOON` (#142): the
@@ -193,5 +201,9 @@ client configured with the host. Doc 06 §1's wording is the stale line.
 
 **Breaking for a generated client, not on the wire**, and labelled: fields that were optional become required
 (non-null types where the field is never null), three request strings become enums, the `partnerEntry` classes
-change, and `LockedEntryResponse` loses the `status` it now inherits. One wire change: a `DeviceRequest.platform`
-refusal's `errors[].code` is `VALID_DEVICE_PLATFORM` where it was `PATTERN`.
+change, and `LockedEntryResponse` loses the `status` it now inherits. Two wire changes, both in a refusal of
+`device.platform`: an unknown value's `errors[].code` is `VALID_DEVICE_PLATFORM` where it was `PATTERN`; and a
+blank one is now one error, `NOT_BLANK`, where it was two, `NOT_BLANK` and `PATTERN` (the new constraint leaves
+blank to `@NotBlank`, as every other constraint here does, so one mistake is reported once). And every error body
+now differs from every other by its `traceId`: two refusals that were byte for byte the same are the same apart
+from it.
