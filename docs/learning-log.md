@@ -3048,3 +3048,15 @@ Reality: the idempotency record's `result_kind` CHECK is common:web's table, so 
 Wrong about: the brief's "follow how entries count length". Graphemes cannot be backed by a
          database CHECK; the report's detail already chose code points for that reason, and so
          does support.
+## 2026-11-08 · Feature · Reporting the other member, and the 404 that had to come from bond (issue #127)
+
+Expected: a second report route would need a second table, a second queue and new reasons.
+Reality: none of them. The report table takes a `target` column and the operator's commands work
+         unchanged; "How they're treating me" was already `HARASSMENT`. The one real choice was where
+         the "nobody has joined yet" 404 is made: in `gratitude` it would have restated the bond's
+         message, so `BondAccess.partnerMemberIdOf` throws the bond's own exception, and a test
+         compares its bytes with a stranger's. The review of #151 found the route's own two 404s
+         (an unreadable id, a replay of someone else's report) still hand-copying that sentence;
+         it is now one constant in `bond.api` that the guard's exception is built from too.
+Wrong about: nothing yet. Nothing the reported member reads may change, so the test reads their
+         bond and their today, bytes and ETag, before and after; the smoke does the same over HTTP.

@@ -61,6 +61,7 @@ stateDiagram-v2
 | the milestones reached, and the next<br>`GET /bonds/{bondId}/milestones` | 404 `NOT_FOUND` | 200 stays | 200 stays | 200 stays | 200 stays |
 | ask to turn semantic search back on, or agree to it<br>`POST /bonds/{bondId}/semantic-search` | 404 `NOT_FOUND` | 202 stays | 202 stays (semantic search is off, and no request to turn it on is waiting)<br>202 stays (semantic search is off, and your own request is waiting)<br>202 stays (semantic search is off, and your partner's request is waiting)<br>202 stays (semantic search is on) | 409 `BOND_ARCHIVED` | 409 `BOND_ARCHIVED` |
 | call off a request to turn semantic search back on<br>`DELETE /bonds/{bondId}/semantic-search` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 204 stays (a request to turn it on is waiting, yours or your partner's)<br>404 `NOT_FOUND` (no request to turn it on is waiting) | 204 stays (a request to turn it on, made before the countdown, is still waiting)<br>404 `NOT_FOUND` (no request to turn it on is waiting) | 404 `NOT_FOUND` |
+| report the other member of your bond to a person<br>`POST /bonds/{bondId}/members/other/report` | 404 `NOT_FOUND` | 404 `NOT_FOUND` | 201 stays | 201 stays | 201 stays |
 
 ### You can
 
@@ -149,6 +150,9 @@ stateDiagram-v2
 | `ACTIVE` | ask to turn semantic search back on, or agree to it | semantic search is on | stays | It is already on: nothing is asked for and nothing changes. The answer is the bond as it is. | smoke |
 | `ACTIVE` | call off a request to turn semantic search back on | a request to turn it on is waiting, yours or your partner's | stays | Either of you may call a waiting request off: the one who asked, or the one being asked, which is how a request is declined. Semantic search stays off. | smoke |
 | `PENDING_DELETION` | call off a request to turn semantic search back on | a request to turn it on, made before the countdown, is still waiting | stays | A request made before the countdown began is not called off by it, and either member may still call it off. Nothing else changes; it could not be agreed to now (409). | never-run |
+| `ACTIVE` | report the other member of your bond to a person |  | stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. | smoke |
+| `PENDING_DELETION` | report the other member of your bond to a person |  | stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. A countdown to deletion does not refuse it: a report is never contact. | never-run |
+| `ARCHIVED` | report the other member of your bond to a person |  | stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. Ended by a leave or a block, by either of you: a report is never contact, and the member who has just blocked may need it most. | smoke |
 
 ### Refused here
 
@@ -238,6 +242,8 @@ stateDiagram-v2
 | `ACTIVE` | call off a request to turn semantic search back on | no request to turn it on is waiting | 404 `NOT_FOUND` | Nothing is waiting to be called off: no request was made, it was answered, or it lapsed after seven days. | FR-204, ADR-0054 | smoke |
 | `PENDING_DELETION` | call off a request to turn semantic search back on | no request to turn it on is waiting | 404 `NOT_FOUND` | Nothing is waiting to be called off. | FR-204, ADR-0054 | never-run |
 | `ARCHIVED` | call off a request to turn semantic search back on |  | 404 `NOT_FOUND` | Ending a bond calls off every request still waiting (ADR-0028), so there is never one to call off here. | FR-204, ADR-0054, ADR-0028 | smoke |
+| `NO_BOND` | report the other member of your bond to a person |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `PENDING_MEMBER` | report the other member of your bond to a person |  | 404 `NOT_FOUND` | Nobody has joined, so there is nobody to report. The same answer, byte for byte, as a bond you are not in. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
 
 ### Happens without you
 
@@ -482,3 +488,5 @@ The code answers these and `contracts/openapi.json` does not document them.
 | Endpoint | Status | What the code does |
 |---|---|---|
 | `GET /bonds/{bondId}` | 304 | Sent with an If-None-Match that equals the bond's current ETag, the answer is 304 with no body, for as long as what you would be shown has not changed. Asserted by BondSettingsEndpointTest (rotating and expiring an invite invalidate a cached bond without a row version change) and BondTimezoneEndpointTest (proposal creation cancellation and expiry invalidate the other member's cached view). |
+| `POST /bonds/{bondId}/members/other/report` | 409 | IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route. |
+| `POST /bonds/{bondId}/members/other/report` | 413 | MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route. |

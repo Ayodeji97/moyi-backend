@@ -90,13 +90,50 @@ internal class ReportCommandsTest(
         val run = moyi("list").also { it.code shouldBe 0 }
         val lines = run.out.lines().filter { it.isNotBlank() }
 
-        lines[0] shouldBe "reportId\treason\tentryId\theld\tdetail\treceivedAt"
-        lines[1] shouldStartWith "$priority\tMINOR_SEXUAL_CONTENT\t$entry\t1\tf\t"
+        lines[0] shouldBe "reportId\treason\ttarget\tentryId\tmemberId\theld\tdetail\treceivedAt"
+        lines[1] shouldStartWith "$priority\tMINOR_SEXUAL_CONTENT\tENTRY\t$entry\t-\t1\tf\t"
         lines[1] shouldEndWith "\tDO NOT VIEW — runbook §2"
-        lines[2] shouldStartWith "$older\tHARASSMENT\t$entry\t1\tt\t"
+        lines[2] shouldStartWith "$older\tHARASSMENT\tENTRY\t$entry\t-\t1\tt\t"
         lines[2] shouldNotContain "DO NOT VIEW"
         run.out shouldNotContain DETAIL
         log(null) shouldContainExactly listOf("LISTED|op-fake-ada|")
+    }
+
+    /**
+     * FR-100's member half (ADR-0053, amended for #127): a member report is in the same queue, names the reported
+     * member and no entry, holds nothing back, and is decided by the same commands.
+     */
+    @Test
+    fun `a member report is listed, shown and decided in the same queue, naming the member and holding nothing`() {
+        val response =
+            mockMvc
+                .post("/api/v1/bonds/$bondId/members/other/report") {
+                    header(HttpHeaders.AUTHORIZATION, bearer(ada))
+                    header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                    contentType = MediaType.APPLICATION_JSON
+                    content = """{"reason":"HARASSMENT","detail":"$DETAIL"}"""
+                }.andReturn()
+                .response
+        response.status shouldBe 201
+        val report = UUID.fromString(body(response)["id"].asString())
+        val beas =
+            jdbc.queryForObject("SELECT id FROM bond_members WHERE bond_id = ?::uuid AND user_id = ?", UUID::class.java, bondId, bea)
+
+        moyi("list").out.lines()[1] shouldStartWith "$report\tHARASSMENT\tMEMBER\t-\t$beas\t0\tt\t"
+        moyi("show", report.toString()).out.let {
+            it shouldContain "target:     MEMBER"
+            it shouldContain "entry:      -"
+            it shouldContain "member:     $beas"
+            it shouldContain "bond:       $bondId"
+            it shouldContain "detail:     \"$DETAIL\""
+            it shouldContain "holds back:\n  nothing"
+        }
+        moyi("uphold", report.toString(), "delete", "harassment, confirmed").let {
+            it.code shouldBe 0
+            it.out shouldContain "nothing to take down"
+        }
+        reportRow(report) shouldBe "UPHELD|true|null"
+        log(report) shouldContainExactly listOf("READ|op-fake-ada|", "UPHELD|op-fake-ada|DELETE: harassment, confirmed")
     }
 
     @Test
