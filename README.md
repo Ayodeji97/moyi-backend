@@ -186,7 +186,7 @@ moyi-backend/
 ├─ app/             @SpringBootApplication, wiring — depends on everything
 ├─ common/          core, web, security, events, testing — shared, no domain logic
 ├─ modules/         identity, bond, gratitude, media, notification,
-│                   scheduling, admin, analytics, ai, support — the actual domain
+│                   scheduling, admin, analytics, ai, support, export — the actual domain
 ├─ contracts/       OpenAPI generation for the client
 ├─ config/          detekt configuration (only the tuned rules)
 ├─ adr/             architecture decision records
@@ -214,20 +214,23 @@ flowchart TD
     admin["admin"]
     analytics["analytics"]
     support["support"]
+    export["export"]
 
     common["<b>common</b> — core · web · security · events · testing"]
 
     app --> identity & bond & gratitude & media
-    app --> notification & scheduling & admin & analytics & support
+    app --> notification & scheduling & admin & analytics & support & export
 
     identity & bond & gratitude & media --> common
-    notification & scheduling & admin & analytics & support --> common
+    notification & scheduling & admin & analytics & support & export --> common
 
     gratitude -. "only via bond's api" .-> bond
     gratitude -. "only via identity's api" .-> identity
     scheduling -. "only via gratitude's api" .-> gratitude
     support -. "only via identity's api" .-> identity
     scheduling -. "only via identity's api" .-> identity
+    export -. "only via each one's api" .-> gratitude & bond & identity & media & support
+    scheduling -. "only via export's api" .-> export
 
     classDef wiring fill:#f4cccc,stroke:#a61c00,stroke-width:2px,color:#1a1a1a
     classDef shared fill:#cfe2f3,stroke:#1155cc,stroke-width:2px,color:#1a1a1a
@@ -255,7 +258,11 @@ transactional outbox, and `scheduling`'s outbox poller hands it to
 same shape turned the other way: `identity` carries it out and publishes
 `AccountDeleted`, and `bond`, `gratitude`, `media` and `support`, which all
 know of `identity` and not it of them, each erase their own share from the
-event (ADR-0058).
+event (ADR-0058); `export` is told the same way, and deletes the person's
+archives. The data export (ADR-0059) is the one module that reads from five
+others, each through its `api`, and each of them decides what of its own a
+person may have; nothing depends on `export` but `scheduling`, which builds
+the archives on a timer.
 
 ### Layers inside a single module
 

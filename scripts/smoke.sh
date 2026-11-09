@@ -574,7 +574,7 @@ if [ "$ATTACH" = 0 ]; then
     --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" \
     --moyi.scheduling.close.cron='*/5 * * * * *' \
     --moyi.scheduling.reminders.cron='*/5 * * * * *' --moyi.scheduling.held-pushes.cron='*/5 * * * * *' \
-    --moyi.scheduling.account-deletion.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
+    --moyi.scheduling.account-deletion.cron='*/5 * * * * *' --moyi.scheduling.data-export.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
   for _ in $(seq 1 90); do
     grep -q "Started MoyiApplication" "$MOYI_LOG" && break
@@ -3587,6 +3587,67 @@ else
 fi
 flush_buckets
 
+echo; echo "data export — asked for, built by the job, downloaded, limited (FR-009, FR-094, ADR-0059)"
+# The job runs on a five-second schedule here (the boot above; with --attach, start the server with
+# --moyi.scheduling.data-export.cron='*/5 * * * * *'). The bond is ended by a block that withdraws the
+# blocker's words first, so the archive shows what T-20 asks: the person's own words, and the
+# partner's withdrawn entry as a blank placeholder.
+verified_account "exporter" "203.0.113.210"; EX_A="$ACCOUNT_ACCESS"
+verified_account "exporters-partner" "203.0.113.211"; EX_B="$ACCOUNT_ACCESS"
+flush_buckets
+EX_WORDS="Exporter~words~$RANDOM$RANDOM"
+EX_PARTNER_WORDS="Withdrawn~words~$RANDOM$RANDOM"
+revealed_bond "data export" "$EX_A" "$EX_B" "$EX_WORDS" "$EX_PARTNER_WORDS"
+EX_BOND="$RB_BOND"; EX_B_ENTRY="$RB_B_ENTRY"
+expect "data export: the partner blocks and withdraws their words" 204 "" -- -X POST "$API/bonds/$EX_BOND/block" -H "Authorization: Bearer $EX_B" -d '{"withdrawEntries": true}'
+expect "data export without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/me/export"
+expect "the latest export with none asked for is 404" 404 '"code":"NOT_FOUND"' -- "$API/me/export" -H "Authorization: Bearer $EX_A"
+expect "data export request is 202 PREPARING" 202 '"status":"PREPARING"' -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
+EX_ID="$(printf '%s' "$LAST_BODY" | jget id)"
+expect "asking again while it is prepared is the same export" 202 "\"id\":\"$EX_ID\"" -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
+expect "the latest export is the one asked for" 200 "\"id\":\"$EX_ID\"" -- "$API/me/export" -H "Authorization: Bearer $EX_A"
+expect "someone else's export is 404" 404 '"code":"NOT_FOUND"' -- "$API/me/export/$EX_ID" -H "Authorization: Bearer $EX_B"
+EX_THEIRS="$(printf '%s' "$LAST_BODY" | sed "s#$EX_ID#ID#")"
+EX_NOBODY_ID="$(new_key)"
+expect "…and one that does not exist is 404" 404 '"code":"NOT_FOUND"' -- "$API/me/export/$EX_NOBODY_ID" -H "Authorization: Bearer $EX_B"
+is "…the same bytes but for the path" "$(printf '%s' "$LAST_BODY" | sed "s#$EX_NOBODY_ID#ID#")" "$EX_THEIRS"
+expect "the export answers its state while the job builds it" 200 "\"id\":\"$EX_ID\"" -- "$API/me/export/$EX_ID" -H "Authorization: Bearer $EX_A"
+EX_MAILS="$(grep -c "Your Moyi archive is ready" "$MOYI_LOG" || true)"
+# Up to 60 seconds: the job runs every five here, and a build takes a moment.
+for _ in $(seq 1 60); do
+  EX_NOW="$(curl -s "$API/me/export/$EX_ID" -H "Authorization: Bearer $EX_A")"
+  [[ "$EX_NOW" == *'"status":"READY"'* ]] && break; sleep 1
+done
+expect "the job makes the export READY" 200 '"status":"READY"' -- "$API/me/export/$EX_ID" -H "Authorization: Bearer $EX_A"
+EX_NOW="$LAST_BODY"
+is "…its URL good for exactly 24 hours" "$(python3 -c "
+import json, sys
+from datetime import datetime
+b = json.loads(sys.argv[1]); p = lambda k: datetime.fromisoformat(b[k].replace('Z', '+00:00'))
+print(int((p('expiresAt') - p('readyAt')).total_seconds()), 'X-Amz-Expires=86400' in b['downloadUrl'])" "$EX_NOW" 2>&1)" "86400 True"
+EX_DIR="$(mktemp -d)"
+EX_URL="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['downloadUrl'])" "$EX_NOW" 2>/dev/null || echo none)"
+EX_CODE="$(curl -s -o "$EX_DIR/archive.zip" -w '%{http_code}' "$EX_URL" || true)"
+if [ "$EX_CODE" = 200 ] && unzip -qo "$EX_DIR/archive.zip" -d "$EX_DIR/x" 2>/dev/null; then pass "the READY export's URL downloads a zip"; else fail "the READY export's URL downloads a zip" "HTTP $EX_CODE"; fi
+is "…of the JSON and the README" "$(cd "$EX_DIR/x" 2>/dev/null && ls | sort | tr '\n' ' ')" "README.txt moyi-export.json "
+is "…holding the person's own words, and the partner's withdrawn entry as a blank placeholder" "$(python3 -c "
+import json, sys
+a = json.load(open(sys.argv[1]))
+entries = [e for b in a['bonds'] for d in b['days'] for e in d['entries']]
+mine = [e['text'] for e in entries if e['author'] == 'ME']
+theirs = [(e['id'], e['status'], e['text']) for e in entries if e['author'] == 'PARTNER']
+print(mine == [sys.argv[2]], theirs == [(sys.argv[3], 'DELETED', None)], a['bonds'][0]['bond']['status'], a['adminAccess']['logKept'])" "$EX_DIR/x/moyi-export.json" "$EX_WORDS" "$EX_B_ENTRY" 2>&1)" "True True ARCHIVED False"
+if grep -q "$EX_PARTNER_WORDS" "$EX_DIR/x/moyi-export.json"; then fail "…and not a word the partner withdrew" "found in the archive"; else pass "…and not a word the partner withdrew"; fi
+rm -rf "$EX_DIR"
+for _ in $(seq 1 20); do [ "$(grep -c "Your Moyi archive is ready" "$MOYI_LOG" || true)" -gt "$EX_MAILS" ] && break; sleep 0.25; done
+is "the person is emailed that it is ready" "$(( $(grep -c "Your Moyi archive is ready" "$MOYI_LOG" || true) - EX_MAILS ))" "1"
+if grep -q "X-Amz-Signature" "$MOYI_LOG"; then fail "…and no signed URL reaches a log, the email's included" "one is in $MOYI_LOG"; else pass "…and no signed URL reaches a log, the email's included"; fi
+expect "asking after it is READY is a new export" 202 '"status":"PREPARING"' -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
+[[ "$LAST_BODY" != *"\"id\":\"$EX_ID\""* ]] && pass "…with a new id" || fail "…with a new id" "${LAST_BODY:0:200}"
+expect "the fourth request in a day is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/me/export" -H "Authorization: Bearer $EX_A"
+if grep -q "$EX_WORDS" "$MOYI_LOG"; then fail "the exported words are in no log line" "they are in $MOYI_LOG"; else pass "the exported words are in no log line"; fi
+flush_buckets
+
 echo; echo "account deletion — asked for, called off, asked again, carried out (FR-008, ADR-0058)"
 # The job runs on a five-second schedule here (the boot above; with --attach, start the server with
 # --moyi.scheduling.account-deletion.cron='*/5 * * * * *'), and the window is moved back by SQL,
@@ -3627,6 +3688,7 @@ is "…the same bytes as cancelling with nothing ever asked" "$LAST_BODY" "$DL_N
 expect "GET /me is clear again" 200 '"deletionRequest":null' -- "$API/me" -H "Authorization: Bearer $DL_A"
 flush_buckets
 expect "asked for again: 202" 202 '"cancellableUntil":"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d "{\"password\":\"$PASSWORD\"}"
+expect "…and an export asked for before it is carried out" 202 '"status":"PREPARING"' -- -X POST "$API/me/export" -H "Authorization: Bearer $DL_A"
 if [ "$PSQL_OK" = 1 ]; then
   DL_USER="$(sql "SELECT id FROM users WHERE email = '$DL_EMAIL'")"
   db_is "…its window is moved back fifteen days, as fourteen days on would leave it" \
@@ -3643,6 +3705,9 @@ if [ "$PSQL_OK" = 1 ]; then
     "$(sql "SELECT string_agg((text IS NULL) || ':' || status || ':' || author_deleted_account, ',' ORDER BY (id = '$DL_A_ENTRY') DESC) FROM entries WHERE id IN ('$DL_A_ENTRY', '$DL_B_ENTRY')")" "true:DELETED:true,false:REVEALED:false"
   db_is "…and the day they both wrote keeps its status, so the partner's streak stands" \
     "$(sql "SELECT d.status FROM bond_days d JOIN entries e ON e.bond_day_id = d.id WHERE e.id = '$DL_B_ENTRY'")" "REVEALED"
+  for _ in $(seq 1 15); do [ "$(sql "SELECT count(*) FROM data_exports WHERE user_id = '$DL_USER'")" = "0" ] && break; sleep 1; done
+  db_is "…and every export of the deleted account is gone, its archive with it (ADR-0059)" \
+    "$(sql "SELECT count(*) FROM data_exports WHERE user_id = '$DL_USER'")" "0"
 else
   skip "account deletion: carried out by the job (psql not reachable through docker compose)"
 fi

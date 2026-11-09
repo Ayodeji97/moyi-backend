@@ -3159,3 +3159,20 @@ Also: a mutation helper that undid an edit by replacing the new text with the ol
 Also: the first smoke run waited 20 s for a job on a five-second cron and failed. ShedLock's
          `lockAtLeastFor` (30 s) is a floor on the gap between two runs, whatever the cron says;
          a probe that waits on a ShedLocked job must outwait that, not the schedule.
+
+
+## 2026-11-09 · Feature · The data export: the app's own reading, five modules' answers (FR-009, FR-094, #126, ADR-0059)
+
+Expected: a query per table, joined into one JSON file by a job.
+Reality: what a person may have of their partner's words is not a query's to decide. The archive
+         route already answers it, through the gate that withholds a locked entry and turns a
+         withdrawn one into a tombstone the moment the block commits. So `gratitude`'s share of the
+         export *is* `GetDays.page`, walked to the end; `bond`, `identity`, `media` and `support`
+         each answer for their own rows; and a new `export` module only asks and zips. T-20 then
+         holds by construction rather than by a second copy of the rule.
+Wrong about: Jackson 3's `JsonNode.map`. It is a member function that applies the lambda to the
+         node itself (Optional-style), so in Kotlin it wins over the `Iterable.map` extension and
+         `array.map { it["field"] }` reads a field of the array: null, and an NPE three lines on.
+         `.toList().map` is what was meant.
+Also: the partner's leave and block must look the same in the export as in the app (ADR-0028):
+         the bond export carries the person's own block and withdrawal, and never the partner's.
