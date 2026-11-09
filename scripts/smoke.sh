@@ -4,13 +4,16 @@
 # Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
 # 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
 # (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded
-# from MinIO holding the person's words and the blocker's withdrawn entry as a blank placeholder, the
-# email without a link, a new export after READY, 429 on the fourth of the day, no words or signed
-# URL in the log; and in the deletion section, an export the deleted account had is gone. Last run on
-# 2026-11-09, on feat/data-export, from a jar of ae1211d's tree, against its own compose project
-# (moyi-41j: Postgres 55481, Valkey 56401, MinIO 59481), the jar booted by hand (local profile, the
-# close, reminders, held-pushes, account-deletion and data-export crons at */5) and --attach:
-# 1595 passed, 0 failed, 0 skipped, on a fresh database.
+# from MinIO, the email without a link; then the partner blocks and withdraws, and that export is
+# EXPIRED and its URL dead (ADR-0059 decision 12); a new one holds the withdrawn entry as a blank
+# placeholder; a repeat while one is prepared spends none of the three a day, the fourth new one is
+# 429; no words or signed URL in the log; and in the deletion section, the deleted account's export is
+# gone. Last run on 2026-11-09, on feat/data-export after the review of #162, from a jar of 104f0bd's
+# tree, against its own compose project (moyi-41j: Postgres 55481, Valkey 56401, MinIO 59481), the jar
+# booted by hand (local profile, the close, reminders, held-pushes, account-deletion and data-export
+# crons at */5) and --attach: on a fresh database 1602 passed, 1 failed (late entries: "the job has
+# run since", the close job's 30 s ShedLock floor against the probe's 30 s wait; nothing of the
+# export's), 0 skipped; again on the same server, 1603 passed, 0 failed, 0 skipped.
 #
 # Issue #125 adds the account-deletion section: the password asked for again (422 absent or blank,
 # 401 INVALID_CREDENTIALS wrong, without WWW-Authenticate), the 202 with its two windows, the
@@ -3629,11 +3632,10 @@ await_export() {
     [[ "$(curl -s "$API/me/export/$1" -H "Authorization: Bearer $EX_A")" == *"\"status\":\"$2\""* ]] && break; sleep 1
   done
 }
-# fetch_archive <READY body> <dir>: the zip at its downloadUrl, unzipped into <dir>/x; the HTTP status.
+# url_of <READY body>: its downloadUrl. fetch_archive <url> <dir>: the zip unzipped into <dir>/x; the HTTP status.
+url_of() { python3 -c "import json,sys; print(json.loads(sys.argv[1])['downloadUrl'])" "$1" 2>/dev/null || echo none; }
 fetch_archive() {
-  local url; url="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['downloadUrl'])" "$1" 2>/dev/null || echo none)"
-  EX_URL="$url"
-  local code; code="$(curl -s -o "$2/archive.zip" -w '%{http_code}' "$url" || true)"
+  local code; code="$(curl -s -o "$2/archive.zip" -w '%{http_code}' "$1" || true)"
   [ "$code" = 200 ] && unzip -qo "$2/archive.zip" -d "$2/x" 2>/dev/null
   printf '%s' "$code"
 }
@@ -3646,8 +3648,8 @@ from datetime import datetime
 b = json.loads(sys.argv[1]); p = lambda k: datetime.fromisoformat(b[k].replace('Z', '+00:00'))
 print(int((p('expiresAt') - p('readyAt')).total_seconds()), 'X-Amz-Expires=86400' in b['downloadUrl'])" "$EX_NOW" 2>&1)" "86400 True"
 EX_DIR="$(mktemp -d)"
-is "the READY export's URL downloads a zip" "$(fetch_archive "$EX_NOW" "$EX_DIR")" "200"
-EX_FIRST_URL="$EX_URL"
+EX_FIRST_URL="$(url_of "$EX_NOW")"
+is "the READY export's URL downloads a zip" "$(fetch_archive "$EX_FIRST_URL" "$EX_DIR")" "200"
 is "…of the JSON and the README" "$(cd "$EX_DIR/x" 2>/dev/null && ls | sort | tr '\n' ' ')" "README.txt moyi-export.json "
 if grep -q "$EX_WORDS" "$EX_DIR/x/moyi-export.json" && grep -q "$EX_PARTNER_WORDS" "$EX_DIR/x/moyi-export.json"; then pass "…holding both people's revealed words, the bond being whole"; else fail "…holding both people's revealed words, the bond being whole" "not both in the archive"; fi
 rm -rf "$EX_DIR"
@@ -3663,7 +3665,7 @@ EX_ID2="$(printf '%s' "$LAST_BODY" | jget id)"
 await_export "$EX_ID2" READY
 expect "the new export is READY" 200 '"status":"READY"' -- "$API/me/export/$EX_ID2" -H "Authorization: Bearer $EX_A"
 EX_DIR="$(mktemp -d)"
-is "…its URL downloads a zip" "$(fetch_archive "$LAST_BODY" "$EX_DIR")" "200"
+is "…its URL downloads a zip" "$(fetch_archive "$(url_of "$LAST_BODY")" "$EX_DIR")" "200"
 is "…holding the person's own words, and the partner's withdrawn entry as a blank placeholder" "$(python3 -c "
 import json, sys
 a = json.load(open(sys.argv[1]))
