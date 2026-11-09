@@ -3159,3 +3159,16 @@ Also: a mutation helper that undid an edit by replacing the new text with the ol
 Also: the first smoke run waited 20 s for a job on a five-second cron and failed. ShedLock's
          `lockAtLeastFor` (30 s) is a floor on the gap between two runs, whatever the cron says;
          a probe that waits on a ShedLocked job must outwait that, not the schedule.
+
+
+## 2026-11-09 · Site · The app-link files under `.well-known` (moyi-app #49)
+
+Expected: a dot-directory the host might not deploy, needing a rename and a rewrite.
+Reality: Wrangler's Pages ignore list is `_worker.js`, `_redirects`, `_headers`,
+         `_routes.json`, `functions`, `.DS_Store`, `node_modules`, `.git` and `.wrangler`
+         (read in wrangler 4.158's bundled source), so `.well-known/` deploys as it is.
+         The real trap was the Apple file's missing extension: without a `_headers` rule it
+         goes out as a download, and `wrangler pages dev` showed the override replaces the
+         type rather than adding a second header.
+Also: the Android fingerprint is the upload key's. Play re-signs the app, so a Play install
+         will not verify until the App Signing key's SHA-256 is added beside it.
