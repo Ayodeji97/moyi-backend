@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #126 adds the data-export section: 401 without a token, 404 for a latest never asked for,
+# 202 PREPARING and the same export again, one 404 for someone else's id and a missing one, the job
+# (on a five-second cron) making it READY with a URL good for exactly 24 hours, the zip downloaded
+# from MinIO holding the person's words and the blocker's withdrawn entry as a blank placeholder, the
+# email without a link, a new export after READY, 429 on the fourth of the day, no words or signed
+# URL in the log; and in the deletion section, an export the deleted account had is gone. Last run on
+# 2026-11-09, on feat/data-export, from a jar of ae1211d's tree, against its own compose project
+# (moyi-41j: Postgres 55481, Valkey 56401, MinIO 59481), the jar booted by hand (local profile, the
+# close, reminders, held-pushes, account-deletion and data-export crons at */5) and --attach:
+# 1595 passed, 0 failed, 0 skipped, on a fresh database.
+#
 # Issue #125 adds the account-deletion section: the password asked for again (422 absent or blank,
 # 401 INVALID_CREDENTIALS wrong, without WWW-Authenticate), the 202 with its two windows, the
 # idempotent repeat, the pending request on GET /me, one email, sign-in kept, a cancel and the one
