@@ -9,7 +9,7 @@
 # feat/late-entry-grace after the review fixes (e131b048, main f906903 merged in), from a jar of
 # that tree, on a fresh database, against compose project moyi-41f (Postgres 55461, Valkey 56361,
 # MinIO 59261), the jar booted by hand (local profile) and --attach: 1408 passed, 0 failed,
-# 0 skipped. The run before, from 8f1cdc7's parent tree, had one failure: the sign-in limit's
+# 0 skipped. The run before (main c6428c1 merged in) had one failure: the sign-in limit's
 # Retry-After, 179 for 180, a second boundary in a probe this change does not touch; it did not
 # recur.
 #
