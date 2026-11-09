@@ -115,6 +115,7 @@ internal class TypedCodeRedisOutageTest(
 
         refused.status shouldBe 503
         refused.contentAsString shouldContain "\"code\":\"CODE_CHECK_UNAVAILABLE\""
+        refused.getHeader(HttpHeaders.RETRY_AFTER) shouldBe "60"
         jdbc.queryForObject(
             "SELECT code_attempts FROM verification_tokens WHERE purpose = 'PASSWORD_RESET'",
             Int::class.java,
@@ -123,6 +124,20 @@ internal class TypedCodeRedisOutageTest(
 
         resetByToken(secretIn(email), NEW_PASSWORD).status shouldBe 200
         login(NEW_PASSWORD).status shouldBe 200
+    }
+
+    @Test
+    fun `a typed reset code for an address with no account is the same bytes`() {
+        register().status shouldBe 201
+        forgot().status shouldBe 202
+        val code = codeIn(awaitEmails(2).last())
+
+        val known = resetByCode(ADA, code, NEW_PASSWORD)
+        val unknown = resetByCode("nobody@example.com", code, NEW_PASSWORD)
+
+        unknown.status shouldBe 503
+        withoutTraceId(unknown.contentAsString) shouldBe withoutTraceId(known.contentAsString)
+        unknown.getHeader(HttpHeaders.RETRY_AFTER) shouldBe known.getHeader(HttpHeaders.RETRY_AFTER)
     }
 
     private fun awaitEmails(count: Int): List<EmailMessage> {
