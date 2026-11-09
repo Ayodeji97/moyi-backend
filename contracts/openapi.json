@@ -638,7 +638,7 @@
                 }
               }
             },
-            "description" : "Gone: `PASSWORD_RESET_TOKEN_EXPIRED`. The link was real but is past its hour or was already used. Ask for a new one."
+            "description" : "Gone: `PASSWORD_RESET_TOKEN_EXPIRED`. The link was real but is past its hour or was already used. Ask for a new one. Only a `token` is answered 410; an `email` and `code` never are."
           },
           "415" : {
             "content" : {
@@ -658,7 +658,7 @@
                 }
               }
             },
-            "description" : "Unprocessable Entity"
+            "description" : "Unprocessable: `VALIDATION_FAILED` for a body that is not exactly one of a `token`, or an `email` and a six-digit `code`, or for the new `password` (`VALID_PASSWORD`, `NOT_BREACHED`); that refusal spends nothing. `PASSWORD_RESET_TOKEN_INVALID` for a token that matches nothing, and for every refused code: no such account, a wrong code, or one expired (15 minutes), burned (5 wrong tries) or spent. One answer for all of them, on purpose; ask for a new email."
           },
           "429" : {
             "content" : {
@@ -688,7 +688,7 @@
                 }
               }
             },
-            "description" : "Service Unavailable: `HASHING_CAPACITY_EXCEEDED`, with `Retry-After: 1`. Password hashing is momentarily full; retry the same request. The link is not spent."
+            "description" : "Service Unavailable: `HASHING_CAPACITY_EXCEEDED`, with `Retry-After: 1`. Password hashing is momentarily full; retry the same request. The link or the code is not spent."
           }
         },
         "security" : [ ],
@@ -867,7 +867,7 @@
                 }
               }
             },
-            "description" : "Gone: `VERIFICATION_TOKEN_EXPIRED`. The link was real but is past its 24 hours or was already used. Ask for a new one."
+            "description" : "Gone: `VERIFICATION_TOKEN_EXPIRED`. The link was real but is past its 24 hours or was already used. Ask for a new one. Only a `token` is answered 410; an `email` and `code` never are."
           },
           "415" : {
             "content" : {
@@ -887,7 +887,7 @@
                 }
               }
             },
-            "description" : "Unprocessable Entity"
+            "description" : "Unprocessable: `VALIDATION_FAILED` for a body that is not exactly one of a `token`, or an `email` and a six-digit `code`. `VERIFICATION_TOKEN_INVALID` for a token that matches nothing, and for every refused code: no such account, a wrong code, or one expired (15 minutes), burned (5 wrong tries) or spent. One answer for all of them, on purpose; ask for a new email."
           },
           "429" : {
             "content" : {
@@ -6990,18 +6990,28 @@
       },
       "ResetPasswordRequest" : {
         "type" : "object",
+        "description" : "Exactly one of: `token`, the value after `?token=` in the emailed link; or `email` and `code`, the address the email was sent to and the six digits in it. Anything else is `422 VALIDATION_FAILED`.",
         "properties" : {
+          "code" : {
+            "type" : [ "string", "null" ],
+            "description" : "The six ASCII digits from the email (surrounding space is trimmed). Good for 15 minutes, until 5 wrong tries, and until a newer email is sent; spent with the link beside it. Another shape is `422 VALIDATION_FAILED` with the field's code `VALID_VERIFICATION_CODE`, and counts as no try."
+          },
+          "email" : {
+            "type" : [ "string", "null" ],
+            "description" : "The address the email was sent to, as typed (case and surrounding space do not matter). Send with `code`."
+          },
           "password" : {
             "type" : "string",
             "minLength" : 1
           },
           "token" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
+            "description" : "The token from the emailed link. Send it alone, without `email` or `code`.",
             "maxLength" : 256,
             "minLength" : 0
           }
         },
-        "required" : [ "password", "token" ]
+        "required" : [ "password" ]
       },
       "RevealedPartnerEntryResponse" : {
         "allOf" : [ {
@@ -7434,14 +7444,23 @@
       },
       "VerifyEmailRequest" : {
         "type" : "object",
+        "description" : "Exactly one of: `token`, the value after `?token=` in the emailed link; or `email` and `code`, the address the email was sent to and the six digits in it. Anything else is `422 VALIDATION_FAILED`.",
         "properties" : {
+          "code" : {
+            "type" : [ "string", "null" ],
+            "description" : "The six ASCII digits from the email (surrounding space is trimmed). Good for 15 minutes, until 5 wrong tries, and until a newer email is sent; spent with the link beside it. Another shape is `422 VALIDATION_FAILED` with the field's code `VALID_VERIFICATION_CODE`, and counts as no try."
+          },
+          "email" : {
+            "type" : [ "string", "null" ],
+            "description" : "The address the email was sent to, as typed (case and surrounding space do not matter). Send with `code`."
+          },
           "token" : {
-            "type" : "string",
+            "type" : [ "string", "null" ],
+            "description" : "The token from the emailed link. Send it alone, without `email` or `code`.",
             "maxLength" : 256,
             "minLength" : 0
           }
-        },
-        "required" : [ "token" ]
+        }
       }
     },
     "securitySchemes" : {

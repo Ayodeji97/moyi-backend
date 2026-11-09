@@ -5,6 +5,7 @@ import com.moyi.identity.domain.DevicePlatform
 import com.moyi.identity.domain.DisplayNames
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
+import com.moyi.identity.domain.VerificationCode
 import com.moyi.notification.api.PushToken
 import jakarta.validation.Constraint
 import jakarta.validation.ConstraintValidator
@@ -84,6 +85,32 @@ internal class PasswordConstraintValidator : ConstraintValidator<ValidPassword, 
         // Not trimmed: ADR-0012 accepts spaces in a password, and silently
         // removing them would make the password the user typed unenterable.
         return validate(context) { Password.of(value) }
+    }
+}
+
+/**
+ * Asks [VerificationCode] whether the value is six ASCII digits (#135), and reports its
+ * answer as `VALID_VERIFICATION_CODE`. Trimmed, as the controller trims what it hands on.
+ * A shape refused here is refused before any address is looked up, so it says nothing
+ * about one and counts against no code.
+ */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [VerificationCodeConstraintValidator::class])
+internal annotation class ValidVerificationCode(
+    val message: String = "is not a verification code",
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+internal class VerificationCodeConstraintValidator : ConstraintValidator<ValidVerificationCode, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean {
+        // Absent is the request's own rule (a token, or an address and a code); not this one's.
+        if (value == null) return true
+        return validate(context) { VerificationCode(value.trim()) }
     }
 }
 

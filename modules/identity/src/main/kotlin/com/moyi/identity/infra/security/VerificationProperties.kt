@@ -1,7 +1,10 @@
 package com.moyi.identity.infra.security
 
+import com.moyi.identity.domain.VerificationPurpose
+import com.moyi.identity.domain.VerificationToken
 import org.springframework.boot.context.properties.ConfigurationProperties
 import java.net.URI
+import java.time.Duration
 
 /**
  * Where the emailed links point.
@@ -29,7 +32,21 @@ import java.net.URI
 internal class VerificationProperties(
     linkBaseUrl: URI?,
     resetLinkBaseUrl: URI?,
+    codeTtl: Duration? = null,
 ) {
+    /**
+     * How long the six-digit code in either email may be typed (#135): fifteen minutes unless
+     * set, and never past the link's own expiry. Unlike the base URLs it has a default, because
+     * a missing value here sends nothing anywhere; it must be positive and at most an hour, the
+     * shortest link (a reset), so that a deployment cannot quietly make a code outlive its link.
+     */
+    val codeTtl: Duration =
+        (codeTtl ?: VerificationToken.CODE_TTL_DEFAULT).also {
+            require(!it.isNegative && !it.isZero && it <= MAX_CODE_TTL) {
+                "moyi.identity.verification.code-ttl must be more than zero and at most $MAX_CODE_TTL"
+            }
+        }
+
     /** Where the email-verification link lands (FR-002). Absolute, `http` or `https`; the token is appended as `?token=`. */
     val linkBaseUrl: URI = requireWebUrl(linkBaseUrl, "moyi.identity.verification.link-base-url", "https://example.com/verify")
 
@@ -44,6 +61,7 @@ internal class VerificationProperties(
         requireWebUrl(resetLinkBaseUrl, "moyi.identity.verification.reset-link-base-url", "https://example.com/reset-password")
 
     private companion object {
+        val MAX_CODE_TTL: Duration = VerificationPurpose.PASSWORD_RESET.ttl
         val WEB_SCHEMES = setOf("http", "https")
 
         /**

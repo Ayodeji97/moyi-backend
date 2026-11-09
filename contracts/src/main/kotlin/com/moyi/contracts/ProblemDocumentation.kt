@@ -88,13 +88,24 @@ private val STATUS_DESCRIPTIONS: Map<Pair<String, HttpStatus>, String> =
             "whose token is not accepted.",
         ("verify" to HttpStatus.GONE) to
             "Gone: `VERIFICATION_TOKEN_EXPIRED`. The link was real but is past its 24 hours or was already used. Ask " +
-            "for a new one.",
+            "for a new one. Only a `token` is answered 410; an `email` and `code` never are.",
         ("reset" to HttpStatus.GONE) to
             "Gone: `PASSWORD_RESET_TOKEN_EXPIRED`. The link was real but is past its hour or was already used. Ask " +
-            "for a new one.",
+            "for a new one. Only a `token` is answered 410; an `email` and `code` never are.",
+        ("verify" to HttpStatus.UNPROCESSABLE_ENTITY) to
+            "Unprocessable: `VALIDATION_FAILED` for a body that is not exactly one of a `token`, or an `email` and a " +
+            "six-digit `code`. `VERIFICATION_TOKEN_INVALID` for a token that matches nothing, and for every refused " +
+            "code: no such account, a wrong code, or one expired (15 minutes), burned (5 wrong tries) or spent. One " +
+            "answer for all of them, on purpose; ask for a new email.",
+        ("reset" to HttpStatus.UNPROCESSABLE_ENTITY) to
+            "Unprocessable: `VALIDATION_FAILED` for a body that is not exactly one of a `token`, or an `email` and a " +
+            "six-digit `code`, or for the new `password` (`VALID_PASSWORD`, `NOT_BREACHED`); that refusal spends " +
+            "nothing. `PASSWORD_RESET_TOKEN_INVALID` for a token that matches nothing, and for every refused code: " +
+            "no such account, a wrong code, or one expired (15 minutes), burned (5 wrong tries) or spent. One answer " +
+            "for all of them, on purpose; ask for a new email.",
         ("register" to HttpStatus.SERVICE_UNAVAILABLE) to HASHING_BUSY,
         ("login" to HttpStatus.SERVICE_UNAVAILABLE) to HASHING_BUSY,
-        ("reset" to HttpStatus.SERVICE_UNAVAILABLE) to "$HASHING_BUSY The link is not spent.",
+        ("reset" to HttpStatus.SERVICE_UNAVAILABLE) to "$HASHING_BUSY The link or the code is not spent.",
     )
 
 /** `ProblemDetail`'s trace extension member: see [traceIdSchema]. */

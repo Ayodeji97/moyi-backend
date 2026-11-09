@@ -6,6 +6,7 @@ import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationToken
 import org.springframework.stereotype.Component
 import java.time.Instant
+import java.util.UUID
 
 /**
  * The verification-token table, spoken in domain terms.
@@ -47,4 +48,29 @@ internal class VerificationTokenStore(
         purpose: VerificationPurpose,
         now: Instant,
     ): Int = tokens.deleteLive(userId.value, purpose, now)
+
+    /** [consume] by id: `true` if this call spent the token. */
+    fun consume(
+        id: UUID,
+        now: Instant,
+    ): Boolean = tokens.consumeById(id, now) == 1
+
+    /** The row holding this person's code for [purpose], locked until the transaction ends; null if none holds one. */
+    fun lockHeldCode(
+        userId: UserId,
+        purpose: VerificationPurpose,
+    ): VerificationToken? = tokens.lockHeldCode(userId.value, purpose)?.toDomain()
+
+    fun recordWrongCode(tokenId: UUID) {
+        tokens.recordWrongCode(tokenId)
+    }
+
+    /** Takes back every code this person holds for [purpose], under the issue lock. */
+    fun retireCodes(
+        userId: UserId,
+        purpose: VerificationPurpose,
+    ): Int {
+        tokens.lockCodeIssue(userId.value)
+        return tokens.retireCodes(userId.value, purpose)
+    }
 }

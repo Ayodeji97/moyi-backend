@@ -4,10 +4,12 @@ import com.moyi.common.web.ErrorCode
 import com.moyi.common.web.ExceptionHandlerAdviceOrder
 import com.moyi.common.web.ProblemDetails
 import com.moyi.identity.domain.HashingCapacityExceededException
+import com.moyi.identity.domain.PasswordResetCodeRejectedException
 import com.moyi.identity.domain.PasswordResetTokenExpiredException
 import com.moyi.identity.domain.PasswordResetTokenInvalidException
 import com.moyi.identity.domain.RefreshTokenInvalidException
 import com.moyi.identity.domain.RefreshTokenReusedException
+import com.moyi.identity.domain.VerificationCodeRejectedException
 import com.moyi.identity.domain.VerificationTokenExpiredException
 import com.moyi.identity.domain.VerificationTokenInvalidException
 import com.moyi.identity.service.AuthenticatedUserMissingException
@@ -50,11 +52,14 @@ internal class IdentityExceptionHandler(
      * does not echo the token — it is a credential, even a wrong one.
      */
     @ExceptionHandler(VerificationTokenInvalidException::class)
-    fun handleVerificationTokenInvalid(request: WebRequest): ResponseEntity<Any> =
+    fun handleVerificationTokenInvalid(
+        invalid: VerificationTokenInvalidException,
+        request: WebRequest,
+    ): ResponseEntity<Any> =
         problem(
             status = HttpStatus.UNPROCESSABLE_ENTITY,
             errorCode = ErrorCode.VERIFICATION_TOKEN_INVALID,
-            detail = "That verification link is not recognised.",
+            detail = if (invalid is VerificationCodeRejectedException) CODE_REJECTED else "That verification link is not recognised.",
             request = request,
         )
 
@@ -73,12 +78,22 @@ internal class IdentityExceptionHandler(
             request = request,
         )
 
+    /**
+     * #135: a refused `{email, code}` is a kind of each of these two, so it is the same status
+     * and code as an unrecognised link, with one detail of its own. That one answer is the
+     * same bytes for an address with no account, a wrong code, and an expired, burned or
+     * spent one (ADR-0018, amended 2026-11-08); the code is the link's, so a client generated
+     * before #135 already handles it.
+     */
     @ExceptionHandler(PasswordResetTokenInvalidException::class)
-    fun handlePasswordResetTokenInvalid(request: WebRequest): ResponseEntity<Any> =
+    fun handlePasswordResetTokenInvalid(
+        invalid: PasswordResetTokenInvalidException,
+        request: WebRequest,
+    ): ResponseEntity<Any> =
         problem(
             status = HttpStatus.UNPROCESSABLE_ENTITY,
             errorCode = ErrorCode.PASSWORD_RESET_TOKEN_INVALID,
-            detail = "That password reset link is not recognised.",
+            detail = if (invalid is PasswordResetCodeRejectedException) CODE_REJECTED else "That password reset link is not recognised.",
             request = request,
         )
 
@@ -194,6 +209,11 @@ internal class IdentityExceptionHandler(
     }
 
     private companion object {
+        /** No dash, per `copy.md`; it covers every reason, because it may not say which. */
+        const val CODE_REJECTED =
+            "That code did not work. Check the address and the code, or ask for a new email. " +
+                "A code works for 15 minutes and stops after 5 wrong tries."
+
         /** A hash takes ~150 ms, so a second is long enough for the queue to drain and short enough to feel instant. */
         const val RETRY_AFTER_SECONDS = "1"
     }

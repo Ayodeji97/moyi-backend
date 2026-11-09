@@ -1,6 +1,10 @@
 package com.moyi.identity.service
 
+import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.TokenHash
+import com.moyi.identity.domain.User
+import com.moyi.identity.domain.VerificationCode
+import com.moyi.identity.domain.VerificationCodeRejectedException
 import com.moyi.identity.domain.VerificationPurpose
 import com.moyi.identity.domain.VerificationSecret
 import com.moyi.identity.domain.VerificationToken
@@ -11,6 +15,7 @@ import com.moyi.identity.infra.database.VerificationTokenStore
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
 import java.time.Instant
 
@@ -37,6 +42,8 @@ internal class VerifyEmail(
     private val tokens: VerificationTokenStore,
     private val accounts: AccountStore,
     private val clock: Clock,
+    private val codes: VerificationCodeCheck,
+    private val transactions: TransactionTemplate,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -57,6 +64,43 @@ internal class VerifyEmail(
         // The FK cascade makes a token without a user impossible; the branch
         // exists so the impossible is a 422 rather than a null dereference.
         val user = accounts.findById(token.userId) ?: throw VerificationTokenInvalidException()
+        complete(user, now)
+    }
+
+    /**
+     * The same verification by the six digits from the email and the address they were sent
+     * to (#135). Every refusal is one [VerificationCodeRejectedException], whatever the reason
+     * (ADR-0018, amended 2026-11-08): never a 410, because "this code was real" would say the
+     * address has an account.
+     *
+     * Not `@Transactional`: a wrong code's count must commit before the refusal is thrown, so
+     * the transaction is the template's and the throw comes after it.
+     *
+     * @throws VerificationCodeRejectedException no account, no code, a wrong, expired, burned or spent one
+     */
+    fun verify(
+        email: Email,
+        code: VerificationCode,
+    ) {
+        codes.limit(email)
+        val now = clock.instant()
+        val verified =
+            transactions.execute {
+                val accepted = codes.check(email, VerificationPurpose.EMAIL_VERIFICATION, code, now)
+                // Under the row lock a live code's row cannot have been spent since: the link's
+                // UPDATE waits on the same lock. The branch is the compare-and-set's, kept.
+                if (accepted == null || !tokens.consume(accepted.token.id, now)) return@execute false
+                complete(accepted.user, now)
+                true
+            }
+        if (verified != true) throw VerificationCodeRejectedException()
+    }
+
+    /** Both paths end here, inside their transaction, with the token spent. */
+    private fun complete(
+        user: User,
+        now: Instant,
+    ) {
         accounts.update(user.verifyEmail(now))
 
         // Any other *live* link still in this person's inbox is now moot.

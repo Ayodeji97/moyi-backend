@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #135 adds the typed-codes section: the six digits in the verification and reset emails,
+# read from the log; {email, code} verifies and resets; an unknown address is the same bytes as a
+# wrong code; five wrong burn the code while its link still works; a new email retires the old
+# code; a used code is refused with its link spent; ten typed codes a day per address and twenty
+# presentations an hour per client address, each to its 429. Last run on 2026-11-09, on
+# feat/typed-email-codes, from a jar of 303a1df (main at f906903, #150, merged in), on a fresh
+# database that applied 44 migrations to V51, against its own compose project (moyi-41h:
+# Postgres 55458, Valkey 56348, MinIO 59275; 55448 and 59266 were held by a forward docker did
+# not list), the jar booted by hand (local profile) and --attach: 1454 passed, 0 failed,
+# 1 skipped (the tag across the erasure, the poller having won the race).
+#
 # The contract-precision PR (#137 to #140, #142) adds five probes: an error body's traceId (32 hex
 # digits, a new one per request) and a TIMEZONE_CHANGE_TOO_SOON refusal's typed allowedFrom, equal to
 # the date its detail names, with its traceId on the log line for that refusal. Every "identical
@@ -815,6 +826,96 @@ expect "the new one does" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$
 sleep 1
 for needle in "$PASSWORD" "$NEW_PASSWORD" "$REFRESH" "$REFRESH2" "$ACCESS"; do if grep -qF -- "$needle" "$MOYI_LOG"; then fail "secret in log" "a password or token appears in the log"; SECRET_LEAK=1; fi; done
 [ "${SECRET_LEAK:-0}" = 0 ] && pass "no password, refresh token or access token appears in the log"
+
+echo; echo "typed codes (#135, ADR-0018 and ADR-0022 amended 2026-11-08)"
+# The verification and reset emails carry six digits beside the link; verify-email and
+# reset-password take {email, code} in place of the token. Each probe comes from its own
+# X-Forwarded-For, so the twenty-an-hour per-IP bucket the two routes share is not what
+# this section ends up testing; the ten-a-day per-address bucket is driven at the end.
+flush_buckets
+# The last six-digit code in the log: the line after "It works for N minutes:" in the email
+# body, whether the log writes the body's newlines as they are or escaped.
+code_from_log() { python3 -c "import re,sys; m=re.findall(r'It works for \d+ minutes:(?:\\\\n|\s)*(\d{6})', open(sys.argv[1]).read()); print(m[-1] if m else '')" "$MOYI_LOG"; }
+await_email() { local before="$1"; for _ in $(seq 1 40); do [ "$(grep -c "Email NOT sent" "$MOYI_LOG" || true)" -gt "$before" ] && break; sleep 0.25; done; }
+other_code() { printf '%06d' $(( (10#$1 + 1) % 1000000 )); }
+CODE_EMAIL="code-$(date +%s)-$RANDOM@example.com"
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "register for the code probes" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.140' -d "$(register_body "$CODE_EMAIL")"
+await_email "$before"
+CODE1="$(code_from_log)"; LINK1="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+[[ "$CODE1" =~ ^[0-9]{6}$ ]] && pass "the email carries a six-digit code beside the link" || fail "code in email" "got '$CODE1'"
+WRONG1="$(other_code "$CODE1")"
+expect "a wrong code is 422 VERIFICATION_TOKEN_INVALID" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.141' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$WRONG1\"}"
+WRONG_BODY="$LAST_BODY"
+expect "an unknown address is the same bytes as a wrong code" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.142' -d "{\"email\":\"nobody-$RANDOM@example.com\",\"code\":\"$CODE1\"}"
+[ "$LAST_BODY" = "$WRONG_BODY" ] && pass "…byte for byte, but the traceId" || fail "unknown address vs wrong code" "'${LAST_BODY:0:200}' vs '${WRONG_BODY:0:200}'"
+[[ "$LAST_RAW_BODY" != *"$CODE1"* ]] && pass "…and the code is not echoed" || fail "code echoed" "${LAST_RAW_BODY:0:200}"
+expect "a five-digit code is 422 VALIDATION_FAILED, before any lookup" 422 '"code":"VALID_VERIFICATION_CODE"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.143' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"12345\"}"
+expect "a token and a code together is 422 VALIDATION_FAILED" 422 '"code":"VALIDATION_FAILED"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.144' -d "{\"token\":\"$LINK1\",\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE1\"}"
+
+# A new email retires the old code; its link stays live (ADR-0018 decision 6).
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "resend for the pending address is 202" 202 "" -- -X POST "$API/auth/resend-verification" -H 'X-Forwarded-For: 203.0.113.145' -d "{\"email\":\"$CODE_EMAIL\"}"
+await_email "$before"
+CODE2="$(code_from_log)"
+if [ "$CODE2" = "$CODE1" ]; then skip "a new email retires the old code (the two codes happen to be equal)"; else
+  expect "a new email retires the old code" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.146' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE1\"}"
+fi
+expect "the code verifies by address: 200, empty body" 200 "" -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.147' -d "{\"email\":\"$(echo "$CODE_EMAIL" | tr a-z A-Z)\",\"code\":\"$CODE2\"}"
+expect "a used code is refused, and so is its link" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.148' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE2\"}"
+# The first email's link was live when the code verified the account, so it was deleted: not recognised.
+expect "…the older link, retired by the verification, is 422" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.149' -d "{\"token\":\"$LINK1\"}"
+
+# Burning: five wrong codes, then the right one is refused; the link beside it still works.
+BURN_EMAIL="burn-$(date +%s)-$RANDOM@example.com"
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "register for the burn probes" 201 "" -- -X POST "$API/auth/register" -H 'X-Forwarded-For: 203.0.113.150' -d "$(register_body "$BURN_EMAIL")"
+await_email "$before"
+BURN_CODE="$(code_from_log)"; BURN_LINK="$(grep -oE 'token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+for i in 1 2 3 4 5; do
+  expect "wrong code $i of 5 is 422" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H "X-Forwarded-For: 203.0.113.15$i" -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$(other_code "$BURN_CODE")\"}"
+done
+expect "the right code after five wrong ones is refused: the code is burned" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.156' -d "{\"email\":\"$BURN_EMAIL\",\"code\":\"$BURN_CODE\"}"
+[ "$LAST_BODY" = "$WRONG_BODY" ] && pass "…the same bytes as a wrong code" || fail "burned vs wrong" "'${LAST_BODY:0:200}'"
+expect "…while the link beside it still verifies: 200" 200 "" -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.157' -d "{\"token\":\"$BURN_LINK\"}"
+
+# Reset by code.
+before="$(grep -c "Email NOT sent" "$MOYI_LOG" || true)"
+expect "forgot-password for the code account is 202" 202 "" -- -X POST "$API/auth/forgot-password" -H 'X-Forwarded-For: 203.0.113.160' -d "{\"email\":\"$CODE_EMAIL\"}"
+await_email "$before"
+RESET_CODE="$(code_from_log)"; RESET_LINK="$(grep -oE 'reset-password\?token=[A-Za-z0-9_-]+' "$MOYI_LOG" | tail -1 | cut -d= -f2 || true)"
+CODE_PASSWORD="a third good password"
+expect "reset by code for an unknown address" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.161' -d "{\"email\":\"nobody-$RANDOM@example.com\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
+UNKNOWN_RESET_BODY="$LAST_BODY"
+expect "reset by a wrong code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.162' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$(other_code "$RESET_CODE")\",\"password\":\"$CODE_PASSWORD\"}"
+[ "$LAST_BODY" = "$UNKNOWN_RESET_BODY" ] && pass "reset by code for an unknown address is the same bytes as a wrong code" || fail "reset unknown vs wrong" "'${LAST_BODY:0:200}' vs '${UNKNOWN_RESET_BODY:0:200}'"
+if [ "$RESET_CODE" != "$CODE2" ]; then
+  expect "the verification code is not a reset code" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.163' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$CODE2\",\"password\":\"$CODE_PASSWORD\"}"
+fi
+expect "a breached password by code is refused per field, code not spent" 422 '"code":"NOT_BREACHED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.164' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"password\"}"
+expect "reset by address and code is 200" 200 "" -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.165' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
+expect "…the same code again is 422, never 410" 422 '"code":"PASSWORD_RESET_TOKEN_INVALID"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.166' -d "{\"email\":\"$CODE_EMAIL\",\"code\":\"$RESET_CODE\",\"password\":\"$CODE_PASSWORD\"}"
+expect "…and the link beside it is spent: 410" 410 '"code":"PASSWORD_RESET_TOKEN_EXPIRED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.167' -d "{\"token\":\"$RESET_LINK\",\"password\":\"$CODE_PASSWORD\"}"
+expect "the password set by code signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -H 'X-Forwarded-For: 203.0.113.168' -d "$(login_body "$CODE_EMAIL" "$CODE_PASSWORD")"
+# The code reaches the log only inside the logged email (provider=log, local only): no other line holds it.
+CODE_LEAK=0; for c in "$CODE1" "$CODE2" "$BURN_CODE" "$RESET_CODE"; do [ "$(grep -wF -- "$c" "$MOYI_LOG" | grep -vE "^\s*$c\s*\$" | grep -vc 'It works for' || true)" -gt 0 ] && CODE_LEAK=1; done
+[ "$CODE_LEAK" = 0 ] && pass "no code appears in the log outside the logged email" || fail "code in log" "a code appears on a log line that is not the email's"
+
+# Ten typed codes a day per address, both routes together, the same for an address with no account.
+flush_buckets
+LIMIT_CODE_EMAIL="nobody-codes-$RANDOM@example.com"
+for i in $(seq 1 10); do
+  expect "typed code $i of 10 for an unknown address is 422" 422 '"code":"VERIFICATION_TOKEN_INVALID"' -- -X POST "$API/auth/verify-email" -H "X-Forwarded-For: 203.0.113.$((170 + i))" -d "{\"email\":\"$LIMIT_CODE_EMAIL\",\"code\":\"000000\"}"
+done
+expect "the eleventh, on reset-password, is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.181' -d "{\"email\":\"$LIMIT_CODE_EMAIL\",\"code\":\"000000\",\"password\":\"$CODE_PASSWORD\"}"
+header_is "…waiting for one try back" "Retry-After" "8640"
+# Twenty an hour per client address on the two routes, links and codes alike.
+flush_buckets
+for i in $(seq 1 20); do
+  expect "presentation $i of 20 from one address" 422 "" -- -X POST "$API/auth/verify-email" -H 'X-Forwarded-For: 203.0.113.190' -d "{\"token\":\"not-a-token-$i\"}"
+done
+expect "the twenty-first from that address is 429" 429 '"code":"RATE_LIMITED"' -- -X POST "$API/auth/reset-password" -H 'X-Forwarded-For: 203.0.113.190' -d "{\"token\":\"not-a-token\",\"password\":\"$CODE_PASSWORD\"}"
+flush_buckets
 
 etag_of() { printf '%s\n' "$LAST_HEADERS" | grep -i '^etag:' | head -1 | cut -d' ' -f2-; }
 
