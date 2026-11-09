@@ -75,7 +75,8 @@ reason).
 **5. Email: one at request, none at completion.** FR-085's "deletion confirmation" is sent when a
 request is made, once per request (keyed by the request's id), to a **confirmed** address only
 (ADR-0057 decision 6's rule: an unconfirmed address may be somebody else's). It says when it will
-happen, that the person can still sign in and cancel, where (the account section's "Delete my
+happen, to the minute ("23 November 2026 at 14:05 UTC": the window closes at the request's time of
+day), that the person can still sign in and cancel, where (the account section's "Delete my
 account"), that their words become blank placeholders in the shared archive, and what to do if they
 did not ask. It goes the way the security notices go (`SendSecurityNotice`, after commit, async),
 with the same accepted gap: a process death between the commit and the send loses the email, not
@@ -84,8 +85,11 @@ the thing being erased; sending one would mean keeping it past the erasure. *Own
 
 **6. Carrying it out: identity's half, one transaction per account.** An hourly ShedLocked job
 (`scheduling.AccountDeletionJob`, `0 41 * * * *`, batches of 50, 1,000 a run) calls
-`identity.api.AccountDeletions.executeDue`. For each due request, under the user's row lock, the
-request is read again (a cancel that committed meanwhile wins) and then, in one commit:
+`identity.api.AccountDeletions.executeDue`. For each due request, under the account's sessions lock
+(the advisory lock sign-in, refresh and reset take, so no refresh token or device committed by a
+sign-in in flight is left behind the erasure) and then the user's row lock, the request is read
+again and skipped unless it is still pending and due (a cancel that committed meanwhile wins), and
+then, in one commit:
 
 - the `users` row stays (doc 07 §7: anonymise, don't cascade) and becomes `DELETED` with
   `deleted_at`; `email` becomes `deleted-<id>@deleted.invalid`; `email_verified_at` and
@@ -97,13 +101,14 @@ request is read again (a cancel that committed meanwhile wins) and then, in one 
   is free to be registered again. *Owner may overrule* (a keyed hash would be the alternative, if
   something needs to recognise a returning address);
 - `credentials`, `refresh_tokens`, `devices`, `verification_tokens` and `consent_records` are
-  deleted for the id, `tokens_invalid_before` is set, and `notification`'s push tokens are forgotten
+  deleted for the id, `tokens_invalid_before` is set to the next whole second (a token's `iat` is whole seconds, so a
+token issued in the same second as the erasure would otherwise live out its fifteen minutes), and `notification`'s push tokens are forgotten
   (`PushTokens.forgetAllOf`): every session and every way back in ends;
 - `deletion_requests.executed_at` is set, and **`AccountDeleted {userId}` is published** to the
   outbox.
 
-One account that fails does not stop the run: it is logged by id and exception class and taken again
-next run, its transaction having committed nothing.
+One account that fails, with any runtime exception, does not stop the run: it is logged by id and
+exception class and taken again next run, its transaction having committed nothing.
 
 **7. `bond`'s share: every bond the person is still in ends as their leaving would end it**
 (`EndBond.endEveryBondOf`, consumer `bond.account-deletion`). A leave, not a block: nothing stops the
@@ -111,7 +116,9 @@ partner meeting a new account of the same person, and the partner is told nothin
 tell them (doc 26 §2.1). The bond is archived, its live invite revoked and its open proposals
 cancelled, as on a leave; a bond that never had a second member is archived; a bond in its
 cooling-off keeps `PENDING_DELETION` (both agreed to destroy it, `Bond.end`). No withdrawal is
-recorded (BR-10a is a different erasure, with `author_deleted_account` false). Member rows stay.
+recorded (BR-10a is a different erasure, with `author_deleted_account` false). Member rows stay,
+but **`nickname_for_other`, the name the person gave the other member, is emptied** in every bond
+they were ever in: it is free text they typed (found by the review of #158).
 *Owner may overrule* (doc 04 §8.2 says only "the Bond transitions to `ARCHIVED`").
 
 **8. `gratitude`'s share** (consumer `gratitude.account-deletion`), in every bond the person was
@@ -169,7 +176,9 @@ days and streak survive, which is what BR-10 exists for.
 - `gratitude`'s share is one delivery transaction, as the withdrawal's is (about twenty thousand
   entries within the dispatcher's sixty seconds; past that it would fail on every retry, and the cure
   is batches).
-- Kept, by id only: `bond_members` and `blocks` rows (the partner's safety, and the tombstones'
+- Erased beyond doc 07 §7's list: the person's `bond_members.nickname_for_other`, their bookmarks,
+  reactions, report details, media, devices, push tokens, consent records and open tickets' words.
+- Kept, by id only: `bond_members` rows (without the nickname) and `blocks` rows (the partner's safety, and the tombstones'
   authorship); the notification ledger (`notifications`: ids, categories and times, no text);
   `idempotency_keys` (reaped within a day, ADR-0031); `entry_report_log` and `media_moderation_log`
   (the operators' record). Deleted data survives in the nightly backups for their 30 days

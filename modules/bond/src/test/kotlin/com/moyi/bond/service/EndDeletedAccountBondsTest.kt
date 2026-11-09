@@ -123,6 +123,29 @@ internal class EndDeletedAccountBondsTest(
         jdbc.queryForObject("SELECT version FROM bonds WHERE id = ?::uuid", Int::class.java, left) shouldBe versionBefore
     }
 
+    @Test
+    fun `the names the person gave their partners go, in bonds held and left, and the partner's own stays`() {
+        val ada = users.verified("Ada")
+        val bea = users.verified("Bea")
+        val cleo = users.verified("Cleo")
+        val held = pair(ada, bea)
+        val left = pair(ada, cleo)
+        jdbc.update("UPDATE bond_members SET nickname_for_other = 'what Ada calls them'")
+        mockMvc
+            .post("/api/v1/bonds/$left/leave") { auth(ada) }
+            .andReturn()
+            .response.status shouldBe 204
+
+        deleteAccount(ada)
+        deleteAccount(ada)
+
+        jdbc.queryForList("SELECT nickname_for_other FROM bond_members WHERE user_id = ?", String::class.java, ada) shouldBe
+            listOf(null, null)
+        jdbc.queryForObject("SELECT nickname_for_other FROM bond_members WHERE user_id = ?", String::class.java, bea) shouldBe
+            "what Ada calls them"
+        statusOf(held) shouldBe "ARCHIVED"
+    }
+
     private fun deleteAccount(userId: UUID) {
         // What the set-up published (a join's pushes) is delivered first, so the count below is this event's alone.
         dispatcher.dispatchDue(clock.instant().plusSeconds(1), 100)

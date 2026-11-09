@@ -3671,7 +3671,7 @@
     "to": "DELETED",
     "status": null,
     "code": null,
-    "reason": "The job carries it out: the address and name are erased, the password, sessions, devices, push tokens, verification codes and consent records deleted, and AccountDeleted published in the same commit. From it every bond you are still in ends as a leave ends it; every entry you wrote becomes a flagged tombstone (BR-10), so your partner's days and streak stand; your bookmarks, reactions, photos, voice notes and report details go; your open support messages are emptied.",
+    "reason": "The job carries it out: the address and name are erased, the password, sessions, devices, push tokens, verification codes and consent records deleted, and AccountDeleted published in the same commit. From it every bond you are still in ends as a leave ends it, and the names you gave your partners are emptied; every entry you wrote becomes a flagged tombstone (BR-10), so your partner's days and streak stand; your bookmarks, reactions, photos, voice notes and report details go; your open support messages are emptied.",
     "rule": "FR-008, ADR-0058",
     "evidence": "smoke",
     "evidenceRef": "the deleted account cannot sign in: 401 INVALID_CREDENTIALS",

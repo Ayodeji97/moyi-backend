@@ -30,12 +30,17 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.put
+import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import javax.sql.DataSource
 
 /**
@@ -55,6 +60,7 @@ internal class AccountDeletionEndpointTest(
     @Autowired private val emails: RecordingEmailSender,
     @Autowired private val deletions: AccountDeletions,
     @Autowired private val directory: UserDirectory,
+    @Autowired private val transactions: TransactionTemplate,
     @Autowired dataSource: DataSource,
 ) : IntegrationTest() {
     private val jdbc = JdbcTemplate(dataSource)
@@ -167,7 +173,7 @@ internal class AccountDeletionEndpointTest(
         val mail = emails.sent.single { it.subject.contains("delet", ignoreCase = true) }
         mail.to shouldBe "ada@example.com"
         mail.text shouldContain "Delete my account"
-        mail.text shouldContain "23 November 2026"
+        mail.text shouldContain "after 23 November 2026 at 10:00 UTC"
         mail.text shouldNotContain PASSWORD
         // The repeat is the same request, under the same key: a provider that remembers keys sends it once.
         mail.idempotencyKey shouldContain "deletion-requested-"
@@ -262,6 +268,15 @@ internal class AccountDeletionEndpointTest(
     fun `carried out, the account is anonymised and every way back into it is closed`() {
         val ada = signUp("ada@example.com", verified = true)
         val other = login("ada@example.com")
+        val phone = login("ada@example.com", device = PIXEL)
+        mockMvc
+            .put("/api/v1/me/devices/current/push-token") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer ${phone.access}")
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"token":"ada-phone-token"}"""
+            }.andReturn()
+            .response.status shouldBe 204
+        jdbc.queryForObject("SELECT count(*) FROM push_tokens WHERE user_id = ?", Int::class.java, ada.id) shouldBe 1
         request(ada.access, PASSWORD)
         clock.advance(Duration.ofDays(14))
 
@@ -326,6 +341,77 @@ internal class AccountDeletionEndpointTest(
         jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, ada.id) shouldBe "DELETED"
     }
 
+    @Test
+    fun `one account that cannot be carried out does not hold up the others in the run`() {
+        val ada = signUp("ada@example.com")
+        val bea = signUp("bea@example.com")
+        request(ada.access, PASSWORD)
+        request(bea.access, PASSWORD)
+        clock.advance(Duration.ofDays(15))
+        jdbc.execute(
+            "CREATE FUNCTION fail_ada() RETURNS trigger LANGUAGE plpgsql AS \$\$ BEGIN " +
+                "IF NEW.aggregate_id = '${ada.id}' THEN RAISE EXCEPTION 'test'; END IF; RETURN NEW; END \$\$",
+        )
+        jdbc.execute("CREATE TRIGGER fail_ada BEFORE INSERT ON outbox_events FOR EACH ROW EXECUTE FUNCTION fail_ada()")
+        try {
+            deletions.executeDue(LIMIT) shouldBe 1
+        } finally {
+            jdbc.execute("DROP TRIGGER fail_ada ON outbox_events")
+            jdbc.execute("DROP FUNCTION fail_ada()")
+        }
+
+        jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, ada.id) shouldBe "PENDING_VERIFICATION"
+        jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, bea.id) shouldBe "DELETED"
+    }
+
+    @Test
+    fun `an access token issued in the moment before it is carried out is refused after it`() {
+        val ada = signUp("ada@example.com")
+        request(ada.access, PASSWORD)
+        clock.advance(Duration.ofDays(14))
+        val fresh = login("ada@example.com").access
+        meResponse(fresh).status shouldBe 200
+
+        deletions.executeDue(LIMIT) shouldBe 1
+
+        // Same second as the erasure: the bump is what refuses it, not its fifteen minutes.
+        meResponse(fresh).status shouldBe 401
+    }
+
+    @Test
+    fun `it waits for a sign-in that holds the account's sessions, so none is left behind it`() {
+        val ada = signUp("ada@example.com")
+        request(ada.access, PASSWORD)
+        clock.advance(Duration.ofDays(14))
+        val holding = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(2)
+        try {
+            // A sign-in in flight: it has taken the sessions lock and not yet committed its family.
+            val signIn =
+                pool.submit {
+                    transactions.executeWithoutResult {
+                        jdbc.queryForList("SELECT pg_advisory_xact_lock(1, hashtext(CAST(? AS text)))", ada.id.toString())
+                        holding.countDown()
+                        release.await()
+                    }
+                }
+            holding.await()
+            val run = pool.submit<Int> { deletions.executeDue(LIMIT) }
+            await().atMost(WAIT).until {
+                jdbc.queryForObject("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted", Int::class.java)!! > 0
+            }
+            jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, ada.id) shouldBe "PENDING_VERIFICATION"
+            release.countDown()
+            signIn.get(WAIT.seconds, TimeUnit.SECONDS)
+            run.get(WAIT.seconds, TimeUnit.SECONDS) shouldBe 1
+        } finally {
+            release.countDown()
+            pool.shutdownNow()
+        }
+        jdbc.queryForObject("SELECT status FROM users WHERE id = ?", String::class.java, ada.id) shouldBe "DELETED"
+    }
+
     // --- helpers ---
 
     private fun request(
@@ -377,16 +463,22 @@ internal class AccountDeletionEndpointTest(
         return Account(id, login(email).access)
     }
 
-    private fun loginResponse(email: String): MockHttpServletResponse =
+    private fun loginResponse(
+        email: String,
+        device: String? = null,
+    ): MockHttpServletResponse =
         mockMvc
             .post("/api/v1/auth/login") {
                 contentType = MediaType.APPLICATION_JSON
-                content = """{"email":"$email","password":"$PASSWORD"}"""
+                content = """{"email":"$email","password":"$PASSWORD"${device?.let { ""","device":$it""" } ?: ""}}"""
             }.andReturn()
             .response
 
-    private fun login(email: String): Signed {
-        val response = loginResponse(email)
+    private fun login(
+        email: String,
+        device: String? = null,
+    ): Signed {
+        val response = loginResponse(email, device)
         response.status shouldBe 200
         val body = json.readTree(response.contentAsString)
         return Signed(body["accessToken"].asText(), body["refreshToken"].asText())
@@ -415,6 +507,7 @@ internal class AccountDeletionEndpointTest(
     private companion object {
         const val PASSWORD = "correct horse battery"
         const val LIMIT = 100
+        const val PIXEL = """{"platform":"ANDROID","appVersion":"1.0.3","osVersion":"16"}"""
         val WAIT: Duration = Duration.ofSeconds(5)
         val SETTLE: Duration = Duration.ofMillis(500)
 

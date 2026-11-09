@@ -78,7 +78,7 @@ internal class SendSecurityNotice(
                 is SecurityNotice.DeletionRequested -> {
                     "Your Moyi account will be deleted" to
                         "You asked for your Moyi account to be deleted. It will be deleted after " +
-                        "${DELETION_DATE.format(notice.cancellableUntil)} (UTC). Until then you can still sign in, and you can " +
+                        "${DELETION_DATE.format(notice.cancellableUntil)}. Until then you can still sign in, and you can " +
                         "change your mind: open Moyi, go to your account, and cancel it under " +
                         "\"Delete my account\". After that date it cannot be undone. What you wrote becomes a blank " +
                         "placeholder in your shared archive, so the other person's days and streak stay as they were. " +
@@ -114,5 +114,9 @@ internal class SendSecurityNotice(
     }
 }
 
-/** "23 November 2026": the day the window closes, in words, as `states.md` writes dates. UTC, and said so. */
-private val DELETION_DATE: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.UK).withZone(ZoneOffset.UTC)
+/**
+ * "23 November 2026 at 14:05 UTC": the moment the window closes, to the minute, because it closes at
+ * the request's time of day and not at the start or end of that date. UTC, and said so.
+ */
+private val DELETION_DATE: DateTimeFormatter =
+    DateTimeFormatter.ofPattern("d MMMM yyyy 'at' HH:mm 'UTC'", Locale.UK).withZone(ZoneOffset.UTC)

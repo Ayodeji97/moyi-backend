@@ -142,12 +142,16 @@ internal class EndBond(
      * agreed to destroy it, and one of them going is no reason to undo that ([Bond.end]). A bond
      * that never had a second member is archived with its live invite revoked.
      *
+     * The name the person gave each partner (`nickname_for_other`) is emptied first, in every bond
+     * they were ever in: free text they typed does not outlive their account.
+     *
      * Bonds are locked in id order, so two deletions sharing a bond cannot deadlock each other.
      * **Idempotent**: a bond the person has already left is not touched, so a redelivery ends
      * nothing twice. Runs in the caller's transaction, the outbox delivery's.
      */
     @Transactional(propagation = Propagation.MANDATORY)
     fun endEveryBondOf(userId: UserId): Int {
+        memberships.forgetNicknamesOf(userId)
         val now = clock.instant()
         return memberships
             .of(userId)

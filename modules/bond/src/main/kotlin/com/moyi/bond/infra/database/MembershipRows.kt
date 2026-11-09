@@ -3,6 +3,7 @@ package com.moyi.bond.infra.database
 import com.moyi.bond.domain.BondId
 import com.moyi.bond.domain.MemberId
 import com.moyi.bond.domain.UserId
+import jakarta.persistence.EntityManager
 import org.springframework.stereotype.Component
 
 /**
@@ -13,7 +14,22 @@ import org.springframework.stereotype.Component
 @Component
 internal class MembershipRows(
     private val members: BondMemberRepository,
+    private val entityManager: EntityManager,
 ) {
+    /**
+     * The name [userId] gave the other member, in every bond they were in, emptied (ADR-0058
+     * decision 7): it is text the person typed, and it goes with their account. Run before the
+     * bonds are loaded, which read their rows again under the lock (Hibernate flushes first, and
+     * the members are refreshed), so no entity in memory writes the old name back. Twice is the
+     * same as once.
+     */
+    fun forgetNicknamesOf(userId: UserId) {
+        entityManager
+            .createNativeQuery("UPDATE bond_members SET nickname_for_other = NULL WHERE user_id = ?1 AND nickname_for_other IS NOT NULL")
+            .setParameter(1, userId.value)
+            .executeUpdate()
+    }
+
     fun of(userId: UserId): List<MembershipRow> =
         members.findAllByUserId(userId.value).map { MembershipRow(BondId(it.bondId), MemberId(it.getId()), held = it.leftAt == null) }
 }

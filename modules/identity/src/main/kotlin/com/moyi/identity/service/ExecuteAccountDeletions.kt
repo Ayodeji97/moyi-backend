@@ -6,9 +6,9 @@ import com.moyi.identity.api.AccountDeletions
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.infra.database.AccountErasure
 import com.moyi.identity.infra.database.DeletionRequestStore
+import com.moyi.identity.infra.database.RefreshTokenStore
 import com.moyi.notification.api.PushTokens
 import org.slf4j.LoggerFactory
-import org.springframework.dao.DataAccessException
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Clock
@@ -28,8 +28,10 @@ import java.time.temporal.ChronoUnit
  * Nothing about the person is logged: an id, and that it happened.
  */
 @Service
+@Suppress("LongParameterList") // The stores, the push tokens, the outbox, the clock and the transaction: each named.
 internal class ExecuteAccountDeletions(
     private val requests: DeletionRequestStore,
+    private val sessions: RefreshTokenStore,
     private val erasure: AccountErasure,
     private val pushTokens: PushTokens,
     private val outbox: EventPublisher,
@@ -38,6 +40,7 @@ internal class ExecuteAccountDeletions(
 ) : AccountDeletions {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    @Suppress("TooGenericExceptionCaught") // One account's failure, whatever it is, must not stop the rest.
     override fun executeDue(limit: Int): Int {
         val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
         return requests.dueBy(now, limit).count { userId ->
@@ -46,7 +49,7 @@ internal class ExecuteAccountDeletions(
             // taken again by the next run, its transaction having committed nothing.
             try {
                 transactions.execute { executeOne(userId) } == true
-            } catch (failed: DataAccessException) {
+            } catch (failed: RuntimeException) {
                 log.warn("Account deletion for user {} failed and will be retried: {}", userId.value, failed.javaClass.simpleName)
                 false
             }
@@ -54,11 +57,16 @@ internal class ExecuteAccountDeletions(
     }
 
     private fun executeOne(userId: UserId): Boolean {
+        // The sessions lock first, as sign-in, refresh and reset take it: a sign-in or refresh in
+        // flight commits its refresh token and device before the erasure deletes them, or waits
+        // for the erasure and then finds no account. Then the user's row, as a request and a
+        // cancel take it.
+        sessions.lockSessionsOf(userId)
         requests.lockUser(userId)
         val now = clock.instant().truncatedTo(ChronoUnit.MICROS)
-        // Read again under the lock: a request cancelled meanwhile is no longer pending. Once due it
-        // cannot be cancelled and no second one can be made, so the one found is the one that fell due.
-        val request = requests.findPending(userId) ?: return false
+        // Read again under the lock: a request cancelled meanwhile is no longer pending, and one
+        // that is not yet due is left to a later run.
+        val request = requests.findPending(userId)?.takeUnless { it.canBeCancelledAt(now) } ?: return false
         erasure.erase(userId, now)
         pushTokens.forgetAllOf(userId.value)
         requests.markExecuted(request, now)

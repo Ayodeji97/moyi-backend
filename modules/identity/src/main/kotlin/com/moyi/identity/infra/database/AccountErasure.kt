@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
 import java.sql.Timestamp
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 
 /**
  * What identity holds of a person, erased (doc 07 §7, ADR-0058 decision 6). Plain SQL in the
@@ -31,6 +32,9 @@ internal class AccountErasure(
     ) {
         val id = userId.value
         val now = Timestamp.from(at)
+        // A token's `iat` is whole seconds and is compared at that resolution (ADR-0019): set to
+        // `at`, a token issued earlier in the same second would live out its fifteen minutes.
+        val invalidBefore = Timestamp.from(at.truncatedTo(ChronoUnit.SECONDS).plusSeconds(1))
         jdbc.update(
             """
             UPDATE users
@@ -42,7 +46,7 @@ internal class AccountErasure(
             DELETED_NAME,
             now,
             now,
-            now,
+            invalidBefore,
             id,
         )
         // Refresh tokens before devices: a token points at its device (ON DELETE SET NULL).

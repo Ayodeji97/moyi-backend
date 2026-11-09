@@ -9,9 +9,9 @@
 # flagged tombstone, the day's status kept. Last run on 2026-11-09, on feat/account-deletion, from a
 # jar of the branch's tree on 30f5873, against its own compose project (moyi-41i: Postgres 55471,
 # Valkey 56391, MinIO 59471), the jar booted by hand (local profile, the account-deletion cron at
-# */5) and --attach: 1560 passed, 0 failed, 0 skipped. That was the second run on that database; the
-# first (1555, 4 failed, 1 skipped: the tag across the erasure) waited 20 s for the job, which
-# ShedLock's 30 s hold outlasts, and read psql's command tag with an UPDATE's RETURNING.
+# */5) and --attach: 1560 passed, 0 failed, 0 skipped, on a fresh database, after the review fixes of
+# #158. An earlier run (1555, 4 failed, 1 skipped: the tag across the erasure) waited 20 s for the
+# job, which ShedLock's 30 s hold outlasts, and read psql's command tag with an UPDATE's RETURNING.
 #
 # Issue #135 adds the typed-codes section: the six digits in the verification and reset emails,
 # read from the log; {email, code} verifies and resets; an unknown address is the same bytes as a
