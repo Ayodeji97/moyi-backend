@@ -55,6 +55,25 @@ internal class ReportRateLimitTest(
         attempt(bea).getHeader("X-RateLimit-Remaining") shouldBe "8"
     }
 
+    /** One allowance for both targets (ADR-0053 decision 9, as amended for #127): one queue, one person reading it. */
+    @Test
+    fun `a member report spends the same allowance as an entry report`() {
+        redis.execInContainer("valkey-cli", "FLUSHALL")
+        val ada = users.verified("Ada")
+        repeat(10) { attempt(ada).status shouldBe 404 }
+        val limited =
+            mvc
+                .post("/api/v1/bonds/${UUID.randomUUID()}/members/other/report") {
+                    header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(ada).token}")
+                    header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
+                    contentType = MediaType.APPLICATION_JSON
+                    content = """{"reason":"OTHER"}"""
+                }.andReturn()
+                .response
+        limited.status shouldBe 429
+        limited.getHeader("X-RateLimit-Limit") shouldBe "10"
+    }
+
     private fun attempt(user: UUID) =
         mvc
             .post("/api/v1/entries/${UUID.randomUUID()}/report") {

@@ -1739,7 +1739,7 @@
     "rule": "ADR-0021 §2",
     "evidence": "smoke",
     "evidenceRef": "a never-issued refresh token is 401 REFRESH_TOKEN_INVALID",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#val found = hash?.let(tokens::findByHash) ?: return@execute Outcome.Invalid"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#val found = hash?.let(tokens::findRefByHash) ?: return@execute Outcome.Invalid"
   },
   {
     "id": "session-valid-refresh",
@@ -1757,7 +1757,25 @@
     "rule": "FR-003, ADR-0021 §1",
     "evidence": "smoke",
     "evidenceRef": "refresh rotates: 200 with a new pair",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (tokens.rotate(previous.id, successor.id, now)) {"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#issueNext(previous, now) { successor -> tokens.rotate(previous.id, successor, now) }"
+  },
+  {
+    "id": "session-valid-refresh-grace-retry",
+    "region": "account.session",
+    "from": "ACCESS_VALID",
+    "action": "POST /api/v1/auth/refresh",
+    "actor": "you",
+    "when": "you send a refresh token of this session that was exchanged less than 30 seconds ago, for a newer one not yet used",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACCESS_VALID",
+    "status": 200,
+    "code": null,
+    "reason": "A refresh whose answer was lost: the token was already exchanged less than 30 seconds ago (counted from that first exchange; a retry does not extend it), and the newer token it was exchanged for has not been used. It is exchanged again: the normal 200 with a new pair in the same session, and the newer token nobody received is cancelled. Nothing is ended and nobody is emailed. The cancelled token, if it does come back, is a reuse (see that row).",
+    "rule": "ADR-0021 §3 (amended 2026-11-08), issue #136",
+    "evidence": "smoke",
+    "evidenceRef": "a second refresh of the same token within 30 s is 200 with a new pair",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#tokens.void(unused.id, now) && tokens.repoint(previous.id, unused.id, successor)"
   },
   {
     "id": "session-valid-refresh-reuse",
@@ -1765,17 +1783,17 @@
     "from": "ACCESS_VALID",
     "action": "POST /api/v1/auth/refresh",
     "actor": "you",
-    "when": "you send a refresh token of this session that was already exchanged for a newer one",
+    "when": "you send a refresh token of this session that was already exchanged for a newer one, more than 30 seconds after that exchange, or after the newer one was itself used; or you send a newer token that a retry of the older one replaced before it was used",
     "guards": [],
     "outcome": "refused",
     "to": "ACCESS_VALID",
     "status": 401,
     "code": "TOKEN_REUSE_DETECTED",
-    "reason": "An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. There is no grace period: two refreshes of one token at the same moment let one through and treat the other as this.",
-    "rule": "ADR-0021 §2, §3",
+    "reason": "An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. The one exception is the grace retry (its own row): within 30 seconds of the exchange, while the newer token is still unused. A newer token that such a retry replaced is never retried in its turn: coming back, it is this, so a thief who replayed inside the window is still caught when the owner next refreshes.",
+    "rule": "ADR-0021 §2, §3 (amended 2026-11-08)",
     "evidence": "smoke",
-    "evidenceRef": "presenting the rotated token again is 401 TOKEN_REUSE_DETECTED",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#previous.rotatedAt != null -> reuse(previous, now)"
+    "evidenceRef": "presenting the rotated token after its successor was used is 401 TOKEN_REUSE_DETECTED",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (!previous.admitsRetry(unused, now, properties.graceWindow)) return reuse(previous, now)"
   },
   {
     "id": "session-expired-refresh",
@@ -1793,7 +1811,25 @@
     "rule": "FR-003, ADR-0021 §1",
     "evidence": "test",
     "evidenceRef": "SessionsEndpointTest#a refresh moves the session's last seen, and the new access token still marks it current",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (tokens.rotate(previous.id, successor.id, now)) {"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#issueNext(previous, now) { successor -> tokens.rotate(previous.id, successor, now) }"
+  },
+  {
+    "id": "session-expired-refresh-grace-retry",
+    "region": "account.session",
+    "from": "ACCESS_EXPIRED",
+    "action": "POST /api/v1/auth/refresh",
+    "actor": "you",
+    "when": "no Authorization header is sent, and you send a refresh token of this session that was exchanged less than 30 seconds ago, for a newer one not yet used",
+    "guards": [],
+    "outcome": "ok",
+    "to": "ACCESS_VALID",
+    "status": 200,
+    "code": null,
+    "reason": "A refresh whose answer was lost: the token was already exchanged less than 30 seconds ago (counted from that first exchange; a retry does not extend it), and the newer token it was exchanged for has not been used. It is exchanged again: the normal 200 with a new pair in the same session, and the newer token nobody received is cancelled. Nothing is ended and nobody is emailed. The cancelled token, if it does come back, is a reuse (see that row).",
+    "rule": "ADR-0021 §3 (amended 2026-11-08), issue #136",
+    "evidence": "test",
+    "evidenceRef": "RefreshGraceWindowTest#a retry of the rotated token inside the window gets a new pair, voids the unused successor, and emails nobody",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#tokens.void(unused.id, now) && tokens.repoint(previous.id, unused.id, successor)"
   },
   {
     "id": "session-expired-refresh-reuse",
@@ -1801,17 +1837,17 @@
     "from": "ACCESS_EXPIRED",
     "action": "POST /api/v1/auth/refresh",
     "actor": "you",
-    "when": "no Authorization header is sent, and you send a refresh token of this session that was already exchanged for a newer one",
+    "when": "no Authorization header is sent, and you send a refresh token of this session that was already exchanged for a newer one, more than 30 seconds after that exchange, or after the newer one was itself used; or you send a newer token that a retry of the older one replaced before it was used",
     "guards": [],
     "outcome": "refused",
     "to": "ACCESS_EXPIRED",
     "status": 401,
     "code": "TOKEN_REUSE_DETECTED",
-    "reason": "An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. There is no grace period: two refreshes of one token at the same moment let one through and treat the other as this.",
-    "rule": "ADR-0021 §2, §3",
-    "evidence": "never-run",
-    "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#previous.rotatedAt != null -> reuse(previous, now)"
+    "reason": "An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. The one exception is the grace retry (its own row): within 30 seconds of the exchange, while the newer token is still unused. A newer token that such a retry replaced is never retried in its turn: coming back, it is this, so a thief who replayed inside the window is still caught when the owner next refreshes.",
+    "rule": "ADR-0021 §2, §3 (amended 2026-11-08)",
+    "evidence": "test",
+    "evidenceRef": "RefreshGraceWindowTest#a thief who replays inside the window is caught when the voided successor comes back",
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (!previous.admitsRetry(unused, now, properties.graceWindow)) return reuse(previous, now)"
   },
   {
     "id": "session-ended-refresh-revoked",
@@ -1865,7 +1901,7 @@
     "rule": "ADR-0021 §2",
     "evidence": "never-run",
     "evidenceRef": "",
-    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#previous.rotatedAt != null -> reuse(previous, now)"
+    "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/service/RotateRefreshToken.kt#if (!previous.admitsRetry(unused, now, properties.graceWindow)) return reuse(previous, now)"
   },
   {
     "id": "session-none-logout",

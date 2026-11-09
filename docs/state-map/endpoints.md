@@ -204,9 +204,11 @@ curl -X POST "$API/auth/refresh" -H 'Content-Type: application/json' -d "{\"refr
 |---|---|---|---|---|---|---|
 | `account.session` | `NO_SESSION` |  | 401 `REFRESH_TOKEN_INVALID` | The refresh token matches none on record. Refresh needs no access token: the refresh token is the credential. Sign in again. | ADR-0021 §2 | smoke |
 | `account.session` | `ACCESS_VALID` | you send the session's current refresh token | 200 stays | The token is exchanged: a new access token good for 15 minutes and a new refresh token good for 30 days, in the same session. The old refresh token is marked as used and must not be sent again. Nothing requires the access token to have expired first, and the one you held before is accepted until its own 15 minutes end. | FR-003, ADR-0021 §1 | smoke |
-| `account.session` | `ACCESS_VALID` | you send a refresh token of this session that was already exchanged for a newer one | 401 `TOKEN_REUSE_DETECTED` | An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. There is no grace period: two refreshes of one token at the same moment let one through and treat the other as this. | ADR-0021 §2, §3 | smoke |
+| `account.session` | `ACCESS_VALID` | you send a refresh token of this session that was exchanged less than 30 seconds ago, for a newer one not yet used | 200 stays | A refresh whose answer was lost: the token was already exchanged less than 30 seconds ago (counted from that first exchange; a retry does not extend it), and the newer token it was exchanged for has not been used. It is exchanged again: the normal 200 with a new pair in the same session, and the newer token nobody received is cancelled. Nothing is ended and nobody is emailed. The cancelled token, if it does come back, is a reuse (see that row). | ADR-0021 §3 (amended 2026-11-08), issue #136 | smoke |
+| `account.session` | `ACCESS_VALID` | you send a refresh token of this session that was already exchanged for a newer one, more than 30 seconds after that exchange, or after the newer one was itself used; or you send a newer token that a retry of the older one replaced before it was used | 401 `TOKEN_REUSE_DETECTED` | An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. The one exception is the grace retry (its own row): within 30 seconds of the exchange, while the newer token is still unused. A newer token that such a retry replaced is never retried in its turn: coming back, it is this, so a thief who replayed inside the window is still caught when the owner next refreshes. | ADR-0021 §2, §3 (amended 2026-11-08) | smoke |
 | `account.session` | `ACCESS_EXPIRED` | no Authorization header is sent, and you send the session's current refresh token | 200 → `ACCESS_VALID` | This is the way back from an expired access token, provided the expired token is not sent along: the refresh token is exchanged for a new pair in the same session, and the sessions list shows the session as seen just now. The old refresh token is marked as used and must not be sent again. | FR-003, ADR-0021 §1 | test |
-| `account.session` | `ACCESS_EXPIRED` | no Authorization header is sent, and you send a refresh token of this session that was already exchanged for a newer one | 401 `TOKEN_REUSE_DETECTED` | An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. There is no grace period: two refreshes of one token at the same moment let one through and treat the other as this. | ADR-0021 §2, §3 | never-run |
+| `account.session` | `ACCESS_EXPIRED` | no Authorization header is sent, and you send a refresh token of this session that was exchanged less than 30 seconds ago, for a newer one not yet used | 200 → `ACCESS_VALID` | A refresh whose answer was lost: the token was already exchanged less than 30 seconds ago (counted from that first exchange; a retry does not extend it), and the newer token it was exchanged for has not been used. It is exchanged again: the normal 200 with a new pair in the same session, and the newer token nobody received is cancelled. Nothing is ended and nobody is emailed. The cancelled token, if it does come back, is a reuse (see that row). | ADR-0021 §3 (amended 2026-11-08), issue #136 | test |
+| `account.session` | `ACCESS_EXPIRED` | no Authorization header is sent, and you send a refresh token of this session that was already exchanged for a newer one, more than 30 seconds after that exchange, or after the newer one was itself used; or you send a newer token that a retry of the older one replaced before it was used | 401 `TOKEN_REUSE_DETECTED` | An exchanged token coming back means a copy exists: either a thief or the owner is holding a stale one, and the server cannot tell which. The request is refused, and as a consequence the whole session is ended (see what happens without you) and the account's address is emailed. The one exception is the grace retry (its own row): within 30 seconds of the exchange, while the newer token is still unused. A newer token that such a retry replaced is never retried in its turn: coming back, it is this, so a thief who replayed inside the window is still caught when the owner next refreshes. | ADR-0021 §2, §3 (amended 2026-11-08) | test |
 | `account.session` | `ACCESS_EXPIRED` | an Authorization header carries the expired access token | 401 `UNAUTHENTICATED` | This route needs no access token, but a token that is sent is still checked before the controller runs, and one that is expired, cancelled or unreadable is refused there: nothing else happens. Send no Authorization header to this route. For refresh this is a trap: a client that attaches its access token to every request cannot refresh once that token has expired, which is exactly when it needs to. (read from Spring Security's BearerTokenAuthenticationFilter and SecurityConfiguration; nothing runs it) | ADR-0019 | never-run |
 | `account.session` | `ENDED` | no Authorization header is sent, or one whose token is still accepted, and the session was revoked: by logout, by being removed from the sessions list, by logout-all, by a password reset, or by an earlier reuse | 401 `REFRESH_TOKEN_INVALID` | Any refresh token of a revoked session, the newest or an older one, gets this answer. Revocation is checked before reuse, so presenting a stale token a second time is not a second reuse and sends no second email. Sign in again. | ADR-0021 §2 | smoke |
 | `account.session` | `ENDED` | no Authorization header is sent, or one whose token is still accepted, the session ran out, and you send its last refresh token, now more than 30 days old | 401 `REFRESH_TOKEN_INVALID` | An expired refresh token is not a reuse: nothing is revoked and nobody is emailed. Sign in again. | ADR-0021 §2 | test |
@@ -1415,6 +1417,49 @@ curl "$API/bonds/$BOND/milestones" -H "Authorization: Bearer $TOKEN"
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 404 | `NOT_FOUND` | The bond does not exist, the id is not a UUID, or you are not a member. These cases share one answer. | smoke |
+
+### POST /bonds/{bondId}/members/other/report
+
+report the other member of your bond to a person
+
+**Needs:** an access token.
+
+- Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same report, and nothing filed twice)
+- Content-Type (application/json, the entry report's body: {"reason": "NON_CONSENSUAL", "MINOR_SEXUAL_CONTENT", "VIOLENCE_OR_SELF_HARM", "HARASSMENT" or "OTHER", "detail": optional, at most 500 characters}. The body is checked before the bond is looked at)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/bonds/$BOND/members/other/report" -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $(uuidgen)" -H 'Content-Type: application/json' -d '{"reason": "HARASSMENT"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
+| `bond` | `PENDING_MEMBER` |  | 404 `NOT_FOUND` | Nobody has joined, so there is nobody to report. The same answer, byte for byte, as a bond you are not in. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
+| `bond` | `ACTIVE` |  | 201 stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
+| `bond` | `PENDING_DELETION` |  | 201 stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. A countdown to deletion does not refuse it: a report is never contact. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | never-run |
+| `bond` | `ARCHIVED` |  | 201 stays | Filed for a person to read, with the id and the reason you gave. Nothing is held back and the other member is told nothing: nothing they can read changes, not a byte, not an ETag. Ended by a leave or a block, by either of you: a report is never contact, and the member who has just blocked may need it most. | FR-100, ADR-0053 (amended for #127), doc 26 §2.2 | smoke |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 422 | `VALIDATION_FAILED` | reason is missing, null, or not one of the five names exactly as written; or detail is blank, longer than 500 characters, or holds a NUL or an unpaired surrogate. Nothing is filed. | smoke |
+| 422 | `VALIDATION_FAILED` | The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. Nothing is filed. | test |
+| 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another body, or another bond or route. | test |
+| 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | never-run |
+| 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed. | never-run |
+| 429 | `RATE_LIMITED` | reports:create:user, ten a day, shared with the entry report route: one queue, one person reading it. Refused attempts count. | test |
+
+#### The contract is silent on
+
+| Status | What the code does |
+|---|---|
+| 409 | IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route. |
+| 413 | MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route. |
 
 ## Day
 
