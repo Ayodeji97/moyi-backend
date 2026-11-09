@@ -240,8 +240,9 @@ voice note where they hold for both. CI installs `ffmpeg` beside libvips.
 - **R2, not run:** that a GET of `voice.ogg` is served with `audio/ogg`, as MinIO serves it.
   **Moved to the owner's verification of the switch-on** (ADR-0052, "Switched on"):
   `scripts/r2-switch-on-check.sh` uploads a WAV as a voice note, waits for `READY` and checks the
-  URL's answer is `audio/ogg` and Ogg Opus. Seen against MinIO; owed against R2 until the owner has
-  run it. The iPhone playback test above is not part of it.
+  URL's answer is `audio/ogg` and Ogg Opus. Seen against MinIO; **run against R2 on 2026-11-05**
+  (production, `a8e7652`): `READY` in 2007 ms, served `200` as `audio/ogg`, and Ogg Opus; after the
+  delete, R2 answered its URL `404`. The iPhone playback test above is not part of it.
 - **D5:** erasure purges `voice.ogg` as it purges a photo's variants (`MediaAsset.objectKeys`
   names it; `MediaPurgeTest` holds it, red with `voice.ogg` dropped from the keys); the reaper
   takes an unattached voice note after 24 hours like a photo. **Done**: D5 merged first (#110),

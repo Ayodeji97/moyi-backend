@@ -86,7 +86,7 @@ A restore loses whatever was written after the backup was taken: up to 24 hours
 
 ```
 colima start
-ops/backup/restore-drill.sh --email <an account that is in the backup>
+ops/backup/restore-drill.sh --email 'someone@example.com'   # an account that is in the backup
 ```
 
 It asks for the Bitwarden master password if the vault is locked, then for that

@@ -3161,6 +3161,35 @@ Also: the first smoke run waited 20 s for a job on a five-second cron and failed
          a probe that waits on a ShedLocked job must outwait that, not the schedule.
 
 
+## 2026-11-09 · Site · The app-link files under `.well-known` (moyi-app #49)
+
+Expected: a dot-directory the host might not deploy, needing a rename and a rewrite.
+Reality: Wrangler's Pages ignore list is `_worker.js`, `_redirects`, `_headers`,
+         `_routes.json`, `functions`, `.DS_Store`, `node_modules`, `.git` and `.wrangler`
+         (read in wrangler 4.158's bundled source), so `.well-known/` deploys as it is.
+         The real trap was the Apple file's missing extension: without a `_headers` rule it
+         goes out as a download, and `wrangler pages dev` showed the override replaces the
+         type rather than adding a second header.
+Also: the Android fingerprint is the upload key's. Play re-signs the app, so a Play install
+         will not verify until the App Signing key's SHA-256 is added beside it.
+
+## 2026-11-05 · Ops · The deploy of V37–V41: every gate held, and the step between two gates did not
+
+Expected: the gates to be where a deploy could go wrong: R2's token, the worker's limiter, the
+         restore drill on real data, the collation after the image swap.
+Reality: every gate passed on the first real reading. The R2 token answered `200`; the limiter
+         kept zero restarts; the drill restored the 13:34 backup and ran V37–V41 on it in
+         1 m 20 s; collation read `2.41|2.41`; and R2 refused a body with one byte changed
+         (`400`), settling ADR-0047's inferred checksum item. The outage came from between two
+         gates: after `kamal app stop` and the swap, the deploy did not run, a `200` was
+         reported, and the API was down for about nine minutes (17:26 to 17:35) until an uptime email, Flyway
+         at V36 and an empty `docker ps` said so. The re-run deploy took 79 s.
+Wrong about: a short commit being a version. CI tags images with the full SHA, and the drill
+         stopped at the pull with `not found`; the runbook now passes `git rev-parse HEAD`. And
+         about a placeholder in a command: `<a test account>` was read by zsh as a redirect.
+         A step handed to someone else is done when its own output says so, not when a
+         reading taken somewhere near it looks right.
+
 ## 2026-11-09 · Feature · The data export: the app's own reading, five modules' answers (FR-009, FR-094, #126, ADR-0059)
 
 Expected: a query per table, joined into one JSON file by a job.
