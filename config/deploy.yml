@@ -80,6 +80,11 @@ servers:
         JAVA_TOOL_OPTIONS: >-
           -XX:+ExitOnOutOfMemoryError -XX:MaxDirectMemorySize=10M -Xmx1292m
           -XX:MaxMetaspaceSize=256m -XX:ReservedCodeCacheSize=240M -Xss1M
+        # Real pushes, from the API alone (ops/notification/README.md, issue
+        # #133): the Firebase project moyi-prod, never the development project
+        # moyi-65b68. The shared `log` below stays for the media worker.
+        MOYI_NOTIFICATION_PUSH_PROVIDER: fcm
+        MOYI_NOTIFICATION_PUSH_FCM_PROJECT_ID: moyi-prod
       # The API's secrets, merged over the top-level ones (Kamal 2.12,
       # Role#env): the session-signing pair, the HMAC key behind ip_hash and
       # the rate limits, and the email key. The media worker gets none of them.
@@ -88,6 +93,9 @@ servers:
         - MOYI_SECURITY_JWT_PUBLIC_KEY_PEM
         - MOYI_SECURITY_HASHING_SECRET
         - MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY
+        - MOYI_NOTIFICATION_PUSH_FCM_CLIENT_EMAIL
+        - MOYI_NOTIFICATION_PUSH_FCM_PRIVATE_KEY_PEM
+        - MOYI_NOTIFICATION_PUSH_FCM_PRIVATE_KEY_ID
 
   # The media worker (the owner's Q5 and his ruling of 2026-10-29: a role, not
   # an accessory, so it is redeployed with the application). The same image,
@@ -248,13 +256,10 @@ env:
     MOYI_LEGAL_SUMMARY_URL: https://getmoyi.app/data-processing
     # getmoyi.app is verified in Resend (SPF, DKIM and DMARC pass).
     MOYI_NOTIFICATION_EMAIL_FROM: Moyi <hello@getmoyi.app>
-    # Since slice N3 (#100) production requests pushes, and each one is written
-    # to the log, not sent, until there is a Firebase project (ADR-0044). The
-    # log line names the category and the bond, never the token, and the
-    # ledger settles it as "not-sent:log", never as a delivery. To send, follow
-    # ops/notification/README.md: FCM is switched on in the web role's env,
-    # and this shared line STAYS, because the media worker builds a push sender
-    # too, holds no secrets, and on FCM would refuse to start.
+    # The API sends pushes through FCM, switched on in the web role's env
+    # (ops/notification/README.md, #133). This shared line STAYS, because the
+    # media worker builds a push sender too, holds no secrets, and on FCM would
+    # refuse to start; it never sends a push, so `log` is right for it.
     MOYI_NOTIFICATION_PUSH_PROVIDER: log
     # No entry is embedded for semantic search until the owner has chosen the
     # provider by the eval and holds its key (ADR-0054). `none` sends no word

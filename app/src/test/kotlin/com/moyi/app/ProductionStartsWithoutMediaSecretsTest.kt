@@ -138,6 +138,19 @@ internal class ProductionStartsWithoutMediaSecretsTest {
     }
 
     /**
+     * The API sends through the production Firebase project, never the development
+     * one (ops/notification/README.md, #133); the media worker keeps `log`, because it
+     * holds no FCM secrets and on FCM would refuse to start.
+     */
+    @Test
+    fun `the API pushes through moyi-prod and the media worker only logs`() {
+        val web = roles.getValue("web").clear
+        web["MOYI_NOTIFICATION_PUSH_PROVIDER"] shouldBe "fcm"
+        web["MOYI_NOTIFICATION_PUSH_FCM_PROJECT_ID"] shouldBe "moyi-prod"
+        roles.getValue("media-worker").clear["MOYI_NOTIFICATION_PUSH_PROVIDER"] shouldBe "log"
+    }
+
+    /**
      * Every secret `config/deploy.yml` names (the application's, each
      * accessory's, the registry's) is set by `.kamal/secrets`, from a field its
      * `kamal secrets fetch` line fetches from Bitwarden. A name listed in
@@ -392,13 +405,16 @@ internal class ProductionStartsWithoutMediaSecretsTest {
                 "MOYI_MEDIA_STORAGE_R2_SECRET_ACCESS_KEY",
             )
 
-        /** What the API alone needs: the session-signing pair, the HMAC key, the email key. */
+        /** What the API alone needs: the session-signing pair, the HMAC key, the email key, FCM's service account. */
         val API_SECRETS =
             setOf(
                 "MOYI_SECURITY_JWT_PRIVATE_KEY_PEM",
                 "MOYI_SECURITY_JWT_PUBLIC_KEY_PEM",
                 "MOYI_SECURITY_HASHING_SECRET",
                 "MOYI_NOTIFICATION_EMAIL_RESEND_API_KEY",
+                "MOYI_NOTIFICATION_PUSH_FCM_CLIENT_EMAIL",
+                "MOYI_NOTIFICATION_PUSH_FCM_PRIVATE_KEY_PEM",
+                "MOYI_NOTIFICATION_PUSH_FCM_PRIVATE_KEY_ID",
             )
         const val KIB = 1024L
         const val MIB = 1024L * KIB
