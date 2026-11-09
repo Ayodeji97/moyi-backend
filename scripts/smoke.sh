@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #135 adds the typed-codes section: the six digits in the verification and reset emails,
+# read from the log; {email, code} verifies and resets; an unknown address is the same bytes as a
+# wrong code; five wrong burn the code while its link still works; a new email retires the old
+# code; a used code is refused with its link spent; ten typed codes a day per address and twenty
+# presentations an hour per client address, each to its 429. Last run on 2026-11-09, on
+# feat/typed-email-codes, from a jar of 303a1df (main at f906903, #150, merged in), on a fresh
+# database that applied 44 migrations to V51, against its own compose project (moyi-41h:
+# Postgres 55458, Valkey 56348, MinIO 59275; 55448 and 59266 were held by a forward docker did
+# not list), the jar booted by hand (local profile) and --attach: 1454 passed, 0 failed,
+# 1 skipped (the tag across the erasure, the poller having won the race).
+#
 # The contract-precision PR (#137 to #140, #142) adds five probes: an error body's traceId (32 hex
 # digits, a new one per request) and a TIMEZONE_CHANGE_TOO_SOON refusal's typed allowedFrom, equal to
 # the date its detail names, with its traceId on the log line for that refusal. Every "identical
