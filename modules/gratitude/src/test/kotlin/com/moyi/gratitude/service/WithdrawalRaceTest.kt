@@ -126,7 +126,7 @@ internal class WithdrawalRaceTest(
         bonds.withdrawn.forEach { versions(it) shouldBe versions(bonds.deleted) }
 
         // Midnight: the partner's lone entry, on a bond that ended before the day did. Whatever the twin's becomes.
-        clock.set(Instant.parse("2026-09-15T23:02:00Z"))
+        clock.set(Instant.parse("2026-09-16T11:02:00Z"))
         closer.closeElapsedDays(clock.instant(), BUDGET).failed shouldBe 0
         val settled = rig.snapshot(bonds.deleted, ada, bea)
         bonds.withdrawn.forEach { rig.snapshot(it, ada, bea) shouldBe settled }
@@ -148,7 +148,7 @@ internal class WithdrawalRaceTest(
         clock.set(Instant.parse("2026-09-15T23:00:10Z"))
         endAll(bonds, adas)
 
-        clock.set(Instant.parse("2026-09-15T23:02:00Z"))
+        clock.set(Instant.parse("2026-09-16T11:02:00Z"))
         closer.closeElapsedDays(clock.instant(), BUDGET).failed shouldBe 0
 
         rig.delivery(bonds.closerFirst)["processed_at"].shouldBeNull()
@@ -207,7 +207,7 @@ internal class WithdrawalRaceTest(
         erased.read.count { "\"reaction\":\"SMILE\"" in it } shouldBe 2
         erased.read.forEach { it shouldNotContain "\"reaction\":\"HEART\"" }
 
-        clock.set(Instant.parse("2026-09-15T23:02:00Z"))
+        clock.set(Instant.parse("2026-09-16T11:02:00Z"))
         closer.closeElapsedDays(clock.instant(), BUDGET).failed shouldBe 0
 
         // The close job got to that bond before the consumer did, and left what the consumer left on the other.
@@ -251,7 +251,7 @@ internal class WithdrawalRaceTest(
 
         clock.set(MIDDAY.plusSeconds(3_600))
         all.forEach { rig.block(ada, it.bond) }
-        val midnight = Instant.parse("2026-09-15T23:02:00Z")
+        val midnight = Instant.parse("2026-09-16T11:02:00Z")
         rig.postpone(readerFirst.bond, midnight)
         rig.postpone(closerFirst.bond, midnight)
         dispatcher.dispatchDue(clock.instant(), 10) shouldBe DispatchResult(delivered = 1, failed = 0, more = false)

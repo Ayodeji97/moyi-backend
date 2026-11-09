@@ -227,7 +227,7 @@ internal class StreakEvaluationTest(
         clock.set(Instant.parse("${day(16)}T01:00:00Z"))
         strictMode(false)
 
-        closer.closeElapsedDays(Instant.parse("${day(16)}T02:00:00Z"), BUDGET).failed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("${day(16)}T12:00:00Z"), BUDGET).failed shouldBe 0
 
         decisions().last() shouldBe Decision(day(15), "EMPTY", "MISSED", freeze = false)
         streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(0, 1, 0) }
@@ -255,7 +255,7 @@ internal class StreakEvaluationTest(
         clock.set(Instant.parse("${day(16)}T01:00:05Z"))
         strictMode(true)
 
-        closer.closeElapsedDays(Instant.parse("${day(16)}T02:00:00Z"), BUDGET).failed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("${day(16)}T12:00:00Z"), BUDGET).failed shouldBe 0
 
         decisions().last() shouldBe Decision(day(15), "EMPTY", "MISSED", freeze = false)
         streak().let { Triple(it.current, it.freezes, it.consumed) shouldBe Triple(0, 1, 0) }
@@ -274,7 +274,7 @@ internal class StreakEvaluationTest(
         strictMode(true)
         strictMode(false)
 
-        closer.closeElapsedDays(Instant.parse("${day(16)}T02:00:00Z"), BUDGET).failed shouldBe 0
+        closer.closeElapsedDays(Instant.parse("${day(16)}T12:00:00Z"), BUDGET).failed shouldBe 0
 
         // Day 15 ended with Strict mode off, as it had always been: the banked freeze covers it.
         decisions().last() shouldBe Decision(day(15), "FROZEN", "MISSED", freeze = true)
@@ -353,8 +353,8 @@ internal class StreakEvaluationTest(
         // The handoff is 11:00Z on the 16th; in Kiritimati that is already the 17th. Both write on it.
         writeAt("2026-09-16T20:00:00Z", cara, dan)
 
-        // Kiritimati's 17th ends at 10:00Z on the 17th.
-        closer.closeElapsedDays(Instant.parse("2026-09-17T10:01:00Z"), BUDGET).failed shouldBe 0
+        // Kiritimati's 17th ends at 10:00Z on the 17th, and settles twelve hours later.
+        closer.closeElapsedDays(Instant.parse("2026-09-17T22:01:00Z"), BUDGET).failed shouldBe 0
 
         decisions().takeLast(4).map { "${it.date} ${it.status} ${it.evaluatedAs}" } shouldBe
             listOf(
@@ -372,7 +372,7 @@ internal class StreakEvaluationTest(
             .get("/api/v1/bonds/$bond/streak") { header(HttpHeaders.AUTHORIZATION, bearer(cara)) }
             .andReturn()
             .response
-            .contentAsString shouldContain """{"date":"2026-09-16","status":"FROZEN","reason":"TIMEZONE_SHIFT"}"""
+            .contentAsString shouldContain """{"date":"2026-09-16","status":"FROZEN","reason":"TIMEZONE_SHIFT","settlesAt":null}"""
     }
 
     /** Doc 04 §8.3: when a bond ends "the streak freezes rather than breaks — it is preserved at its value". */
@@ -715,10 +715,10 @@ internal class StreakEvaluationTest(
     /** 10:00Z on day *n*: 11:00 in Lagos. */
     private fun at(n: Int): Instant = Instant.parse("${day(n)}T10:00:00Z")
 
-    /** The first instant the job settles day *n*: a minute after it ends. */
-    private fun settles(n: Int): Instant = Instant.parse("${day(n)}T23:01:00Z")
+    /** The first instant the job settles day *n*: its late-entry grace and a minute after it ends. */
+    private fun settles(n: Int): Instant = Instant.parse("${day(n + 1)}T11:01:00Z")
 
-    /** Runs the job once, a minute after day *n* ends. Everything up to it is written, closed and evaluated. */
+    /** Runs the job once, as soon as day *n* settles. Everything up to it is written, closed and evaluated. */
     private fun closeThrough(n: Int) {
         closer.closeElapsedDays(settles(n), BUDGET).failed shouldBe 0
     }

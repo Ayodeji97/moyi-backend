@@ -1,7 +1,7 @@
 # ADR-0031 — The Bond-day, and the first entry
 
 **Status:** Accepted · **Date:** 2026-09-29 · **Deciders:** Daniel
-**Amended:** 2026-10-03 (the C1 rework, then the final whole-branch review) · 2026-10-05 (C2: the Owed list discharged, decision 17's read rule qualified — ADR-0032; C3: its Owed list discharged — ADR-0033) · 2026-10-28 (decision 10's narrow tombstone, `ErasedEntryResponse`, superseded — ADR-0032 question 2) · 2026-10-28 (the owner's two `EntryText` rulings of 2026-10-21 built: the 500 counted as typed, an entry of only invisible characters refused; decision 23 annotated, and "Rulings — the owner, 2026-10-21" gains the decisions they were built with)
+**Amended:** 2026-11-08 (decision 20: BR-3a's window is the twelve-hour late-entry grace — ADR-0033 decision 15) · 2026-10-03 (the C1 rework, then the final whole-branch review) · 2026-10-05 (C2: the Owed list discharged, decision 17's read rule qualified — ADR-0032; C3: its Owed list discharged — ADR-0033) · 2026-10-28 (decision 10's narrow tombstone, `ErasedEntryResponse`, superseded — ADR-0032 question 2) · 2026-10-28 (the owner's two `EntryText` rulings of 2026-10-21 built: the 500 counted as typed, an entry of only invisible characters refused; decision 23 annotated, and "Rulings — the owner, 2026-10-21" gains the decisions they were built with)
 
 ## Context
 
@@ -517,6 +517,15 @@ says whether the client's claim was the instant used, which is what tells a back
 live write. The redirect takes a second bond-day lock while holding the first. That is safe
 among submitters, who are serialised on the bond lock, and it puts an obligation on the closer
 (Owed).
+
+*Amended 2026-11-08 (the owner's ruling; FR-045 and BR-3a amended in the corpus; ADR-0033
+decision 15, issue #132).* BR-3a's window is **twelve hours, not thirty-six**, and it is no
+longer a constant of `DayAssignment`: it is the late-entry grace (`LateEntryGrace`,
+`moyi.gratitude.days.late-entry-grace`), the same length the close job now waits after a day
+ends before settling it. A claim inside the window therefore names a day the job has not
+settled, and the redirect above is left for what can still settle a day early: an instance
+whose clock runs ahead, and a `REVEALED` day. The window is inclusive at its edge (exactly
+twelve hours old is used), and an older claim is `TOO_OLD` as before.
 
 **21. No task ended with a red build (P2).** The plan had Task 4 break
 `SubmitEntryConcurrencyTest` for Task 5 to rewrite, and Task 6 change a record's shape for Task

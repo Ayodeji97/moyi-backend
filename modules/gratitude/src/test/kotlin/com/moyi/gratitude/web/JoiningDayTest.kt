@@ -449,7 +449,10 @@ internal class JoiningDayTest(
         /** The same hour a day earlier: Bond-day 2026-09-14, and when the bond in the back-fill tests is created. */
         val DAY_BEFORE: Instant = Instant.parse("2026-09-14T10:00:00Z")
 
-        /** Later on 2026-09-14 in Lagos, after [DAY_BEFORE] — a claim the bond already existed for. */
-        const val YESTERDAY_EVENING = "2026-09-14T18:00:00Z"
+        /**
+         * 23:30 on 2026-09-14 in Lagos, after [DAY_BEFORE] — a claim the bond already existed
+         * for, inside the twelve-hour grace before [NOW].
+         */
+        const val YESTERDAY_EVENING = "2026-09-14T22:30:00Z"
     }
 }

@@ -6,8 +6,10 @@ import com.moyi.bond.api.BondMembership
 import com.moyi.gratitude.domain.BondCalendar
 import com.moyi.gratitude.domain.DayAssignment
 import com.moyi.gratitude.domain.DayWindow
+import com.moyi.gratitude.domain.LateEntryGrace
 import com.moyi.gratitude.domain.Reader
 import java.time.Clock
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -41,7 +43,23 @@ internal fun BondAnchorTimeline.asCalendar(): BondCalendar =
 internal fun todayOf(
     membership: BondMembership,
     clock: Clock,
-): LocalDate = DayAssignment.dateFor(clock.instant(), null, membership.anchorTimeline.asCalendar()) { false }
+): LocalDate = todayOf(membership, clock.instant())
+
+/** [todayOf], at an instant the caller has already read, for a read that asks more of that instant than the date. */
+internal fun todayOf(
+    membership: BondMembership,
+    at: Instant,
+): LocalDate = DayAssignment.dateFor(at, null, membership.anchorTimeline.asCalendar(), LateEntryGrace.NONE) { false }
+
+/**
+ * The bond's days not yet decided at [at], oldest first, each with when it settles: today, and
+ * any earlier day inside its late-entry grace ([LateEntryGrace.undecidedDays]). What `GET /streak`
+ * draws as still open, and what `GET /today` says of today.
+ */
+internal fun LateEntryGrace.undecidedDaysOf(
+    membership: BondMembership,
+    at: Instant,
+): Map<LocalDate, Instant> = undecidedDays(membership.anchorTimeline.asCalendar(), at).associate { it.date to settlesAt(it.endsAt) }
 
 /**
  * The caller, as BR-1's gate wants them: their member id together with the

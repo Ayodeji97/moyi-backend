@@ -61,8 +61,8 @@ sequenceDiagram
 9. **you**: read today: the day, both entries, the streak and the bond's prompt of the day. Both entries are readable by both of you, and today is counted in the streak the response carries.
 10. **you**: edit your entry. Your partner may already have read these words, so they can no longer be changed. You can still delete the entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine.
 11. **you**: delete your entry. The words are erased for both of you; your partner is left a tombstone. The reveal stamp is kept and the day stays as it was. You take the words back instead.
-12. **you**: read the streak. The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; after midnight the close job evaluates it and stores the same number.
-13. **system**: the day ends and the close job runs. A day revealed while it was running is stamped closed and nothing else about it changes. That night.
+12. **you**: read the streak. The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; once its twelve-hour late-entry grace has run out the close job evaluates it and stores the same number. Yesterday, while its grace runs, is added the same way once it has revealed.
+13. **system**: the day ends, its twelve-hour late-entry grace runs out, and the close job runs. A day revealed while it was running is stamped closed and nothing else about it changes. It is closed only once its twelve-hour late-entry grace has run out (ADR-0033 §15). That night.
 14. **you**: read today: the day, both entries, the streak and the bond's prompt of the day. The response says OPEN with both entries null: what the day would open as. Reading opens nothing; that no row is written is asserted by a separate test, not by the one cited. The next morning. This is a new day, so nothing of yesterday's carries over, and the loop begins again.
 
 ```mermaid
@@ -91,7 +91,7 @@ sequenceDiagram
     API-->>You: 204, day.entry is DELETED
     You->>API: read the streak
     API-->>You: 200, day is REVEALED
-    Job->>API: the day ends and the close job runs
+    Job->>API: the day ends, its twelve-hour late-entry grace runs out, and the close job runs
     Note over API: day is REVEALED
     You->>API: read today the day, both entries, the streak and the bond's prompt of the day
     API-->>You: 200, day is NOT_OPENED
@@ -101,8 +101,8 @@ sequenceDiagram
 
 1. **you**: write today's entry. Yours is the first entry of the day, and this write is what opens the day's row. The row is inserted OPEN and counted to PARTIAL in the same transaction, so OPEN is never what this write commits. Your partner sees that you wrote, and nothing of what you wrote. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. You are some days into a run, with one rest day banked and Strict mode off.
 2. **you**: read the streak. Today's square still says OPEN: the calendar never says who has written so far. One entry adds nothing to the run.
-3. **system**: the day ends and the close job runs. The day ended with one entry, so it closes as a solo day. Your partner never wrote.
-4. (the same request) **system**: the day ends and the close job runs. A lone entry is unlocked to the partner who did not write when the day closes SOLO.
+3. **system**: the day ends, its twelve-hour late-entry grace runs out, and the close job runs. The day ended with one entry and its twelve-hour late-entry grace has run out, so it closes as a solo day and the lone entry is unlocked to the partner. Not at midnight: until the grace runs out the partner's offline draft may still complete it, and the lone entry stays locked to them. Your partner never wrote.
+4. (the same request) **system**: the day ends, its twelve-hour late-entry grace runs out, and the close job runs. A lone entry is unlocked to the partner who did not write when the day closes SOLO.
 5. **system**: a banked freeze covers a missed day. A missed day spends a banked freeze when Strict mode is off and there is a run to save. This is the one change evaluation makes to a closed day's status. The lone entry stays revealed.
 6. **you**: read the streak. A rest day: a freeze covered it, or a zone change stepped over the date. It is a FROZEN square and it keeps the run going. The next morning.
 7. **you**: edit your entry. Your partner may already have read these words, so they can no longer be changed. You can still delete the entry. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. You try to change what you wrote yesterday.
@@ -119,7 +119,7 @@ sequenceDiagram
     API-->>You: 201, day is PARTIAL
     You->>API: read the streak
     API-->>You: 200, day is PARTIAL
-    Job->>API: the day ends and the close job runs
+    Job->>API: the day ends, its twelve-hour late-entry grace runs out, and the close job runs
     Note over API: day is SOLO, day.entry is REVEALED
     Job->>API: a banked freeze covers a missed day
     Note over API: day is FROZEN
@@ -137,9 +137,9 @@ sequenceDiagram
 
 1. **you**: read today: the day, both entries, the streak and the bond's prompt of the day. Both entries are readable by both of you, and today is counted in the streak the response carries. Both of you wrote today and the day has been revealed.
 2. (the same request) **you**: read today: the day, both entries, the streak and the bond's prompt of the day. The entry has been revealed, so you read it in full. What decides this is the entry's own reveal stamp, never the day's status.
-3. **you**: read the streak. The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; after midnight the close job evaluates it and stores the same number.
+3. **you**: read the streak. The day is a COMPLETE square. While it is today it is added to the run at read time, provided the day before has been evaluated; once its twelve-hour late-entry grace has run out the close job evaluates it and stores the same number. Yesterday, while its grace runs, is added the same way once it has revealed.
 4. **you**: write today's entry. A revealed day is settled: its words have been read. The day is checked before the entry is inserted, so this is the answer whether you still have an entry on it or deleted yours, which is what stops delete-then-rewrite replacing words already read. On a bond that has ended or is counting down the answer is BOND_ARCHIVED first: see the bond machine. You try to add to a day that is already settled.
-5. **system**: the day ends and the close job runs. A day revealed while it was running is stamped closed and nothing else about it changes. After this the day is no longer today, and the journey stops here, where the API does: the archive by month, search, "on this day", milestone cards and export are not built.
+5. **system**: the day ends, its twelve-hour late-entry grace runs out, and the close job runs. A day revealed while it was running is stamped closed and nothing else about it changes. It is closed only once its twelve-hour late-entry grace has run out (ADR-0033 §15). After this the day is no longer today, and the journey stops here, where the API does: the archive by month, search, "on this day", milestone cards and export are not built.
 
 ```mermaid
 sequenceDiagram
@@ -153,7 +153,7 @@ sequenceDiagram
     API-->>You: 200, day is REVEALED
     You->>API: write today's entry
     API-->>You: 409 DAY_CLOSED
-    Job->>API: the day ends and the close job runs
+    Job->>API: the day ends, its twelve-hour late-entry grace runs out, and the close job runs
     Note over API: day is REVEALED
 ```
 

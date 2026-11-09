@@ -25,6 +25,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.patch
 import org.springframework.test.web.servlet.post
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -122,19 +123,20 @@ internal class CloseMatrixTest(
     /**
      * Two people twenty-two hours apart write on one Bond-day: the bond's
      * calendar decides, not either of theirs. The day both wrote on is
-     * revealed when the second writes and closed at the bond's midnight.
+     * revealed when the second writes and closed at the bond's midnight,
+     * once its late-entry grace has run out.
      */
     @Test
-    fun `a day two far-apart members both wrote on closes once, at the bond's midnight`() {
+    fun `a day two far-apart members both wrote on closes once, at the bond's midnight and its grace`() {
         pairedBond("Africa/Lagos", createdAt = "2026-09-11T12:00:00Z")
         writeAt("2026-09-14T23:30:00Z", by = ada) // 12:30 on the 15th in Kiritimati, 00:30 in Lagos
         writeAt("2026-09-15T22:30:00Z", by = bea) // 11:30 on the 15th in Pago Pago, 23:30 in Lagos
         statusOf("2026-09-15") shouldBe "REVEALED"
 
-        closeAt("2026-09-15T23:00:59Z")
+        closeAt("2026-09-16T11:00:59Z")
         closedAtOf("2026-09-15") shouldBe null
-        closeAt("2026-09-15T23:01:00Z")
-        closedAtOf("2026-09-15") shouldBe Instant.parse("2026-09-15T23:01:00Z")
+        closeAt("2026-09-16T11:01:00Z")
+        closedAtOf("2026-09-15") shouldBe Instant.parse("2026-09-16T11:01:00Z")
         statusOf("2026-09-15") shouldBe "REVEALED"
     }
 
@@ -157,8 +159,8 @@ internal class CloseMatrixTest(
         statusOf("2026-09-16") shouldBe "FROZEN"
         jdbc.queryForObject("SELECT count(*) FROM bond_days WHERE date = '2026-09-17'", Int::class.java) shouldBe 0
 
-        // Kiritimati's 17th runs from the handoff to its own midnight, 10:00Z on the 17th.
-        closeAt("2026-09-17T10:01:00Z")
+        // Kiritimati's 17th runs from the handoff to its own midnight, 10:00Z on the 17th, and settles twelve hours later.
+        closeAt("2026-09-17T22:01:00Z")
 
         statusOf("2026-09-17") shouldBe "EMPTY"
         statusOf("2026-09-16") shouldBe "FROZEN"
@@ -172,7 +174,7 @@ internal class CloseMatrixTest(
                 it["anchor_timezone"] shouldBe "Pacific/Kiritimati"
                 it["closed"] shouldBe true
             }
-        runningAgainChangesNothing("2026-09-17T10:15:00Z")
+        runningAgainChangesNothing("2026-09-17T22:15:00Z")
     }
 
     /**
@@ -188,29 +190,38 @@ internal class CloseMatrixTest(
         changeZone("Pacific/Pago_Pago")
         endsAtOf("2026-09-16") shouldBe Instant.parse("2026-09-16T10:00:00Z")
 
-        // The old midnight. The job looks, because the stored end has passed —
-        // and finds the day has twenty-five hours still to run.
-        closeAt("2026-09-16T10:01:00Z")
+        // The old midnight's grace. The job looks, because the stored end has passed
+        // it — and finds the day has thirteen hours still to run.
+        closeAt("2026-09-16T22:01:00Z")
         statusOf("2026-09-16") shouldBe "PARTIAL"
         endsAtOf("2026-09-16") shouldBe Instant.parse(HANDOFF_WEST)
 
         closesExactlyAt("2026-09-16", HANDOFF_WEST)
         // One row for the 16th, not two: no date is used twice.
         jdbc.queryForObject("SELECT count(*) FROM bond_days WHERE date = '2026-09-16'", Int::class.java) shouldBe 1
-        runningAgainChangesNothing("2026-09-17T11:15:00Z")
+        runningAgainChangesNothing("2026-09-17T23:15:00Z")
     }
 
     /**
-     * Still as the entry left it one second before [end], and for the minute
-     * after it (`DayCloser.SETTLE_MARGIN`); `SOLO` and closed once that
-     * minute is up.
+     * Still as the entry left it one second before [end], through its
+     * twelve-hour late-entry grace (BR-3a as amended 2026-11-08) and for the
+     * minute after that (`DayCloser.SETTLE_MARGIN`); `SOLO` and closed once
+     * that minute is up. The minute after [end], when the day settled before
+     * the grace, is asked about too.
      */
     private fun closesExactlyAt(
         date: String,
         end: String,
     ) {
-        val settles = Instant.parse(end).plus(DayCloser.SETTLE_MARGIN)
-        for (tooSoon in listOf(Instant.parse(end).minusSeconds(1), settles.minusSeconds(1))) {
+        val settles = Instant.parse(end).plus(GRACE).plus(DayCloser.SETTLE_MARGIN)
+        val tooSoon =
+            listOf(
+                Instant.parse(end).minusSeconds(1),
+                Instant.parse(end).plus(DayCloser.SETTLE_MARGIN),
+                Instant.parse(end).plus(GRACE).minusSeconds(1),
+                settles.minusSeconds(1),
+            )
+        for (tooSoon in tooSoon) {
             closeAt(tooSoon.toString())
             statusOf(date) shouldBe "PARTIAL"
             closedAtOf(date) shouldBe null
@@ -333,5 +344,8 @@ internal class CloseMatrixTest(
         /** Pago Pago's midnight opening its 17th. */
         const val HANDOFF_WEST = "2026-09-17T11:00:00Z"
         const val BUDGET = 1_000
+
+        /** BR-3a's late-entry grace, the owner's ruling of 2026-11-08: `moyi.gratitude.days.late-entry-grace`'s default. */
+        val GRACE: Duration = Duration.ofHours(12)
     }
 }

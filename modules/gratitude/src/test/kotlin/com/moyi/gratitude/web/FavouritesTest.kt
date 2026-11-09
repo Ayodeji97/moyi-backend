@@ -959,8 +959,8 @@ internal class FavouritesTest(
         val NOW: Instant = Instant.parse("2026-09-15T10:00:00Z")
         val BOND_CREATED: Instant = Instant.parse("2026-09-13T10:00:00Z")
 
-        /** Two minutes after the 15th ended in Lagos: past the close job's margin. */
-        val MIDNIGHT: Instant = Instant.parse("2026-09-15T23:02:00Z")
+        /** When the 15th settles in Lagos: its twelve-hour late-entry grace and two minutes after it ends, past the close job's margin. */
+        val MIDNIGHT: Instant = Instant.parse("2026-09-16T11:02:00Z")
         const val DAY = 86_400L
 
         val FULL_KEYS =

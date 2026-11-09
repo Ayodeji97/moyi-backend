@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
+import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
 
@@ -71,7 +72,10 @@ internal data class StreakResponse(
     val lastRunLength: Int?,
     /** The date of the missed day that ended that run, itself not part of the run; `null` exactly when [lastRunLength] is. */
     val lastRunBrokenOn: LocalDate?,
-    /** The last 53 weeks at most, oldest first, from the day the bond became two people. A date the calendar does not draw is absent. */
+    /**
+     * The last 53 weeks at most, oldest first, from the day the bond became two people. A date the calendar does not draw is absent.
+     * Since issue #132 more than one square can be `OPEN`: yesterday stays open until its grace has run out.
+     */
     val days: List<StreakDayResponse>,
 ) {
     companion object {
@@ -86,7 +90,7 @@ internal data class StreakResponse(
                 lastCompleteDate = detail.streak.lastCompleteDate,
                 lastRunLength = detail.streak.lastRunLength,
                 lastRunBrokenOn = detail.streak.lastRunBrokenOn,
-                days = detail.days.map { StreakDayResponse(it.date, it.cell, it.reason) },
+                days = detail.days.map { StreakDayResponse(it.date, it.cell, it.reason, it.settlesAt) },
             )
     }
 }
@@ -96,6 +100,14 @@ internal data class StreakDayResponse(
     val status: StreakCell,
     /** Why a `FROZEN` square is a rest day; `null` on every other square (issue #141). */
     val reason: FrozenReason?,
+    /**
+     * The earliest an `OPEN` square's day can be decided; `null` on every other square (issue
+     * #132): its end plus the late-entry grace (BR-3a as amended 2026-11-08). An entry written
+     * on that day and sent before this instant still counts for it. The close job decides the
+     * day — complete, a rest day or missed — on its next run after this, and the square stays
+     * `OPEN` until then ([com.moyi.gratitude.domain.LateEntryGrace.undecidedUntil]).
+     */
+    val settlesAt: Instant?,
 )
 
 /** The `streak` object of `GET /today` (doc 06 §3.4): the four numbers the home screen shows. */

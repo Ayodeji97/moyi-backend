@@ -2,6 +2,7 @@ package com.moyi.gratitude.service
 
 import com.moyi.gratitude.api.CloseResult
 import com.moyi.gratitude.api.DayCloser
+import com.moyi.gratitude.domain.LateEntryGrace
 import com.moyi.gratitude.infra.database.CloseCandidate
 import com.moyi.gratitude.infra.database.CloseCandidates
 import com.moyi.gratitude.service.CloseDay.Outcome
@@ -11,8 +12,10 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * The sweep (spec §6.4): every day that may have ended, each handed to
- * [CloseDay] in a transaction of its own.
+ * The sweep (spec §6.4): every day that may have ended and whose late-entry
+ * grace has run out ([LateEntryGrace]), each handed to [CloseDay] in a
+ * transaction of its own. A day inside its grace is still looked at for a
+ * reveal that has fallen due, and left open.
  *
  * **It remembers nothing between calls.** There is no watermark and no "last
  * run": what is left to do is whatever [CloseCandidates] still finds, so a
@@ -39,6 +42,7 @@ internal class CloseElapsedDays(
     private val closeDay: CloseDay,
     private val missingDays: CreateMissingDays,
     private val streaks: EvaluateStreaks,
+    private val grace: LateEntryGrace,
 ) : DayCloser {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -46,9 +50,14 @@ internal class CloseElapsedDays(
         now: Instant,
         budget: Int,
     ): CloseResult {
-        // A day is settled only once it has been over for a minute: see
-        // `DayCloser.SETTLE_MARGIN`. A reveal falls due at `now` itself.
-        val endedAsOf = now.minus(DayCloser.SETTLE_MARGIN)
+        // A day is settled only once its late-entry grace has run out (BR-3a
+        // as amended 2026-11-08, ADR-0033 decision 15), and a minute more:
+        // see `DayCloser.SETTLE_MARGIN`. Until then an entry sent late with
+        // an `intendedAt` inside the day still lands on it. The missing days
+        // are written by the same threshold, or a day nobody had opened yet
+        // would be written closed `EMPTY` under a late entry meant for it.
+        // A reveal falls due at `now` itself, grace or none.
+        val endedAsOf = grace.closesDaysEndedBy(now).minus(DayCloser.SETTLE_MARGIN)
         // Step 1 before step 2 (spec §6.4): a day written here is written
         // closed, so the sweep below has nothing more to do to it.
         val created = missingDays.create(now, endedAsOf, DayCloser.MAX_CREATED_PER_RUN)

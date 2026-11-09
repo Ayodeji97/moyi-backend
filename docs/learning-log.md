@@ -3089,3 +3089,30 @@ Reality: a code is typed beside an address, so a 410 says "this was real", which
          resend test expected no code left after a verification, when the spent row still
          holds its own (dead) code. The count is right only under a row lock, which a test
          proves by blocking on it, and removing the lock makes the test wait forever.
+
+
+## 2026-11-08 · Feature · A Bond-day stays open twelve hours past its end (issue #132, ADR-0033 decision 15)
+
+Expected: one threshold in the close job: settle days that ended twelve hours ago, not one
+         minute ago.
+Reality: three places had to move together, and the third was not the obvious one. The close
+         threshold, BR-3a's window (36 h became 12 h, and is now the same `LateEntryGrace`, so the
+         two cannot drift apart), and the missing-days step, which writes days nobody opened
+         closed `EMPTY` a minute after midnight: left alone, it would have settled the very day
+         a late entry was meant for, through the other door. And every reader that took "past"
+         to mean "decided" — the streak drew only today as open and added only today, so a
+         couple who completed yesterday would have been shown one day less every morning until
+         noon. The streak now walks every undecided day, oldest first.
+Wrong about: the walk's first version stopped at a square the job had already evaluated,
+         because "undecided" was computed from the read's clock while the test's job had run at
+         a later instant. A square already in the stored run is skipped, not a reason to stop.
+         Found by the existing streak tests, not the new ones.
+         And review M1 found the same mistake one step on: the readers let yesterday go at
+         exactly `end + grace`, but the job settles it on its first run after that and its
+         margin, so for up to sixteen minutes a day each noon was neither undecided nor
+         evaluated, and the run shown fell by a day and came back. The tests missed it because
+         `closeThrough` jumped the job straight past the window. Now a stored day is undecided
+         until it has been evaluated (`LateEntryGrace.undecidedUntil`): the store says when the
+         window ends, so no reader keeps a copy of the job's schedule. Also from that review:
+         the index test raced two plans on the shared test database; the competing index is now
+         dropped inside a rolled-back transaction, so only one plan is left to choose.

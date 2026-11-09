@@ -24,8 +24,9 @@ import java.util.UUID
 interface DayCloser {
     /**
      * Writes the days nobody opened (at most [MAX_CREATED_PER_RUN] a call,
-     * spec §6.4 step 1), settles days that had ended [SETTLE_MARGIN] before
-     * [now], and reveals days whose reveal time has come by [now] — each in a
+     * spec §6.4 step 1), settles days that had ended the late-entry grace
+     * (BR-3a, twelve hours by default) and [SETTLE_MARGIN] before [now], and
+     * reveals days whose reveal time has come by [now] — each in a
      * transaction of its own. It stops after [budget] days have been closed,
      * revealed or have failed; a day that is looked at and left does not
      * count. Idempotent: a second call finds nothing the first one finished.
@@ -39,7 +40,7 @@ interface DayCloser {
 
     companion object {
         /**
-         * How long a day must have been over before it is settled.
+         * How long a day must have been over, past its late-entry grace, before it is settled.
          *
          * This margin absorbs ordinary clock skew between the scheduled
          * instance and writers. The closer takes the bond lock before the

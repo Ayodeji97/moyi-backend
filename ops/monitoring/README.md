@@ -43,6 +43,14 @@ ssh moyi 'systemctl start moyi-close-check; journalctl -u moyi-close-check -n 3 
 ssh moyi 'systemctl enable --now moyi-close-check.timer'
 ```
 
+**Since the late-entry grace (issue #132, ADR-0033 decision 15)** a Bond-day is
+closed twelve hours after it ends, not a minute after. The check allows for
+that (`LATE_ENTRY_GRACE`, default `12 hours`). A server still running the
+earlier copy of `close-check.sh` would see every day unclosed for twelve hours
+and alert each morning. The new script against the older image is harmless
+(it only checks less strictly). So **copy the new script up first (the first
+`scp` above), then deploy the image that carries the grace.**
+
 ## Proving an alert reaches you
 
 A check nobody has seen fire is not known to work. Once, after installing:

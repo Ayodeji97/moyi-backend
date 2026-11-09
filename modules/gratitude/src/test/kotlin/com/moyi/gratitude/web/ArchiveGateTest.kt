@@ -235,7 +235,7 @@ internal class ArchiveGateTest(
                 header(HttpHeaders.AUTHORIZATION, "Bearer ${tokens.issue(bea).token}")
                 header(IdempotencyInterceptor.HEADER, UUID.randomUUID().toString())
                 contentType = MediaType.APPLICATION_JSON
-                content = """{"text":"$BEAS","intendedAt":"2026-09-14T20:00:00Z"}"""
+                content = """{"text":"$BEAS","intendedAt":"2026-09-14T22:30:00Z"}"""
             }.andReturn()
             .response.status shouldBe 201
 

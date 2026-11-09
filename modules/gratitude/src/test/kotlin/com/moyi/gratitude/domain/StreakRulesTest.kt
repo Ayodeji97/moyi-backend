@@ -3,6 +3,7 @@ package com.moyi.gratitude.domain
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.time.LocalDate
 
 /** Spec §6.5, one rule at a time. `StreakPropertiesTest` holds what must be true of any timeline. */
@@ -176,18 +177,22 @@ internal class StreakRulesTest {
     /** Issue #141, `states.md` §7a: the "we used a rest day" copy is wrong for a date a zone change stepped over. */
     @Test
     fun `a FROZEN square says why - a rest day spent, or a date a zone change stepped over - and no other square does`() {
+        val settles = Instant.parse("2026-01-02T11:00:00Z")
+
         fun square(
             status: BondDayStatus,
             outcome: DayOutcome?,
             today: Boolean = false,
-        ) = StreakDay.of(start, status, outcome, today)
+        ) = StreakDay.of(start, status, outcome, settles.takeIf { today })
 
         square(BondDayStatus.FROZEN, DayOutcome.MISSED) shouldBe StreakDay(start, StreakCell.FROZEN, FrozenReason.REST_DAY)
         square(BondDayStatus.FROZEN, DayOutcome.FROZEN_BY_SKIP) shouldBe StreakDay(start, StreakCell.FROZEN, FrozenReason.TIMEZONE_SHIFT)
         square(BondDayStatus.REVEALED, DayOutcome.COMPLETE) shouldBe StreakDay(start, StreakCell.COMPLETE, null)
         square(BondDayStatus.SOLO, DayOutcome.MISSED) shouldBe StreakDay(start, StreakCell.SOLO, null)
         square(BondDayStatus.EMPTY, DayOutcome.MISSED) shouldBe StreakDay(start, StreakCell.MISSED, null)
-        square(BondDayStatus.PARTIAL, null, today = true) shouldBe StreakDay(start, StreakCell.OPEN, null)
+        square(BondDayStatus.PARTIAL, null, today = true) shouldBe StreakDay(start, StreakCell.OPEN, null, settles)
+        // The settling instant is an OPEN square's alone: an undecided day that has revealed is decided enough to draw COMPLETE.
+        square(BondDayStatus.REVEALED, null, today = true) shouldBe StreakDay(start, StreakCell.COMPLETE, null, null)
         square(BondDayStatus.SUSPENDED, DayOutcome.SUSPENDED) shouldBe null
     }
 

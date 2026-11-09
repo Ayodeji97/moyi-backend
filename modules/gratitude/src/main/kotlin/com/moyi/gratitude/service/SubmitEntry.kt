@@ -19,6 +19,7 @@ import com.moyi.gratitude.domain.Entry
 import com.moyi.gratitude.domain.EntryId
 import com.moyi.gratitude.domain.EntryReading
 import com.moyi.gratitude.domain.EntryText
+import com.moyi.gratitude.domain.LateEntryGrace
 import com.moyi.gratitude.domain.PromptId
 import com.moyi.gratitude.domain.ReactionType
 import com.moyi.gratitude.domain.ReminderKey
@@ -269,9 +270,10 @@ internal data class Submission(
  * requires: the lock is only worth taking inside the transaction that does
  * the write.
  *
- * `LongParameterList` is suppressed on the constructor: eleven collaborators
- * is what one transaction spanning the key, the bond, the day, the entry,
- * the reveal and the outbox takes (and the replay's read of the caller's bookmark), and bundling some of them to get under
+ * `LongParameterList` is suppressed on the constructor: the collaborators
+ * are what one transaction spanning the key, the bond, the day, the entry,
+ * the reveal and the outbox takes (and the replay's read of the caller's bookmark,
+ * and BR-3a's late-entry grace), and bundling some of them to get under
  * the threshold would hide which of them this class actually uses.
  */
 @Service
@@ -293,6 +295,7 @@ internal class SubmitEntry(
     private val notifications: Notifications,
     private val attachments: MediaAttachments,
     private val media: EntryMedia,
+    private val grace: LateEntryGrace,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -476,7 +479,7 @@ internal class SubmitEntry(
         val timeline = membership.anchorTimeline
         val calendar = timeline.asCalendar()
         val claimed =
-            DayAssignment.resolve(now, intendedAt, calendar) { candidate ->
+            DayAssignment.resolve(now, intendedAt, calendar, grace) { candidate ->
                 days.findByBondAndDate(bondId, candidate)?.isSettled == true
             }
         // BR-3a decided against the client's claim. Why is `resolve`'s to say
@@ -565,7 +568,7 @@ internal class SubmitEntry(
         now: Instant,
     ): Pair<DayAssignment.Resolution, BondDay>? {
         if (!claimed.usedIntendedAt) return null
-        val fallback = DayAssignment.resolve(now, null, calendar) { false }
+        val fallback = DayAssignment.resolve(now, null, calendar, grace) { false }
         // The claimed day is already locked. Reconcile the joining day before
         // today's row so a redirected offline write keeps chronological order.
         val joiningDate = joining.window(membership)?.date

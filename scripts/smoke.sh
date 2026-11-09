@@ -12,6 +12,18 @@
 # not list), the jar booted by hand (local profile) and --attach: 1454 passed, 0 failed,
 # 1 skipped (the tag across the erasure, the poller having won the race).
 #
+# Issue #132 (the late-entry grace, ADR-0033 decision 15) adds a late-entries section: a fresh bond
+# moved back three days into a region zone where it is between 01:00 and 05:59, the job writing
+# the day past its grace and not yesterday, an entry with an intendedAt before midnight counting for
+# yesterday, one older than twelve hours landing on today, settlesAt on today and on the streak's
+# OPEN squares, and yesterday still open after more runs. Last run on 2026-11-09, on
+# feat/late-entry-grace after the review fixes (e131b048, main f906903 merged in), from a jar of
+# that tree, on a fresh database, against compose project moyi-41f (Postgres 55461, Valkey 56361,
+# MinIO 59261), the jar booted by hand (local profile) and --attach: 1408 passed, 0 failed,
+# 0 skipped. The run before (main c6428c1 merged in) had one failure: the sign-in limit's
+# Retry-After, 179 for 180, a second boundary in a probe this change does not touch; it did not
+# recur.
+#
 # The contract-precision PR (#137 to #140, #142) adds five probes: an error body's traceId (32 hex
 # digits, a new one per request) and a TIMEZONE_CHANGE_TOO_SOON refusal's typed allowedFrom, equal to
 # the date its detail names, with its traceId on the log line for that refusal. Every "identical
@@ -45,7 +57,7 @@
 # it, ENTRY_IMMUTABLE, the tombstone a delete leaves, a replay of a deleted
 # entry, and a timed bond waiting in PENDING_REVEAL. Since slice C3 it runs
 # the close job for real, on a five-second schedule, and checks it took its
-# lock, failed on nothing and left no ended day unclosed. Since slice C4 it
+# lock, failed on nothing and left no day past its grace unclosed. Since slice C4 it
 # reads the streak: one on the first day both have written, and on today's
 # payload, and zero while a day waits on its reveal time. Since slice C5a it
 # ends bonds with the outbox poller running: a block and a leave that ask for
@@ -1422,7 +1434,7 @@ expect "the partner reads the author's edited words" 200 "\"text\":\"$EDITED_TEX
 # today is added as soon as both have written — so the first shared day reads one.
 expect "the streak counts today once both have written" 200 '"current":1' -- "$API/bonds/$GRAT_BOND/streak" -H "Authorization: Bearer $PARTNER_ACCESS"
 keep_body streak
-[[ "$LAST_BODY" == *'"days":[{"date":"'*'"status":"COMPLETE","reason":null}]'* ]] && pass "…and its calendar is that one day, COMPLETE" || fail "streak calendar" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" == *'"days":[{"date":"'*'"status":"COMPLETE","reason":null,"settlesAt":null}]'* ]] && pass "…and its calendar is that one day, COMPLETE" || fail "streak calendar" "${LAST_BODY:0:250}"
 [[ "$LAST_BODY" == *'"lastRunLength":null,"lastRunBrokenOn":null'* ]] && pass "…and no run has ended: both sent, both null" || fail "streak ended run" "${LAST_BODY:0:250}"
 expect "…and today carries the same streak" 200 '"streak":{"current":1,"longest":1,"freezesAvailable":0,"strictMode":false}' -- "$API/bonds/$GRAT_BOND/today" -H "Authorization: Bearer $AUTHOR_ACCESS"
 expect "PATCH after reveal is ENTRY_IMMUTABLE" 409 '"code":"ENTRY_IMMUTABLE"' -- -X PATCH "$API/entries/$ENTRY_ID" -H "Authorization: Bearer $AUTHOR_ACCESS" -d '{"text":"too late"}'
@@ -1474,7 +1486,7 @@ expect "both have written and the day is PENDING_REVEAL, not PARTIAL" 200 '"stat
 [[ "$LAST_BODY" == *'"status":"LOCKED"'* && "$LAST_BODY" != *"$TIMED_TEXT"* ]] && pass "…and the partner's entry is still locked, its words withheld" || fail "timed reveal" "${LAST_BODY:0:250}"
 expect "a day still waiting on its reveal time is not in the streak yet" 200 '"current":0' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $EARLY_ACCESS"
 # Today, until both have written, is OPEN on the calendar to both: who has written so far is GET /today's to say.
-[[ "$LAST_BODY" == *'"status":"OPEN","reason":null}]'* && "$LAST_BODY" != *PARTIAL* && "$LAST_BODY" != *PENDING_REVEAL* && "$LAST_BODY" != *SOLO* ]] && pass "…and its calendar says OPEN, not who has written" || fail "streak calendar vocabulary" "${LAST_BODY:0:250}"
+[[ "$LAST_BODY" == *'"status":"OPEN","reason":null,"settlesAt":"'*'Z"}]'* && "$LAST_BODY" != *PARTIAL* && "$LAST_BODY" != *PENDING_REVEAL* && "$LAST_BODY" != *SOLO* ]] && pass "…and its calendar says OPEN, not who has written" || fail "streak calendar vocabulary" "${LAST_BODY:0:250}"
 expect "a stranger asking for a bond's streak gets the one 404" 404 '"code":"NOT_FOUND"' -- "$API/bonds/$TIMED_BOND/streak" -H "Authorization: Bearer $AUTHOR_ACCESS"
 
 echo; echo "gratitude — a confirmed zone change decides no date until tomorrow (BR-6, ADR-0031 §3)"
@@ -1533,7 +1545,7 @@ if [ "$LAGOS_DATE_AFTER" != "$LAGOS_DATE" ]; then
 else
   [[ "$HANDOFF_ENTRY_BODY" == *"\"date\":\"$LAGOS_DATE\""* ]] && pass "…and it lands on the old zone's date, $LAGOS_DATE" || fail "entry date" "expected date $LAGOS_DATE: ${HANDOFF_ENTRY_BODY:0:250}"
   [[ "$HANDOFF_ENTRY_BODY" != *"\"date\":\"$NEW_ZONE_DATE\""* ]] && pass "…not on $NEW_ZONE's, $NEW_ZONE_DATE" || fail "entry redated" "the entry was filed under the new zone: ${HANDOFF_ENTRY_BODY:0:250}"
-  expect "the partner's today is that same day, PARTIAL" 200 "\"bondDay\":{\"date\":\"$LAGOS_DATE\",\"status\":\"PARTIAL\"}" -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $STAYER_ACCESS"
+  expect "the partner's today is that same day, PARTIAL" 200 "\"bondDay\":{\"date\":\"$LAGOS_DATE\",\"status\":\"PARTIAL\",\"settlesAt\":\"" -- "$API/bonds/$HANDOFF_BOND/today" -H "Authorization: Bearer $STAYER_ACCESS"
   # The rows behind it: the day keeps the zone it began under, and the timeline
   # holds a closed Lagos interval followed by an open one that starts later.
   DAY_ZONE="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT anchor_timezone FROM bond_days WHERE bond_id='$HANDOFF_BOND' AND date='$LAGOS_DATE'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
@@ -2655,13 +2667,92 @@ if [ "$SR_MADE" = "2/1/1/21" ]; then
   is "streak: …a rest day a freeze paid for, a date a zone change stepped over, and no reason on any other square" \
     "$(python3 -c 'import json,sys; b=json.loads(sys.argv[1]); print(sorted((d["date"], d["status"], d["reason"]) for d in b["days"] if d["reason"] or d["status"] == "FROZEN"), sum(1 for d in b["days"] if "reason" not in d))' "$SR_BODY")" \
     "[('$SR_REST', 'FROZEN', 'REST_DAY'), ('$SR_SHIFT', 'FROZEN', 'TIMEZONE_SHIFT')] 0"
-  [[ "$SR_BODY" == *"{\"date\":\"$SR_BROKEN\",\"status\":\"MISSED\",\"reason\":null}"* ]] && pass "streak: …the day that ended it is MISSED, with no reason" || fail "streak: broken day" "${SR_BODY:0:250}"
+  [[ "$SR_BODY" == *"{\"date\":\"$SR_BROKEN\",\"status\":\"MISSED\",\"reason\":null,\"settlesAt\":null}"* ]] && pass "streak: …the day that ended it is MISSED, with no reason" || fail "streak: broken day" "${SR_BODY:0:250}"
   db_is "streak: …and the job wrote the ended run on the projection, as recalculate would" "$(sql "SELECT last_run_length || '/' || last_run_broken_on FROM streak_states WHERE bond_id = '$SR_BOND'")" "16/$SR_BROKEN"
   expect "streak: the same for the other member" 200 '"lastRunLength":16' -- "$API/bonds/$SR_BOND/streak" -H "Authorization: Bearer $SR_B"
   is "streak: …the same bytes" "$LAST_BODY" "$SR_BODY"
   expect "streak: today's streak object is as it was, without the new fields" 200 '"streak":{"current":4,"longest":16,"freezesAvailable":0,"strictMode":false}' -- "$API/bonds/$SR_BOND/today" -H "Authorization: Bearer $SR_A"
 else
   skip "streak: the ended run and the rest-day reasons (the days could not be put in by hand: $SR_MADE)"
+fi
+
+echo; echo "late entries — a Bond-day stays open twelve hours past its end (issue #132, BR-3a, ADR-0033 decision 15)"
+flush_buckets
+# What this section is for: the grace as the jar serves it, with the real close job running on
+# its five-second schedule. No day ends during a run, so a fresh bond is moved back three days and
+# into a region zone where it is now between 01:00 and 05:59 — yesterday ended hours ago and its
+# grace has hours left, whatever the time the run starts. Then: the job writes the two days that
+# are past their grace (EMPTY) and does NOT write yesterday, which nobody has opened; an entry
+# sent now with an intendedAt before midnight counts for yesterday; one older than the grace lands
+# on today; GET /today and GET /streak say when each open day settles; and after more runs of the
+# job yesterday is still open, with the late entry on it.
+verified_account "late-writer" "203.0.113.150"; LE_A="$ACCOUNT_ACCESS"
+verified_account "late-reader" "203.0.113.151"; LE_B="$ACCOUNT_ACCESS"
+expect "late entries: a bond" 201 '"status":"PENDING_MEMBER"' -- -X POST "$API/bonds" -H "Authorization: Bearer $LE_A" -d "$(bond_body "Us")"
+LE_BOND="$(printf '%s' "$LAST_BODY" | jget id)"
+LE_CODE="$(python3 -c "import json,sys; print(json.load(sys.stdin)['invite']['code'])" <<<"$LAST_BODY")"
+expect "late entries: …joined" 200 '"status":"ACTIVE"' -- -X POST "$API/invites/$LE_CODE/accept" -H "Authorization: Bearer $LE_B"
+LE_ZONE="$(python3 -c '
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, available_timezones
+now = datetime.now(timezone.utc)
+for z in sorted(available_timezones()):
+    if "/" not in z or z.startswith(("Etc/", "SystemV/", "US/", "posix/", "right/")):
+        continue
+    if 1 <= now.astimezone(ZoneInfo(z)).hour <= 5:
+        print(z)
+        break' 2>/dev/null || true)"
+LE_MADE=no
+if [ -n "$LE_ZONE" ]; then
+  LE_MADE="$(sql "WITH m AS (UPDATE bond_members SET joined_at = joined_at - interval '3 days' WHERE bond_id = '$LE_BOND' RETURNING 1),
+    b AS (UPDATE bonds SET created_at = created_at - interval '3 days', anchor_timezone = '$LE_ZONE' WHERE id = '$LE_BOND' RETURNING 1),
+    a AS (UPDATE bond_anchor_intervals SET zone = '$LE_ZONE', effective_from = effective_from - interval '3 days',
+            first_label = ((effective_from - interval '3 days') AT TIME ZONE '$LE_ZONE')::date WHERE bond_id = '$LE_BOND' RETURNING 1)
+    SELECT (SELECT count(*) FROM m) || '/' || (SELECT count(*) FROM b) || '/' || (SELECT count(*) FROM a)")"
+fi
+if [ "$LE_MADE" = "2/1/1" ]; then
+  LE_TODAY="$(sql "SELECT (now() AT TIME ZONE '$LE_ZONE')::date")"
+  LE_YDAY="$(sql "SELECT (now() AT TIME ZONE '$LE_ZONE')::date - 1")"
+  LE_OLDER="$(sql "SELECT (now() AT TIME ZONE '$LE_ZONE')::date - 2")"
+  utc() { sql "SELECT to_char(($1) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')"; }
+  LE_BEFORE_MIDNIGHT="$(utc "('$LE_TODAY'::date::timestamp - interval '30 minutes') AT TIME ZONE '$LE_ZONE'")"
+  LE_TOO_OLD="$(utc "now() - interval '13 hours'")"
+  LE_YDAY_SETTLES="$(utc "('$LE_TODAY'::date::timestamp AT TIME ZONE '$LE_ZONE') + interval '12 hours'")"
+  LE_TODAY_SETTLES="$(utc "(('$LE_TODAY'::date + 1)::timestamp AT TIME ZONE '$LE_ZONE') + interval '12 hours'")"
+  # The job runs every five seconds: wait for it to write the day past its grace, which is
+  # also the run that would have written yesterday closed if the grace were not kept.
+  for _ in $(seq 1 30); do
+    [ "$(sql "SELECT count(*) FROM bond_days WHERE bond_id = '$LE_BOND' AND date = '$LE_OLDER' AND closed_at IS NOT NULL")" = 1 ] && break
+    sleep 1
+  done
+  db_is "late entries: the job wrote the day before yesterday, past its grace, closed EMPTY ($LE_ZONE)" \
+    "$(sql "SELECT status FROM bond_days WHERE bond_id = '$LE_BOND' AND date = '$LE_OLDER' AND closed_at IS NOT NULL")" "EMPTY"
+  db_is "late entries: …and did not write yesterday, which nobody opened and whose grace has hours left" \
+    "$(sql "SELECT count(*) FROM bond_days WHERE bond_id = '$LE_BOND' AND date = '$LE_YDAY'")" "0"
+  expect "late entries: yesterday is OPEN on the calendar, saying when it settles" 200 "{\"date\":\"$LE_YDAY\",\"status\":\"OPEN\",\"reason\":null,\"settlesAt\":\"$LE_YDAY_SETTLES\"}" -- "$API/bonds/$LE_BOND/streak" -H "Authorization: Bearer $LE_B"
+  expect "late entries: written before midnight, sent after it, the entry counts for yesterday" 201 "\"date\":\"$LE_YDAY\"" -- \
+    -X POST "$API/bonds/$LE_BOND/entries" -H "Authorization: Bearer $LE_A" -H "Idempotency-Key: $(new_key)" \
+    -d "{\"text\":\"written last night, sent this morning\",\"intendedAt\":\"$LE_BEFORE_MIDNIGHT\"}"
+  is "late entries: …stamped with the instant it was written" "$(raw intendedAt)" "$LE_BEFORE_MIDNIGHT"
+  expect "late entries: one written longer ago than the grace lands on today" 201 "\"date\":\"$LE_TODAY\"" -- \
+    -X POST "$API/bonds/$LE_BOND/entries" -H "Authorization: Bearer $LE_B" -H "Idempotency-Key: $(new_key)" \
+    -d "{\"text\":\"written yesterday afternoon\",\"intendedAt\":\"$LE_TOO_OLD\"}"
+  expect "late entries: today says when it settles" 200 "\"bondDay\":{\"date\":\"$LE_TODAY\",\"status\":\"PARTIAL\",\"settlesAt\":\"$LE_TODAY_SETTLES\"}" -- "$API/bonds/$LE_BOND/today" -H "Authorization: Bearer $LE_A"
+  # Two more runs of the job (ten seconds), then yesterday: still open, with the late entry on it.
+  # As epoch seconds: `sql` strips whitespace, which a timestamp's own space would not survive.
+  LE_RUNS_FROM="$(sql "SELECT extract(epoch FROM locked_at)::bigint FROM shedlock WHERE name = 'close-days'")"
+  for _ in $(seq 1 30); do
+    [ "$(sql "SELECT count(*) FROM shedlock WHERE name = 'close-days' AND extract(epoch FROM locked_at) > $LE_RUNS_FROM + 4")" = 1 ] && break
+    sleep 1
+  done
+  db_is "late entries: the job has run since" "$(sql "SELECT count(*) FROM shedlock WHERE name = 'close-days' AND extract(epoch FROM locked_at) > $LE_RUNS_FROM + 4")" "1"
+  db_is "late entries: …and left yesterday open inside its grace, PARTIAL with the late entry" \
+    "$(sql "SELECT status || '/' || entry_count || '/' || (closed_at IS NULL) FROM bond_days WHERE bond_id = '$LE_BOND' AND date = '$LE_YDAY'")" "PARTIAL/1/true"
+  # The archive lists an unsettled day only for a member who wrote on it (ADR-0036): to the partner it is not there yet.
+  expect "late entries: …so the partner cannot read the lone entry yet: the day is not in their archive" 404 '"title":"Day not found"' -- "$API/bonds/$LE_BOND/days/$LE_YDAY" -H "Authorization: Bearer $LE_B"
+  [[ "$LAST_BODY" == *"written last night"* ]] && fail "late entries: lone entry" "readable to the partner inside the grace: ${LAST_BODY:0:200}" || pass "late entries: …its words are not in the partner's view of the day"
+else
+  skip "late entries: the grace on the wire (the bond could not be moved by hand: ${LE_ZONE:-no zone at 01-05h}, $LE_MADE)"
 fi
 
 echo; echo "push tokens (Phase 4 N1, ADR-0044)"
@@ -3503,8 +3594,10 @@ echo; echo "scheduling — the close job runs, under its lock, without error (sp
 CLOSE_LOCK="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM shedlock WHERE name='close-days'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
 case "$CLOSE_LOCK" in psql-unavailable) skip "lock check";; 1) pass "the close job has taken its ShedLock row";; *) fail "close job" "expected one shedlock row named close-days, got '$CLOSE_LOCK'";; esac
 if grep -qE "close: day .* failed|close: the missing days of bond|streak: bond .* could not be evaluated|FAILED [1-9]|Unexpected error occurred in scheduled task" "$MOYI_LOG"; then fail "close job" "the close job logged a failure"; else pass "…and has logged no failure"; fi
-UNCLOSED_PAST="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM bond_days WHERE closed_at IS NULL AND ends_at < now() - interval '1 minute'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
-case "$UNCLOSED_PAST" in psql-unavailable) skip "unclosed-day check";; 0) pass "…and no day that has ended is still unclosed";; *) fail "close job" "$UNCLOSED_PAST ended days are still unclosed";; esac
+# A day stays open for its twelve-hour late-entry grace (issue #132, ADR-0033 decision 15), so
+# what must be closed is every day whose grace has run out, a minute ago.
+UNCLOSED_PAST="$(docker compose exec -T postgres psql -U moyi -d "$MOYI_DB" -Atc "SELECT count(*) FROM bond_days WHERE closed_at IS NULL AND ends_at < now() - interval '12 hours 1 minute'" 2>/dev/null | tr -d '[:space:]' || echo psql-unavailable)"
+case "$UNCLOSED_PAST" in psql-unavailable) skip "unclosed-day check";; 0) pass "…and no day past its grace is still unclosed";; *) fail "close job" "$UNCLOSED_PAST days past their grace are still unclosed";; esac
 
 echo; printf '%d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
 # The exit status is the failure count, as the README says (capped at what a

@@ -322,7 +322,7 @@ internal class DayPushesTest(
     }
 
     private fun closeTheDay() {
-        val after = Instant.parse("2026-09-01T23:05:00Z")
+        val after = Instant.parse("2026-09-02T11:05:00Z")
         clock.set(after)
         closer.closeElapsedDays(after, CLOSE_BUDGET)
     }
