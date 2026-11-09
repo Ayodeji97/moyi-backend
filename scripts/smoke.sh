@@ -176,11 +176,13 @@
 # report and a stranger the same 404, 422 on reason, 201 with {id, reason} and its replay, one MEMBER
 # row holding nothing, the reported member's GET /bonds/{id} and GET /today byte for byte and ETag for
 # ETag the same after it, 201 after a block, the operator's list and dismissals, the detail in no log.
-# Run on 2026-11-08 on feat/report-member (main 0d674ca), a fresh database that applied 41 migrations
-# to V46, its own compose project (moyi-41e: Postgres 55445, Valkey 56345, MinIO 59249), the jar booted
-# by hand (local profile) and --attach: 1362 passed, 0 failed, 1 skipped (the tag across the erasure,
-# the poller having won the race), 35 sections. The run before it failed one probe: the entry
-# reports' list check still expected the list's old columns.
+# Last run on 2026-11-09 on feat/report-member after main's #150 (f906903) was merged in, from a
+# jar of that merge (a1ce621), on a fresh database that applied 44 migrations to V48, against its
+# own compose project (moyi-41e: Postgres 55445, Valkey 56345, MinIO 59249), the jar booted by hand
+# (local profile) and --attach: 1424 passed, 0 failed, 1 skipped (the tag across the erasure, the
+# poller having won the race), 38 sections. Before the merge, at V46 (since renumbered V48): 1362,
+# 0, 1 skipped, 35 sections; the run before that failed one probe, the entry reports' list check
+# still expecting the list's old columns.
 # Since semantic search S1 (FR-204, ADR-0054) it runs with the embedding provider `none`, as the
 # local profile and production name it: search 200 by words alone; "Remember when" 200 from the
 # words' ranking alone (and a plain question whose words are not all in one entry answers no day),
