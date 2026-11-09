@@ -26,8 +26,31 @@ internal data class LateEntryGrace(
         require(!length.isNegative) { "a grace is never negative: $length" }
     }
 
-    /** When a day that ends at [endsAt] is decided: missed or not, a rest day or not, its notifications. */
+    /**
+     * The earliest a day that ends at [endsAt] can be decided: missed or not, a rest day or not,
+     * its notifications. Not the moment it is: the close job decides it on its next run after
+     * this and its settle margin (`DayCloser.SETTLE_MARGIN`), and until then the day is still
+     * undecided ([undecidedUntil]).
+     */
     fun settlesAt(endsAt: Instant): Instant = endsAt.plus(length)
+
+    /**
+     * Whether a stored day is still undecided for a read, and if so the [settlesAt] its square
+     * carries; `null` once it is decided.
+     *
+     * [inGrace] is the day's [settlesAt] when it is one of [undecidedDays] (today, or inside its
+     * grace by the clock), else `null`. A day past its grace is **still undecided until the
+     * close job has evaluated it** ([evaluated]), whatever the clock says: the job settles it
+     * only on its first run after the grace and its margin, and a read that stopped treating it
+     * as undecided at [settlesAt] would neither draw nor count it for those minutes (review M1:
+     * the streak dropped by the day each noon until the job ran). The store, not a margin, says
+     * when that ends, so no second length has to be kept equal to the job's schedule.
+     */
+    fun undecidedUntil(
+        inGrace: Instant?,
+        endsAt: Instant,
+        evaluated: Boolean,
+    ): Instant? = inGrace ?: settlesAt(endsAt).takeUnless { evaluated }
 
     /** The oldest `intendedAt` still trusted for a submission at [submittedAt]. */
     fun oldestClaimAt(submittedAt: Instant): Instant = submittedAt.minus(length)

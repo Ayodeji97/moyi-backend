@@ -32,6 +32,15 @@ internal class LateEntryGraceTest {
         dates(Instant.parse("2026-09-15T11:00:00Z")) shouldBe listOf(LocalDate.of(2026, 9, 15))
     }
 
+    /** Review M1: past its grace a day is undecided until the job has evaluated it, and decided after. */
+    @Test
+    fun `a stored day is undecided in its grace, and after it until the job has evaluated it`() {
+        val settles = Instant.parse("2026-09-15T11:00:00Z")
+        grace.undecidedUntil(inGrace = settles, endsAt = the14thEnds, evaluated = false) shouldBe settles
+        grace.undecidedUntil(inGrace = null, endsAt = the14thEnds, evaluated = false) shouldBe settles
+        grace.undecidedUntil(inGrace = null, endsAt = the14thEnds, evaluated = true) shouldBe null
+    }
+
     @Test
     fun `with no grace only today is undecided, and a negative grace is refused`() {
         LateEntryGrace.NONE.undecidedDays(fixed(lagos), Instant.parse("2026-09-15T00:00:00Z")).map { it.date } shouldBe

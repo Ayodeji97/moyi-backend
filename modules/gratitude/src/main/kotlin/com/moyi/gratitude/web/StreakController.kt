@@ -101,10 +101,11 @@ internal data class StreakDayResponse(
     /** Why a `FROZEN` square is a rest day; `null` on every other square (issue #141). */
     val reason: FrozenReason?,
     /**
-     * When an `OPEN` square's day settles; `null` on every other square (issue #132). An `OPEN`
-     * square is today, or yesterday while its twelve-hour late-entry grace runs (BR-3a as
-     * amended 2026-11-08): an entry written on that day and sent before this instant still
-     * counts for it, and only then is the day decided — complete, a rest day or missed.
+     * The earliest an `OPEN` square's day can be decided; `null` on every other square (issue
+     * #132): its end plus the late-entry grace (BR-3a as amended 2026-11-08). An entry written
+     * on that day and sent before this instant still counts for it. The close job decides the
+     * day — complete, a rest day or missed — on its next run after this, and the square stays
+     * `OPEN` until then ([com.moyi.gratitude.domain.LateEntryGrace.undecidedUntil]).
      */
     val settlesAt: Instant?,
 )

@@ -173,7 +173,8 @@ reason; each mutation was restored and the restore checked.
    test.
    *Amended 2026-11-08 (issue #132, ADR-0033 decision 15).* The premise "today is never
    evaluated while it is today" no longer covers everything added: yesterday is now pending,
-   and added if it has revealed, until twelve hours after it ends, and it can be evaluated
+   and added if it has revealed, until the close job has evaluated it (its grace and the job's
+   next run after it), and it can be evaluated
    between the reads. **As built now, `GetMilestones.of` reads the pending days
    (`GetStreak.pending`: the run, the last evaluated date, the undecided squares), then
    `completeDays`, then the last evaluated date again, and drops every pending day that last

@@ -365,12 +365,17 @@ day with it; second, it finds the day settled and is filed on today, never on th
 - **A rejected claim is unchanged:** an `intendedAt` older than the grace, ahead of the clock,
   before the bond, or on a settled day still falls back to the day of submission.
 
-**What a reader sees.** `GET /streak` draws every undecided day — today, and an earlier day
-inside its grace — `OPEN` until it has revealed (`COMPLETE`), with a new required, nullable
-`settlesAt` on each square that is set exactly on an `OPEN` one; and the shown run adds every
+**What a reader sees.** `GET /streak` draws every undecided day — today, an earlier day
+inside its grace, and a stored day past it that this job has not evaluated yet — `OPEN` until
+it has revealed (`COMPLETE`), with a new required, nullable `settlesAt` on each square that is
+set exactly on an `OPEN` one; and the shown run adds every
 undecided day that has revealed, oldest first, while each follows the last evaluated day
-(ADR-0034 decision 8 as amended). `GET /today`'s `bondDay` gains a required `settlesAt`: when
-today settles. `GET /days` shows yesterday as it is (`PARTIAL`, say) until it settles.
+(ADR-0034 decision 8 as amended). `GET /today`'s `bondDay` gains a required `settlesAt`.
+**`settlesAt` is the earliest a day can be decided, not the moment it is:** this job settles it
+on its first run after `settlesAt` and the settle margin, up to a margin and a period later
+(about sixteen minutes at the production schedule). The readers do not stop treating a day as
+undecided at `settlesAt`: a stored day stays undecided until it has been evaluated
+(`LateEntryGrace.undecidedUntil`), so no reader has to know this job's schedule (review M1). `GET /days` shows yesterday as it is (`PARTIAL`, say) until it settles.
 
 **Consequences.**
 
@@ -382,9 +387,12 @@ today settles. `GET /days` shows yesterday as it is (`PARTIAL`, say) until it se
   hours. It now allows the grace (`LATE_ENTRY_GRACE`, default `12 hours`). The new script must
   be on the server before the image that carries this (ops/monitoring/README.md).
 - No migration: no stored value changes meaning. Days closed before this ships stay closed.
-- The skipped date of an eastward change (decision 6) is written once the day before it has
-  settled, so up to twelve hours later than before; nothing reads it sooner, because the
-  streak cannot be evaluated past the unsettled day in front of it.
+- The skipped date of an eastward change (decision 6) is written `FROZEN` once the day before
+  it has settled, so a grace later than before. Until then the streak read's walk stops at the
+  missing date, so a day after it that both have completed is not yet added and the shown run
+  is short by it for those hours; the stored run is right once the job has written and
+  evaluated the date. The review fix above does not cover it: there is no row yet to be
+  "not yet evaluated". Accepted (review L2) as rare — it needs an approved eastward change.
 
 **Checked:** `LateEntryGraceTest`, `DayAssignmentTest`, `CloseElapsedDaysTest` (a day left open
 through its grace takes a late entry and is decided once; a day nobody opened is not written

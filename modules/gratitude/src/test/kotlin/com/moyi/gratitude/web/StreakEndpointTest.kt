@@ -248,6 +248,56 @@ internal class StreakEndpointTest(
         calendar(ada).takeLast(2) shouldBe listOf("${day(4)} COMPLETE", "${day(5)} COMPLETE")
     }
 
+    /**
+     * Review M1: the grace runs out at 11:00Z (noon in Lagos), but the job settles a day only
+     * on its first run after that and the settle margin. In between, yesterday is neither in its
+     * grace nor evaluated, and it is still undecided: drawn and counted as before, not dropped
+     * until the job catches up. A couple at three who completed day 4 and day 5 see five
+     * throughout, never three for the minutes before the job runs.
+     */
+    @Test
+    fun `a day whose grace has run out but which the job has not yet settled still counts`() {
+        (1..3).forEach { bothWriteOn(it) }
+        closeThrough(3)
+        bothWriteOn(4)
+        bothWriteOn(5)
+
+        clock.set(Instant.parse("${day(5)}T10:59:59Z"))
+        streak(ada)["current"].asInt() shouldBe 5
+
+        clock.set(Instant.parse("${day(5)}T11:00:30Z"))
+        for (member in listOf(ada, bea)) {
+            streak(member).numbers() shouldBe Numbers(current = 5, longest = 5, freezes = 0, progress = 5, total = 5)
+            calendar(member).takeLast(2) shouldBe listOf("${day(4)} COMPLETE", "${day(5)} COMPLETE")
+            today(member)["streak"]["current"].asInt() shouldBe 5
+        }
+
+        // Once the job has run, day 4 is in the stored run and is not counted twice.
+        closeThrough(4)
+        streak(ada).numbers() shouldBe Numbers(current = 5, longest = 5, freezes = 0, progress = 5, total = 5)
+    }
+
+    /**
+     * The same window for a day only one wrote on: past its grace and not yet settled it is
+     * still OPEN, saying when it could first be decided, and it still stops the walk.
+     */
+    @Test
+    fun `a partial day past its grace and not yet settled stays OPEN until the job runs`() {
+        (1..3).forEach { bothWriteOn(it) }
+        closeThrough(3)
+        clock.set(at(4))
+        submit(ada)
+        bothWriteOn(5)
+
+        clock.set(Instant.parse("${day(5)}T11:00:30Z"))
+        calendar(ada).takeLast(2) shouldBe listOf("${day(4)} OPEN", "${day(5)} COMPLETE")
+        streak(ada)["days"].toList().single { it["date"].asString() == "${day(4)}" }["settlesAt"].asString() shouldBe "${day(5)}T11:00:00Z"
+        streak(ada)["current"].asInt() shouldBe 3
+
+        closeThrough(4)
+        calendar(ada).takeLast(2) shouldBe listOf("${day(4)} SOLO", "${day(5)} COMPLETE")
+    }
+
     /** An open yesterday stops the walk: today, complete, cannot extend a run yesterday may yet break. */
     @Test
     fun `today is not added while yesterday is still open in its grace, and is once it settles complete`() {

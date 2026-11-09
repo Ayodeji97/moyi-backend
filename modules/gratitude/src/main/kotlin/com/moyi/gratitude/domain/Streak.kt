@@ -131,8 +131,9 @@ internal enum class DayOutcome {
  *
  * Today, until it is complete, is still only [OPEN] here: who has written so
  * far today is `GET /today`'s to say. So is yesterday, while its late-entry
- * grace runs (BR-3a as amended 2026-11-08): an entry sent late may still land
- * on it, and nothing about it is decided until the close job settles it.
+ * grace runs (BR-3a as amended 2026-11-08), and after it until the close job has
+ * evaluated it: an entry sent late may still land on it, and nothing about it is
+ * decided until the job settles it.
  */
 internal enum class StreakCell {
     /** Both wrote. */
@@ -148,8 +149,9 @@ internal enum class StreakCell {
     MISSED,
 
     /**
-     * Not decided yet, and not complete: today, or an earlier day inside its late-entry grace
-     * ([LateEntryGrace]). Whether anybody has written is `GET /today`'s to say, not this calendar's.
+     * Not decided yet, and not complete: today, or an earlier day inside its late-entry grace or
+     * not yet evaluated by the close job ([LateEntryGrace.undecidedUntil]). Whether anybody has
+     * written is `GET /today`'s to say, not this calendar's.
      */
     OPEN,
     ;
@@ -163,8 +165,8 @@ internal enum class StreakCell {
          * - a day not yet evaluated, unless it is [undecided] — its square
          *   could still change (a missed day may become a rest day), and "the
          *   numbers must agree with the grid": the run counts evaluated days.
-         *   An [undecided] day is today or one inside its late-entry grace,
-         *   which is drawn [COMPLETE] once it has revealed (that much cannot
+         *   An [undecided] day is today, one inside its late-entry grace, or
+         *   one the close job has not evaluated yet, which is drawn [COMPLETE] once it has revealed (that much cannot
          *   change) and [OPEN] until then;
          * - a suspended day, and a missed day after the bond had ended, which
          *   moved nothing and must not sit in the grid looking like a break.
@@ -206,8 +208,9 @@ internal enum class FrozenReason {
 
 /**
  * One square of a bond's calendar. [reason] is set on a [StreakCell.FROZEN] square and on no
- * other; [settlesAt] on an [StreakCell.OPEN] square and on no other: when the day's late-entry
- * grace runs out and the close job decides it (BR-3a, [LateEntryGrace.settlesAt]).
+ * other; [settlesAt] on an [StreakCell.OPEN] square and on no other: the earliest the day can be
+ * decided, when its late-entry grace runs out; the close job decides it on its next run after
+ * that (BR-3a, [LateEntryGrace.settlesAt]), so on a day not yet evaluated it can be past.
  */
 internal data class StreakDay(
     val date: LocalDate,
@@ -228,8 +231,9 @@ internal data class StreakDay(
          * `FROZEN` when, and only when, it spends a freeze (`StreakStore.recordDay`; V17's
          * `bond_days_freeze_check`). So the outcome says which.
          *
-         * [settlesAt] is non-null exactly for an undecided day (today, or one inside its grace),
-         * and is when it settles; the square carries it only if it is drawn [StreakCell.OPEN].
+         * [settlesAt] is non-null exactly for an undecided day (today, one inside its grace, or
+         * one not yet evaluated: [LateEntryGrace.undecidedUntil]), and is the earliest it can be
+         * decided; the square carries it only if it is drawn [StreakCell.OPEN].
          */
         fun of(
             date: LocalDate,

@@ -341,25 +341,52 @@ internal class CloseElapsedDaysTest(
         statuses()[ended] shouldBe "SOLO"
     }
 
+    /**
+     * What this guards: the job's statement can be answered from `bond_days_unclosed_idx`, the
+     * partial index that holds only the days still to be settled, so the scan reads those and
+     * not every day there has ever been. A statement that stopped implying `closed_at IS NULL`
+     * could not use it.
+     *
+     * Deterministic, not a cost race: on the shared test database the planner may also choose
+     * `bond_days_bond_date_key`, which fits the `ORDER BY` and the `LIMIT` and walks every row,
+     * and which it prefers depended on what the other tests had left there (it failed in CI
+     * once). So the competing index is dropped inside this transaction, which is rolled back,
+     * and sequential scans are priced out: what is left is the partial index, or a Seq Scan if
+     * the statement cannot use it.
+     */
     @Test
     fun `the scan for days that may have ended can use its index`() {
-        // The statement the job runs, not a copy of it.
-        val plan =
-            dataSource.connection
-                .use { connection ->
-                    connection.autoCommit = false
-                    connection.createStatement().use { it.execute("SET LOCAL enable_seqscan = off") }
-                    connection.prepareStatement("EXPLAIN " + CloseCandidates.SQL).use { statement ->
-                        statement.setTimestamp(1, java.sql.Timestamp.from(LAGOS_END))
-                        statement.setObject(2, UUID(0, 0))
-                        statement.setObject(3, java.time.LocalDate.of(1, 1, 1))
-                        statement.setInt(4, 200)
-                        statement.executeQuery().use { rows -> generateSequence { if (rows.next()) rows.getString(1) else null }.toList() }
-                    }
-                }.joinToString("\n")
+        val plan = candidatePlan(dropping = listOf("bond_days_bond_date_key"))
 
         plan shouldContain "bond_days_unclosed_idx"
+        plan shouldNotContain "Seq Scan"
     }
+
+    /** `EXPLAIN` of the job's own statement, with [dropping] dropped in a transaction that is rolled back. */
+    private fun candidatePlan(dropping: List<String>): String =
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            try {
+                // Never queue the other tests behind this lock for long.
+                val setup = listOf("SET LOCAL lock_timeout = '5s'", "SET LOCAL enable_seqscan = off") + dropping.map { "DROP INDEX $it" }
+                connection.createStatement().use { statement -> setup.forEach(statement::execute) }
+                explainCandidates(connection)
+            } finally {
+                connection.rollback()
+            }
+        }
+
+    /** The statement the job runs, not a copy of it. */
+    private fun explainCandidates(connection: java.sql.Connection): String =
+        connection
+            .prepareStatement("EXPLAIN " + CloseCandidates.SQL)
+            .use { statement ->
+                statement.setTimestamp(1, java.sql.Timestamp.from(LAGOS_END))
+                statement.setObject(2, UUID(0, 0))
+                statement.setObject(3, java.time.LocalDate.of(1, 1, 1))
+                statement.setInt(4, 200)
+                statement.executeQuery().use { rows -> generateSequence { if (rows.next()) rows.getString(1) else null }.toList() }
+            }.joinToString("\n")
 
     private fun statuses(): Map<String, String> =
         jdbc.query("SELECT bond_id, status FROM bond_days") { row, _ -> row.getString(1) to row.getString(2) }.toMap()
