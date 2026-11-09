@@ -186,7 +186,7 @@ moyi-backend/
 ├─ app/             @SpringBootApplication, wiring — depends on everything
 ├─ common/          core, web, security, events, testing — shared, no domain logic
 ├─ modules/         identity, bond, gratitude, media, notification,
-│                   scheduling, admin, analytics — the actual domain
+│                   scheduling, admin, analytics, ai, support — the actual domain
 ├─ contracts/       OpenAPI generation for the client
 ├─ config/          detekt configuration (only the tuned rules)
 ├─ adr/             architecture decision records
@@ -213,18 +213,20 @@ flowchart TD
     scheduling["scheduling"]
     admin["admin"]
     analytics["analytics"]
+    support["support"]
 
     common["<b>common</b> — core · web · security · events · testing"]
 
     app --> identity & bond & gratitude & media
-    app --> notification & scheduling & admin & analytics
+    app --> notification & scheduling & admin & analytics & support
 
     identity & bond & gratitude & media --> common
-    notification & scheduling & admin & analytics --> common
+    notification & scheduling & admin & analytics & support --> common
 
     gratitude -. "only via bond's api" .-> bond
     gratitude -. "only via identity's api" .-> identity
     scheduling -. "only via gratitude's api" .-> gratitude
+    support -. "only via identity's api" .-> identity
 
     classDef wiring fill:#f4cccc,stroke:#a61c00,stroke-width:2px,color:#1a1a1a
     classDef shared fill:#cfe2f3,stroke:#1155cc,stroke-width:2px,color:#1a1a1a

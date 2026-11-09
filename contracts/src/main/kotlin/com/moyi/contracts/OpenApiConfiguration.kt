@@ -182,6 +182,7 @@ class OpenApiConfiguration {
             documentRemember(api)
             documentSemanticSearch(api)
             documentLegal(api)
+            documentSupport(api)
             documentRequestEnums(api)
             requireOver18(api)
             // After every function above that reads an entry's fields where springdoc put them.
@@ -527,6 +528,8 @@ class OpenApiConfiguration {
                 "deleteMedia",
                 // FR-100, ADR-0053: REPORT_ON_OWN_ENTRY, and IDEMPOTENCY_KEY_IN_FLIGHT.
                 "reportEntry",
+                // FR-102, ADR-0057: IDEMPOTENCY_KEY_IN_FLIGHT, when a key is sent.
+                "sendSupportMessage",
             )
 
         /**
@@ -545,7 +548,8 @@ class OpenApiConfiguration {
          * [requireIdempotencyKey] exists at all: springdoc cannot read this
          * off the controller the way it reads an actual `@RequestHeader`.
          */
-        private val IDEMPOTENT_OPERATIONS = setOf("submitEntry", "patchEntry", "completeMediaUpload", "reportEntry")
+        private val IDEMPOTENT_OPERATIONS =
+            setOf("submitEntry", "patchEntry", "completeMediaUpload", "reportEntry", "sendSupportMessage")
 
         /**
          * The [IDEMPOTENT_OPERATIONS] declared `@Idempotent(required = false)`:
@@ -554,7 +558,7 @@ class OpenApiConfiguration {
          * springdoc — and `OpenApiContractTest` holds it against the
          * controllers' own annotations.
          */
-        private val OPTIONAL_KEY_OPERATIONS = setOf("patchEntry")
+        private val OPTIONAL_KEY_OPERATIONS = setOf("patchEntry", "sendSupportMessage")
 
         private const val IDEMPOTENCY_KEY = "Idempotency-Key"
 
