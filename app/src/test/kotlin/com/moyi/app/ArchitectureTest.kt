@@ -53,6 +53,7 @@ class ArchitectureTest {
                 "analytics",
                 "ai",
                 "support",
+                "export",
             )
 
         /**

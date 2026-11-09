@@ -56,6 +56,18 @@ internal value class StorageKey(
          * kept: `v/{uuid}/voice.ogg`, derived as a photo's variants are
          * ([forVariant]) and for the same reasons (ADR-0049).
          */
+        private const val ARCHIVE_PREFIX = "x/"
+        private val ARCHIVE = Regex("""^x/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.zip$""")
+
+        /** A data export's archive (ADR-0059): `x/{random}.zip`, never the export's id. */
+        fun forArchive(random: UUID): StorageKey = StorageKey("$ARCHIVE_PREFIX$random.zip")
+
+        /** [value] as an archive's key, or an [IllegalArgumentException]: the export may name its own objects and no other. */
+        fun ofArchive(value: String): StorageKey {
+            require(ARCHIVE.matches(value)) { "not an archive's key" }
+            return StorageKey(value)
+        }
+
         fun forVoice(upload: StorageKey): StorageKey {
             check(upload.value.startsWith(UPLOAD_PREFIX)) { "a voice note is made from an upload's key" }
             return StorageKey("v/${upload.value.removePrefix(UPLOAD_PREFIX)}/voice.ogg")

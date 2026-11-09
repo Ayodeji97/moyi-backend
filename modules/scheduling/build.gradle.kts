@@ -23,6 +23,8 @@ dependencies {
     // deletions once their cancellation window has closed (FR-008, ADR-0058). The same "when,
     // never what". identity does not depend on this module, so this makes no cycle.
     implementation(projects.modules.identity)
+    // `export.api.DataExportJobs`: builds and expires data exports on a timer (ADR-0059).
+    implementation(projects.modules.export)
     // OutboxDispatcher, for the poller: this module owns the trigger and the
     // meters, `common:events` the delivering (ADR-0035 decisions 7 and 8).
     implementation(projects.common.events)

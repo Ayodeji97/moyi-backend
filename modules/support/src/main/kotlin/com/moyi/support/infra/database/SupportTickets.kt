@@ -1,5 +1,6 @@
 package com.moyi.support.infra.database
 
+import com.moyi.support.api.ExportedTicket
 import com.moyi.support.domain.SupportBody
 import com.moyi.support.domain.SupportSubject
 import com.moyi.support.domain.SupportTicket
@@ -70,6 +71,23 @@ internal class SupportTickets(
         }
         return closed.size
     }
+
+    /** Every ticket [userId] sent, oldest first, with whatever words it still holds (ADR-0059). */
+    fun allOf(userId: UUID): List<ExportedTicket> =
+        jdbc.query(
+            "SELECT id, subject, body, status, created_at, closed_at FROM support_tickets WHERE user_id = ? ORDER BY created_at, id",
+            { rs, _ ->
+                ExportedTicket(
+                    id = rs.getObject("id", UUID::class.java),
+                    subject = rs.getString("subject"),
+                    body = rs.getString("body"),
+                    status = rs.getString("status"),
+                    createdAt = rs.getTimestamp("created_at").toInstant(),
+                    closedAt = rs.getTimestamp("closed_at")?.toInstant(),
+                )
+            },
+            userId,
+        )
 
     /** The ticket [id] names, whoever sent it, or null: the caller checks it is theirs. Never its words. */
     fun find(id: UUID): SupportTicket? =
