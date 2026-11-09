@@ -333,7 +333,9 @@ there the asset's state decides it. CI installs `libvips-tools` and `libheif-plu
   **Moved to the owner's verification of the switch-on** (ADR-0052, "Switched on"):
   `scripts/r2-switch-on-check.sh` uploads a photo, waits for `READY`, waits until its URL's
   signature is `MOYI_CHECK_URL_MIN_AGE` minutes old (the runbook says 40) and GETs it, printing
-  neither the URL nor the key. Seen against MinIO; owed against R2 until the owner has run it.
+  neither the URL nor the key. Seen against MinIO; **run against R2 on 2026-11-05** (production,
+  `a8e7652`): `READY` 34 s into the run, then a GET of a URL signed 40 minutes earlier answered
+  `200`, `image/webp`, a WebP with no EXIF.
 - **D3:** voice notes, still `UPLOADED` after `media.process` has passed them; D3 processes them,
   and claims `voiceMediaId` (`MEDIA_NOT_YET_SUPPORTED` until then). `AttachableKind` gains `VOICE`.
 - **D4:** the verdict that lets a partner see a photo. **The author's "not shared" for a

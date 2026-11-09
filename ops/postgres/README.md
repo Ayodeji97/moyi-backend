@@ -42,8 +42,10 @@ The production restore below remains a separate gate.
 
    Require `Result=success` and `ExecMainStatus=0`. Record the new backup
    object from the backup journal without dumping the environment files.
-5. Run `ops/backup/restore-drill.sh --email <restored-account> --version <main-sha>`
-   on the Mac. It needs the vault and the account password, and must end
+5. Run `ops/backup/restore-drill.sh --email 'restored@example.com' --version "$(git rev-parse HEAD)"`
+   on the Mac. CI tags images with the full 40-character commit; a short one
+   is answered `not found` at the image pull (2026-11-05). It needs the vault
+   and the account password, and must end
    `RESTORE DRILL PASSED`. Use the CI-published image of the exact commit to
    be deployed. Production was at V36 on 2026-11-04, so this checks V37–V41,
    not only V40/V41. The drill disables scheduled work and external
@@ -69,6 +71,12 @@ kamal deploy --skip-push --version=$(git rev-parse HEAD)
 Require matching collation versions and available vector 0.8.7 before the
 app deploy. Check the Postgres logs for collation warnings. If either check
 fails, stop here; do not run migrations on an unvalidated image.
+
+From `kamal app stop` until the deploy's new web container is healthy, the
+API is down and the uptime monitor says so. On 2026-11-05 that was about nine
+minutes (17:26 to 17:35), because the deploy had not run and a `200` was
+reported in its place; Flyway at V36 and an empty `docker ps` showed it. The deploy is done only when `kamal deploy` ends
+`Finished all in …` and the checks below have been read.
 
 After deployment, require `/healthz` 200, Flyway success through V41,
 `SELECT extversion FROM pg_extension WHERE extname='vector'` returning 0.8.7,
