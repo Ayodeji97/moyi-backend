@@ -33,6 +33,8 @@ internal class RefreshTokenEntity(
     var revokedAt: Instant?,
     @Column(name = "replaced_by")
     var replacedBy: UUID?,
+    @Column(name = "voided_at")
+    var voidedAt: Instant?,
     @Column(name = "device_id")
     var deviceId: UUID?,
 ) : Persistable<UUID> {
@@ -54,5 +56,6 @@ internal class RefreshTokenEntity(
     override fun hashCode(): Int = id.hashCode()
 
     override fun toString(): String =
-        "RefreshTokenEntity(id=$id, familyId=$familyId, expiresAt=$expiresAt, rotated=${rotatedAt != null}, revoked=${revokedAt != null})"
+        "RefreshTokenEntity(id=$id, familyId=$familyId, expiresAt=$expiresAt, rotated=${rotatedAt != null}, " +
+            "revoked=${revokedAt != null}, voided=${voidedAt != null})"
 }

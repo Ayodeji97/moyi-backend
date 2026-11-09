@@ -13,6 +13,7 @@ import java.util.UUID
  * guarantees live; see `RefreshTokenRepository`.
  */
 @Component
+@Suppress("TooManyFunctions") // One per statement of RefreshTokenRepository, in domain terms.
 internal class RefreshTokenStore(
     private val tokens: RefreshTokenRepository,
 ) {
@@ -22,7 +23,24 @@ internal class RefreshTokenStore(
 
     fun findByHash(hash: TokenHash): RefreshToken? = tokens.findByTokenHash(hash.value)?.toDomain()
 
-    fun findById(id: UUID): RefreshToken? = tokens.findById(id)?.toDomain()
+    /** The token a hash names: its id and owner, enough to take the sessions lock before reading it. */
+    fun findRefByHash(hash: TokenHash): RefreshTokenRef? = tokens.findRefByTokenHash(hash.value)
+
+    /** The row, read fresh and locked for the rest of the transaction. Call it after [lockSessionsOf]. */
+    fun lockById(id: UUID): RefreshToken? = tokens.findByIdForUpdate(id)?.toDomain()
+
+    /** @return whether the unused token is now voided (ADR-0021, amended 2026-11-08). */
+    fun void(
+        id: UUID,
+        now: Instant,
+    ): Boolean = tokens.void(id, now) == 1
+
+    /** @return whether the rotated token now names [replacementId] instead of [voidedId] as its successor. */
+    fun repoint(
+        id: UUID,
+        voidedId: UUID,
+        replacementId: UUID,
+    ): Boolean = tokens.repoint(id, voidedId, replacementId) == 1
 
     /**
      * Takes the per-user sessions lock for the rest of the current transaction.

@@ -1,7 +1,9 @@
 package com.moyi.identity.infra.database
 
 import com.moyi.identity.domain.VerificationPurpose
+import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
@@ -108,12 +110,83 @@ internal interface CredentialsRepository : Repository<CredentialsEntity, UUID> {
     ): Int
 }
 
+// Each statement is one of rotation's, revocation's or the sessions list's, named; the grace window added three.
+@Suppress("TooManyFunctions")
 internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID> {
     fun save(token: RefreshTokenEntity): RefreshTokenEntity
 
     fun findByTokenHash(tokenHash: String): RefreshTokenEntity?
 
-    fun findById(id: UUID): RefreshTokenEntity?
+    /**
+     * Which token a hash names and whose it is, **without loading the row as
+     * an entity**. Rotation needs the owner to take the sessions lock before it
+     * reads the state it acts on; had this loaded the entity, the read after
+     * the lock would have been answered from the persistence context — the
+     * state from before the wait, not what the lock holder committed. That is
+     * how a refresh that waited on a revocation used to call it a reuse.
+     */
+    @Query(
+        """
+        SELECT new com.moyi.identity.infra.database.RefreshTokenRef(t.id, t.userId)
+          FROM RefreshTokenEntity t
+         WHERE t.tokenHash = :tokenHash
+        """,
+    )
+    fun findRefByTokenHash(tokenHash: String): RefreshTokenRef?
+
+    /**
+     * The row, locked (`SELECT … FOR UPDATE`) for the rest of the transaction.
+     * Rotation reads the presented token and its successor this way under the
+     * sessions lock, so what it decides on is what it then changes
+     * (ADR-0021, amended 2026-11-08).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT t FROM RefreshTokenEntity t WHERE t.id = :id")
+    fun findByIdForUpdate(id: UUID): RefreshTokenEntity?
+
+    /**
+     * Voids an unused successor: the grace retry of its predecessor replaced it
+     * before it was used. Marked rotated at the same instant, so it leaves every
+     * live query and presenting it is a reuse. Conditional like [rotate]: `0`
+     * means it was used or revoked after all.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.rotatedAt = :now,
+               t.voidedAt = :now
+         WHERE t.id = :id
+           AND t.rotatedAt IS NULL
+           AND t.revokedAt IS NULL
+        """,
+    )
+    fun void(
+        id: UUID,
+        now: Instant,
+    ): Int
+
+    /**
+     * Points a rotated token at the successor its grace retry minted, in place
+     * of the one that retry voided. `rotatedAt` is left alone: the window runs
+     * from the first rotation. Conditional on the successor it replaces.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE RefreshTokenEntity t
+           SET t.replacedBy = :replacementId
+         WHERE t.id = :id
+           AND t.replacedBy = :voidedId
+           AND t.voidedAt IS NULL
+           AND t.revokedAt IS NULL
+        """,
+    )
+    fun repoint(
+        id: UUID,
+        voidedId: UUID,
+        replacementId: UUID,
+    ): Int
 
     /**
      * Serialises every mutation of one user's sessions for the rest of the
@@ -248,6 +321,12 @@ internal interface RefreshTokenRepository : Repository<RefreshTokenEntity, UUID>
     )
     fun familyStartsOf(userId: UUID): List<FamilyStart>
 }
+
+/** A refresh token's id and owner, read without making it a managed entity (JPQL constructor projection). */
+internal data class RefreshTokenRef(
+    val id: UUID,
+    val userId: UUID,
+)
 
 /** A family and the moment it was created (JPQL constructor projection). */
 internal data class FamilyStart(

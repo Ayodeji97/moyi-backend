@@ -740,8 +740,32 @@ REFRESH="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
 expect "refresh rotates: 200 with a new pair" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
 REFRESH2="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
 [ "$REFRESH2" != "$REFRESH" ] && pass "…and the new refresh token differs from the old" || fail "rotation" "same refresh token returned"
-expect "presenting the rotated token again is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
-expect "…and the successor died with the family: REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH2\"}"
+# The grace window (ADR-0021, amended 2026-11-08, issue #136): a refresh whose
+# answer was lost may be retried for 30 s while the successor is unused. The
+# WARN "Refresh token REUSE detected" is written inside the revoking
+# transaction, before the response, so counting it is a synchronous check that
+# no reuse (and so no reuse email) happened.
+reuse_lines() { grep -c "Refresh token REUSE detected" "$MOYI_LOG" || true; }
+REUSES_BEFORE="$(reuse_lines)"
+expect "a second refresh of the same token within 30 s is 200 with a new pair" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH\"}"
+REFRESH_RETRY="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+[ -n "$REFRESH_RETRY" ] && [ "$REFRESH_RETRY" != "$REFRESH2" ] && pass "…a different token from the one it voids" || fail "grace retry" "same or no refresh token returned"
+[ "$(reuse_lines)" = "$REUSES_BEFORE" ] && pass "…with no reuse detected, so no reuse email" || fail "grace retry" "a reuse was logged for the retry"
+grep -q "Refresh retried inside the grace window" "$MOYI_LOG" && pass "…logged as a grace retry" || fail "grace retry log" "no 'Refresh retried inside the grace window' line"
+expect "the voided successor presented afterwards is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH2\"}"
+[ "$(reuse_lines)" -gt "$REUSES_BEFORE" ] && pass "…detected as a reuse (the person is emailed)" || fail "voided successor" "no reuse logged"
+expect "…and the family is dead: the retry's token is REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_RETRY\"}"
+flush_buckets
+expect "login again (a family to use the successor of)" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
+REFRESH_A="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "refresh it" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_A\"}"
+REFRESH_B="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "refresh the successor (now used)" 200 '"refreshToken"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_B\"}"
+REFRESH_C="$(printf '%s' "$LAST_BODY" | jget refreshToken)"
+expect "presenting the rotated token after its successor was used is 401 TOKEN_REUSE_DETECTED" 401 '"code":"TOKEN_REUSE_DETECTED"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_A\"}"
+expect "…and the successor died with the family: REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d "{\"refreshToken\":\"$REFRESH_C\"}"
+# The window itself, 30 s, is not waited out here: RefreshGraceWindowTest moves
+# a clock past it. A token past the window answers as a used successor's does.
 expect "a never-issued refresh token is 401 REFRESH_TOKEN_INVALID" 401 '"code":"REFRESH_TOKEN_INVALID"' -- -X POST "$API/auth/refresh" -d '{"refreshToken":"never-issued"}'
 expect "login again (fresh family)" 200 '"refreshToken"' -- -X POST "$API/auth/login" -d "$(login_body "$EMAIL" "$PASSWORD")"
 REFRESH3="$(printf '%s' "$LAST_BODY" | jget refreshToken)"; ACCESS3="$(printf '%s' "$LAST_BODY" | jget accessToken)"

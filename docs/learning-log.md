@@ -3010,10 +3010,6 @@ Wrong about: naming `/me`'s new body `MeResponse`. The name was already the bond
          `/me` reports the current version's row before the newest, or a rolled-back version would
          prompt for ever, re-consent writing nothing.)
 
-
-
-
-
 ## 2026-11-08 · Contract · a legal document is not a decodable one
 
 Expected: the contract was precise because it validated and the client was generated from it.
@@ -3060,3 +3056,21 @@ Reality: none of them. The report table takes a `target` column and the operator
          it is now one constant in `bond.api` that the guard's exception is built from too.
 Wrong about: nothing yet. Nothing the reported member reads may change, so the test reads their
          bond and their today, bytes and ETag, before and after; the smoke does the same over HTTP.
+
+
+## 2026-11-08 · Feature · A 30-second grace window for a lost refresh answer (issue #136, ADR-0021 amended)
+
+Expected: a time check in front of the reuse branch, and a column to mark the successor that a retry
+         makes worthless.
+Reality: the column was the easy part. The voided successor had to be a reuse when it came back —
+         that is the only way a thief who replays inside the window is caught — and must never be
+         retried in its turn, or two holders could void each other's tokens for as long as they
+         kept inside the window. Both follow from marking it rotated at the instant it was voided,
+         with nothing after it.
+Wrong about: the re-read after the sessions lock. `RotateRefreshToken` looked the token up by hash,
+         took the lock, and "re-read" it by id, but the first read had made it a managed entity, so
+         the second was answered from the persistence context: the state from before the wait. A
+         refresh that waited on a revocation saw a live token, lost the compare-and-set, and called
+         it a reuse, emailing the person about a theft that never happened. The row-lock test found
+         it on its first run against the old code; the lookup now returns a projection, and the
+         read after the lock is `SELECT … FOR UPDATE`.

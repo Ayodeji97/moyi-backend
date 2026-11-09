@@ -15,6 +15,7 @@ internal fun RefreshTokenEntity.toDomain(): RefreshToken =
         rotatedAt = rotatedAt,
         revokedAt = revokedAt,
         replacedBy = replacedBy,
+        voidedAt = voidedAt,
         deviceId = deviceId,
     )
 
@@ -29,5 +30,6 @@ internal fun RefreshToken.toEntity(): RefreshTokenEntity =
         rotatedAt = rotatedAt,
         revokedAt = revokedAt,
         replacedBy = replacedBy,
+        voidedAt = voidedAt,
         deviceId = deviceId,
     )
