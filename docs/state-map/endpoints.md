@@ -477,6 +477,42 @@ curl "$API/meta/legal"
 | `account` | `SIGNED_IN` | no access token is sent, or one that is still accepted | 200 stays | The same answer as before there was an account: the documents are the same for everyone, and the answer names nobody. | FR-103, FR-011, ADR-0056 | test |
 | `account` | `SIGNED_IN` | an Authorization header carries an access token that is no longer accepted | 401 `UNAUTHENTICATED` | This route needs no access token, but a token that is sent is still checked before the controller runs, and one that is expired, cancelled or unreadable is refused there: nothing else happens. Send no Authorization header to this route. Signed in is where this bites: a client that adds its access token to every request sends an expired one here. | ADR-0019 | test |
 
+### POST /support/messages
+
+write to support
+
+**Needs:** an access token.
+
+- Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same ticket, filed once and acknowledged at most once. A replay spends one of the five a day too, so a retry can be 429: wait for Retry-After, then the same key returns the same ticket. Without one, each request is a new ticket)
+- Content-Type (application/json, {"subject": 1 to 120 characters, "body": 1 to 5000 characters}; characters are Unicode code points, and neither may be blank)
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Five messages a day per account, one back every 4.8 hours, spent before the body is checked, so a 422 and a replay use one too. The sixth is 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/support/messages" -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $(uuidgen)" -H 'Content-Type: application/json' -d '{"subject": "Locked out", "body": "What happened, in your words"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session. Support is reached from inside the app, signed in; a signed-out person writes to the published support address instead (ADR-0057 decision 1). Nothing is filed. | ADR-0057 §1 | smoke |
+| `account.session` | `ACCESS_VALID` |  | 201 stays | The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. Five a day: the sixth is 429 with Retry-After. | ADR-0057 §2, §5 | smoke |
+| `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes. Exchange the refresh token at POST /auth/refresh, then send it again; nothing was filed, so a key sent with it is still unused. | ADR-0019 §5 | never-run |
+| `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired | 201 stays | Ending one session does not cancel its access token: until its 15 minutes run out the message is filed as from a live session. | ADR-0021 §6, ADR-0025 §5 | never-run |
+| `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | After logout-all or a password reset, a token issued before that second is refused whatever its remaining life. Nothing is filed. | ADR-0019 §4 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 422 | `VALIDATION_FAILED` | subject or body is missing, null, blank, longer than its limit (120 and 5000 characters), or holds a NUL or an unpaired surrogate; errors names the field, and the message never repeats it. Nothing is filed and no email is sent. | smoke |
+| 422 | `VALIDATION_FAILED` | An Idempotency-Key that is sent is blank, longer than 255 characters, or holds something other than visible ASCII. Leaving it out is allowed. | never-run |
+| 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another subject or body. | test |
+| 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | never-run |
+| 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed. | never-run |
+
 ### POST /auth/forgot-password
 
 ask for a password reset link
