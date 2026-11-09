@@ -562,6 +562,16 @@
       "endpoint": "GET /api/v1/bonds/{bondId}",
       "status": 304,
       "note": "Sent with an If-None-Match that equals the bond's current ETag, the answer is 304 with no body, for as long as what you would be shown has not changed. Asserted by BondSettingsEndpointTest (rotating and expiring an invite invalidate a cached bond without a row version change) and BondTimezoneEndpointTest (proposal creation cancellation and expiry invalidate the other member's cached view)."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/members/other/report",
+      "status": 409,
+      "note": "IDEMPOTENCY_KEY_IN_FLIGHT, when a request with the same Idempotency-Key is still being processed: the shared idempotency interceptor's answer, which springdoc does not read off this route."
+    },
+    {
+      "endpoint": "POST /api/v1/bonds/{bondId}/members/other/report",
+      "status": 413,
+      "note": "MALFORMED_REQUEST, for a body over one mebibyte: the shared idempotency interceptor refuses it before it is read, which springdoc does not read off this route."
     }
   ]
 }

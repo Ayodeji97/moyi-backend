@@ -162,6 +162,12 @@ A `MINOR_SEXUAL_CONTENT` row ends `DO NOT VIEW — runbook §2`, and so does `sh
      content access (doc 09: an admin's, with justification): read them only to decide a report that
      names them, and say so in the note. There is no takedown of words in v1 (ADR-0053, question 3);
      a threat to someone's safety is section 4's territory and the reporter's to take to the police.
+   - a report about **the other member** (target `MEMBER`, ADR-0053 decision 14; `show` names
+     the reported member's `bond_members` id and the bond): it holds nothing back and names no
+     entry. Read the detail and decide as for words: `dismiss`, or `uphold … delete` to record it
+     upheld (nothing is taken down; there is no action on an account in v1). A `MINOR_SEXUAL_CONTENT`
+     member report is upheld by `block` (nothing to block; it records the decision) after step 1's
+     report to the authority, or reclassified first. The reported member is never told.
 4. Every decision empties the detail the reporter wrote (it is needed only to decide) and is
    recorded with your name and note in `entry_report_log`; what became of the media is in
    `media_moderation_log`. `uphold … delete` never deletes a `BLOCKED` asset: it says so

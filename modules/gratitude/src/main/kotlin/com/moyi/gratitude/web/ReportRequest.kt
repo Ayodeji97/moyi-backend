@@ -12,8 +12,10 @@ import java.util.UUID
 import kotlin.reflect.KClass
 
 /**
- * The wire format of `POST /entries/{entryId}/report` (FR-100, ADR-0053):
- * `{"reason": …, "detail": …}`, the detail optional.
+ * The wire format of `POST /entries/{entryId}/report` and of
+ * `POST /bonds/{bondId}/members/other/report` (FR-100, ADR-0053 and its
+ * amendment for #127): `{"reason": …, "detail": …}`, the detail optional.
+ * One body for both targets, so one rule for each field.
  *
  * Both fields are text, so that a value that is not one of the reasons, or a
  * detail too long, is a `422` naming the field and not an unreadable body.

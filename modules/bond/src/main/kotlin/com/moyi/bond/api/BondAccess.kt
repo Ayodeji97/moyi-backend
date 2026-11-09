@@ -143,6 +143,24 @@ interface BondAccess {
      * discloses nothing the caller's own `GET /bonds/{bondId}` does not.
      */
     fun partnerDisplayNameOf(membership: BondMembership): String?
+
+    /**
+     * The `bond_members` id of the other member of [membership]'s bond: the
+     * member a member report names (FR-100's member half, ADR-0053 as
+     * amended for #127). The other member row, as [partnerDisplayNameOf]
+     * reads it, **whether or not they have left or blocked**: a report is
+     * never contact, and the member who has just blocked may need it most.
+     *
+     * Takes a [BondMembership] for [partnerDisplayNameOf]'s reason: the guard
+     * that minted it is the check.
+     *
+     * @throws com.moyi.common.web.NotFoundException the bond has never had a
+     * second member: **the same `404` as a bond the caller is not in**, thrown
+     * here, where that answer is made, so its bytes cannot drift from it.
+     * There is nobody to report, and saying so differently would tell a
+     * caller something about a bond they could not otherwise learn.
+     */
+    fun partnerMemberIdOf(membership: BondMembership): UUID
 }
 
 /**

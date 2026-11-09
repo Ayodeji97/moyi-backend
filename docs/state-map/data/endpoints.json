@@ -990,6 +990,67 @@
     "curl": "curl -X POST \"$API/entries/$ENTRY/report\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\" -H 'Content-Type: application/json' -d '{\"reason\": \"NON_CONSENSUAL\"}'"
   },
   {
+    "id": "POST /api/v1/bonds/{bondId}/members/other/report",
+    "summary": "report the other member of your bond to a person",
+    "machine": "bond",
+    "auth": "bearer",
+    "headers": [
+      "Idempotency-Key (required. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same report, and nothing filed twice)",
+      "Content-Type (application/json, the entry report's body: {\"reason\": \"NON_CONSENSUAL\", \"MINOR_SEXUAL_CONTENT\", \"VIOLENCE_OR_SELF_HARM\", \"HARASSMENT\" or \"OTHER\", \"detail\": optional, at most 500 characters}. The body is checked before the bond is looked at)"
+    ],
+    "requestErrors": [
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "reason is missing, null, or not one of the five names exactly as written; or detail is blank, longer than 500 characters, or holds a NUL or an unpaired surrogate. Nothing is filed.",
+        "evidence": "smoke",
+        "evidenceRef": "a report with an unknown reason is 422 on the member route too",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/ReportRequest.kt#): Boolean = value == null || ReportReason.named(value) != null"
+      },
+      {
+        "status": 422,
+        "code": "VALIDATION_FAILED",
+        "reason": "The Idempotency-Key header is missing or blank, is longer than 255 characters, or holds something other than visible ASCII. Nothing is filed.",
+        "evidence": "test",
+        "evidenceRef": "MemberReportsTest#without an Idempotency-Key it is refused, and nothing is filed",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#violationOf(key)?.let { throw IdempotencyKeyNotValidException(it) }"
+      },
+      {
+        "status": 422,
+        "code": "IDEMPOTENCY_KEY_REUSED",
+        "reason": "This Idempotency-Key was already used by you for a different request: another body, or another bond or route.",
+        "evidence": "test",
+        "evidenceRef": "MemberReportsTest#the same key is the same report, filed once, and replayed",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!matches) throw IdempotencyKeyReusedException()"
+      },
+      {
+        "status": 409,
+        "code": "IDEMPOTENCY_KEY_IN_FLIGHT",
+        "reason": "A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotentExecution.kt#if (!store.lockFor(request.userId, request.key)) throw IdempotencyKeyInFlightException()"
+      },
+      {
+        "status": 413,
+        "code": "MALFORMED_REQUEST",
+        "reason": "The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed.",
+        "evidence": "never-run",
+        "evidenceRef": "",
+        "codeRef": "common/web/src/main/kotlin/com/moyi/common/web/idempotency/IdempotencyInterceptor.kt#if (request.contentLengthLong > maxBytes) throw RequestBodyTooLargeException()"
+      },
+      {
+        "status": 429,
+        "code": "RATE_LIMITED",
+        "reason": "reports:create:user, ten a day, shared with the entry report route: one queue, one person reading it. Refused attempts count.",
+        "evidence": "test",
+        "evidenceRef": "ReportRateLimitTest#a member report spends the same allowance as an entry report",
+        "codeRef": "modules/gratitude/src/main/kotlin/com/moyi/gratitude/web/MemberReportsController.kt#@RateLimited(RateLimitBucket.REPORTS_CREATE_USER)"
+      }
+    ],
+    "curl": "curl -X POST \"$API/bonds/$BOND/members/other/report\" -H \"Authorization: Bearer $TOKEN\" -H \"Idempotency-Key: $(uuidgen)\" -H 'Content-Type: application/json' -d '{\"reason\": \"HARASSMENT\"}'"
+  },
+  {
     "id": "POST /api/v1/auth/register",
     "summary": "register",
     "machine": "account",
