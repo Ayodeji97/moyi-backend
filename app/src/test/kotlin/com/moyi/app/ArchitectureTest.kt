@@ -52,6 +52,7 @@ class ArchitectureTest {
                 "admin",
                 "analytics",
                 "ai",
+                "support",
             )
 
         /**

@@ -30,6 +30,8 @@ dependencies {
     // Semantic search (ADR-0054): the EmbeddingPort and the provider behind it.
     // Gratitude reaches it through `ai.api` only.
     implementation(projects.modules.ai)
+    // In-app support (FR-102, ADR-0057): the support_tickets table (V45) and its route.
+    implementation(projects.modules.support)
     implementation(projects.common.web)
     // The filter chain, the JWT encoder/decoder and the current-user resolver.
     // Reachable transitively through identity already; declared so the
