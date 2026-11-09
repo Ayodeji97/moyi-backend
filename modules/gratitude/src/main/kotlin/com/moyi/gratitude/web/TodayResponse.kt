@@ -133,12 +133,12 @@ internal data class TodayPromptResponse(
  * needing `@JsonTypeInfo` here — this type is only ever written to the
  * wire, never read back off it.
  *
- * **In the generated OpenAPI document this is a `oneOf` of the two,
- * discriminated on `status`.** springdoc resolves a sealed interface to its
- * branches by itself; `contracts.OpenApiConfiguration` adds the
- * discriminator. Each wire value names exactly one branch: `LOCKED` is
- * [LockedEntryResponse], and the entry's own statuses — `DELETED` included,
- * the wide tombstone — are [EntryResponse].
+ * **In the generated OpenAPI document this is a parent schema with one child
+ * per value of `status`** (#140, `contracts`' `PartnerEntryDocumentation`):
+ * `LOCKED` is [LockedEntryResponse], and each of the entry's own statuses,
+ * `DELETED` included, the wide tombstone, has a schema of its own with
+ * [EntryResponse]'s fields, because a generator cannot map several values to
+ * one class. The bytes on the wire are these two types' either way.
  */
 internal sealed interface PartnerEntryResponse {
     companion object {

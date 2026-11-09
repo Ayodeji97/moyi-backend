@@ -40,6 +40,30 @@ internal class StreakRulesTest {
         broken.state.lastCompleteDate shouldBe start.plusDays(4)
     }
 
+    /** Issue #141, `states.md` §7: "Your streak ended at 21 days." `longest` is the longest ever; this is the last. */
+    @Test
+    fun `a break records the run it ended - its length, and the day that ended it`() {
+        StreakState.NONE.lastRunLength shouldBe null
+        val broken = StreakRules.step(after(*complete(5)), start.plusDays(5), DayOutcome.MISSED, strict = false).state
+
+        (broken.lastRunLength to broken.lastRunBrokenOn) shouldBe (5 to start.plusDays(5))
+
+        // It stays the last ended run while a new one grows, and a longer run before it does not replace it.
+        val longerBefore = after(*complete(9), DayOutcome.MISSED, *complete(3), DayOutcome.MISSED, *complete(2))
+        (longerBefore.lastRunLength to longerBefore.lastRunBrokenOn) shouldBe (3 to start.plusDays(13))
+        (longerBefore.longest to longerBefore.current) shouldBe (9 to 2)
+    }
+
+    @Test
+    fun `only a break records an ended run - a covered day, a day missed on nothing and a stepped-over date do not`() {
+        val covered = StreakRules.step(after(*complete(14)), start.plusDays(14), DayOutcome.MISSED, strict = false)
+        covered.change shouldBe StreakChange.FREEZE_CONSUMED
+        covered.state.lastRunLength shouldBe null
+
+        StreakRules.step(StreakState.NONE, start, DayOutcome.MISSED, strict = false).state.lastRunLength shouldBe null
+        after(*complete(3), DayOutcome.FROZEN_BY_SKIP, DayOutcome.SUSPENDED, DayOutcome.AFTER_THE_END).lastRunLength shouldBe null
+    }
+
     @Test
     fun `a missed day on a run already at zero changes nothing and breaks nothing`() {
         val again = StreakRules.step(StreakState.NONE, start, DayOutcome.MISSED, strict = false)
@@ -147,6 +171,24 @@ internal class StreakRulesTest {
             cell(status, null, today = true) shouldBe StreakCell.OPEN
         }
         cell(BondDayStatus.REVEALED, null, today = true) shouldBe StreakCell.COMPLETE
+    }
+
+    /** Issue #141, `states.md` §7a: the "we used a rest day" copy is wrong for a date a zone change stepped over. */
+    @Test
+    fun `a FROZEN square says why - a rest day spent, or a date a zone change stepped over - and no other square does`() {
+        fun square(
+            status: BondDayStatus,
+            outcome: DayOutcome?,
+            today: Boolean = false,
+        ) = StreakDay.of(start, status, outcome, today)
+
+        square(BondDayStatus.FROZEN, DayOutcome.MISSED) shouldBe StreakDay(start, StreakCell.FROZEN, FrozenReason.REST_DAY)
+        square(BondDayStatus.FROZEN, DayOutcome.FROZEN_BY_SKIP) shouldBe StreakDay(start, StreakCell.FROZEN, FrozenReason.TIMEZONE_SHIFT)
+        square(BondDayStatus.REVEALED, DayOutcome.COMPLETE) shouldBe StreakDay(start, StreakCell.COMPLETE, null)
+        square(BondDayStatus.SOLO, DayOutcome.MISSED) shouldBe StreakDay(start, StreakCell.SOLO, null)
+        square(BondDayStatus.EMPTY, DayOutcome.MISSED) shouldBe StreakDay(start, StreakCell.MISSED, null)
+        square(BondDayStatus.PARTIAL, null, today = true) shouldBe StreakDay(start, StreakCell.OPEN, null)
+        square(BondDayStatus.SUSPENDED, DayOutcome.SUSPENDED) shouldBe null
     }
 
     @Test

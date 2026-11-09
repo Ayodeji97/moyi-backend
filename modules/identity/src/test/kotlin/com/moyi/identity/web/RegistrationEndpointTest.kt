@@ -294,6 +294,26 @@ internal class RegistrationEndpointTest(
     }
 
     @Test
+    fun `a body without the 18+ confirmation is refused, as the contract's required field says`() {
+        // #138: the contract lists over18 as required. A body that leaves it out is refused, and nothing registers:
+        // the field is a Kotlin Boolean with no default, so the body cannot be read at all (400), where `false` is
+        // read and refused by the constraint (422, above).
+        val withoutConfirmation =
+            """{"email":"ada@example.com","password":"$PASSWORD","displayName":"Ada","locale":"en","acceptedTermsVersion":"2026-09-01"}"""
+        val response =
+            mockMvc
+                .post(PATH) {
+                    contentType = MediaType.APPLICATION_JSON
+                    content = withoutConfirmation
+                }.andReturn()
+                .response
+
+        response.status shouldBe 400
+        response.contentAsString shouldContain "\"code\":\"MALFORMED_REQUEST\""
+        jdbc.queryForObject("SELECT count(*) FROM users", Int::class.java) shouldBe 0
+    }
+
+    @Test
     fun `a malformed body is 400, not 422`() {
         val response =
             mockMvc
@@ -513,7 +533,6 @@ internal class RegistrationEndpointTest(
                     password = Password.of(PASSWORD),
                     displayName = "Ad\u202Ea",
                     locale = "en",
-                    acceptedTermsVersion = "2026-09-01",
                     client = ClientContext(addressHash = "address-hash", userAgentHash = null),
                 ),
             )

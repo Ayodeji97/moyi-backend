@@ -1,6 +1,7 @@
 package com.moyi.identity.web
 
 import com.moyi.identity.domain.BreachedPasswordCorpus
+import com.moyi.identity.domain.DevicePlatform
 import com.moyi.identity.domain.DisplayNames
 import com.moyi.identity.domain.Email
 import com.moyi.identity.domain.Password
@@ -115,6 +116,32 @@ internal class DisplayNameConstraintValidator : ConstraintValidator<ValidDisplay
         // and a newline inside the name is refused.
         return validate(context) { DisplayNames.check(value.trim()) }
     }
+}
+
+/**
+ * One of [DevicePlatform]'s names, exactly, and reported as `VALID_DEVICE_PLATFORM` (#139). It asks the enum, which
+ * is the one statement of the set: until 2026-11-08 the request carried `@Pattern("ANDROID|IOS|WEAR")`, a second
+ * copy that would have accepted a fourth platform nowhere and published itself in the contract as a pattern, which
+ * a generated client reads as a free string. The contract now lists the enum's names (`contracts`'
+ * `RequestDocumentation`), read from `DeviceResponse.platform`, which is the enum.
+ *
+ * Not trimmed: `DeviceRequest.toDescription` takes the value as sent, so a value with a space around it is refused
+ * here rather than failing there.
+ */
+@Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)
+@Retention(AnnotationRetention.RUNTIME)
+@Constraint(validatedBy = [DevicePlatformConstraintValidator::class])
+internal annotation class ValidDevicePlatform(
+    val message: String = "must be one of ANDROID, IOS, WEAR",
+    val groups: Array<KClass<*>> = [],
+    val payload: Array<KClass<out Payload>> = [],
+)
+
+internal class DevicePlatformConstraintValidator : ConstraintValidator<ValidDevicePlatform, String> {
+    override fun isValid(
+        value: String?,
+        context: ConstraintValidatorContext,
+    ): Boolean = value.isNullOrBlank() || DevicePlatform.entries.any { it.name == value }
 }
 
 @Target(AnnotationTarget.FIELD, AnnotationTarget.PROPERTY)

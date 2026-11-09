@@ -3,6 +3,7 @@ package com.moyi.gratitude.web
 import com.moyi.bond.api.BondAccess
 import com.moyi.common.security.CurrentUser
 import com.moyi.common.web.NotFoundException
+import com.moyi.gratitude.domain.FrozenReason
 import com.moyi.gratitude.domain.StreakCell
 import com.moyi.gratitude.service.GetStreak
 import com.moyi.gratitude.service.ReconcileJoiningDay
@@ -62,6 +63,14 @@ internal data class StreakResponse(
     val strictMode: Boolean,
     val totalCompleteDays: Int,
     val lastCompleteDate: LocalDate?,
+    /**
+     * The length of the run the latest break ended, or `null` while no run has ended (issue
+     * #141): "your streak ended at 21 days". It stays the last ended run while the next grows;
+     * show the "ended" copy when [current] is 0 and this is not `null`. Not [longest].
+     */
+    val lastRunLength: Int?,
+    /** The date of the missed day that ended that run, itself not part of the run; `null` exactly when [lastRunLength] is. */
+    val lastRunBrokenOn: LocalDate?,
     /** The last 53 weeks at most, oldest first, from the day the bond became two people. A date the calendar does not draw is absent. */
     val days: List<StreakDayResponse>,
 ) {
@@ -75,7 +84,9 @@ internal data class StreakResponse(
                 strictMode = detail.streak.strictMode,
                 totalCompleteDays = detail.streak.totalCompleteDays,
                 lastCompleteDate = detail.streak.lastCompleteDate,
-                days = detail.days.map { StreakDayResponse(it.date, it.cell) },
+                lastRunLength = detail.streak.lastRunLength,
+                lastRunBrokenOn = detail.streak.lastRunBrokenOn,
+                days = detail.days.map { StreakDayResponse(it.date, it.cell, it.reason) },
             )
     }
 }
@@ -83,6 +94,8 @@ internal data class StreakResponse(
 internal data class StreakDayResponse(
     val date: LocalDate,
     val status: StreakCell,
+    /** Why a `FROZEN` square is a rest day; `null` on every other square (issue #141). */
+    val reason: FrozenReason?,
 )
 
 /** The `streak` object of `GET /today` (doc 06 §3.4): the four numbers the home screen shows. */

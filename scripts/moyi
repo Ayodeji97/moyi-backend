@@ -111,6 +111,15 @@
 #                                            what was reported: delete what it holds back, or block it as
 #                                            child sexual abuse material (held as evidence; runbook §2)
 #
+# And the members' support messages (FR-102, ADR-0057), the same way, recorded in support_ticket_log:
+#
+#   moyi support list                        the open messages, oldest first: id, sender, how long the subject
+#                                            and body are, when. Never what they say
+#   moyi support show <ticketId>             one message: its subject and body, and the address to answer at,
+#                                            read from the account now, marked if it was never confirmed
+#                                            (the look is recorded)
+#   moyi support close <ticketId> "<note>"   answered, or nothing to answer: its words are deleted, your note kept
+#
 # The session (two tokens and the bond in use) is kept in
 # ~/.config/moyi/<profile>.json, readable by you alone. The password is asked
 # for and never stored. An access token lasts fifteen minutes; when one has
@@ -310,7 +319,7 @@ ask_new_password() {
   printf '%s' "$p"
 }
 
-# The operator's way in (`moyi media quarantine`, `moyi reports`): not a member's, and the one that talks to the
+# The operator's way in (`moyi media quarantine`, `moyi reports`, `moyi support`): not a member's, and the one that talks to the
 # database rather than the API. There is no admin console before Phase 5.
 ops_init() {
   OPERATOR="${MOYI_OPERATOR:-}"
@@ -634,6 +643,50 @@ case "$cmd" in
             *)               echo "  $media: $outcome" ;;
           esac
         done
+        ;;
+      *) die "$usage" ;;
+    esac
+    ;;
+  support)
+    # The members' support messages (FR-102, ADR-0057): the operator's, through the database, as the reports are.
+    usage="usage: moyi support list | show <ticketId> | close <ticketId> \"<note>\""
+    action="${1:-}"; shift || true
+    ops_init
+    case "$action" in
+      list)
+        [ $# -eq 0 ] || die "$usage"
+        out="$(ops_sql "SELECT * FROM support_ticket_list(:'actor');" "actor=$OPERATOR")" || die "the database refused (see above)"
+        if [ -z "$out" ]; then echo "No support message is open."; exit 0; fi
+        # How long each is, never what it says: `show` reads one, and the look is recorded.
+        printf 'ticketId\tuserId\tsubjectChars\tbodyChars\treceivedAt\n'
+        printf '%s\n' "$out"
+        ;;
+      show)
+        [ $# -eq 1 ] || die "$usage"
+        need_uuid ticketId "$1"
+        # The words as JSON strings, so that what the sender typed (a tab, a new line) cannot break a row here.
+        out="$(ops_sql "SELECT ticket_id, status, user_id, coalesce(reply_to, '-'), coalesce(reply_to_confirmed::text, '-'), received_at,
+                               coalesce(to_json(subject)::text, '-'), coalesce(to_json(body)::text, '-')
+                        FROM support_ticket_read(:'ticket'::uuid, :'actor');" "ticket=$1" "actor=$OPERATOR")" ||
+          die "the database refused (see above)"
+        [ -n "$out" ] || die "that id names no support message"
+        printf '%s\n' "$out" | awk -F '\t' '{
+          print "ticket:     " $1; print "status:     " $2; print "from:       " $3
+          print "reply to:   " $4 ($5 == "f" ? "   NOT CONFIRMED: it may not be the sender'"'"'s (ADR-0015)" : ($4 == "-" ? "   the account is gone" : ""))
+          print "received:   " $6; print "subject:    " $7; print "body:       " $8
+        }'
+        ;;
+      close)
+        [ $# -eq 2 ] || die "$usage"
+        need_uuid ticketId "$1"
+        [ -n "$2" ] && [ "${#2}" -le 400 ] || die "a note is required (at most 400 characters): what was done, e.g. answered by email"
+        result="$(ops_sql "SELECT support_ticket_close(:'ticket'::uuid, :'actor', :'note');" "ticket=$1" "actor=$OPERATOR" "note=$2")" ||
+          die "the database refused (see above)"
+        case "$result" in
+          CLOSED)   echo "Closed: its subject and body are deleted; your note is kept in support_ticket_log." ;;
+          NOT_OPEN) die "that id names no open support message (never sent, or already closed)" ;;
+          *)        die "unexpected answer from the database: $result" ;;
+        esac
         ;;
       *) die "$usage" ;;
     esac

@@ -176,6 +176,10 @@ openssl pkey -in "$WORK/jwt.pem" -pubout -out "$WORK/jwt.pub"
   echo "MOYI_IDENTITY_VERIFICATION_LINK_BASE_URL=http://localhost/verify"
   echo "MOYI_IDENTITY_VERIFICATION_RESET_LINK_BASE_URL=http://localhost/reset-password"
   echo "MOYI_BOND_INVITE_LINK_BASE_URL=http://localhost/i"
+  for document in TERMS PRIVACY SUMMARY; do
+    echo "MOYI_LEGAL_${document}_VERSION=drill"
+    echo "MOYI_LEGAL_${document}_URL=http://localhost/legal"
+  done
 } >"$WORK/app.env"
 rm -f "$WORK/jwt.pem" "$WORK/jwt.pub"
 docker run -d --name moyi-drill-app --network "$NET" --env-file "$WORK/app.env" \

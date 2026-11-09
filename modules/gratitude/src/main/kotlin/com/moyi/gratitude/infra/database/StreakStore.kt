@@ -166,7 +166,8 @@ internal class StreakStore(
             """
             UPDATE streak_states
             SET current_streak = ?, longest_streak = ?, last_complete_date = ?, freezes_available = ?,
-                freeze_progress = ?, freezes_consumed = ?, total_complete_days = ?, updated_at = ?,
+                freeze_progress = ?, freezes_consumed = ?, total_complete_days = ?, last_run_length = ?,
+                last_run_broken_on = ?, updated_at = ?,
                 recomputed_at = CASE WHEN ? THEN ? ELSE recomputed_at END
             WHERE bond_id = ?
             """.trimIndent(),
@@ -177,6 +178,8 @@ internal class StreakStore(
             state.freezeProgress,
             state.freezesConsumed,
             state.totalCompleteDays,
+            state.lastRunLength,
+            state.lastRunBrokenOn,
             Timestamp.from(now),
             recomputed,
             Timestamp.from(now),
@@ -216,12 +219,14 @@ internal class StreakStore(
             freezeProgress = getInt("freeze_progress"),
             freezesConsumed = getInt("freezes_consumed"),
             totalCompleteDays = getInt("total_complete_days"),
+            lastRunLength = getInt("last_run_length").takeUnless { wasNull() },
+            lastRunBrokenOn = getObject("last_run_broken_on", LocalDate::class.java),
         )
 
     internal companion object {
         private const val SELECT_STATE =
             "SELECT current_streak, longest_streak, last_complete_date, freezes_available, freeze_progress, " +
-                "freezes_consumed, total_complete_days FROM streak_states"
+                "freezes_consumed, total_complete_days, last_run_length, last_run_broken_on FROM streak_states"
         private val FIRST_BOND = UUID(0, 0)
 
         /** [StreakChange] as `streak_events.event` spells it; `null` for a day that changed nothing. */

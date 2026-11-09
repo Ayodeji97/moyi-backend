@@ -37,6 +37,9 @@ import javax.sql.DataSource
  * `SecurityConfiguration` was tried by a reviewer and every test stayed
  * green.
  *
+ * `GET /meta/legal` is the other exception (ADR-0056): `public, no-cache`,
+ * because it is the same for everyone and holds nothing about anyone.
+ *
  * The archive's two reads are the exception (search and on-this-day, slice
  * C6b, are not: they keep the default), and the reason the default now
  * needs holding: they send `Cache-Control: private, no-cache` beside an
@@ -142,6 +145,19 @@ class CacheHeadersTest(
         neverStored("the feed, a limit that cannot be read", get("$days?limit=0", ada), 422)
         neverStored("the feed, an Accept JSON cannot answer", get(days, ada, mapOf(HttpHeaders.ACCEPT to "text/plain")), 406)
         neverStored("the day, an Accept JSON cannot answer", get(day, ada, mapOf(HttpHeaders.ACCEPT to "text/plain")), 406)
+        // The one public read (ADR-0056): the same for everyone, so any cache may keep it, and must ask first.
+        val legal = get("/meta/legal", null)
+        keptByAnyCache("GET /meta/legal 200", legal, 200)
+        val legalTag = legal.getHeader(HttpHeaders.ETAG).shouldNotBeNull()
+        keptByAnyCache("GET /meta/legal 304", get("/meta/legal", null, mapOf(HttpHeaders.IF_NONE_MATCH to legalTag)), 304)
+        neverStored("GET /meta/legal, a token that is not one", get("/meta/legal", "not.a.token"), 401)
+        val consent =
+            mockMvc
+                .post("/api/v1/me/legal-consent") { header(HttpHeaders.AUTHORIZATION, "Bearer $ada") }
+                .andReturn()
+                .response
+        neverStored("POST /me/legal-consent 204", consent, 204)
+
         // A stale tag is the whole response again, and that one may be kept.
         keptAndRevalidated("the day, a stale tag", get(day, ada, mapOf(HttpHeaders.IF_NONE_MATCH to "\"${"0".repeat(TAG_LENGTH)}\"")), 200)
     }
@@ -164,6 +180,18 @@ class CacheHeadersTest(
     ) = withClue(what) {
         response.status shouldBe status
         response.getHeaders(HttpHeaders.CACHE_CONTROL) shouldBe listOf("private, no-cache")
+        response.getHeader(HttpHeaders.PRAGMA).shouldBeNull()
+        response.getHeader(HttpHeaders.EXPIRES).shouldBeNull()
+        response.getHeader(HttpHeaders.ETAG).shouldNotBeNull()
+    }
+
+    private fun keptByAnyCache(
+        what: String,
+        response: MockHttpServletResponse,
+        status: Int,
+    ) = withClue(what) {
+        response.status shouldBe status
+        response.getHeaders(HttpHeaders.CACHE_CONTROL) shouldBe listOf("public, no-cache")
         response.getHeader(HttpHeaders.PRAGMA).shouldBeNull()
         response.getHeader(HttpHeaders.EXPIRES).shouldBeNull()
         response.getHeader(HttpHeaders.ETAG).shouldNotBeNull()

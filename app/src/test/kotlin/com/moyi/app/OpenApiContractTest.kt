@@ -28,6 +28,7 @@ import io.kotest.matchers.string.shouldNotContainIgnoringCase
 import io.kotest.matchers.string.shouldStartWith
 import io.swagger.v3.oas.models.OpenAPI
 import io.swagger.v3.oas.models.Operation
+import io.swagger.v3.oas.models.media.Schema
 import io.swagger.v3.parser.OpenAPIV3Parser
 import io.swagger.v3.parser.core.models.ParseOptions
 import org.junit.jupiter.api.BeforeAll
@@ -155,13 +156,15 @@ class OpenApiContractTest(
     @Test
     fun `every operation documents the problem responses it can return`() {
         // Doc 06 §2: one error shape. 429 and 500 can happen to anything;
-        // 400 and 422 to anything with a body; 401 to anything behind the
-        // bearer. Each points at the one ProblemDetail schema.
+        // 400, 415 and 422 to anything with a body; 401 to anything at all
+        // (a public route still checks a token that is sent: ADR-0024, amended
+        // 2026-11-08), 403 to anything behind the bearer. Each points at the
+        // one ProblemDetail schema.
         operations().forEach { (name, op) ->
             val responses = op.responses.keys
-            responses shouldContainAll listOf("429", "500")
-            if (op.requestBody != null) responses shouldContainAll listOf("400", "422")
-            if (!isPublic(name)) op.responses shouldContainKey "401"
+            responses shouldContainAll listOf("401", "429", "500")
+            if (op.requestBody != null) responses shouldContainAll listOf("400", "415", "422")
+            if (!isPublic(name)) op.responses shouldContainKey "403" else op.responses.keys shouldNotContain "403"
             // An operation that names a resource by id can answer "not found
             // or not permitted to know it exists" (doc 06 §2), and a
             // generated client has to be able to model that (Codex on #35).
@@ -183,11 +186,165 @@ class OpenApiContractTest(
     }
 
     @Test
+    fun `an error body declares its trace id and the typed date of a too-soon time zone change, both optional`() {
+        // #139 and #142. Optional, both: a client that required a member some body lacks could not read that error at
+        // all. ProblemTraceIdTest shows the trace id is on every kind of error body; BondTimezoneEndpointTest the date.
+        val problem = api.components.schemas["ProblemDetail"]!!
+        problem.required shouldContainExactlyInAnyOrder listOf("type", "title", "status", "code")
+        problem.properties["traceId"]!!.pattern shouldBe "^[0-9a-f]{32}$"
+        val allowedFrom = problem.properties["allowedFrom"]!!
+        allowedFrom.format shouldBe "date"
+        allowedFrom.description shouldContain "TIMEZONE_CHANGE_TOO_SOON"
+    }
+
+    @Test
+    fun `the auth endpoints declare the 401, 410 and 503 they answer, with the codes each carries`() {
+        // #137, and the state map's contractGaps, which listed each of these as a status the code answers and the
+        // document did not declare. `scripts/state-map-check` now fails if one is undeclared again.
+        fun responses(path: String) = api.paths[path]!!.post.responses
+
+        responses("/api/v1/auth/login")["401"]!!.description shouldContain "INVALID_CREDENTIALS"
+        responses("/api/v1/auth/login")["503"]!!.description shouldContain "HASHING_CAPACITY_EXCEEDED"
+        responses("/api/v1/auth/refresh")["401"]!!.description.let {
+            it shouldContain "TOKEN_REUSE_DETECTED"
+            it shouldContain "REFRESH_TOKEN_INVALID"
+        }
+        responses("/api/v1/auth/verify-email")["410"]!!.description shouldContain "VERIFICATION_TOKEN_EXPIRED"
+        responses("/api/v1/auth/reset-password")["410"]!!.description shouldContain "PASSWORD_RESET_TOKEN_EXPIRED"
+        responses("/api/v1/auth/reset-password")["503"]!!.description shouldContain "HASHING_CAPACITY_EXCEEDED"
+        responses("/api/v1/auth/register")["503"]!!.description shouldContain "HASHING_CAPACITY_EXCEEDED"
+        // Every public route says what its 401 is, since it is not the missing token everywhere else is.
+        operations().filter { (name, _) -> isPublic(name) }.forEach { (name, op) ->
+            withClue(name) { op.responses["401"]!!.description shouldContain "UNAUTHENTICATED" }
+        }
+        // Nothing else answers 410: a spent link is the only thing that was real and is gone.
+        operations().filter { (_, op) -> "410" in op.responses }.map { it.first }.toSet() shouldBe
+            setOf("POST /api/v1/auth/verify-email", "POST /api/v1/auth/reset-password")
+    }
+
+    @Test
+    fun `every field of every object a success body can carry is required, and no request shares one`() {
+        // #138. The mapper writes nulls, so every field of a response is always sent and a nullable one is `null`,
+        // never absent. A generated client then makes a field nullable only where its type says null, and treats a
+        // missing one as the error it is. The walk here is the test's own, not the configuration's.
+        val responses = reachable("2")
+        responses.map { it.first.substringBefore('.') }.toSet() shouldContainAll
+            listOf("LoginResponse", "MeResponse", "BondResponse", "StreakResponse", "RevealedPartnerEntryResponse", "LockedEntryResponse")
+        responses.forEach { (where, schema) ->
+            withClue(where) {
+                (schema.properties.orEmpty().keys - schema.required.orEmpty().toSet()).shouldBeEmpty()
+            }
+        }
+        // The rule would make a request's optional field required if a schema were ever shared. None is.
+        val requests = reachable(null).map { it.second }
+        responses.filter { (_, schema) -> requests.any { it === schema } }.map { it.first }.shouldBeEmpty()
+        // The issue's own list, by name.
+        listOf(
+            "LoginResponse",
+            "UserResponse",
+            "BondResponse",
+            "BondsResponse",
+            "InviteResponse",
+            "InviteDetailResponse",
+            "InvitePreviewResponse",
+            "MemberResponse",
+            "MeResponse",
+            "StreakResponse",
+            "StreakDayResponse",
+        ).forEach { name ->
+            withClue(name) { fieldsOf(name).required.toSet() shouldBe fieldsOf(name).properties.keys }
+        }
+        // Required and nullable: present as null, which only `required` lets a client tell from absent.
+        api.components.schemas["StreakResponse"]!!
+            .properties["lastCompleteDate"]!!
+            .types shouldBe setOf("string", "null")
+        api.components.schemas["BondResponse"]!!
+            .properties["archivedAt"]!!
+            .types shouldBe setOf("string", "null")
+    }
+
+    @Test
+    fun `the application's mapper writes a null field as null, which is what makes every response field required`() {
+        // The premise of the rule above. Were a response type, or the mapper, to leave nulls out, `required` would
+        // describe fields the server does not send; ArchitectureTest keeps @JsonInclude out of the code.
+        json.writeValueAsString(NullableProbe(null)) shouldBe """{"value":null}"""
+    }
+
+    @Test
+    fun `registering requires the over-18 confirmation`() {
+        // #138: FR-011, and a body without it is refused.
+        val register = api.components.schemas["RegisterRequest"]!!
+        register.required shouldContain "over18"
+        register.properties["over18"]!!.description shouldContain "18"
+    }
+
+    @Test
+    fun `a bond's type and a device's platform are sent as the enum they are returned as`() {
+        // #139. Text on the server so that a wrong value is a 422 naming the field; the domain's enum judges it, and
+        // the response that returns the same value is that enum. The request is given its names: one set.
+        fun enumOf(
+            schema: String,
+            property: String,
+        ) = api.components.schemas[schema]!!
+            .properties[property]!!
+            .enum
+            .map { it?.toString() }
+
+        enumOf("BondResponse", "type") shouldBe listOf("COUPLE", "FRIENDS", "FAMILY", "PARENT_CHILD")
+        enumOf("CreateBondRequest", "type") shouldBe enumOf("BondResponse", "type")
+        // The PATCH may send null (keep the type), so null is one of its values.
+        enumOf("PatchBondRequest", "type") shouldBe enumOf("BondResponse", "type") + null
+        enumOf("DeviceResponse", "platform") shouldBe listOf("ANDROID", "IOS", "WEAR")
+        enumOf("DeviceRequest", "platform") shouldBe enumOf("DeviceResponse", "platform")
+        api.components.schemas["DeviceRequest"]!!
+            .properties["platform"]!!
+            .pattern
+            .shouldBeNull()
+    }
+
+    @Test
+    fun `the server is stated, and every path carries the version`() {
+        // #139: the base URL is the host; the version is in each path. Not the generating request's host.
+        api.servers.map { it.url } shouldBe listOf("https://api.getmoyi.app", "http://localhost:8080")
+        api.paths.keys.forEach { it shouldStartWith "/api/v1/" }
+    }
+
+    @Test
     fun `the public auth endpoints carry no bearer requirement, and everything else does`() {
         operations().forEach { (name, op) ->
             val required = op.security?.let { it.isNotEmpty() } ?: (api.security?.isNotEmpty() == true)
             required shouldBe !isPublic(name)
         }
+    }
+
+    @Test
+    fun `the legal documents are a public conditional read, and re-consent takes no body (ADR-0056)`() {
+        val legal = api.paths["/api/v1/meta/legal"]!!.get
+        legal.operationId shouldBe "legalDocuments"
+        legal.security shouldBe emptyList()
+        // 401 too, as on every public route: a token that is sent is checked (ADR-0024, amended 2026-11-08).
+        legal.responses.keys shouldContainExactlyInAnyOrder listOf("200", "304", "401", "406", "429", "500")
+        legal.responses["200"]!!.headers shouldContainKey "ETag"
+        legal.responses["200"]!!.content.keys shouldBe setOf("application/json")
+        legal.parameters.single().name shouldBe "If-None-Match"
+        api.components.schemas["LegalResponse"]!!
+            .properties.keys shouldBe setOf("terms", "privacy", "dataProcessingSummary")
+
+        val consent = api.paths["/api/v1/me/legal-consent"]!!.post
+        consent.operationId shouldBe "acceptLegalDocuments"
+        consent.requestBody shouldBe null
+        consent.responses.keys shouldContainAll listOf("204", "401")
+
+        val me =
+            api.paths["/api/v1/me"]!!
+                .get.responses["200"]!!
+                .content["application/json"]!!
+                .schema.`$ref`
+        me shouldBe "#/components/schemas/ProfileResponse"
+        api.components.schemas["ProfileResponse"]!!
+            .properties.keys shouldContainAll
+            api.components.schemas["UserResponse"]!!
+                .properties.keys + "legalAccepted"
     }
 
     @Test
@@ -411,14 +568,42 @@ class OpenApiContractTest(
         // member would tell one of them something about the other.
         api.components.schemas["StreakResponse"]!!
             .properties.keys shouldBe
-            setOf("current", "longest", "freezesAvailable", "freezeProgress", "strictMode", "totalCompleteDays", "lastCompleteDate", "days")
+            setOf(
+                "current",
+                "longest",
+                "freezesAvailable",
+                "freezeProgress",
+                "strictMode",
+                "totalCompleteDays",
+                "lastCompleteDate",
+                "lastRunLength",
+                "lastRunBrokenOn",
+                "days",
+            )
         api.components.schemas["StreakDayResponse"]!!
-            .properties.keys shouldBe setOf("date", "status")
+            .properties.keys shouldBe setOf("date", "status", "reason")
         api.components.schemas["TodayStreakResponse"]!!
             .properties.keys shouldBe
             setOf("current", "longest", "freezesAvailable", "strictMode")
         api.components.schemas["TodayResponse"]!!
             .properties.keys shouldContain "streak"
+    }
+
+    /** Issue #141: the ended run and a rest day's reason are always sent, null when there is none, and say when. */
+    @Test
+    fun `the streak sends the run that ended and why a day is frozen, every new field always sent`() {
+        val streak = api.components.schemas["StreakResponse"]!!
+        streak.required.orEmpty() shouldContainAll listOf("lastRunLength", "lastRunBrokenOn")
+        streak.properties["lastRunLength"]!!.types shouldBe setOf("integer", "null")
+        streak.properties["lastRunBrokenOn"]!!.types shouldBe setOf("string", "null")
+        streak.properties["lastRunLength"]!!.description.shouldNotBeNull() shouldContain "longest"
+        streak.properties["lastRunBrokenOn"]!!.description.shouldNotBeNull() shouldContain "not part of the run"
+
+        val day = api.components.schemas["StreakDayResponse"]!!
+        day.required.orEmpty() shouldContain "reason"
+        day.properties["reason"]!!.types shouldBe setOf("string", "null")
+        day.properties["reason"]!!.enum.map { it?.toString() } shouldBe listOf("REST_DAY", "TIMEZONE_SHIFT", null)
+        day.properties["reason"]!!.description.shouldNotBeNull() shouldContain "FROZEN"
     }
 
     @Test
@@ -509,9 +694,10 @@ class OpenApiContractTest(
                 refused.description shouldContain "the same response for a member"
             }
         }
-        // Everywhere else a 406 comes after the handler, as it always has, and is documented nowhere (as 405 is not).
+        // Everywhere else a 406 comes after the handler, as it always has, and is documented nowhere (as 405 is not);
+        // but for the public legal read, which declares `produces` for the same reason (ADR-0056) and guards nothing.
         operations().filter { (_, op) -> op.responses.containsKey("406") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
-            listOf("days", "day")
+            listOf("days", "day", "legalDocuments")
     }
 
     @Test
@@ -555,8 +741,8 @@ class OpenApiContractTest(
         today.keys shouldNotContain "partnerDisplayName"
         day.properties["partnerEntry"] shouldBe today["partnerEntry"]
         day.properties["myEntry"] shouldBe today["myEntry"]
-        day.properties["partnerEntry"]!!.discriminator.shouldNotBeNull()
-        day.properties["partnerEntry"]!!.oneOf.size shouldBe 3
+        // The discriminator is on the parent schema both fields refer to (#140), and the field is it or null.
+        day.properties["partnerEntry"]!!.oneOf.size shouldBe 2
         day.properties["date"]!!.format shouldBe "date"
 
         val page = api.components.schemas["DaysResponse"]!!
@@ -748,9 +934,10 @@ class OpenApiContractTest(
                 read.responses.keys shouldNotContain "428"
             }
         }
-        // And only they: a 304 documented on a route that cannot give one is a branch a client is generated to handle for nothing.
+        // And only they, and the public legal read (ADR-0056): a 304 documented on a route that cannot give one is a
+        // branch a client is generated to handle for nothing.
         operations().filter { (_, op) -> op.responses.containsKey("304") }.map { it.second.operationId } shouldContainExactlyInAnyOrder
-            listOf("days", "day")
+            listOf("days", "day", "legalDocuments")
     }
 
     @Test
@@ -778,14 +965,10 @@ class OpenApiContractTest(
     @Test
     fun `an entry says whether its reader kept it, and the shape for an entry never shown has no such field`() {
         val full =
-            api.components.schemas["EntryResponse"]!!
-                .allOf
-                .last()
+            fieldsOf("EntryResponse")
         full.properties["favourited"]!!.types shouldBe setOf("boolean")
         full.required shouldContain "favourited"
-        api.components.schemas["LockedEntryResponse"]!!
-            .allOf
-            .last()
+        fieldsOf("LockedEntryResponse")
             .properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
     }
 
@@ -796,12 +979,13 @@ class OpenApiContractTest(
 
         // 409 is REACTION_ON_OWN_ENTRY, ENTRY_IMMUTABLE and BOND_ARCHIVED. A body goes in, so 400 and 422; none comes out.
         reaction.put.operationId shouldBe "reactToEntry"
-        reaction.put.responses.keys shouldContainExactlyInAnyOrder listOf("204", "400", "401", "403", "404", "409", "422", "429", "500")
+        reaction.put.responses.keys shouldContainExactlyInAnyOrder
+            listOf("204", "400", "401", "403", "404", "409", "415", "422", "429", "500")
         reaction.put.responses["204"]!!.content shouldBe null
         reaction.put.parameters.map { it.name } shouldBe listOf("entryId")
         reaction.put.requestBody.required shouldBe true
         reaction.put.requestBody.content.keys shouldBe setOf(MediaType.APPLICATION_JSON_VALUE)
-        // 415 is not in the status list; the description says it, with the body's other rules, as the ending routes' does.
+        // 415 is in the status list, as on every route with a body, and the description says it with the body's other rules.
         reaction.put.description shouldContain "415"
 
         // The body is the one key, never null, and its values are the set itself: no second list to drift.
@@ -856,9 +1040,7 @@ class OpenApiContractTest(
     @Test
     fun `an entry carries the reaction on it, one of the five or null and always sent, and nothing says when it was left`() {
         val full =
-            api.components.schemas["EntryResponse"]!!
-                .allOf
-                .last()
+            fieldsOf("EntryResponse")
         val reaction = full.properties["reaction"]!!
         reaction.types shouldBe setOf("string", "null")
         // `null` is listed: by JSON Schema an enum that leaves it out forbids it, whatever `type` says.
@@ -898,16 +1080,12 @@ class OpenApiContractTest(
         listOf("url", "width", "height").forEach { image.properties[it]!!.types shouldContain "null" }
 
         val full =
-            api.components.schemas["EntryResponse"]!!
-                .allOf
-                .last()
+            fieldsOf("EntryResponse")
         full.required shouldContain "image"
         full.properties["image"]!!.oneOf.map { it.`$ref` ?: it.types.single() } shouldBe
             listOf("#/components/schemas/EntryImageResponse", "null")
         // BR-8: the locked shape has no field a photo could hide in.
-        api.components.schemas["LockedEntryResponse"]!!
-            .allOf
-            .last()
+        fieldsOf("LockedEntryResponse")
             .properties.keys shouldBe setOf("authorMemberId", "status")
     }
 
@@ -922,9 +1100,7 @@ class OpenApiContractTest(
         voice.description.shouldNotBeNull() shouldContain "to the other member only once it has passed moderation"
 
         val full =
-            api.components.schemas["EntryResponse"]!!
-                .allOf
-                .last()
+            fieldsOf("EntryResponse")
         full.required shouldContain "voice"
         full.properties["voice"]!!.oneOf.map { it.`$ref` ?: it.types.single() } shouldBe
             listOf("#/components/schemas/EntryVoiceResponse", "null")
@@ -949,58 +1125,69 @@ class OpenApiContractTest(
         remove shouldContain "`409 BOND_ARCHIVED`"
         remove shouldNotContain "Allowed on a bond that has ended"
 
-        api.components.schemas["EntryResponse"]!!
-            .allOf
-            .last()
+        fieldsOf("EntryResponse")
             .properties["reaction"]!!
             .description
             .shouldNotBeNull() shouldContain "left by the member who did not write"
     }
 
     @Test
-    fun `partnerEntry is one of two branches, discriminated on status with no value naming two`() {
-        // springdoc resolves the sealed interface to a `oneOf` of its
-        // branches; OpenApiConfiguration adds the `discriminator`, which is
-        // what a generated client builds its sealed types from (doc 06 §2).
-        // A discriminator maps a value to exactly one schema, so the
-        // branches' `status` enums must be disjoint. There were three until
-        // the owner's ruling of 2026-10-21 (ADR-0032 question 2): a partner's
-        // entry erased before it was revealed is now `null`, and its
-        // `ErasedEntryResponse` and `REMOVED` are gone from the document.
-        val today = api.components.schemas["TodayResponse"]!!
-        val partnerEntry = today.properties["partnerEntry"]!!
-        val branches = listOf("EntryResponse", "LockedEntryResponse")
+    fun `partnerEntry is a parent with one child per status, the shape a generator makes a sealed class of`() {
+        // #140. A discriminator that mapped three values to one schema generated, with OpenAPI Generator 7.26's
+        // kotlin/multiplatform, a sealed class nothing extended: every non-null partnerEntry failed to decode. Now
+        // the parent carries the discriminator and each value maps to exactly one child, which inherits `status`
+        // by `allOf` and does not declare it again (a kotlinx.serialization subclass may not have a property named
+        // like its class discriminator). There were three branches until the owner's ruling of 2026-10-21
+        // (ADR-0032 question 2): a partner's entry erased before it was revealed is `null`, and `ErasedEntryResponse`
+        // and `REMOVED` are gone.
         api.components.schemas.keys shouldNotContain "ErasedEntryResponse"
+        val parent = api.components.schemas["PartnerEntryResponse"]!!
+        val statuses = parent.properties["status"]!!.enum.map { it.toString() }
+        parent.required shouldBe listOf("status")
+        parent.discriminator.shouldNotBeNull().propertyName shouldBe "status"
 
-        partnerEntry.oneOf.mapNotNull { it.`$ref` } shouldContainExactlyInAnyOrder branches.map { "#/components/schemas/$it" }
-        partnerEntry.discriminator.shouldNotBeNull()
-        partnerEntry.discriminator.propertyName shouldBe "status"
-        partnerEntry.discriminator.mapping shouldBe
+        // The values are the two shapes' own enums, read from the domain: nothing restated.
+        statuses shouldBe listOf("SUBMITTED", "REVEALED", "DELETED", "LOCKED")
+        val children =
             mapOf(
-                "SUBMITTED" to "#/components/schemas/EntryResponse",
-                "REVEALED" to "#/components/schemas/EntryResponse",
-                "DELETED" to "#/components/schemas/EntryResponse",
-                "LOCKED" to "#/components/schemas/LockedEntryResponse",
+                "SUBMITTED" to "SubmittedPartnerEntryResponse",
+                "REVEALED" to "RevealedPartnerEntryResponse",
+                "DELETED" to "DeletedPartnerEntryResponse",
+                "LOCKED" to "LockedEntryResponse",
             )
+        parent.discriminator.mapping shouldBe children.mapValues { "#/components/schemas/${it.value}" }
+        // One schema per value: none maps two.
+        parent.discriminator.mapping.values
+            .toSet()
+            .size shouldBe statuses.size
 
-        // The mapping is the document's claim; each branch's own `status`
-        // enum is what the server can actually send. Every value a branch
-        // can send maps to that branch, so no value names two schemas and
-        // none is left to the OpenAPI default.
-        val statusesByBranch =
-            branches.associateWith { name ->
-                val fields =
-                    api.components.schemas[name]!!
-                        .allOf
-                        .last()
-                fields.required shouldContain "status"
-                fields.properties["status"]!!.enum.map { it.toString() }
+        children.values.forEach { child ->
+            withClue(child) {
+                val schema = api.components.schemas[child]!!
+                schema.allOf.first().`$ref` shouldBe "#/components/schemas/PartnerEntryResponse"
+                schema.allOf.drop(1).forEach { it.properties.keys shouldNotContain "status" }
+                fieldsOf(child).required shouldContain "status"
             }
-        statusesByBranch.values.flatten().let { all -> all.toSet().size shouldBe all.size }
-        statusesByBranch.forEach { (branch, statuses) ->
-            statuses.forEach { partnerEntry.discriminator.mapping[it] shouldBe "#/components/schemas/$branch" }
         }
-        statusesByBranch.values.flatten().toSet() shouldBe partnerEntry.discriminator.mapping.keys
+        // An entry's three children carry exactly an entry's fields; the locked one its author and nothing else.
+        listOf("SubmittedPartnerEntryResponse", "RevealedPartnerEntryResponse", "DeletedPartnerEntryResponse").forEach {
+            fieldsOf(it).properties.keys shouldBe fieldsOf("EntryResponse").properties.keys
+            fieldsOf(it).required.toSet() shouldBe fieldsOf("EntryResponse").required.toSet()
+        }
+
+        // The caller's own entry is not discriminated, and is not a child: it keeps its own `status`.
+        val entry = api.components.schemas["EntryResponse"]!!
+        entry.allOf.shouldBeNull()
+        entry.properties["status"]!!.enum.map { it.toString() } shouldBe listOf("SUBMITTED", "REVEALED", "DELETED")
+
+        listOf("TodayResponse", "DayResponse").forEach { holder ->
+            withClue(holder) {
+                val partnerEntry = api.components.schemas[holder]!!.properties["partnerEntry"]!!
+                partnerEntry.discriminator.shouldBeNull()
+                partnerEntry.oneOf.map { it.`$ref` ?: it.types.single() } shouldBe
+                    listOf("#/components/schemas/PartnerEntryResponse", "null")
+            }
+        }
     }
 
     @Test
@@ -1019,20 +1206,19 @@ class OpenApiContractTest(
                 branches.filter { it.`$ref` == null }.map { it.types } shouldBe listOf(setOf("null"))
             }
         }
-        // Exactly the two objects and the null: nothing else was admitted.
-        today.properties["partnerEntry"]!!.oneOf.size shouldBe 3
+        // Exactly the parent and the null: nothing else was admitted.
+        today.properties["partnerEntry"]!!.oneOf.size shouldBe 2
     }
 
     @Test
     fun `the narrow partnerEntry branch carries an author and a status, both required, and nothing else`() {
-        // BR-8: the type has nowhere to put anything else.
+        // BR-8: the type has nowhere to put anything else. Its `status` is the parent's, LOCKED mapped to it alone.
         val fields =
-            api.components.schemas["LockedEntryResponse"]!!
-                .allOf
-                .last()
+            fieldsOf("LockedEntryResponse")
         fields.properties.keys shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
         fields.required shouldContainExactlyInAnyOrder listOf("authorMemberId", "status")
-        fields.properties["status"]!!.enum shouldBe listOf("LOCKED")
+        api.components.schemas["PartnerEntryResponse"]!!
+            .discriminator.mapping["LOCKED"] shouldBe "#/components/schemas/LockedEntryResponse"
     }
 
     @Test
@@ -1041,9 +1227,7 @@ class OpenApiContractTest(
         // replay re-reads it). Optional as well as nullable, a generated
         // client could not tell that from a field the server never sent.
         val fields =
-            api.components.schemas["EntryResponse"]!!
-                .allOf
-                .last()
+            fieldsOf("EntryResponse")
 
         fields.required shouldContainAll
             listOf("id", "bondId", "date", "authorMemberId", "text", "status", "createdAt", "intendedAt")
@@ -1142,12 +1326,69 @@ class OpenApiContractTest(
         }
     }
 
+    /** A schema's fields as a reader sees them: its own, and every `allOf` part's, references followed. */
+    private class Fields(
+        val properties: Map<String, Schema<*>>,
+        val required: List<String>,
+    )
+
+    private fun fieldsOf(name: String): Fields = fieldsOf(api.components.schemas[name]!!)
+
+    private fun fieldsOf(schema: Schema<*>): Fields {
+        val resolved = schema.`$ref`?.let { api.components.schemas[it.removePrefix(SCHEMAS)]!! } ?: schema
+        val parts = resolved.allOf.orEmpty().map(::fieldsOf) + Fields(resolved.properties.orEmpty(), resolved.required.orEmpty())
+        return Fields(parts.flatMap { it.properties.entries }.associate { it.toPair() }, parts.flatMap { it.required }.distinct())
+    }
+
+    /** Every schema a response with one of [statuses] (or a request body, with `null`) can reach, named and inline. */
+    private fun reachable(statusPrefix: String?): List<Pair<String, Schema<*>>> {
+        val seen = mutableListOf<Pair<String, Schema<*>>>()
+        val names = mutableSetOf<String>()
+
+        fun walk(
+            where: String,
+            schema: Schema<*>?,
+        ) {
+            if (schema == null || seen.any { it.second === schema }) return
+            schema.`$ref`?.removePrefix(SCHEMAS)?.let { name ->
+                if (names.add(name)) walk(name, api.components.schemas[name])
+                return
+            }
+            seen += where to schema
+            schema.properties.orEmpty().forEach { (key, value) -> walk("$where.$key", value) }
+            walk("$where[]", schema.items)
+            (schema.allOf.orEmpty() + schema.oneOf.orEmpty() + schema.anyOf.orEmpty()).forEach { walk(where, it) }
+            // A discriminator's mapping is a way to reach a schema too: it is how a generator finds a parent's children.
+            schema.discriminator
+                ?.mapping
+                ?.values
+                ?.forEach { walk(where, Schema<Any>().`$ref`(it)) }
+            (schema.additionalProperties as? Schema<*>)?.let { walk("$where{}", it) }
+        }
+
+        operations().forEach { (route, op) ->
+            val contents =
+                if (statusPrefix == null) {
+                    listOfNotNull(op.requestBody?.content)
+                } else {
+                    op.responses
+                        .filterKeys { it.startsWith(statusPrefix) }
+                        .values
+                        .mapNotNull { it.content }
+                }
+            contents.flatMap { it.values }.forEach { walk(route, it.schema) }
+        }
+        return seen
+    }
+
     private fun handlerOf(operationId: String) = handlerMapping.handlerMethods.values.single { it.method.name == operationId }
 
     private fun operations(): List<Pair<String, Operation>> =
         api.paths.flatMap { (path, item) -> item.readOperationsMap().map { (method, op) -> "$method $path" to op } }
 
-    private fun isPublic(operation: String): Boolean = SecurityConfiguration.PUBLIC_AUTH_ENDPOINTS.any { operation == "POST $it" }
+    private fun isPublic(operation: String): Boolean =
+        SecurityConfiguration.PUBLIC_AUTH_ENDPOINTS.any { operation == "POST $it" } ||
+            SecurityConfiguration.PUBLIC_READS.any { operation == "GET $it" }
 
     private fun token(): String {
         mockMvc
@@ -1189,10 +1430,16 @@ class OpenApiContractTest(
         }
     }
 
+    /** A response-shaped type with a nullable field, for the mapper test. */
+    private data class NullableProbe(
+        val value: String?,
+    )
+
     private companion object {
         /** FR-048's set, written out: the contract's enum, so a change here is a breaking change to a generated client. */
         val REACTION_TYPES = listOf("HEART", "THANK_YOU", "SMILE", "MOVED", "ME_TOO")
         val GENERATED = File("build/openapi/openapi.json")
         val COMMITTED = File("../contracts/openapi.json")
+        const val SCHEMAS = "#/components/schemas/"
     }
 }

@@ -69,8 +69,10 @@ link bases a verification, reset or invite link is built on:
 `MOYI_BOND_INVITE_LINK_BASE_URL`, pages on the marketing site; `local`
 points them at `localhost:3000`, and nothing else has a default, because a
 token travels in the link (ADR-0018's amendment). Set all three together: a boot
-reports only the first one missing. Everything under
-`/api/v1` except the auth endpoints needs `Authorization: Bearer <token>`;
+reports only the first one missing. So are the current legal documents
+(ADR-0056): `MOYI_LEGAL_{TERMS,PRIVACY,SUMMARY}_{VERSION,URL}`, the version
+every consent row records and the page it is read at. Everything under
+`/api/v1` except the auth endpoints and `GET /meta/legal` needs `Authorization: Bearer <token>`;
 `GET /api/v1/me` is the endpoint to try it on.
 
 Since slice F (ADR-0023) the compose Redis (Valkey) matters too: it holds
@@ -157,6 +159,13 @@ pull request, `.github/workflows/api-contract.yml` diffs the file against
 `breaking-api-change` label; on merge it attaches the file to the rolling
 `api-latest` release.
 
+The document's base URL is the host (`https://api.getmoyi.app`, or
+`http://localhost:8080` locally) and every path carries `/api/v1`. Every
+status an operation can answer is declared on it, every field of a success
+body is `required` (a nullable one says `null` in its type), and every error
+body carries `traceId`, the id the server's log lines for that request carry
+(ADR-0024, amended 2026-11-08).
+
 ## How is it structured
 
 A **modular monolith** (ADR-0001): one deployable Spring Boot service,
@@ -177,7 +186,7 @@ moyi-backend/
 ├─ app/             @SpringBootApplication, wiring — depends on everything
 ├─ common/          core, web, security, events, testing — shared, no domain logic
 ├─ modules/         identity, bond, gratitude, media, notification,
-│                   scheduling, admin, analytics — the actual domain
+│                   scheduling, admin, analytics, ai, support — the actual domain
 ├─ contracts/       OpenAPI generation for the client
 ├─ config/          detekt configuration (only the tuned rules)
 ├─ adr/             architecture decision records
@@ -204,18 +213,20 @@ flowchart TD
     scheduling["scheduling"]
     admin["admin"]
     analytics["analytics"]
+    support["support"]
 
     common["<b>common</b> — core · web · security · events · testing"]
 
     app --> identity & bond & gratitude & media
-    app --> notification & scheduling & admin & analytics
+    app --> notification & scheduling & admin & analytics & support
 
     identity & bond & gratitude & media --> common
-    notification & scheduling & admin & analytics --> common
+    notification & scheduling & admin & analytics & support --> common
 
     gratitude -. "only via bond's api" .-> bond
     gratitude -. "only via identity's api" .-> identity
     scheduling -. "only via gratitude's api" .-> gratitude
+    support -. "only via identity's api" .-> identity
 
     classDef wiring fill:#f4cccc,stroke:#a61c00,stroke-width:2px,color:#1a1a1a
     classDef shared fill:#cfe2f3,stroke:#1155cc,stroke-width:2px,color:#1a1a1a

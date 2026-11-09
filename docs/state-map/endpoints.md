@@ -39,7 +39,7 @@ register
 **Try it:**
 
 ```sh
-curl -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{\"email\": \"$EMAIL\", \"password\": \"$PASSWORD\", \"displayName\": \"Ada\", \"acceptedTermsVersion\": \"2026-09-01\", \"over18\": true}"
+curl -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{\"email\": \"$EMAIL\", \"password\": \"$PASSWORD\", \"displayName\": \"Ada\", \"over18\": true}"
 ```
 
 #### Every answer
@@ -56,16 +56,8 @@ curl -X POST "$API/auth/register" -H 'Content-Type: application/json' -d "{\"ema
 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
-| 422 | `VALIDATION_FAILED` | A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank (by every Unicode space, so a name of only no-break spaces too) or over 80 characters, or, once trimmed, holds a control character, a format character other than ZWNJ and ZWJ, or an unpaired surrogate (errors code VALID_DISPLAY_NAME, and NOT_BLANK too for an empty or all-space name; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion is blank or over 40 characters; over18 is false. Nothing is created. | smoke |
+| 422 | `VALIDATION_FAILED` | A field is not acceptable; errors names each one. email is blank or not shaped like an address; password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED); displayName is blank (by every Unicode space, so a name of only no-break spaces too) or over 80 characters, or, once trimmed, holds a control character, a format character other than ZWNJ and ZWJ, or an unpaired surrogate (errors code VALID_DISPLAY_NAME, and NOT_BLANK too for an empty or all-space name; a newline inside the name is refused, a trailing one trimmed off); locale is not a language tag such as en or en-GB; acceptedTermsVersion, if sent, is over 40 characters (it is optional and ignored: the consent rows record the versions GET /meta/legal names, ADR-0056); over18 is false. Nothing is created. | smoke |
 | 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. | test |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| 503 | 503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
 
 ### POST /auth/verify-email
 
@@ -103,14 +95,6 @@ curl -X POST "$API/auth/verify-email" -H 'Content-Type: application/json' -d "{\
 |---|---|---|---|
 | 422 | `VALIDATION_FAILED` | token is blank or longer than 256 characters. It is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID. | smoke |
 
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| 410 | 410 VERIFICATION_TOKEN_EXPIRED for a verification link that is past its 24 hours or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
-
 ### POST /auth/resend-verification
 
 ask for a new verification link
@@ -143,13 +127,6 @@ curl -X POST "$API/auth/resend-verification" -H 'Content-Type: application/json'
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 422 | `VALIDATION_FAILED` | email is blank or not shaped like an address. This says nothing about whether the address has an account. | smoke |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
 
 ### POST /auth/login
 
@@ -200,14 +177,6 @@ curl -X POST "$API/auth/login" -H 'Content-Type: application/json' -d "{\"email\
 | 422 | `VALIDATION_FAILED` | email is blank or over 254 characters; password is blank or over 512 characters; or device is sent and its platform is not ANDROID, IOS or WEAR, or its appVersion or osVersion is blank or over 40 characters. device may be left out. An address that is merely not shaped like one is not a 422: it is the 401 an unknown address gets. No password is checked for a 422. | smoke |
 | 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. (the test of this answer drives register, not sign-in) | never-run |
 
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 401 | 401 INVALID_CREDENTIALS for every refused sign-in: a wrong password, an unknown address, a locked account; and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| 503 | 503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; sign-in checks the password under the same limit as registration. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
-
 ### POST /auth/refresh
 
 exchange the refresh token for a new pair
@@ -243,13 +212,6 @@ curl -X POST "$API/auth/refresh" -H 'Content-Type: application/json' -d "{\"refr
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 422 | `VALIDATION_FAILED` | refreshToken is blank or longer than 256 characters. (a test asserts the 422 for an oversized token, not the code) | never-run |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 401 | 401 REFRESH_TOKEN_INVALID for a refresh token that is unknown, expired or revoked, 401 TOKEN_REUSE_DETECTED for one already exchanged, and 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted (read from the code). The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
 
 ### POST /auth/logout
 
@@ -290,13 +252,6 @@ curl -X POST "$API/auth/logout" -H 'Content-Type: application/json' -d "{\"refre
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 422 | `VALIDATION_FAILED` | refreshToken is blank or longer than 256 characters. (a test asserts the 422 for an oversized token, not the code) | never-run |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
 
 ### POST /auth/logout-all
 
@@ -466,10 +421,95 @@ curl "$API/me" -H "Authorization: Bearer $TOKEN"
 | Region | In | When | Answer | Why | Rule | Evidence |
 |---|---|---|---|---|---|---|
 | `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session, so there is nobody to act for. Sign in first. | ADR-0019 §5 | smoke |
-| `account.session` | `ACCESS_VALID` |  | 200 stays | Your own profile: id, email, display name, locale, emailVerified and status. It is read from the account at each call, so it shows a verification made a moment ago without a new token. | ADR-0019 §6 | smoke |
+| `account.session` | `ACCESS_VALID` |  | 200 stays | Your own profile: id, email, display name, locale, emailVerified and status, and legalAccepted: the version of the Terms and of the Privacy Policy you accepted and when (null for one with no acceptance recorded; ADR-0056). It is read from the account at each call, so it shows a verification made a moment ago without a new token. | ADR-0019 §6 | smoke |
 | `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes (the server allows 60 seconds for a wrong clock). Exchange the refresh token at POST /auth/refresh, then repeat the call. (a test asserts the 401 for an expired token on a test-only route, not the code) | ADR-0019 §5 | never-run |
 | `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired (15 minutes, and the 60 seconds more the server allows) | 200 stays | Ending one session does not cancel its access token. Until its 15 minutes run out the token is accepted everywhere a token is needed, and the profile is returned as before. | ADR-0021 §6, ADR-0025 §5 | never-run |
 | `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | After logout-all or a password reset, a token issued before that second is refused whatever its remaining life. The test cited sets the account's sign-out time directly, as those two do, and finds a token issued earlier refused; LoginEndpointTest shows the same 401 after a real logout-all and a real reset, by status. | ADR-0019 §4 | test |
+
+### POST /me/legal-consent
+
+accept the current Terms and Privacy Policy
+
+**Needs:** an access token.
+
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/me/legal-consent" -H "Authorization: Bearer $TOKEN"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session, so there is nobody whose consent to record. Nothing is recorded. | ADR-0019 §5 | smoke |
+| `account.session` | `ACCESS_VALID` |  | 204 stays | You accept the current Terms and Privacy Policy, the versions GET /meta/legal names: a consent row for each one you have not accepted before, with the moment and the hashed address and user agent. No body is read, so the versions are the server's. Again is 204 and writes nothing; a version keeps the moment it was first accepted. | FR-011, FR-103, ADR-0056 | smoke |
+| `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes (the server allows 60 seconds for a wrong clock). Exchange the refresh token at POST /auth/refresh, then repeat the call. | ADR-0019 §5 | never-run |
+| `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired (15 minutes, and the 60 seconds more the server allows) | 204 stays | Ending one session does not cancel its access token, so the acceptance is recorded as from a live session. | ADR-0021 §6, ADR-0056 | never-run |
+| `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | Nothing is left that the server accepts. Sign in again. Nothing is recorded. | ADR-0019 §4 | never-run |
+
+### GET /meta/legal
+
+read the current legal documents
+
+**Needs:** no access token.
+
+- Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)
+- If-None-Match (optional; a matching strong ETag returns 304 with no body. Sent with Cache-Control: public, no-cache)
+
+**Try it:**
+
+```sh
+curl "$API/meta/legal"
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account` | `ANONYMOUS` |  | 200 stays | The current Terms of Service, Privacy Policy and data-processing summary, each a version and the address it is read at. No token is needed, because sign-up shows them first. Cache-Control: public, no-cache with an ETag; the same tag as If-None-Match is a 304 with no body. Registration records the Terms and Privacy versions this names, whatever the request says. | FR-103, FR-011, ADR-0056 | smoke |
+| `account` | `PENDING_VERIFICATION` |  | 200 stays | The same answer as before there was an account: the documents are the same for everyone, and the answer names nobody. | FR-103, FR-011, ADR-0056 | test |
+| `account` | `ACTIVE_SIGNED_OUT` |  | 200 stays | The same answer as before there was an account: the documents are the same for everyone, and the answer names nobody. | FR-103, FR-011, ADR-0056 | test |
+| `account` | `SIGNED_IN` | no access token is sent, or one that is still accepted | 200 stays | The same answer as before there was an account: the documents are the same for everyone, and the answer names nobody. | FR-103, FR-011, ADR-0056 | test |
+| `account` | `SIGNED_IN` | an Authorization header carries an access token that is no longer accepted | 401 `UNAUTHENTICATED` | This route needs no access token, but a token that is sent is still checked before the controller runs, and one that is expired, cancelled or unreadable is refused there: nothing else happens. Send no Authorization header to this route. Signed in is where this bites: a client that adds its access token to every request sends an expired one here. | ADR-0019 | test |
+
+### POST /support/messages
+
+write to support
+
+**Needs:** an access token.
+
+- Idempotency-Key (optional. Repeating a key with the body it was first sent with is a replay: 201 again with Idempotency-Replayed: true, the same ticket, filed once and acknowledged at most once. A replay spends one of the five a day too, so a retry can be 429: wait for Retry-After, then the same key returns the same ticket. Without one, each request is a new ticket)
+- Content-Type (application/json, {"subject": 1 to 120 characters, "body": 1 to 5000 characters}; characters are Unicode code points, and neither may be blank)
+- X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Five messages a day per account, one back every 4.8 hours, spent before the body is checked, so a 422 and a replay use one too. The sixth is 429 with Retry-After)
+
+**Try it:**
+
+```sh
+curl -X POST "$API/support/messages" -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $(uuidgen)" -H 'Content-Type: application/json' -d '{"subject": "Locked out", "body": "What happened, in your words"}'
+```
+
+#### Every answer
+
+| Region | In | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `account.session` | `NO_SESSION` |  | 401 `UNAUTHENTICATED` | No access token is sent, or one that names no session. Support is reached from inside the app, signed in; a signed-out person writes to the published support address instead (ADR-0057 decision 1). Nothing is filed. | ADR-0057 §1 | smoke |
+| `account.session` | `ACCESS_VALID` |  | 201 stays | The message is a ticket a person reads: 201 with its id and when it arrived, never its words. Once it is stored an acknowledgement email is attempted once, to the account's address if that address is confirmed, with the id as a reference and without the subject or body; it is best effort, not retried if the provider fails. Five a day: the sixth is 429 with Retry-After. | ADR-0057 §2, §5 | smoke |
+| `account.session` | `ACCESS_EXPIRED` |  | 401 `UNAUTHENTICATED` | The access token is past its 15 minutes. Exchange the refresh token at POST /auth/refresh, then send it again; nothing was filed, so a key sent with it is still unused. | ADR-0019 §5 | never-run |
+| `account.session` | `ENDED` | its access token is still accepted: the session ended by logout, by being removed from the sessions list or by a reuse, and the token has not yet expired | 201 stays | Ending one session does not cancel its access token: until its 15 minutes run out the message is filed as from a live session. | ADR-0021 §6, ADR-0025 §5 | never-run |
+| `account.session` | `ENDED` | its access token is no longer accepted: logout-all or a password reset ended it, or the token has expired | 401 `UNAUTHENTICATED` | After logout-all or a password reset, a token issued before that second is refused whatever its remaining life. Nothing is filed. | ADR-0019 §4 | never-run |
+
+#### Whatever the state
+
+| Status | Code | Why | Evidence |
+|---|---|---|---|
+| 422 | `VALIDATION_FAILED` | subject or body is missing, null, blank, longer than its limit (120 and 5000 characters), or holds a NUL or an unpaired surrogate; errors names the field, and the message never repeats it. Nothing is filed and no email is sent. | smoke |
+| 422 | `VALIDATION_FAILED` | An Idempotency-Key that is sent is blank, longer than 255 characters, or holds something other than visible ASCII. Leaving it out is allowed. | never-run |
+| 422 | `IDEMPOTENCY_KEY_REUSED` | This Idempotency-Key was already used by you for a different request: another subject or body. | test |
+| 409 | `IDEMPOTENCY_KEY_IN_FLIGHT` | A request with this Idempotency-Key is still being processed. The second one is refused at once; it is not queued. | never-run |
+| 413 | `MALFORMED_REQUEST` | The request body is larger than one mebibyte. It is refused before it is read in full, and nothing is filed. | never-run |
 
 ### POST /auth/forgot-password
 
@@ -502,13 +542,6 @@ curl -X POST "$API/auth/forgot-password" -H 'Content-Type: application/json' -d 
 | Status | Code | Why | Evidence |
 |---|---|---|---|
 | 422 | `VALIDATION_FAILED` | email is blank or not shaped like an address. This says nothing about whether the address has an account. | never-run |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
 
 ### POST /auth/reset-password
 
@@ -553,15 +586,6 @@ curl -X POST "$API/auth/reset-password" -H 'Content-Type: application/json' -d "
 |---|---|---|---|
 | 422 | `VALIDATION_FAILED` | token is blank or over 256 characters; or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link is looked at, so a refused password does not spend the link. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED) | never-run |
 | 503 | `HASHING_CAPACITY_EXCEEDED` | Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link is not spent. (the test of this answer drives register, not a reset) | never-run |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 401 | 401 UNAUTHENTICATED when an Authorization header is sent whose token is not accepted: the route is public, but the resource server checks any bearer token before the controller runs. Read from the code; nothing runs it. The contract's generator gives a public auth route no 401. |
-| 410 | 410 PASSWORD_RESET_TOKEN_EXPIRED for a reset link that is past its hour or was already used. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| 503 | 503 HASHING_CAPACITY_EXCEEDED with Retry-After: 1 when password hashing is full; the link is not spent. The contract's generator (OpenApiConfiguration.statusesFor) gives a public auth route no 401 and adds 410 and 503 to nothing. |
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE; the contract's generator adds 415 only to the two Idempotency-Key routes. |
 
 ## Bond
 
@@ -636,12 +660,6 @@ curl -X POST "$API/bonds" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: ap
 |---|---|---|---|
 | 422 | `VALIDATION_FAILED` | name is blank once trimmed, or over 60 characters; type is not COUPLE, FRIENDS, FAMILY or PARENT_CHILD; anchorTimezone is not a region time zone (a fixed offset such as Etc/GMT+3 is refused); revealTimeLocal is not a time such as 21:00; or reminderTimezone is not a region time zone. A required field that is missing or null is not this answer: it fails while the body is read, which is 400 MALFORMED_REQUEST (by reading; nothing sends such a body). (the tests and the smoke script assert the status and the field, not the code) | never-run |
 
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 415 | Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type. |
-
 ### GET /bonds/{bondId}
 
 read a bond
@@ -713,12 +731,6 @@ curl -X PATCH "$API/bonds/$BOND" -H "Authorization: Bearer $TOKEN" -H "If-Match:
 | 422 | `VALIDATION_FAILED` | The body names no setting at all; or names anchorTimezone, which only moves through /timezone with your partner's agreement; or name is blank or over 60 characters, type is unknown, or revealTimeLocal is not a time such as 21:00; or semanticSearchEnabled is true (ASSERT_FALSE on the field: it is turned on only through /semantic-search, by both members). The body is checked before membership is, so a stranger gets this too. | smoke |
 | 428 | `PRECONDITION_REQUIRED` | No If-Match header, a blank one, or If-Match: *. The update must be conditional, so that two people editing at once cannot silently overwrite each other. It is checked after membership and before the bond's state is read. | smoke |
 
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 415 | Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type. |
-
 ### POST /bonds/{bondId}/leave
 
 leave the bond
@@ -777,12 +789,6 @@ curl -X POST "$API/bonds/$BOND/leave" -H "Authorization: Bearer $TOKEN" -H 'Cont
 |---|---|---|---|
 | 400 | `MALFORMED_REQUEST` | A body was sent and it is not exactly {"withdrawEntries": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn. | test |
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. |
 
 ### POST /bonds/{bondId}/block
 
@@ -843,12 +849,6 @@ curl -X POST "$API/bonds/$BOND/block" -H "Authorization: Bearer $TOKEN" -H 'Cont
 | 400 | `MALFORMED_REQUEST` | A body was sent and it is not exactly {"withdrawEntries": true, false or null}: another key, the flag twice, a value that is not a boolean, or something that is not an object. It is answered before membership is looked at, so a stranger gets the same bytes, and nothing is ended or withdrawn. | smoke |
 | 400 | `MALFORMED_REQUEST` | The flag is missing: no body, {}, or {"withdrawEntries": null}. The same bytes as a body that cannot be read, and nothing is ended or withdrawn. Unlike that refusal it is answered after membership is looked at, so a stranger who sends no flag gets the 404 below (ADR-0035 question 1). | test |
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 415 | A Content-Type other than application/json is 415 UNSUPPORTED_MEDIA_TYPE even with no body, for a member and a stranger alike; it is what curl -X POST -d '' sends. Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. |
 
 ### POST /bonds/{bondId}/invites
 
@@ -1050,12 +1050,6 @@ curl -X PUT "$API/bonds/$BOND/members/me/settings" -H "Authorization: Bearer $TO
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
 | 422 | `VALIDATION_FAILED` | reminderTimeLocal is missing or is not a time such as 21:00; one of quietHoursStart and quietHoursEnd is sent without the other; nicknameForOther is blank or over 40 characters; or reminderTimezone is not a region time zone. (the smoke script asserts the status and the field, not the code) | never-run |
 
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 415 | Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type. |
-
 ### GET /bonds/{bondId}/members/me/notifications
 
 read which kinds of push you want in this bond
@@ -1131,10 +1125,10 @@ curl -X PATCH "$API/bonds/$BOND/timezone" -H "Authorization: Bearer $TOKEN" -H '
 |---|---|---|---|---|---|---|
 | `bond` | `NO_BOND` |  | 404 `NOT_FOUND` | There is no bond of yours under this id: you were never a member of it, it does not exist, or the id is not a UUID. One answer for all three, and never 403. | T-02, ADR-0026 §2 | smoke |
 | `bond` | `PENDING_MEMBER` | the zone has not moved in the last 30 days | 200 stays | Alone in the bond there is nobody to ask, so the zone changes at once and no proposal is written. Dates already decided are not redone: the new zone decides days from the end of the current one. | FR-027, ADR-0030 §8, BR-6 | test |
-| `bond` | `PENDING_MEMBER` | the zone moved in the last 30 days | 409 `TIMEZONE_CHANGE_TOO_SOON` | The shared zone moves at most once in 30 days, also while you are alone in the bond. The detail names the date from which it may move again. | FR-027, ADR-0030 §7 | never-run |
+| `bond` | `PENDING_MEMBER` | the zone moved in the last 30 days | 409 `TIMEZONE_CHANGE_TOO_SOON` | The shared zone moves at most once in 30 days, also while you are alone in the bond. The detail names the date from which it may move again, and allowedFrom carries it typed (YYYY-MM-DD, in the bond's zone). | FR-027, ADR-0030 §7 | never-run |
 | `bond` | `ACTIVE` | the zone has not moved in the last 30 days, and no zone change is waiting | 200 stays | A proposal is recorded for your partner to agree to within seven days. The bond's zone does not move yet, and the bond stays ACTIVE. | FR-027, BR-6, ADR-0030 §4 | smoke |
 | `bond` | `ACTIVE` | the zone has not moved in the last 30 days, and a zone change is already waiting, yours or your partner's | 409 `PROPOSAL_PENDING` | The 30 days are asked first and the waiting proposal second. One zone change may wait at a time. The one that is waiting has to be agreed to, called off, or left to lapse before another is proposed. | ADR-0030 §3 | smoke |
-| `bond` | `ACTIVE` | the zone moved in the last 30 days | 409 `TIMEZONE_CHANGE_TOO_SOON` | The shared zone moves at most once in 30 days. This is a 409 and not a 429: a month is not a rate limit. The detail names the date from which it may move again. | FR-027, ADR-0030 §7 | smoke |
+| `bond` | `ACTIVE` | the zone moved in the last 30 days | 409 `TIMEZONE_CHANGE_TOO_SOON` | The shared zone moves at most once in 30 days. This is a 409 and not a 429: a month is not a rate limit. The detail names the date from which it may move again, and allowedFrom carries it typed (YYYY-MM-DD, in the bond's zone). | FR-027, ADR-0030 §7 | smoke |
 | `bond` | `PENDING_DELETION` |  | 409 `BOND_ARCHIVED` | A bond counting down to deletion takes no new proposal. | BR-9, FR-028 | smoke |
 | `bond` | `ARCHIVED` |  | 409 `BOND_ARCHIVED` | An ended bond's zone no longer moves. | BR-9, ADR-0028 §4 | test |
 | `bond.proposal` | `NONE` | the bond is two people, and the zone has not moved in the last 30 days | 200 → `PROPOSED` | The first zone change this bond has been asked for. It is recorded with the zone it names and waits seven days for your partner; the bond's zone does not move yet. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | FR-027, ADR-0030 §1 | smoke |
@@ -1142,7 +1136,7 @@ curl -X PATCH "$API/bonds/$BOND/timezone" -H "Authorization: Bearer $TOKEN" -H '
 | `bond.proposal` | `NONE` | the zone moved in the last 30 days | 409 `TIMEZONE_CHANGE_TOO_SOON` | No proposal is written. With no earlier proposal, the zone can only have moved while you were alone in the bond, where a change applies at once. | FR-027, ADR-0030 §7 | never-run |
 | `bond.proposal` | `PROPOSED` |  | 409 `PROPOSAL_PENDING` | One zone change waits at a time, whoever opened it. The database refuses a second as well, with a unique index. The 30-day rule is checked before this, but the zone cannot have moved while a proposal waits. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | ADR-0030 §3 | smoke |
 | `bond.proposal` | `CONFIRMED` | 30 days have passed since the zone moved | 200 → `PROPOSED` | The last change was agreed long enough ago, so a new proposal is recorded and waits for your partner. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | FR-027 | never-run |
-| `bond.proposal` | `CONFIRMED` | fewer than 30 days have passed since the zone moved | 409 `TIMEZONE_CHANGE_TOO_SOON` | The zone moved when the last proposal was agreed, and it moves at most once in 30 days. The detail names the date from which it may move again. | FR-027, ADR-0030 §7 | smoke |
+| `bond.proposal` | `CONFIRMED` | fewer than 30 days have passed since the zone moved | 409 `TIMEZONE_CHANGE_TOO_SOON` | The zone moved when the last proposal was agreed, and it moves at most once in 30 days. The detail names the date from which it may move again, and allowedFrom carries it typed (YYYY-MM-DD, in the bond's zone). | FR-027, ADR-0030 §7 | smoke |
 | `bond.proposal` | `CANCELLED` |  | 200 → `PROPOSED` | A proposal that was called off is no obstacle: a fresh one is recorded, with its own id and its own seven days. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | ADR-0030 §5 | smoke |
 | `bond.proposal` | `LAPSED` |  | 200 → `PROPOSED` | A lapsed proposal is invisible to every read but still holds the one slot, so proposing first stamps it cancelled and then records the new one. On a bond that has ended or is counting down the answer is BOND_ARCHIVED: see the bond region. | ADR-0030 §2, §3 | test |
 
@@ -1152,12 +1146,6 @@ curl -X PATCH "$API/bonds/$BOND/timezone" -H "Authorization: Bearer $TOKEN" -H '
 |---|---|---|---|
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
 | 422 | `VALIDATION_FAILED` | anchorTimezone is blank, or not a region time zone; a fixed offset such as Etc/GMT+3 is refused. A required field that is missing or null is not this answer: it fails while the body is read, which is 400 MALFORMED_REQUEST (by reading; nothing sends such a body). (the tests and the smoke script assert the status and the field, not the code) | never-run |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 415 | Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type. |
 
 ### POST /bonds/{bondId}/timezone/confirm
 
@@ -1198,12 +1186,6 @@ curl -X POST "$API/bonds/$BOND/timezone/confirm" -H "Authorization: Bearer $TOKE
 |---|---|---|---|
 | 400 | `MALFORMED_REQUEST` | The body is required: {"proposalId": the id of the proposal you reviewed}. With no body, or with proposalId missing, null or not a UUID, the request cannot be read into the type the handler takes (a non-null UUID), and an unreadable body is this 400, before membership is looked at. Read from the code and never run: the field also carries @NotNull, which would answer 422 VALIDATION_FAILED if a null ever reached validation, and reading alone did not settle whether one can. | never-run |
 | 404 | `NOT_FOUND` | You are not a member of this bond, there is no such bond, or the id is not a UUID. All three get this one answer, and never 403, so that it does not confirm the bond exists. | test |
-
-#### The contract is silent on
-
-| Status | What the code does |
-|---|---|
-| 415 | Any route that reads a JSON body answers 415 UNSUPPORTED_MEDIA_TYPE to another Content-Type; the contract's generator (OpenApiConfiguration.statusesFor) adds 415 only to the two Idempotency-Key routes. Read from the code; no test sends this route another Content-Type. |
 
 ### DELETE /bonds/{bondId}/timezone
 
