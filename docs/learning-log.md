@@ -3035,3 +3035,17 @@ Wrong about: "a parent with a discriminator and one schema per value" being enou
          own request. No test had compared two error bodies under a tracer. The probes now
          compare without the id, which is random per request and so says nothing either way.
 
+
+## 2026-11-08 · Feature · A typed code is a guessable credential, so every refusal is one (issue #135)
+
+Expected: a six-digit code is a shorter token; reuse the token's two answers, 422 "not
+         recognised" and 410 "expired or used".
+Reality: a code is typed beside an address, so a 410 says "this was real", which says the
+         address has an account; and anyone can make one real by burning a stranger's code
+         with five wrong guesses, then ask. Every refusal of a code is one 422, with the same
+         bytes and the same work (counted, not timed). Two smaller ones: the wrong attempt
+         has to commit before the refusal is thrown, so `@Transactional` (which rolls back on
+         the exception and un-counts the guess) is the wrong tool; and the first draft of the
+         resend test expected no code left after a verification, when the spent row still
+         holds its own (dead) code. The count is right only under a row lock, which a test
+         proves by blocking on it, and removing the lock makes the test wait forever.

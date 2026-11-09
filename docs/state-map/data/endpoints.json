@@ -1021,24 +1021,25 @@
   },
   {
     "id": "POST /api/v1/auth/verify-email",
-    "summary": "verify your email",
+    "summary": "verify your email, by the link or by the code",
     "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
-      "Content-Type (application/json. The token travels in the body of a POST, never in a GET: a GET on this path without a bearer is the everywhere 401, so a mail scanner that fetches the link cannot spend it. No rate limit of its own)"
+      "Content-Type (application/json. The token, or the email address and the six-digit code from the same email, travel in the body of a POST, never in a GET: a GET on this path without a bearer is the everywhere 401, so a mail scanner that fetches the link cannot spend it)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, verify-email and reset-password together, links and codes alike, spent before the body is checked. Beside it, for an email and a code only: ten a day per email address as typed, both routes together, one back every 2.4 hours, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)"
     ],
     "requestErrors": [
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "token is blank or longer than 256 characters. It is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID.",
+        "reason": "The body is not exactly one of a token, or an email and a code: neither, both, a blank token, or an address without a code (one violation on tokenOrEmailAndCode). Or the token is over 256 characters, the email is not shaped like an address, or the code is not six ASCII digits (errors code VALID_VERIFICATION_CODE). A token is not otherwise shape-checked: a mangled token is the state answer, 422 VERIFICATION_TOKEN_INVALID. Nothing here looks an address up or counts against a code.",
         "evidence": "smoke",
         "evidenceRef": "blank token is 422 VALIDATION_FAILED",
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/VerificationController.kt#internal data class VerifyEmailRequest("
       }
     ],
-    "curl": "curl -X POST \"$API/auth/verify-email\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$VERIFY_TOKEN\\\"}\""
+    "curl": "curl -X POST \"$API/auth/verify-email\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$VERIFY_TOKEN\\\"}\"   # or -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"code\\\": \\\"$CODE\\\"}\""
   },
   {
     "id": "POST /api/v1/auth/resend-verification",
@@ -1256,18 +1257,19 @@
   },
   {
     "id": "POST /api/v1/auth/reset-password",
-    "summary": "set a new password with a reset link",
+    "summary": "set a new password with a reset link or code",
     "machine": "account",
     "auth": "none",
     "headers": [
       "Authorization (not needed, and best not sent: a token that is sent is still checked, and one that is expired or not accepted is 401 UNAUTHENTICATED before the request is looked at)",
-      "Content-Type (application/json. The reset token in the body is the credential. No rate limit of its own)"
+      "Content-Type (application/json. The reset token, or the email address and the six-digit code from the same email, in the body are the credential)",
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Twenty an hour per client address, verify-email and reset-password together, links and codes alike, spent before the body is checked. Beside it, for an email and a code only: ten a day per email address as typed, both routes together, one back every 2.4 hours, counted for every address whether or not it has an account: the eleventh is 429 with Retry-After)"
     ],
     "requestErrors": [
       {
         "status": 422,
         "code": "VALIDATION_FAILED",
-        "reason": "token is blank or over 256 characters; or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link is looked at, so a refused password does not spend the link. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED)",
+        "reason": "The body is not exactly one of a token, or an email and a code (one violation on tokenOrEmailAndCode); or the token is over 256 characters, the email is not shaped like an address, or the code is not six ASCII digits (VALID_VERIFICATION_CODE); or password is blank, under 8 or over 128 characters, over 512 bytes (errors code VALID_PASSWORD), or matches the list of breached passwords (NOT_BREACHED). This is checked before the link or code is looked at, so a refused password spends neither and counts against no code. (the tests and the smoke script assert the status and the field's code, NOT_BREACHED, not VALIDATION_FAILED)",
         "evidence": "never-run",
         "evidenceRef": "",
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/PasswordResetController.kt#internal data class ResetPasswordRequest("
@@ -1275,13 +1277,13 @@
       {
         "status": 503,
         "code": "HASHING_CAPACITY_EXCEEDED",
-        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link is not spent. (the test of this answer drives register, not a reset)",
+        "reason": "Password hashing is briefly full: six run at once, and a request that waits 250 milliseconds for a turn is answered 503 with Retry-After: 1. The request was fine; send it again. The link or the code is not spent. (the test of this answer drives register, not a reset)",
         "evidence": "never-run",
         "evidenceRef": "",
         "codeRef": "modules/identity/src/main/kotlin/com/moyi/identity/web/IdentityExceptionHandler.kt#errorCode = ErrorCode.HASHING_CAPACITY_EXCEEDED,"
       }
     ],
-    "curl": "curl -X POST \"$API/auth/reset-password\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$RESET_TOKEN\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\""
+    "curl": "curl -X POST \"$API/auth/reset-password\" -H 'Content-Type: application/json' -d \"{\\\"token\\\": \\\"$RESET_TOKEN\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\"   # or -d \"{\\\"email\\\": \\\"$EMAIL\\\", \\\"code\\\": \\\"$CODE\\\", \\\"password\\\": \\\"$PASSWORD\\\"}\""
   },
   {
     "id": "POST /api/v1/media/upload-intent",

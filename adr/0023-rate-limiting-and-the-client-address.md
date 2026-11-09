@@ -1,6 +1,6 @@
 # ADR-0023 — Rate limiting: Bucket4j on Redis, failing open; the trusted-proxy client address; keyed hashes for personal identifiers
 
-**Status:** Accepted · **Date:** 2026-09-24
+**Status:** Accepted · **Date:** 2026-09-24 · **Amended:** 2026-11-08 (two buckets for typed codes, #135)
 
 ## Context
 
@@ -50,3 +50,18 @@ The course's answer, for contrast: Chirp hand-writes a Lua token bucket over `St
 ## Revisit when
 
 Redis is cut during Phase 5 load testing (move to Bucket4j's JDBC backend behind the same port). A second application node exists (the buckets are already shared; the hold and WARN are per process). The deployment is real and Cloudflare's ranges have to be configured (and refreshed — they change). The invite buckets of doc 06 §4 arrive with Phase 2 (`invite:lookup` + `invite:accept` share one per-IP bucket, which needs a bucket that two annotations can name). A 429 is ever seen on a legitimate client's ordinary use of `/me` polling (raise the global bucket, or shape the client). Lettuce 8.
+
+## Amendment — 2026-11-08: the typed-code buckets, and the guess budget they leave (#135)
+
+`verify-email` and `reset-password` had no bucket of their own: they took a 256-bit token, which no rate of guessing reaches. A six-digit code is one of 10^6, so both routes now carry two buckets, as code (decision 2).
+
+**1. `auth:code:ip`, twenty an hour per client address, on both routes together**, consumed by the interceptor before the body is read (decision 3), for links and codes alike, the way the invite routes share `invite:code:ip`. It bounds one address spraying codes across many accounts: at most 480 tries a day, spread over whichever addresses it names.
+
+**2. `auth:code:email`, ten a day per address as typed, on both routes together**, consumed in the service (`VerificationCodeCheck.limit`) and only for the code form, before any lookup, for every address alike, so the 429 is no oracle. Greedy refill: one try back every 2.4 hours, which is the `Retry-After: 8640` a person meets.
+
+**3. The arithmetic.** A code is burned after five wrong tries (ADR-0018, amended): one code gives a guesser at most 5 / 10^6 = 1 in 200,000. Codes can be asked for again (`resend-verification` once a minute, `forgot-password` three an hour per address), so the per-code limit alone bounds nothing over a day; the per-address bucket does: **at most ten tries a day against one account, whatever is re-requested and from however many addresses**, so at most 10 / 10^6 = **1 in 100,000 a day**, or about 1 in 274 over a year of continuous attack. Using even those ten needs at least two codes a day, and every code is an email to the owner of the address, so a sustained attempt is visible to its target. For reset (an account takeover) that is the number that matters; for verification the prize is a verified address its holder does not own.
+
+**4. Fail-open still applies, and costs more here.** With Redis down (decision 5) neither bucket is consumed, nor is the issuing cooldown, so the budget per day becomes five per code times as many codes as can be asked for. What still stands: the burn at five, the fifteen minutes, one code per account at a time, and every code an email to the owner. **Whether these two routes should fail closed is an owner question**, recorded rather than decided: failing closed would turn a Redis outage into "you cannot verify or reset by code" while the link still works.
+
+`RateLimitingEndpointTest` drives both to their 429 (`ten typed codes a day per address…`, `twenty presentations an hour from one client address…`), and `scripts/smoke.sh` does too, against the compose Valkey; removing either the annotation or the service's consume turns its test red.
+

@@ -49,6 +49,22 @@ enum class RateLimitBucket(
     /** ADR-0023 addition, same reasoning as [AUTH_RESET_IP]. */
     AUTH_RESEND_IP("auth:resend:ip", Subject.IP, 20, Duration.ofHours(1)),
 
+    /**
+     * #135, ADR-0023 amended 2026-11-08: ten typed codes a day per address, on `verify-email`
+     * and `reset-password` together. A code is one of 10^6 and five wrong ones burn it, but
+     * codes can be asked for again; this is what bounds the guesses at one account to ten a
+     * day whatever is re-requested: at most 10 / 10^6 = 1 in 100,000 a day. Counted for every
+     * address alike, so the 429 is no oracle.
+     */
+    AUTH_CODE_EMAIL("auth:code:email", Subject.EMAIL, 10, Duration.ofDays(1)),
+
+    /**
+     * #135, ADR-0023 amended 2026-11-08: twenty presentations an hour per client address,
+     * shared by `verify-email` and `reset-password`, links and codes alike, as the invite
+     * endpoints share theirs. Bounds one address spraying codes across many accounts.
+     */
+    AUTH_CODE_IP("auth:code:ip", Subject.IP, 20, Duration.ofHours(1)),
+
     /** Doc 06 §4: "`invite:create` (per user) 10 / day". Creating one revokes the outstanding one, so this bounds churn. */
     INVITE_CREATE_USER("invite:create:user", Subject.USER, 10, Duration.ofDays(1)),
 

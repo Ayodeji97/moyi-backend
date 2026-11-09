@@ -1,7 +1,9 @@
 package com.moyi.identity.infra.database
 
 import com.moyi.identity.domain.VerificationPurpose
+import jakarta.persistence.LockModeType
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.Repository
@@ -403,6 +405,77 @@ internal interface VerificationTokenRepository : Repository<VerificationTokenEnt
         purpose: VerificationPurpose,
         now: Instant,
     ): Int
+
+    /**
+     * Spends the token with this id if it is still live: [consume]'s compare-and-set, by id,
+     * for a caller that already holds the row (the code path, and the reset that follows it).
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE VerificationTokenEntity t
+           SET t.consumedAt = :now
+         WHERE t.id = :id
+           AND t.consumedAt IS NULL
+           AND t.expiresAt > :now
+        """,
+    )
+    fun consumeById(
+        id: UUID,
+        now: Instant,
+    ): Int
+
+    /**
+     * The one row of this person's for [purpose] that holds a code (V51's partial unique
+     * index makes it one), **locked** `FOR UPDATE` until the transaction ends. The lock is
+     * what makes the attempt count a count: every concurrent attempt against the code waits
+     * here, then reads the number the one before it wrote, so five wrong codes are five and
+     * the sixth, however many arrive at once, finds the code burned (ADR-0018, amended
+     * 2026-11-08). Whether the code is live is the domain's to say; this only finds it.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query(
+        """
+        SELECT t FROM VerificationTokenEntity t
+         WHERE t.userId = :userId
+           AND t.purpose = :purpose
+           AND t.codeHash IS NOT NULL
+        """,
+    )
+    fun lockHeldCode(
+        userId: UUID,
+        purpose: VerificationPurpose,
+    ): VerificationTokenEntity?
+
+    /** One more wrong code against this row. Zero rows for an id that is no row: the path with nothing to count. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE VerificationTokenEntity t SET t.codeAttempts = t.codeAttempts + 1 WHERE t.id = :id")
+    fun recordWrongCode(id: UUID): Int
+
+    /** Takes the code off every row of this person's for [purpose]; their links are left as they were. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query(
+        """
+        UPDATE VerificationTokenEntity t
+           SET t.codeHash = NULL, t.codeExpiresAt = NULL
+         WHERE t.userId = :userId
+           AND t.purpose = :purpose
+           AND t.codeHash IS NOT NULL
+        """,
+    )
+    fun retireCodes(
+        userId: UUID,
+        purpose: VerificationPurpose,
+    ): Int
+
+    /**
+     * Serialises issuing codes to one person: two emails asked for at once would each retire
+     * the codes they can see and insert their own, and the second insert would break V51's
+     * one-code index (a 500). Namespace `5` in the two-key form; `1` to `4` are taken
+     * (`PushBudgetLedger`'s list). Released at commit or rollback.
+     */
+    @Query(nativeQuery = true, value = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(5, hashtext(CAST(:userId AS text)))) AS held")
+    fun lockCodeIssue(userId: UUID): Int
 }
 
 /**
