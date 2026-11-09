@@ -1291,6 +1291,28 @@
     "curl": "curl -X POST \"$API/me/legal-consent\" -H \"Authorization: Bearer $TOKEN\""
   },
   {
+    "id": "POST /api/v1/me/deletion-request",
+    "summary": "ask for your account to be deleted",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After). This route also spends account:deletion:user, five an hour, wrong passwords included: the sixth is 429 with Retry-After"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X POST \"$API/me/deletion-request\" -H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{\"password\":\"your password\"}'"
+  },
+  {
+    "id": "DELETE /api/v1/me/deletion-request",
+    "summary": "call off your account's deletion",
+    "machine": "account",
+    "auth": "bearer",
+    "headers": [
+      "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset (on answers, describing the bucket with the fewest left. Every call with an accepted access token counts against one limit of 120 a minute per user; past it, 429 with Retry-After)"
+    ],
+    "requestErrors": [],
+    "curl": "curl -X DELETE \"$API/me/deletion-request\" -H \"Authorization: Bearer $TOKEN\""
+  },
+  {
     "id": "GET /api/v1/meta/legal",
     "summary": "read the current legal documents",
     "machine": "account",

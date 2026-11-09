@@ -137,6 +137,25 @@ internal class EntryStore(
         }
 
     /**
+     * BR-10's flag, on every entry [authorMemberId] wrote in [bondId], erased or not: the
+     * tombstone says its author deleted their account (doc 07 §7, ADR-0058 decision 8). Set
+     * after the erasures, in one statement; it changes no word and no day, and setting it
+     * twice changes nothing.
+     */
+    fun markAuthorDeletedAccount(
+        bondId: UUID,
+        authorMemberId: UUID,
+    ) {
+        entityManager
+            .createNativeQuery(
+                "UPDATE entries SET author_deleted_account = true " +
+                    "WHERE bond_id = ?1 AND author_member_id = ?2 AND NOT author_deleted_account",
+            ).setParameter(1, bondId)
+            .setParameter(2, authorMemberId)
+            .executeUpdate()
+    }
+
+    /**
      * Writes what is pending and lets go of every entity this transaction has
      * loaded — for a caller working through thousands of entries in one
      * transaction, between one and the next.

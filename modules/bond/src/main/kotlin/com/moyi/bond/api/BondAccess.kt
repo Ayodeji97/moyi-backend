@@ -161,7 +161,21 @@ interface BondAccess {
      * caller something about a bond they could not otherwise learn.
      */
     fun partnerMemberIdOf(membership: BondMembership): UUID
+
+    /**
+     * Every membership row [userId] holds **or held**, in any bond, open or ended, for the work
+     * that has no caller: account deletion's erasure of what that person wrote, kept and
+     * reacted with (ADR-0058). Runs no guard, which is why it is one of `ArchitectureTest`'s
+     * unguarded reads and must never be reachable from a request.
+     */
+    fun membershipsOfAccount(userId: UUID): List<AccountMembership>
 }
+
+/** One membership row of an account, by id only: which bond, and which member of it the person was. */
+data class AccountMembership(
+    val bondId: UUID,
+    val memberId: UUID,
+)
 
 /**
  * What a bond is for (cADR-0013), as another module may know it. The same four values as

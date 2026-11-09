@@ -291,6 +291,7 @@ error code. No event: nothing outside the report's transaction needs to know. De
   this" by the client that sent it.
 - **Account deletion** (not built): a deleted reporter's details in open reports, and their reports'
   `reporter_member_id`, are that change's to erase.
+  *Discharged 2026-11-09 by ADR-0058 (issue #125): a deleted reporter's reports lose their `detail` and keep their `reporter_member_id`, a member row's id that no longer names a person (decision 8 there; the owner may overrule).*
 - **The owner, for the documents this changes (the corpus is read-only to a slice):** the Privacy
   Policy and doc 07 §7's retention table say that (a) a photo or voice note under an open report is
   kept, whoever deletes it, until a person decides, which the review alarms bound to days (decision

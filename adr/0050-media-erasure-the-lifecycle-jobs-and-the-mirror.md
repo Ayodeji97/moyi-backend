@@ -211,6 +211,7 @@ lifecycle rule**.
 - **Phase 5's account deletion and its bond-deletion job** must erase entries through `EraseEntry`
   (or call `MediaErasure.releaseAllOf` for each entry they remove), or an account's photos outlive
   it. Neither exists yet.
+  *Discharged 2026-11-09 by ADR-0058 (issue #125): the account deletion erases through `EraseEntry` and also releases every asset the person owns, attached or not (decisions 8 and 9 there). The bond-deletion job is still owed.*
 - **D3:** `AttachableKind.VOICE`, and nothing else here: a voice note attached to an erased entry is
   released by decision 1 as it stands, and purged by decision 2 once D3 lands: D3 adds the voice
   note's `voice.ogg` to `MediaAsset.objectKeys`, so with both merged the purge deletes it too. D3

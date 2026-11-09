@@ -50,6 +50,21 @@ internal class EntryReports(
         )
     }
 
+    /**
+     * The detail [reporterMemberIds] wrote on their reports, emptied (ADR-0058 decision 8,
+     * ADR-0053's Owed item): the person's own words to a moderator go with their account. The
+     * report stays, open or decided, with its reason, its target and its reporter's member id,
+     * which names a member row and no longer a person: what was reported about somebody else
+     * is still somebody's to decide.
+     */
+    fun forgetDetailOf(reporterMemberIds: Collection<UUID>) {
+        if (reporterMemberIds.isEmpty()) return
+        jdbc.update(
+            "UPDATE entry_reports SET detail = NULL WHERE reporter_member_id = ANY (?) AND detail IS NOT NULL",
+            reporterMemberIds.toTypedArray(),
+        )
+    }
+
     /** The entry report [id] names, whoever made it, or null: the caller checks it is theirs. */
     fun find(id: UUID): EntryReport? =
         jdbc

@@ -237,7 +237,34 @@ internal class RateLimitingEndpointTest(
         me(token).status shouldBe 200
     }
 
+    // ---- account:deletion, per user (ADR-0058) ------------------------------
+
+    @Test
+    fun `a sixth account-deletion request in an hour is 429, wrong passwords counted alike`() {
+        register("ada@example.com").status shouldBe 201
+        val userId = jdbc.queryForObject("SELECT id FROM users", UUID::class.java)!!
+        val token = issuer.issue(userId).token
+
+        repeat(5) { deletionRequest(token).status shouldBe 401 }
+
+        val refused = deletionRequest(token)
+        refused.status shouldBe 429
+        refused.getHeader(HttpHeaders.RETRY_AFTER) shouldBe "720"
+        refused.contentAsString shouldContain "\"code\":\"RATE_LIMITED\""
+        // Spent before the password was looked at: the sixth cost no Argon2id.
+        hasher.matchesCalls.get() shouldBe 5
+    }
+
     // ---- helpers -----------------------------------------------------------
+
+    private fun deletionRequest(token: String): MockHttpServletResponse =
+        mockMvc
+            .post("/api/v1/me/deletion-request") {
+                header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+                contentType = MediaType.APPLICATION_JSON
+                content = """{"password":"not the password"}"""
+            }.andReturn()
+            .response
 
     private fun login(
         email: String = "ada@example.com",

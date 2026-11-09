@@ -46,4 +46,18 @@ internal sealed interface SecurityNotice {
         /** Distinguishes one change from the next, so a provider that remembers idempotency keys delivers both. */
         val changedAt: Instant,
     ) : SecurityNotice
+
+    /**
+     * FR-008 and FR-085's "deletion confirmation" (ADR-0058 decision 5): the account will be
+     * deleted, when, and how to call it off. Sent once per request and only to a confirmed
+     * address (ADR-0057 decision 6's rule). If the person did not ask, this is how they learn
+     * that somebody with their password did, while there is still time to cancel.
+     */
+    data class DeletionRequested(
+        override val userId: UserId,
+        override val email: Email,
+        override val displayName: String,
+        val requestId: UUID,
+        val cancellableUntil: Instant,
+    ) : SecurityNotice
 }

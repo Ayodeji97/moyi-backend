@@ -15,6 +15,7 @@ import com.moyi.gratitude.api.EmbeddingSweep
 import com.moyi.gratitude.api.OnThisDayPushes
 import com.moyi.gratitude.api.OnThisDayRun
 import com.moyi.gratitude.api.ReminderRun
+import com.moyi.identity.api.AccountDeletions
 import com.moyi.media.api.LifecycleRun
 import com.moyi.media.api.MediaLifecycle
 import com.moyi.notification.api.HeldPushes
@@ -78,6 +79,27 @@ internal class SchedulingTestApplication {
 
     @Bean
     fun embeddingSweep(): RecordingEmbeddingSweep = RecordingEmbeddingSweep()
+
+    @Bean
+    fun accountDeletions(): RecordingAccountDeletions = RecordingAccountDeletions()
+}
+
+/** An [AccountDeletions] that records the limits it was asked for and answers [next]: what a deletion does is identity's to test. */
+internal class RecordingAccountDeletions : AccountDeletions {
+    val limits = CopyOnWriteArrayList<Int>()
+
+    @Volatile
+    var next: Int = 0
+
+    override fun executeDue(limit: Int): Int {
+        limits += limit
+        return next
+    }
+
+    fun reset() {
+        limits.clear()
+        next = 0
+    }
 }
 
 /**

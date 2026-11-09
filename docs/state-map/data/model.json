@@ -88,6 +88,29 @@
               "label": "link expired"
             }
           ]
+        },
+        {
+          "id": "account.deletion",
+          "label": "Your account's deletion (FR-008: asked for with your password, cancellable for 14 days, then carried out)",
+          "states": [
+            {
+              "id": "NONE",
+              "label": "none (never asked for, or the last request cancelled)",
+              "initial": true
+            },
+            {
+              "id": "PENDING",
+              "label": "asked for, inside the 14 days: cancellable"
+            },
+            {
+              "id": "WINDOW_CLOSED",
+              "label": "the 14 days are over: no longer cancellable, carried out within the hour"
+            },
+            {
+              "id": "DELETED",
+              "label": "carried out: the account is anonymised and signs in no more"
+            }
+          ]
         }
       ]
     },
@@ -488,6 +511,16 @@
       "id": "event:operator-upholds-report",
       "label": "the operator upholds the report (moyi reports uphold delete|block)",
       "actor": "system"
+    },
+    {
+      "id": "event:deletion-window-closes",
+      "label": "the account deletion's 14 days run out",
+      "actor": "system"
+    },
+    {
+      "id": "event:account-deletion-runs",
+      "label": "the hourly account deletion job runs",
+      "actor": "system"
     }
   ],
   "everywhere": [
@@ -504,7 +537,8 @@
       "codeRef": "common/security/src/main/kotlin/com/moyi/common/security/ProblemAuthenticationHandlers.kt#ErrorCode.UNAUTHENTICATED",
       "rowsAllowedIn": [
         "account",
-        "account.session"
+        "account.session",
+        "account.deletion"
       ]
     },
     {

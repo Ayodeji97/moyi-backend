@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.RowMapper
 import org.springframework.stereotype.Component
 import java.sql.Timestamp
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -35,6 +36,39 @@ internal class SupportTickets(
             body.value,
             Timestamp.from(ticket.createdAt),
         )
+    }
+
+    /**
+     * Every open ticket [userId] sent is closed and emptied, with one `CLOSED` line each in the
+     * log under [actor] (ADR-0057 decision 8, ADR-0058 decision 10): the sender's words go with
+     * their account. The ticket stays, with its id, its time and the sender's id, which names an
+     * anonymised account. A closed ticket already holds no words (V45). Returns how many it closed.
+     */
+    fun closeAllOf(
+        userId: UUID,
+        at: Instant,
+        actor: String,
+        note: String,
+    ): Int {
+        val closed =
+            jdbc.queryForList(
+                "UPDATE support_tickets SET status = 'CLOSED', subject = NULL, body = NULL, closed_at = ? " +
+                    "WHERE user_id = ? AND status = 'OPEN' RETURNING id",
+                UUID::class.java,
+                Timestamp.from(at),
+                userId,
+            )
+        closed.forEach { ticketId ->
+            jdbc.update(
+                "INSERT INTO support_ticket_log (id, ticket_id, action, actor, note, at) VALUES (?, ?, 'CLOSED', ?, ?, ?)",
+                UUID.randomUUID(),
+                ticketId,
+                actor,
+                note,
+                Timestamp.from(at),
+            )
+        }
+        return closed.size
     }
 
     /** The ticket [id] names, whoever sent it, or null: the caller checks it is theirs. Never its words. */

@@ -318,3 +318,57 @@ stateDiagram-v2
 | In | What happens | Who | When | Leads to | Why | Evidence |
 |---|---|---|---|---|---|---|
 | `REQUESTED` | the reset link expires, an hour on | system |  | `EXPIRED` | A reset link stops working one hour after it was issued. No job does this and nothing is written: each presentation compares the link's expiry with the clock. | never-run |
+
+## Your account's deletion (FR-008: asked for with your password, cancellable for 14 days, then carried out)
+
+```mermaid
+stateDiagram-v2
+    state "none (never asked for, or the last request cancelled)" as account_deletion__NONE
+    state "asked for, inside the 14 days cancellable" as account_deletion__PENDING
+    state "the 14 days are over no longer cancellable, carried out within the hour" as account_deletion__WINDOW_CLOSED
+    state "carried out the account is anonymised and signs in no more" as account_deletion__DELETED
+    account_deletion__NONE --> account_deletion__PENDING: you - ask for your account to be deleted
+    account_deletion__PENDING --> account_deletion__NONE: you - call off your account's deletion
+    account_deletion__PENDING --> account_deletion__WINDOW_CLOSED: system - account deletion's 14 days run out
+    account_deletion__WINDOW_CLOSED --> account_deletion__DELETED: system - hourly account deletion job runs
+```
+
+### Every action in every state
+
+| Action | `NONE` | `PENDING` | `WINDOW_CLOSED` | `DELETED` |
+|---|---|---|---|---|
+| ask for your account to be deleted<br>`POST /me/deletion-request` | 202 → `PENDING` (the password is right)<br>401 `INVALID_CREDENTIALS` (the password sent is not the account's) | 202 stays (the password is right)<br>401 `INVALID_CREDENTIALS` (the password sent is not the account's) | 202 stays (the password is right)<br>401 `INVALID_CREDENTIALS` (the password sent is not the account's) | 401 `UNAUTHENTICATED` |
+| call off your account's deletion<br>`DELETE /me/deletion-request` | 404 `NOT_FOUND` | 204 → `NONE` | 404 `NOT_FOUND` | 401 `UNAUTHENTICATED` |
+| read your profile<br>`GET /me` | 200 stays | 200 stays | 200 stays | 401 `UNAUTHENTICATED` |
+
+### You can
+
+| In | Action | When | Leads to | Why | Evidence |
+|---|---|---|---|---|---|
+| `NONE` | ask for your account to be deleted | the password is right | `PENDING` | With your current password: the request is recorded and 202 answers requestedAt, cancellableUntil (14 days on) and deleteBy (30 days on). Nothing is destroyed now. Your status, your sign-in and your other sessions are as they were. A confirmed address is emailed once, saying when it will happen and how to cancel. | smoke |
+| `PENDING` | ask for your account to be deleted | the password is right | stays | The same request: 202 with the same three dates, byte for byte, and no second email. | smoke |
+| `WINDOW_CLOSED` | ask for your account to be deleted | the password is right | stays | Still the same pending request until the job has run: 202 with the same dates. It can no longer be cancelled. | never-run |
+| `PENDING` | call off your account's deletion |  | `NONE` | Called off. GET /me says null again, and a new request starts new windows. | smoke |
+| `NONE` | read your profile |  | stays | Your profile, with deletionRequest null. | smoke |
+| `PENDING` | read your profile |  | stays | Your profile, with deletionRequest carrying the three dates the 202 gave: what a reinstalled client draws the pending state, and its cancel, from. | smoke |
+| `WINDOW_CLOSED` | read your profile |  | stays | Still pending until the job runs: deletionRequest with its dates, cancellableUntil now past. | never-run |
+
+### Refused here
+
+| In | Action | When | Answer | Why | Rule | Evidence |
+|---|---|---|---|---|---|---|
+| `NONE` | ask for your account to be deleted | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is checked again, and this one is wrong. Nothing is recorded, and it is not counted towards the sign-in lock. No WWW-Authenticate: your session is fine, do not sign out. Five tries an hour, then 429. | FR-008, ADR-0058 | smoke |
+| `PENDING` | ask for your account to be deleted | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is checked before the pending request is looked at; nothing changes. | FR-008, ADR-0058 | never-run |
+| `WINDOW_CLOSED` | ask for your account to be deleted | the password sent is not the account's | 401 `INVALID_CREDENTIALS` | The password is wrong; nothing changes. | FR-008, ADR-0058 | never-run |
+| `DELETED` | ask for your account to be deleted |  | 401 `UNAUTHENTICATED` | The account is gone: every access token issued before it was deleted is refused, and it cannot sign in for a new one. | FR-008, ADR-0058, ADR-0019 §4 | never-run |
+| `NONE` | call off your account's deletion |  | 404 `NOT_FOUND` | Nothing to cancel. The same bytes as a window that has closed. | FR-008, ADR-0058 | smoke |
+| `WINDOW_CLOSED` | call off your account's deletion |  | 404 `NOT_FOUND` | Too late: from cancellableUntil on it cannot be cancelled. One 404 for this and for nothing pending, because you can do nothing about either. | FR-008, ADR-0058 | test |
+| `DELETED` | call off your account's deletion |  | 401 `UNAUTHENTICATED` | The account is gone, and so is every token of it. | FR-008, ADR-0058, ADR-0019 §4 | test |
+| `DELETED` | read your profile |  | 401 `UNAUTHENTICATED` | The account is gone: its access tokens are refused. | FR-008, ADR-0058, ADR-0019 §4 | smoke |
+
+### Happens without you
+
+| In | What happens | Who | When | Leads to | Why | Evidence |
+|---|---|---|---|---|---|---|
+| `PENDING` | the account deletion's 14 days run out | system |  | `WINDOW_CLOSED` | Nothing is written: from cancellableUntil the request is due, which the job and the cancel each ask of the clock. | test |
+| `WINDOW_CLOSED` | the hourly account deletion job runs | system |  | `DELETED` | The job carries it out: the address and name are erased, the password, sessions, devices, push tokens, verification codes and consent records deleted, and AccountDeleted published in the same commit. From it every bond you are still in ends as a leave ends it, and the names you gave your partners are emptied; every entry you wrote becomes a flagged tombstone (BR-10), so your partner's days and streak stand; your bookmarks, reactions, photos, voice notes and report details go; your open support messages are emptied. | smoke |

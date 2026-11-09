@@ -1,5 +1,6 @@
 package com.moyi.bond.service
 
+import com.moyi.bond.api.AccountMembership
 import com.moyi.bond.api.BondAccess
 import com.moyi.bond.api.BondAnchorTimeline
 import com.moyi.bond.api.BondClosingView
@@ -17,6 +18,7 @@ import com.moyi.bond.infra.database.AnchorIntervalStore
 import com.moyi.bond.infra.database.BondClosingStore
 import com.moyi.bond.infra.database.BondStore
 import com.moyi.bond.infra.database.EntryWithdrawals
+import com.moyi.bond.infra.database.MembershipRows
 import com.moyi.identity.api.UserDirectory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -55,6 +57,7 @@ internal class BondAccessAdapter(
     private val closing: BondClosingStore,
     private val pasts: BondPasts,
     private val withdrawals: EntryWithdrawals,
+    private val memberships: MembershipRows,
     private val users: UserDirectory,
 ) : BondAccess {
     @Transactional(readOnly = true)
@@ -95,6 +98,10 @@ internal class BondAccessAdapter(
 
     @Transactional(readOnly = true)
     override fun closingViewOf(bondId: UUID): BondClosingView? = closingView(bondId)
+
+    @Transactional(readOnly = true)
+    override fun membershipsOfAccount(userId: UUID): List<AccountMembership> =
+        memberships.of(UserId(userId)).map { AccountMembership(it.bondId.value, it.memberId.value) }
 
     @Transactional(propagation = Propagation.MANDATORY)
     override fun lockClosingViewOf(bondId: UUID): BondClosingView? {

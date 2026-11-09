@@ -93,6 +93,7 @@ account's tickets must be emptied (subject and body to null, closed) and its `us
 anonymised as the deletion's ADR decides; `support_tickets_user_idx` is there for that sweep. Until
 then a ticket names its sender by id only, and `support_ticket_read` shows no address for an account
 that is gone.
+*Discharged 2026-11-09 by ADR-0058 (issue #125): the deletion closes and empties the account's open tickets, logged `CLOSED` by `account-deletion`, and keeps `user_id` (decision 10 there).*
 
 **9. `support:create:user`, five a day per account** (doc 06 §4; `RateLimitBucket.SUPPORT_CREATE_USER`,
 greedy, so one back every 4.8 hours). Spent before the body is read, as every bucket here is, so a

@@ -241,6 +241,24 @@ internal class MediaAssetStore(
         )
 
     /**
+     * Every asset [owner] has that is not already deleted, attached or not, becomes `DELETED` as
+     * of [at] and is detached: account deletion's share of `media` (ADR-0058 decision 9).
+     * Returns the ids it deleted, none the second time. Each row is locked by the update, so a
+     * pipeline step on one of them says its last word after this commits, and finds it deleted.
+     */
+    fun releaseAllOwnedBy(
+        owner: UUID,
+        at: Instant,
+    ): List<UUID> =
+        jdbc.query(
+            "UPDATE media_assets SET status = 'DELETED', deleted_at = ?, attached_entry_id = NULL " +
+                "WHERE owner_user_id = ? AND status <> 'DELETED' RETURNING id",
+            ID,
+            Timestamp.from(at),
+            owner,
+        )
+
+    /**
      * The reaper (D5): up to [limit] assets that are attached to nothing and
      * past their keeping become DELETED as of [now]. An upload never completed,
      * once its URL has been dead for [Retention.PENDING_GRACE]; a ready or
