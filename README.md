@@ -227,6 +227,7 @@ flowchart TD
     gratitude -. "only via identity's api" .-> identity
     scheduling -. "only via gratitude's api" .-> gratitude
     support -. "only via identity's api" .-> identity
+    scheduling -. "only via identity's api" .-> identity
 
     classDef wiring fill:#f4cccc,stroke:#a61c00,stroke-width:2px,color:#1a1a1a
     classDef shared fill:#cfe2f3,stroke:#1155cc,stroke-width:2px,color:#1a1a1a
@@ -250,7 +251,11 @@ entries are `gratitude`'s, and `gratitude` already depends on `bond`, so
 a call back would be a cycle. `bond` records the fact and publishes an
 event in the same transaction; `common/events` holds it in a
 transactional outbox, and `scheduling`'s outbox poller hands it to
-`gratitude`'s consumer every two seconds (ADR-0035).
+`gratitude`'s consumer every two seconds (ADR-0035). Account deletion is the
+same shape turned the other way: `identity` carries it out and publishes
+`AccountDeleted`, and `bond`, `gratitude`, `media` and `support`, which all
+know of `identity` and not it of them, each erase their own share from the
+event (ADR-0058).
 
 ### Layers inside a single module
 

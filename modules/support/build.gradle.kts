@@ -20,6 +20,9 @@ dependencies {
     // `com.moyi.identity.api` only: `AccountMail`, which writes to the account holder's
     // address without telling this module what the address is (ADR-0057 decision 6).
     implementation(projects.modules.identity)
+    // The outbox: an account deletion is told to this module by `AccountDeleted`, and the
+    // sender's tickets are emptied from it (ADR-0057 decision 8, ADR-0058).
+    implementation(projects.common.events)
 
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-web")

@@ -26,6 +26,10 @@ dependencies {
     // module boundary doing its job: identity knows an email can be sent and
     // nothing about how.
     implementation(projects.modules.notification)
+    // The outbox (ADR-0008): carrying out an account deletion publishes `AccountDeleted` in the
+    // transaction that anonymises the account, and every module that holds something of that
+    // person erases it from the event (ADR-0058). identity cannot call them: they depend on it.
+    implementation(projects.common.events)
 
     // JPA annotations and Spring Data repositories.
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")

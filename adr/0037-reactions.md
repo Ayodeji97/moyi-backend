@@ -422,6 +422,7 @@ existing reads do. `EraseEntry` must clear search data (ADR-0035, unchanged).
 something does, that change removes the member's rows of `reactions`, as of
 `entry_favourites`. A member's export should carry the reactions they left. Whether it
 carries the ones left on their entries is not decided anywhere.
+*Discharged 2026-11-09 by ADR-0058 (issue #125): an account deletion deletes every reaction the person left, and the reactions on their entries go with the entries through `EraseEntry` (decision 8 there). The export half is still owed.*
 
 **Owed by the amendment of 2026-10-28** (question 1, `ME_TOO`):
 

@@ -4891,6 +4891,165 @@
         "tags" : [ "me-controller" ]
       }
     },
+    "/api/v1/me/deletion-request" : {
+      "delete" : {
+        "description" : "Calls off the pending account deletion. `204`. `404 NOT_FOUND` when there is nothing to cancel, whether nothing was requested, it was already cancelled, or `cancellableUntil` has passed: one answer for all, because there is nothing the person can do about any of them.",
+        "operationId" : "cancelAccountDeletion",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "404" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Not Found"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "deletion-request-controller" ]
+      },
+      "post" : {
+        "description" : "Asks for the signed-in account to be deleted (FR-008). Nothing is destroyed now: `202` answers with `requestedAt`, `cancellableUntil` (14 days later) and `deleteBy` (30 days later, FR-008's bound). Until `cancellableUntil` the person can still sign in and use the app, and `DELETE` calls it off; other sessions are not ended. From `cancellableUntil` it cannot be cancelled, and within the hour the account is deleted: the address and name are erased and the account can no longer sign in; every entry its owner wrote becomes a blank placeholder in each shared archive, so the other person's days and streak stay as they were; their bookmarks, reactions, photos and voice notes, devices and sessions are deleted, their open support messages emptied, and every bond they are still in ends as if they had left it. Asking again while one is pending is the same `202` with the same dates. The current `password` is required: wrong is `401 INVALID_CREDENTIALS` (the session is fine; do not sign out), absent or blank is `422`. A confirmed address is emailed once per request, saying when and how to cancel. Five an hour per account, wrong passwords included: the sixth is `429` with `Retry-After`.",
+        "operationId" : "requestAccountDeletion",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DeletionRequestBody"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DeletionRequestResponse"
+                }
+              }
+            },
+            "description" : "Accepted"
+          },
+          "400" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Bad Request"
+          },
+          "401" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unauthorized"
+          },
+          "403" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Forbidden"
+          },
+          "415" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unsupported Media Type"
+          },
+          "422" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Unprocessable Entity"
+          },
+          "429" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Too Many Requests"
+          },
+          "500" : {
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description" : "Internal Server Error"
+          }
+        },
+        "tags" : [ "deletion-request-controller" ]
+      }
+    },
     "/api/v1/me/devices/current/push-token" : {
       "delete" : {
         "operationId" : "forgetPushToken",
@@ -6050,6 +6209,36 @@
         } ],
         "description" : "The other member's entry, with every field an entry has, when its `status` is `DELETED`."
       },
+      "DeletionRequestBody" : {
+        "type" : "object",
+        "properties" : {
+          "password" : {
+            "type" : "string",
+            "description" : "The account's current password, typed again. Absent, null or blank is `422`; wrong is `401`.",
+            "maxLength" : 512,
+            "minLength" : 1
+          }
+        },
+        "required" : [ "password" ]
+      },
+      "DeletionRequestResponse" : {
+        "type" : "object",
+        "properties" : {
+          "cancellableUntil" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "deleteBy" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "requestedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "cancellableUntil", "deleteBy", "requestedAt" ]
+      },
       "DeviceRequest" : {
         "type" : "object",
         "properties" : {
@@ -6843,6 +7032,14 @@
       "ProfileResponse" : {
         "type" : "object",
         "properties" : {
+          "deletionRequest" : {
+            "description" : "The account deletion waiting to be carried out, with its dates, or `null` when none is. Read it on start: a client reinstalled during the 14 days draws the pending state, and its cancel, from this.",
+            "oneOf" : [ {
+              "$ref" : "#/components/schemas/DeletionRequestResponse"
+            }, {
+              "type" : "null"
+            } ]
+          },
           "displayName" : {
             "type" : "string"
           },
@@ -6867,7 +7064,7 @@
             "enum" : [ "PENDING_VERIFICATION", "ACTIVE", "SUSPENDED", "PENDING_DELETION", "DELETED" ]
           }
         },
-        "required" : [ "displayName", "email", "emailVerified", "id", "legalAccepted", "locale", "status" ]
+        "required" : [ "deletionRequest", "displayName", "email", "emailVerified", "id", "legalAccepted", "locale", "status" ]
       },
       "PushTokenRequest" : {
         "type" : "object",

@@ -136,6 +136,14 @@ enum class RateLimitBucket(
      */
     SUPPORT_CREATE_USER("support:create:user", Subject.USER, 5, Duration.ofDays(1)),
 
+    /**
+     * ADR-0058 addition (doc 06 §4 names no bucket for it): five account-deletion requests an hour
+     * per user. Each verifies the password, so this is what bounds the guesses a held session can
+     * make at it; a wrong one is not counted towards the sign-in lock, which a thief could
+     * otherwise use to keep the owner out of the account they need to cancel from.
+     */
+    ACCOUNT_DELETION_USER("account:deletion:user", Subject.USER, 5, Duration.ofHours(1)),
+
     /** Doc 06 §4: "global authenticated 120 / min", per user, on every request that carries a valid token. */
     AUTHENTICATED("authenticated:user", Subject.USER, 120, Duration.ofMinutes(1)),
     ;

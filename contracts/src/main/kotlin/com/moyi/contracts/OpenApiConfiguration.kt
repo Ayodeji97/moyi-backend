@@ -183,6 +183,7 @@ class OpenApiConfiguration {
             documentSemanticSearch(api)
             documentLegal(api)
             documentSupport(api)
+            documentAccountDeletion(api)
             documentRequestEnums(api)
             requireOver18(api)
             // After every function above that reads an entry's fields where springdoc put them.
@@ -274,7 +275,7 @@ class OpenApiConfiguration {
             add(HttpStatus.UNAUTHORIZED)
             if (!public) add(HttpStatus.FORBIDDEN)
             if (operation.parameters.orEmpty().any { it.`in` == PATH_PARAMETER }) add(HttpStatus.NOT_FOUND)
-            if (operation.operationId in CURRENT_DEVICE_OPERATIONS) add(HttpStatus.NOT_FOUND)
+            if (operation.operationId in PATHLESS_NOT_FOUND_OPERATIONS) add(HttpStatus.NOT_FOUND)
             if (operation.operationId in CONFLICTING_OPERATIONS) add(HttpStatus.CONFLICT)
             if (operation.operationId in CONDITIONAL_OPERATIONS) {
                 addAll(listOf(HttpStatus.PRECONDITION_FAILED, HttpStatus.PRECONDITION_REQUIRED))
@@ -466,6 +467,12 @@ class OpenApiConfiguration {
          * [CONFLICTING_OPERATIONS] are.
          */
         private val CURRENT_DEVICE_OPERATIONS = setOf("registerPushToken", "forgetPushToken")
+
+        /**
+         * Every operation with no path parameter that still answers `404`: the two above, and
+         * cancelling an account deletion when none can be cancelled (ADR-0058 decision 3).
+         */
+        private val PATHLESS_NOT_FOUND_OPERATIONS = CURRENT_DEVICE_OPERATIONS + "cancelAccountDeletion"
 
         /**
          * The operations that answer `409`, by id.

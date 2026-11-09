@@ -3136,3 +3136,26 @@ Wrong about: the switched-off limiter. `enabled=false` answered `Unavailable` to
          The new problem code is a new enum value in every error response, so oasdiff calls
          the contract change breaking (response-property-enum-value-added, 390 places) though
          no route changed shape: the PR carries `breaking-api-change`.
+
+
+## 2026-11-09 · Feature · Account deletion: one event, five shares (FR-008, #125, ADR-0058)
+
+Expected: a job in `identity` that deletes a person.
+Reality: `identity` can reach none of the modules holding what the person wrote: `bond`,
+         `gratitude` and `support` depend on it, and `media` is a leaf. So `identity` carries out
+         its own share in one transaction and publishes `AccountDeleted`, and each module erases
+         its share from that event, the shape ending a bond already had (ADR-0035) turned the
+         other way. Each share is idempotent and none needs another first, which is what makes a
+         crash part-way safe: the outbox retries what did not commit.
+Wrong about: `users.status = PENDING_DELETION` during the window, which doc 07 lists.
+         `User.canAuthenticate` refuses it, so the person could not have signed in to cancel.
+         The request is its own row instead, and the status changes only when it is carried out.
+Also: a mutation helper that undid an edit by replacing the new text with the old corrupted
+         two files when the new text was empty (`"".replace` inserts at every position). Undo by
+         position, never by search, when the replacement can be empty. Two guards came back
+         green under mutation and are recorded rather than kept as untested claims: a re-check of
+         "due" under the lock (removed: once due a request cannot change), and a member filter in
+         `EndBond.endEveryBondOf` that `Bond.end` already makes redundant.
+Also: the first smoke run waited 20 s for a job on a five-second cron and failed. ShedLock's
+         `lockAtLeastFor` (30 s) is a floor on the gap between two runs, whatever the cron says;
+         a probe that waits on a ShedLocked job must outwait that, not the schedule.

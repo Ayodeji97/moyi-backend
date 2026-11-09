@@ -3,10 +3,12 @@ package com.moyi.identity.web
 import com.moyi.common.security.ClientContext
 import com.moyi.common.security.CurrentUser
 import com.moyi.identity.domain.Acceptance
+import com.moyi.identity.domain.DeletionRequest
 import com.moyi.identity.domain.User
 import com.moyi.identity.domain.UserId
 import com.moyi.identity.domain.UserStatus
 import com.moyi.identity.service.AcceptedLegal
+import com.moyi.identity.service.AccountDeletion
 import com.moyi.identity.service.GetProfile
 import com.moyi.identity.service.LegalConsent
 import org.springframework.http.HttpStatus
@@ -37,11 +39,12 @@ import java.util.UUID
 internal class MeController(
     private val getProfile: GetProfile,
     private val legalConsent: LegalConsent,
+    private val deletion: AccountDeletion,
 ) {
     @GetMapping
     fun me(caller: CurrentUser): ProfileResponse {
         val id = UserId(caller.id)
-        return ProfileResponse.from(getProfile.byId(id), legalConsent.acceptedBy(id))
+        return ProfileResponse.from(getProfile.byId(id), legalConsent.acceptedBy(id), deletion.pendingOf(id))
     }
 
     /**
@@ -74,11 +77,18 @@ internal data class ProfileResponse(
     val emailVerified: Boolean,
     val status: UserStatus,
     val legalAccepted: LegalAcceptedResponse,
+    /**
+     * The account deletion waiting to be carried out, or `null` when none is (FR-008,
+     * ADR-0058 decision 4): here so that a client reinstalled during the 14 days draws the
+     * pending state, with its cancel, from the one read it makes on start.
+     */
+    val deletionRequest: DeletionRequestResponse?,
 ) {
     companion object {
         fun from(
             user: User,
             legal: AcceptedLegal,
+            deletion: DeletionRequest?,
         ): ProfileResponse {
             val profile = UserResponse.from(user)
             return ProfileResponse(
@@ -89,6 +99,7 @@ internal data class ProfileResponse(
                 emailVerified = profile.emailVerified,
                 status = profile.status,
                 legalAccepted = LegalAcceptedResponse(legal.terms?.let(::AcceptanceResponse), legal.privacy?.let(::AcceptanceResponse)),
+                deletionRequest = deletion?.let(DeletionRequestResponse::from),
             )
         }
     }

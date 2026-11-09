@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # Smoke test for the moyi-backend API against a locally running instance.
 #
+# Issue #125 adds the account-deletion section: the password asked for again (422 absent or blank,
+# 401 INVALID_CREDENTIALS wrong, without WWW-Authenticate), the 202 with its two windows, the
+# idempotent repeat, the pending request on GET /me, one email, sign-in kept, a cancel and the one
+# 404, then the window moved back by SQL and the job (on a five-second cron, held 30 s by ShedLock)
+# carrying it out: the account anonymised and shut, the partner's bond archived, the person's entry a
+# flagged tombstone, the day's status kept. Last run on 2026-11-09, on feat/account-deletion, from a
+# jar of the branch's tree on 30f5873, against its own compose project (moyi-41i: Postgres 55471,
+# Valkey 56391, MinIO 59471), the jar booted by hand (local profile, the account-deletion cron at
+# */5) and --attach: 1560 passed, 0 failed, 0 skipped. That was the second run on that database; the
+# first (1555, 4 failed, 1 skipped: the tag across the erasure) waited 20 s for the job, which
+# ShedLock's 30 s hold outlasts, and read psql's command tag with an UPDATE's RETURNING.
+#
 # Issue #135 adds the typed-codes section: the six digits in the verification and reset emails,
 # read from the log; {email, code} verifies and resets; an unknown address is the same bytes as a
 # wrong code; five wrong burn the code while its link still works; a new email retires the old
@@ -561,7 +573,8 @@ if [ "$ATTACH" = 0 ]; then
   "$JAVA" -jar "$JAR" --spring.profiles.active=local --server.port="$PORT" --management.server.port="$MGMT_PORT" \
     --spring.datasource.url="jdbc:postgresql://localhost:5432/$MOYI_DB" \
     --moyi.scheduling.close.cron='*/5 * * * * *' \
-    --moyi.scheduling.reminders.cron='*/5 * * * * *' --moyi.scheduling.held-pushes.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
+    --moyi.scheduling.reminders.cron='*/5 * * * * *' --moyi.scheduling.held-pushes.cron='*/5 * * * * *' \
+    --moyi.scheduling.account-deletion.cron='*/5 * * * * *' >"$MOYI_LOG" 2>&1 &
   APP_PID=$!
   for _ in $(seq 1 90); do
     grep -q "Started MoyiApplication" "$MOYI_LOG" && break
@@ -1064,6 +1077,7 @@ verified_account() {
   expect "verify $label" 200 "" -- -X POST "$API/auth/verify-email" -d "{\"token\":\"$token\"}"
   expect "$label signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$email" "$PASSWORD")"
   ACCOUNT_ACCESS="$(printf '%s' "$LAST_BODY" | jget accessToken)"
+  ACCOUNT_EMAIL="$email"
 }
 
 
@@ -3571,6 +3585,68 @@ if [ "$PSQL_OK" = 1 ]; then
 else
   skip "support: the operator's queue (psql not reachable through docker compose)"
 fi
+flush_buckets
+
+echo; echo "account deletion — asked for, called off, asked again, carried out (FR-008, ADR-0058)"
+# The job runs on a five-second schedule here (the boot above; with --attach, start the server with
+# --moyi.scheduling.account-deletion.cron='*/5 * * * * *'), and the window is moved back by SQL,
+# because fourteen days cannot be waited out. Everything before the move is the API alone.
+verified_account "deleter" "203.0.113.200"; DL_A="$ACCOUNT_ACCESS"; DL_EMAIL="$ACCOUNT_EMAIL"
+verified_account "deleters-partner" "203.0.113.201"; DL_B="$ACCOUNT_ACCESS"
+flush_buckets
+DL_WORDS="Deleter~words~$RANDOM$RANDOM"
+revealed_bond "account deletion" "$DL_A" "$DL_B" "$DL_WORDS" "Partner~words~$RANDOM"
+DL_BOND="$RB_BOND"; DL_A_ENTRY="$RB_A_ENTRY"; DL_B_ENTRY="$RB_B_ENTRY"
+expect "account deletion without a token is 401 UNAUTHENTICATED" 401 '"code":"UNAUTHENTICATED"' -- -X POST "$API/me/deletion-request" -d "{\"password\":\"$PASSWORD\"}"
+expect "account deletion with no password is 422 on password" 422 '"field":"password"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{}'
+expect "account deletion with a blank password is 422 on password" 422 '"field":"password"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{"password":"  "}'
+expect "account deletion with a wrong password is 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d '{"password":"not the password"}'
+header_is "…without WWW-Authenticate: the session is fine" "WWW-Authenticate" ""
+expect "GET /me says no deletion is pending" 200 '"deletionRequest":null' -- "$API/me" -H "Authorization: Bearer $DL_A"
+expect "cancelling with nothing pending is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $DL_A"
+DL_NOTHING="$LAST_BODY"
+DL_MAILS="$(grep -c "Your Moyi account will be deleted" "$MOYI_LOG" || true)"
+expect "account deletion with the password is 202 with its dates" 202 '"cancellableUntil":"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d "{\"password\":\"$PASSWORD\"}"
+DL_FIRST="$LAST_BODY"
+is "…cancellable for 14 days, done within 30" "$(python3 -c "
+import json, sys
+from datetime import datetime
+b = json.loads(sys.argv[1]); p = lambda k: datetime.fromisoformat(b[k].replace('Z', '+00:00'))
+print((p('cancellableUntil') - p('requestedAt')).days, (p('deleteBy') - p('requestedAt')).days)" "$DL_FIRST")" "14 30"
+expect "asking again while it is pending is 202" 202 '"requestedAt":"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d "{\"password\":\"$PASSWORD\"}"
+is "…with the same dates, byte for byte" "$LAST_BODY" "$DL_FIRST"
+expect "GET /me shows the pending deletion" 200 '"deletionRequest":{"' -- "$API/me" -H "Authorization: Bearer $DL_A"
+is "…with the same dates as the 202" "$(python3 -c "import json,sys; print(json.dumps(json.loads(sys.argv[1])['deletionRequest'], sort_keys=True))" "$LAST_BODY")" "$(python3 -c "import json,sys; print(json.dumps(json.loads(sys.argv[1]), sort_keys=True))" "$DL_FIRST")"
+for _ in $(seq 1 40); do [ "$(grep -c "Your Moyi account will be deleted" "$MOYI_LOG" || true)" -gt "$DL_MAILS" ] && break; sleep 0.25; done
+is "the person is emailed once, with how to cancel, for the two requests" "$(( $(grep -c "Your Moyi account will be deleted" "$MOYI_LOG" || true) - DL_MAILS ))" "1"
+if grep -q "cancel it under \"Delete my account\"" "$MOYI_LOG"; then pass "…and the email says where to cancel"; else fail "…and the email says where to cancel" "no such line in $MOYI_LOG"; fi
+expect "while it is pending the person still signs in" 200 '"accessToken"' -- -X POST "$API/auth/login" -d "$(login_body "$DL_EMAIL" "$PASSWORD")"
+expect "cancelling inside the window is 204" 204 "" -- -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $DL_A"
+expect "cancelling again is 404 NOT_FOUND" 404 '"code":"NOT_FOUND"' -- -X DELETE "$API/me/deletion-request" -H "Authorization: Bearer $DL_A"
+is "…the same bytes as cancelling with nothing ever asked" "$LAST_BODY" "$DL_NOTHING"
+expect "GET /me is clear again" 200 '"deletionRequest":null' -- "$API/me" -H "Authorization: Bearer $DL_A"
+flush_buckets
+expect "asked for again: 202" 202 '"cancellableUntil":"' -- -X POST "$API/me/deletion-request" -H "Authorization: Bearer $DL_A" -d "{\"password\":\"$PASSWORD\"}"
+if [ "$PSQL_OK" = 1 ]; then
+  DL_USER="$(sql "SELECT id FROM users WHERE email = '$DL_EMAIL'")"
+  db_is "…its window is moved back fifteen days, as fourteen days on would leave it" \
+    "$(sql "WITH moved AS (UPDATE deletion_requests SET requested_at = requested_at - interval '15 days', execute_after = execute_after - interval '15 days' WHERE user_id = '$DL_USER' AND cancelled_at IS NULL AND executed_at IS NULL RETURNING 1) SELECT count(*) FROM moved")" "1"
+  # Up to 45 seconds: the job runs every five here, but ShedLock holds its lock at least 30 after each run.
+  for _ in $(seq 1 45); do [ "$(sql "SELECT status FROM users WHERE id = '$DL_USER'")" = "DELETED" ] && break; sleep 1; done
+  db_is "the job carries it out: the account is DELETED, its address and name gone, its password and sessions deleted" \
+    "$(sql "SELECT status || '|' || (email = 'deleted-' || id || '@deleted.invalid') || '|' || (display_name <> 'Smoke') || '|' || (SELECT count(*) FROM credentials WHERE user_id = u.id) || '|' || (SELECT count(*) FROM refresh_tokens WHERE user_id = u.id) FROM users u WHERE id = '$DL_USER'")" "DELETED|true|true|0|0"
+  expect "the deleted account's access token is refused: 401" 401 '"code":"UNAUTHENTICATED"' -- "$API/me" -H "Authorization: Bearer $DL_A"
+  expect "the deleted account cannot sign in: 401 INVALID_CREDENTIALS" 401 '"code":"INVALID_CREDENTIALS"' -- -X POST "$API/auth/login" -d "$(login_body "$DL_EMAIL" "$PASSWORD")"
+  for _ in $(seq 1 15); do [ "$(sql "SELECT status FROM bonds WHERE id = '$DL_BOND'")" = "ARCHIVED" ] && [ "$(sql "SELECT author_deleted_account FROM entries WHERE id = '$DL_A_ENTRY'")" = "t" ] && break; sleep 1; done
+  expect "the partner sees the bond ended, as a leave ends it" 200 '"status":"ARCHIVED"' -- "$API/bonds/$DL_BOND" -H "Authorization: Bearer $DL_B"
+  db_is "the deleted person's entry is a flagged tombstone (BR-10), and the partner's is untouched" \
+    "$(sql "SELECT string_agg((text IS NULL) || ':' || status || ':' || author_deleted_account, ',' ORDER BY (id = '$DL_A_ENTRY') DESC) FROM entries WHERE id IN ('$DL_A_ENTRY', '$DL_B_ENTRY')")" "true:DELETED:true,false:REVEALED:false"
+  db_is "…and the day they both wrote keeps its status, so the partner's streak stands" \
+    "$(sql "SELECT d.status FROM bond_days d JOIN entries e ON e.bond_day_id = d.id WHERE e.id = '$DL_B_ENTRY'")" "REVEALED"
+else
+  skip "account deletion: carried out by the job (psql not reachable through docker compose)"
+fi
+if grep -q "$DL_WORDS" "$MOYI_LOG"; then fail "the deleted person's words are in no log line" "they are in $MOYI_LOG"; else pass "the deleted person's words are in no log line"; fi
 flush_buckets
 
 echo; echo "database state"

@@ -19,6 +19,10 @@ dependencies {
     // (spec §4 D5, ADR-0050). The same "when, never what". `media` is a leaf,
     // so this makes no cycle.
     implementation(projects.modules.media)
+    // `identity.api.AccountDeletions` and nothing else: the job that carries out account
+    // deletions once their cancellation window has closed (FR-008, ADR-0058). The same "when,
+    // never what". identity does not depend on this module, so this makes no cycle.
+    implementation(projects.modules.identity)
     // OutboxDispatcher, for the poller: this module owns the trigger and the
     // meters, `common:events` the delivering (ADR-0035 decisions 7 and 8).
     implementation(projects.common.events)

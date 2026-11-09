@@ -155,6 +155,7 @@ class ArchitectureTest {
                 "remindersDueBetween",
                 "audienceOf",
                 "onThisDayDueBetween",
+                "membershipsOfAccount",
             )
 
         /**
@@ -174,6 +175,7 @@ class ArchitectureTest {
                 "NotifyDayMembers.kt",
                 "SendOnThisDayPushes.kt",
                 "EmbedPendingEntries.kt",
+                "EraseDeletedAccount.kt",
             )
 
         /**
@@ -438,7 +440,7 @@ class ArchitectureTest {
         assertTrue(
             violations.isEmpty(),
             "Only the close job, the withdrawal's consumer, the reminder sweep, the day's push consumer, the on-this-day " +
-                "sweep and the embedding sweep may call bond's unguarded reads. Found in: $violations",
+                "sweep, the embedding sweep and the account deletion's erasure may call bond's unguarded reads. Found in: $violations",
         )
     }
 
