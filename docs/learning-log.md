@@ -3035,3 +3035,16 @@ Wrong about: "a parent with a discriminator and one schema per value" being enou
          own request. No test had compared two error bodies under a tracer. The probes now
          compare without the id, which is random per request and so says nothing either way.
 
+## 2026-11-08 · Feature · In-app support messages (issue #129, ADR-0057)
+
+Expected: one route, one table, one migration, in the shape of the report route.
+Reality: the idempotency record's `result_kind` CHECK is common:web's table, so a new idempotent
+         resource needs a second migration in that module's sequence. It was first V45.1, beside
+         V45, which `FlywayMigrationTest` (reading versions as integers) refused; the ruling was
+         no decimal versions, and it is V47. And
+         the acknowledgement could not be sent from the new module without learning the address,
+         which `UserDirectory` withholds on purpose: identity now sends it (`AccountMail`), to a
+         confirmed address only.
+Wrong about: the brief's "follow how entries count length". Graphemes cannot be backed by a
+         database CHECK; the report's detail already chose code points for that reason, and so
+         does support.

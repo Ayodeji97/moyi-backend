@@ -97,6 +97,12 @@ enum class RateLimitBucket(
      */
     REMEMBER_USER("remember:user", Subject.USER, 30, Duration.ofHours(1)),
 
+    /**
+     * Doc 06 §4: "`support:create` (per user) 5 / day" (FR-102, ADR-0057). Each message puts a ticket in
+     * a person's queue and an email in the sender's mailbox, so this bounds both.
+     */
+    SUPPORT_CREATE_USER("support:create:user", Subject.USER, 5, Duration.ofDays(1)),
+
     /** Doc 06 §4: "global authenticated 120 / min", per user, on every request that carries a valid token. */
     AUTHENTICATED("authenticated:user", Subject.USER, 120, Duration.ofMinutes(1)),
     ;
